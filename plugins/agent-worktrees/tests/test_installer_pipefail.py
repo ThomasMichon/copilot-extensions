@@ -26,10 +26,11 @@ tests carry no Windows-vs-POSIX path-translation assumptions either.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
-from native_shell_support import run_headless
+from native_shell_support import bash_path, run_headless
 
 _INSTALL_SH = (
     Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
@@ -88,3 +89,49 @@ def test_install_sh_guards_value_greps():
         assert line.rstrip().endswith("|| true)"), (
             f"unguarded value grep for {key!r}: {line.strip()}"
         )
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize(
+    ("marker", "cgroup", "release", "version", "expected"),
+    [
+        ("/.dockerenv", "", "Microsoft-WSL2", "Microsoft", "linux"),
+        ("/run/.containerenv", "", "Microsoft-WSL2", "Microsoft", "linux"),
+        (None, "0::/docker/fixture", "Microsoft-WSL2", "Microsoft", "linux"),
+        (None, "0::/kubepods/fixture", "Microsoft-WSL2", "Microsoft", "linux"),
+        (None, "0::/containerd/fixture", "Microsoft-WSL2", "Microsoft", "linux"),
+        (None, "0::/lxc/fixture", "Microsoft-WSL2", "Microsoft", "linux"),
+        (None, "0::/libpod-fixture", "Microsoft-WSL2", "Microsoft", "linux"),
+        (None, "0::/", "Microsoft-WSL2", "Linux", "wsl"),
+        (None, "0::/", "generic", "Linux Microsoft", "wsl"),
+        (None, "0::/", "generic", "Linux", "linux"),
+        (None, None, "Darwin", None, "linux"),
+    ],
+)
+def test_installer_detects_execution_root(
+    native_bash: str, tmp_path: Path, marker, cgroup, release, version, expected,
+):
+    """Run the shipped detector with only OS observations redirected to fixtures."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    detector = text[text.index("\ndetect_platform() {") :].split("\n}\n", 1)[0] + "\n}\n"
+    observations = {
+        "/.dockerenv": "" if marker == "/.dockerenv" else None,
+        "/run/.containerenv": "" if marker == "/run/.containerenv" else None,
+        "/proc/1/cgroup": cgroup,
+        "/proc/version": version,
+    }
+    for index, (path, content) in enumerate(observations.items()):
+        fixture = tmp_path / f"observation-{index}"
+        if content is not None:
+            fixture.write_text(content, encoding="utf-8")
+        detector = detector.replace(path, shlex.quote(bash_path(native_bash, fixture)))
+    script = (
+        "set -euo pipefail\n"
+        "export WSL_DISTRO_NAME=fixture\n"
+        f"uname() {{ printf '%s\\n' {shlex.quote(release)}; }}\n"
+        f"{detector}\ndetect_platform\n"
+    )
+    result = run_headless([native_bash, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected

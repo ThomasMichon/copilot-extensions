@@ -458,3 +458,66 @@ owned-session alternative or name the SDK dependency before adopting it.
   verified cleanup. Windows file-rebinding fixtures use unprivileged hard links;
   Unix uses symlinks and its separate FIFO branch. No elevation or shared
   configuration change is required.
+
+### 2026-11-01 - Source contracts merged; native integration is the next slice
+
+- PR #9866 merged after the current-head Copilot comment verdict reported no
+  open issues or inline findings, every review thread was resolved, and
+  required checks passed. Reconciled the source worktree onto `dev` and reread
+  this complete Plan and Validation Plan; this effort remains Active.
+- The canonical specialist, bounded declared-source reader, exact native
+  decision contract and forty-control packet are persistent source artifacts,
+  not a registered or qualified production selector.
+- Next is supported native host integration: bind actual agent/tool visibility,
+  source-policy roots, task configuration/result ownership and full accounting,
+  then run the matched independently judged comparison. Preserve read failures
+  as unavailable/insufficient context rather than accepting a no-match result.
+  Main preference and any separately authorized rollout remain open.
+
+### 2026-11-02 - Native host preflight prepared without inference
+
+- Added an import-inert joined-host preflight using the actual foreground
+  registry. It checks unique native specialist identity, exact canonical prompt
+  and authored model, effort and read-tool declarations. Optional bounded
+  primary-context acquisition returns only counts and omission evidence.
+- Before/after checks cover the foreground model/provider, plan and Auto
+  snapshots and selected-agent ID during acquisition. They do not prove
+  preservation across registration or later task dispatch. Sampled context
+  is explicitly not a frozen comparative boundary.
+- The preflight never dispatches a task. Resolved child model, effort, tier,
+  effective tools and prospective fit remain unknown; successful declaration
+  checks are not comparability or quality evidence. Ordinary task/custom-agent
+  interfaces cannot set a child context tier.
+- The existing bounded packet passed with focused native-host controls and
+  verified process cleanup; the strict source customization scan reported no
+  blocking findings. A separately approved session-only loader is prepared,
+  pending its independent review and native preflight.
+- This effort remains Active. Native child/tool/source-policy integration,
+  frozen matched inputs, independent quality and complete-cost comparison,
+  primary preference and source publication/release remain open.
+
+### 2026-11-02 - Canonical SDK input verified independently of optional metadata
+
+- The joined API omitted the optional authored-prompt field despite exposing
+  the configured specialist ID, model, effort and read-tool declaration. That
+  omission was not evidence that the actual specialist input was wrong.
+- Added a focused owned-runtime mode instead of continuing prompt-readback
+  probing. It selects the canonical agent, verifies the explicit resolved
+  model/effort/tier before sending, and inspects the actual assembled request
+  locally. Exact canonical system/developer content, the requested model and
+  the sole source-read function were all observed. Replies remain synthetic;
+  no inference request reached a provider.
+- Native model-list retrieval is a separately admitted read-only GET, with
+  explicit success/failure/refusal accounting. Learning the real model metadata
+  made the native runtime try WebSocket first; the fixture refused it before
+  upstream contact and the runtime completed through HTTP. Qualification is
+  explicitly HTTP-only, with balanced attempt/refusal counts and fallback
+  overhead retained rather than a claim about unsupported WebSocket input.
+- The native HTTP-only witness completed with no lifecycle errors and verified
+  process cleanup. The focused bounded regression packet and independent
+  source reviews passed. This closes the canonical-input uncertainty for that
+  owned configuration, not model quality, prospective capacity or price.
+- Next is the supported selector binding and the already-planned independently
+  judged comparison using the requesting catalog and admitted source policy.
+  No production preference, candidate promotion or shared rollout is implied;
+  this effort remains Active and its remaining gates stay open.

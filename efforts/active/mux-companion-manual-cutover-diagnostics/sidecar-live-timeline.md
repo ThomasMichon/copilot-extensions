@@ -8,9 +8,11 @@ Proposed data boundary: [observation contract](sidecar-observation-contract.md).
 **Status: reviewed implementation/validation plan; source execution active.**
 Plan #9960 merged after current-head approval and required CI. The new widget,
 observation feeds and classifier remain subject to the unchecked gates below.
-The foundation source now includes a tested alternate Timeline view and
-unattached owner projection/evidence primitives. Its first source review does
-not complete feed, qualified-measurement, joined-app or native acceptance.
+The foundation source merged in #9979 as
+`74d9254007c1b06c0f058e20bc6a8cad05f3a8ad`, including the tested alternate
+Timeline view and unattached owner projection/evidence primitives. This closes
+S1 source delivery, not feed, qualified-measurement, joined-app or native
+acceptance.
 
 ## Guiding intent
 
@@ -96,6 +98,14 @@ A failed ancillary append must not undo a successful canonical mutation or
 advertise complete history. Expose a gap/error and retain the last-qualified
 facts. Crash-atomic YAML-and-index history is not silently promised. A stronger
 guarantee requires its own reviewed owner transaction design.
+
+Agenda state is an advisory navigation aid, not an execution authority. Missing
+or rewound planning state must not halt otherwise authorized work: the continuing
+agent can recover its root, current action and saved return from context,
+session/worktree history and present reality. Declared identity, revision and
+last-update information aid judgment; age alone is not a rigid trust gate.
+The efforts-owned guidance governs reconciliation without fabricated history,
+replayed external actions or cosmetic resets of explicit constraints.
 
 Importing an old journal cannot mint stable IDs from reusable line numbers.
 Source incarnation, retained range and completeness remain explicit. State
@@ -217,13 +227,17 @@ and verify cancellation, rather than silently changing the hosting policy.
 
 ### S1 - Bounded model, renderer and policy
 
-- [ ] Implement typed source positions/events/pages, evidence qualifiers, bounded
+- [x] Implement typed source positions/events/pages, evidence qualifiers, bounded
   window/height index and deterministic actor lanes.
-- [ ] Implement virtual line rendering, short-content bottom placement,
+- [x] Implement virtual line rendering, short-content bottom placement,
   follow/unread behavior, prepend/reflow/expansion anchoring and sticky purpose.
-- [ ] Implement the configurable pure compaction classifier and explicit
+- [x] Implement the configurable pure compaction classifier and explicit
   unknown/error states without changing runtime thresholds.
-- [ ] Preserve Summary/Claims/Agenda/Graph/Recovery and literal field rendering.
+- [x] Preserve Summary/Claims/Agenda/Graph/Recovery and literal field rendering.
+
+Source receipt: #9979. Its separately qualified packets cover the Manager,
+owner-index primitives and Bridge translation/evidence; no source feed is
+attached by this foundation. Current-source integration begins at S2.
 
 ### S2 - Worktree and agenda owner observations
 
@@ -281,9 +295,11 @@ and verify cancellation, rather than silently changing the hosting policy.
 - [ ] Enforce the resource limits in the contract structurally; exercise a long
   logical history without materializing it all. Report repaint/CPU/RSS benchmarks
   separately from deterministic CI correctness.
-- [ ] At configured 65: 28, 35 and 64.99 are premature; 65 and 75 are not by this
+- [x] At configured 65: 28, 35 and 64.99 are premature; 65 and 75 are not by this
   rule. Test rounding traps, invalid/bool/zero capacity, absent/stale/estimated/
   wrong-session/uncorrelated/model-only/post-only samples and context replacement.
+  Pure policy coverage landed in #9979; selected-runtime active-capacity and
+  actual producer qualification remain open under S3 and the next item.
 - [ ] Test actual producer construction of accepted evidence, not a mock beyond
   it. Unsupported measurement sources remain unknown and do not complete S3.
 - [ ] Actual input/permission clearing and read-only attention: no automatic

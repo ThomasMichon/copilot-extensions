@@ -14,7 +14,10 @@ from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 from .events import EventBus
 from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
 from .queue_records import WorkerAdmissionInhibited
-from .queue_pool_placement import POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION, pool_placement_contract
+from .queue_pool_placement import (
+    ConfiguredPoolPlacementRequired, POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION,
+    pool_placement_contract,
+)
 
 
 class ReserveSpawnBody(BaseModel):
@@ -288,6 +291,8 @@ def register_spawn_routes(
                 allocation_revision=body.allocation_revision,
             )
         except WorkerAdmissionInhibited as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
+        except ConfiguredPoolPlacementRequired as exc:
             raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             msg = str(exc)

@@ -2074,7 +2074,12 @@ resolve_machine() {
 }
 
 detect_platform() {
-    if grep -qi microsoft /proc/version 2>/dev/null; then
+    # Match machine_transport's execution-root classification, not a shared host kernel.
+    if [[ -f /.dockerenv || -f /run/.containerenv ]] ||
+        grep -Eq '/docker|/kubepods|containerd|/lxc|libpod' /proc/1/cgroup 2>/dev/null; then
+        echo "linux"
+    elif uname -r 2>/dev/null | grep -qi microsoft ||
+        grep -qi microsoft /proc/version 2>/dev/null; then
         echo "wsl"
     else
         echo "linux"

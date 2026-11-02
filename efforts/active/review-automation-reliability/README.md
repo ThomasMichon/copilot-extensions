@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-08-29
-- **Status:** Draft
+- **Status:** Blocked (parked by maintainer direction, 2026-11-02)
 - **Vision:** harness-guidance `authoritative-ownership`,
   `bounded-delegate-contracts`, `resilient-safety-boundary`, and
   `proportional-independent-review`; also
@@ -23,6 +23,31 @@ best-effort request. Each review has one owner, bounded retries, resumable
 evidence, explicit human decision boundaries, and a terminal outcome that
 cannot be mistaken for successful publication.
 
+## Current status and parking
+
+The maintainer directed a current-state update and parking on 2026-11-02.
+Further execution under this ROOT effort is paused; the effort is not Done,
+and no unchecked Plan or Validation item is silently retired.
+
+Delivered work includes Phase 9's declared machines and simulation track,
+bounded task/replay/provider runtime integration and consistency observation,
+the command/projection extraction in #2506, later producer-command extraction
+in #3155, and direct producer CLI regression coverage in #7493. The periodic
+consistency sweep also landed in #2759; its old "cadence still deferred"
+wording is historical, not proof the current runtime lacks that integration.
+
+Remaining bridge/liveness call-site integration, carried-launch accounting,
+transactional steering-application acknowledgement, deferred design mappings,
+backlog disposition and complete concurrent/restart/provider validation stay
+open under the existing phase contracts. In particular, #2423 and every
+acceptance section transferred into it remain authoritative and open; parking
+this ROOT does not replace that contract or supersede an independent owner.
+
+Resume only on explicit maintainer direction and after reconciling current
+source and existing phase, native, ground-layer and provider ownership.
+No new executor, source/resource handoff, runtime change or rollout is assigned
+by this parked record.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -33,6 +58,8 @@ cannot be mistaken for successful publication.
 
 ## Coordination
 
+- **Execution:** this ROOT is parked pending explicit maintainer resumption.
+  Existing independent issue owners, claims, holds and acceptance remain intact.
 - **Topology:** lifecycle host with adapter and validation slices.
 - **Host (owns PRs):** lifecycle host.
 - **Delegates:** adapters implement provider seams without owning orchestration.
@@ -66,7 +93,13 @@ Define and implement a provider-neutral review lifecycle that remains correct
 across process restarts, delayed responses, duplicate delivery, reviewer
 failure, and explicit human steering.
 
+**Later maintainer direction (2026-11-02):** reconcile the delivered slices and
+remaining acceptance, then park further execution without declaring completion.
+
 ## Plan
+
+Unchecked items are retained but parked. Historical completed slices are not
+fresh proof of whole-effort or deployed acceptance.
 
 **Note (2026-09-10):** Phases 1-3's state list, idempotency, and steering
 items are superseded in scope by
@@ -496,6 +529,17 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-11-02 - Reconciled source delivery and parked the ROOT effort
+
+Updated the stale Draft status to an explicit maintainer-directed parked
+state. The state-machine/model, bounded runtime-wiring, componentization and
+producer-regression slices remain delivered; #2506, #3155, #2759 and #7493
+are credited without claiming the authoring of unrelated source or full live
+acceptance. Remaining phase contracts and every unchecked Validation item
+remain pending. #2423 stays open with all carried-launch, steering-application
+and deferred-design acceptance and existing owners/holds unchanged.
+No implementation, lifecycle, task, provider or release/rollout action occurred.
 
 ### 2026-10-20 - Direct producer CLI regression coverage
 

@@ -3,9 +3,53 @@
 The explicit version-1 pool placement provider atomically binds an assignment,
 occupies capacity and moves a task from `QUEUED` to `CLAIMED` before any workspace
 or native process exists. The normal supervisor still uses its legacy
-reservation/worker-claim path; these explicit operations do **not** migrate it.
+reservation/worker-claim path where no cohort has been projected; these explicit
+operations do **not** migrate it. Once a cohort is projected, the queue fences
+fresh legacy spawning as described below.
 See the [lifecycle architecture](spawn-supervisor.md#assignment-lifecycle-current-versus-target)
 and [complete catalog owner](pool-publication.md) for those separate boundaries.
+
+## Configured-cohort legacy reservation fence
+
+The running `pool_placement/v1` descriptor advertises
+`configured_cohort_reservation_fencing_versions: [1]`. After the first configured
+cohort observation is projected, fresh queued spawn reservations must use the
+explicit pool placement operation. The existing reservation transaction reads
+the coordinator's retained cohort revision under the same SQLite write lock
+used by projection and reservation. A concurrent operation either commits its
+legacy reservation first, or observes the projected cohort and refuses; a
+pre-transaction inspection cannot authorize a later bypass.
+
+Both legacy `POST /spawn-reservations` and
+`POST /spawn-reservations/revisions` return `409` with
+`detail.code: configured_pool_placement_required`, an explanatory `reason` and
+`retryable: false`. Changing the driver, allocator, allocation revision or
+suspended-reembodiment flag cannot turn queued work into a compatible legacy
+request. No task, reservation, assignment or startup counter is changed by
+this refusal. A caller must not reinterpret it as permission to spawn,
+downgrade placement or switch coordinators.
+
+This fence depends on projection, not a local configuration file, publisher
+enrollment or current catalog readiness. Complete nonempty, confirmed empty,
+unconfirmed and unavailable projected observations all fence legacy admission.
+Later uncertainty, expired metadata, missing members and a queue reopen do not
+silently reenable the old path. An unprojected queue retains its existing
+legacy contract. Removing or rolling back configuration is not an implicit
+request to clear its retained projection.
+
+Existing active/exclusive reservation replay still returns `reserved=false`,
+without fresh spawn permission or adoption into pool capacity. Existing
+suspended re-embodiment and direct interactive claim/start retain their own
+contracts and fences. The separately admitted coordinator CI-repair lane keeps
+its existing reservation and launch authority; a `ci-repair` source label alone
+still cannot pass that lane's independently verified admission.
+
+This is a provider-side mixed-caller boundary, not automatic publication or
+ordinary startup/prompt migration. Projecting a cohort before those consumers
+are qualified intentionally blocks their fresh legacy spawns rather than
+pretending they enforce pool selection. An older or rolled-back provider that
+does not advertise this capability is **not qualified** for configured-cohort
+adoption. No code here installs, downgrades or activates such a provider.
 
 ## Allocator caller
 

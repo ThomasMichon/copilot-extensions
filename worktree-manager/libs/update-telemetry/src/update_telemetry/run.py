@@ -15,15 +15,16 @@ import socket
 import sys
 import tempfile
 import time
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterable, Iterator, MutableMapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, cast, overload
 
 from . import outcomes as oc
 from .fold import MAX_DETAIL, RUN_COMPONENT, fold
-from .redact import redact, redact_argv
 from .human import current_operation
+from .redact import redact, redact_argv
 
 ENV_HOME = "COPILOT_EXTENSIONS_UPDATE_HOME"
 ENV_RUN_ID = "COPILOT_EXTENSIONS_UPDATE_RUN_ID"
@@ -87,7 +88,7 @@ def file_lock(path: Path, timeout: float) -> Iterator[None]:
     try:
         while True:
             try:
-                if os.name == "nt":
+                if sys.platform == "win32":
                     import msvcrt
 
                     os.lseek(fd, 0, os.SEEK_SET)
@@ -104,7 +105,7 @@ def file_lock(path: Path, timeout: float) -> Iterator[None]:
         try:
             yield
         finally:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 import msvcrt
 
                 os.lseek(fd, 0, os.SEEK_SET)
@@ -126,9 +127,9 @@ def append_line(path: Path, line: str) -> None:
             os.close(fd)
 
 
-def read_events(path: Path) -> tuple[list[dict], int]:
+def read_events(path: Path) -> tuple[list[dict[str, Any]], int]:
     """Parse ``events.jsonl``; unparseable lines are skipped and counted."""
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     errors = 0
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -149,7 +150,7 @@ def read_events(path: Path) -> tuple[list[dict], int]:
     return events, errors
 
 
-def write_json_atomic(path: Path, document: dict) -> None:
+def write_json_atomic(path: Path, document: dict[str, Any]) -> None:
     """Temp file in the same directory, then ``os.replace`` (retried briefly)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
@@ -170,7 +171,15 @@ def write_json_atomic(path: Path, document: dict) -> None:
             os.unlink(tmp)
 
 
-def _redact_obj(value):
+@overload
+def _redact_obj(value: dict[str, Any]) -> dict[str, Any]: ...
+
+
+@overload
+def _redact_obj(value: object) -> object: ...
+
+
+def _redact_obj(value: object) -> object:
     if isinstance(value, str):
         return redact(value)
     if isinstance(value, dict):
@@ -180,7 +189,7 @@ def _redact_obj(value):
     return value
 
 
-def _bound_strings(record: dict, limit: int) -> None:
+def _bound_strings(record: dict[str, Any], limit: int) -> None:
     for key, value in list(record.items()):
         if isinstance(value, str) and len(value) > limit:
             record[key] = value[:limit]
@@ -193,7 +202,7 @@ def _fits(line: str) -> bool:
     return len(line.encode("utf-8")) + 1 <= MAX_LINE
 
 
-def encode_event(record: dict) -> str:
+def encode_event(record: dict[str, Any]) -> str:
     """Serialize one event so the written line (newline included) is at most
     ``MAX_LINE`` UTF-8 bytes.
 
@@ -224,7 +233,7 @@ class PhaseResult:
         self.outcome: str | None = None
         self.changed: bool | None = None
         self.exit_code: int | None = None
-        self.error: dict | None = None
+        self.error: dict[str, Any] | None = None
 
 
 class Run:
@@ -295,12 +304,12 @@ class Run:
         self._saved_env = None
 
     # -- events --------------------------------------------------------------
-    def emit(self, phase: str, component: str, event: str, **fields) -> None:
+    def emit(self, phase: str, component: str, event: str, **fields: object) -> None:
         """Append one event; ``None``-valued fields are omitted."""
         if not self.enabled:
             return
         try:
-            record = {"v": 1, "ts": utc_now(), "run_id": self.run_id, "seq": next(_SEQ),
+            record: dict[str, Any] = {"v": 1, "ts": utc_now(), "run_id": self.run_id, "seq": next(_SEQ),
                       "pid": os.getpid(), "proc": self.proc, "phase": phase,
                       "component": component, "event": event}
             record.update({k: v for k, v in fields.items() if v is not None})
@@ -320,7 +329,7 @@ class Run:
                 too_big = len(json.dumps(details)) > MAX_DETAILS
                 record["details"] = {"truncated": True} if too_big else details
             line = encode_event(record)
-            append_line(self.events_path, line)
+            append_line(cast(Path, self.events_path), line)
             due = time.monotonic() - self._last_status >= REFRESH_SECONDS
             if self.is_owner and event == "end" and component == "run" and due:
                 self._write_status(final=False)
@@ -334,14 +343,16 @@ class Run:
         _warn(exc)
         self.enabled = False
 
-    def _begin(self, phase: str, component: str, action: str | None, argv) -> float:
+    def _begin(
+        self, phase: str, component: str, action: str | None, argv: Iterable[object] | None,
+    ) -> float:
         if component == RUN_COMPONENT:
             self._open[phase] = []
         self.emit(phase, component, "start", action=action, argv=argv)
         return time.monotonic()
 
     def _end(self, phase: str, component: str, started: float, *, outcome: str | None,
-             **fields) -> None:
+             **fields: object) -> None:
         seen = self._open.pop(phase, []) if component == RUN_COMPONENT else []
         final = outcome if outcome == oc.SKIPPED and not seen else oc.worst([outcome, *seen])
         self.emit(phase, component, "end", outcome=final,
@@ -349,7 +360,7 @@ class Run:
 
     @contextmanager
     def phase(self, phase: str, component: str = "run", action: str | None = None,
-              argv=None) -> Iterator[PhaseResult]:
+              argv: Iterable[object] | None = None) -> Iterator[PhaseResult]:
         """Record ``start``/``end`` around the body; exceptions map to outcomes."""
         result = PhaseResult()
         started = self._begin(phase, component, action, argv)
@@ -367,7 +378,9 @@ class Run:
         self._close_step()
         self._step = (phase, self._begin(phase, RUN_COMPONENT, action, None))
 
-    def _close_step(self, error: dict | None = None, outcome: str | None = None) -> None:
+    def _close_step(
+        self, error: dict[str, Any] | None = None, outcome: str | None = None,
+    ) -> None:
         if self._step is not None:
             phase, started = self._step
             self._step = None
@@ -376,13 +389,13 @@ class Run:
     def target(self, phase: str, component: str, outcome: str, *, required: bool = True,
                changed: bool | None = None, detail: str | None = None,
                duration_ms: int | None = None, exit_code: int | None = None,
-               error: dict | None = None, action: str | None = None) -> None:
+               error: dict[str, Any] | None = None, action: str | None = None) -> None:
         """Record one target's result (an ``end`` event for ``component``)."""
         if required:
             self._own_required.append(outcome)
             if phase in self._open:
                 self._open[phase].append(outcome)
-        details: dict = {"required": required}
+        details: dict[str, Any] = {"required": required}
         if detail:
             details["detail"] = redact(detail)[:MAX_DETAIL]
         self.emit(phase, component, "end", outcome=outcome, changed=changed,
@@ -395,7 +408,7 @@ class Run:
         """The most severe outcome over required targets this process recorded."""
         return oc.worst(self._own_required)
 
-    def finish(self, outcome: str | None = None, *, error: dict | None = None) -> int:
+    def finish(self, outcome: str | None = None, *, error: dict[str, Any] | None = None) -> int:
         """Close the run; return the exit code for this process's result."""
         error_code = (error or {}).get("code")
         own = oc.worst([outcome, *self._own_required])
@@ -420,7 +433,7 @@ class Run:
             return
         try:
             self._last_status = time.monotonic()
-            events, parse_errors = read_events(self.events_path)
+            events, parse_errors = read_events(cast(Path, self.events_path))
             now = utc_now()
             meta = {
                 "id": self.run_id, "owner": self.owner, "trigger": self.trigger,
@@ -435,19 +448,20 @@ class Run:
                     previous = json.loads(status_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     previous = None
-                document = fold(events, run=meta, previous=previous, final=final,
-                                hint=hint, error_code=error_code, updated_at=now)
+                folded = fold(events, run=meta, previous=previous, final=final,
+                              hint=hint, error_code=error_code, updated_at=now)
+                document: dict[str, Any] | None = folded
                 newer = _newer_run(previous, self.run_id, self.started_at)
                 if newer:
                     _stderr(f"warning: update status left to newer run {newer}")
-                    document = _merge_completion(previous, document, now) if final else None
+                    document = _merge_completion(previous, folded, now) if final else None
                 if document is not None:
                     write_json_atomic(status_path, document)
         except Exception as exc:
             self._trip(exc)
 
 
-def _newer_run(previous, run_id: str, started_at: str) -> str | None:
+def _newer_run(previous: object, run_id: str, started_at: str) -> str | None:
     """The id of the run recorded in ``previous`` if it started after this one.
 
     Runs are ordered by ``run.started_at`` (UTC, fixed-width ISO text), then by
@@ -456,13 +470,15 @@ def _newer_run(previous, run_id: str, started_at: str) -> str | None:
     run = previous.get("run") if isinstance(previous, dict) else None
     if not isinstance(run, dict) or not isinstance(run.get("id"), str):
         return None
-    other_id, other_start = run["id"], str(run.get("started_at") or "")
+    other_id, other_start = cast(str, run["id"]), str(run.get("started_at") or "")
     if other_id == run_id:
         return None
     return other_id if (other_start, other_id) > (started_at, run_id) else None
 
 
-def _merge_completion(previous: dict, document: dict, now: str) -> dict | None:
+def _merge_completion(
+    previous: dict[str, Any], document: dict[str, Any], now: str,
+) -> dict[str, Any] | None:
     """Keep a newer run's status, carrying an older run's later completion.
 
     The older run's ``last_success``/``last_failure`` replaces the recorded one

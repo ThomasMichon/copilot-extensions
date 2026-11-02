@@ -451,6 +451,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       [proposed observation contract](sidecar-observation-contract.md).
       Preserve every original parent clause, owner and evidence tier; a model,
       widget, provider or source PR alone does not complete this root.
+      S0 and S1 source delivery are merged; S2 owner/provider integration is next.
 
 ## Validation Plan
 
@@ -526,6 +527,28 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-11-02 - Sidecar foundation merged; owner integration next
+
+- #9979 merged as `74d9254007c1b06c0f058e20bc6a8cad05f3a8ad` through the
+  authorized Maintainer self-merge path after concrete corrections and required
+  green CI. No separate human-review layer or human acceptance claim was added.
+- Pulled the retained source workspace forward, then re-read this entire root
+  and both linked implementation/observation documents. Close only S1 source
+  delivery and the pure classifier criterion; retain every original root,
+  source-transport, selected-measurement, native, manual and Relay gate.
+- Source-head packets separately qualified 128 Manager, 226 owner-index and
+  111 Bridge cases. The new controller also passed strict checking. These are
+  source results, not installed or native-client evidence.
+- The merged foundation includes the virtual timeline, cooperative reader
+  lifetime, owner-qualified history and durable index admission intents. It
+  advertises no new provider capability and attaches no actual owner transport.
+- Continue with the advisory-agenda recovery/freshness guidance revision, then
+  S2's elected-owner capture, passive provider handlers and consumer integration.
+  Agenda relocation, archival and cleanup changes remain a separate design
+  proposal; unavailable planning state must not become an execution authority.
+- The whole effort remains Active. No rollout, live Mux change, head action,
+  resource release or original manual/native acceptance was performed.
 
 ### 2026-11-02 - Durable admission-intent design amendment
 

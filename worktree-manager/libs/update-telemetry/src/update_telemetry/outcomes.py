@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import subprocess
 from collections.abc import Iterable
+from typing import Any
 
 from .redact import redact
 
@@ -114,9 +115,11 @@ def outcome_for_installer_exit(code: int) -> tuple[str, str | None]:
     return COMMAND_FAILED, f"exit_{code}"
 
 
-def classify_exception(exc: BaseException, *, op: str | None = None) -> tuple[str, dict]:
+def classify_exception(
+    exc: BaseException, *, op: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Map an exception raised inside a phase to ``(outcome, error)``."""
-    error: dict = {"message": redact(str(exc))[:2048]}
+    error: dict[str, Any] = {"message": redact(str(exc))[:2048]}
     if op:
         error["op"] = op
     if isinstance(exc, subprocess.TimeoutExpired):
