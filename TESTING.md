@@ -5411,6 +5411,10 @@ contract. Empty `archive_info` retains the exact hash-pinned URL and version
 binding; an explicit wrong hash, contradictory hash fields or unsupported
 archive metadata remains a refusal.
 
+The process SDK's native interpreter controls launch both file-backed and
+retained-byte output relays twice from a selected Windows venv whose executable
+path exceeds 260 characters, preserving exact output and owned-Job settlement.
+
 The copied-pane boundary controls are an explicit, non-serving native lane:
 
 ```text

@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
+from types import SimpleNamespace
 import venv
 
 import pytest
@@ -15,6 +17,40 @@ import agent_procutil as pu
 from agent_procutil._interpreter import physical_executable
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows interpreter contract")
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_output_relay_accepts_deep_selected_interpreter(tmp_path, monkeypatch, retained):
+    from agent_procutil import _output_relay
+
+    root = tmp_path
+    while len(str(root / "Scripts" / "python.exe")) <= 280:
+        root /= "selected-" + "x" * 40
+    venv.EnvBuilder(with_pip=False).create(root)
+    interpreter = root / "Scripts" / "python.exe"
+    assert len(str(interpreter)) > 260
+    monkeypatch.setattr(
+        _output_relay, "sys", SimpleNamespace(executable=str(interpreter)),
+    )
+    if retained:
+        monkeypatch.setattr(
+            _output_relay, "_retained_source_bytes",
+            Path(_output_relay.__file__).read_bytes(), raising=False,
+        )
+    for cycle in range(2):
+        output = tmp_path / f"output-{cycle}"
+        with output.open("wb") as stream:
+            relay = _output_relay.ByteRelay(stream.fileno())
+            try:
+                assert relay.offer(b"native relay output")
+                deadline = time.monotonic() + 10
+                while not relay.end():
+                    assert time.monotonic() < deadline, "native relay did not finish"
+                    time.sleep(.01)
+                relay.close()
+            finally:
+                relay.abort(10)
+        assert output.read_bytes() == b"native relay output"
 
 
 def _guard_flags():
