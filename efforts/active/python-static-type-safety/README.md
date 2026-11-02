@@ -924,7 +924,8 @@ composition prerequisites, and review/validation rules.
   vendoring and diff whitespace checks pass.
 - Documentation impact: this is below-altitude test-contract preparation;
   existing developer commands and operational documentation remain accurate.
-  No shipped plugin payload changes, so no changefile is required. Fresh-box
-  and remote-venue tests are skipped because production/provisioning behavior
+  The shared-library ownership map requires an `agent-machines` patch
+  changefile even for this test-only slice. Fresh-box and remote-venue tests
+  are skipped because production/provisioning behavior
   is unchanged; local real consumer tests cover the affected helpers.
   The governed unit packet and its budget remain unchanged.
