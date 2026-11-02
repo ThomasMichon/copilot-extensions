@@ -1,0 +1,9 @@
+{
+  "comment": "Compose opt-in cohort and scope publication on existing coordinator and supervisor cadences",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

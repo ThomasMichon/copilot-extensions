@@ -158,6 +158,7 @@ def create_app(
     wake_retry_base: float = 1.0,
     replay_consumer_factory=None,
     cohort_sources: RegistrarSources | None = None,
+    pool_publication_enabled: bool = False,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -179,7 +180,8 @@ def create_app(
     and enabled waiter maintenance; ordinary server/CLI construction omits it.
 
     ``cohort_sources`` binds explicit projection to the coordinator's registrar.
-    It requires active-route authority but does not publish on startup or a tick.
+    It requires active-route authority. ``pool_publication_enabled`` additionally
+    selects whole-cohort maintenance on the existing GC cadence; it defaults off.
     """
     if replay_consumer_factory is not None and (
         not math.isfinite(wake_interval) or wake_interval <= 0 or not callable(wake_is_active)
@@ -187,6 +189,14 @@ def create_app(
         raise ValueError("replay consumer requires waiter maintenance and active-owner authority")
     if cohort_sources is not None and not callable(wake_is_active):
         raise ValueError("configured cohort source requires active-owner authority")
+    if pool_publication_enabled and (
+        cohort_sources is None or not control_token
+        or not math.isfinite(sweep_interval) or sweep_interval <= 0
+    ):
+        raise ValueError(
+            "pool publication requires the coordinator registrar, configured control authority "
+            "and enabled GC cadence"
+        )
     if (
         token is not None
         and control_token is not None
@@ -386,6 +396,7 @@ def create_app(
                 bus,
                 health=sweeper_health,
                 governance=governance,
+                **({"pool_source": cohort_source} if pool_publication_enabled else {}),
             )
         )
         orphan_reaper = (
@@ -857,6 +868,8 @@ def create_app(
                         await sweeper
                     except asyncio.CancelledError:
                         pass
+                if cohort_source is not None:
+                    await cohort_source.close()
                 if orphan_reaper is not None:
                     orphan_reaper.cancel()
                     try:

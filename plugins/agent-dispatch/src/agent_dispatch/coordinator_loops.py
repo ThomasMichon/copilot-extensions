@@ -10,7 +10,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Condition
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -20,6 +20,9 @@ from .loop_governance import LoopGovernance
 from .procutil import run_agent_worktrees_capture
 from .queue import Status, Task, TaskError, TaskQueue, machine_matches
 from .worktree_status_relay import WorktreeStatusRelayStore
+
+if TYPE_CHECKING:
+    from .coordinator_pool_source import CoordinatorPoolSource
 
 log = logging.getLogger("agent-dispatch.coordinator")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -422,6 +425,7 @@ async def _gc_loop(
     governance: LoopGovernance | None = None,
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
+    pool_source: CoordinatorPoolSource | None = None,
 ) -> None:
     """Maintain diagnostics; garbage-collect tasks only when interval is enabled."""
     from .diagnostic_logs import MAINTENANCE_SECONDS, maintain_file_logging
@@ -457,6 +461,11 @@ async def _gc_loop(
             loop_name="liveness GC",
         ):
             continue
+        if pool_source is not None:
+            try:
+                await pool_source.maintain(timeout=min(interval, 3.0))
+            except Exception:
+                log.exception("configured cohort maintenance unresolved; original custody retained")
         counts = await run_supervised_cycle(
             health,
             queue.reconcile_liveness,

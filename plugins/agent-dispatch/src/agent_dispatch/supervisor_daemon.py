@@ -151,8 +151,10 @@ class SupervisorDaemon(BoundedReconciliation):
         self_update_stale_target: Callable[[Path, str], Path | None] | None = None,
         self_update_spawn: Callable[[Any, list[str]], None] | None = None,
         reconcile_call_budget: float = 3.0,
+        pool_publication_enabled: bool = False,
     ):
         self.client = client
+        self.pool_publication_enabled = pool_publication_enabled
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
         #: rendezvous ``endpoint.json``). The coordinator binds an OS-assigned
         #: ephemeral port, so a coordinator restart moves the port; a daemon that
@@ -360,6 +362,8 @@ class SupervisorDaemon(BoundedReconciliation):
         discovery layer and a later re-sync cannot quietly revive the unit (vision
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
+        if self.pool_publication_enabled:
+            self.reconcile_pool_metadata()
         desired = self._effective_registrations()
         self._resolve_companion_desired(desired)
         self._materialize_managed_runtime_desired(desired)

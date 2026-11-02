@@ -48,6 +48,10 @@ lone dev box or against a designated coordinator host on a shared network:
   must sit idle before the fallback launch fires (default 1 hour: generous, so
   a stored handoff whose successor is merely mid cold-start, or an operator who
   simply hasn't looked yet, is never preempted).
+- ``AGENT_DISPATCH_POOL_PUBLICATION`` -- default-off configured-cohort and
+  per-scope metadata maintenance on the existing coordinator/master cadences.
+  Projection fences fresh legacy spawning; this does not migrate ordinary
+  allocator or worker-prompt consumers.
 """
 
 from __future__ import annotations
@@ -179,6 +183,7 @@ class Config:
     orphan_grace: float = DEFAULT_ORPHAN_GRACE
     handoff_fallback_enabled: bool = False
     handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE
+    pool_publication_enabled: bool = False
 
     @property
     def url(self) -> str:
@@ -242,6 +247,7 @@ def load_config() -> Config:
             os.environ.get("AGENT_DISPATCH_ORPHAN_GRACE") or str(DEFAULT_ORPHAN_GRACE)
         ),
         handoff_fallback_enabled=_truthy_env("AGENT_DISPATCH_HANDOFF_FALLBACK"),
+        pool_publication_enabled=_truthy_env("AGENT_DISPATCH_POOL_PUBLICATION"),
         handoff_fallback_grace=float(
             os.environ.get("AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE")
             or str(DEFAULT_HANDOFF_FALLBACK_GRACE)
