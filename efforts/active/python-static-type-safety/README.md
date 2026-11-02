@@ -1103,3 +1103,8 @@ composition prerequisites, and review/validation rules.
   preparation; existing developer commands and production guarantees remain
   accurate. Fresh-box provisioning and external-venue validation do not apply
   to unchanged runtime code. #9807 and the full campaign remain active.
+- Review of #10012 caught a nullable `ref` in a descriptor fixture; the
+  descriptor contract now includes `None` while normalized fields remain
+  strings. Both full-project strict counts are unchanged. The fixture
+  consistency test passes, and a real MyPy client control accepts `str | None`
+  but rejects using that descriptor value as a definite string.

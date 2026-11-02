@@ -29,7 +29,7 @@ LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
 
 class _SourceVector(TypedDict):
     name: str
-    descriptor: dict[str, str]
+    descriptor: dict[str, str | None]
     marketplaceKey: str
     normalized: dict[str, str]
     record: str
