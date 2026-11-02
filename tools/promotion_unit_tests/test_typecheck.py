@@ -10,6 +10,7 @@ import pytest
 
 import typecheck as checker
 from tools import _admission_protocol as admission
+from tools import typecheck_source_views as views
 
 
 def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
@@ -113,3 +114,36 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
     assert events == ["acquired", "released"]
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
+
+
+def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    directory = Path(views.INSTALLATION_ENTRY).parent
+    inputs = [
+        path for path in (root / directory).glob("*.py")
+        if path.name == "installation_context.py" or path.name.startswith("_installation_context_")
+    ]
+    paths = tuple(path.relative_to(root).as_posix() for path in inputs)
+    for path in inputs:
+        destination = tmp_path / path.relative_to(root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(path.read_bytes())
+    view = views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+    view.verify(tmp_path)
+    line = view.lines[-1]
+    assert view.diagnostics(f"{view.output}:{len(view.lines)}: note: sample\n", tmp_path) == (
+        f"{line.path}:{line.number}: note: sample\n"
+    )
+    fragment = tmp_path / view.inputs[1][0]
+    fragment.write_bytes(fragment.read_bytes() + b"\nextra: int = 1\n")
+    with pytest.raises(views.SourceViewError, match="source changed"):
+        view.verify(tmp_path)
+    fragment.write_bytes(view.inputs[1][1])
+    new = fragment.with_name("_installation_context_extra.py")
+    new.write_bytes(b"extra: int = 1\n")
+    with pytest.raises(views.SourceViewError, match="membership"):
+        view.verify(tmp_path)
+    with pytest.raises(views.SourceViewError, match="membership"):
+        views.installation_view(
+            tmp_path, (*paths, new.relative_to(tmp_path).as_posix()), view.output,
+        )

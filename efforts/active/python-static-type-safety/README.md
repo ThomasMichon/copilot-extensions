@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification); #9916 (P4a canonical Installation Context source view). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -91,11 +91,14 @@ rewrite.
 - [x] Deliver the typed local front door, reproducible checker preparation, project manifest and complete tracked-Python coverage ledger.
 - [x] Activate the already-clean small libraries in strict mode and the checker infrastructure's own code/tests; verify actual negative MyPy controls.
 - [x] Add required source-PR static checks using the same front door and project policies; preserve existing unit selection.
-- [ ] Add exact-candidate release static checks through the existing controller contract; preserve Main control.
+- [x] Land candidate-local static-checking source/controller contracts with frozen-input identity, failure propagation and helper decision qualification.
+- [x] Adopt exact-candidate release static checks in Main through the separately approved workflow-only change; preserve Main control.
+- [ ] Prove live candidate enforcement and regression rejection under the adopted Main controller.
 - [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
 ### Phase 2 - Source and platform qualification
 
+- [ ] Land the bounded canonical Installation Context composition/source-map adapter (#9916); keep copies independently pending.
 - [ ] Make executed source fragments statically visible with source-mapped composition or genuine typed modules; qualify every source line and byte-identical copy without suppressing errors.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
@@ -293,3 +296,68 @@ composition prerequisites, and review/validation rules.
   command refused the missing admission before enrollment. Focused helper,
   shell and checker controls pass 136 tests; exact packet coverage remains
   required before merge.
+
+### 2026-11-02 - Candidate source qualification merged; Main adoption selected
+
+- #9881 merged as `2e64d1874a277040dc85a832e545820ad5068d7c`
+  after exact-head Copilot approval, resolved feedback and green required CI.
+  [Run 41368464711](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41368464711)
+  passed all 3,508 controls with actual helper decision coverage in 111.924
+  seconds; the final same-head required run 41369625276 also passed.
+- The final source froze successfully. Its imported candidate passed exact
+  source/Main/tree identity validation, fresh pinned preparation and all
+  admitted Linux/Win32 strict checks. Local Windows packet runs that exceeded
+  the unchanged 300-second budget were not accepted as passing receipts;
+  hosted exact-head qualification passed without widening that budget.
+- The source worktree is pulled forward. #9807 and #9862 remain open.
+  Source qualification does not activate the preserved Main controller or
+  complete the portfolio: four projects are strict and 64 remain pending.
+- Next is the explicitly approved, separately reviewed Main workflow-only
+  adoption: the two read-only MyPy steps and the 20-minute combined job
+  deadline, with the unit packet's own 300-second bound unchanged. Live
+  candidate rejection remains required; no installed rollout is authorized.
+
+### 2026-11-02 - Reviewed Main workflow-only adoption merged
+
+- #9914 merged as `8492f3540566c1474aba486fb5415b913c05e2d3`
+  after exact-head Copilot approval, the normal Main source gate and identifier
+  scans. Managed completion reported no review-gate bypass.
+- The entire diff was one workflow file: the two six-minute candidate MyPy
+  steps and the approved 20-minute combined job deadline. Full-document
+  comparison proved every other Main controller setting unchanged. The unit
+  packet remains bounded at 300 seconds.
+- Configuration adoption is complete; actual provider execution and candidate
+  type-regression rejection remain open. No pause/resume, installed rollout
+  or global repository configuration change occurred.
+
+### 2026-11-02 - Live candidate enforcement observed; canonical source view selected
+
+- [Run 41370906756](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41370906756)
+  executed the adopted Main controller, passed pinned candidate preparation,
+  candidate MyPy enforcement and source units, then completed the normal
+  non-admin generated promotion #9918. The negative candidate-regression proof
+  remains open under #9862; success is not a substitute for rejection evidence.
+- #9916 owns the bounded P4a adapter for canonical Installation Context.
+  Composition and copy inheritance are split: the existing vendoring owner
+  retains copy membership, and copies remain independently pending until
+  correspondence is explicitly qualified.
+- The checker-only view follows the actual literal loader order and maps
+  diagnostics back to physical source lines. Focused controls cover actual
+  basic/strict MyPy failures and a clean shared namespace, omitted/reordered/
+  modified inputs, changed loader behavior and suppression/code-loss hazards.
+  The original runtime loader and fragments are unchanged.
+- Initial local validation passes 35 focused controls, strict checker typing,
+  all eight admitted platform targets and Ruff F/E9. A real complete-project
+  strict probe now reaches 496 errors across 29 files (including tests), rather
+  than independent-fragment namespace cascades. It remains a failing pending
+  probe, not library admission. Four projects are strict and 64 remain pending.
+- A same-source Linux strict comparison of the 21 canonical implementation
+  files reports 3,227 errors / 3,125 undefined-name diagnostics when checked
+  independently, versus 85 errors / zero undefined-name diagnostics across
+  the two composed/worker targets. These are actual MyPy subprocess results;
+  no runtime or annotation changes were needed to remove the false namespace
+  cascades. Both probes still fail, as required by their remaining typing debt.
+- The new adapter is also byte-admitted as a release-helper decision target.
+  One actor-free candidate-unit control checks real canonical composition,
+  diagnostic mapping and stale bytes/membership rejection. The whole-packet
+  deadline remains 300 seconds; full packet qualification is still required.
