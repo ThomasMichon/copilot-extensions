@@ -2912,7 +2912,12 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
     )
 
     calls = []
-    from agent_worktrees import local_cache_refresh
+    from agent_worktrees import guarded_anchors, local_cache_refresh
+
+    monkeypatch.setattr(
+        guarded_anchors, "prepare",
+        lambda *args: pytest.fail("SessionStart must not acquire guard facts under the resident lock"),
+    )
 
     monkeypatch.setattr(
         local_cache_refresh,

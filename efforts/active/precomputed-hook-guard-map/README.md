@@ -311,3 +311,12 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   scopes now include object/ref directories, and the resident fixture selects
   its map through the matching `AGENT_HOME`. The contained three-case packet
   passes without weakening metadata validation or borrowing another map.
+- Moved SessionStart guard acquisition out of the resident shared lock into
+  its existing checkout-local backup worker. Managed pre-launch and initial
+  resident publication remain explicit producer boundaries. The lifecycle
+  regression forbids synchronous guard preparation, and the worker regression
+  proves acquisition runs after releasing its administrative lease. Failures
+  remain visible alongside independently successful instruction delivery.
+  The focused five-case packet and complete 26-case worker packet pass.
+  Rebased onto current Dev while preserving the native stderr handling fix;
+  regenerated only the combined installer's existing admission hash.

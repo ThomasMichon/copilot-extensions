@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import local_cache_refresh as lcr, local_cache_worker as worker
+from agent_worktrees import guarded_anchors, local_cache_refresh as lcr, local_cache_worker as worker
 
 
 @pytest.mark.parametrize("kind", ["ordinary", "linked", "relative", "bare"])
@@ -102,6 +102,17 @@ def test_dispatch_reservation_survives_the_pre_acknowledgement_gap(tmp_path, mon
 def test_rendering_keeps_no_administrative_lease_open(tmp_path, monkeypatch):
     directory = tmp_path / "worker"
     directory.mkdir()
+    calls = []
+
+    def prepare(root):
+        gate = worker._gate(directory)
+        gate.acquire()
+        gate.release()
+        assert worker._read(directory / "request.json")["phase"] == "running"
+        calls.append(root)
+        return ""
+
+    monkeypatch.setattr(guarded_anchors, "prepare", prepare)
 
     def refresh(root, **kwargs):
         gate = worker._gate(directory)
@@ -119,6 +130,22 @@ def test_rendering_keeps_no_administrative_lease_open(tmp_path, monkeypatch):
     assert state["result"]["restart_required"] is True
     assert state["result"]["model_admission"] == "unknown"
     assert "3 installed" in (directory / "refresh.log").read_text()
+    assert calls == [tmp_path]
+
+
+def test_guard_preparation_failure_keeps_guidance_delivery_visible(tmp_path, monkeypatch):
+    directory = tmp_path / "worker"
+    directory.mkdir()
+    diagnostic = "[guarded-anchors] preparation failed; publication/withdrawal unconfirmed: fixture\n"
+    monkeypatch.setattr(guarded_anchors, "prepare", lambda root: diagnostic)
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root, **kwargs: lcr.RefreshResult("ready", changed=1))
+
+    assert worker.run(tmp_path, directory) == 1
+
+    state = worker._read(directory / "request.json")
+    assert state["result"]["status"] == "partial"
+    assert state["result"]["installed"] == 1
+    assert diagnostic.strip() in (directory / "refresh.log").read_text()
 
 
 def test_overlapping_requests_coalesce_and_share_one_copy_budget(tmp_path, monkeypatch):
@@ -126,6 +153,8 @@ def test_overlapping_requests_coalesce_and_share_one_copy_budget(tmp_path, monke
     directory.mkdir()
     clock = [0.0]
     timeouts = []
+    guard_calls = []
+    monkeypatch.setattr(guarded_anchors, "prepare", lambda root: guard_calls.append(root) or "")
     monkeypatch.setattr(lcr, "DEFAULT_TIMEOUT_S", 2.0)
     monkeypatch.setattr(worker, "time", SimpleNamespace(
         monotonic=lambda: clock[0], time=lambda: clock[0],
@@ -142,6 +171,7 @@ def test_overlapping_requests_coalesce_and_share_one_copy_budget(tmp_path, monke
     monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
     assert worker.run(tmp_path, directory) == 0
     assert timeouts == [2.0, 1.5, 1.0]
+    assert guard_calls == [tmp_path] * 3
     state = worker._read(directory / "request.json")
     assert state["phase"] == "done"
     assert state["pending_rerun"] is False

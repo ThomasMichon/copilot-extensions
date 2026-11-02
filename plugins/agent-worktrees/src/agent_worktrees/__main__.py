@@ -3936,10 +3936,6 @@ def _run_session_lifecycle(
         _migrate_legacy_marketplace_overrides(payload, cwd)
         _reconcile_knowledge_plugin_overlay(payload, cwd)
 
-        from . import guarded_anchors
-
-        diagnostics += guarded_anchors.prepare(cwd)
-
         from . import local_cache_refresh
 
         diagnostics += local_cache_refresh.sessionstart_diagnostic(

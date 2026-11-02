@@ -32,6 +32,13 @@ owner-input provenance remains a documented qualification limit, not evidence
 that a readable value is a reusable snapshot.
 Launch/session preparation updates only that caller's view, not every prepared
 worktree. Initial resident preparation and explicit refresh cover prepared views.
+Managed launch preparation is synchronous before launch. SessionStart reuses
+the existing checkout-local backup worker to prepare its caller asynchronously,
+outside the resident state lock and before the instruction-copy pass. A queued
+request is not completed publication. Coalesced requests reacquire guard facts;
+preparation failures remain visible in the worker result without withholding
+independently usable instruction copies. The instruction-copy budget does not
+qualify the guard producer's total preparation cost.
 An ordinary related-index mutation does not require registering its checkout.
 It refreshes prepared callers and may prepare a positively registered caller;
 an unregistered implicit caller is not enrolled. Uncertain registration for a
