@@ -471,6 +471,11 @@ def test_materialized_human_declaration_binds_rewritten_entrypoint(
         assert log == []
         assert (scripts / "install.ps1").read_bytes() == before
     for ext in ("ps1", "sh"):
+        emitted = (scripts / f"install.{ext}").read_bytes()
+        if ext == "sh":
+            assert b"\r\n" not in emitted
+        else:
+            assert b"\n" not in emitted.replace(b"\r\n", b"")
         assert contract.is_local_ref(
             contract.find_engine_ref(scripts / f"install.{ext}", ext), destination,
         )
@@ -478,6 +483,15 @@ def test_materialized_human_declaration_binds_rewritten_entrypoint(
     for asset in (*contract.FILES, *contract.support_files(canonical)):
         assert (scripts / asset).read_bytes() == (canonical / asset).read_bytes()
     assert _human_admission()(scripts / "install.ps1")
+    declaration = scripts / "install.human-output.json"
+    expected = declaration.read_bytes()
+    assert b"\r\n" not in expected
+    declaration.write_bytes(expected.replace(b"\n", b"\r\n"))
+    materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination,
+        canonical_root=source_root, dest_root=tmp_path,
+    )
+    assert declaration.read_bytes() == expected
     snapshot = {path.name: path.read_bytes() for path in scripts.iterdir()}
     assert materialize_installer_engine.materialize_ref_into(
         source_consumer_dir=destination, dest_consumer_dir=destination,

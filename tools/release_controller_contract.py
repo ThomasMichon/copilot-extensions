@@ -67,6 +67,68 @@ def verify_helper_selection(workflow: dict) -> None:
         raise UnitEvidenceError("source implementation selection requires Main's live Dev ancestry admission")
 
 
+def verify_candidate_typechecking(workflow: dict) -> None:
+    """Require candidate-local checking after frozen import and before unit evidence."""
+    job = workflow.get("jobs", {}).get("source-units", {})
+    steps = job.get("steps", [])
+    commands = (
+        'python "$RUNNER_TEMP/candidate/tools/typecheck.py" --prepare',
+        'python "$RUNNER_TEMP/candidate/tools/typecheck.py" --enforced',
+    )
+    selected = [
+        [index for index, step in enumerate(steps) if step.get("run", "").strip() == command]
+        for command in commands
+    ]
+    imports = [
+        index for index, step in enumerate(steps)
+        if step.get("name") == "Import the frozen candidate without recomposition"
+    ]
+    units = [
+        index for index, step in enumerate(steps)
+        if step.get("name") == "Execute only the admitted candidate units once"
+    ]
+    if (
+        job.get("permissions") != {"contents": "read"}
+        or job.get("timeout-minutes") != 20
+        or not {"gate", "compose-candidate"} <= set(job.get("needs", []))
+        or "continue-on-error" in job
+        or any(len(indices) != 1 for indices in (*selected, imports, units))
+    ):
+        raise UnitEvidenceError("candidate MyPy requires one read-only frozen-input qualification sequence")
+    indices = (imports[0], selected[0][0], selected[1][0], units[0])
+    imported = steps[indices[0]]
+    expected_import = (
+        'python reviewed-helpers/tools/promotion_frozen_candidate.py '
+        '--repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" '
+        '--dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" '
+        '--candidate-sha "$CANDIDATE_SHA" --checkout "$RUNNER_TEMP/candidate"'
+    )
+    if (
+        " ".join(imported.get("run", "").replace("\\\n", " ").split()) != expected_import
+        or imported.get("env") != {
+            "DEV_SHA": "${{ needs.gate.outputs.sha }}",
+            "MAIN_BEFORE": "${{ needs.gate.outputs.main_before }}",
+            "CANDIDATE_SHA": "${{ needs.compose-candidate.outputs.candidate_sha }}",
+        }
+    ):
+        raise UnitEvidenceError("candidate MyPy import must bind the admitted frozen candidate identities")
+    if list(indices) != sorted(indices) or any(
+        "if" in steps[index] or "continue-on-error" in steps[index]
+        for index in indices
+    ) or any(steps[index].get("timeout-minutes") != 6 for index in indices[1:3]):
+        raise UnitEvidenceError("candidate MyPy must prepare then enforce frozen inputs before unit evidence")
+    default_shell = job.get("defaults", {}).get("run", {}).get(
+        "shell", workflow.get("defaults", {}).get("run", {}).get("shell"),
+    )
+    if any(
+        steps[index].get("shell", default_shell) not in (
+            None, "bash", "bash --noprofile --norc -e -o pipefail {0}",
+        )
+        for index in indices
+    ):
+        raise UnitEvidenceError("candidate MyPy requires a failure-propagating Bash shell")
+
+
 def required_arguments(source: bytes) -> set[str]:
     """Discover new required CLI inputs without executing a source helper."""
     required = set()

@@ -75,15 +75,16 @@ class PromotionError(RuntimeError):
 
 def _git(
     args: list[str], *, cwd: Path | None = None, check: bool = True,
-    env: dict[str, str] | None = None,
+    env: dict[str, str] | None = None, input_text: str | None = None,
 ) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd or REPO), capture_output=True, text=True, env=env,
+        ["git", *args], cwd=str(cwd or REPO), capture_output=True, env=env,
+        input=input_text.encode("utf-8") if input_text is not None else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if check and result.returncode != 0:
-        raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+        raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
+    return result.stdout.decode("utf-8").strip()
 
 
 def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:
@@ -408,7 +409,7 @@ def _read_pipeline_state(main_head: str, *, repo: Path) -> dict:
 def _write_pipeline_state_into_scratch(scratch: Path, state: dict) -> None:
     path = scratch / PIPELINE_STATE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 
 # Mirrors `tools/coverage_guided_selection/correlation.py`'s own
@@ -453,7 +454,7 @@ def _seed_coverage_baselines_from_main(scratch: Path, main_head: str, *, repo: P
         if not raw:
             continue
         (scratch / path).parent.mkdir(parents=True, exist_ok=True)
-        (scratch / path).write_text(raw + "\n", encoding="utf-8")
+        (scratch / path).write_text(raw + "\n", encoding="utf-8", newline="\n")
         seeded += 1
     return seeded
 
@@ -544,7 +545,7 @@ def _write_coverage_baselines_into_scratch(
         }
         dest_dir.mkdir(parents=True, exist_ok=True)
         (dest_dir / src.name).write_text(
-            json.dumps(pointer, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(pointer, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
         )
         written.append(src.stem)
     return written
@@ -789,8 +790,8 @@ def promote(
             if promotion_time is not None else []
         )
         commit = _git(
-            [*identity, "commit-tree", new_tree, "-p", main_head, "-m", message],
-            cwd=scratch, env=candidate_environment(promotion_time),
+            [*identity, "commit-tree", new_tree, "-p", main_head, "-F", "-"],
+            cwd=scratch, env=candidate_environment(promotion_time), input_text=message,
         )
         if build_python_artifacts_dir is not None:
             try:
@@ -820,7 +821,10 @@ def promote(
                 if existing and not _same_source_release(existing, commit, dev_head, repo=repo):
                     raise PromotionError("existing source release tag binds a different source/composition")
                 if not existing:
-                    _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+                    _git(
+                        ["tag", "-a", tag_name, "-F", "-", commit],
+                        cwd=scratch, input_text=message,
+                    )
             else:
                 # Artifact preparation never tags (and never pushes; see the
                 # guard at the top), so there is no tag name to report.

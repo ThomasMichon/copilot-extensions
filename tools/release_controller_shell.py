@@ -15,8 +15,10 @@ import shlex
 import tokenize
 
 _NAME = r"[A-Za-z0-9_-]+\.py"
-_REFERENCE = re.compile(r"reviewed-helpers/tools/(" + _NAME + r")\b")
-_FILE = re.compile(r"(?:(?:.*?/)?reviewed-helpers/tools/|tools/)?(" + _NAME + r")$")
+# The unit runner is the qualification framework, not one of its helper inputs.
+_CANDIDATE_TOOLS = r"\$RUNNER_TEMP/candidate/tools/(?!run-promotion-unit-tests\.py\b)"
+_REFERENCE = re.compile(r"(?:reviewed-helpers/tools/|" + _CANDIDATE_TOOLS + r")(" + _NAME + r")\b")
+_FILE = re.compile(r"(?:(?:.*?/)?reviewed-helpers/tools/|" + _CANDIDATE_TOOLS + r"|tools/)?(" + _NAME + r")$")
 _RUN = re.compile(r"^( *)(?:- +)?run: *(.*)$")
 _ARRAY = re.compile(r"^([A-Za-z_]\w*)(\+?)=\((.*)\)$", re.S)
 _EXPANSION = re.compile(r"^\$\{([A-Za-z_]\w*)\[@\]\}$")
