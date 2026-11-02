@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude obsolete configured pool scopes from current placement while retaining publication and execution custody",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

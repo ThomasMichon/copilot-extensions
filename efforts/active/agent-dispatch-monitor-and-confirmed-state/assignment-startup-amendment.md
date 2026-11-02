@@ -48,7 +48,8 @@ the current Plan and Validation Plan remain active.
 The [direct-definition source](journal/2026/11.02-direct-pool-definitions.md)
 connects explicit complete direct-worker policy to the existing registration
 and effective-source owners without deriving missing legacy semantics.
-Its source review/merge, remaining ordinary migration and native gates are distinct.
+Its source merged in [#10111](https://github.com/ThomasMichon/copilot-extensions/pull/10111);
+remaining legacy-row adoption, ordinary migration and native gates are distinct.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).

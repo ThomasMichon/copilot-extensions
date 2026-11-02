@@ -142,8 +142,8 @@ def test_changed_cohort_fences_original_writes_but_recovers_accepted_results(q):
     published = _publish(q, pending)
     _observe(q, _cohort(revision=1, source="changed"), expected=1)
     before = q.pool_catalog_snapshot()
-    assert not before.configured_ready
-    assert "host-linux/linux: enrolled scope is not configured" in before.blockers
+    assert before.configured_ready and not before.ready
+    assert before.scopes == (published,) and before.definitions == () and before.blockers == ()
     assert _publish(q, pending, now=140.0) == published
     assert _begin(q) == published
     with pytest.raises(TaskError):
@@ -184,7 +184,9 @@ def test_legacy_projection_retains_scope_without_backfilling_or_silent_withdrawa
     assert q.pool_catalog_snapshot().ready
     _observe(q, _cohort(revision=1), expected=1)
     assert q.pool_catalog_snapshot().scopes == (updated,)
-    assert not q.pool_catalog_snapshot().configured_ready
+    assert q.pool_catalog_snapshot().configured_ready
+    assert not q.pool_catalog_snapshot().ready
+    assert q.pool_catalog_snapshot().definitions == ()
 
 
 def test_unavailable_publication_retains_definition_cohort_attribution(q):
