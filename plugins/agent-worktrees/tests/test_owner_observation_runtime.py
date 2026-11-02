@@ -778,6 +778,56 @@ def test_direct_oversized_entry_is_invalidated_only_after_matching_admission(run
         stream.close()
 
 
+@pytest.mark.parametrize("batch_id", [None, "bad batch", "b" * 513, True])
+def test_invalid_batch_metadata_cannot_invalidate_oversized_publication(
+    runtime, monkeypatch, batch_id
+):
+    owner, _clock, _wakes = runtime
+    current = owner.initialize(record(1))
+    capture = record(2)
+    item = event(capture)
+    item["payload"] = {"details": ["x" * 3500] * 9}
+    c.entry(item, post_save=True, _check_size=False)
+    with pytest.raises(c.ObservationError) as oversized:
+        c.entry(item, post_save=True)
+    assert oversized.value.code == "oversized"
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == current
+        with pytest.raises(c.ObservationError) as error:
+            owner.publish(
+                capture,
+                [item],
+                batch_id=batch_id,
+                expected_cursor=current["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "invalid-request"
+        assert owner.read(request()) == current
+        assert owner.history._failures == {}
+        assert owner.history._failure_reasons == {}
+        assert notifications == []
+        assert next(stream)["type"] == "heartbeat"
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("completeness", ["complete", "unknown"])
+def test_invalid_reconciliation_batch_cannot_refresh_unchanged_capture(runtime, completeness):
+    owner, _clock, _wakes = runtime
+    capture = replace(record(1), completeness=completeness)
+    current = owner.initialize(capture)
+    refreshed = replace(capture, observed_at="2026-11-02T00:00:01Z")
+    with pytest.raises(c.ObservationError) as error:
+        owner.reconcile(refreshed, batch_id="invalid batch")
+    assert error.value.code == "invalid-request"
+    assert owner.read(request()) == current
+    assert owner.history._failures == {}
+    assert owner.history._failure_reasons == {}
+
+
 @pytest.mark.parametrize("completeness", ["complete", "unknown"])
 def test_recovery_gap_does_not_rewrite_capture_completeness_or_emit_fake_reconcile(
     runtime, completeness

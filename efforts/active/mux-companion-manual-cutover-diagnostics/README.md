@@ -527,6 +527,19 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Reject malformed batch metadata before invalidation
+
+- Runtime publication and reconciliation validate the batch reference before
+  capture/entry preflight or unchanged-capture refresh. Invalid batch metadata
+  cannot trigger oversized-delivery invalidation, alter current facts or wake
+  held subscribers.
+- Added malformed batch cases covering non-text, whitespace and overlong
+  identities with a matching current cursor and an otherwise oversized entry.
+- The focused owner contract/history/runtime packet passed 104 cases, including
+  unchanged complete/unknown reconciliation captures with invalid batch metadata.
+- This is a further review correction in the open foundation PR. Source
+  integration, native qualification and whole-parent gates remain open.
+
 ### 2026-11-02 - Bounded change evidence and journal-local recovery
 
 - Large changed captures retain explicit before/after omission, capture-source

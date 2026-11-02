@@ -212,6 +212,7 @@ class OwnerObservationRuntime:
         expected_cursor: str,
         post_save: bool = False,
     ) -> dict:
+        c.reference(batch_id, "observation batch identity")
         record = freeze_record(record)
         try:
             record, entries, _digest = prepare(record, entries, post_save)
@@ -255,6 +256,7 @@ class OwnerObservationRuntime:
 
     def reconcile(self, record: CanonicalObservation, *, batch_id: str) -> dict:
         """Only explicitly captured differences, not sampled mutation history."""
+        c.reference(batch_id, "observation batch identity")
         record = freeze_record(record)
         with self._operations:
             self._admit()
