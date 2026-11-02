@@ -190,7 +190,7 @@ class TestBridgeAgentInitialize:
 
 class TestBridgeAgentSessions:
     @pytest.mark.asyncio
-    async def test_new_session(self, bridge_agent, mock_conn):
+    async def test_new_session(self, bridge_agent, mock_conn, tmp_path):
         bridge_agent.on_connect(mock_conn)
 
         with patch("agent_bridge.session_manager.spawn") as mock_spawn:
@@ -220,7 +220,8 @@ class TestBridgeAgentSessions:
                 with patch.object(
                     SessionManager, "_connect_via_session_host", _fake_host_connect
                 ):
-                    resp = await bridge_agent.new_session(cwd="/tmp/test")
+                    # An existing directory: the cwd is resolved strictly.
+                    resp = await bridge_agent.new_session(cwd=str(tmp_path))
 
                 assert resp.session_id is not None
                 assert resp.field_meta == {"agent-bridge": {"role": "owner"}}

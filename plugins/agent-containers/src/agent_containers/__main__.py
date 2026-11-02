@@ -63,6 +63,12 @@ log = logging.getLogger("agent-containers")
 _BUSY_EXIT = 75
 
 
+def _runtime_drivers():
+    from . import runtime_drivers
+
+    return runtime_drivers
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="agent-containers",
@@ -114,6 +120,11 @@ def main(argv: list[str] | None = None) -> int:
 
     claim_provider_cli.add_claim_provider_parsers(sub)
     plugin_config.add_subparsers(sub)
+    sub.add_parser("drivers", help="List registered external runtime drivers").add_argument(
+        "--json", action="store_true", help="Emit JSON")
+    proxy = sub.add_parser("runtime-proxy", help=argparse.SUPPRESS)
+    proxy.add_argument("--fleet")
+    proxy.add_argument("argv", nargs=argparse.REMAINDER)
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
@@ -304,6 +315,10 @@ def main(argv: list[str] | None = None) -> int:
             return lifecycle.dispatch_stop_or_remove(args)
         if args.command == "leases":
             return _cmd_leases()
+        if args.command in ("drivers", "runtime-proxy"):
+            from . import driver_cli
+            return (driver_cli.cmd_drivers if args.command == "drivers"
+                    else driver_cli.cmd_runtime_proxy)(args)
         if args.command == "lifecycle-clear":
             return _cmd_lifecycle_clear(args)
         if args.command == "exec":
@@ -443,15 +458,20 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
 
     context = _trusted_session_host_context(args.name, args.expected_instance)
     config, fleet, user, workspace = context
+    forward, relay_enabled = config.credentials_for(fleet)
+    relay_enabled = _runtime_drivers().launch_plan(
+        fleet, args.name, relay_enabled, require_ssh=True,
+    ).agent_relay
     acp_command, launcher_token, token_count, instance_id = hosting_policy.session_host_launch_inputs(
         context, args.expected_instance,
     )
-    projection_target = args.expected_instance or args.name
+    # A driver member is addressed by its fleet-qualified handle; its raw id
+    # may be shared by another runtime.
+    projection_target = (context.target if args.expected_instance else args.name)
     ssh_config = prepare_ssh_config(projection_target, user)
     cleanup_remote_envs(projection_target, user)
     launch_env = container_environment(projection_target, user)
 
-    forward, relay_enabled = config.credentials_for(fleet)
     if forward:
         github_token = host_gh_token()
         if not github_token:
@@ -518,8 +538,13 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
     """Emit lifecycle state without starting or attaching to the container."""
     from .lifecycle import inspect_container
 
+    drivers = _runtime_drivers()
+    drivers.discover(load_config(), member=args.name)
     try:
-        details = inspect_container(args.expected_instance or args.name)
+        details = (
+            drivers.inspect_pinned(args.name, args.expected_instance)
+            or inspect_container(args.expected_instance or args.name)
+        )
     except RuntimeError as exc:
         detail = str(exc)
         if "No such object" not in detail and "No such container" not in detail:
@@ -543,10 +568,16 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     if args.expected_instance:
         from .session_host_context import cleanup_user
 
-        user = cleanup_user(args.expected_instance, args.expected_user)
+        drivers = _runtime_drivers()
+        drivers.discover(load_config(), member=args.name)
+        target = args.expected_instance
+        route = drivers.owner_of(args.name)
+        if route is not None:  # a driver member: its fleet-qualified handle
+            target = f"{route.name}.{args.expected_instance}"
+        user = cleanup_user(args.expected_instance, args.expected_user, target)
     else:
         _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
-    target = args.expected_instance or args.name
+        target = args.name
     remote_env = guard_cleanup_path(target, user, args.remote_env)
     if cleanup_remote_env(target, user, remote_env) is False:
         raise RuntimeError("launch environment cleanup could not be confirmed")
@@ -706,6 +737,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "status": c.status,
                 "fleet": c.fleet,
                 "fleet_source": config.fleet_source(c.fleet),
+                "driver": c.driver,
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
                 "lifecycle_hold": hold_status,
@@ -995,6 +1027,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
             target.actual_profile,
             target.user,
             _append_copilot_args(target.acp_command, extra),
+            handle=target.container_id,
         )
     finally:
         target_lock.release()
@@ -1009,6 +1042,7 @@ def _launch_container_agent(
     acp_command: str,
     *,
     container_id: str | None = None,
+    handle: str | None = None,
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
     if actual_profile == RESTRICTED_PROFILE:
@@ -1029,6 +1063,12 @@ def _launch_container_agent(
         return _exec_stdio(spawn_cmd, env)
 
     forward, relay_enabled = config.credentials_for(fleet)
+    plan = _runtime_drivers().launch_plan(fleet, args.name, relay_enabled)
+    # A driver member is driven through the exact incarnation selected before
+    # the hosting check (``<name>.<id>``): a replacement created since then is
+    # refused by its driver instead of receiving credentials or the launch.
+    member = handle if plan.driver is not None and handle else args.name
+    relay_enabled = plan.agent_relay
     env = os.environ.copy()
     if forward:
         token = host_gh_token()
@@ -1063,7 +1103,7 @@ def _launch_container_agent(
                 "restart agent-bridge or set relay.enabled: false in "
                 "containers.yaml"
             )
-        deploy_shims(args.name, ado=True)
+        deploy_shims(member, ado=True)
         env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
         env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
         env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
@@ -1083,7 +1123,7 @@ def _launch_container_agent(
             f"127.0.0.1:{config.relay_port}:127.0.0.1:{host_relay_port}"
         ]
 
-    launch_env = container_environment(args.name, user)
+    launch_env = container_environment(member, user)
     if forward and "GH_TOKEN" in env:
         launch_env["GH_TOKEN"] = env["GH_TOKEN"]
     launch_env.update({
@@ -1092,13 +1132,13 @@ def _launch_container_agent(
         if name in env
     })
     remote_env = process_auth.stage_env(
-        args.name, user, launch_env, write_remote_env, config=config, fleet=fleet,
+        member, user, launch_env, write_remote_env, config=config, fleet=fleet,
     )
     env = process_auth.without_inference_token(env)
     copilot_auth_env = None
     try:
-        ssh_config = prepare_ssh_config(args.name, user)
-        copilot_auth_env = process_auth.prepare_launch(config, fleet, args.name, user)
+        ssh_config = prepare_ssh_config(member, user) if plan.ssh else None
+        copilot_auth_env = process_auth.prepare_launch(config, fleet, member, user)
         acp_command = hosting_policy.guarded_launch(
             process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
         )
@@ -1107,8 +1147,12 @@ def _launch_container_agent(
             ssh_config,
             remote_command,
             reverse_forwards=reverse_forwards,
+        ) if plan.ssh else _runtime_drivers().stream_routed(
+            ["docker", "exec", "-i", "-u", user, member, "sh", "-c", remote_command],
         )
-        log.info("exec transport=ssh target=%s", args.name)
+        if not plan.ssh and spawn_cmd[:1] == ["docker"]:  # never fall back to Docker
+            raise RuntimeError(f"Container '{args.name}' is no longer routed to its runtime driver")
+        log.info("exec transport=%s target=%s", "ssh" if plan.ssh else "driver", args.name)
         if not args.stdio:
             proc = subprocess.run(
                 spawn_cmd, env=env, creationflags=_creation_flags()
@@ -1116,64 +1160,16 @@ def _launch_container_agent(
             return proc.returncode
         return _exec_stdio(spawn_cmd, env)
     finally:
-        cleanup_remote_env(args.name, user, remote_env)
-        cleanup_remote_env(args.name, user, copilot_auth_env)
+        cleanup_remote_env(member, user, remote_env)
+        cleanup_remote_env(member, user, copilot_auth_env)
+
 
 
 def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
     """Run a transport command, pumping stdio over explicit pipes."""
-    import threading
+    from .stdio_pump import exec_stdio
 
-    proc = subprocess.Popen(
-        spawn_cmd,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        creationflags=_creation_flags(),
-    )
-
-    def _forward_in() -> None:
-        try:
-            in_fd = sys.stdin.buffer.fileno()
-            while True:
-                data = os.read(in_fd, 65536)
-                if not data:
-                    break
-                proc.stdin.write(data)
-                proc.stdin.flush()
-        except (OSError, ValueError) as exc:
-            log.error("transport stdin forwarding failed: %s", exc)
-        finally:
-            try:
-                proc.stdin.close()
-            except OSError:
-                pass
-
-    def _forward(src, dst) -> None:
-        try:
-            src_fd = src.fileno()
-            while True:
-                data = os.read(src_fd, 65536)
-                if not data:
-                    break
-                dst.write(data)
-                dst.flush()
-        except (OSError, ValueError) as exc:
-            log.error("transport output forwarding failed: %s", exc)
-
-    threads = [
-        threading.Thread(target=_forward_in, daemon=True),
-        threading.Thread(target=_forward, args=(proc.stdout, sys.stdout.buffer), daemon=True),
-        threading.Thread(target=_forward, args=(proc.stderr, sys.stderr.buffer), daemon=True),
-    ]
-    for t in threads:
-        t.start()
-    rc = proc.wait()
-    # Let the output pumps drain anything buffered after exit.
-    for t in threads[1:]:
-        t.join(timeout=2)
-    return rc
+    return exec_stdio(spawn_cmd, env)
 
 
 if __name__ == "__main__":

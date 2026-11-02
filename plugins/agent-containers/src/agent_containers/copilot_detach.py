@@ -147,6 +147,11 @@ def _launch_env(
 ) -> tuple[dict[str, str], int | None, int | None]:
     config = target.config
     forward, relay_enabled = config.credentials_for(target.fleet)
+    from .runtime_drivers import launch_plan
+
+    relay_enabled = launch_plan(
+        target.fleet, args.name, relay_enabled, require_ssh=True,
+    ).agent_relay
     env: dict[str, str] = {}
     if forward:
         from .resolver import host_gh_token

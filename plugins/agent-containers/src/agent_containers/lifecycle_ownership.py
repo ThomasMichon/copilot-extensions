@@ -14,6 +14,7 @@ from .config import (
 )
 
 EXTERNAL_REASON = "external lifecycle owner; use the selected deployment manager"
+DRIVER_REASON = "member of a runtime-driver fleet; only its driver may manage it"
 
 
 def require_internal_fleet(fleet: FleetConfig) -> None:
@@ -22,12 +23,57 @@ def require_internal_fleet(fleet: FleetConfig) -> None:
         raise RuntimeError(EXTERNAL_REASON)
 
 
+def _exact_driver_route(name: str, instance_id: str | None) -> bool:
+    """True only when the driver reported exactly this name AND incarnation."""
+    from .runtime_drivers import owner_of
+
+    if not instance_id:
+        return False
+    try:
+        route = owner_of(f"{name}.{instance_id}")
+    except RuntimeError:  # ambiguous handle
+        return False
+    return route is not None and route.name == name and route.instance_id == instance_id
+
+
+def _name_held_by_driver(name: str) -> bool:
+    """True when a driver member (or several runtimes) answers to ``name``."""
+    from .runtime_drivers import owner_of
+
+    try:
+        return owner_of(name) is not None
+    except RuntimeError:  # ambiguous: at least one runtime driver claims it
+        return True
+
+
 def lifecycle_blocker(
     config: ContainersConfig, name: str, labels: dict[str, str],
+    instance_id: str | None = None,
 ) -> str | None:
+    """Why agent-containers must not act on this container, or ``None``.
+
+    ``instance_id`` is the exact incarnation about to be acted on. A
+    container that claims a driver fleet (by label or deterministic name), or
+    whose name a driver member holds, is admitted only when its driver
+    reported exactly that name and incarnation. A same-name driver member is
+    never sufficient: the Docker fallback is refused for a different
+    incarnation, so a name collision is never Docker-managed as if it were
+    driver-owned.
+    """
     owner = labels.get(LIFECYCLE_OWNER_LABEL, INTERNAL_LIFECYCLE_OWNER)
     if owner != INTERNAL_LIFECYCLE_OWNER:
         return EXTERNAL_REASON
+    claims_driver_fleet = any(
+        getattr(fleet, "driver", None) and (
+            labels.get(FLEET_LABEL) == key
+            or (not labels.get(FLEET_LABEL) and name.startswith(fleet.prefix(key) + "-"))
+        )
+        for key, fleet in config.fleets.items()
+    )
+    if (claims_driver_fleet or _name_held_by_driver(name)) and not _exact_driver_route(
+        name, instance_id,
+    ):
+        return DRIVER_REASON
     selected = config.fleets.get(labels.get(FLEET_LABEL, ""))
     if selected and selected.lifecycle_owner == EXTERNAL_LIFECYCLE_OWNER:
         return EXTERNAL_REASON
@@ -54,7 +100,7 @@ def pin_lifecycle_command(args: list[str], config: ContainersConfig, inspect) ->
             or not isinstance(name, str) or not name.startswith("/")
             or not isinstance(labels, dict)):
         raise RuntimeError("container lifecycle identity could not be verified")
-    reason = lifecycle_blocker(config, name.removeprefix("/"), labels)
+    reason = lifecycle_blocker(config, name.removeprefix("/"), labels, identity)
     if reason:
         raise RuntimeError(reason)
     return [*args[:-1], identity]

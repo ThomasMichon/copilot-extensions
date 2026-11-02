@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) and
   the plugin's [`README`](../../../plugins/agent-containers/README.md)
 
@@ -104,6 +104,19 @@ muxed CLI session, attached or detached) through that same contract —
 restricted venues deliberately receive only the headless/narrow-tool shape,
 never the interactive one, consistent with their reduced authority envelope.
 
+### Pluggable container runtime
+The container runtime is a replaceable substrate beneath the venue, not part of
+its contract. Docker is the built-in runtime; a trusted fleet may delegate its
+runtime operations — provisioning, inventory, lifecycle, execution, file
+ingress — to an external driver that owns image and workspace setup for its
+own runtime. Fleet identity, leases, readiness, trust posture and the
+`container:` coordination face stay with the provider, so agents address a
+driver-backed venue exactly like any other. A driver declares what it
+guarantees (for example that it supplies the credential-relay contract
+itself), and the provider refuses a dispatch the declared capabilities cannot
+honor rather than degrading silently. Restricted containment, which rests on
+inspected runtime hardening, stays on the built-in runtime.
+
 ### Externally discoverable venue
 A restricted venue's identity and readiness are not confined to this
 provider's own CLI: a named, read-only venue descriptor can be published for
@@ -135,6 +148,14 @@ state scope rather than sharing the host’s globals; Gateway federation stays
 the cross-cluster path, and the physical machine stays the security boundary.
 Restricted fleets deliberately receive none of this by default
 (see `restricted-credential-boundary` / `harness-and-tool-latitude`).
+
+### external-runtime-drivers
+A trusted fleet can run on a container runtime other than Docker by naming a
+registered external driver. The driver answers a versioned, non-interactive
+command protocol with typed errors; the provider keeps leases, borrow/release,
+sizing, readiness and the coordination-layer resolver, and routes dispatch
+through the driver. Fleet keys that only the built-in runtime understands are
+rejected for a driver fleet instead of being silently ignored.
 
 ### interactive-venue-reach-trusted
 A trusted venue is reachable as an attended, muxed, interactive Copilot CLI
@@ -356,3 +377,11 @@ only after inspecting a running process.
   disconnects), while a detached session carries them on a separate,
   host-side keeper independent of the launcher's lifetime — the original
   wording wrongly attributed both to one keeper.
+- **2026-10-30** — Extended with *Pluggable container runtime* and
+  `external-runtime-drivers` (issue #9584): some teams already own a
+  container CLI that selects images, prepares workspaces and wires credentials
+  for their runtime, and previously had to bypass the provider (losing leases,
+  readiness and `container:` addressing) to use it. The runtime becomes a
+  substrate behind a driver seam; coordination, posture and leases stay
+  provider-owned, and restricted containment remains Docker-only because it
+  depends on inspected runtime hardening.
