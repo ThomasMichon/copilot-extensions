@@ -358,6 +358,7 @@ async def test_provider_selection_registers_before_consumer(tmp_path, monkeypatc
         source_paths=[control], codespace_plugins=[{"source": "sample@synthetic"}],
     )
     shared = Path(__file__).resolve().parents[3] / "libs" / "plugin-resolve" / "src"
+    events = []
 
     async def local_policy(_manager, _name, workspace, *, preflight):
         from repository_policy import require_agent_hosting
@@ -365,11 +366,14 @@ async def test_provider_selection_registers_before_consumer(tmp_path, monkeypatc
         assert workspace == str(target)
         assert preflight is True
         require_agent_hosting(workspace)
+        events.append("admission")
 
     monkeypatch.setattr("agent_codespaces.hosting_policy.require_guest_hosting", local_policy)
 
     class Transport:
         async def exec_command(self, _name, command, *, input_bytes, timeout):
+            events.append("prepare")
+            assert events == ["admission", "prepare"]
             assert command == "bash -ls"
             match = re.search(r"request=json.loads\(base64.b64decode\('([^']+)'\)\)", input_bytes.decode())
             request = base64.b64decode(match[1]).decode()
@@ -396,6 +400,7 @@ async def test_provider_selection_registers_before_consumer(tmp_path, monkeypatc
     assert settings["enabledPlugins"]["sample@synthetic"] is True
     assert context["plugin_context"]["cwd"] == str(target)
     assert context["plugin_context"]["logical_payloads"] == {"sample@synthetic": directories[0]}
+    assert events == ["admission", "prepare"]
 
 
 @pytest.mark.asyncio
@@ -421,14 +426,16 @@ async def test_explicit_worktree_uses_the_native_resolve_contract_before_prepare
         manager, "synthetic", "example/project", object(), "/workspaces/anchor",
         worktree_id="selected", prepared_context=context,
     )
-    first, policy, second = manager.exec_command.await_args_list
+    first, admission, preparation = manager.exec_command.await_args_list
     assert 'WORKTREES=$(command -v agent-worktrees)' in first.args[1]
     assert 'resolve --json --dry-run' in first.args[1]
     assert '--worktree-id selected' in first.args[1]
-    assert "agent-policy check" in policy.args[1] and "/workspaces/selected" in policy.args[1]
+    assert "agent-policy check" in admission.args[1]
+    assert "/workspaces/selected" in admission.args[1]
+    assert "/workspaces/anchor" not in admission.args[1]
     encoded = re.search(
         r"request=json.loads\(base64.b64decode\('([^']+)'\)\)",
-        second.kwargs["input_bytes"].decode(),
+        preparation.kwargs["input_bytes"].decode(),
     )[1]
     assert json.loads(base64.b64decode(encoded))["repo"] == "/workspaces/selected"
     assert "worktree_id" not in json.loads(base64.b64decode(encoded))
@@ -567,9 +574,10 @@ async def test_relay_is_proven_and_prelude_exported_before_installer(monkeypatch
         manager, "synthetic", "example/project", object(), "/workspaces/project",
         prelude="export SYNTHETIC_CONTEXT=ready;", relay_port=12001,
     )
-    probe, policy, install = manager.exec_command.await_args_list
+    probe, admission, install = manager.exec_command.await_args_list
     assert "ping" in probe.args[1] and "pong" in probe.args[1]
-    assert "agent-policy check" in policy.args[1]
+    assert "agent-policy check" in admission.args[1]
+    assert "/workspaces/project" in admission.args[1]
     assert install.kwargs["input_bytes"].startswith(b"export SYNTHETIC_CONTEXT=ready;")
 
 
