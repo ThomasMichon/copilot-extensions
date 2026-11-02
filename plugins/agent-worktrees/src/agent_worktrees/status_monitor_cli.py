@@ -133,11 +133,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     if passive_mode and not preparation.register(status_monitor_runtime._aw_runtime_home(), getattr(args, "control_port", None)):
         return 0
 
-    # Stage D (agent-cli-lazy-dispatch): these six are owned by
-    # status_updater_cli/status_monitor_runtime (both already cluster-free);
-    # resolving them via `_core_helper` -- direct sibling import, falling back
-    # to a monkeypatched `__main__` override if one is present -- instead of
-    # `core.attr`, is what lets `status-monitor` stay cluster-free too.
+    # Resolve sibling helpers directly while preserving test entrypoint overrides.
     lock = _core_helper("_monitor_lock_path", status_monitor_runtime._monitor_lock_path)()
     my_prefix = os.path.realpath(sys.prefix)
     my_slot = os.path.dirname(my_prefix) if os.path.basename(my_prefix) == ".venv" else my_prefix
