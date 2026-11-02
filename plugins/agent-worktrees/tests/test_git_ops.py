@@ -429,11 +429,12 @@ class TestPushTimeoutTreeKill:
         outer_script = tmp_path / "outer.py"
         outer_script.write_text(
             f"import subprocess, sys, time\n"
-            f"p = subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
+            f"p = subprocess.Popen([sys.executable, '-I', '-S', '-B', {str(grandchild_script)!r}])\n"
             f"open({str(ready)!r}, 'w').write(str(p.pid))\n"
             f"time.sleep(60)\n"
         )
-        cmd = [sys.executable, str(outer_script)]
+        python = getattr(sys, "_base_executable", None) or sys.executable
+        cmd = [python, "-I", "-S", "-B", str(outer_script)]
 
         original_spawn = agent_procutil.spawn_sync_in_kill_on_close_job
 

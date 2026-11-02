@@ -1,5 +1,6 @@
 """Fresh URL authority and exact, batched transport configuration."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,19 +18,18 @@ def test_cold_target_import_does_not_load_native_process_helpers():
     from agent_procutil import no_window_kwargs
 
     script = """
-import sys
+import sys, json, faulthandler
 assert "agent_procutil" not in sys.modules and "ctypes" not in sys.modules
 class RefuseNative:
     def find_spec(self, fullname, path=None, target=None):
         if fullname in ("agent_procutil", "ctypes"):
             raise AssertionError("target import loaded native process helpers")
 sys.meta_path.insert(0, RefuseNative())
-sys.path.insert(0, sys.argv[1])
+sys.path[:0] = json.loads(sys.argv[1])
 print("before-policy-import", flush=True)
+faulthandler.dump_traceback_later(10)
 from agent_worktrees import git_ops
 print("git-policy-imported", flush=True)
-import faulthandler
-faulthandler.dump_traceback_later(10)
 from agent_worktrees import pr_publish, publication_deadline
 faulthandler.cancel_dump_traceback_later()
 print("target-policy-imported", flush=True)
@@ -37,8 +37,10 @@ assert callable(git_ops.git) and callable(pr_publish.head_branch_gone)
 assert publication_deadline.validate(30) == 30
 """
     try:
+        python = getattr(sys, "_base_executable", None) or sys.executable
+        roots = [str(Path(__file__).resolve().parents[1] / "src"), *sys.path]
         result = subprocess.run(
-            [sys.executable, "-c", script, str(Path(__file__).resolve().parents[1] / "src")],
+            [python, "-I", "-S", "-B", "-c", script, json.dumps(roots)],
             capture_output=True, text=True, timeout=20, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
