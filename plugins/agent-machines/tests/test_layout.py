@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from agent_machines import __main__ as cli
+from agent_machines import cli_fleet_update
 from agent_machines.layout import (
     inspect_layouts,
     inspect_repo_layout,
@@ -311,7 +313,11 @@ def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
 
 
 @pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
-def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path):
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+@pytest.mark.parametrize("explicit_path", [False, True])
+def test_resolve_cwd_repo_matches_registered_linked_worktree(
+    tmp_path, monkeypatch, entrypoint, explicit_path
+):
     anchor = tmp_path / "anchor"
     _git("init", "-q", str(anchor))
     _git("-C", str(anchor), "config", "user.email", "test@example.com")
@@ -346,6 +352,24 @@ def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path):
     assert name == "canonical"
     assert path == worktree.resolve()
     assert anchor_path == anchor.resolve()
+
+    for root, platform_name in ((anchor, "linux"), (worktree, "windows")):
+        (root / "machines.yaml").write_text(
+            f"machines:\n  fixture:\n    execution_platform: {platform_name}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(entrypoint._discover, "read_registry", lambda: registry)
+    monkeypatch.setattr(entrypoint._discover, "read_projects", lambda: projects)
+    monkeypatch.chdir(worktree)
+
+    identity = entrypoint._resolve_machine_identity(
+        argparse.Namespace(
+            repo=str(worktree) if explicit_path else None, machine="fixture"
+        )
+    )
+
+    assert identity.execution_platform == "linux"
+    assert identity.topology_path == anchor / "machines.yaml"
 
 
 @pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
