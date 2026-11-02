@@ -855,8 +855,9 @@ def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
 
 
 @pytest.mark.parametrize("ready", [True, False])
+@pytest.mark.parametrize("grant_error", [False, True])
 def test_interrupted_marked_committed_witness_is_never_rolled_back(
-    driver, tmp_path, monkeypatch, ready,
+    driver, tmp_path, monkeypatch, ready, grant_error,
 ):
     from zdd import breadcrumb
     from agent_worktrees import runtime_monitor_recovery
@@ -866,15 +867,21 @@ def test_interrupted_marked_committed_witness_is_never_rolled_back(
     calls = []
     def recover(*args):
         calls.append(True)
+        if grant_error:
+            raise RuntimeError("retirement grant changed")
         return "committed"
 
     monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", recover)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *args: ready)
+    monkeypatch.setattr(driver.time, "sleep", lambda delay: pytest.fail("committed recovery must not retry under installer guards"))
     summary = {"action": "interrupted"}
     assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
     assert calls == [True]
     assert summary["result"]["committed"] is True
-    assert summary["result"]["ok"] is ready
+    assert summary["result"]["ok"] is (ready and not grant_error)
+    if grant_error:
+        assert "retirement grant changed" in summary["result"]["error"]
+        assert breadcrumb.read_breadcrumb(tmp_path) is record
 
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):

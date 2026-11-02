@@ -403,7 +403,7 @@ def _settle_monitor(
 
                 try:
                     recovered = recover_owned_publication(root, record, predecessor, handles)
-                except (OSError, ValueError, ConnectionError) as error:
+                except (OSError, ValueError, RuntimeError, ConnectionError) as error:
                     recovered = False
                     result["error"] = f"Committed monitor recovery unavailable: {error}"
                 result.update(committed=True, publication_uncertain=False, ok=recovered == "committed")
@@ -430,7 +430,7 @@ def _settle_monitor(
                             return False
                         if recovered:
                             continue
-                    except (OSError, ValueError, ConnectionError) as error:
+                    except (OSError, ValueError, RuntimeError, ConnectionError) as error:
                         announce(f"Owned monitor recovery unavailable: {error}")
                 time.sleep(1)
                 continue
@@ -455,7 +455,7 @@ def _settle_monitor(
             if record is not None:
                 try:
                     recover_owned_publication(root, record, predecessor, handles)
-                except (OSError, ValueError, ConnectionError) as error:
+                except (OSError, ValueError, RuntimeError, ConnectionError) as error:
                     announce(f"Owned monitor recovery unavailable: {error}")
         if not live_handles:
             # A vanished failed/restarted child is an observed failure, not
