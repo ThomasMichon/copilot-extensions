@@ -232,3 +232,12 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   unavailable checkout without relaxing caller-identity failure handling.
   The combined removal/outage regression and interruption binding assertions
   passed in the focused packet: 37 cases, one native FIFO capability skip.
+- Addressed the next overview's map-store indirection and unregistered-source
+  mutation warnings. The actual Windows junction control proves neither reads
+  nor publication can enter another store. Related-index mutations still work
+  in unregistered checkouts while refreshing prepared callers; new implicit
+  caller registration uncertainty is advisory, not an after-write failure.
+  This packet passed 40 cases with one native FIFO capability skip.
+- Applied the same unavailable-versus-empty distinction to unreadable declared
+  guarded checkouts. The focused unreadable-target and unregistered-write
+  controls passed three cases; no incomplete observation became an empty view.

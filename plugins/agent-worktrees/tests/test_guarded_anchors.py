@@ -359,6 +359,32 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
 
+def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, monkeypatch):
+    from agent_worktrees import repos
+
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    original_root = repos.registered_entry_root
+    original_local = repos.RepoEntry.local_path
+    monkeypatch.setattr(repos.RepoEntry, "local_path", lambda entry: (
+        str(p.target) if entry.name == "target" else original_local(entry)
+    ))
+
+    def unavailable(entry):
+        if entry.name == "target":
+            raise repos.RepositoryResolutionError("synthetic unreadable checkout") from PermissionError()
+        return original_root(entry)
+
+    monkeypatch.setattr(repos, "registered_entry_root", unavailable)
+    with pytest.raises(p.module.GuardPublicationError, match="guarded checkout .* unavailable"):
+        p.module.refresh(registry_root=p.root)
+    assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
+    assert p.reader.read_map(p.callers[1], p.root).status == "ready"
+    monkeypatch.setattr(repos, "registered_entry_root", original_root)
+    assert p.module.refresh(registry_root=p.root)["published"] == 2
+    assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
+
+
 @pytest.mark.parametrize("consumer", ["hook", "withdraw", "refresh"])
 def test_nonregular_map_is_rejected_by_every_reader(producer, monkeypatch, consumer):
     p = producer
@@ -400,6 +426,42 @@ def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(
         p.module.managed_write(lambda: effects.append("source written"))
     assert effects == []
     assert [path.read_bytes() for path in paths] == before
+
+
+def test_indirected_map_store_cannot_read_or_mutate_another_store(producer, monkeypatch):
+    import shutil
+
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    directory = p.root / "guarded-anchors"
+    directory.parent.mkdir(parents=True)
+    foreign = p.root.parent / "foreign" / "guarded-anchors"
+    foreign.mkdir(parents=True)
+    path = foreign / p.reader.map_path(p.callers[0], p.root).name
+    path.write_text(json.dumps(_snapshot(p.reader, p.callers[0], p.root)))
+    before = path.read_bytes()
+    if os.name == "nt":
+        powershell = shutil.which("powershell.exe")
+        if powershell is None:
+            pytest.skip("native junction creator unavailable")
+        completed = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-Command",
+             "New-Item -ItemType Junction -Path $env:GUARD_LINK -Target $env:GUARD_TARGET -ErrorAction Stop | Out-Null"],
+            env={**os.environ, "GUARD_LINK": str(directory), "GUARD_TARGET": str(foreign)},
+            capture_output=True, text=True, timeout=15, creationflags=0x08000000,
+        )
+        assert completed.returncode == 0, completed.stderr
+    else:
+        directory.symlink_to(foreign, target_is_directory=True)
+    assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
+    with pytest.raises(ValueError, match="indirected"):
+        p.module.refresh()
+    effects = []
+    with pytest.raises(ValueError, match="indirected"):
+        p.module.managed_write(lambda: effects.append("source written"))
+    assert effects == []
+    assert path.read_bytes() == before
+    assert list(foreign.iterdir()) == [path]
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native FIFO unavailable")
@@ -595,7 +657,7 @@ def test_managed_write_reports_completed_source_before_publication_failure(produ
     p.module.refresh(p.callers, registry_root=p.root)
     effects = []
 
-    def failed_publication(*args):
+    def failed_publication(*args, **kwargs):
         raise p.module.GuardPublicationError("synthetic publisher failure")
 
     monkeypatch.setattr(p.module, "_refresh_locked", failed_publication)
@@ -629,7 +691,7 @@ def test_managed_related_mutations_publish_after_write(tmp_path, monkeypatch):
     registry = tmp_path / "registry"
     monkeypatch.setattr(registry_paths, "registry_root", lambda *a: registry)
     observed = []
-    monkeypatch.setattr(producer, "_refresh_locked", lambda root, callers: observed.append(
+    monkeypatch.setattr(producer, "_refresh_locked", lambda root, callers, **kwargs: observed.append(
         (related.read_related(caller), callers),
     ))
     related.write_related(caller, related.RelatedConfig(
@@ -655,9 +717,41 @@ def test_plugin_related_mutation_refreshes_views_without_preparing_plugin_checko
     (plugin / "plugin.json").write_text('{"name":"sample"}')
     monkeypatch.setattr(registry_paths, "registry_root", lambda *a: tmp_path / "registry")
     observed = []
-    monkeypatch.setattr(producer, "_refresh_locked", lambda root, callers: observed.append(callers))
+    monkeypatch.setattr(producer, "_refresh_locked", lambda root, callers, **kwargs: observed.append(callers))
     related.write_related(plugin, related.RelatedConfig())
     assert observed == [[]]
+
+
+@pytest.mark.parametrize("unrelated_unavailable", [False, True])
+def test_unregistered_related_write_refreshes_existing_callers_without_requiring_registration(
+    producer, monkeypatch, capsys, unrelated_unavailable,
+):
+    from agent_worktrees import related, repos
+
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    p.module.refresh(p.callers)
+    caller = _repo(p.root.parent / "unregistered")
+    if unrelated_unavailable:
+        p.registry.repos["unrelated"] = repos.RepoEntry(name="unrelated")
+        original_root = repos.registered_entry_root
+        original_local = repos.RepoEntry.local_path
+        monkeypatch.setattr(repos.RepoEntry, "local_path", lambda entry: (
+            str(p.root.parent / "unavailable") if entry.name == "unrelated" else original_local(entry)
+        ))
+
+        def unavailable(entry):
+            if entry.name == "unrelated":
+                raise repos.RepositoryResolutionError("synthetic unrelated unavailable path")
+            return original_root(entry)
+
+        monkeypatch.setattr(repos, "registered_entry_root", unavailable)
+    related.write_related(caller, related.RelatedConfig(primary="target"))
+    assert related.read_related(caller).primary == "target"
+    assert p.reader.read_map(caller, p.root).status == "missing"
+    assert all(p.reader.read_map(path, p.root).status == "ready" for path in p.callers)
+    if unrelated_unavailable:
+        assert "new caller registration unavailable; not prepared" in capsys.readouterr().err
 
 
 def test_explicit_refresh_command_and_strict_argument_rejection(producer, monkeypatch, capsys):

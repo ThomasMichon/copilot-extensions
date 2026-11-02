@@ -15,6 +15,12 @@ MAX_BYTES = 1024 * 1024
 MAX_ROOTS = 4096
 
 
+def validate_directory(path: Path) -> None:
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("non-directory or indirected guard-map store")
+
+
 def _open_map(path: Path):
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
@@ -135,8 +141,7 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
     """Unavailable is distinct from a complete, deliberately empty inventory."""
     try:
         path = map_path(source_root, registry_root)
-        if path.is_symlink() or path.parent.is_symlink():
-            raise ValueError("indirected guard map")
+        validate_directory(path.parent)
         with _open_map(path) as stream:
             raw = stream.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:

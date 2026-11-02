@@ -28,6 +28,10 @@ class CallerNotRegistered(GuardPublicationError):
     """A retained caller was deliberately removed from the selected registry."""
 
 
+class CallerRegistrationUnavailable(GuardPublicationError):
+    """Caller registration cannot be established from current observations."""
+
+
 def _reader():
     source = Path(__file__).resolve().parents[2] / "scripts" / "guarded_anchor_map.py"
     if not source.is_file():
@@ -77,7 +81,7 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         if prior_project is not None and prior_project not in registry.repos:
             raise CallerNotRegistered("caller has no available selected-registry registration")
         if registration_unavailable:
-            raise GuardPublicationError("caller registration identity is unavailable")
+            raise CallerRegistrationUnavailable("caller registration identity is unavailable")
         raise CallerNotRegistered("caller has no available selected-registry registration")
     configuration = cfg.load_config(
         cfg.project_dir(project) / "config.yaml", project=project,
@@ -101,8 +105,10 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
             continue
         try:
             path = repos.registered_entry_root(registered)
-        except repos.RepositoryResolutionError:
-            continue  # Explicitly unavailable local registrations are not local anchors.
+        except repos.RepositoryResolutionError as exc:
+            if not registered.local_path() or isinstance(exc.__cause__, FileNotFoundError):
+                continue
+            raise GuardPublicationError(f"registered guarded checkout {name!r} is unavailable") from exc
         target = reader.repository_identity(path)
         if target is None or target["root"] != reader.canonical(path):
             raise GuardPublicationError(f"registered guarded checkout {name!r} has no Git identity")
@@ -141,6 +147,7 @@ def _view_data(path: Path, reader) -> object:
 
 def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
     reader = reader if reader is not None else _reader()
+    reader.validate_directory(directory)
     for path in directory.glob("*.json") if paths is None else paths:
         try:
             data = _view_data(path, reader)
@@ -156,11 +163,16 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
         }))
 
 
-def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) -> dict:
+def _refresh_locked(
+    root: Path, callers=(), *, include_prepared: bool = True, require_callers: bool = True,
+) -> dict:
     directory = root / "guarded-anchors"
     reader = _reader()
-    explicit = {reader.canonical(caller) for caller in callers}
-    selected = set(explicit)
+    reader.validate_directory(directory)
+    requested = {reader.canonical(caller) for caller in callers}
+    explicit = requested if require_callers else set()
+    selected = set(requested)
+    prepared = set()
     prior_projects = {}
     old_paths = []
     for path in directory.glob("*.json") if include_prepared else ():
@@ -174,6 +186,7 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
                 and reader.map_path(source, root) == path
             ):
                 selected.add(source)
+                prepared.add(source)
                 project = data.get("source_project")
                 if isinstance(project, str) and project:
                     prior_projects[source] = project
@@ -202,6 +215,9 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
     for caller in sorted(selected):
         identity = reader.repository_identity(caller)
         if identity is None or identity["root"] != caller:
+            if caller in requested and caller not in prepared and not require_callers:
+                print(f"[guarded-anchors] new caller identity unavailable; not prepared: {caller}", file=sys.stderr)
+                continue
             if caller not in explicit:
                 try:
                     Path(caller).stat()
@@ -230,6 +246,12 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
                 errors.append(f"{caller}: {exc}")
             else:
                 reader.map_path(caller, root).unlink(missing_ok=True)
+        except CallerRegistrationUnavailable as exc:
+            if caller in requested and caller not in prepared and not require_callers:
+                reader.map_path(caller, root).unlink(missing_ok=True)
+                print(f"[guarded-anchors] new caller registration unavailable; not prepared: {caller}", file=sys.stderr)
+            else:
+                errors.append(f"{caller}: {exc}")
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             errors.append(f"{caller}: {exc}")
     if errors:
@@ -239,12 +261,22 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
     return {"published": published, "generation": generation}
 
 
+def _prepare_directory(root: Path) -> Path:
+    directory = root / "guarded-anchors"
+    reader = _reader()
+    try:
+        reader.validate_directory(directory)
+    except FileNotFoundError:
+        directory.mkdir(parents=True, exist_ok=True)
+        reader.validate_directory(directory)
+    return directory
+
+
 def refresh(
     callers=(), *, registry_root: Path | None = None, include_prepared: bool = True,
 ) -> dict:
     root = registry_root if registry_root is not None else registry_paths.registry_root()
-    directory = root / "guarded-anchors"
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = _prepare_directory(root)
     with registry_lock(root / "repos.yaml"), _RecordLock(
         directory / "publication", timeout=10.0, require_sidecar=True,
     ):
@@ -254,8 +286,7 @@ def refresh(
 def managed_write(write, *, caller: str | Path | None = None):
     """Serialize source mutations with publication, including all prepared views."""
     root = registry_paths.registry_root()
-    directory = root / "guarded-anchors"
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = _prepare_directory(root)
     with registry_lock(root / "repos.yaml"), _RecordLock(
         directory / "publication", timeout=10.0, require_sidecar=True,
     ):
@@ -266,7 +297,7 @@ def managed_write(write, *, caller: str | Path | None = None):
             reader = _reader()
             identity = reader.repository_identity(caller) if caller is not None else None
             callers = [identity["root"]] if identity else []
-            _refresh_locked(root, callers)
+            _refresh_locked(root, callers, require_callers=False)
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             raise GuardPublicationError(
                 f"managed source write completed; guard-map publication incomplete: {exc}"

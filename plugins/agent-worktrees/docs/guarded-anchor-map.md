@@ -25,6 +25,11 @@ and the existing ordered related/knowledge overlays. Unavailable local
 registrations do not become guessed checkout paths.
 Launch/session preparation updates only that caller's view, not every prepared
 worktree. Initial resident preparation and explicit refresh cover prepared views.
+An ordinary related-index mutation does not require registering its checkout.
+It refreshes prepared callers and may prepare a positively registered caller;
+an unregistered implicit caller is not enrolled. Uncertain registration for a
+new implicit caller is advisory, not a source-write failure. Explicit refresh
+and failures of already-prepared views retain their error contracts.
 
 For out-of-band configuration, binding, plugin or filesystem changes, run:
 
@@ -65,9 +70,14 @@ retry scope and report unavailable acquisition. An unreadable identity is not
 proof that registration or the checkout disappeared.
 All map readers reject nonregular or indirected inputs before opening, with a
 nonblocking POSIX open and post-open type check to cover replacement races.
+The map-store directory itself must be a real directory, not a symlink or
+Windows junction; publication cannot follow it into another installation.
 If the shared reader itself is unavailable, a managed source write refuses
 before mutation rather than destroying the caller inventory or reading unsafe
 inputs. Hook consumption with a missing reader still fails open.
+An unreadable declared guarded checkout also makes its caller view unavailable,
+not complete empty. A nonlocal registration or positively absent checkout is
+distinct from an unreadable local path.
 
 ## Reader contract
 
