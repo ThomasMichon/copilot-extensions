@@ -306,18 +306,28 @@ class KomodoIncumbentMaterialization:
         selected = decode(self.encoded)
         observed = self.storage_observation()
         paths = {}
+        local_sources = set()
+        local_directories = set()
+        storage_fields = ("device", "inode", "uid", "gid", "mode")
         for mounts in selected["mounts"].values():
             for mount in mounts:
                 path = (self.docker_socket if mount["Source"] == self.docker_socket_source
                         else Path(mount["Source"]))
                 name = mount["Source"] if mount["Source"] == self.docker_socket_source else str(path)
                 remote = self._storage_entry(path, observed)
-                if remote is None:
+                if remote is None or mount["Type"] == "bind":
+                    if mount["Type"] == "bind":
+                        local_sources.add(path)
                     ordinary_path(path)
                     info = path.stat()
+                    if mount["Type"] == "bind" and stat.S_ISDIR(info.st_mode):
+                        local_directories.add(path)
                     paths[name] = {"device": info.st_dev, "inode": info.st_ino}
-                else:
-                    paths[name] = dict(remote)
+                    if remote is not None and paths[name] != {
+                            key: remote[key] for key in ("device", "inode")}:
+                        raise PlanError("Komodo local bind differs from its original storage")
+                if remote is not None:
+                    paths[name] = {key: remote[key] for key in storage_fields}
         files = {}
         username_path = (self.admin_username.config if type(self.admin_username) is KomodoConfigUsername
                          else self.admin_username)
@@ -327,7 +337,9 @@ class KomodoIncumbentMaterialization:
         }
         for path in (*self.retained_files, username_path, self.admin_password):
             remote = self._storage_entry(path, observed)
-            if remote is not None and path not in (username_path, self.admin_password):
+            if (remote is not None and path not in local_sources
+                    and path not in (username_path, self.admin_password)
+                    and not any(directory in path.parents for directory in local_directories)):
                 files[str(path)] = dict(remote)
                 continue
             ordinary_path(path)
@@ -356,6 +368,8 @@ class KomodoIncumbentMaterialization:
         if remote_keys is None:
             info = self.keys.stat()
             remote_keys = {"device": info.st_dev, "inode": info.st_ino}
+        else:
+            remote_keys = {key: remote_keys[key] for key in storage_fields}
         result = {
             "incumbent": digest({
                 "schema": selected["schema"], "version": selected["version"],

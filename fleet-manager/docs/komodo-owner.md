@@ -257,6 +257,12 @@ have disjoint canonical mountpoints, the keys directory must be one exact
 volume root, and the producer must explicitly select every observed file's
 original UID/GID. Local bind sources, local login/configured-username inputs
 and the physical Docker socket retain their existing filesystem checks.
+Overlapping bind sources are still checked locally on every observation and
+their retained files are locally reread, even when a volume observation also
+covers those paths. The two views must agree on physical identity. Directory
+link counts remain validated observation metadata but do not enter persistent
+material identity: ordinary subdirectory growth must not invalidate adoption.
+Regular-file link counts remain strict.
 
 The callback receives a bounded canonical request containing the complete
 original mounts and volume records, exact file-owner map and private-file set.

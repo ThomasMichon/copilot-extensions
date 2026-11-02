@@ -301,6 +301,65 @@ def test_original_storage_does_not_replace_overlapping_local_login_rereads(incum
         material.evidence()
 
 
+def test_original_storage_directory_growth_preserves_material_identity(incumbent):
+    storage, snapshot, _ = _observed_storage(incumbent)
+    material = replace(incumbent.material, storage=storage)
+    before = material.evidence()
+    for volume in material.volumes():
+        root = Path(volume["Mountpoint"])
+        (root / "ordinary-subdirectory").mkdir()
+        snapshot["entries"][str(root)]["nlink"] += 1
+    assert material.evidence() == before
+    snapshot["entries"][str(material.keys)]["inode"] = (
+        max(item["inode"] for item in snapshot["entries"].values()) + 1)
+    assert material.evidence() != before
+
+
+def test_original_storage_does_not_bypass_overlapping_bind_source_validation(incumbent):
+    storage, _, _ = _observed_storage(incumbent)
+    value = decode(incumbent.material.encoded)
+    value["mounts"]["periphery"].append({
+        "Type": "bind", "Source": str(incumbent.material.keys),
+        "Destination": "/original-bind-view", "RW": False,
+    })
+    material = replace(incumbent.material, storage=storage, encoded=canonical(value))
+    before = material.evidence()
+    value["mounts"]["periphery"].reverse()
+    assert replace(material, encoded=canonical(value)).evidence() == before
+    material.keys.rename(material.keys.with_name("retained-original-keys"))
+    with pytest.raises(FileNotFoundError):
+        material.evidence()
+
+
+def test_original_storage_does_not_replace_overlapping_bind_file_reads(incumbent):
+    original = incumbent.files["periphery_config"]
+    local = incumbent.material.keys / original.name
+    original.rename(local)
+    value = decode(incumbent.material.encoded)
+    value["mounts"]["periphery"][1]["Source"] = str(local)
+    material = replace(
+        incumbent.material, encoded=canonical(value),
+        retained_files=tuple(local if path == original else path for path in incumbent.material.retained_files))
+    storage, _, _ = _observed_storage(SimpleNamespace(material=material, volumes=incumbent.volumes))
+    material = replace(material, storage=storage)
+    before = material.evidence()
+    local.write_bytes(b"changed-local-bind-configuration")
+    assert material.evidence() != before
+
+
+def test_original_storage_rereads_retained_files_under_overlapping_bind_directories(incumbent):
+    storage, _, _ = _observed_storage(incumbent)
+    value = decode(incumbent.material.encoded)
+    value["mounts"]["periphery"].append({
+        "Type": "bind", "Source": str(incumbent.material.keys),
+        "Destination": "/original-bind-view", "RW": False,
+    })
+    material = replace(incumbent.material, storage=storage, encoded=canonical(value))
+    before = material.evidence()
+    (material.keys / "core.key").write_bytes(b"changed-retained-file-under-local-bind")
+    assert material.evidence() != before
+
+
 def _socket_mount(material, source):
     value = decode(material.encoded)
     value["mounts"]["periphery"].append({
