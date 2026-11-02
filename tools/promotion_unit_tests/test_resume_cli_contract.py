@@ -47,8 +47,20 @@ class ResumeBoundary:
         args.func(args)
 
 
+@pytest.fixture(scope="session")
+def source_code():
+    compiled = {}
+
+    def load(path: Path):
+        if path not in compiled:
+            compiled[path] = compile(path.read_bytes(), str(path), "exec")
+        return compiled[path]
+
+    return load
+
+
 @pytest.fixture
-def boundary(monkeypatch: pytest.MonkeyPatch) -> ResumeBoundary:
+def boundary(monkeypatch: pytest.MonkeyPatch, source_code) -> ResumeBoundary:
     def module(name: str, **attributes: Any) -> ModuleType:
         value = ModuleType(name)
         value.__dict__.update(attributes)
@@ -69,7 +81,7 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> ResumeBoundary:
     assert startup_spec and startup_spec.loader
     startup = importlib.util.module_from_spec(startup_spec)
     monkeypatch.setitem(sys.modules, startup_spec.name, startup)
-    startup_spec.loader.exec_module(startup)
+    exec(source_code(ROOT / "libs/agent-procutil/src/agent_procutil/startup.py"), startup.__dict__)
     module(f"{PACKAGE}.diagnostic_logs", register_log_commands=lambda sub: None)
     module(
         f"{PACKAGE}.agent_registry",
@@ -84,7 +96,7 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> ResumeBoundary:
         assert spec and spec.loader
         result = importlib.util.module_from_spec(spec)
         monkeypatch.setitem(sys.modules, name, result)
-        spec.loader.exec_module(result)
+        exec(source_code(root / f"{child}.py"), result.__dict__)
         monkeypatch.setattr(package, child, result, raising=False)
         return result
 

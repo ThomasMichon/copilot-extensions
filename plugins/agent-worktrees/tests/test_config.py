@@ -136,6 +136,7 @@ def test_config_acquisition_report_required_knowledge_unavailable_keeps_base(tmp
         repos={"sample": cfg.RepoConfig(
             anchor=base, worktree_root=str(tmp_path / "trees"), stateless=True,
         )},
+        knowledge_repo="knowledge",
     )
     unresolved = state_root.StateRoot(
         path=None, source="knowledge_repo", repo="knowledge", stateless=True,
@@ -143,9 +144,9 @@ def test_config_acquisition_report_required_knowledge_unavailable_keeps_base(tmp
     )
     monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
     monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: unresolved)
-    legacy = config_sources.config_source_anchors(config, base_anchor=base)
+    legacy = config_sources.config_source_anchors(config, base_anchor=base, family="registry")
     assert [(source.anchor, source.origin) for source in legacy] == [(base, "harness")]
-    report = config_sources.config_source_anchors_report(config, base_anchor=base)
+    report = config_sources.config_source_anchors_report(config, base_anchor=base, family="registry")
     assert report.value == legacy
     assert report.authority is ScanAuthority.INDETERMINATE
     assert any(f.reason == "knowledge-unavailable" for f in report.findings)
@@ -4128,10 +4129,12 @@ def control_plane_acquisition_sources(monkeypatch):
             monkeypatch.setattr(state_root, "config_source_anchors", rebound)
         return project
 
-    def sources(config, *, base_anchor):
+    def sources(config, *, base_anchor, family="configuration"):
         if config is not project:
+            assert family == "registry"
             calls.append("execution-sources")
             return []
+        assert family == "configuration"
         calls.append(("sources", base_anchor))
         assert base_anchor == "control-anchor"
         if state.failure_at == "sources":

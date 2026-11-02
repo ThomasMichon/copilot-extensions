@@ -11,7 +11,7 @@ import stat
 import zipfile
 
 from promotion_unit_contract import (
-    MAX_PACKET_FILE_BYTES, MAX_UNIT_EVIDENCE_FILE_BYTES, admit_manifest, decode_json, manifest_digest,
+    MAX_PACKET_FILE_BYTES, MAX_UNIT_EVIDENCE_FILE_BYTES, admit_manifest, bounded_bytes, decode_json, manifest_digest,
 )
 
 SCHEMA = "copilot-extensions.candidate-qualification"
@@ -80,7 +80,7 @@ def regular_bytes(root: Path, name: str, *, max_bytes: int = MAX_PACKET_FILE_BYT
     if path.stat().st_size > max_bytes:
         raise UnitQualificationError(f"unit input exceeds its byte bound: {name}")
     with path.open("rb") as stream:
-        raw = stream.read(max_bytes + 1)
+        raw = bounded_bytes(stream, max_bytes)
     if len(raw) > max_bytes:
         raise UnitQualificationError(f"unit input exceeds its byte bound: {name}")
     return raw

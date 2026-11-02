@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
@@ -20,6 +21,19 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset()
 
 class UnitEvidenceError(ValueError):
     """The declared unit packet or its observed evidence is incomplete."""
+
+
+def bounded_bytes(stream: BinaryIO, maximum: int) -> bytes:
+    """Retain the overflow sentinel without allocating the whole limit per read."""
+    chunks: list[bytes] = []
+    remaining = maximum + 1
+    while remaining:
+        chunk = stream.read(min(64 * 1024, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
 
 
 def decode_json(text: str | bytes) -> object:

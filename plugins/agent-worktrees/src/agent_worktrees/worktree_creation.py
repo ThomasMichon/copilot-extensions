@@ -926,6 +926,8 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if build_launch_plan and permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
+        from .copilot_plugin_profile import prepare_checkout
+        prepare_checkout(worktree_path, config=config)
         composition_ready = _complete_created_pair(
             config, record, timestamp=timestamp, suffix=suffix, no_pair=no_pair,
         )

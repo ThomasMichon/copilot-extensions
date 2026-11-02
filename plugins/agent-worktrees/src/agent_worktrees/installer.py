@@ -1679,8 +1679,12 @@ def register_project(
     elif existing_wsl and isinstance(existing_wsl, dict):
         # Preserve previously recorded WSL state
         entry["wsl"] = existing_wsl
+    from . import copilot_plugin_profile as tool
+    if tool.REGISTRY_KEY in existing:
+        entry[tool.REGISTRY_KEY] = existing[tool.REGISTRY_KEY]
 
     registry["projects"][project] = entry
 
     write_projects_registry(registry)
+    tool.reconcile_project(project, repo_dir, registry)
     output.ok(f"Project '{project}' registered in projects.yaml")

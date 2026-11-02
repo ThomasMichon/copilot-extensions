@@ -2982,6 +2982,29 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+Packet input readers use bounded chunks while retaining the original byte cap
+and overflow sentinel; a tiny file must not allocate the full evidence limit.
+The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
+once per test session, then execute that code in fresh per-case module globals.
+They do not share module state, results, provider observations or qualification
+receipts between tests. Source fingerprints, per-call production coverage,
+effect checks and the whole-packet deadline remain independently enforced.
+The workflow validator uses PyYAML's C-backed base loader when available and
+otherwise the Python base loader. Both preserve scalar strings, including
+`on`, booleans, numbers and dates; neither enables object construction.
+
+The eight tool-profile units in `test_related_acquisition.py` use the existing
+synthetic acquisition fixture and actual Worktrees repository builder, parser
+and native merge. They cover absent/base/exact/null selection, malformed shapes
+and exclusion from ordinary portable preferences. Only unrelated acquisition
+and PR-deadline owners are substituted. Their existing closed source/import
+cohort and production coverage targets are positively admitted; no Git, child,
+workspace mutation, tool staging or native launch is represented by these units.
+Those effectful counterparts remain in the bounded Worktrees development packet.
+The retained lifecycle deadline and guardian-pair units substitute their native
+Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
+byte-reader logic. Native ownership and file-sharing custody are not unit evidence.
+
 `tools/promotion_unit_tests/test_komodo_repair_authorization.py` exercises the
 repair phase controller with synthetic verified-identity records and the real
 common admission owner. It counts one producer and six current resolutions per

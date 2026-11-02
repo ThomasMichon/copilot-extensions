@@ -32,6 +32,8 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
         ref = tracking.parse_claim_ref(
             tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
         )
+        if ref is None:
+            raise ExecutionSpaceError("Folder trust requires a valid local claim identity")
         if resolve_legacy_wsl_owner_ref(ref, config) is None:
             raise ExecutionSpaceError("Folder trust requires a local execution-space record")
     return permissions.ensure_trusted_folder(record.worktree_path)
@@ -42,9 +44,9 @@ def prepare_for_launch(
 ) -> None:
     """Establish trust before guidance without coupling it to cache deferral."""
     ensure_record_trusted(record, config)
-    if not defer_projections:
-        from . import local_cache_refresh
+    from . import local_cache_refresh
 
-        local_cache_refresh.prepare_for_launch(
-            record.worktree_path, compose_pair=True, config=config,
-        )
+    local_cache_refresh.prepare_admitted_launch(
+        record.worktree_path, compose_pair=True, config=config,
+        defer_projections=defer_projections,
+    )
