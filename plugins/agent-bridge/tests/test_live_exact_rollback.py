@@ -22,13 +22,14 @@ def prior_owners(monkeypatch):
     assert packet["source_commit"] == "de0495f9eaa1e3d1b888c5c2ea24ce543cd117d4"
     modules = {}
     for source in packet["sources"]:
-        body = source["body"]
+        fixture = Path(__file__).parent / "fixtures" / source["fixture_path"]
+        body = fixture.read_text()
         assert hashlib.sha256(body.encode()).hexdigest() == source["sha256"]
         name = Path(source["source_path"]).stem
         module = types.ModuleType(f"agent_bridge._schema38_{name}")
         module.__package__ = "agent_bridge"
         monkeypatch.setitem(sys.modules, module.__name__, module)
-        exec(compile(body, source["source_path"], "exec"), module.__dict__)
+        exec(compile(body, str(fixture), "exec"), module.__dict__)
         modules[name] = module
     modules["db_schema"].SCHEMA_VERSION = 38
     return modules
