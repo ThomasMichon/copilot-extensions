@@ -1,5 +1,15 @@
 # Testing copilot-extensions
 
+Dispatch's actor-free `test_dispatch_runtime_resolution.py` promotion packet
+checks flat/nested physical slot selection, unchanged fallback tiers, BOM
+markers, nested precedence and redirected-environment refusal. The separate
+on-demand `agent-dispatch --test-file tests/test_procutil.py -k
+"resolve_runtime_python or resolve_own_runtime_python or
+sibling_launch_executes_selected_physical_environment"` packet includes fresh
+real venvs and two actual sibling module invocations per layout, retaining data
+and selectors. It does not qualify whole installation, resident lifetime,
+desktop visibility, graceful cutover or rollout.
+
 The manual `Installation context full` workflow's `komodo-recovery` portfolio
 runs one bounded Linux job at the exact dispatch SHA. It exercises the existing
 native subprocess protocol fixture, real physical-owner locks, immutable

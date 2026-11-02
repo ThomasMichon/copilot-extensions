@@ -135,21 +135,31 @@ _SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
 
 
 def _slot_python(root: Path, version: str) -> Path | None:
-    """The interpreter inside ``<root>/versions/<version>``, or ``None``."""
+    """Resolve a physical nested application or legacy flat runtime slot."""
     if not version:
         return None
     vdir = root / "versions" / version
-    for sub in _SLOT_PYTHON_SUBPATHS:
-        p = vdir / sub
-        if p.is_file():
-            return p
+    for directory in (vdir, vdir / ".venv"):
+        try:
+            info = directory.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return None
+        if directory.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+            return None
+    for prefix in (vdir / ".venv", vdir):
+        for sub in _SLOT_PYTHON_SUBPATHS:
+            p = prefix / sub
+            if p.is_file():
+                return p
     return None
 
 
 def _read_marker(root: Path, name: str) -> str | None:
     """Read a plain-text marker file (``current-version`` / ``last-known-good``)."""
     try:
-        return (root / name).read_text(encoding="utf-8").strip() or None
+        return (root / name).read_text(encoding="utf-8-sig").strip() or None
     except (OSError, ValueError):
         # ValueError covers UnicodeDecodeError -- a torn/binary-corrupt marker
         # write must fail safe (no marker) exactly like a missing file.
@@ -189,6 +199,8 @@ def resolve_runtime_python(root: Path) -> Path | None:
     2. ``last-known-good`` when the marker is missing/unresolvable;
     3. the newest **complete** installed slot, then any newest slot.
 
+    Each slot accepts a physical ``.venv`` application environment before the
+    legacy flat interpreter layout; selection tiers are unchanged.
     Never resolves through a ``venv``/``.venv`` link (a reparse point Windows'
     RedirectionGuard blocks) and **never** falls back to a PATH python -- returns
     ``None`` when no runtime is installed so the caller degrades deliberately.
