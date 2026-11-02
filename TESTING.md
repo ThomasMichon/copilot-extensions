@@ -5787,15 +5787,15 @@ just as standalone test preparation does; it does not bypass policy or build
 from a mutable source fallback.
 
 The independent `libs/docker-resource-producer/tests` suite uses only a fake
-Docker process and temporary JSON state, never a live daemon. Required PR guards
-select it when that library, its selector, promotion tool/tests, or the CI workflow changes, and run it
-on the declared minimum Python 3.10 with bounded per-test and step timeouts.
-The same selection runs the canonical package's focused promotion-compatibility
-regression on guard Python, before minimum-runtime setup.
-Minimum-runtime dependency provisioning uses the canonical seasoned UV adapter.
+Docker process and temporary JSON state, never a live daemon. Current required
+PR CI admits only the source-bound unit packet and does not run this independent
+suite. A green PR gate is not evidence that these fixtures ran. Run the suite
+explicitly under the existing test containment, including Linux on the declared
+minimum Python 3.10 for POSIX-only cases; record unavailable platform coverage.
+Isolated dependency provisioning uses the canonical seasoned UV adapter.
 The library also declares the native seven-day UV cutoff for direct consumers.
-Minimum-runtime setup uses its explicit interpreter output without replacing
-the guard job's Python 3.12 environment. This catches fractional-timestamp and
+Use the selected interpreter explicitly without replacing the caller's Python
+environment. This catches fractional-timestamp and
 optional TLS client-identity compatibility; it is not live Docker lifecycle
 acceptance.
 

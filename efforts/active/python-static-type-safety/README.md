@@ -79,6 +79,10 @@ Confirmed operator responses:
   explicitly approved two-step workflow change and job deadline above; no ruleset/CI bypass,
   pause/resume, dependency-policy relaxation, service restart or installed
   rollout is authorized.
+- For #10045's platform verification, the operator explicitly authorized starting
+  the existing local Docker Desktop installation and preparing isolated test
+  tooling. This is bounded test capacity, not installed plugin rollout, product
+  Docker lifecycle acceptance or a new CI lane.
 
 ## Plan
 
@@ -1574,3 +1578,47 @@ composition prerequisites, and review/validation rules.
   host provisioning, service rollout and container mutation are not part of this
   static admission, and none was performed. The worker worktree remains held
   until the library admission is merged.
+
+### 2026-11-02 - Docker review correction and platform evidence reconciliation
+
+- #10076's first review found that the changefile's bare library identifier
+  would be ignored by promotion. It now uses `libs/docker-resource-producer`;
+  the real accumulator computes `0.1.0-dev1` to `0.1.1-dev1`. No version file
+  was manually changed.
+- Actual CI job inspection contradicts the preceding assumed Linux fixture
+  lane: the current guards and required source-bound unit packet passed, but
+  neither runs this independent library suite. The old `TESTING.md` paragraph
+  was stale and is corrected. Green unit CI is not substituted for Linux
+  fixture evidence, and no new required integration gate is introduced.
+- Existing local Linux test capacity was unavailable until the operator
+  explicitly approved Docker Desktop startup and isolated tooling. The
+  hash-locked Dev Containers CLI passed the existing npm seasoning audit.
+  The convenience wrapper is POSIX-only and its runner does not register this
+  library; platform verification instead uses its checked-in hardened profile,
+  a source snapshot, explicit contained execution, network disconnection and
+  exact resource cleanup. Execution results remain pending.
+- Next independent canonical source-only workers are reserved by #10083
+  (Process Telemetry) and #10084 (Single Instance Lease). The lead retains
+  admission metadata, consumer qualification, publication and completion.
+
+### 2026-11-02 - Docker Linux/minimum-runtime fixtures verified
+
+- The complete synthetic Docker suite passes all 160 cases, with zero skips,
+  on actual Linux/Python 3.10.21 in 12.94 seconds, within the unchanged
+  300-second contained-run budget. This exercises all 53 POSIX cases skipped
+  on Windows. The source snapshot is `401bd13af5f991802b51bbf42e00aebee1ab8050`;
+  subsequent documentation changes do not alter its executable inputs.
+- The test used the checked-in isolation profile's immutable image and hardening
+  arguments: non-root execution, a read-only root, dropped capabilities, no
+  privilege escalation, bounded temporary storage and no host or Docker-socket
+  bind. Dependency preparation preceded verified network disconnection; actual
+  tests used the existing contained runner and daemon-test lifecycle.
+- The convenience CLI's setup timed out, so explicit Docker phases applied the
+  same profile. A container-side dependency CDN handshake failed; the host's
+  canonical seasoned UV adapter instead prepared the same hash-locked Linux
+  dependency target for transfer. Neither TLS verification nor dependency
+  seasoning was relaxed. Source, requirement and transferred-artifact hashes
+  and exact container/volume cleanup receipts were retained.
+- This supplies the missing independent Linux evidence, not a new CI lane,
+  live product Docker acceptance or installed runtime rollout. Required CI
+  and a subsequent passing review still gate #10076's corrected head.
