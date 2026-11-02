@@ -115,7 +115,7 @@ refuses that materialization without retiring still-admitted readers. The
 affected selection and its unresolved intent remain explicit; unrelated cached
 selections remain readable. A changed stored owner or revoked read admission
 still supersedes the receiver.
-Each request also captures the provider's in-memory admission epoch. Stale
+Each request also captures its provider and reusable runtime admission epochs. Stale
 requests retire only their own admission, never a receiver activated afterward,
 including reactivation with the same stored owner. Held feeds wait and retry
 transient publication qualification at initial, before-read and after-read

@@ -7,7 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from test_owner_observation_provider import enroll, owner as owner, request, row
+from test_owner_observation_runtime import record, runtime as runtime
 
+from agent_worktrees import owner_observation_contract as contract
 from agent_worktrees import owner_observation_transport as wire
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -26,6 +28,65 @@ def reactivate(owner, replacement):
     finally:
         if successor is not None:
             successor.shutdown()
+
+
+@pytest.mark.parametrize("operation", ["read", "history", "feed"])
+def test_stale_runtime_error_handler_cannot_close_a_new_admission(runtime, monkeypatch, operation):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    native_operations = owner._operations
+    entered, finish = threading.Event(), threading.Event()
+    method = "page" if operation == "history" else "snapshot"
+    original = getattr(owner.history, method)
+
+    def stale(*args, **kwargs):
+        if not entered.is_set():
+            raise contract.ObservationError("old captured admission is superseded", "superseded")
+        return original(*args, **kwargs)
+
+    class Operations:
+        def __enter__(self):
+            return native_operations.__enter__()
+
+        def __exit__(self, kind, error, traceback):
+            result = native_operations.__exit__(kind, error, traceback)
+            if isinstance(error, contract.ObservationError) and not entered.is_set():
+                entered.set()
+                assert finish.wait(5), "stale runtime error fixture was not released"
+            return result
+
+    monkeypatch.setattr(owner, "_operations", Operations())
+    monkeypatch.setattr(owner.history, method, stale)
+    stream = owner.stream(request(), lambda: False) if operation == "feed" else None
+    payload = request()
+    if operation == "history":
+        payload.pop("after_cursor")
+        payload.update(
+            source_generation=initial["source_generation"], before_cursor=None, limit=64,
+        )
+
+    def invoke():
+        if stream is not None:
+            return next(stream)
+        return owner.history_page(payload) if operation == "history" else owner.read(payload)
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(invoke)
+            try:
+                assert entered.wait(2), "old handler did not release its operation lock"
+                owner.activate()
+                assert owner.read(request()) == initial
+            finally:
+                finish.set()
+            stale_result = future.result(timeout=3)
+        assert stale_result["type"] == "error"
+        assert stale_result["error"]["code"] == "superseded"
+        assert owner.read(request()) == initial
+    finally:
+        finish.set()
+        if stream is not None:
+            stream.close()
 
 
 @pytest.mark.parametrize("replacement", [False, True])
