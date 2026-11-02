@@ -8,35 +8,96 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
 import pytest
 
+if TYPE_CHECKING:
+    import installation_context as context
+
+
+class _LockArguments(TypedDict):
+    kind: str
+    marketplace_id: str
+    plugin_id: str
+
+
+class _RecoveryModule(Protocol):
+    InstallationContextError: type[context.InstallationContextError]
+    _DirectoryLock: type[context._DirectoryLock]
+
+    def _lock_openprocess_failure_means_live(self, last_error: int) -> bool: ...
+
+    def _pid_is_live(self, pid: int) -> bool: ...
+
+    def _atomic_write_json(
+        self, path: Path, value: Mapping[str, Any], *,
+        lock: context._DirectoryLock | Sequence[context._DirectoryLock] | None = None,
+    ) -> None: ...
+
+    def _lock_snapshot(
+        self, lock: context._DirectoryLock, *, allow_incomplete: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]: ...
+
+    def _quarantine_stale_lock(
+        self, lock: context._DirectoryLock, expected: Mapping[str, Any], *,
+        inactive_owner_evidence: str = "",
+    ) -> dict[str, Any]: ...
+
+    def inspect_installation_lock(
+        self, path: str | os.PathLike[str], *, kind: str, marketplace_id: str,
+        plugin_id: str | None = None, allow_incomplete: bool = False,
+    ) -> dict[str, Any]: ...
+
+    def repair_installation_lock(
+        self, path: str | os.PathLike[str], *, kind: str, marketplace_id: str,
+        plugin_id: str | None = None, expected_evidence: str, inactive_owner_evidence: str = "",
+    ) -> dict[str, Any]: ...
+
+    def _lock_mutation_guard(
+        self, path: Path, *, deadline: float,
+    ) -> AbstractContextManager[None]: ...
+
+
+if TYPE_CHECKING:
+    _module_contract: _RecoveryModule = context
+
+
 LIB = Path(__file__).resolve().parents[1]
 SCRIPT = LIB / "installation_context.py"
-ARGS = {"kind": "command-binding-publication", "marketplace_id": "legacy",
-        "plugin_id": "agent-example"}
+ARGS: _LockArguments = {"kind": "command-binding-publication", "marketplace_id": "legacy",
+                       "plugin_id": "agent-example"}
 ASSESSMENT = "Test-owned fixture; recorded owner and all test children are settled."
+BASE_EXECUTABLE = cast(str, getattr(sys, "_base_executable"))
+CREATION_FLAGS = cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0
 
 
 @pytest.fixture
-def module(monkeypatch):
+def module(monkeypatch: pytest.MonkeyPatch) -> _RecoveryModule:
     spec = importlib.util.spec_from_file_location("recovery_installation_context", SCRIPT)
+    assert spec is not None and spec.loader is not None
     result = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, result)
     spec.loader.exec_module(result)
-    return result
+    return cast(_RecoveryModule, result)
 
 
 @pytest.mark.parametrize(("error", "live"), [(5, True), (8, True), (1450, True), (87, False)])
-def test_native_open_failure_is_not_implicitly_death(module, error, live):
+def test_native_open_failure_is_not_implicitly_death(
+    module: _RecoveryModule, error: int, live: bool,
+) -> None:
     assert module._lock_openprocess_failure_means_live(error) is live
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows OpenProcess dispatch")
 @pytest.mark.parametrize(("error", "live"), [(8, True), (1450, True), (87, False)])
-def test_windows_pid_probe_classifies_open_failure(module, monkeypatch, error, live):
+def test_windows_pid_probe_classifies_open_failure(
+    module: _RecoveryModule, monkeypatch: pytest.MonkeyPatch, error: int, live: bool,
+) -> None:
     import ctypes
 
     kernel = SimpleNamespace(
@@ -49,30 +110,32 @@ def test_windows_pid_probe_classifies_open_failure(module, monkeypatch, error, l
     assert module._pid_is_live(1234) is live
 
 
-def _orphan(module, path):
+def _orphan(module: _RecoveryModule, path: Path) -> context._DirectoryLock:
     lock = module._DirectoryLock(path, **ARGS)
     lock.acquire()
-    owner = lock._owner()
+    owner = dict(lock._owner())
     owner["pid"] = 2_000_000_000
     owner.pop("processIdentity", None)
     module._atomic_write_json(lock.owner_path, owner)
     return lock
 
 
-def _run(*args):
+def _run(*args: str | Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys._base_executable, str(SCRIPT), *map(str, args)], capture_output=True, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        [BASE_EXECUTABLE, str(SCRIPT), *map(str, args)], capture_output=True, text=True,
+        creationflags=CREATION_FLAGS,
     )
 
 
-def _cli(action, path, *extra):
+def _cli(action: str, path: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     return _run(action, "--lock-path", path, "--kind", ARGS["kind"],
                 "--marketplace-id", ARGS["marketplace_id"], "--plugin-id", ARGS["plugin_id"],
                 *extra)
 
 
-def test_standalone_inspection_and_evidence_bound_repair(module, tmp_path):
+def test_standalone_inspection_and_evidence_bound_repair(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     path = tmp_path / "publication.lock"
     orphan = _orphan(module, path)
     original = orphan.owner_path.read_bytes()
@@ -97,11 +160,13 @@ def test_standalone_inspection_and_evidence_bound_repair(module, tmp_path):
 
 
 @pytest.mark.parametrize("state", ["live", "legacy", "foreign", "unknown"])
-def test_repair_preserves_live_foreign_and_unknown_owners(module, tmp_path, monkeypatch, state):
+def test_repair_preserves_live_foreign_and_unknown_owners(
+    module: _RecoveryModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str,
+) -> None:
     path = tmp_path / "publication.lock"
     lock = module._DirectoryLock(path, **ARGS)
     lock.acquire()
-    owner = lock._owner()
+    owner = dict(lock._owner())
     if state == "legacy":
         owner.pop("processIdentity", None)
     elif state == "foreign":
@@ -120,10 +185,10 @@ def test_repair_preserves_live_foreign_and_unknown_owners(module, tmp_path, monk
     lock.release()
 
 
-def test_changed_receipt_refuses_repair(module, tmp_path):
+def test_changed_receipt_refuses_repair(module: _RecoveryModule, tmp_path: Path) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
     inspection = module.inspect_installation_lock(lock.path, **ARGS)
-    owner = lock._owner()
+    owner = dict(lock._owner())
     owner["token"] = "replacement"
     module._atomic_write_json(lock.owner_path, owner)
     with pytest.raises(module.InstallationContextError, match="changed since inspection"):
@@ -133,9 +198,11 @@ def test_changed_receipt_refuses_repair(module, tmp_path):
     assert lock._owner()["token"] == "replacement"
 
 
-def test_dead_owner_with_corrupt_optional_birth_is_recoverable(module, tmp_path):
+def test_dead_owner_with_corrupt_optional_birth_is_recoverable(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
-    owner = lock._owner()
+    owner = dict(lock._owner())
     owner["processIdentity"] = "incomplete-or-unsupported"
     module._atomic_write_json(lock.owner_path, owner)
     inspected = module.inspect_installation_lock(lock.path, **ARGS)
@@ -149,7 +216,9 @@ def test_dead_owner_with_corrupt_optional_birth_is_recoverable(module, tmp_path)
 
 
 @pytest.mark.parametrize("contents", [None, "{", '{"host":"another-host"}'])
-def test_manual_bypass_requires_evidence_and_cannot_override_foreign_owner(module, tmp_path, contents):
+def test_manual_bypass_requires_evidence_and_cannot_override_foreign_owner(
+    module: _RecoveryModule, tmp_path: Path, contents: str | None,
+) -> None:
     path = tmp_path / "publication.lock"
     path.mkdir()
     if contents is not None:
@@ -177,7 +246,9 @@ def test_manual_bypass_requires_evidence_and_cannot_override_foreign_owner(modul
         assert (backup / "owner.json").read_text() == contents
 
 
-def test_manual_evidence_does_not_override_a_live_owner(module, tmp_path):
+def test_manual_evidence_does_not_override_a_live_owner(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     lock = module._DirectoryLock(tmp_path / "publication.lock", **ARGS)
     lock.acquire()
     try:
@@ -195,10 +266,10 @@ def test_manual_evidence_does_not_override_a_live_owner(module, tmp_path):
 @pytest.mark.parametrize("token", ["", None, 123])
 @pytest.mark.parametrize("state", ["stale", "live", "foreign", "wrong-scope"])
 def test_manual_recovery_of_invalid_token_preserves_owner_guards(
-    module, tmp_path, token, state,
-):
+    module: _RecoveryModule, tmp_path: Path, token: str | int | None, state: str,
+) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
-    owner = lock._owner()
+    owner = dict(lock._owner())
     owner["token"] = token
     if state == "live":
         owner["pid"] = os.getpid()
@@ -229,19 +300,23 @@ def test_manual_recovery_of_invalid_token_preserves_owner_guards(
     assert Path(result["backupPath"], "owner.json").read_bytes() == original
 
 
-def test_changed_directory_identity_refuses_quarantine(module, tmp_path, monkeypatch):
+def test_changed_directory_identity_refuses_quarantine(
+    module: _RecoveryModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
     expected, _owner = module._lock_snapshot(lock)
     snapshot = module._lock_snapshot
     calls = 0
 
-    def replace_before_move(candidate, **kwargs):
+    def replace_before_move(
+        candidate: context._DirectoryLock, *, allow_incomplete: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         nonlocal calls
         calls += 1
         if calls == 2:
             os.rename(lock.path, tmp_path / "original-preserved")
             _orphan(module, lock.path)
-        return snapshot(candidate, **kwargs)
+        return snapshot(candidate, allow_incomplete=allow_incomplete)
 
     monkeypatch.setattr(module, "_lock_snapshot", replace_before_move)
     with pytest.raises(module.InstallationContextError, match="changed before quarantine"):
@@ -251,12 +326,14 @@ def test_changed_directory_identity_refuses_quarantine(module, tmp_path, monkeyp
     assert not list(tmp_path.glob("publication.lock.recovery-*/lock"))
 
 
-def test_receipt_write_failure_after_move_is_not_success(module, tmp_path, monkeypatch):
+def test_receipt_write_failure_after_move_is_not_success(
+    module: _RecoveryModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
     expected, _owner = module._lock_snapshot(lock)
     write_json = module._atomic_write_json
 
-    def fail_completion(path, document):
+    def fail_completion(path: Path, document: Mapping[str, object]) -> None:
         if document.get("state") == "quarantined":
             raise OSError("test-owned interrupted receipt completion")
         write_json(path, document)
@@ -271,30 +348,34 @@ def test_receipt_write_failure_after_move_is_not_success(module, tmp_path, monke
     assert json.loads((backups[0] / "recovery.json").read_text())["state"] == "prepared"
 
 
-def test_quarantine_flushes_both_rename_parents(module, tmp_path, monkeypatch):
+def test_quarantine_flushes_both_rename_parents(
+    module: _RecoveryModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
     expected, _owner = module._lock_snapshot(lock)
-    flushed = []
+    flushed: list[Path] = []
     monkeypatch.setattr(module, "_sync_lock_directory", flushed.append)
     result = module._quarantine_stale_lock(lock, expected)
     assert flushed == [lock.path.parent, Path(result["backupPath"]).parent, lock.path.parent]
 
 
-def test_concurrent_repairs_cannot_quarantine_a_replacement(module, tmp_path):
+def test_concurrent_repairs_cannot_quarantine_a_replacement(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     lock = _orphan(module, tmp_path / "publication.lock")
     inspected = module.inspect_installation_lock(lock.path, **ARGS)
     command = [
-        sys._base_executable, str(SCRIPT), "lock-repair", "--lock-path", str(lock.path),
+        BASE_EXECUTABLE, str(SCRIPT), "lock-repair", "--lock-path", str(lock.path),
         "--kind", ARGS["kind"], "--marketplace-id", ARGS["marketplace_id"],
         "--plugin-id", ARGS["plugin_id"], "--expected-evidence", inspected["expectedEvidence"],
         "--inactive-owner-evidence", ASSESSMENT,
     ]
-    children = []
+    children: list[subprocess.Popen[bytes]] = []
     try:
         for _ in range(2):
             children.append(subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=CREATION_FLAGS,
             ))
         for child in children:
             child.communicate(timeout=20)
@@ -310,7 +391,9 @@ def test_concurrent_repairs_cannot_quarantine_a_replacement(module, tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["missing", "malformed", "extra", "link"])
-def test_incomplete_and_unsafe_locks_are_not_automatically_stolen(module, tmp_path, failure):
+def test_incomplete_and_unsafe_locks_are_not_automatically_stolen(
+    module: _RecoveryModule, tmp_path: Path, failure: str,
+) -> None:
     path = tmp_path / "publication.lock"
     path.mkdir()
     if failure == "malformed":
@@ -329,11 +412,13 @@ def test_incomplete_and_unsafe_locks_are_not_automatically_stolen(module, tmp_pa
     assert path.is_dir()
 
 
-def test_process_identity_detects_pid_reuse_and_prior_boot(module, tmp_path, monkeypatch):
+def test_process_identity_detects_pid_reuse_and_prior_boot(
+    module: _RecoveryModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path = tmp_path / "publication.lock"
     lock = module._DirectoryLock(path, **ARGS)
     lock.acquire()
-    owner = lock._owner()
+    owner = dict(lock._owner())
     owner["processIdentity"] = "windows:1"
     module._atomic_write_json(lock.owner_path, owner)
     monkeypatch.setattr(module, "_pid_is_live", lambda _pid: True)
@@ -352,7 +437,9 @@ def test_process_identity_detects_pid_reuse_and_prior_boot(module, tmp_path, mon
     replacement.release()
 
 
-def test_real_child_death_releases_guard_and_recovers_owner(module, tmp_path):
+def test_real_child_death_releases_guard_and_recovers_owner(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     path = tmp_path / "publication.lock"
     ready = tmp_path / "ready"
     child_code = (
@@ -362,8 +449,8 @@ def test_real_child_death_releases_guard_and_recovers_owner(module, tmp_path):
         f"Path({str(ready)!r}).write_text('ready'); time.sleep(60)"
     )
     child = subprocess.Popen(
-        [sys._base_executable, "-c", child_code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        [BASE_EXECUTABLE, "-c", child_code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=CREATION_FLAGS,
     )
     try:
         deadline = time.monotonic() + 20
@@ -395,7 +482,9 @@ def test_real_child_death_releases_guard_and_recovers_owner(module, tmp_path):
         child.communicate(timeout=10)
 
 
-def test_kernel_releases_mutation_guard_after_child_death(module, tmp_path):
+def test_kernel_releases_mutation_guard_after_child_death(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     path = tmp_path / "publication.lock"
     ready = tmp_path / "guard-ready"
     code = (
@@ -405,8 +494,8 @@ def test_kernel_releases_mutation_guard_after_child_death(module, tmp_path):
         f" Path({str(ready)!r}).write_text('ready')\n time.sleep(60)\n"
     )
     child = subprocess.Popen(
-        [sys._base_executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        [BASE_EXECUTABLE, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=CREATION_FLAGS,
     )
     try:
         deadline = time.monotonic() + 20
@@ -429,7 +518,9 @@ def test_kernel_releases_mutation_guard_after_child_death(module, tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows surviving-child regression")
-def test_dead_admitting_parent_does_not_admit_overlapping_installer(module, tmp_path):
+def test_dead_admitting_parent_does_not_admit_overlapping_installer(
+    module: _RecoveryModule, tmp_path: Path,
+) -> None:
     path = tmp_path / "publication.lock"
     ready, heartbeat, stop = (tmp_path / name for name in ("ready", "heartbeat", "stop"))
     child_code = (
@@ -447,8 +538,8 @@ def test_dead_admitting_parent_does_not_admit_overlapping_installer(module, tmp_
         f"Path({str(ready)!r}).write_text(json.dumps({{'child':child.pid}}))\ntime.sleep(60)\n"
     )
     parent = subprocess.Popen(
-        [sys._base_executable, "-c", parent_code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        [BASE_EXECUTABLE, "-c", parent_code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=CREATION_FLAGS,
     )
     child_pid = None
     try:

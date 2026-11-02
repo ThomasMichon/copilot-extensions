@@ -7,7 +7,8 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Current test cohorts:** #9998, #9999 and #10001 (integrated lock-recovery, digest-cache and snapshot-provenance test slice); #10003 (installation-mode governance) and #10004 (runtime-profile policy) are preparing independent follow-on cohorts.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -28,9 +29,9 @@ definition of success.
 
 ## Coordination
 
-- **Topology:** Independent per-slice PRs, never a shared staging branch.
+- **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** None allocated yet. A future assignment names the issue, exact files, validation commands and stop condition; it does not claim an entire wave.
+- **Delegates:** #10003 owns only `test_installation_mode_governance.py`; #10004 owns only `test_runtime_profile_policy.py`, each in an independent source worktree. Their first milestone is diagnosis and a bounded plan, not publication. #9998 and #9999 returned isolated commits for lead integration and validation. The lead retains the effort, shared checker controls and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -932,3 +933,84 @@ composition prerequisites, and review/validation rules.
 - The final consumer audit also narrows the slot-release receipt-drift
   parameter to its two declared keys; its four runtime cases pass and the
   complete platform probes report no new literal-key diagnostics.
+
+### 2026-11-02 - Shared fixtures merged; slot-release contracts selected
+
+- #9995 merged as `c7f8fba2e041e1fe7a036e85a05616100d2ab229`
+  after exact-head approval with no findings, zero open review comments and
+  all required checks in
+  [run 41459443498](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41459443498).
+  The source worktree is pulled forward; #9993 is complete.
+- #9996 selects the remaining slot-release helper and monkeypatch contracts.
+  Preserve the existing receipt-only reservation lifecycle, refusal/race
+  assertions and real runner boundaries. Run full platform probes and all
+  slot-release cases. The campaign remains active; library admission and
+  independent copies are still open.
+
+- Slot-release layouts, arguments, runners, test parameters and monkeypatch
+  callbacks now retain concrete contracts. Invalid-input mutation cases still
+  accept their deliberate string/integer alternatives; dynamic SDK results
+  are cast only at the forwarding boundary. No lifecycle assertion changes.
+- Full probes report zero slot-release and production diagnostics on both
+  declared targets. Remaining project test debt is Linux 157 basic / 352
+  strict and Windows 147 basic / 343 strict: 16 strict diagnostics removed
+  per target. The parent project remains pending.
+- Validation: all 77 checker and slot-release tests pass, including actual
+  MyPy positive/negative helper clients and real Python/PowerShell release,
+  refusal, replay and race cases. Changed-file Ruff, all 26 enforced MyPy
+  targets, documentation consistency, install contracts, source-copy sync,
+  vendoring and whitespace checks pass.
+- Documentation impact: below-altitude test-only typing; developer commands,
+  runtime behavior and operating documentation remain accurate. Fresh-box
+  and external-venue tests are not applicable. The ownership-map-required
+  `agent-machines` patch changefile is included; the governed unit packet,
+  source-copy bytes, CI budgets and 13-strict / 55-pending admission counts
+  remain unchanged.
+
+### 2026-11-02 - Slot-release contracts merged; independent test cohorts selected
+
+- #9997 merged as `ad6c8bde24477d481eb46d18fa7d73e87210cfef`
+  after exact-head approval with no findings, zero open review comments and
+  all required checks in
+  [run 41462080479](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41462080479).
+  The source worktree is pulled forward; #9996 is complete.
+- The lead selected #10001 for the remaining snapshot-provenance test
+  parameters, native callbacks and result narrowing. #9998 and #9999 own
+  disjoint lock-recovery and digest-cache hardening test cohorts in isolated
+  worktrees. Each delegate first returns a bounded diagnosis/plan; shared
+  helpers, checker controls and this canonical effort remain lead-owned.
+  No worker may claim full library admission or close #9807.
+- All unresolved Plan and Validation Plan items remain active. The last
+  measured project debt is Linux 157 basic / 352 strict and Windows
+  147 basic / 343 strict, with zero production and slot-release diagnostics.
+
+### 2026-11-02 - Three test cohorts integrated; next independent cohorts selected
+
+- #9998 and #9999 supplied isolated lock-recovery and digest-cache test
+  contracts; the lead integrated them with #10001's snapshot-provenance
+  fixture, native callback and result contracts. The bounded slice changes
+  no production implementation, assertions, skips, timeouts or project level.
+- Whole-project probes report zero diagnostics in all three changed modules
+  and production on both targets. Remaining test debt is Linux 127 basic /
+  250 strict and Windows 114 basic / 238 strict. All 26 already-enforced
+  platform checks, changed-file Ruff, install contracts, documentation
+  consistency, source-copy synchronization and vendoring checks pass.
+- The delegates' complete modules pass independently (42 lock-recovery
+  cases; 34 digest-cache cases with three existing POSIX-only skips).
+  Combined validation of all three complete modules and checker regressions
+  passes 393 tests, with 54 existing platform/opt-in skips, in 1,194.56 seconds.
+  Windows-native Python/PowerShell producer, completion, policy and race
+  contracts ran; POSIX-only and opt-in exhaustive adapters retain their
+  existing skips. Native producer tests require a short temporary basename
+  on Windows; a long invocation path exposed the native path limit, while
+  the complete run passes using `--basetemp .test-venvs/s`. This broader
+  manual check adds no tests or duration to the governed unit packet.
+- #10003 and #10004 select installation-mode governance and runtime-profile
+  policy test contracts in separate worktrees. Both diagnosis/plan milestones
+  passed; isolated implementation and module validation are authorized.
+  Publication and shared helpers remain lead-owned.
+- Documentation impact: below-altitude test-contract preparation; developer
+  commands and operational behavior remain accurate. Fresh-box and remote
+  venue tests do not apply to unchanged production/provisioning code.
+  The governed unit packet, CI budgets and 13-strict / 55-pending admission
+  counts remain unchanged. The campaign and #9807 remain active.
