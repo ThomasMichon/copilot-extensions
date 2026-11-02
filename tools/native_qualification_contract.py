@@ -27,6 +27,7 @@ STREAM_BYTES = 1024 * 1024
 OWNER_STDOUT_BYTES = 4 * STREAM_BYTES + 65536
 DESCENDANT_PHASE = "descendants-settled-v2"
 WORK_SCHEMA = "native-qualification.work-completed"
+PROCESS_MODE = "process-safety-only"
 
 
 class QualificationError(RuntimeError):
@@ -45,6 +46,23 @@ def decode_object(data: bytes) -> dict[str, Any]:
     value = json.loads(data.decode("utf-8"), object_pairs_hook=unique)
     if not isinstance(value, dict):
         raise QualificationError("Qualification evidence must be an object.")
+    return value
+
+
+def decode_terminal(output: bytes, scope: int, mode: str) -> dict[str, Any]:
+    prefix, separator, data = output.partition(b"\n")
+    if mode not in {"functional-only", PROCESS_MODE}:
+        raise QualificationError("Unknown native qualification mode.")
+    expected = "PROCESS SAFETY START" if mode == PROCESS_MODE else "FUNCTIONAL START"
+    if not separator or not prefix.startswith(f"{expected}: scope {scope};".encode("ascii")):
+        raise QualificationError("Receiver raw stdout lacks its exact native terminal.")
+    value = decode_object(data)
+    if mode == PROCESS_MODE and (
+        value.get("qualification") != PROCESS_MODE
+        or value.get("process_safety_positive") is not True
+        or value.get("desktop_observed") is not False or "functional_positive" in value
+    ):
+        raise QualificationError("Process evidence cannot borrow functional or desktop qualification.")
     return value
 
 
@@ -171,6 +189,7 @@ class Qualification:
     receiver: dict[str, Any] | None = None
     work_receipt_sha256: str | None = None
     admitted: bool = False
+    mode: str = "functional-only"
 
     @property
     def work_receipt(self) -> Path:
@@ -184,6 +203,7 @@ class Qualification:
             or re.fullmatch(r"[a-f0-9]{64}", self.manifest_sha256) is None
             or not self.runtime_root.is_absolute() or self.runtime_root.resolve() != self.runtime_root
             or sandbox.resolve() != self.runtime_root
+            or self.mode not in {"functional-only", PROCESS_MODE}
         ):
             raise QualificationError("Qualification requires an exact original scope, source and runtime root.")
         if (
@@ -290,15 +310,15 @@ class Qualification:
             if len(raw) != stream["bytes"] or hashlib.sha256(raw).hexdigest() != stream["sha256"]:
                 raise QualificationError("Receiver raw capture digest or byte count changed.")
             raw_streams[name] = raw
-        prefix, separator, terminal_data = raw_streams["stdout"].partition(b"\n")
-        if not separator or not prefix.startswith(f"FUNCTIONAL START: scope {self.scope};".encode("ascii")):
-            raise QualificationError("Receiver raw stdout lacks its exact native terminal.")
-        terminal = decode_object(terminal_data)
+        terminal = decode_terminal(raw_streams["stdout"], self.scope, self.mode)
         if (
             terminal != value.get("terminal") or terminal.get("evidence_phase") != DESCENDANT_PHASE
             or terminal.get("original_job_drained") is not False
             or terminal.get("original_owner_settlement_required") is not True
-            or terminal.get("functional_positive") is not True
+            or (self.mode == "functional-only" and terminal.get("functional_positive") is not True)
+            or (self.mode == PROCESS_MODE and (
+                value.get("qualification") != PROCESS_MODE or value.get("desktop_observed") is not False
+            ))
             or type(terminal.get("execution_scope")) is not int or terminal["execution_scope"] != self.scope
             or type(terminal.get("monotonic_start")) not in (int, float)
             or terminal["monotonic_start"] != self.boundary.start

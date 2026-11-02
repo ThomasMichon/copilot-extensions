@@ -590,6 +590,47 @@ worker command protocol and preserves the desktop dispatch override.
 Targeted unit invocations use the canonical packet's explicit
 repository root and importlib import mode, preserving one helper/error identity.
 
+The explicit outside entrypoint is `tools/native_process_qualification.py`.
+It requires `--execute-accepted-scope`, a four-field receiver request, an
+already-created empty ordinary `--runtime-root` and the original monotonic/UTC
+arguments. It invokes the existing containment owner exactly once, with its
+unchanged limits and fresh 8 GiB available-memory admission. It never uses a
+temporary-directory context to delete retained evidence.
+`tools/native-process-qualification.ps1` forwards the 19 accepted arguments to
+`tools/native_process_stage.py` through setup-provided PATH Python. This stage
+inherits containment; it never creates another harness Job or calls the owner.
+It launches the existing process-only fixture, waits for its actual exit,
+checks all four worker cleanup results and independently verifies all 44
+literal JUnit identities before publishing work-completion evidence.
+The process-only request carries its original monotonic origin, so source
+verification and adapter startup cannot restart the 150-second worker cutoff.
+No optional origin field is admitted by the old functional or desktop modes.
+
+This adapter uses a distinct version-1
+`native-qualification.process-preparation` manifest at
+`tools/prepared-manifest.json` in an ordinary source-tree snapshot. Its exact
+fields are `schema`, `version`, `files`, `nonce` and `case_packets`.
+Each `files` row has `name`, `bytes` and `sha256`; names are canonical
+source-root-relative paths, not launcher-relative basenames. The complete
+adapter/owner, procutil package and SDK fixture closure must be included.
+The prepared nonce and four literal case packets are data bound by the accepted
+manifest hash. They neither grant execution permission nor replace explicit
+outside-owner scope acceptance. Flat historical functional manifests and their
+evidence remain unchanged; an old preparation is not silently upgraded.
+The prepared tree contains exactly those files plus its manifest, no bytecode
+cache or indirect entries. Runtime evidence stays outside that immutable tree.
+
+The new terminal starts with `PROCESS SAFETY START` and explicitly reports
+`process-safety-only`, never `functional_positive`. Its complete artifact
+index covers the candidate request, report, JUnit and captured raw streams.
+Only the existing receiver's actual exit and the outside owner's final
+Job/handle/lifecycle/environment checks can produce an
+`original-owner-settled-v1` result. Candidate failure, changed source, expired
+original clock or uncertain cleanup retains files and stays nonpositive.
+Actor-free wiring controls live in `test_native_process_driver.py` and
+`test_native_process_stage.py` under `tools/promotion_unit_tests/`; these are
+source qualification, not permission to arm or execute the native fixture.
+
 `tools/native_qualification_receiver.py` supplies an explicitly selected,
 source-managed result receiver when the command transport cannot witness final
 native exit and post-capture timing. It adds one process inside the existing
