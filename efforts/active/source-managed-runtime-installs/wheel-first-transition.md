@@ -213,8 +213,8 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 ### W0 — Reviewed upstream intent first
 - [x] Capture the operator request and distinguish requested scope from recommendations.
 - [x] Review and merge the effort/vision/performance proposal upstream before implementation. #9623 lands the current intent checkpoint; W1–W4 implementation and qualification remain open.
-- [x] Release the bounded Manager/Worktrees app slice (#9990/#10024); the contributor matrix names the remaining independently releasable scopes. #9623 lands the current intent checkpoint; W1–W4 implementation and qualification remain open.
-- [ ] Qualify locally, then submit one final implementation PR for the complete flow.
+- [x] Release the bounded Manager/Worktrees app slice (#9990/#10024); the contributor matrix names the remaining independently releasable scopes. W1–W4 whole-flow qualification remains open.
+- [ ] Qualify each bounded app/integration slice locally, then submit it through required review/CI; retain complete-flow qualification without requiring one final implementation PR.
 
 ### W1 — Complete local promotion and Manager fast path
 - [ ] Reuse canonical official Main version seeding before source/wheel locking;
@@ -256,8 +256,10 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 
 The phases and owner reuse above are implementation decomposition
 _(agent-recommended)_. The operator explicitly requested whole-system proof,
-local promotion inputs, proposal review before implementation, one final code
-PR, scoped recovery and preservation. The exact automatic/manual truth table is
+local promotion inputs, proposal review before implementation, scoped recovery
+and preservation. The later core-service refinement supersedes the earlier
+single-final-PR sequencing, not whole-flow acceptance.
+The exact automatic/manual truth table is
 operator-required, not a generic maintenance-active veto.
 If an unavoidable external credential/model/role is required, identify the
 blocked service and scope; do not claim the portfolio passed.

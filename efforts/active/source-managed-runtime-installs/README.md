@@ -1327,9 +1327,11 @@ operator-requested I/O-only refusal boundary.
 
 ## Proposal
 
-The [wheel-first extension](wheel-first-transition.md) is proposed for initial
-upstream review and merge before implementation. That checkpoint is not
-application acceptance. One final code PR follows local qualification.
+The [wheel-first extension](wheel-first-transition.md) cleared its initial
+upstream intent review before implementation. That checkpoint is not
+application acceptance. Qualified app/integration slices now clear review
+independently under the [core-service refinement](wheel-first-contributors.md#request-capture);
+whole-flow qualification remains required regardless of PR count.
 Implementation remains scoped by its W0–W4 gates,
 native ownership and the explicit container-before-host requirement.
 
