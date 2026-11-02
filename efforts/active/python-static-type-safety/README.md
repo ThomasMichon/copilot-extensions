@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -112,7 +112,7 @@ rewrite.
 
 - [x] Strictly admit all Config Migrate source/test files with a declared YAML/stub environment (#9924).
 - [x] Strictly admit all canonical Dropin Registry source/test files; keep copies independently pending (#9930).
-- [ ] Strictly admit all canonical Endpoint Rendezvous source/test files, preserving native ownership fixtures (#9933).
+- [x] Strictly admit all canonical Endpoint Rendezvous source/test files, preserving native ownership fixtures (#9933).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -522,3 +522,33 @@ composition prerequisites, and review/validation rules.
   Rendezvous candidate on the repaired base, obtain a genuine fresh review,
   merge only after required checks, then continue #9941's four remaining
   leaf-library helper/test files. #9807 remains active.
+
+### 2026-11-02 - Endpoint Rendezvous merged; leaf-library tests selected
+
+- #9940 merged as `fc9fd32bfe9ce823f37d69b894e8bc90118f96c8`
+  after exact-head Copilot approval with no findings, no unresolved threads
+  and all required checks in
+  [run 41422127217](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41422127217).
+  Normal review was restored; no bounded exception was used for this slice.
+- The source worktree is pulled forward after a backup and exact stable
+  patch equivalence proved all local commits were present in the merged
+  squash. Seven projects are strict and 61 remain pending.
+- #9941 selects the four remaining test/helper files of Remote Login Shell,
+  Session Liveness Probe and Worktree Identity. Their existing source and
+  `-remaining` project names remain stable. The measured strict deltas were
+  six, ten and eight diagnostics respectively.
+- The candidate annotates test parameters/returns and wire-reader callables,
+  retains invalid-value fixtures through `object` boundaries, and narrows
+  optional probe reasons before existing substring assertions. Production
+  code, test parameter matrices and runtime behavior are unchanged.
+  The full campaign and later leaf-library admissions remain open.
+- All 20 admitted analysis targets, 134 focused library/checker tests and
+  Ruff F/E9 pass. Only the two changed test-source digests in the release
+  unit manifest are refreshed; its selected nodes, decision targets and
+  packet budget remain unchanged. The Session Liveness Probe tests are
+  outside that packet's admitted source set.
+- This proposes ten strict projects and 58 pending projects. Hosted
+  source/packet CI and normal review remain required before admission lands.
+  The changefile covers all three libraries and their eight unique consumers.
+  No installer/bootstrap or runtime source changed, so a provisioning clean
+  room and external runtime rollout are not applicable.
