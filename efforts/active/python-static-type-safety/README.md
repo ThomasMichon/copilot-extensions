@@ -814,3 +814,7 @@ composition prerequisites, and review/validation rules.
   admitted-source hashes and MCP source-only producer hashes are refreshed.
   Unit nodes, coverage targets, 300-second budget and footprint revision 36
   stay unchanged.
+- Initial hosted units pass, but the module-size guard rejects the added
+  standalone declaration at 1,001 lines. Move that same annotation onto its
+  first assignment, retaining the 1,000-line bound without widening the
+  baseline, deleting unrelated content or changing the contract.
