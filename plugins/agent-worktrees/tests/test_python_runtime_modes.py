@@ -322,6 +322,331 @@ def test_repair_refuses_changed_governance_before_acquiring_cutover(modes, tmp_p
         )
 
 
+@pytest.mark.parametrize("blocked_by", ["pending", "serving"])
+@pytest.mark.parametrize("selected", ["dev", "current"])
+def test_dev_rebuild_refuses_live_code_before_claim_or_construction(
+    modes, tmp_path, monkeypatch, blocked_by, selected,
+):
+    from contextlib import nullcontext
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    lifecycle = modes.lifecycle
+    root, plugin = tmp_path / "runtime", tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    claim = lifecycle.runtime.claim_dev(root, "original-owner", previous_version="numbered")
+    (root / "versions" / "dev").mkdir(parents=True, exist_ok=True)
+    lifecycle.runtime.mark_complete(root, "dev", payload_hash="dev-content")
+    if selected == "current":
+        (root / "versions" / selected).mkdir()
+        lifecycle.runtime.mark_complete(root, selected, payload_hash="numbered-content")
+    lifecycle.runtime.activate(root, selected, link_free=True)
+    released = []
+    monkeypatch.setattr(lifecycle, "_load_installed", lambda _slot: None)
+    monkeypatch.setattr(
+        lifecycle, "Governance",
+        lambda *_args: SimpleNamespace(
+            root=root, payload=plugin, signature=lambda: {},
+            held=lambda **_kwargs: nullcontext(),
+        ),
+    )
+    monkeypatch.setattr(
+        cutover, "_acquire_cutover_lock",
+        lambda *_args, **_kwargs: SimpleNamespace(release=lambda: released.append(True)),
+    )
+    monkeypatch.setattr(
+        retirements, "pending_slot",
+        lambda requested, slot: blocked_by == "pending" and requested == root and slot == "dev",
+    )
+    monkeypatch.setattr(lifecycle, "_monitor_identity", lambda requested: (101, "1001"))
+    monkeypatch.setattr(
+        retirements.locks, "read_lock",
+        lambda *_args: {
+            "pid": 101, "start_time": "1001", "prefix": str(root / "versions" / "dev"),
+        },
+    )
+    monkeypatch.setattr(retirements.locks, "lock_is_live", lambda _record: True)
+    monkeypatch.setattr(retirements.locks, "process_start_time", lambda _pid: "1001")
+    monkeypatch.setattr(
+        lifecycle.runtime, "claim_dev",
+        lambda *_args, **_kwargs: pytest.fail("Live dev code was claimed before retirement"),
+    )
+    monkeypatch.setattr(
+        lifecycle.engine, "dev_candidate",
+        lambda *_args, **_kwargs: pytest.fail("Retiring dev runtime was reconstructed"),
+    )
+    message = "previous dev resident is still retiring" if blocked_by == "pending" else "must retire before reconstruction"
+    with pytest.raises(lifecycle.InstallationRefused, match=message):
+        modes.run_owned(
+            root, plugin, payload=plugin, uv=tmp_path / "uv",
+            base_python=Path(sys.executable), mode="dev", owner=tmp_path / "new-owner",
+            expected_governance={},
+        )
+    assert lifecycle.runtime.read_dev_claim(root) == claim
+    assert released == [True]
+
+
+@pytest.mark.parametrize("blocked_by", ["claim", "slot"])
+def test_duplicate_dev_release_refuses_while_original_claim_is_retiring(
+    modes, tmp_path, monkeypatch, blocked_by,
+):
+    from contextlib import ExitStack, nullcontext
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from single_instance_lease import SingleInstance
+
+    root = tmp_path / "runtime"
+    owner = tmp_path / "owner"
+    claim = modes.lifecycle.runtime.claim_dev(root, str(owner), previous_version="original")
+    monkeypatch.setattr(
+        retirements, "pending_claim",
+        lambda requested, original: blocked_by == "claim" and requested == root and original == claim,
+    )
+    def pending_slot(requested, slot, *, include_cancelled=True):
+        assert requested == root and slot == "dev" and not include_cancelled
+        return blocked_by == "slot"
+
+    monkeypatch.setattr(retirements, "pending_slot", pending_slot)
+    governance = SimpleNamespace(held=lambda **kwargs: nullcontext())
+    with ExitStack() as custody:
+        guard = custody.enter_context(
+            SingleInstance(root / "status-monitor-routing", lock_name="cutover.lock"),
+        )
+        with pytest.raises(modes.lifecycle.InstallationRefused, match="pending resident retirement"):
+            modes._release(
+                root, tmp_path, governance, custody, guard, tmp_path,
+                owner=owner, wait_timeout=0.1, child_timeout=0.1,
+            )
+    assert modes.lifecycle.runtime.read_dev_claim(root) == claim
+
+
+@pytest.fixture
+def retired_mode_runtime(modes, tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
+    from zdd import process_exit
+
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    helper = (
+        Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    )
+    spec = importlib.util.spec_from_file_location("mode_retirement_runtime", helper)
+    runtime = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runtime)
+    spec.loader.exec_module(runtime)
+    monkeypatch.setattr(modes.lifecycle, "runtime", runtime)
+    monkeypatch.setattr(retirements, "_runtime", lambda: runtime)
+    root, plugin, owner = tmp_path / "runtime", tmp_path / "plugin", tmp_path / "owner"
+    for version in ("original", "dev"):
+        (root / "versions" / version).mkdir(parents=True)
+    runtime.mark_complete(root, "original", payload_hash="original")
+    runtime.activate(root, "original", link_free=True)
+    claim = runtime.claim_dev(root, str(owner), previous_version="original")
+    runtime.mark_complete(root, "dev", payload_hash="dev")
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    governance = SimpleNamespace(
+        root=root, payload=plugin, signature=lambda: {},
+        held=lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(modes.lifecycle, "Governance", lambda *_args: governance)
+    monkeypatch.setattr(modes.lifecycle, "_load_installed", lambda _slot: None)
+    monkeypatch.setattr(modes.lifecycle, "_monitor_identity", lambda _root: None)
+    monkeypatch.setitem(sys.modules, "agent_worktrees._build_info", SimpleNamespace(
+        BUILD_INFO=dict(version="1.0.0", source=str(plugin), commit=None, branch=None,
+                        deployment_source="{}"),
+    ))
+    observation = {"exited": False}
+
+    def native_exit(pid, start):
+        assert (pid, start) == (101, "1001")
+        if observation["exited"] is None:
+            raise PermissionError("native identity unavailable")
+        return observation["exited"]
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", native_exit)
+    predecessor = dict(pid=101, start="1001", slot="dev", release_claim=claim)
+
+    def reserve(state, exited):
+        # Publish references through the actual SDK while the original is live.
+        retirements.reserve(root, predecessor, runtime=runtime, committed=state == "retiring")
+        if state == "cancelled":
+            retirements.cancel(root, predecessor, runtime=runtime)
+        observation["exited"] = exited
+        assert retirements.pending_slot(root, "dev")
+
+    def release():
+        from contextlib import ExitStack
+
+        with ExitStack() as custody:
+            guard = cutover._acquire_cutover_lock(root / "status-monitor-routing", timeout_s=0.1)
+            custody.callback(guard.release)
+            return modes._release(
+                root, plugin, governance, custody, guard, tmp_path,
+                owner=owner, wait_timeout=0.1, child_timeout=0.1,
+            )
+
+    return SimpleNamespace(
+        root=root, plugin=plugin, owner=owner, runtime=runtime, claim=claim,
+        reserve=reserve, release=release, retirements=retirements,
+    )
+
+
+@pytest.mark.parametrize(("state", "exited"), [
+    ("cancelled", True), ("retiring", True), ("prepared", True),
+    ("cancelled", False), ("retiring", False),
+    ("cancelled", None), ("retiring", None),
+])
+def test_dev_rebuild_reconciles_only_settled_native_retirements(
+    modes, retired_mode_runtime, tmp_path, monkeypatch, state, exited,
+):
+    fixture = retired_mode_runtime
+    fixture.reserve(state, exited)
+    constructed = []
+
+    @contextmanager
+    def candidate(root, *, owner, **_kwargs):
+        assert root == fixture.root and owner == str(fixture.owner)
+        assert not fixture.retirements.pending_slot(root, "dev")
+        assert not fixture.runtime._leases.read_runtime_references(root)
+        assert fixture.runtime.read_dev_claim(root)["previous_version"] == "original"
+        constructed.append(True)
+        yield SimpleNamespace(payload_hash="new-dev", reused=False)
+
+    def settle(root, version, **kwargs):
+        assert version == "dev" and kwargs["force_monitor_transition"] is True
+        assert kwargs["previous"] == "original"
+        assert kwargs["cutover_guard"].held
+        return {"runtime_version": version}
+
+    monkeypatch.setattr(modes.lifecycle.engine, "dev_candidate", candidate)
+    monkeypatch.setattr(modes.lifecycle, "settle_candidate", settle)
+    arguments = dict(
+        payload=fixture.plugin, uv=tmp_path / "uv", base_python=Path(sys.executable),
+        mode="dev", owner=fixture.owner, expected_governance={}, wait_timeout=0.1,
+    )
+    if exited is True and state != "prepared":
+        result = modes.run_owned(fixture.root, fixture.plugin, **arguments)
+        assert result["runtime_version"] == "dev"
+        assert constructed == [True]
+    else:
+        message = (
+            "native identity" if exited is None else "previous dev resident is still retiring"
+        )
+        with pytest.raises(RuntimeError, match=message):
+            modes.run_owned(fixture.root, fixture.plugin, **arguments)
+        assert not constructed
+        assert fixture.retirements.pending_slot(fixture.root, "dev")
+        assert fixture.runtime.read_dev_claim(fixture.root) == fixture.claim
+        assert fixture.runtime._leases.read_runtime_references(fixture.root)
+
+
+@pytest.mark.parametrize("state", ["cancelled", "retiring", "prepared"])
+def test_dev_release_reconciles_exited_resident_before_retry(
+    modes, retired_mode_runtime, monkeypatch, state,
+):
+    fixture = retired_mode_runtime
+    fixture.reserve(state, True)
+    settlements = []
+    monkeypatch.setattr(
+        modes.lifecycle.engine, "run_owned",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout='"1.0.0"'),
+    )
+
+    def settle(root, version, **kwargs):
+        assert version == "original"
+        assert kwargs["release_dev_claim"] == fixture.claim
+        assert kwargs["cutover_guard"].held
+        assert not fixture.retirements.pending_slot(root, "dev")
+        settlements.append(True)
+        fixture.runtime.activate(root, version, link_free=True)
+        return {"runtime_version": version}
+
+    monkeypatch.setattr(modes.lifecycle, "settle_candidate", settle)
+    if state == "prepared":
+        # Preserve the existing exact precommit cancellation retry protocol.
+        fixture.runtime.activate(fixture.root, "dev", link_free=True)
+    assert fixture.release() == {
+        "runtime_version": "original", "reused": True,
+        **({"dev_claim_release_pending": False} if state == "retiring" else {}),
+    }
+    assert settlements == ([] if state == "retiring" else [True])
+    assert fixture.runtime.read_dev_claim(fixture.root, strict=True) is None
+    assert not fixture.retirements.pending_slot(fixture.root, "dev")
+    assert not fixture.runtime._leases.read_runtime_references(fixture.root)
+    assert (fixture.root / "versions" / "dev").is_dir()
+
+
+@pytest.mark.parametrize("exited", [False, None])
+def test_dev_release_preserves_live_or_unknown_retirement(
+    retired_mode_runtime, exited,
+):
+    fixture = retired_mode_runtime
+    fixture.reserve("retiring", exited)
+    message = "native identity" if exited is None else "pending resident retirement"
+    with pytest.raises(RuntimeError, match=message):
+        fixture.release()
+    assert fixture.runtime.read_dev_claim(fixture.root) == fixture.claim
+    assert fixture.retirements.pending_claim(fixture.root, fixture.claim)
+    assert fixture.runtime._leases.read_runtime_references(fixture.root)
+
+
+@pytest.mark.parametrize("same_owner", [False, True])
+def test_dev_release_reconciliation_preserves_changed_claim(
+    retired_mode_runtime, same_owner,
+):
+    fixture = retired_mode_runtime
+    fixture.reserve("retiring", True)
+    changed = fixture.runtime.claim_dev(
+        fixture.root, str(fixture.owner) if same_owner else "another-owner",
+        host="changed-host", previous_version="original", force=not same_owner,
+    )
+    message = "Dev claim changed" if same_owner else "dev slot is already claimed"
+    with pytest.raises(RuntimeError, match=message):
+        fixture.release()
+    assert fixture.runtime.read_dev_claim(fixture.root) == changed
+    assert fixture.retirements.pending_claim(fixture.root, fixture.claim)
+    assert fixture.runtime._leases.read_runtime_references(fixture.root)
+
+
+def test_dev_release_keeps_exited_uncommitted_intent_after_selector_changed(
+    retired_mode_runtime,
+):
+    fixture = retired_mode_runtime
+    fixture.reserve("prepared", True)
+    with pytest.raises(RuntimeError, match="pending resident retirement"):
+        fixture.release()
+    assert fixture.runtime.read_dev_claim(fixture.root) == fixture.claim
+    assert fixture.retirements._records(fixture.root)[0][1]["state"] == "prepared"
+    assert fixture.runtime._leases.read_runtime_references(fixture.root)
+
+
+def test_dev_release_rereads_claim_after_reconciliation(retired_mode_runtime, monkeypatch):
+    fixture = retired_mode_runtime
+    fixture.reserve("cancelled", True)
+    reconcile = fixture.retirements.reconcile
+    changed = []
+
+    def reconcile_and_reclaim(root, **kwargs):
+        result = reconcile(root, **kwargs)
+        changed.append(fixture.runtime.claim_dev(
+            root, str(fixture.owner), host="new-claim-host",
+        ))
+        return result
+
+    monkeypatch.setattr(fixture.retirements, "reconcile", reconcile_and_reclaim)
+    with pytest.raises(RuntimeError, match="Dev claim changed before its settled release"):
+        fixture.release()
+    assert fixture.runtime.read_dev_claim(fixture.root) == changed[0]
+    assert not fixture.retirements.pending_slot(fixture.root, "dev")
+
+
 def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_path, monkeypatch):
     lifecycle = modes.lifecycle
     root, plugin = tmp_path / "runtime", tmp_path / "plugin"
@@ -395,11 +720,18 @@ def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_pat
 
 
 @pytest.mark.parametrize("settlement_failure", [False, True])
+@pytest.mark.parametrize("retirement_pending,retiring_dev,already_released", [
+    (False, False, False), (True, False, False), (True, True, False),
+    (False, True, True),
+])
 def test_dev_release_keeps_original_claim_until_restoration_settles(
     modes,
     tmp_path,
     monkeypatch,
     settlement_failure,
+    retirement_pending,
+    retiring_dev,
+    already_released,
 ):
     from agent_worktrees import status_monitor_cutover as cutover
 
@@ -446,6 +778,7 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         assert events == ["enter-governance"]
         assert kwargs["governance"].active
         assert lifecycle.runtime.read_dev_claim(root)["previous_version"] == "original"
+        assert kwargs["release_dev_claim"] == lifecycle.runtime.read_dev_claim(root)
         for retained in ("original", "dev"):
             with pytest.raises(lifecycle.runtime.RetentionTimeout):
                 with lifecycle.runtime._kernel_lease(
@@ -459,7 +792,12 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         if settlement_failure:
             raise RuntimeError("unsettled cutover")
         lifecycle.runtime.activate(root, version, link_free=True)
-        return {"runtime_version": version}
+        if already_released:
+            lifecycle.runtime.release_dev(root, str(owner))
+        return {
+            "runtime_version": version, "retirement_pending": retirement_pending,
+            "dev_claim_release_pending": retirement_pending and retiring_dev,
+        }
 
     monkeypatch.setattr(lifecycle, "Governance", Governance)
     monkeypatch.setattr(lifecycle, "_load_installed", lambda _slot: None)
@@ -485,8 +823,13 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         assert lifecycle.runtime.read_dev_claim(root)["owner"] == str(owner)
         assert lifecycle.runtime.current_version(root) == "dev"
     else:
-        assert modes.run_owned(root, plugin, **arguments)["reused"] is True
-        assert lifecycle.runtime.read_dev_claim(root) is None
+        result = modes.run_owned(root, plugin, **arguments)
+        assert result["reused"] is True
+        if retirement_pending and retiring_dev:
+            assert result["dev_claim_release_pending"] is True
+            assert lifecycle.runtime.read_dev_claim(root)["owner"] == str(owner)
+        else:
+            assert lifecycle.runtime.read_dev_claim(root) is None
         assert lifecycle.runtime.current_version(root) == "original"
     assert events[-2:] == ["release-cutover", "leave-governance"]
 

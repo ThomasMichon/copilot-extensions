@@ -536,7 +536,7 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
     original = owner.agendas._fence
     injected = [False]
 
-    def fence(conn=None, expected=None):
+    def fence(conn=None, expected=None, *, read=False):
         if conn is not None and not conn.in_transaction and not injected[0]:
             injected[0] = True
             with sqlite3.connect(owner.store.db_path) as db:
@@ -554,7 +554,7 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
                     )
             if lost_authority == "election":
                 elected[0] = False
-        return original(conn, expected)
+        return original(conn, expected, read=read)
 
     monkeypatch.setattr(owner.agendas, "_fence", fence)
     if operation == "reconcile":
@@ -567,7 +567,10 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
             if operation == "publish"
             else owner.agendas.read(request(), refresh=operation != "pending-read")
         )
-        assert result["ok"] is False and result["error"]["code"] == "superseded"
+        if lost_authority == "database" and operation in {"read", "pending-read"}:
+            assert result["ok"] is True and result["observation"]["revision"] == 1
+        else:
+            assert result["ok"] is False and result["error"]["code"] == "superseded"
     assert injected[0]
     assert owner.agendas._rows == rows
     assert owner.agendas._sequence == sequence
@@ -694,6 +697,122 @@ def test_cache_fault_does_not_break_roster(owned):
     owner.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
     assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
     assert owner.agendas.read(request())["error"]["code"] == "unavailable"
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_cached_handoff_read_retains_corrupt_project_error(owned, monkeypatch, refresh):
+    owner, _head, elected, _path = owned
+    assert owner.agendas.publish(publication(owner))["ok"] is True
+    with sqlite3.connect(owner.store.db_path) as conn:
+        conn.execute("UPDATE worktrees_agenda_cache SET payload=?", ('{"bad":true}',))
+    owner.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
+    failed = owner.agendas.read(request(), refresh=refresh)
+    assert failed["error"]["code"] == "unavailable"
+    rows = copy.deepcopy(owner.agendas._rows)
+    sequence = owner.agendas._sequence
+    pending = {("project", "full-worktree-id")}
+    owner.agendas._pending.update(pending)
+    monkeypatch.setattr(owner, "_admitted", lambda: True)
+    elected[0] = False
+    monkeypatch.setattr(
+        owner, "register_project_demand", lambda *a, **kw: pytest.fail("cached read renewed demand")
+    )
+    monkeypatch.setattr(
+        owner.agendas, "_refresh_pending", lambda: pytest.fail("cached read refreshed records")
+    )
+    successor = WorktreesRuntime(owner.store.db_path)
+    successor.activate()
+    try:
+        assert owner.agendas.read(request(), refresh=refresh) == failed
+        assert owner.agendas.read(request(project="unpublished"))["error"]["code"] == "unready"
+        assert owner.agendas._rows == rows
+        assert owner.agendas._sequence == sequence
+        assert owner.agendas._pending == pending
+    finally:
+        successor.shutdown()
+
+
+@pytest.mark.parametrize("prior_error", [None, "existing producer failure"])
+def test_roster_handoff_fence_preserves_previous_cached_status(owned, monkeypatch, prior_error):
+    owner, _head, elected, _path = owned
+    owner.agendas.publish(publication(owner))
+    monkeypatch.setattr(owner, "_admitted", lambda: True)
+    if prior_error:
+        owner.agendas._project_errors["project"] = prior_error
+    expected = owner.agendas.read(request())
+    rows = copy.deepcopy(owner.agendas._rows)
+    errors = copy.deepcopy(owner.agendas._project_errors)
+    sequence = owner.agendas._sequence
+    reconcile = owner.agendas.reconcile
+    def lose_election(project):
+        elected[0] = False
+        return reconcile(project)
+
+    monkeypatch.setattr(owner.agendas, "reconcile", lose_election)
+    owner.agendas.roster_changed("project")
+    assert owner.agendas.read(request()) == expected
+    assert owner.agendas._rows == rows and owner.agendas._project_errors == errors
+    assert owner.agendas._sequence == sequence
+
+
+def test_cached_handoff_reads_and_held_feed_keep_admitted_read_fence(owned, monkeypatch):
+    owner, _head, elected, _path = owned
+    admitted = [True]
+    monkeypatch.setattr(owner, "_admitted", lambda: admitted[0])
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.001)
+    accepted = owner.agendas.publish(publication(owner))
+    stream = owner.agendas.stream(request(), lambda: False)
+    try:
+        assert next(stream) == {"type": "snapshot", **accepted}
+        elected[0] = False
+        monkeypatch.setattr(
+            owner.agendas, "_refresh_pending", lambda: pytest.fail("cached read refreshed records")
+        )
+        heartbeat = {
+            "type": "heartbeat",
+            "generation": accepted["generation"],
+            "sequence": accepted["sequence"],
+        }
+        assert next(stream) == heartbeat
+        assert next(stream) == heartbeat
+        assert owner.agendas.feed.active_count() == 1
+        assert owner.agendas.read(request()) == accepted
+        assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
+        assert owner.agendas.publish(publication(owner, observation(2)))["error"]["code"] == "superseded"
+        admitted[0] = False
+        assert next(stream) == {**heartbeat, "type": "going-away", "reason": "superseded"}
+        with pytest.raises(StopIteration):
+            next(stream)
+        assert owner.agendas.read(request())["error"]["code"] == "superseded"
+        assert owner.handle({"contract_version": 1, "project": "project"})["error"]["code"] == "superseded"
+        assert owner.agendas.feed.active_count() == 0
+    finally:
+        stream.close()
+
+
+def test_read_crossing_writer_flip_retries_cached_and_restores_pending(owned, monkeypatch):
+    owner, _head, elected, _path = owned
+    expected = owner.agendas.publish(publication(owner))
+    monkeypatch.setattr(owner, "_admitted", lambda: True)
+    pending = {("project", "full-worktree-id")}
+    owner.agendas._pending.update(pending)
+    sequence = owner.agendas._sequence
+    fresh = owner.agendas._fresh_fence
+    successor = WorktreesRuntime(owner.store.db_path)
+    def flip(expected, *, read=False):
+        if not read:
+            elected[0] = False
+            successor.activate()
+        return fresh(expected, read=read)
+
+    monkeypatch.setattr(owner.agendas, "_fresh_fence", flip)
+    try:
+        assert owner.agendas.read(request()) == expected
+        assert owner.agendas._pending == pending
+        assert owner.agendas._sequence == sequence
+        assert owner.agendas.publish(publication(owner, observation(2)))["error"]["code"] == "superseded"
+    finally:
+        successor.shutdown()
 
 
 @contextmanager
@@ -1345,17 +1464,19 @@ def test_sqlite_failure_preserves_previous_commit_and_reports_fault(owned):
     assert owner.agendas.read(request()) == accepted
 
 
-def test_generation_fence_refuses_old_read_and_write_without_election_guess(owned):
+def test_writer_replacement_preserves_admitted_cache_but_fences_old_writes(owned):
     owner, *_rest = owned
-    owner.agendas.publish(publication(owner))
+    accepted = owner.agendas.publish(publication(owner))
     successor = WorktreesRuntime(owner.store.db_path)
     successor.activate()
     try:
-        assert owner.agendas.read(request())["error"]["code"] == "superseded"
+        assert owner.agendas.read(request()) == accepted
         assert (
             owner.agendas.publish(publication(owner, observation(2)))["error"]["code"]
             == "superseded"
         )
+        owner.close_admission("superseded")
+        assert owner.agendas.read(request())["error"]["code"] == "superseded"
     finally:
         successor.shutdown()
 

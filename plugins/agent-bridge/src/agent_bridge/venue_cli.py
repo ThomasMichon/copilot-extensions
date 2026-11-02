@@ -383,9 +383,16 @@ def _cmd_deploy(
     if passive_reap.get("reaped"):
         prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
+    successor_published = False
+
     def refuse_serving(active: dict | None) -> str | None:
+        if successor_published and isinstance(active, dict) and (
+            type(active.get("generation")) is int
+            and active["generation"] >= serving.route["generation"]
+        ):
+            active = {**active, "generation": serving.route["generation"]}
         refusal = serving.refuse(active)
-        if refusal or candidate is None:
+        if refusal or candidate is None or successor_published:
             return refusal
         try:
             candidate.verify_health(core._service_health_on_port(candidate.port, host=host))
@@ -403,11 +410,13 @@ def _cmd_deploy(
         ))
 
     def record_successor_publication(endpoint: routing.Endpoint) -> None:
+        nonlocal successor_published
         if candidate is None:
             from .serving_reconcile import ServingReconcileError
 
             raise ServingReconcileError("successor publication has no launch owner")
         candidate.mark_published(endpoint)
+        successor_published = True
 
     orch = CutoverOrchestrator(
         config_dir(),

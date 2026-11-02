@@ -479,11 +479,13 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
             driver.install(root, plugin, **arguments)
 
 
-@pytest.mark.parametrize("rollback,interrupted", [
-    (False, False), (True, False), (False, True), (True, True),
+@pytest.mark.parametrize("rollback,interrupted,activation_failed,special", [
+    (False, False, False, None), (True, False, False, None), (False, True, False, None),
+    (True, True, False, None), (False, False, True, None),
+    (False, False, False, "deferred"), (True, False, False, "committed-rollback"),
 ])
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
-    driver, tmp_path, monkeypatch, rollback, interrupted,
+    driver, tmp_path, monkeypatch, rollback, interrupted, activation_failed, special,
 ):
     from agent_worktrees import config as cfg, status_monitor_cutover as cutover
 
@@ -535,6 +537,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
 
     def actual_transition(**arguments):
         assert arguments["cutover_guard"] is guard
+        assert arguments["asynchronous_retirement"] is True
         assert authority == ["enter", "leave", "enter"]
         assert driver.runtime.current_version(root) == "2.0.0"
         assert driver.runtime.gc(root) == []
@@ -546,7 +549,16 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             pass
         if interrupted:
             raise RuntimeError("cutover interrupted")
-        return {"action": "cutover", "result": {"committed": not rollback, "rolled_back": rollback}}
+        if special == "committed-rollback":
+            from zdd import breadcrumb
+
+            breadcrumb.write_breadcrumb(root / "status-monitor-routing", state="committed", self_retirement=True)
+            return {"action": "cutover", "result": {"ok": False, "publication_uncertain": True}}
+        return {"action": "cutover", "result": {
+            "ok": not rollback and not activation_failed,
+            "committed": not rollback, "rolled_back": rollback,
+            "error": "promotion response failed" if activation_failed else None,
+        }}
 
     guard = Guard()
 
@@ -592,14 +604,35 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: guard)
     monkeypatch.setattr(cutover, "activate_after_update", actual_transition)
-    monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
+    if special == "deferred":
+        from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
+
+        def deferred(*args):
+            raise PublicationOutcomePending("retained unknown publication")
+
+        monkeypatch.setattr(driver, "_settle_monitor", deferred)
+    elif special == "committed-rollback":
+        from agent_worktrees import runtime_monitor_recovery
+        from zdd import breadcrumb
+
+        def rolled_back(*args):
+            breadcrumb.clear_breadcrumb(root / "status-monitor-routing")
+            return "rolled_back"
+
+        monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", rolled_back)
+    else:
+        monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
     monkeypatch.setattr(driver.subprocess, "Popen", Process)
-    if rollback or interrupted:
+    if rollback or interrupted or activation_failed or special == "deferred":
         with pytest.raises(subprocess.CalledProcessError):
             driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         expected = "1.0.0" if rollback else "2.0.0"
         assert driver.runtime.current_version(root) == expected
         assert driver.runtime.read_last_known_good(root) == expected
+        if special == "deferred":
+            from agent_worktrees import runtime_deployment
+
+            assert runtime_deployment.read_manifest(root) is None
     else:
         result = driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         assert result["runtime_version"] == "2.0.0"
@@ -627,6 +660,59 @@ def test_failed_passive_exit_is_observed_before_returning(driver, tmp_path, monk
         {"action": "cutover", "result": {"rolled_back": True}}, None, [Handle()],
     ) is False
     assert events == ["poll", "wait", "poll"]
+
+def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
+    monkeypatch.setattr(
+        driver.time, "sleep", lambda *_args: pytest.fail("installer waited for drain"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {"committed": True, "retirement_pending": True}},
+        (123, "original-birth"), [],
+    )
+
+
+def test_failed_committed_activation_settles_without_waiting_for_readiness(
+    driver, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        driver, "_candidate_serving", lambda *_args: pytest.fail("failed commitment waited for readiness"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {
+            "committed": True, "ok": False, "error": "roster activation failed",
+        }},
+        (123, "1001"), [],
+    )
+
+
+def test_committed_successor_death_never_rolls_back_retirement_custody(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: False)
+    summary = {"action": "cutover", "result": {"committed": True, "ok": True}}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
+    assert summary["result"]["committed"] and not summary["result"]["ok"]
+    assert "stopped serving" in summary["result"]["error"]
+
+
+def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner(
+    driver, tmp_path, monkeypatch,
+):
+    from agent_worktrees import locks, status_monitor_cutover as cutover
+
+    monkeypatch.setattr(locks, "read_lock", lambda _path: {"pid": 101})
+    monkeypatch.setattr(locks, "lock_is_live", lambda _record: True)
+
+    def routed(root, *, require_async_retirement=False):
+        assert root == tmp_path and require_async_retirement
+        return (202, "2002", "current")
+
+    monkeypatch.setattr(cutover, "routed_monitor_identity", routed)
+    assert driver._monitor_identity(tmp_path) == (202, "2002")
+    monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *args, **kwargs: None)
+    with pytest.raises(driver.InstallationRefused, match="unrouted"):
+        driver._monitor_identity(tmp_path)
 
 
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
@@ -707,7 +793,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
     monkeypatch.setattr(cfg, "install_dir", lambda: root if monitor_scope else tmp_path / "other")
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: Guard())
-    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: (123, "previous-identity"))
+    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: (123, "1001"))
     monkeypatch.setattr(driver, "_monitor_slot", lambda *_args: "0.9.0")
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(driver, "_settle_monitor", settle)
@@ -746,7 +832,11 @@ def test_reported_commit_or_restart_cannot_hide_actual_child_failure(
             return 1
 
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
-    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is False
+    committed = summary["action"] == "cutover"
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is committed
+    if committed:
+        assert summary["result"]["ok"] is False
+        assert "stopped serving" in summary["result"]["error"]
 
 
 def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path, monkeypatch, capsys):
@@ -763,6 +853,62 @@ def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path,
     ) is False
     assert waits == [1, 1]
     assert capsys.readouterr().err.count("publication is uncertain") == 1
+
+
+@pytest.mark.parametrize("outcome", ["committed", "rolled_back"])
+def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
+    driver, tmp_path, monkeypatch, outcome,
+):
+    from zdd import breadcrumb
+    from agent_worktrees import runtime_monitor_recovery
+
+    record = {"state": "started", "self_retirement": True}
+    reads = []
+    def witness(_root):
+        reads.append(True)
+        assert len(reads) == 1, "settlement reread a witness consumed by owned recovery"
+        return record
+
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", witness)
+    monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", lambda *a: outcome)
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: True)
+    summary = {"action": "cutover", "result": {"publication_uncertain": True, "ok": False, "error": "uncertain"}}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is (
+        outcome == "committed"
+    )
+    assert summary["result"]["publication_uncertain"] is False
+    if outcome == "committed":
+        assert summary["result"]["ok"] is True and summary["result"]["error"] is None
+
+
+@pytest.mark.parametrize("ready", [True, False])
+@pytest.mark.parametrize("grant_error", [False, True])
+def test_interrupted_marked_committed_witness_is_never_rolled_back(
+    driver, tmp_path, monkeypatch, ready, grant_error,
+):
+    from zdd import breadcrumb
+    from agent_worktrees import runtime_monitor_recovery
+
+    record = {"state": "committed", "self_retirement": True}
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda path: record)
+    calls = []
+    def recover(*args):
+        calls.append(True)
+        if grant_error:
+            raise RuntimeError("retirement grant changed")
+        return "committed"
+
+    monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", recover)
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *args: ready)
+    monkeypatch.setattr(driver.time, "sleep", lambda delay: pytest.fail("committed recovery must not retry under installer guards"))
+    summary = {"action": "interrupted"}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
+    assert calls == [True]
+    assert summary["result"]["committed"] is True
+    assert summary["result"]["ok"] is (ready and not grant_error)
+    if grant_error:
+        assert "retirement grant changed" in summary["result"]["error"]
+        assert breadcrumb.read_breadcrumb(tmp_path) is record
 
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):
@@ -783,18 +929,30 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
 
 @pytest.mark.parametrize("legacy_lock", ["absent", "stale"])
 @pytest.mark.parametrize("slot", ["serving", None, "..", "missing"])
-def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot):
+@pytest.mark.parametrize("nested", [False, True])
+def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot, nested):
     from agent_worktrees import locks, status_monitor_cutover as cutover
+    from agent_worktrees.runtime_monitor_retirements import CAPABILITY
+    from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
     from zdd import routing
 
     root = tmp_path / "runtime"
     (root / "versions" / "serving").mkdir(parents=True)
+    if nested:
+        (root / "versions" / "serving" / ".venv").mkdir()
     (root / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
     if legacy_lock == "stale":
         (root / "status-monitor.lock").write_text(json.dumps({"pid": 0}), encoding="utf-8")
     pid = os.getpid()
+    prefix = root / "versions" / slot if isinstance(slot, str) else None
+    if nested and prefix is not None:
+        prefix = prefix / ".venv"
     server = cutover.ControlServer(
-        lambda *_args: {"pid": pid, "status": "ready", "runtime_slot": slot},
+        lambda *_args: {
+            "pid": pid, "status": "ready", "runtime_slot": slot,
+            "runtime_prefix": str(prefix) if prefix is not None else None,
+            "capabilities": [CAPABILITY, RECOVERY], "runtime_generation": "a" * 32,
+        },
         token="fixture-token",
     )
     server.start()
@@ -802,12 +960,13 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
         routing.publish_active(
             root / "status-monitor-routing", bind="127.0.0.1", port=server.port, pid=pid,
         )
-        identity = driver._monitor_identity(root)
-        assert identity == (pid, locks.process_start_time(pid))
         if slot == "serving":
+            identity = driver._monitor_identity(root)
+            assert identity == (pid, locks.process_start_time(pid))
             assert driver._monitor_slot(root, identity) == "serving"
         else:
             with pytest.raises(driver.InstallationRefused):
+                identity = driver._monitor_identity(root)
                 driver._monitor_slot(root, identity)
     finally:
         server.close()
@@ -866,7 +1025,7 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
 
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize("legacy_lock", ["live", "absent", "stale"])
-def test_real_installer_retains_the_serving_slot_until_monitor_drain(
+def test_real_installer_returns_before_resident_owned_monitor_drain(
     driver, tmp_path, native_runtime_source, legacy_lock,
 ):
     from agent_worktrees import classify_daemon, locks
@@ -1034,31 +1193,6 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     stdin=subprocess.DEVNULL, **no_window_kwargs(),
                 )
                 processes.append(transition)
-                draining = _wait_for(
-                    lambda: (
-                        state if (state := breadcrumb.read_breadcrumb(route_root)) is not None
-                        and state.get("state") == "draining" else None
-                    ),
-                    timeout=120,
-                    message="installer never began the guarded predecessor drain",
-                )
-                assert draining["old"]["pid"] == old_pid
-                assert draining["requires_writer_reconciliation"] is True
-                identities[draining["new_pid"]] = diagnostics.process_start_time(draining["new_pid"])
-                assert routing.read_active_endpoint(route_root, verify_listener=False).pid == old_pid
-                demand_stop.set()
-                demand_thread.join(timeout=5)
-                classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
-                assert not demand_errors, demand_errors
-                assert transition.poll() is None, "installer returned before predecessor drain"
-                assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
-                for version in (old.name, installed["runtime_version"]):
-                    with pytest.raises(driver.runtime.RetentionTimeout):
-                        with driver.runtime._kernel_lease(
-                            root, version, kind="retention", shared=False, timeout=0,
-                        ):
-                            pytest.fail("installer released a live cutover generation")
-                request_release.touch()
                 successor = _wait_for(
                     lambda: (
                         endpoint if (endpoint := routing.read_active_endpoint(
@@ -1066,16 +1200,37 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                         )) is not None and endpoint.pid != old_pid else None
                     ),
                     timeout=120,
-                    message="installer never published its drained successor route",
+                    message="installer never published the successor route",
                 )
-                assert successor.pid == draining["new_pid"]
-                assert transition.wait(timeout=180) == 0, log.read_text(encoding="utf-8", errors="replace")
+                identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+                assert transition.wait(timeout=60) == 0, log.read_text(encoding="utf-8", errors="replace")
+                demand_stop.set()
+                demand_thread.join(timeout=5)
+                classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
+                assert not demand_errors, demand_errors
+                assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
+                assert monitor.poll() is None, "installation waited for predecessor retirement"
+                with driver.runtime._kernel_lease(
+                    root, old.name, kind="retention", shared=False, timeout=0,
+                ):
+                    pass
+                assert old.name in {
+                    version for versions in driver.runtime._leases.read_runtime_references(root).values()
+                    for version in versions
+                }
+                assert driver.runtime.gc(root, min_age_days=0) == []
+                request_release.touch()
             hook_thread.join(timeout=15)
             assert not hook_thread.is_alive()
             assert hook_result.get("delayed") is True
-            assert monitor.returncode is not None, "installer returned before its predecessor was reaped"
-            assert monitor_exit.result() == 0
-            assert not diagnostics._pid_alive(old_pid), "installer returned before actual predecessor exit"
+            from agent_worktrees.status_monitor_cli import _SELF_RETIRE_MAX_GRACE_S
+
+            assert monitor_exit.result(timeout=_SELF_RETIRE_MAX_GRACE_S + 15) == 0
+            assert not diagnostics._pid_alive(old_pid), "predecessor did not independently retire"
+            with driver.runtime._kernel_lease(
+                root, old.name, kind="retention", shared=False, timeout=0,
+            ):
+                pass
             new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
             assert new_lock["pid"] == successor.pid
             assert Path(new_lock["prefix"]).resolve() == candidate.resolve()

@@ -1313,6 +1313,7 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
 - [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
 
 ### 2026-10-28 - Fresh-default installation and recognizer manifests
@@ -1877,5 +1878,12 @@ Complete portfolio/platform acceptance, maintenance, actual same-existing-data
 adoption and live all-code-absent session/connectivity survival remain open.
 No host installation, cleanup, service operation, maintenance clearance or
 rollout occurred.
+
+### 2026-11-01 - Worktrees installation and resident retirement separation
+
+#9919 / #9935 implement the bounded Worktrees incoming-start-first slice.
+The [source and qualification record](<journal/2026/11.01 asynchronous-installer-drain.md>)
+retains the resident-owned custody, review corrections and source-process proof.
+Review and required CI still gate merge; parent acceptance and rollout remain open.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

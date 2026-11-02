@@ -4971,9 +4971,162 @@ The caller-owned monitor seam can return actual passive **and restart**
 process handles without releasing its cutover guard. Supplying both guard and
 handles transfers settlement responsibility to that lifecycle; older callers
 retain their existing asynchronous recovery backstop. Spawn/commit return
-values do not prove service readiness or process exit. Candidate readiness,
-failed-child exit and predecessor retirement are observed under retained
-custody; uncertain durable publication requires a terminal owner-led recovery
+values do not prove service readiness or process exit. The ordinary Worktrees
+installer opts into resident-owned predecessor retirement: it promotes and
+attests the published successor, then finishes without an old drain RPC or a
+predecessor-exit wait. The outgoing resident observes supersession and drains
+and retires independently; `retirement_pending` is not an exit receipt.
+Monitor identity and retirement accept both an owned version directory as the
+interpreter prefix and its managed `.venv` child. Health keeps the version slot
+name; slot retention, serving attestation and retained-helper lookup normalize
+only that owned layout, without treating an unrelated external environment as
+an installed slot.
+Both the outgoing and incoming monitors must advertise
+`status-monitor-async-retirement-v1` for this flow. The outgoing peer is
+authenticated before selector mutation; an unsupported or unrouted incumbent
+is an explicit refusal, not unsafe self-exit, a synchronous fallback or a
+package-version guess. Both peers also need guarded preparation recovery and
+a valid receiver generation; generation-less source/legacy residents refuse
+before selector mutation rather than leaving an unrecoverable preparation.
+Preparation health binds the responding PID and native birth to the captured
+spawned child before publication. The captured birth is rechecked at the
+publication boundary; another authenticated listener on the port is not that
+child. Route commitment precedes any promotion
+callback that can admit work. A failure after that frontier preserves the
+possibly admitted successor and remains an explicit failed commit-forward result.
+Before changing selectors or releasing installer retention, the owner reserves
+the canonical runtime reference first, then persists fsynced birth-identified
+retirement intent, including for a compatible resident that holds no runtime
+lease. An interruption between these writes leaves discoverable execution
+protection, not an unprotected intent or a claim-release grant. Reference
+capacity is checked by the canonical publisher before intent is written. Proven precommit
+rollback cancels only exact custody, without releasing a deferred dev claim.
+Retirement records distinguish prepared, retiring and cancelled intent.
+Preparation retains code and demand but cannot release a claim, even if the old
+process exits before publication. Only durable publication enables the matching
+retirement grant, before promotion can open successor admission. If the installer
+exits at that boundary, the selected resident's existing loop completes the
+exact birth-identified publication under the cutover lease, enables its grant
+and promotes itself. The attributable witness remains until serving readiness
+is confirmed; failed completion remains visible and retryable.
+Only an explicitly marked asynchronous witness permits resident completion.
+An exact selected PID, recorded native birth and port can complete even if the
+installer departed before writing `flipped`; unmarked synchronous witnesses
+retain their original recovery path. Durable confirmation preserves the
+previous route rather than republishing away the fallback. A subsequent
+installer rechecks pending witness refusal after acquiring cutover custody,
+before reserving retirement or invoking legacy recovery.
+The resident also reconciles abandoned prepublication preparation without a
+new worker: nonblocking acquisition of the same cutover guard proves no
+installer still owns that transition. Cancellation requires no witness and
+the original recorded native route, or positive predecessor exit without a
+foreign route. It revokes the nongrant, never grants dev-claim release, and
+retains live code. A different or unknown owner remains pending. Read-only
+inventory refresh cannot erase an earlier cleanup failure; only a successful
+cleanup pass clears that pending error.
+Marked interruptions are also recoverable under both the Worktrees and shared
+cutover guards. The original installer consumes a verified terminal result
+directly, rather than rereading a witness already cleared by completion.
+An absent or never-published passive candidate permits exact precommit
+cancellation; passive disposal rechecks publication under native routing
+custody and requires identity-bound exit. A selected candidate's positive exit
+permits restoration only while predecessor grants remain uncommitted.
+Receiver-bound undrain and serving attestation precede durable cancellation.
+The restored precommit witness is persisted before cancellation and preserves
+its original owner, so failed cancellation, final recording or removal stays
+retryable. Unknown native evidence, foreign routes or irreversible grants do
+not authorize rollback.
+A positively exited committed successor instead settles commit-forward,
+withdrawing only its exact dead route while preserving retiring predecessors
+and their accepted work. An exact granted retiree's discovery record is not
+an unrouted incumbent for the next installation; uncommitted and unknown
+identities retain the original refusal. No new recovery worker is introduced.
+The marked committed recovery result can still prove rollback before a
+retirement grant: that outcome restores the prior selectors and deployment
+manifest, rather than advertising the new selection against an old route.
+If conservative pre-flip history cannot establish a safe terminal outcome,
+installation fails after a bounded recovery attempt and releases its guards.
+The selected candidate, old canonical references, helpers and witness stay
+retained; uncertainty neither triggers selector rollback nor publishes a
+successful new deployment manifest. Legacy unmarked synchronous recovery
+keeps identity-verified predecessor drain, shutdown and native-exit settlement.
+An active serving owner does not hide a second live fallback: admission also
+requires that fallback's positive exit or exact granted retirement custody.
+The installer witness also records its own native birth. Strict native
+original-exit observation, rather than PID liveness, recognizes an exited
+object with a readable birth or Darwin zombie. Matching live identity keeps
+custody; positive original exit or PID reuse permits abandoned recovery,
+and observation errors remain unknown. Passive launch carries that exact
+attempt to the child, which durably registers its own PID/birth before opening
+an endpoint. On Windows/Linux, exact native cancellation of a registered,
+never-published child does not require an HTTP listener to have started.
+Optional health diagnostics cannot veto that native proof; a positively
+published or identity-unknown candidate still refuses cancellation.
+Missing-PID cancellation closes startup under the routing lease
+before clearing custody, so a delayed child cannot silently survive the gap
+between spawn and the installer's first PID write. Same-attempt parent writes
+cannot erase an already registered candidate birth. Every parent/child phase
+write serializes the whole read/merge/write under the shared routing lock.
+Trusted lexical callers already holding that lock borrow it explicitly;
+conditional callers retain their shorter lock-acquisition deadline.
+On Darwin, passive disposal uses the authenticated `cancel-preparation`
+operation only when the actual endpoint advertises
+`status-monitor-passive-cancel-v1`. The request binds PID, birth, port,
+`started_at` and publication witness; the receiver requires its own still-passive,
+never-published identity before closing. A pre-captured kqueue exit reference
+confirms completion. Unsupported peers refuse explicitly, with no PID-signaling
+fallback. Windows/Linux retain native identity-bound termination of proven
+passives. Ordinary successor publication never drains its predecessor.
+Cancellation is fsynced before cleanup and revokes the claim grant while keeping
+execution protection for any still-live code. Completed retirement is an
+idempotent commit outcome, not a missing-record loop.
+The elected successor remains needed while
+those identities are live or unknown and reconciles them in its existing loop.
+When recovery withdraws a dead successor into `previous`, a predecessor can
+release its cold-start lease from native exit evidence only for a strictly
+newer retained generation. Accepted work and execution references stay held.
+Only positive native exit releases references, even when the old birth token
+remains readable. Outgoing retirement latches actual successor readiness and
+settles all accepted work without grace-forced exit, even if the successor later
+dies. Before that latch, cached reads remain admitted through the published
+predecessor while every new write is independently fenced by current route
+ownership. Losing writer authority during agenda roster refresh is a handoff,
+not a producer failure: cached rows, sequence and any earlier producer error
+remain intact. Idle exit is serialized with installation through the existing
+cutover lease, rather than racing publication. Route-fenced discovery
+renewal prevents a predecessor from rewriting successor metadata; ready
+publication is advertised only after the discovery stamp succeeds. A known
+failed-but-committed activation settles as an error without indefinitely holding
+installation locks for a permanently unready candidate. Dev release similarly retains
+the original claim and defers its exact-snapshot release to that resident;
+changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
+duplicate release cannot bypass the original pending claim.
+Idle retirement rechecks election, accepted work, demand and pending retirement
+inside the acquired cutover custody before closing admission.
+If a just-accepted request remains after closure, the resident releases that
+idle-exit guard immediately and drains under its own latched retirement, allowing
+the next installation to proceed independently. A positively verified successor
+birth-token mismatch also releases the cold-start lease; unknown identity does not.
+Guarded synchronous
+rollback reuses its already-held routing authority for discovery renewal; this
+is a private call-chain fact, never an instruction accepted from a wire payload.
+Release also refuses other pending dev-code retirement; cancelled attempts do
+not prevent a newly authorized release retry. Reconstruction independently
+refuses an attributable resident actually executing `dev`, regardless of a
+different selector, and reselected `dev` prevents deferred claim release.
+A retry may durably cancel exact prepared dev release under the held cutover,
+inventory and publication guards only while the original dev claim and route
+still match and no cutover witness exists. Committed grants and foreign claims
+remain refusals. Reference cleanup occurs after publication custody is released,
+retaining live execution protection without recursively acquiring that lease.
+A rebuild or release retry first reconciles positively exited committed or
+cancelled residents under cutover custody, then rereads the claim before
+applying its inventory gates. Live, unknown, changed and prepared custody
+remains protected; cleanup never borrows an outer publication lease.
+There is no installer-owned subscription, new cleanup worker, forced unrouted
+restart or delayed daemon reaper in this path.
+Failed candidate children remain under installer custody, and uncertain durable
+publication requires a terminal owner-led recovery
 witness, never a missing/corrupt breadcrumb interpreted as success. Selector
 publication, monitor transition, and selector settlement share one exception-safe
 owning boundary: failures before either selector write, between writes, or after
@@ -4987,13 +5140,16 @@ the previous selector. For an uncertain publication, the same owning receiver
 can retry recovery under native ZDD transition authority instead of waiting for
 another installer blocked by its own guards. Recovery validates its breadcrumb,
 actual spawned handle, process start identities, and strict routing state.
-It confirms durable publication and actual predecessor drain before
-commit-forward, or restores and verifies the predecessor before retiring a
+It confirms durable publication and successor readiness before
+commit-forward, without contacting or waiting for the predecessor, or restores
+and verifies the predecessor before retiring a
 ready unpublished passive. Unknown evidence, formerly-published unhealthy
 candidates, and storage failures retain custody rather than manufacturing a
 terminal outcome. Promoted monitor demand uses its existing worktree-status
-subscription, renewed under the lifecycle's transition stack through actual
-predecessor retirement. The successor is reattested after that exit. Windows
+subscription, renewed under the lifecycle's transition stack until successor
+readiness is established. Resident process-retention leases protect live
+generations after installation returns; installation does not retain a worker
+or background thread to wait for predecessor exit. Windows
 exit evidence tests the native process signal, not whether a retained exited
 process object can still be opened. These
 pieces do not yet constitute complete adoption: dev/release, distinct-generation

@@ -134,7 +134,7 @@ class AgendaFeed:
                         if subscriber["dirty"] or subscriber["closed"] is not None:
                             break
                     owner = self.agendas.owner
-                    if owner._elected is not None and not owner._elected():
+                    if owner._read_elected is not None and not owner._read_elected():
                         owner.close_admission("superseded")
                         break
                     yield {

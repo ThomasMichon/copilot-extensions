@@ -47,9 +47,10 @@ class AgendaRuntime:
         self._unsubscribe = None
         self.feed = AgendaFeed(self)
 
-    def _fence(self, conn=None, expected=None) -> None:
+    def _fence(self, conn=None, expected=None, *, read=False) -> None:
         owner = self.owner
-        if owner._elected is not None and not owner._elected():
+        elected = owner._read_elected if read else owner._elected
+        if elected is not None and not elected():
             raise contract.AgendaError("resident is no longer elected", "superseded")
         with owner._lock:
             if not owner._admitting:
@@ -138,7 +139,10 @@ class AgendaRuntime:
             for project in {key[0] for key in changed}:
                 self.feed.changed(project)
 
-    def _fresh_fence(self, expected) -> None:
+    def _fresh_fence(self, expected, *, read=False) -> None:
+        if read:
+            self._fence(expected=expected, read=True)
+            return
         with closing(
             sqlite3.connect(
                 self.owner.store.db_path.resolve().as_uri() + "?mode=ro",
@@ -146,25 +150,28 @@ class AgendaRuntime:
                 timeout=0.2,
             )
         ) as conn:
-            self._fence(conn, expected)
+            self._fence(conn, expected, read=read)
 
     def roster_changed(self, project) -> None:
         with self._lock:
             try:
                 self.reconcile(project)
             except (OSError, sqlite3.Error, ValueError, ProjectionUnavailable) as exc:
+                if isinstance(exc, contract.AgendaError) and exc.code == "superseded":
+                    return
                 if self._activation_error is None:
                     self._project_errors[project] = str(exc)[:1024]
                 self.feed.changed(project)
 
-    def _request_project(self, project: str) -> None:
+    def _request_project(self, project: str, *, read=False) -> None:
         published = project in self.owner.store.published_projects()
-        self.owner.register_project_demand(project, unready=not published)
+        if not read:
+            self.owner.register_project_demand(project, unready=not published)
         if not published:
-            self._fresh_fence(self._generation)
+            self._fresh_fence(self._generation, read=read)
             raise contract.AgendaError("resident project roster is not published", "unready")
         if project in self._project_errors:
-            self._fresh_fence(self._generation)
+            self._fresh_fence(self._generation, read=read)
             raise contract.AgendaError(self._project_errors[project], "unavailable")
 
     def _advance(self) -> None:
@@ -332,7 +339,10 @@ class AgendaRuntime:
         try:
             project, wid, _session = contract.selection(request)
             with self.owner._activation_lock, self._lock:
-                self._fence(expected=self._generation)
+                self._fence(expected=self._generation, read=True)
+                if self.owner._elected is not None and not self.owner._elected():
+                    self._request_project(project, read=True)
+                    return self._reply(request)
                 self._request_project(project)
                 pending, updates = self._refresh_pending()
                 key = project, wid
@@ -345,6 +355,15 @@ class AgendaRuntime:
                 return self._reply(request)
         except contract.AgendaError as exc:
             self._restore_pending(pending)
+            if exc.code == "superseded":
+                try:
+                    with self.owner._activation_lock, self._lock:
+                        project, _wid, _session = contract.selection(request)
+                        self._fence(expected=self._generation, read=True)
+                        self._request_project(project, read=True)
+                        return self._reply(request)
+                except contract.AgendaError as cached_error:
+                    exc = cached_error
             return contract.failure(exc.code, str(exc), version=contract.error_version(request))
         except (OSError, sqlite3.Error, ProjectionUnavailable, ValueError) as exc:
             self._restore_pending(pending)
