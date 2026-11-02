@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -430,3 +430,34 @@ composition prerequisites, and review/validation rules.
   preparation is exercised; hosted Linux preparation remains required.
   A machine-provisioning clean room is not applicable to annotation-only
   runtime changes and isolated checker-dependency preparation.
+
+### 2026-11-02 - Config Migrate merged; Dropin Registry selected
+
+- #9929 merged as `9301cb5401284e5a08adaf7d9d208b6e227ef3e7`
+  after exact-head Copilot approval with no findings and all required checks.
+  Hosted [run 41378233039](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41378233039)
+  passed seasoned preparation, both target policies and all 3,575 unit controls
+  with coverage once in 59.450 seconds. The source worktree is pulled forward.
+- Five projects are now strict and 63 remain pending. The next bounded L1 slice
+  is #9930: all six Dropin Registry source/test files. Its pre-change strict
+  probe reports 21 errors across two files: a generic local plus fixture
+  annotations and a stat-result double. The canonical implementation needs
+  no runtime logic changes; physical copies retain independent pending
+  typing ownership even when synchronized through the existing vendoring tool.
+- The candidate passes strict checking for all six canonical files on both
+  declared targets. The Win32 target exposed an unavailable `os.mkfifo` call
+  hidden by the old untyped fixture; its existing skip now executes inside the
+  test so the checker can follow that platform guard. A spec-bound stat-result
+  test double preserves the nonzero reparse-tag control without an unchecked
+  cast or widening the library's input contract.
+- All 12 admitted MyPy analysis targets, Ruff F/E9, 37 original/release-adapted
+  controls and install/vendoring/admission checks pass. Native FIFO creation
+  is the sole Windows skip; the existing actor-free FIFO refusal adapter
+  still runs. Fresh isolated processes load each of the three physical copies
+  and exercise real atomic writes and native directory scans successfully.
+- Only the canonical scan annotation is synchronized into physical copies.
+  Their independently authored tests are preserved and their typing ownership
+  remains pending. The changefile names the library and all ten physical/
+  pointer consumers. Only two unit-source digests change; nodes, decision
+  targets and packet budget are unchanged. Required hosted packet qualification
+  and review remain before merging this proposed sixth strict project.

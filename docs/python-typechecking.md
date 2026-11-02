@@ -5,8 +5,8 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Config
-Migrate source/test project, and the source of Remote Login Shell, Session
-Liveness Probe and Worktree Identity. The latter libraries' remaining
+Migrate and Dropin Registry source/test projects, and the source of Remote
+Login Shell, Session Liveness Probe and Worktree Identity. The latter libraries' remaining
 tests/helpers and the other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
@@ -22,6 +22,7 @@ python tools/typecheck.py --changed --base origin/dev
 python tools/typecheck.py lib-worktree-identity
 python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
+python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
@@ -47,6 +48,12 @@ declared analysis targets. Serialization documents remain explicitly dynamic
 existing runtime validation. There are no new missing-import ignores or
 unchecked first-party stubs. Other projects do not implicitly gain YAML
 dependencies from this environment.
+
+Dropin Registry uses the base checker environment and checks all six canonical
+source/test files strictly on both declared targets. Its native FIFO test skips
+only where that operation is unavailable; the actor-free release adapter retains
+its existing synthetic FIFO refusal control. Synchronized vendored copies remain
+independently pending until copy-checking correspondence is qualified.
 
 `--enforced` is the default when no project name or selector is supplied. It
 validates the complete physical-Python inventory, then checks admitted projects
