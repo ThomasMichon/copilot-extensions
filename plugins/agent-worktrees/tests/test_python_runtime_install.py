@@ -98,6 +98,188 @@ def test_governance_recheck_uses_signed_fields(driver, monkeypatch, section, fie
         governance.recheck()
 
 
+@pytest.fixture
+def provenance_repository(tmp_path, monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    repository = tmp_path / "source"
+    repository.mkdir()
+    hooks = tmp_path / "empty-hooks"
+    hooks.mkdir()
+    git = shutil.which("git")
+    assert git is not None, "source provenance qualification requires native Git"
+
+    def run(*arguments):
+        return subprocess.check_output(
+            [
+                git, "-C", str(repository), "-c", f"core.hooksPath={hooks}",
+                "-c", "core.autocrlf=false", "-c", "core.fsmonitor=false",
+                "-c", "commit.gpgsign=false",
+                "-c", "user.name=Provenance test", "-c", "user.email=test@example.invalid",
+                *arguments,
+            ],
+            text=True, timeout=30, **no_window_kwargs(),
+        ).strip()
+
+    run("init", "-q", "--template", str(hooks))
+    (repository / "tracked.txt").write_text("source\n", encoding="utf-8")
+    run("add", "tracked.txt")
+    run("commit", "-qm", "Synthetic provenance fixture")
+    return repository, run
+
+
+@pytest.mark.parametrize("location", ["metadata", "bare", "outside"])
+def test_source_provenance_does_not_inherit_non_worktree_git(
+    driver, tmp_path, provenance_repository, location,
+):
+    repository, run = provenance_repository
+    if location == "metadata":
+        payload = repository / ".git" / "venue-plugins" / "agent-worktrees"
+    elif location == "bare":
+        payload = tmp_path / "bare"
+        run("clone", "--bare", "--quiet", str(repository), str(payload))
+    else:
+        payload = tmp_path / "payload"
+    payload.mkdir(parents=True, exist_ok=True)
+    result = driver._source_provenance(payload, "1.0.0")
+    assert result["commit"] == result["branch"] == "unknown"
+    deployment = json.loads(result["deployment_source"])
+    assert deployment["commit"] == deployment["branch"] == "unknown"
+    assert deployment["dirty"] is None
+    assert deployment["path"] == payload.as_posix()
+    assert run("status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+@pytest.mark.parametrize("linked", [False, True])
+def test_source_provenance_preserves_real_checkout_identity(
+    driver, tmp_path, provenance_repository, dirty, linked,
+):
+    repository, run = provenance_repository
+    commit, branch = run("rev-parse", "HEAD"), run("rev-parse", "--abbrev-ref", "HEAD")
+    if linked:
+        repository = tmp_path / "linked"
+        run("worktree", "add", "--quiet", "--detach", str(repository), "HEAD")
+        branch = "HEAD"
+    if dirty:
+        (repository / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    result = driver._source_provenance(repository, "1.0.0")
+    assert result["commit"] == commit and result["branch"] == branch
+    deployment = json.loads(result["deployment_source"])
+    assert deployment["commit"] == commit and deployment["branch"] == branch
+    assert deployment["dirty"] is dirty
+
+
+@pytest.mark.parametrize("operation", ["worktree", "commit", "branch", "status"])
+def test_source_provenance_retains_actual_git_failure(driver, tmp_path, monkeypatch, operation):
+    monkeypatch.setattr(driver.shutil, "which", lambda _name: "git")
+
+    def run(argv, **kwargs):
+        assert kwargs["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        arguments = argv[3:]
+        current = (
+            "status" if arguments[0] == "status"
+            else "worktree" if "--is-inside-work-tree" in arguments
+            else "branch" if "--abbrev-ref" in arguments else "commit"
+        )
+        if current == operation:
+            return subprocess.CompletedProcess(argv, 128, "", "synthetic Git failure")
+        return subprocess.CompletedProcess(
+            argv, 0, "true\n" if current == "worktree" else "synthetic-identity\n", "",
+        )
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    with pytest.raises(driver.InstallationRefused, match="synthetic Git failure"):
+        driver._source_provenance(tmp_path, "1.0.0")
+
+
+def test_source_provenance_refuses_invalid_worktree_state(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver.shutil, "which", lambda _name: "git")
+    monkeypatch.setattr(
+        driver.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "unexpected\n", ""),
+    )
+    with pytest.raises(driver.InstallationRefused, match="invalid working-tree state"):
+        driver._source_provenance(tmp_path, "1.0.0")
+
+
+def test_source_provenance_without_git_is_unknown(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(driver.subprocess, "run", lambda *a, **k: pytest.fail("Git is unavailable"))
+    result = driver._source_provenance(tmp_path, "1.0.0")
+    assert result["commit"] == result["branch"] == "unknown"
+    assert json.loads(result["deployment_source"])["dirty"] is None
+
+
+def test_source_provenance_preserves_verified_source_identity(driver, tmp_path, monkeypatch):
+    source = driver.runtime_source
+    identity = source.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, "c" * 64,
+        source.runtime_version("1.0.0", "a" * 40, "c" * 64),
+    )
+    monkeypatch.setattr(driver.shutil, "which", lambda *a: pytest.fail("No Git lookup is needed"))
+    result = driver._source_provenance(tmp_path, "1.0.0", identity)
+    assert result["commit"] == identity.source_commit and result["branch"] == "unknown"
+    deployment = json.loads(result["deployment_source"])
+    assert all(deployment[key] == value for key, value in source.manifest_fields(identity).items())
+
+
+@pytest.mark.timeout(600)
+def test_source_provenance_real_first_install_from_git_metadata(
+    driver, tmp_path, provenance_repository,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("real construction requires the configured uv executable")
+    repository, run = provenance_repository
+    frozen = driver.engine.freeze_inputs(
+        driver.SCRIPTS.parent, repository / ".git" / "venue-plugins",
+    )
+    plugin = frozen.plugin
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / ".agent-worktrees"
+    assert not root.exists()
+    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
+    for name in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "COPILOT_PLUGIN_STAGED_FROM",
+        "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_STATUS_MONITOR_ROUTING_DIR",
+    ):
+        environment.pop(name, None)
+    environment["AGENT_WORKTREES_STATUS_MONITOR"] = "0"
+    result = tmp_path / "result.json"
+    argv = [
+        sys.executable, "-I", "-B", str(plugin / "scripts" / "runtime_install.py"),
+        "--root", str(root), "--plugin", str(plugin), "--payload", str(plugin),
+        "--base-python", sys.executable, "--result", str(result), "--uv", uv,
+    ]
+    log = tmp_path / "installer.log"
+    with log.open("w", encoding="utf-8") as stream:
+        built = subprocess.run(
+            argv, env=environment, cwd=home, stdout=stream, stderr=subprocess.STDOUT,
+            timeout=300, **no_window_kwargs(),
+        )
+    assert built.returncode == 0, log.read_text(encoding="utf-8", errors="replace")
+    installed = json.loads(result.read_text(encoding="utf-8"))
+    python = driver.runtime.slot_python(root, installed["runtime_version"])
+    info = json.loads(subprocess.check_output(
+        [str(python), "-I", "-B", "-c",
+         "import json; from agent_worktrees._build_info import BUILD_INFO; print(json.dumps(BUILD_INFO))"],
+        env=environment, cwd=home, text=True, timeout=30, **no_window_kwargs(),
+    ))
+    assert info["commit"] == info["branch"] == "unknown"
+    assert info["source"] == plugin.as_posix()
+    deployment = json.loads(info["deployment_source"])
+    assert deployment["commit"] == deployment["branch"] == "unknown"
+    assert deployment["dirty"] is None
+    assert deployment["path"] == plugin.as_posix()
+    assert driver.runtime.current_version(root) == installed["runtime_version"]
+    assert run("status", "--porcelain") == ""
+
+
 @pytest.fixture(scope="module")
 def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path, str]]:
     repository = Path(__file__).resolve().parents[3]

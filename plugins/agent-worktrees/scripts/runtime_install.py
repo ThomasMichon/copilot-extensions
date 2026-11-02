@@ -417,6 +417,22 @@ def _source_provenance(
     payload: Path, version: str, source_identity: runtime_source.SourceIdentity | None = None,
 ) -> dict[str, str]:
     provenance = {"version": version, "source": payload.as_posix()}
+    git_options = {
+        "capture_output": True, "text": True, "timeout": 30,
+    }
+    inside_worktree = False
+    if source_identity is None and shutil.which("git") is not None:
+        result = subprocess.run(
+            ["git", "-C", str(payload), "rev-parse", "--is-inside-work-tree"], **git_options,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if result.returncode != 0:
+            if "not a git repository" not in result.stderr:
+                raise InstallationRefused(f"Source provenance lookup failed: {result.stderr}")
+        elif result.stdout.strip() not in ("true", "false"):
+            raise InstallationRefused("Source provenance lookup returned an invalid working-tree state")
+        else:
+            inside_worktree = result.stdout.strip() == "true"
     for field, arguments in (
         ("commit", ["rev-parse", "HEAD"]),
         ("branch", ["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -424,12 +440,12 @@ def _source_provenance(
         if source_identity is not None:
             provenance[field] = source_identity.source_commit if field == "commit" else "unknown"
             continue
-        if shutil.which("git") is None:
+        if not inside_worktree:
             provenance[field] = "unknown"
             continue
         result = subprocess.run(
             ["git", "-C", str(payload), *arguments],
-            capture_output=True, text=True, timeout=30,
+            **git_options,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if result.returncode != 0:
@@ -443,9 +459,11 @@ def _source_provenance(
     if source_identity is None and kind == "local" and provenance["commit"] != "unknown":
         status = subprocess.run(
             ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
-            capture_output=True, text=True, timeout=30, check=True,
+            **git_options,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
+        if status.returncode != 0:
+            raise InstallationRefused(f"Source provenance status failed: {status.stderr}")
         dirty = bool(status.stdout.strip())
     if source_identity is not None:
         provenance["commit"] = source_identity.source_commit
