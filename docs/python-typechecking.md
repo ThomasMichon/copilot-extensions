@@ -5,8 +5,9 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
-Killswitch, Config Migrate, Dropin Registry, Endpoint Rendezvous, Lazy CLI Dispatch, Remote Login
-Shell, Session Liveness Probe and Worktree Identity source/test projects.
+Killswitch, Config Migrate, Dropin Registry, Endpoint Rendezvous, Lazy CLI Dispatch,
+Peer Launch, Remote Login Shell, Session Liveness Probe and Worktree Identity
+source/test projects.
 Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
@@ -26,6 +27,7 @@ python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py lib-lazy-cli-dispatch
+python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
 python tools/typecheck.py lib-worktree-identity-remaining
@@ -88,6 +90,15 @@ MyPy cohort, detecting parameter or return-type erasure. The checker test suite
 also retains real positive/negative clients for both helpers. Its type-only
 `typing_extensions` import uses the existing pinned checker dependency, not a
 new library runtime dependency.
+
+Peer Launch checks its complete three-file canonical source/test project on
+both declared targets. A typed optional `creationflags` dictionary preserves
+the native subprocess keyword contract without widening unrelated arguments.
+The two dynamically loaded, validated installation/governance records retain
+explicit `dict[str, Any]` boundaries. No validation, headless behavior,
+environment filtering or dependency-free bootstrap rule changes. Its 12
+synchronized packaged copies and pending consumers remain independently
+unqualified until their own projects and source correspondence are admitted.
 
 The three initially admitted leaf libraries retain separate source and
 `-remaining` project names so existing local selectors remain valid. Both
