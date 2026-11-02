@@ -2000,6 +2000,27 @@ warm-worker birth identity retain the cold path and skip this packet.
 
 ## Optional daemon-instance lifetime acceptance
 
+`tools/promotion_unit_tests/test_daemon_instance_creation.py` covers atomic
+private inventory creation with Windows FFI doubles and a real portable
+directory/lock/record/cursor roundtrip. It keeps existing owner admission,
+borrowed runtime anchors, binary descriptor handoff and lazy native imports
+unchanged. These admitted units are not native Windows qualification.
+
+The contained Windows selectors
+`libs/agent-procutil/tests/test_daemon_instances_native.py::test_created_private_inventory_entries_use_token_user_owner`
+and `::test_created_private_file_preserves_binary_bytes_and_noninheritance`
+check actual new-entry TokenUser ownership and raw bytes/noninheritance.
+The same contained file's
+`test_private_creation_survives_concurrent_cold_layout[directory]` and `[file]`
+force simultaneous cold layout misses and interleaved creation in two native
+threads, retaining actual ownership and descriptor checks.
+Run them through the existing bounded process-tree owner with fresh test
+storage. A same-user parent/child control whose TokenOwner differs must also
+exercise actual reservation through the retained Git-Bash Manager callback;
+the standalone creator tests do not replace that consumer boundary.
+No existing-path ACL repair, installed-state migration or desktop observation
+is needed for these ownership controls.
+
 `tools/clean-room/scenarios/leased-daemon-instances` is a credential-free Tier-P
 source/native consumer proof. Use a fresh disposable Linux container, a
 read-only candidate and its generated Python source archive, with compilers

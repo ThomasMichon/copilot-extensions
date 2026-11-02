@@ -903,6 +903,17 @@ artifacts still require current-user ownership and exact file identity. Missing
 explicit runtime directories may be created privately as admission metadata;
 callers avoiding business-state creation should use an existing anchor.
 
+On Windows, new private inventory directories, lock entries and record/cursor
+staging files receive the current token **user** as owner at creation time.
+The protected private-mode descriptor retains user, SYSTEM and Administrators
+access; it does not depend on a launcher's token default owner. Native Python
+and a Bash child can therefore share the same user-owned inventory even when
+their default owners differ. Existing entries are not reowned or migrated,
+current-token ownership admission is unchanged, and borrowed runtime anchors
+remain read-only metadata. File access/share/disposition, binary record bytes
+and noninheritance retain their existing behavior. Portable registry imports
+still load no native bindings; Windows descriptor types are initialized lazily.
+
 `reconcile_instances(registry_root=None, limit=128, max_seconds=5)` is an explicit
 installer backstop for **expired disposable** instances and observed-exit
 finite control records. Resident production and unexpired disposable records
