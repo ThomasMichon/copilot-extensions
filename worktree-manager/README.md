@@ -306,6 +306,39 @@ request. Its bounded completion receipt binds the root, source digest and
 actual installed slot; later selection by another request cannot silently
 change which runtime the bootstrap dispatches.
 
+### Local promoted installation inputs
+
+The standalone bootstrap and `scripts/runtime_install.py` advertise the
+read-only `--describe-source-inputs` descriptor. Its `install-source` capability
+accepts `--install-source <absolute-snapshot>` before application arguments;
+`--repository` remains the application's repository-adoption argument.
+Unknown or ambiguous `--repo` syntax is not a Manager-source selector.
+
+`tools/local_install_source.py` freezes a Git commit and materializes its declared
+closure without changing package versions or consuming changefiles, then builds
+the Manager's first-party wheels. Existing commit/tree and assembly identities
+distinguish deployment generations even when package versions are unchanged.
+Use repeated `--project` selections for a bounded core preparation, for example
+`--project standalone:worktree-manager --project agent-worktrees`; this avoids
+building the rest of the portfolio. The default remains Manager only, and the
+separate `--suite` option explicitly selects all declared projects.
+Ordinary source installation remains available. Resource-packaging hooks use
+the constructor's existing isolated source-build fallback rather than its
+static-project wheel cache; an explicitly prepared wheel application does not
+run those first-party build backends during installation.
+`--finalized-main --main-head <commit>` additionally verifies Main ancestry.
+Only real Dev-to-Main promotion accumulates release versions.
+This build step produces first-party preparation data, not yet an installable
+native runtime profile. An incomplete snapshot explicitly refuses installation.
+Wheel files belong in ignored build output, never Git.
+
+A complete snapshot additionally carries its prepared native profile and exact
+wheel closure. The adapter retains and inspects those bytes through the existing
+constructor and real installed-health gate. It does not resolve dependencies,
+execute first-party backends, clear automatic-update inhibition, or acquire
+permission from a running Manager. Independent native installation custody
+still governs publication; foreign or unsettled owners are not bypassed.
+
 While retaining the qualified candidate, the Windows installer adopts its
 finite launch broker through that slot's isolated installed
 `update_driver.windows_broker` entry, before selector publication and any

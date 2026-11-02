@@ -4014,7 +4014,9 @@ def _run_session_lifecycle(
 def _load_hook_client_module():
     import importlib.util
 
-    candidates = []
+    candidates = [
+        Path(__file__).resolve().parent / "_runtime_assets" / "scripts" / "hook_client.py",
+    ]
     try:
         candidates.append(cfg.install_dir() / "bin" / "hook_client.py")
     except Exception:
@@ -6291,6 +6293,15 @@ def main(argv: list[str] | None = None) -> int:
 
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
+
+    if args_list and args_list[0] in {"__source-setup", "__source-start"}:
+        parser = argparse.ArgumentParser(allow_abbrev=False)
+        parser.parse_args(args_list[1:])
+        if args_list[0] == "__source-setup":
+            return inst.setup_application()
+        from .status_monitor_cutover import start_application
+
+        return start_application()
 
     # Policy inspection must not resolve/adopt a project or prepare runtime state.
     policy_args = front_door_cli.policy_invocation(args_list)

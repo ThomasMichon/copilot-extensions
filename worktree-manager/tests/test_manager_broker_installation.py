@@ -238,6 +238,7 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     (["update", "--auto"], False),
     (["update", "--auto", "--force"], False),
     (["create", "--prompt", "--force"], False),
+    (["create", "--auto"], False),
 ])
 @pytest.mark.parametrize("held", [True, False])
 def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_work(
@@ -253,7 +254,7 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
     monkeypatch.chdir(caller)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "../killswitch.json")
     automatic = core.enqueue(
-        core.RequestSpec("automatic-fixture", cwd=str(caller)),
+        core.RequestSpec("automatic-fixture", ("update", "--auto"), cwd=str(caller)),
         runner=core.TrustedRunner((sys.executable, "-c", "raise SystemExit(99)"), str(state.root)),
     )
     executed = []
@@ -281,7 +282,7 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
         skip_instance_reconcile=False,
     )
     result = state.adapter._foreground_install(args, driver)
-    admitted = repair or not held
+    admitted = not (normalized[:1] == ["update"] and "--auto" in normalized and held)
     assert result == (state.slot if admitted else 3)
     skipped = core.status(automatic.id)
     assert skipped.state == "completed" and skipped.exit_code == (3 if held else 0)
@@ -293,11 +294,33 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
     assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if admitted else 3)
     assert executed == ([] if held else [automatic.id]) + ([bootstrap.id] if admitted else [])
     assert bootstrap.spec.argv == (
-        (*(("install", "repair-update") if normalized[:1] == ["update"] else ("install",)),
-         *(("--auto",) if "--auto" in normalized else ()))
+        ("update" if normalized[:1] == ["update"] and "--auto" in normalized else "install",
+         *(("repair-update",) if normalized[:1] == ["update"] else ()),
+         *(("--auto",) if normalized[:1] == ["update"] and "--auto" in normalized else ()))
     )
     assert "--force" not in bootstrap.runner.argv
     assert json.loads(switch.read_text()) == {"active": held}
+
+
+@pytest.mark.parametrize("command,inhibited", [
+    (["update", "--auto"], True),
+    (["--", "update", "--auto"], True),
+    (["update", "--force"], False),
+    (["install", "--auto"], False),
+    (["doctor", "--auto"], False),
+    (["launch", "--auto"], False),
+])
+def test_bootstrap_precheck_is_scoped_to_explicit_automatic_update(
+    installation, monkeypatch, command, inhibited,
+):
+    hold = installation.root / "automatic-hold.json"
+    hold.write_text('{"active":true}')
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(hold))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(installation.adapter, "_execution_driver", lambda payload: core)
+    assert installation.adapter._automatic_bootstrap_inhibited(
+        SimpleNamespace(command=command, payload=installation.root),
+    ) is inhibited
 
 
 @pytest.mark.parametrize(("automatic", "held"), [(False, True), (True, True), (True, False)])

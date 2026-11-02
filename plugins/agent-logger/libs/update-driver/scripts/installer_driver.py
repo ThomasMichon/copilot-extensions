@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -13,41 +14,59 @@ import sys
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 NATIVE_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALLER"
+SOURCE_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
 RECIPES = {
-    "agent-bridge": frozenset({"RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun"}),
-    "agent-codespaces": frozenset({"Force", "DryRun"}),
+    "agent-bridge": frozenset({"Repair", "RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun"}),
+    "agent-codespaces": frozenset({"Force", "DryRun", "Repair"}),
     "agent-dispatch": frozenset({
         "NoService", "NoSupervisor", "Interactive", "Purge", "Force",
-        "RequireGracefulCutover", "PreserveSupervisors", "ZeroDowntime", "DryRun",
+        "RequireGracefulCutover", "PreserveSupervisors", "ZeroDowntime", "DryRun", "Repair",
     }),
-    "agent-pull-requests": frozenset({"Force"}),
-    "agent-vault": frozenset({"NoService", "Purge", "Force", "DryRun"}),
-    "agent-mcp": frozenset({"Force"}),
+    "agent-pull-requests": frozenset({"Force", "Repair"}),
+    "agent-vault": frozenset({"NoService", "Purge", "Force", "DryRun", "Repair"}),
+    "agent-mcp": frozenset({"Force", "Repair", "Serve"}),
     "agent-index": frozenset({
-        "NoService", "Purge", "Force", "ZeroDowntime", "AllowTaskElevation", "DryRun",
+        "NoService", "Purge", "Force", "ZeroDowntime", "AllowTaskElevation", "DryRun", "Repair",
     }),
+    "agent-containers": frozenset({"Force", "Repair"}),
+    "agent-machines": frozenset({"Force", "Repair"}),
+    "agent-logger": frozenset({"Repair"}),
+    "agent-ssh": frozenset({"Force", "Repair"}),
+    "budget-guidance": frozenset({"Force", "Repair"}),
 }
-ENTRYPOINTS = {"agent-mcp": "init.ps1"}
+ENTRYPOINTS = dict.fromkeys(
+    ("agent-mcp", "agent-containers", "agent-machines"), "init.ps1",
+)
 DEFAULT_ACTIONS = frozenset({"install", "update", "provision", "uninstall"})
 ACTIONS = {
     "agent-mcp": frozenset({"install", "init", "provision", "broker-remove"}),
+    "agent-containers": frozenset({"install", "init", "provision"}),
+    "agent-machines": frozenset({"install", "init", "provision"}),
     "agent-dispatch": DEFAULT_ACTIONS | {"restore"},
 }
 CONTEXT_KEYS = (
-    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", "COPILOT_PROJECT_DIR",
     "AGENT_BRIDGE_INSTALL_DIR", "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_NONINTERACTIVE",
     "AGENT_BRIDGE_INSTALL_DEADLINE_SEC", "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC",
-    "AGENT_CODESPACES_INSTALL_DIR",
+    "AGENT_CODESPACES_INSTALL_DIR", "AGENT_CODESPACES_HOME",
+    "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_INSTALL_PROFILE",
+    "AGENT_LOGGER_HOME", "AGENT_LOGGER_REPO_CONFIG", "AGENT_WORKTREES_REPOS_YAML",
+    "AGENT_MACHINES_HOME", "AGENT_PULL_REQUESTS_HOME", "AGENT_SSH_HOME",
+    "BUDGET_GUIDANCE_HOME",
     "AGENT_DISPATCH_ALLOW_DOWNGRADE", "AGENT_DISPATCH_INSTALL_DEADLINE_SEC",
     "AGENT_DISPATCH_BASE_PYTHON", "AGENT_DISPATCH_RUN_DIR", "AGENT_DISPATCH_ROUTING_DIR",
     "AGENT_DISPATCH_SUPERVISE_MACHINE", "AGENT_PULL_REQUESTS_INSTALL_DEADLINE_SEC",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_ALLOW_DOWNGRADE",
     "AGENT_MCP_HOME", "AGENT_MCP_INSTALL_DEADLINE_SEC",
+    "AGENT_MCP_SERVE_SOCKET", "AGENT_MCP_NO_CUTOVER",
+    "AGENT_MCP_CUTOVER_HEALTH_TIMEOUT", "AGENT_MCP_CUTOVER_DRAIN_TIMEOUT",
     "AGENT_INDEX_INSTALL_DEADLINE_SEC", "AGENT_INDEX_ALLOW_DOWNGRADE", "AGENT_INDEX_ROLE",
     "AGENT_INDEX_CONFIG", "AGENT_INDEX_REPO", "AGENT_INDEX_MACHINE", "AGENT_INDEX_ENGINE_HOME",
     "AGENT_INDEX_ENGINE_HOST", "AGENT_INDEX_ENGINE_PORT", "AGENT_INDEX_ALLOW_TASK_ELEVATION",
     "CE_UPDATE_AUTH",
+    SOURCE_SELECTION_ENV,
 )
 TRANSIENT_KEYS = (
     NATIVE_ENV, "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_PLUGIN_INSTALL_STAGED",
@@ -100,7 +119,7 @@ def native_arguments(args) -> list[str]:
     if any(getattr(args, name, None) is not None for name, _flag in CELL_FIELDS):
         raise ValueError("Cell installation fields require an explicit cell context")
     options = args.options
-    if args.action not in ACTIONS.get(args.plugin, DEFAULT_ACTIONS):
+    if args.plugin not in RECIPES or args.action not in ACTIONS.get(args.plugin, DEFAULT_ACTIONS):
         raise ValueError("Unsupported native installer action")
     if (
         not isinstance(options, list)
@@ -112,6 +131,32 @@ def native_arguments(args) -> list[str]:
         "-Action", args.action, "-InstallDir", str(args.root.resolve()),
         *("-" + option for option in sorted(options)),
     ]
+    install_source = getattr(args, "install_source", None)
+    if "Repair" in options and install_source is None:
+        raise ValueError("Native repair requires its explicit installation source")
+    if "Serve" in options and install_source is None:
+        raise ValueError("Native serving requires its explicit installation source")
+    if install_source is not None:
+        if (
+            args.action not in {"install", "update", "init", "provision"}
+            or not install_source.is_absolute()
+        ):
+            raise ValueError("Unsupported native installation-source operation")
+        from install_source import native_selection, project_inputs, sources
+
+        with project_inputs(install_source, args.plugin) as (selected, inputs):
+            if selected.source_descriptor is None or sources.read_source_identity(
+                args.payload, selected.identity.package_version, plugin=args.plugin,
+            ) != selected.identity:
+                raise ValueError("Native source installation requires its exact source and repository provenance")
+            selection = json.dumps(native_selection(selected, inputs), sort_keys=True, separators=(",", ":"))
+        previous = getattr(args, "source_selection", None) or os.environ.get(SOURCE_SELECTION_ENV)
+        if previous is not None and previous != selection:
+            raise ValueError("Native installation-source selection changed after admission")
+        args.source_selection = selection
+        arguments.extend(["-InstallSource", str(install_source)])
+    elif os.environ.get(SOURCE_SELECTION_ENV):
+        raise ValueError("Native source selection requires its explicit installation input")
     record = getattr(args, "retained_runtime", None)
     expected = getattr(args, "retained_runtime_sha256", None)
     if args.action == "restore":
@@ -152,6 +197,7 @@ def cell_arguments(args) -> list[str]:
             "snapshot-prepare", "snapshot-stamp", "slot-provision", "slot-complete",
         }
         or args.options or getattr(args, "retained_runtime", None)
+        or getattr(args, "install_source", None) is not None
         or getattr(args, "retained_runtime_sha256", None)
         or Path(args.cell_context).absolute() != args.root / "install.json"
     ):
@@ -232,6 +278,8 @@ def execute(args) -> int:
         if args.check_native:
             return 0
         environment = {**os.environ, **participant_environment(), NATIVE_ENV: args.plugin}
+        if getattr(args, "source_selection", None) is not None:
+            environment[SOURCE_SELECTION_ENV] = args.source_selection
         if getattr(args, "cell_context", None) is not None:
             command = [sys.executable, "-I", "-B", str(args.payload / "scripts" / "cell_install.py"), *arguments]
         else:
@@ -239,6 +287,16 @@ def execute(args) -> int:
              "-ExecutionPolicy", "Bypass", "-File",
              str(args.payload / "scripts" / ENTRYPOINTS.get(args.plugin, "install.ps1")),
              *arguments]
+        if getattr(args, "source_selection", None) is not None:
+            selection = json.loads(args.source_selection)
+            command = [
+                sys.executable, "-I", "-B", str(args.payload / "scripts" / "command_binding.py"),
+                "--payload-root", str(args.payload), "--source-payload-root", str(args.payload),
+                "--plugin-id", args.plugin, "--legacy-root", str(args.root),
+                "--project-root", str(Path.cwd().resolve()), "--source-descriptor",
+                json.dumps(selection["source_descriptor"], sort_keys=True),
+                "--run-lifecycle", "--managed-deployment", "--", *command,
+            ]
         process = subprocess.Popen(
             command,
             env=environment, stdout=sys.stdout, stderr=sys.stderr,
@@ -266,6 +324,8 @@ def foreground(args, driver) -> int:
         "--payload", str(args.payload), "--root", str(args.root), "--shell", str(args.shell),
         "--plugin", args.plugin, "--action", args.action, "--participant",
     ]
+    if getattr(args, "install_source", None) is not None:
+        command.extend(["--install-source", str(args.install_source)])
     for option in args.options:
         command.extend(["--option", option])
     for name, flag in CELL_FIELDS:
@@ -278,6 +338,8 @@ def foreground(args, driver) -> int:
             "--retained-runtime-sha256", args.retained_runtime_sha256,
         ])
     context = {key: os.environ[key] for key in CONTEXT_KEYS if key in os.environ}
+    if getattr(args, "source_selection", None) is not None:
+        context[SOURCE_SELECTION_ENV] = args.source_selection
     request = driver.enqueue(
         driver.RequestSpec(
             "plugin-native-install", request_arguments(args), project=str(args.root.resolve()),
@@ -310,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--option", dest="options", action="append", default=[])
     parser.add_argument("--retained-runtime", type=Path)
     parser.add_argument("--retained-runtime-sha256")
+    parser.add_argument("--install-source", type=Path)
     for name, _flag in CELL_FIELDS:
         parser.add_argument(
             "--" + name.replace("_", "-"),

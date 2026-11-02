@@ -323,9 +323,7 @@ def inspect_archive(
                     if None in node:
                         raise WheelError("ambiguous wheel file/directory members")
                     node = node.setdefault(part.casefold(), {})
-                    if part.casefold().endswith(".dist-info"):
-                        if index != 0:
-                            raise WheelError("ambiguous wheel dist-info")
+                    if index == 0 and part.casefold().endswith(".dist-info"):
                         prefixes.add(part + "/")
                 if not member.is_dir():
                     if node:

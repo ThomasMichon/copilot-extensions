@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 from contextlib import contextmanager
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,15 +42,54 @@ def selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return root
 
 
-def _select(root: Path, payload: Path, identity, *, repair: bool = False) -> Path:
+def _select(root: Path, payload: Path, identity, *, repair: bool = False, profile: bool = False) -> Path:
     adapter = si._runtime_installer()
-    generation = identity.runtime_version + (".repair." + "f" * 32 if repair else "")
+    generation = identity.runtime_version
+    receipt = None
+    local = ("copilot-extensions-worktree-manager",)
+    if profile:
+        binding = {
+            "component": "worktree-manager", "mode": "source",
+            "release": {
+                "identity": "source:" + identity.source_commit,
+                "sha256": "sha256:" + identity.assembly_hash,
+            },
+        }
+        lock = "sha256:" + hashlib.sha256(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")).encode(),
+        ).hexdigest()
+        receipt = {
+            "construction": "closed-wheels", "lock_id": lock, "binding": binding,
+            "distributions": {local[0]: {
+                "version": identity.package_version,
+                "filename": f"copilot_extensions_worktree_manager-{identity.package_version}-py3-none-any.whl",
+                "sha256": "sha256:" + "1" * 64,
+            }},
+        }
+        generation += ".profile." + lock[7:23]
+    if repair:
+        generation += ".repair." + "f" * 32
     slot = si.version_slot(generation, root)
     shutil.copytree(payload, slot / "payload")
     python = slot / ("Scripts/python.exe" if si.os.name == "nt" else "bin/python")
     python.parent.mkdir(exist_ok=True)
     python.write_text("fixture interpreter")
-    adapter.runtime.mark_complete(root, generation, payload_hash="a" * 64)
+    payload_hash = "a" * 64
+    if receipt is not None:
+        (slot / ".runtime-input-origins.json").write_text(json.dumps({
+            "schema": "installer-engine.frozen-input-origins", "version": 2,
+            "wheel_inputs": receipt, "local_packages": list(local),
+        }))
+        reuse = adapter.engine.WheelReuseInputs(
+            generation, json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            time.monotonic() + 30,
+        )
+        payload_hash = adapter.engine._wheel_construction_hash(
+            adapter.engine._construction_hash(
+                adapter.engine._source_files(adapter.engine._package_roots(payload)), (), local,
+            ), reuse,
+        )
+    adapter.runtime.mark_complete(root, generation, payload_hash=payload_hash)
     si._write_marker(root, generation)
     si._deploy_binstubs()
     si._write_control_plane_provider_manifest(payload, root=root)
@@ -69,6 +110,44 @@ def test_exact_source_plan_reports_actual_selected_generation(selection, tmp_pat
     assert result.version == "1.2.3"
     assert result.slot == str(slot)
     assert result.marker == slot.name
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_profile_source_plan_reuses_bound_selected_generation(selection, tmp_path, repair):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, profile=True, repair=repair)
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "already-current", result
+    assert result.slot == str(slot) and result.marker == slot.name
+    reused, local = si._runtime_installer()._source_profile_reuse(payload, identity, slot)
+    assert reused.generation == slot.name
+    assert local == ("copilot-extensions-worktree-manager",)
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("fault", ["binding", "locals", "completion-hash"])
+def test_profile_source_plan_refuses_changed_constructor_binding(selection, tmp_path, fault):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, profile=True)
+    if fault == "completion-hash":
+        marker = slot / ".install-complete.json"
+        data = json.loads(marker.read_text())
+        data["payload_hash"] = "b" * 64
+        marker.write_text(json.dumps(data))
+    else:
+        path = slot / ".runtime-input-origins.json"
+        data = json.loads(path.read_text())
+        if fault == "binding":
+            data["wheel_inputs"]["binding"]["release"]["identity"] = "source:" + "b" * 40
+        else:
+            data["local_packages"] = []
+        path.write_text(json.dumps(data))
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "error", result
+    assert "source-profile evidence is invalid" in result.reason
     assert _bytes(selection) == before
 
 

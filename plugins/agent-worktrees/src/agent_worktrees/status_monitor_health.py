@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Protocol
 
 from .runtime_identity import PROCESS_GENERATION, PROCESS_VERSION
@@ -29,6 +30,8 @@ def response(
     if shutdown:
         roster["worktrees"]["status"] = "shutdown"
     ready = roster["worktrees"]["status"] in {"ready", "unready"}
+    environment = Path(sys.prefix).resolve()
+    slot = environment.parent if environment.name == ".venv" else environment
     return {
         "status": "draining" if admission_closed else ("ready" if ready else "unavailable"),
         "published": published, "pid": os.getpid(), **roster,
@@ -36,5 +39,5 @@ def response(
         "repositories": repository["repositories"],
         "allocationLinker": allocation["allocationLinker"],
         "runtime_generation": PROCESS_GENERATION, "version": PROCESS_VERSION,
-        "runtime_slot": os.path.basename(os.path.realpath(sys.prefix)),
+        "runtime_slot": slot.name,
     }

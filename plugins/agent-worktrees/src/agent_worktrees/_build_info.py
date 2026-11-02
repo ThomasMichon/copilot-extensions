@@ -13,6 +13,10 @@ Query at runtime::
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import sys
+
 BUILD_INFO: dict[str, str] = {
     "version": "1.0.0",
     "commit": "dev",
@@ -20,3 +24,15 @@ BUILD_INFO: dict[str, str] = {
     "build_timestamp": "unknown",
     "source": "repo",
 }
+
+_environment = Path(sys.prefix).resolve()
+if _environment.name == ".venv":
+    _record = _environment.parent / ".runtime-bootstrap" / "build-info.json"
+    if _record.exists():
+        _value = json.loads(_record.read_text(encoding="utf-8"))
+        if not isinstance(_value, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in _value.items()
+        ):
+            raise RuntimeError("Installed runtime build provenance is malformed")
+        BUILD_INFO = _value

@@ -120,36 +120,49 @@ def require_immutable_environment(
     """
     base = slot.resolve()
 
+    def native(path: Path) -> Path:
+        value = os.path.abspath(path)
+        if os.name == "nt" and not value.startswith("\\\\?\\"):
+            value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+        return Path(value)
+
     def text_lines(path: Path) -> list[str]:
         try:
-            return path.read_text(encoding="utf-8-sig").splitlines()
+            return native(path).read_text(encoding="utf-8-sig").splitlines()
         except UnicodeError as exc:
             raise error_type(f"Invalid installed text metadata: {path}") from exc
 
     def ordinary(path: Path) -> None:
-        info = path.lstat()
+        info = native(path).lstat()
         if (
             not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
             or getattr(info, "st_file_attributes", 0) & 0x400
         ):
             raise error_type(f"Installed runtime content must be ordinary files, not redirected: {path}")
 
-    config = slot / "pyvenv.cfg"
-    if os.path.lexists(config):
-        ordinary(config)
-        for line in text_lines(config):
-            key, separator, value = line.partition("=")
-            if separator and key.strip().casefold() == "include-system-site-packages":
-                if value.strip().casefold() != "false":
-                    raise error_type("Deployed Python must not include system site-packages")
+    environments = [slot]
+    nested = slot / ".venv"
+    if os.path.lexists(nested):
+        ordinary(nested)
+        environments.append(nested)
+    sites = []
+    for environment in environments:
+        config = environment / "pyvenv.cfg"
+        if os.path.lexists(config):
+            ordinary(config)
+            for line in text_lines(config):
+                key, separator, value = line.partition("=")
+                if separator and key.strip().casefold() == "include-system-site-packages":
+                    if value.strip().casefold() != "false":
+                        raise error_type("Deployed Python must not include system site-packages")
 
-    sites = [slot / "Lib" / "site-packages"]
-    for name in ("lib", "lib64"):
-        library = slot / name
-        if os.path.lexists(library):
-            if not library.resolve().is_relative_to(base):
-                raise error_type(f"Installed library path escapes its runtime: {library}")
-            sites.extend(library.glob("python*/site-packages"))
+        sites.append(environment / "Lib" / "site-packages")
+        for name in ("lib", "lib64"):
+            library = environment / name
+            if os.path.lexists(library):
+                if not library.resolve().is_relative_to(base):
+                    raise error_type(f"Installed library path escapes its runtime: {library}")
+                sites.extend(library.glob("python*/site-packages"))
     seen = set()
     for site in sites:
         if not os.path.lexists(site):
@@ -165,8 +178,8 @@ def require_immutable_environment(
         def walk_error(error: OSError) -> None:
             raise error
 
-        for directory, directories, files in os.walk(site, onerror=walk_error):
-            parent = Path(directory)
+        for directory, directories, files in os.walk(native(site), onerror=walk_error):
+            parent = site / Path(directory).relative_to(native(site))
             for name in directories + files:
                 path = parent / name
                 ordinary(path)
@@ -176,7 +189,7 @@ def require_immutable_environment(
                 path = parent / name
                 if name.casefold() == "direct_url.json" and parent.name.casefold().endswith(".dist-info"):
                     try:
-                        origin = read_json(path)
+                        origin = read_json(native(path))
                     except ValueError as exc:
                         raise error_type(f"Invalid installed origin metadata: {path}") from exc
                     if not isinstance(origin, dict) or not isinstance(origin.get("dir_info", {}), dict):
@@ -716,7 +729,9 @@ function script:ConvertTo-RuntimeConstructionArgument([string]$Value) {
 function script:Start-RuntimeConstruction {
     param([string]$Python, [string]$Helper, [string]$Root, [string]$Version,
           [string]$PayloadHash, [string]$LinkName, [string]$DevOwner = '',
-          [string]$Footprint = '', [string]$Plugin = '')
+          [string]$Footprint = '', [string]$Plugin = '', [string]$InstallSource = '',
+          [string]$Payload = '', [string]$UvCommand = '', [string]$HealthModule = '',
+          [switch]$Repair)
     if ($script:RuntimeConstructionSession) {
         if ($script:RuntimeConstructionSession.Key -ne "$Root/$Version" -or
             $script:RuntimeConstructionSession.Process.HasExited) {
@@ -746,8 +761,24 @@ function script:Start-RuntimeConstruction {
     $psi.FileName = $base
     $argv = @('-I', '-B', $Helper, '--root', $Root, '--link-name', $LinkName,
               'construction-session', $Version, '--payload-hash', $PayloadHash)
-    if ($DevOwner) { $argv += @('--dev-owner', $DevOwner) }
-    if ($Footprint) { $argv += @('--footprint', $Footprint, '--plugin', $Plugin) }
+    if ($InstallSource) {
+        if ($DevOwner -or $Footprint -or -not $Payload -or -not $Plugin -or
+            -not $UvCommand -or -not $HealthModule) {
+            throw 'Source wheel construction requires its complete independent native input'
+        }
+        $argv = @('-I', '-B', (Join-Path (Split-Path -Parent $Helper) 'install_source.py'),
+            '--native-session', '--install-source', $InstallSource, '--component', $Plugin,
+            '--payload', $Payload, '--root', $Root, '--uv', $UvCommand, '--base-python', $base,
+            '--health-module', $HealthModule, '--expected-runtime-version', $Version,
+            '--expected-payload-hash', $PayloadHash)
+        if ($Repair) { $argv += '--repair' }
+    } else {
+        if ($Payload -or $UvCommand -or $HealthModule -or $Repair) {
+            throw 'Source construction arguments require an installation-source snapshot'
+        }
+        if ($DevOwner) { $argv += @('--dev-owner', $DevOwner) }
+        if ($Footprint) { $argv += @('--footprint', $Footprint, '--plugin', $Plugin) }
+    }
     $psi.Arguments = ($argv | ForEach-Object { ConvertTo-RuntimeConstructionArgument $_ }) -join ' '
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -770,6 +801,20 @@ function script:Start-RuntimeConstruction {
     $reuse = $admission.admission -eq 'reuse'
     $selected = $Version
     $construction = $null
+    if ($InstallSource) {
+        $versionMatches = $admission.version -ceq $Version
+        if ($Repair) {
+            $versionMatches = $admission.version -cmatch (
+                '^' + [regex]::Escape($Version) + '\.repair\.[0-9a-f]{32}$'
+            ) -and $admission.reused -eq $false
+        }
+        if (-not $versionMatches -or $admission.payload_hash -cne $PayloadHash -or -not $reuse) {
+            $process.StandardInput.Close()
+            $process.WaitForExit()
+            throw 'Source construction returned a different native candidate'
+        }
+        $selected = $admission.version
+    }
     if ($Footprint) {
         if ($admission.version -notmatch '^[0-9][A-Za-z0-9._+-]*$' -or
             $admission.construction -notin @('fresh', 'incremental')) {

@@ -8,7 +8,9 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -76,11 +78,13 @@ def test_registration_revalidates_publication_after_initial_read(
             "GUEST_TEST_REGISTRATION": str(publication),
         }, monkeypatch,
     )
+    getuid = cast(Callable[[], int], getattr(os, "getuid"))
+    getgid = cast(Callable[[], int], getattr(os, "getgid"))
     lookup = profile / "test-bin" / "getent"
     lookup.write_text(
         "#!/bin/sh\n"
-        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {os.getuid()} ] || exit 1\n'
-        f"printf '%s\\n' {shlex.quote(f'fixture:x:{os.getuid()}:{os.getgid()}:fixture:{profile}:/bin/sh')}\n",
+        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {getuid()} ] || exit 1\n'
+        f"printf '%s\\n' {shlex.quote(f'fixture:x:{getuid()}:{getgid()}:fixture:{profile}:/bin/sh')}\n",
         encoding="utf-8",
     )
     lookup.chmod(0o755)

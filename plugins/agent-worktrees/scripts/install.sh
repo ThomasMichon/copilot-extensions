@@ -47,6 +47,8 @@ context_governance_unchanged() {
 }
 __aw_action="${1:-status}"
 __aw_install_dir_arg=""
+__aw_install_source=""
+__aw_source_descriptor=""
 __aw_provision_missing_runtime=false
 __aw_remove_config=false
 __aw_project_name=""
@@ -86,6 +88,8 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
     elif [[ "${__aw_args[$__aw_i]}" == --project-name ||
             "${__aw_args[$__aw_i]}" == --machine ||
             "${__aw_args[$__aw_i]}" == --owner ||
+            "${__aw_args[$__aw_i]}" == --install-source ||
+            "${__aw_args[$__aw_i]}" == --runtime-source-descriptor ||
             "${__aw_args[$__aw_i]}" == --runtime-publication-plan ||
             "${__aw_args[$__aw_i]}" == --runtime-publication-digest ||
             "${__aw_args[$__aw_i]}" == --runtime-publication-python ]]; then
@@ -96,6 +100,10 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
         if [[ "${__aw_args[$__aw_i]}" == --project-name ]]; then
             __aw_project_name="${__aw_args[$((__aw_i + 1))]}"
             __aw_project_name_index=$((__aw_i + 1))
+        elif [[ "${__aw_args[$__aw_i]}" == --install-source ]]; then
+            __aw_install_source="${__aw_args[$((__aw_i + 1))]}"
+        elif [[ "${__aw_args[$__aw_i]}" == --runtime-source-descriptor ]]; then
+            __aw_source_descriptor="${__aw_args[$((__aw_i + 1))]}"
         fi
         ((__aw_i += 1))
     elif [[ "$__aw_action" == uninstall ]]; then
@@ -191,6 +199,26 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 --source-payload-root "$(__aw_uninstall_native_path "$__aw_admission_source")"
                 --project-root "$(__aw_uninstall_native_path "$__aw_admission_project")"
             )
+            if [[ -n "$__aw_install_source" ]]; then
+                case "$__aw_action" in
+                    install|update|provision|repair) ;;
+                    *) printf '%s\n' 'ERROR: --install-source selects only installation, update, provisioning or independent repair' >&2; exit 1 ;;
+                esac
+                __aw_selected_source="$("$__aw_admission_python" -I -S -B \
+                    "$PLUGIN_DIR/scripts/install_source.py" --install-source "$__aw_install_source" \
+                    --component agent-worktrees --payload "$PLUGIN_DIR" |
+                    "$__aw_admission_python" -I -S -B -c \
+                    'import json,sys; value=json.load(sys.stdin)["source_descriptor"]; assert value is not None, "installation source requires repository provenance"; print(json.dumps(value, sort_keys=True))')" || exit 1
+                if [[ -n "$__aw_source_descriptor" ]]; then
+                    "$__aw_admission_python" -I -S -B -c \
+                        'import json,sys; assert json.loads(sys.argv[1]) == json.loads(sys.argv[2]), "installation source repository changed"' \
+                        "$__aw_source_descriptor" "$__aw_selected_source" || exit 1
+                fi
+                __aw_source_descriptor="$__aw_selected_source"
+            fi
+            if [[ -n "$__aw_source_descriptor" ]]; then
+                __aw_admission_args+=(--source-descriptor "$__aw_source_descriptor")
+            fi
             __aw_admission_operation=publish
             [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
             if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
@@ -789,10 +817,12 @@ REMOVE_CONFIG=false
 MACHINE=""
 PROJECT_NAME_ARG=""
 INSTALL_DIR_ARG=""
+INSTALL_SOURCE_ARG=""
 OWNER_ARG=""
 RUNTIME_PUBLICATION_PLAN=""
 RUNTIME_PUBLICATION_DIGEST=""
 RUNTIME_PUBLICATION_PYTHON=""
+RUNTIME_SOURCE_DESCRIPTOR=""
 ZERO_DOWNTIME=false
 
 while [[ $# -gt 0 ]]; do
@@ -802,15 +832,23 @@ while [[ $# -gt 0 ]]; do
         --machine)       MACHINE="$2"; shift 2 ;;
         --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
         --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
+        --install-source) INSTALL_SOURCE_ARG="$2"; shift 2 ;;
         --owner)         OWNER_ARG="$2"; shift 2 ;;
         --runtime-publication-plan) RUNTIME_PUBLICATION_PLAN="$2"; shift 2 ;;
         --runtime-publication-digest) RUNTIME_PUBLICATION_DIGEST="$2"; shift 2 ;;
         --runtime-publication-python) RUNTIME_PUBLICATION_PYTHON="$2"; shift 2 ;;
+        --runtime-source-descriptor) RUNTIME_SOURCE_DESCRIPTOR="$2"; shift 2 ;;
         --provision-missing-runtime) shift ;;
         --zero-downtime) ZERO_DOWNTIME=true; shift ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+if [[ -n "$INSTALL_SOURCE_ARG" ]]; then
+    case "$ACTION" in
+        install|update|provision|repair) ;;
+        *) echo "ERROR: --install-source selects only installation, update, provisioning or independent repair" >&2; exit 1 ;;
+    esac
+fi
 
 # ── Infer project name ──────────────────────────────────────────────────
 # Priority: --project-name arg > existing config
@@ -1255,6 +1293,7 @@ _deploy_python_runtime() {
             ;;
     esac
     [[ -z "$OWNER_ARG" ]] || mode_args+=(--owner "$OWNER_ARG")
+    [[ -z "$INSTALL_SOURCE_ARG" ]] || mode_args+=(--install-source "$INSTALL_SOURCE_ARG")
     [[ "$ACTION" != update || "${AGENT_WORKTREES_TARGETED_UPDATE:-}" == "1" ]] || mode_args+=(--recover-adopted-manager)
     base="$(_bootstrap_python exclude-venv-dir)" || {
         err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
@@ -3524,8 +3563,10 @@ case "$ACTION" in
         # left a project-less install with no tool binstub at all.
         deploy_tool_binstub
         reconcile_binstubs
-        deploy_copilot_plugin
-        ensure_copilot_experimental
+        if [[ -z "$INSTALL_SOURCE_ARG" ]]; then
+            deploy_copilot_plugin
+            ensure_copilot_experimental
+        fi
         assert_path
 
         # -- Project-specific (only when adopting) --
@@ -3778,8 +3819,10 @@ case "$ACTION" in
         # project-less `update` also keeps `agent-worktrees` on PATH.
         deploy_tool_binstub
         reconcile_binstubs
-        deploy_copilot_plugin
-        ensure_copilot_experimental
+        if [[ -z "$INSTALL_SOURCE_ARG" ]]; then
+            deploy_copilot_plugin
+            ensure_copilot_experimental
+        fi
 
         # -- Project-specific (only when a project is known) --
         if $HAS_PROJECT; then

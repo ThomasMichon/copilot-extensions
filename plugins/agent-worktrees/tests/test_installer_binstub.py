@@ -185,7 +185,7 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
     assert "agent-worktrees.exe" not in global_cmd
     global_ps1 = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text()
     assert "resolve-runtime.ps1" in global_ps1
-    assert "-m agent_worktrees" in global_ps1
+    assert "'-m', 'agent_worktrees'" in global_ps1
     assert "agent-worktrees.exe" not in global_ps1
 
     for name in ("demoproj.cmd", "demoproj.ps1"):
@@ -330,6 +330,43 @@ def _reg(monkeypatch, names: list[str]) -> None:
         inst, "read_projects_registry",
         lambda **_kwargs: snapshot,
     )
+
+
+def test_source_setup_reuses_commands_and_preserves_old_inventory(monkeypatch, tmp_path):
+    slot = tmp_path / "application" / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(inst.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    local_bin = tmp_path / "bin"
+    local_bin.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: local_bin)
+    _reg(monkeypatch, ["demo", "agent-worktrees"])
+    registry = inst.projects_yaml_path().read_bytes()
+    stale = local_bin / "prior.cmd"
+    stale.write_bytes(b"retained old command\n")
+    assert inst.setup_application() == 0
+    first = {path: path.read_bytes() for path, _ in inst._project_binstub_specs("demo")}
+    assert inst.setup_application() == 0
+    assert {path: path.read_bytes() for path in first} == first
+    assert inst.projects_yaml_path().read_bytes() == registry
+    assert stale.read_bytes() == b"retained old command\n"
+    assert not (local_bin / "agent-worktrees.cmd").exists()
+    assert inst._read_receipt("demo")["owner"]["payload_root"] == slot.parent.parent.as_posix()
+
+
+def test_source_setup_refuses_modified_commands_without_touching_data(monkeypatch, tmp_path):
+    local_bin = tmp_path / "bin"
+    local_bin.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: local_bin)
+    _reg(monkeypatch, ["demo"])
+    assert inst.setup_application() == 0
+    target = inst._project_binstub_specs("demo")[0][0]
+    target.write_bytes(b"operator edit\n")
+    registry = inst.projects_yaml_path().read_bytes()
+    assert inst.setup_application() == 1
+    assert target.read_bytes() == b"operator edit\n"
+    assert inst.projects_yaml_path().read_bytes() == registry
 
 
 def test_reconcile_adds_registered_and_removes_stale(monkeypatch, tmp_path: Path):

@@ -377,6 +377,21 @@ def test_complete_actual_wheel_closure_never_executes_payload():
     assert profile.record()["wheels"][0]["selected_extras"] == ["metrics"]
     assert all(not stream.closed for stream in wheels.values())
 
+
+def test_duplicate_requires_dist_is_preserved_and_verified_against_wheel_bytes():
+    record = _record()
+    requirements = record["wheels"][0]["requires_dist"]
+    requirements.append(requirements[0])
+    streams = {}
+    for wheel in record["wheels"]:
+        data = _encoded(wheel)
+        wheel["sha256"] = "sha256:" + hashlib.sha256(data).hexdigest()
+        streams[wheel["filename"]] = io.BytesIO(data)
+    profile = validate_profile(record)
+    _verify(profile, streams)
+    assert profile.record()["wheels"][0]["requires_dist"] == requirements
+
+
 def test_retained_file_handles_use_the_same_complete_byte_contract(tmp_path):
     from contextlib import ExitStack
 

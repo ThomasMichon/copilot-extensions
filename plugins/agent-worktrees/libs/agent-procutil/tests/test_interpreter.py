@@ -18,19 +18,21 @@ import agent_procutil as pu
 from agent_procutil._interpreter import physical_executable
 
 
-def test_external_python_cache_cold_warm_and_readonly(tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+def test_external_python_cache_cold_warm_and_readonly(tmp_path, nested):
     root = tmp_path / "owned runtime"
     source = tmp_path / "versions" / "immutable" / ("module-path-" + "x" * 100)
     source.mkdir(parents=True)
     module = source / "cache_witness.py"
     module.write_text("VALUE = 42\n", encoding="utf-8")
     runtime = source.parent
+    environment_root = runtime / ".venv" if nested else runtime
     marker = runtime / ".install-complete.json"
     marker.write_text(json.dumps({
         "version": runtime.name, "completed_at": "2026-11-01T11:00:00Z",
         "pid": 1, "payload_hash": "a" * 64,
     }), encoding="utf-8")
-    record = runtime / "Lib" / "site-packages" / "witness.dist-info" / "RECORD"
+    record = environment_root / "Lib" / "site-packages" / "witness.dist-info" / "RECORD"
     record.parent.mkdir(parents=True)
     def record_module():
         digest = base64.urlsafe_b64encode(hashlib.sha256(module.read_bytes()).digest()).decode().rstrip("=")
@@ -38,7 +40,8 @@ def test_external_python_cache_cold_warm_and_readonly(tmp_path):
 
     record_module()
     environment = dict(os.environ)
-    arguments = pu.python_cache_args(root, runtime=runtime)
+    arguments = pu.python_cache_args(root, runtime=environment_root)
+    assert arguments == pu.python_cache_args(root, runtime=runtime)
     assert not root.exists()
 
     def snapshot():
@@ -62,7 +65,7 @@ def test_external_python_cache_cold_warm_and_readonly(tmp_path):
 
     def run(cache_root, *flags):
         result = subprocess.run(  # noqa: S603 - actual owned interpreter and fixture source
-            [sys.executable, "-I", *flags, *pu.python_cache_args(cache_root, runtime=runtime),
+            [sys.executable, "-I", *flags, *pu.python_cache_args(cache_root, runtime=environment_root),
              "-c", code, str(source), str(module)],
             env={**environment, "PYTHONPYCACHEPREFIX": str(tmp_path / "foreign"),
                  "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(tmp_path / "foreign")},

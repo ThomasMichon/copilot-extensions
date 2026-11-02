@@ -31,6 +31,7 @@ from . import config as cfg
 from . import launch_wrapper_assets as lwa
 from . import project_state, registry_paths
 from . import output, pr_authority
+from .installer_binstub_io import _write_binstub_if_changed
 from agent_procutil import no_window_kwargs
 
 if TYPE_CHECKING:
@@ -445,38 +446,6 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     return True
 
 
-def _write_binstub_if_changed(dst: Path, content: str) -> bool:
-    """Write *content* to *dst* only if the on-disk content differs.
-
-    Comparison is newline-normalized so that a stub written by a sibling
-    generator (init.ps1 / install.ps1 with CRLF, init.sh with LF) is treated
-    as unchanged when its logical content matches.
-
-    This is critical on Windows: ``register``/``adopt``/``update`` run *through*
-    the global ``agent-worktrees.cmd`` binstub, then call this function, which
-    would otherwise rewrite that very file mid-execution. cmd.exe resumes
-    reading a batch file by byte offset after a child process returns, so
-    rewriting the running stub to a different length corrupts the read (the
-    classic stray ``'b' is not recognized`` from ``exit /b`` plus a spurious
-    re-run). Skipping the write when nothing changed avoids the corruption.
-
-    Returns True if a write occurred, False if skipped.
-    """
-    def _norm(s: str) -> str:
-        return s.replace("\r\n", "\n").replace("\r", "\n")
-
-    if dst.exists():
-        try:
-            existing = dst.read_text(encoding="utf-8", errors="replace")
-            if _norm(existing) == _norm(content):
-                return False
-        except OSError:
-            pass
-    # newline="" preserves the literal \r\n / \n already embedded in content
-    dst.write_text(content, encoding="utf-8", newline="")
-    return True
-
-
 # The global ``agent-worktrees`` command shares ~/.local/bin with the project
 # launchers, so its name is reserved: reconciliation never deploys it as a
 # project stub (that would clobber the global launcher) and never removes it
@@ -519,7 +488,21 @@ def is_reserved_project_command(project: str) -> bool:
     return key in _RESERVED_BINSTUB_NAMES
 
 
+def _application_root() -> Path | None:
+    environment = Path(sys.prefix).resolve()
+    slot = environment.parent
+    if (
+        environment.name == ".venv" and slot.parent.name == "versions"
+        and (slot / "application.json").is_file()
+    ):
+        return slot.parent.parent
+    return None
+
+
 def _payload_root(repo_dir: str | Path | None = None) -> Path:
+    application = _application_root()
+    if application is not None:
+        return application
     explicit = os.environ.get("AGENT_WORKTREES_PAYLOAD_ROOT")
     if explicit:
         candidate = Path(explicit).expanduser()
@@ -547,10 +530,15 @@ def _payload_root(repo_dir: str | Path | None = None) -> Path:
 
 def _binstub_owner(repo_dir: str | Path | None = None) -> dict[str, str]:
     root = _payload_root(repo_dir)
-    try:
-        manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        manifest = {}
+    if _application_root() is not None:
+        from ._build_info import BUILD_INFO
+
+        manifest = {"name": "agent-worktrees", "version": BUILD_INFO["version"]}
+    else:
+        try:
+            manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
     normalized = root.as_posix()
     match = re.search(
         r"/\.copilot/installed-plugins/([^/]+)/agent-worktrees(?:/|$)",
@@ -795,7 +783,9 @@ def _project_binstub_specs(
         (local_bin() / name, content)
         for name, content in render(
             project, _payload_root(repo_dir), windows=platform.system() == "Windows",
-            user_bin=local_bin() if registry_paths.installation_context() is None else None,
+            user_bin=local_bin() if (
+                _application_root() is not None or registry_paths.installation_context() is None
+            ) else None,
         ).items()
     ]
 
@@ -1033,6 +1023,26 @@ def _projects_snapshot_for_mutation() -> dict:
         raise BinstubOwnershipError(
             f"cannot mutate commands without a valid authoritative projects registry: {exc}"
         ) from exc
+
+
+def setup_application() -> int:
+    """Refresh registered commands without pruning registries or old inventory."""
+    with _binstub_lock("__registries__"):
+        registry = _projects_snapshot_for_mutation()
+        blocked = []
+        for project in sorted(registry["projects"]):
+            if is_reserved_project_command(project) or _project_is_knowledge_only(project):
+                continue
+            try:
+                with _binstub_lock(project):
+                    _deploy_project_binstub_unlocked(project, registry=registry)
+            except (BinstubOwnershipError, OSError) as error:
+                blocked.append(project)
+                output.warn(str(error))
+        if blocked:
+            output.warn("Unresolved project commands: " + ", ".join(blocked))
+            return 1
+        return 0
 
 
 def _reconcile_binstubs_unlocked() -> dict:

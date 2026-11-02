@@ -44,6 +44,7 @@ from .pr_observation_config import ObservationConfig, parse_observation
 from .pr_publication_config import PublicationChecksConfig, parse_publication_checks, parse_string_tuple
 from .pr_publication_labels import PublicationOrigin, parse_origin
 from .pr_related_binding import parse_repository
+from .runtime_paths import resolve_venv_python
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
     cached_load_config_scope,
@@ -2054,6 +2055,13 @@ def tracking_dir(name: str | None = None) -> Path:
     return project_dir(name) / "worktrees"
 
 
+def runtime_install_dir() -> Path:
+    """Physical installation root, independently of the registry/data root."""
+    environment = Path(sys.prefix).resolve()
+    slot = environment.parent if environment.name == ".venv" else environment
+    return slot.parent.parent if slot.parent.name == "versions" else install_dir()
+
+
 def venv_python() -> Path:
     """Path to the active runtime slot's Python interpreter.
 
@@ -2061,30 +2069,4 @@ def venv_python() -> Path:
     complete slot, matching the canonical hook/binstub resolver. The ``.venv``
     link is retired (#1106).
     """
-    root = install_dir()
-    win = sys.platform == "win32"
-    sub = ("Scripts", "python.exe") if win else ("bin", "python")
-    try:
-        ver = (root / "current-version").read_text("utf-8").strip()
-    except OSError:
-        ver = ""
-    if ver:
-        p = root / "versions" / ver / sub[0] / sub[1]
-        if p.exists():
-            return p
-    try:
-        last_known_good = (root / "last-known-good").read_text("utf-8").strip()
-    except OSError:
-        last_known_good = ""
-    if last_known_good:
-        p = root / "versions" / last_known_good / sub[0] / sub[1]
-        if p.exists():
-            return p
-    versions = root / "versions"
-    if versions.is_dir():
-        for slot in sorted(versions.iterdir(), reverse=True):
-            p = slot / sub[0] / sub[1]
-            if p.exists():
-                return p
-    # No installed slot -- return the canonical (marker or empty) slot path.
-    return root / "versions" / (ver or last_known_good or "") / sub[0] / sub[1]
+    return resolve_venv_python(runtime_install_dir(), windows=sys.platform == "win32")

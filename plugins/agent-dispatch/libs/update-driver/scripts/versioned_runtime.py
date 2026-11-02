@@ -283,16 +283,20 @@ def _write_last_known_good(root: Path, version: str) -> None:
 def slot_python(root: Path, version: str) -> Path | None:
     """The interpreter inside ``versions/<version>``, or ``None`` if not present.
 
-    Checks the POSIX (``bin/python``) then Windows (``Scripts/python.exe``)
-    layout, so it resolves correctly on either OS and under git-bash on Windows.
+    Application slots use ``.venv``; historical direct-slot environments remain
+    supported on either OS and under git-bash on Windows.
     """
     if not version:
         return None
     vdir = version_dir(root, version)
-    for sub in SLOT_PYTHON_SUBPATHS:
-        p = vdir / sub
-        if p.is_file():
-            return p
+    nested = vdir / ".venv"
+    if _is_link(nested):
+        return None
+    for environment in (nested, vdir):
+        for sub in SLOT_PYTHON_SUBPATHS:
+            p = environment / sub
+            if p.is_file():
+                return p
     return None
 
 

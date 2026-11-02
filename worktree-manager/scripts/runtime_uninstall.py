@@ -11,6 +11,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from installer_dependency_config import native_retained_path
 import versioned_runtime as runtime
 
 SCRIPTS = Path(__file__).absolute().parent
@@ -36,33 +37,34 @@ def _contract(path: Path) -> None:
 
 
 def _indirect(path: Path) -> bool:
-    value = path.lstat()
+    value = Path(native_retained_path(path)).lstat()
     return stat.S_ISLNK(value.st_mode) or bool(getattr(value, "st_file_attributes", 0) & 0x400)
 
 
 def _plain(path: Path) -> Path:
     path = path.absolute()
     for entry in reversed((path, *path.parents)):
-        if os.path.lexists(entry) and _indirect(entry):
+        if os.path.lexists(native_retained_path(entry)) and _indirect(entry):
             raise ValueError(f"Indirect removal path refused: {entry}")
     return path
 
 
 def _state(path: Path) -> dict:
     _plain(path.parent)
-    before = path.lstat()
+    native = Path(native_retained_path(path))
+    before = native.lstat()
     if _indirect(path):
         # CPython's copied POSIX venv may still create this local library alias.
-        if path.name != "lib64" or os.readlink(path) != "lib":
+        if path.name != "lib64" or os.readlink(native) != "lib":
             raise ValueError(f"Unsupported linked artifact: {path}")
-        kind, digest = "link", hashlib.sha256(os.readlink(path).encode()).hexdigest()
+        kind, digest = "link", hashlib.sha256(os.readlink(native).encode()).hexdigest()
     elif stat.S_ISDIR(before.st_mode):
         kind, digest = "directory", ""
     elif stat.S_ISREG(before.st_mode):
-        kind, digest = "file", hashlib.sha256(path.read_bytes()).hexdigest()
+        kind, digest = "file", hashlib.sha256(native.read_bytes()).hexdigest()
     else:
         raise ValueError(f"Unsupported artifact type: {path}")
-    after = path.lstat()
+    after = native.lstat()
     fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns")
     if any(getattr(before, key) != getattr(after, key) for key in fields):
         raise ValueError(f"Artifact changed during inspection: {path}")
@@ -74,7 +76,8 @@ def _tree(slot: Path) -> dict[str, dict]:
     result = {}
 
     def walk(directory: Path) -> None:
-        for path in sorted(directory.iterdir()):
+        for name in sorted(os.listdir(native_retained_path(directory))):
+            path = directory / name
             if path.parent == slot and path.name in (INVENTORY, runtime.COMPLETE_MARKER):
                 continue
             value = _state(path)
@@ -86,12 +89,43 @@ def _tree(slot: Path) -> dict[str, dict]:
     return result
 
 
+def _manager_layout(slot: Path) -> tuple[dict, Path, Path]:
+    if not (slot / "application.json").is_file():
+        import tomllib
+
+        payload = slot / "payload"
+        project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        return project, payload / "references" / "uninstall-contract.json", payload
+    from importlib.metadata import distributions
+
+    environment = slot / ".venv"
+    libraries = (
+        [environment / "Lib" / "site-packages"] if os.name == "nt"
+        else list((environment / "lib").glob("python*/site-packages"))
+    )
+    if len(libraries) != 1:
+        raise ValueError("Manager application has no unique installed library")
+    _plain(libraries[0])
+    installed = [
+        item for item in distributions(path=[str(libraries[0])])
+        if item.metadata["Name"] == "copilot-extensions-worktree-manager"
+    ]
+    if len(installed) != 1:
+        raise ValueError("Manager application has no unique installed distribution")
+    project = {"name": installed[0].metadata["Name"], "version": installed[0].version}
+    contract = Path(installed[0].locate_file(
+        "worktree_manager/_runtime_assets/references/uninstall-contract.json",
+    ))
+    return project, contract, slot
+
+
 def seal_inventory(slot: Path, *, frontdoors: dict[str, str], provider: dict) -> None:
     """Called only by installed Manager preparation, before slot completion."""
     _plain(slot)
     if os.path.lexists(slot / INVENTORY) or os.path.lexists(slot / runtime.COMPLETE_MARKER):
         raise ValueError("Manager inventory requires an unfinished, unsealed candidate")
-    _contract(slot / "payload" / "references" / "uninstall-contract.json")
+    _project, contract, _source = _manager_layout(slot)
+    _contract(contract)
     record = {
         "schema": "worktree-manager.artifact-inventory", "version": 1,
         "generation": slot.name, "slot": _state(slot),
@@ -123,13 +157,13 @@ def _generated_bytecode(slot: Path, sealed: dict, current: dict) -> dict:
         source_name = source.as_posix()
         if sealed.get(source_name, {}).get("kind") != "file":
             raise ValueError(f"Manager bytecode has no sealed source: {slot / path}")
-        content = (slot / path).read_bytes()
+        content = Path(native_retained_path(slot / path)).read_bytes()
         if len(content) <= 16 or hashlib.sha256(content).hexdigest() != state["digest"]:
             raise ValueError(f"Manager bytecode changed or is malformed: {slot / path}")
         magic, flags = content[:4], int.from_bytes(content[4:8], "little")
         if magic[2:] != b"\r\n" or flags not in (0, 1, 3):
             raise ValueError(f"Unsupported Manager bytecode header: {slot / path}")
-        source_path = slot / source
+        source_path = Path(native_retained_path(slot / source))
         if flags:
             valid = content[8:16] == _imp.source_hash(
                 int.from_bytes(magic, "little"), source_path.read_bytes(),
@@ -150,8 +184,6 @@ def _generated_bytecode(slot: Path, sealed: dict, current: dict) -> dict:
 
 
 def _validate_inventory(slot: Path) -> dict:
-    import tomllib
-
     _plain(slot)
     inventory = slot / INVENTORY
     publication = runtime._runtime_component("versioned_runtime_publication")
@@ -169,20 +201,19 @@ def _validate_inventory(slot: Path) -> dict:
     ):
         raise ValueError(f"Manager construction inventory changed or is unsupported: {slot}")
     extras = _generated_bytecode(slot, record["entries"], current)
-    metadata = slot / "payload" / "pyproject.toml"
-    project = tomllib.loads(metadata.read_text(encoding="utf-8"))["project"]
+    project, contract, payload = _manager_layout(slot)
     if (
         project["name"] != "copilot-extensions-worktree-manager"
         or runtime.package_version(slot.name) != project["version"]
     ):
         raise ValueError("Removal target belongs to another package")
-    _contract(slot / "payload" / "references" / "uninstall-contract.json")
+    _contract(contract)
     if not runtime.is_complete(slot.parent.parent, slot.name):
         raise ValueError("Removal target is not a completed canonical Manager runtime")
     if runtime.slot_python(slot.parent.parent, slot.name) is None:
         raise ValueError("Removal target has no canonical interpreter")
     source = runtime._runtime_component("versioned_runtime_source")
-    source.read_source_identity(slot / "payload", project["version"], plugin="worktree-manager")
+    source.read_source_identity(payload, project["version"], plugin="worktree-manager")
     if not isinstance(record["frontdoors"], dict) or not isinstance(record["provider"], dict):
         raise ValueError("Malformed Manager integration ownership")
     return dict(record, entries={**record["entries"], **extras})

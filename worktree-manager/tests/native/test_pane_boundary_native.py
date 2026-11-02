@@ -99,13 +99,14 @@ def test_wrapper_validation_cancels_and_command_dispatch_preserves_exit(tmp_path
 
 
 @pytest.mark.parametrize("replacement", ["B", "absent"])
-def test_current_boundary_is_resolved_after_old_runtime_removal(tmp_path, replacement):
+@pytest.mark.parametrize("layout", ["flat", "nested", "upgrade"])
+def test_current_boundary_is_resolved_after_old_runtime_removal(tmp_path, replacement, layout):
     pwsh = shutil.which("pwsh")
     assert pwsh, "PowerShell 7 is required"
     root = tmp_path / "Manager with spaces"
-    first = boundary_runtime(root, "A", diagnostics=True)
+    first = boundary_runtime(root, "A", diagnostics=True, nested=layout == "nested")
     if replacement == "B":
-        boundary_runtime(root, "B", diagnostics=True)
+        boundary_runtime(root, "B", diagnostics=True, nested=layout != "flat")
     marker = root / "current-version"
     marker.write_text("A\n", encoding="utf-8")
     ready, proceed = tmp_path / "ready.json", tmp_path / "proceed"

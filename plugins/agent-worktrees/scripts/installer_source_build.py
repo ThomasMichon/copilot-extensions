@@ -64,6 +64,14 @@ def retained_input_graph(
                 inputs.wheel_inputs,
             ) != inputs.payload_hash:
                 raise RuntimeError("Runtime source changed before closed wheel construction")
+            if inputs.application is not None:
+                yield engine.FrozenInputs(
+                    frozen.plugin, frozen.packages, inputs.payload_hash,
+                    retained_hash=frozen.payload_hash, extras=inputs.extras,
+                    local_packages=inputs.local_packages, wheel_inputs=inputs.wheel_inputs,
+                    application=inputs.application,
+                )
+                return
             with engine.retain_closed_wheel_install(
                 str(uv), inputs.wheel_inputs.snapshot, python=python,
             ) as transaction:

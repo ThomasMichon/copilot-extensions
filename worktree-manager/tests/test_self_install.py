@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -64,6 +65,112 @@ def test_payload_version_reads_init(tmp_path):
     assert payload_version(pd) == "9.9.9-dev1"
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_running_payload_uses_outer_slot_source(tmp_path, monkeypatch, nested):
+    slot = tmp_path / "versions" / "1.2.3"
+    payload = _fake_payload(slot, "1.2.3")
+    prefix = slot / ".venv" if nested else slot
+    package = prefix / "Lib" / "site-packages" / "worktree_manager" / "__init__.py"
+    monkeypatch.setattr(si.sys, "prefix", str(prefix))
+    monkeypatch.setattr(si.worktree_manager, "__file__", str(package))
+    assert si.running_payload_dir() == payload
+    assert si.payload_version() == "1.2.3"
+
+
+@pytest.mark.parametrize("failure", [None, "qualification", "activation", "wrong-root"])
+def test_app_only_self_install_qualifies_and_transactionally_activates_without_source(
+    tmp_path, monkeypatch, failure,
+):
+    installer = si._runtime_installer()
+    root = tmp_path / "root"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text('{"name":"worktree-manager"}', encoding="utf-8")
+    scripts = Path(__file__).resolve().parents[2] / "libs" / "installer-engine"
+    for name, target in (
+        ("runtime_application_install.py", "install.py"),
+        ("runtime_application_binstubs.py", "runtime_application_binstubs.py"),
+    ):
+        shutil.copyfile(scripts / name, slot / target)
+    monkeypatch.setattr(si.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(
+        si.worktree_manager, "__file__",
+        str(slot / ".venv" / "Lib" / "site-packages" / "worktree_manager" / "__init__.py"),
+    )
+    references = Path(si.worktree_manager.__file__).parent / "_runtime_assets" / "references"
+    references.mkdir(parents=True)
+    shutil.copyfile(
+        Path(__file__).resolve().parents[1] / "references" / "control-plane-provider.json",
+        references / "control-plane-provider.json",
+    )
+    monkeypatch.setattr(si.worktree_manager, "__version__", "1.2.3")
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    monkeypatch.setattr(si, "_runtime_installer", lambda: installer)
+    events = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("an installed application must not be used as source")
+
+    @contextmanager
+    def qualified(candidate, record):
+        assert candidate == slot and record["name"] == "worktree-manager"
+        events.append("qualified")
+        if failure == "qualification":
+            raise RuntimeError("injected qualification failure")
+        yield None, lambda: events.append("unchanged")
+        events.append("released")
+
+    original = si.importlib.util.spec_from_file_location
+
+    def application_spec(name, path):
+        spec = original(name, path)
+        if name == "_manager_application_install":
+            execute = spec.loader.exec_module
+
+            def load(module):
+                execute(module)
+                monkeypatch.setattr(module, "_application", lambda _slot: {"name": "worktree-manager"})
+                monkeypatch.setattr(module, "_qualified", qualified)
+
+            spec.loader.exec_module = load
+        return spec
+
+    def activate(_root, _version, **options):
+        assert events[0] == "qualified"
+        options["before_publish"]()
+        events.append("published")
+        options["after_publish"]()
+
+    def startup(_root, candidate, *, start_if_missing):
+        assert candidate == slot
+        assert start_if_missing is True
+        events.append("started")
+        if failure == "activation":
+            raise RuntimeError("injected activation failure")
+
+    monkeypatch.setattr(si, "running_payload_dir", forbidden)
+    monkeypatch.setattr(installer, "candidate", forbidden)
+    monkeypatch.setattr(installer, "activate", activate)
+    monkeypatch.setattr(installer, "_activate_after_bootstrap_update", startup)
+    monkeypatch.setattr(si.importlib.util, "spec_from_file_location", application_spec)
+    result = si.self_install(
+        root=tmp_path / "foreign" if failure == "wrong-root" else root, dry_run=False,
+        _reconcile_instances=False,
+    )
+    if failure is None:
+        assert result.action == "installed", result.reason
+        assert result.version == "1.2.3" and result.slot == str(slot)
+        assert events.index("published") < events.index("started") < events.index("released")
+    else:
+        assert result.action == "error", result
+        assert not si.local_bin().exists() or not any(path.is_file() for path in si.local_bin().iterdir())
+        if failure == "wrong-root":
+            assert "another installation" in result.reason
+            assert events == []
+    assert not (slot / "payload").exists()
+
+
 def test_copy_payload_preserves_bundled_dbus_next_wheel(tmp_path):
     source = Path(__file__).resolve().parents[1]
     payload = _fake_payload(tmp_path, "1.2.3")
@@ -85,6 +192,139 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert res.version == "1.2.3"
     assert current_version(root) is None
     assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("generation", ["1.2.3", "1.2.3+repair.unit"])
+def test_application_publication_never_runs_legacy_cleanup(tmp_path, monkeypatch, generation):
+    payload = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    slot = root / "versions" / generation
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "installer-engine" / "runtime_application_binstubs.py",
+        slot / "runtime_application_binstubs.py",
+    )
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    def forbidden(_root):
+        raise AssertionError("ordinary/Repair app publication cannot clean old artifacts")
+
+    def activate(_root, _version, **options):
+        options["before_publish"]()
+
+    monkeypatch.setattr(si, "clean_legacy_artifacts", forbidden)
+    monkeypatch.setattr(si._runtime_installer(), "activate", activate)
+    result = si._complete_candidate(
+        SimpleNamespace(slot=slot, reused=False), payload, root,
+        previous=None, was_current=False,
+    )
+    assert result.action == "installed" and not result.cleaned
+    assert si._control_plane_provider_manifest_path(payload, root=root).is_file()
+    assert set(Path(path).name for path in result.binstubs) == {
+        "worktree-manager", "worktree-manager.sh", "worktree-manager.cmd", "worktree-manager.ps1",
+    }
+    assert not si._binstubs_are_stale(application_slot=slot)
+
+
+@pytest.mark.parametrize("incumbent", ["legacy", "foreign"])
+def test_application_frontdoors_migrate_only_owned_bytes(tmp_path, monkeypatch, incumbent):
+    root = tmp_path / "root"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "installer-engine" / "runtime_application_binstubs.py",
+        slot / "runtime_application_binstubs.py",
+    )
+    local_bin = _patch_local_bin(monkeypatch, tmp_path)
+    si._deploy_binstubs()
+    primary = local_bin / ("worktree-manager.cmd" if os.name == "nt" else "worktree-manager")
+    if incumbent == "foreign":
+        primary.write_bytes(b"foreign launcher\n")
+        before = {path: path.read_bytes() for path in local_bin.iterdir()}
+        with pytest.raises(RuntimeError, match="Foreign Manager command preserved"):
+            si._deploy_binstubs(application_slot=slot)
+        assert {path: path.read_bytes() for path in local_bin.iterdir()} == before
+    else:
+        si._deploy_binstubs(application_slot=slot)
+        assert not si._binstubs_are_stale(application_slot=slot)
+        assert si._binstubs_are_stale()
+
+
+def test_application_status_checks_qualified_slot_not_a_source_payload(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "installer-engine" / "runtime_application_binstubs.py",
+        slot / "runtime_application_binstubs.py",
+    )
+    _patch_local_bin(monkeypatch, tmp_path)
+    si._deploy_binstubs(application_slot=slot)
+    si._write_marker(root, slot.name)
+    monkeypatch.setattr(si, "_slot_is_complete", lambda candidate: candidate == slot)
+    assert si.status(root).installed
+    assert not (slot / "payload").exists()
+    assert not si._core_install_satisfied("1.2.4", root)
+
+
+@pytest.mark.parametrize("incumbent", [False, True])
+@pytest.mark.parametrize("failure", ["frontdoor", "activation", "foreign-after"])
+def test_application_publication_recovers_only_its_created_frontdoors(
+    tmp_path, monkeypatch, incumbent, failure,
+):
+    payload = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "installer-engine" / "runtime_application_binstubs.py",
+        slot / "runtime_application_binstubs.py",
+    )
+    local_bin = _patch_local_bin(monkeypatch, tmp_path)
+    registry = _patch_provider_registry(monkeypatch, tmp_path)
+    if incumbent:
+        si._deploy_binstubs()
+        si._write_control_plane_provider_manifest(payload, root=root)
+    before = {path: path.read_bytes() for directory in (local_bin, registry)
+              if directory.exists() for path in directory.iterdir() if path.is_file()}
+    primary = local_bin / "worktree-manager"
+
+    def activate(_root, _version, **options):
+        options["before_publish"]()
+        options["after_publish"]()
+
+    def fail_activation(_slot):
+        if failure == "foreign-after":
+            primary.write_bytes(b"foreign after publication\n")
+        raise RuntimeError("injected activation failure")
+
+    replace = si._replace_with_retry
+
+    def fail_frontdoor(source, target):
+        if target.name == "worktree-manager.ps1" and source.suffix == ".tmp":
+            raise RuntimeError("injected frontdoor failure")
+        replace(source, target)
+
+    if failure == "frontdoor":
+        monkeypatch.setattr(si, "_replace_with_retry", fail_frontdoor)
+    monkeypatch.setattr(si._runtime_installer(), "activate", activate)
+    message = "changed during recovery" if failure == "foreign-after" else "injected"
+    with pytest.raises(RuntimeError, match=message):
+        si._complete_candidate(
+            SimpleNamespace(slot=slot, reused=False), payload, root,
+            previous=None, was_current=False, after_activate=fail_activation,
+            transactional_activation=True,
+        )
+    if failure == "foreign-after":
+        assert primary.read_bytes() == b"foreign after publication\n"
+    else:
+        after = {path: path.read_bytes() for directory in (local_bin, registry)
+                 if directory.exists() for path in directory.iterdir() if path.is_file()}
+        assert after == before
 
 
 @pytest.mark.parametrize("marker", [None, "", "../outside"])

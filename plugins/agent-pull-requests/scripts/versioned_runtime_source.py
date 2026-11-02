@@ -12,7 +12,6 @@ import re
 import shutil as shutil
 import stat
 import sys
-import tempfile
 import time as time
 from types import ModuleType
 from typing import Any
@@ -126,7 +125,8 @@ def _stage_redirect(
     root: Path, name: str, content: bytes, mode: int,
     owned: dict[Path, tuple[int, int]], receipt: Any = None, target: Path | None = None,
 ) -> Path:
-    fd, temporary = tempfile.mkstemp(prefix=f".{name}.redirect-", dir=root)
+    publication = _runtime()._runtime_component("versioned_runtime_publication")
+    fd, temporary = publication._temporary_file(root, f".{name}.redirect-")
     path = Path(temporary)
     opened = os.fstat(fd)
     owned[path] = opened.st_dev, opened.st_ino
@@ -442,7 +442,17 @@ def assembly_hash(payload: Path, *, on_progress=None) -> str:
 
 def payload_package_version(payload: Path, plugin: str) -> str:
     """Read the selected consumer's attributed package identity."""
-    if plugin == "worktree-manager":
+    standalone = {
+        "worktree-manager": "copilot-extensions-worktree-manager",
+        "fleet-manager": "fleet-manager",
+        "pr-service": "agent-pull-requests-service",
+        "chat-service": "agent-chat-service",
+        "dispatch-service": "agent-dispatch-service",
+        "ssh-service": "agent-ssh-service",
+        "index-service": "agent-index-service",
+        "index-engine": "agent-index-engine",
+    }
+    if plugin in standalone:
         import tomllib
 
         data = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
@@ -450,9 +460,9 @@ def payload_package_version(payload: Path, plugin: str) -> str:
         if (
             not isinstance(manifest, dict) or not isinstance(manifest.get("name"), str)
             or re.sub(r"[-_.]+", "-", manifest["name"]).lower()
-            != "copilot-extensions-worktree-manager"
+            != standalone[plugin]
         ):
-            raise SourceIdentityError("Materialized Manager project identity does not match")
+            raise SourceIdentityError("Materialized standalone project identity does not match")
     else:
         manifest = json.loads(
             (payload / "plugin.json").read_text(encoding="utf-8"),
@@ -712,13 +722,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=N
     import os as _os
 
     def _lstat_mode(p: Path, context: str) -> int:
-        # An explicit lstat (never following the final symlink component),
-        # with any OSError other than "does not exist" propagating. This is
-        # deliberately NOT Path.is_symlink()/is_dir()/is_file(): those
-        # catch OSError internally (including PermissionError) and return
-        # False, which would silently misclassify -- and potentially drop
-        # -- an entry this function could not actually stat, rather than
-        # failing closed like every other check in this function.
+        # lstat preserves the final link and propagates unreadable-entry errors;
+        # Path.is_* can silently misclassify those failures as absence.
         try:
             return _os.lstat(p).st_mode
         except FileNotFoundError:
@@ -751,14 +756,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=N
     # regardless of the order `paths` was passed in.
     ordered_roots = sorted(roots, key=lambda r: len(r.parts), reverse=True)
 
-    # The common ancestor of every declared root is itself a deterministic
-    # function of the ROOT SET (never of the order `paths` was passed in,
-    # and never of where that set happens to live on disk): relocating the
-    # whole checkout moves the ancestor too, but every root's path RELATIVE
-    # to it is unchanged. Label roots by that relative path instead of their
-    # absolute one, so the fingerprint is both order- and location-
-    # independent while still disambiguating two roots that merely share a
-    # basename (e.g. "src" under two different parents).
+    # Relative labels preserve order/location independence and distinguish
+    # equal basenames under different parents.
     common_root = Path(_os.path.commonpath([str(r) for r in roots]))
 
     def _root_label(root_path: Path) -> str:

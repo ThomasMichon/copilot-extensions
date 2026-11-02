@@ -664,7 +664,7 @@ def test_generated_launcher_trace_identity_does_not_disqualify_a_spare(pool, mon
     assert json.loads((slot.directory / "request.json").read_text())["launch_id"] == "sample-fresh-launch"
 
 
-@pytest.mark.parametrize("retained", [False, True])
+@pytest.mark.parametrize("retained", [False, True, "app"])
 def test_runtime_commands_ignore_conflicting_python_paths(tmp_path, monkeypatch, retained):
     import sys
     from agent_procutil import no_window_kwargs
@@ -687,7 +687,7 @@ def test_runtime_commands_ignore_conflicting_python_paths(tmp_path, monkeypatch,
             "print(json.dumps(sys.argv[1:]))\n"
         )
         (prefix / ".install-complete.json").write_text("{}")
-        monkeypatch.setattr(sys, "prefix", str(prefix))
+        monkeypatch.setattr(sys, "prefix", str(prefix / ".venv" if retained == "app" else prefix))
     command = contract.runtime_command("worktree_manager", "--version")
     completed = subprocess.run(
         command, cwd=foreign, env=environment, capture_output=True, text=True,

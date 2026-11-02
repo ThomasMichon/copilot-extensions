@@ -11,7 +11,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
 import pytest
@@ -42,6 +42,98 @@ def test_driver_governance_uses_current_scripts(driver):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     assert Path(governance.__file__).resolve().parent == scripts
     assert governance.SCRIPTS == scripts
+
+
+def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
+    tmp_path, monkeypatch,
+):
+    import agent_worktrees
+    from agent_worktrees import runtime_candidate as candidate, update_stage
+
+    slot = tmp_path / "runtime" / "versions" / "1.2.3"
+    environment = slot / ".venv"
+    package = environment / "Lib" / "site-packages" / "agent_worktrees"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    source_scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in candidate._LIFECYCLE_FILES:
+        shutil.copyfile(source_scripts / name, scripts / name)
+    shutil.copytree(
+        source_scripts / "installation-context", scripts / "installation-context",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    (slot / ".runtime-bootstrap").mkdir()
+    build_info = package / "_build_info.py"
+    build_info.write_bytes(b"immutable wheel member\n")
+    frozen = tmp_path / "frozen-source"
+    frozen.mkdir()
+    (frozen / "__init__.py").write_text("source identity input\n", encoding="utf-8")
+    monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(sys, "prefix", str(environment))
+    monkeypatch.setattr(candidate, "distribution_version", lambda _name: "1.2.3")
+    candidate.prepare_runtime_candidate({
+        "version": "1.2.3", "frozen_plugin": str(frozen),
+        "deployment_source": json.dumps({"mode": "source"}),
+    })
+    record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
+    assert record["runtime_version"] == "1.2.3"
+    assert json.loads(record["deployment_source"])["payload_fingerprint"] == (
+        update_stage.fingerprint(frozen)
+    )
+    assert build_info.read_bytes() == b"immutable wheel member\n"
+    assert (slot / ".runtime-bootstrap" / "runtime-generation").read_text().strip() == (
+        record["runtime_generation"]
+    )
+    assert not (environment / ".runtime-bootstrap").exists()
+
+
+@pytest.mark.parametrize("legacy_paths", [
+    False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH")),
+])
+def test_application_preparation_retains_its_source_without_a_payload(
+    tmp_path, monkeypatch, legacy_paths,
+):
+    import agent_worktrees
+    from agent_worktrees import runtime_candidate as candidate
+
+    slot = tmp_path / "runtime" / "versions" / ("1.2.3+" + "a" * 140 if legacy_paths else "1.2.3")
+    package = slot / ".venv" / "Lib" / "site-packages" / "agent_worktrees"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    source_scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in candidate._LIFECYCLE_FILES:
+        shutil.copyfile(source_scripts / name, scripts / name)
+    shutil.copytree(source_scripts / "installation-context", scripts / "installation-context")
+    (slot / ".runtime-bootstrap").mkdir()
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    source = {"plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40}
+    (slot / "runtime-source.json").write_text(json.dumps(source), encoding="utf-8")
+    immutable = package / "_build_info.py"
+    immutable.write_bytes(b"immutable wheel\n")
+    monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(candidate, "distribution_version", lambda _name: "1.2.3")
+    if legacy_paths:
+        scan = os.scandir
+
+        def legacy_scandir(path):
+            value = os.fspath(path)
+            if len(value) >= 260 and not value.startswith("\\\\?\\"):
+                raise FileNotFoundError(3, "legacy Windows path limit", value)
+            return scan(path)
+
+        monkeypatch.setattr(os, "scandir", legacy_scandir)
+        assert len(str(scripts / "installation-context")) > 260
+    candidate.prepare_runtime_candidate()
+    record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
+    assert record["commit"] == source["source_commit"]
+    assert json.loads(record["deployment_source"]) == source
+    assert immutable.read_bytes() == b"immutable wheel\n"
+    assert not (slot / "payload").exists()
+    copied = slot / ".runtime-bootstrap" / "installation-context"
+    for member in (source_scripts / "installation-context").glob("*.py"):
+        assert (copied / member.name).read_bytes() == member.read_bytes()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installation ownership")
@@ -114,6 +206,12 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
         spec.loader.exec_module(engine)
         frozen = engine.freeze_inputs(plugin, owned / "repository")
     root = owned / "repository"
+    marketplace = root / ".github" / "plugin" / "marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({
+        "name": "runtime-fixture",
+        "plugins": [{"name": "agent-worktrees", "source": frozen.plugin.relative_to(root).as_posix()}],
+    }), encoding="utf-8")
     hooks = owned / "empty-hooks"
     hooks.mkdir()
     git = shutil.which("git")
@@ -159,8 +257,9 @@ def _slot(driver, root, version):
 
 
 @pytest.mark.parametrize("tampered", [False, True])
+@pytest.mark.parametrize("deployment", ["source", "closed-wheels", "repair"])
 def test_source_deployment_uses_exact_verified_snapshot_before_construction(
-    driver, tmp_path, monkeypatch, tampered,
+    driver, tmp_path, monkeypatch, tampered, deployment,
 ):
     from types import SimpleNamespace
 
@@ -198,9 +297,20 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
     class ConstructionReached(Exception):
         pass
 
+    wheels = None
+
     def construct(requested, version, **kwargs):
         assert not tampered
-        assert requested == root and version == identity.runtime_version
+        expected = identity.runtime_version
+        if wheels is not None:
+            expected += ".profile." + wheels.receipt()["lock_id"][7:23]
+            assert kwargs["wheel_inputs"] is wheels
+            assert kwargs["local_packages"] == ("agent-worktrees",)
+        if deployment == "repair":
+            assert version.startswith(expected + ".repair.") and version != expected
+        else:
+            assert version == expected
+        assert requested == root
         snapshot = root / "snapshots" / identity.runtime_version
         assert kwargs["plugin"] == snapshot
         assert source.read_source_identity(snapshot, "1.0.0") == identity
@@ -211,13 +321,105 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
     monkeypatch.setattr(driver, "_source_provenance", attribute)
     monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
     error = source.SourceIdentityError if tampered else ConstructionReached
-    with pytest.raises(error):
-        driver.install(
-            root, plugin, payload=plugin, uv=tmp_path / "unused",
-            base_python=Path(sys.executable),
-        )
+    with ExitStack() as custody:
+        options = {}
+        if deployment != "source":
+            from installer_wheel_snapshot import retain_wheel_inputs
+
+            archive = tmp_path / "agent_worktrees-1.0.0-py3-none-any.whl"
+            archive.write_bytes(b"retained upstream-inspected wheel fixture")
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            retained = custody.enter_context(retain_wheel_inputs(
+                {archive.name: archive}, {archive.name: digest},
+                max_wheels=2, max_archive_bytes=1024, max_total_bytes=1024,
+                max_snapshot_bytes=4096, deadline=time.monotonic() + 30,
+            ))
+            profile = {
+                "component": "agent-worktrees", "mode": "source",
+                "release": {
+                    "identity": "source:" + identity.source_commit,
+                    "sha256": "sha256:" + identity.assembly_hash,
+                },
+            }
+            wheels = driver.engine.WheelInstallInputs(
+                retained, json.dumps(profile, sort_keys=True, separators=(",", ":")),
+                (("agent-worktrees", "1.0.0", archive.name, digest),),
+            )
+            options = {"wheel_inputs": wheels, "repair": deployment == "repair"}
+        with pytest.raises(error):
+            driver.install(
+                root, plugin, payload=plugin, uv=tmp_path / "unused",
+                base_python=Path(sys.executable), **options,
+            )
     if tampered:
         assert not root.exists()
+
+
+@pytest.mark.parametrize("mode", ["ordinary", "repair", "dev"])
+def test_install_source_cli_retains_inputs_through_native_owner_return(
+    driver, tmp_path, monkeypatch, mode,
+):
+    from types import SimpleNamespace
+    import install_source
+
+    snapshot = tmp_path / "snapshot"
+    plugin = tmp_path / "plugin"
+    identity = SimpleNamespace(package_version="1.0.0")
+    selected = SimpleNamespace(payload=plugin, identity=identity)
+    wheels = object()
+    held = []
+
+    @contextmanager
+    def inputs(path, component):
+        assert path == snapshot and component == "agent-worktrees" and mode != "dev"
+        held.append(True)
+        try:
+            yield selected, wheels
+        finally:
+            held.pop()
+
+    def install(root, selected_plugin, **options):
+        assert held == [True] and selected_plugin == plugin
+        assert options["wheel_inputs"] is wheels and options["repair"] == (mode == "repair")
+        return {"runtime_version": "selected-generation"}
+
+    monkeypatch.setattr(install_source, "project_inputs", inputs)
+    monkeypatch.setattr(driver.runtime_source, "read_source_identity", lambda *a, **kw: identity)
+    monkeypatch.setattr(driver, "install", install)
+    result = tmp_path / "result.json"
+    arguments = [
+        "--root", str(tmp_path / "root"), "--plugin", str(plugin),
+        "--payload", str(plugin), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(result),
+        "--install-source", str(snapshot), "--mode", mode,
+    ]
+    if mode == "dev":
+        with pytest.raises(SystemExit) as refusal:
+            driver.main(arguments)
+        assert refusal.value.code == 2 and not result.exists()
+    else:
+        assert driver.main(arguments) == 0
+        assert json.loads(result.read_text()) == {"runtime_version": "selected-generation"}
+    assert not held
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+def test_native_frontend_refuses_source_inputs_for_status_before_touching_installation(
+    tmp_path, shell,
+):
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"{shell} is unavailable")
+    root = tmp_path / "untouched-installation"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script), "status",
+         "-InstallDir", str(root), "-InstallSource", str(tmp_path / "absent-source")],
+        capture_output=True, text=True, timeout=20, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode != 0 and "independent repair" in result.stderr
+    assert not root.exists()
 
 
 @pytest.mark.parametrize("source_backed", [False, True])
@@ -832,16 +1034,18 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     stdin=subprocess.DEVNULL, **no_window_kwargs(),
                 )
                 processes.append(transition)
-                successor = _wait_for(
+                draining = _wait_for(
                     lambda: (
-                        endpoint if (endpoint := routing.read_active_endpoint(
-                            route_root, verify_listener=False,
-                        )) is not None and endpoint.pid != old_pid else None
+                        state if (state := breadcrumb.read_breadcrumb(route_root)) is not None
+                        and state.get("state") == "draining" else None
                     ),
                     timeout=120,
-                    message="installer never published the successor route",
+                    message="installer never began the guarded predecessor drain",
                 )
-                identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+                assert draining["old"]["pid"] == old_pid
+                assert draining["requires_writer_reconciliation"] is True
+                identities[draining["new_pid"]] = diagnostics.process_start_time(draining["new_pid"])
+                assert routing.read_active_endpoint(route_root, verify_listener=False).pid == old_pid
                 demand_stop.set()
                 demand_thread.join(timeout=5)
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
@@ -855,6 +1059,16 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                         ):
                             pytest.fail("installer released a live cutover generation")
                 request_release.touch()
+                successor = _wait_for(
+                    lambda: (
+                        endpoint if (endpoint := routing.read_active_endpoint(
+                            route_root, verify_listener=False,
+                        )) is not None and endpoint.pid != old_pid else None
+                    ),
+                    timeout=120,
+                    message="installer never published its drained successor route",
+                )
+                assert successor.pid == draining["new_pid"]
                 assert transition.wait(timeout=180) == 0, log.read_text(encoding="utf-8", errors="replace")
             hook_thread.join(timeout=15)
             assert not hook_thread.is_alive()
@@ -1098,14 +1312,18 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
                 print(line, flush=True)
         return diagnostics
 
-    run(argv, "construct", 300)
+    construction = run(argv, "construct", 300)
     installed = json.loads(result.read_text(encoding="utf-8"))
     assert installed["reused"] is False
     assert (root / "current-version").read_text().strip() == installed["runtime_version"]
     python = Path(installed["runtime_python"])
     origins = json.loads((python.parent.parent / ".runtime-input-origins.json").read_text())
-    assert set(origins["source_wheels"]) == set(origins["packages"])
-    assert all("#sha256=" in value for value in origins["packages"].values())
+    assert "agent-worktrees:non-static-setuptools-contract" in construction
+    assert "retaining isolated source builds" in construction
+    assert "source_wheels" not in origins
+    assert set(origins["packages"]) == {
+        driver.engine._package_name(package) for package in driver.engine._package_roots(plugin)
+    }
     info_probe = [
         str(python), "-I", "-B", "-c",
         "import json; from agent_worktrees._build_info import BUILD_INFO; print(json.dumps(BUILD_INFO))",
@@ -1133,8 +1351,8 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
         "\n assert engine.runtime.is_complete(root,version,expect_hash=candidate.payload_hash)",
         str(plugin), str(root), uv, fresh_version,
     ]
-    diagnostics = run(fresh, "fresh-venv-from-cached-source", 180)
-    assert "Source wheel assembly: built=0 reused=" in diagnostics
+    diagnostics = run(fresh, "fresh-venv-from-retained-source", 180)
+    assert "agent-worktrees:non-static-setuptools-contract" in diagnostics
     assert (root / "current-version").read_text().strip() == installed["runtime_version"]
     argv[-1] = str(tmp_path / "uv-must-not-run")
     run(argv, "reuse-without-uv", 180)

@@ -30,7 +30,7 @@ $catalog = [ordered]@{
     payload = [ordered]@{ provenance = 'payload-local' }
     commands = $commands
 }
-@@CATALOG_BINDING_POWERSHELL@@$catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
+@@CATALOG_BINDING_POWERSHELL@@@@CATALOG_FLIGHT_POWERSHELL@@$catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
 $fence = '```'
 $context = @(
     '## @@PLUGIN@@ session command catalog'
@@ -40,6 +40,8 @@ $context = @(
     "${fence}json"
     $catalogJson
     $fence
+    ''
+    $runtimeStatus
 ) -join "`n"
 Write-Output (@{ additionalContext = $context } | ConvertTo-Json -Compress -Depth 3)
 exit 0

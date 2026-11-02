@@ -57,11 +57,12 @@ def test_invalid_transport_cancels_its_registration_without_starting_child(tmp_p
 
 
 @pytest.mark.parametrize("replacement", ["B", "absent"])
-def test_copied_wrapper_uses_current_handler_without_runtime_waiters(tmp_path, replacement):
+@pytest.mark.parametrize("layout", ["flat", "nested", "upgrade"])
+def test_copied_wrapper_uses_current_handler_without_runtime_waiters(tmp_path, replacement, layout):
     root = tmp_path / "Manager with spaces"
-    first = boundary_runtime(root, "A")
+    first = boundary_runtime(root, "A", nested=layout == "nested")
     if replacement == "B":
-        boundary_runtime(root, "B")
+        boundary_runtime(root, "B", nested=layout != "flat")
     marker = root / "current-version"
     marker.write_text("A\n", encoding="utf-8")
     owned = tmp_path / "session"

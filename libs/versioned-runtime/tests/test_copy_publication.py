@@ -27,12 +27,49 @@ def case(tmp_path: Path):
     bindings, before = [], {}
     for index, target in enumerate(targets):
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(f"old-{index}\n".encode())
+        with os.fdopen(publication._created_file(target), "wb") as stream:
+            stream.write(f"old-{index}\n".encode())
         source = sources / str(index)
         source.write_bytes(f"new-{index}\n".encode())
         before[target] = target.read_bytes()
         bindings.append(publication.CopyBinding(source, target, hashlib.sha256(source.read_bytes()).hexdigest()))
     return publication.CopyPublication(root, workspace, bindings), before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows inherited publication permissions")
+def test_created_publication_file_is_private_under_a_writable_parent(tmp_path):
+    directory = tmp_path / "writable-parent"
+    directory.mkdir()
+    grant = subprocess.run(
+        ["icacls", str(directory), "/grant", "*S-1-5-11:(OI)(CI)(M)"],
+        capture_output=True, text=True, creationflags=HEADLESS, timeout=15,
+    )
+    assert grant.returncode == 0, grant.stdout + grant.stderr
+
+    def permissions():
+        result = subprocess.run(
+            ["icacls", str(directory)], capture_output=True, text=True,
+            creationflags=HEADLESS, timeout=15, check=True,
+        )
+        return result.stdout
+
+    before = permissions()
+    plain = directory / "plain"
+    with plain.open("x+b") as stream:
+        stream.write(b"untrusted inherited permissions")
+        stream.flush()
+        with pytest.raises(publication.PublicationProofError, match="not owned"):
+            publication.state_fd(stream.fileno())
+    path = directory / "owned"
+    with os.fdopen(publication._created_file(path), "w+b") as stream:
+        stream.write(b"private publication")
+        stream.flush()
+        captured = publication.state_fd(stream.fileno())
+    assert publication.state_path(path, private=True) == captured
+    with pytest.raises(FileExistsError):
+        publication._created_file(path)
+    assert path.read_bytes() == b"private publication"
+    assert permissions() == before
 
 
 @pytest.mark.parametrize("settlement", ["keep", "retain", "rollback"])
@@ -158,7 +195,8 @@ p.CopyPublication(root,workspace,bindings).publish()
     assert not (transaction.workspace / "refused.jsonl").exists()
     if foreign:
         peer = targets[0].with_name("peer-replacement")
-        peer.write_bytes(targets[0].read_bytes())
+        with os.fdopen(publication._created_file(peer), "wb") as stream:
+            stream.write(targets[0].read_bytes())
         os.replace(peer, targets[0])
     observed = publication.state_path(targets[0])
     refused = publication.recover_uncontested(
@@ -367,7 +405,8 @@ def test_foreign_earlier_output_survives_a_later_copy_failure(tmp_path, monkeypa
         nonlocal peer_state
         if target == last and kwargs.get("phase") == "forward":
             peer = first.with_name("peer")
-            peer.write_bytes(b"foreign earlier helper")
+            with os.fdopen(publication._created_file(peer), "wb") as stream:
+                stream.write(b"foreign earlier helper")
             os.replace(peer, first)
             peer_state = publication.state_path(first)
             raise OSError("Injected later stage failure")
@@ -387,7 +426,8 @@ def test_foreign_earlier_output_survives_a_later_copy_failure(tmp_path, monkeypa
 @pytest.mark.skipif(os.name != "nt", reason="native CRT descriptor translation")
 def test_created_fd_capture_preserves_position_and_callers_text_mode(tmp_path):
     path = tmp_path / "literal"
-    path.write_bytes(b"a\r\nb\r\n")
+    with os.fdopen(publication._created_file(path), "wb") as stream:
+        stream.write(b"a\r\nb\r\n")
     fd = os.open(path, os.O_RDONLY | os.O_TEXT)
     try:
         value = publication.state_fd(fd)
@@ -430,7 +470,8 @@ def test_foreign_poststate_is_not_overwritten_at_live_keep(tmp_path, capsys):
     transaction.publish()
     target = transaction.bindings[0].target
     peer = target.with_name("peer")
-    peer.write_bytes(b"peer")
+    with os.fdopen(publication._created_file(peer), "wb") as stream:
+        stream.write(b"peer")
     os.replace(peer, target)
     identity = target.stat().st_ino
     transaction.keep()

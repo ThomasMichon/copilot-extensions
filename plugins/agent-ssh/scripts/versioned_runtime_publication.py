@@ -13,6 +13,7 @@ import re
 import stat
 import sys
 import tempfile
+import uuid
 from typing import Any, Callable, Iterator
 
 SCHEMA = "copilot-extensions.publication-proof"
@@ -40,6 +41,25 @@ def _pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _windows_owned(fd: int) -> bool:
     return lease_component().windows_owned_file(fd)
+
+
+def _created_file(path: Path) -> int:
+    _plain_parents(path)
+    if os.name == "nt":
+        return lease_component().windows_private_created_file(path)
+    return os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+
+
+def _temporary_file(parent: Path, prefix: str) -> tuple[int, str]:
+    if os.name != "nt":
+        return tempfile.mkstemp(prefix=prefix, dir=parent)
+    for _attempt in range(10):
+        path = parent / (prefix + uuid.uuid4().hex)
+        try:
+            return _created_file(path), str(path)
+        except FileExistsError:
+            continue
+    raise PublicationProofError("Private publication stage could not obtain a fresh name")
 
 
 def _plain_parents(path: Path) -> None:
@@ -199,7 +219,7 @@ class Receipt:
         self.path, self.root = absolute(path), absolute(root)
         self.targets = [absolute(target) for target in targets]
         _plain_parents(self.path)
-        fd, name = tempfile.mkstemp(prefix=".receipt-", dir=self.path.parent)
+        fd, name = _temporary_file(self.path.parent, ".receipt-")
         temporary = Path(name)
         created = os.fstat(fd)
         self.stream = os.fdopen(fd, "r+b", buffering=0)
@@ -371,7 +391,7 @@ def create_context(path: Path, root: Path, bindings: list[list[str]]) -> None:
         entries.append({"target": str(destination), "backup": str(saved) if saved else None,
                         "state": asdict(value) if value else None})
     _plain_parents(path)
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    fd = _created_file(path)
     created = os.fstat(fd)
     document = {"schema": CONTEXT_SCHEMA, "version": 1, "root": str(absolute(root)), "entries": entries,
                 "file_identity": [created.st_dev, created.st_ino]}
@@ -459,7 +479,7 @@ def cleanup_proofs(context: Path, receipts: list[Path], expected: list[list[str]
 
 
 def _stage(root: Path, target: Path, data: bytes, mode: int, receipt: Receipt, *, phase: str = "recovery") -> tuple[Path, PhysicalState]:
-    fd, name = tempfile.mkstemp(prefix=f".{target.name}.owned-", dir=target.parent)
+    fd, name = _temporary_file(target.parent, f".{target.name}.owned-")
     temporary = Path(name)
     try:
         with os.fdopen(fd, "w+b") as stream:
@@ -650,7 +670,7 @@ class CopyPublication:
                     backup = self.workspace / f"copy-before.{index}"
                     if before is not None:
                         data = self._bytes(item.target, before)
-                        fd = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                        fd = _created_file(backup)
                         with os.fdopen(fd, "w+b") as stream:
                             stream.write(data)
                             stream.flush()
@@ -778,7 +798,7 @@ def publish_selectors(
             if index and receipt is None:
                 last_good(root, version)
                 continue
-            fd, name = tempfile.mkstemp(prefix=f".{target.name}.activate-", dir=root)
+            fd, name = _temporary_file(root, f".{target.name}.activate-")
             temporary = Path(name)
             with os.fdopen(fd, "w+b") as stream:
                 stream.write((version + "\n").encode())

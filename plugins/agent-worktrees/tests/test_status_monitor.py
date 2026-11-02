@@ -3426,6 +3426,14 @@ def test_current_runtime_python_prefers_the_resolved_current_slot(monkeypatch, t
     assert status_monitor_reap_stale.current_runtime_python() == str(current_python)
 
 
+def test_current_runtime_python_validates_the_outer_application_slot(monkeypatch, tmp_path):
+    from agent_worktrees import config, status_monitor_reap_stale
+
+    current_python = _write_valid_slot(tmp_path, sub=(".venv", "Scripts", "python.exe"))
+    monkeypatch.setattr(config, "venv_python", lambda: current_python)
+    assert status_monitor_reap_stale.current_runtime_python() == str(current_python)
+
+
 def test_current_runtime_python_falls_back_to_sys_executable(monkeypatch):
     from agent_worktrees import config as _cfg
     from pathlib import Path

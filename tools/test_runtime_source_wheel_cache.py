@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import sys
 import threading
@@ -57,6 +58,50 @@ def test_stable_archive_selection_reuses_without_copying(assembly):
     selected.write_bytes(b"X" * selected.stat().st_size)
     with pytest.raises(WheelError, match="digest differs"):
         cache.cached_source_wheel(root, b"source+target+exact-backend", None, **arguments)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows long directory publication")
+def test_long_owned_cache_path_publishes_then_reuses_without_rebuilding(tmp_path):
+    root = tmp_path / ("long-installation-" + "x" * 130) / ("nested-" + "y" * 100)
+    root.mkdir(parents=True)
+    builds = []
+
+    def build(output):
+        builds.append(output)
+        wheel = output / "example-1-py3-none-any.whl"
+        wheel.write_bytes(b"selected artifact")
+        return wheel
+
+    arguments = {
+        "build": build, "validate": lambda _path: None,
+        "max_archive_bytes": 100, "deadline": time.monotonic() + 20,
+    }
+    first = cache.cached_source_wheel(root, b"long-native-source", None, **arguments)
+    arguments["build"] = lambda _path: pytest.fail("published native wheel was rebuilt")
+    assert cache.cached_source_wheel(root, b"long-native-source", None, **arguments) == first
+    assert first.read_bytes() == b"selected artifact" and len(builds) == 1
+
+
+def test_named_private_helper_directory_admits_its_created_proof(tmp_path):
+    import installer_dependency_policy as policy
+    import versioned_runtime_publication as publication
+
+    root = policy._private_retained_root(tmp_path, name="helper-publication-test")
+    path = root / "copies"
+    with path.open("x+b") as stream:
+        stream.write(b"owned helper input")
+        stream.flush()
+        captured = publication.state_fd(stream.fileno())
+    assert publication.state_path(path, private=True) == captured
+
+
+@pytest.mark.parametrize("name", ["", "..", "../outside", "nested/helper"])
+def test_private_helper_directory_refuses_nonlocal_names_before_creation(tmp_path, name):
+    import installer_dependency_policy as policy
+
+    with pytest.raises(policy.DependencyPolicyError, match="one ordinary name"):
+        policy._private_retained_root(tmp_path, name=name)
+    assert not list(tmp_path.iterdir())
 
 
 def test_fresh_output_reuses_exact_artifact_and_changed_inputs_rebuild(assembly):

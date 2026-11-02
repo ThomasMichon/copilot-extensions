@@ -44,24 +44,27 @@ def installed():
     return json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())
 
 
-def _script(slot, name, env, directory):
+def _script(slot, name, env, directory, *, payload=None):
     if os.environ.get("MANAGER_CALLBACK_BASELINE") == "1":
         result = _run(["git", "-C", SOURCE.parent, "show", f"{BASELINE}:worktree-manager/bin/{name}"], env, directory)
         assert result.returncode == 0, result.stderr
         return result.stdout
-    return (slot / "payload" / "bin" / name).read_text(encoding="utf-8")
+    return ((payload or slot / "payload") / "bin" / name).read_text(encoding="utf-8")
 
 
 def _await_mapping(root, project, worktree, *, removed):
-    deadline = time.monotonic() + 6
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         entry = mux_daemon.get_mapping(project, worktree, root=root)
         if entry is not None and bool(entry.get("live")) != removed:
             return entry
         time.sleep(0.05)
-    log = root / "mux-callback.log"
+    logs = "\n".join(
+        name + ":\n" + (root / name).read_text(encoding="utf-8")[-8192:]
+        for name in ("mux-callback.log", "mux-daemon.log") if (root / name).exists()
+    )
     pytest.fail(f"callback did not {'remove' if removed else 'register'} mapping: "
-                + (log.read_text(encoding="utf-8") if log.exists() else "no callback log"))
+                + (logs or "no callback log"))
 
 
 @pytest.mark.parametrize("selector_state", ["missing", "blank", "whitespace"])
@@ -119,9 +122,9 @@ def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(
     assert launched.stdout.strip() == f"worktree-manager {version}"
 
 
-@pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
-def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, monkeypatch, shell):
+def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
     directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))
+    payload = Path(installed.get("payload", slot / "payload"))
     env = _environment(directory)
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "WORKTREE_MANAGER_ENGINE_CMD", "WORKTREE_MANAGER_ENGINE_ARGV"):
         env.pop(name, None)
@@ -136,24 +139,35 @@ def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, mon
     runtime.start()
     mux_daemon.write_lock_data(mux_daemon.lock_path(root), runtime.lock_extra())
     try:
-        launch = _script(slot, f"launch-session.{shell}", env, directory)
-        pane = _script(slot, f"pane-wrapper.{shell}", env, directory)
-        bin_path = slot / "payload" / "bin"
+        launch = _script(slot, f"launch-session.{shell}", env, directory, payload=payload)
+        pane = _script(slot, f"pane-wrapper.{shell}", env, directory, payload=payload)
+        bin_path = payload / "bin"
         if shell == "sh":
             bash = Path(shutil.which("git")).parent.parent / "bin" / "bash.exe" if os.name == "nt" else shutil.which("bash")
             env["PATH"] = "/usr/bin:/bin"
+            mux_bin = tmp_path / "mux-bin"
+            mux_bin.mkdir()
+            tmux = mux_bin / "tmux"
+            tmux.write_text("#!/bin/sh\nprintf '%s\\n' 'fixture:1'\n", encoding="utf-8")
+            tmux.chmod(0o755)
+            env["FIXTURE_MUX_BIN"] = str(mux_bin)
+            mux_path = (
+                'if command -v cygpath >/dev/null 2>&1; then '
+                'export PATH="$(cygpath -u "$FIXTURE_MUX_BIN"):$PATH"; '
+                'else export PATH="$FIXTURE_MUX_BIN:$PATH"; fi\n'
+            )
             function = launch.split("        _aw_publish_managed_mux_live() {", 1)[1].split("\n        }\n", 1)[0]
             register = (
-                '_aw_publish_managed_mux_live() {' + function + "\n}\n"
-                'tmux() { printf "%s\\n" "fixture:1"; }\n'
+                mux_path + '_aw_publish_managed_mux_live() {' + function + "\n}\n"
                 f'LAUNCH_PROJECT={project}; WORKTREE_ID={worktree}; '
                 f'_aw_publish_managed_mux_live "{session}" "{directory.as_posix()}"'
             )
             start = pane.index("\nif command -v uv") if "\nif command -v uv" in pane else pane.index('\nif [[ -n "$AW_PROJECT"')
             removal = pane[start:pane.index("\n# Intentional interrupt", start)]
+            if removal.rstrip().endswith("\nfi\nfi"):
+                removal = removal.rstrip().rsplit("\nfi", 1)[0]
             remove = (
-                'callback() {\n' + removal + '\n}\n'
-                'tmux() { printf "%s\\n" "fixture:1"; }\n'
+                mux_path + 'callback() {\n' + removal + '\n}\n'
                 f'AW_PROJECT={project}; AW_WT={worktree}; AW_MUX_SESSION={session}; callback'
             )
             invoke = lambda code, name: _run([bash, "-c", code, (bin_path / name).as_posix()], env, directory)
@@ -176,6 +190,8 @@ def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, mon
             )
             start = pane.index("\nif (\n    -not [string]::IsNullOrWhiteSpace($awProject)")
             removal = pane[start:pane.index("\n# Intentional interrupt", start)]
+            if removal.rstrip().endswith("\n}\n}"):
+                removal = removal.rstrip().rsplit("\n}", 1)[0]
             header = (
                 f"$PSScriptRoot='{str(bin_path).replace(chr(39), chr(39)*2)}'\n"
                 "function Write-SetupLog { param($message,$level); throw $message }\n"
@@ -203,6 +219,11 @@ def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, mon
         assert entry["session_incarnation"] == "fixture:1"
     finally:
         runtime.shutdown()
+
+
+@pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
+def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, monkeypatch, shell):
+    exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell)
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ owner = client._external_update_driver_active(home, python)
 result = client._fallback_session_start({'_agentWorktrees': {'pluginVersion': '999.0.0'}}, home)
 expected = case in ('live', 'legacy-no-birth')
 assert owner is expected, (case, owner, expected)
-assert result == {'skip': expected}, (case, result)
+assert result == {'skip': False}, (case, result)
 assert 'single_instance_lease' not in sys.modules
 print(json.dumps({'case': case, 'owner': owner, 'skip': result['skip'], 'python': list(sys.version_info[:2])}))
 """

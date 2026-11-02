@@ -2075,14 +2075,13 @@ if (-not $noMux) {
     $paneLaunch = Join-Path $PSScriptRoot 'pane-launch.ps1'
     $paneManagerRoot = $null
     $managerPayload = Split-Path -Parent $PSScriptRoot
-    $managerSlot = Split-Path -Parent $managerPayload
-    $managerVersions = Split-Path -Parent $managerSlot
+    . (Join-Path $PSScriptRoot 'manager-runtime.ps1')
+    $managerSlot = Get-ManagerRuntimeSlot -PayloadRoot $managerPayload
     if (
         ($plan.pane_shell_version -is [int] -or $plan.pane_shell_version -is [long]) -and
-        $plan.pane_shell_version -eq 1 -and $plan.record_path -and
-        (Split-Path -Leaf $managerPayload) -eq 'payload' -and
-        (Split-Path -Leaf $managerVersions) -eq 'versions'
+        $plan.pane_shell_version -eq 1 -and $plan.record_path -and $managerSlot
     ) {
+        $managerVersions = Split-Path -Parent $managerSlot
         $paneManagerRoot = Split-Path -Parent $managerVersions
         try {
             $shellPython = Resolve-RuntimePython

@@ -10,11 +10,14 @@ COMPONENTS = {
     "fleet-manager": "fleet-manager", "pr-service": "services/pr",
     "chat-service": "services/chat", "dispatch-service": "services/dispatch",
     "ssh-service": "services/ssh", "worktree-manager": "worktree-manager",
+    "index-service": "services/index", "index-engine": "plugins/agent-index/server",
 }
 TRUSTED_ROOT = Path(__file__).resolve().parent.parent
 _RESOURCE_PACKAGES = {
+    "worktree-manager": "worktree_manager",
     "fleet-manager": "fleet_manager",
     "chat-service": "agent_chat_service",
+    "index-service": "agent_index_service",
 }
 
 
@@ -103,16 +106,19 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
                 root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "_output_relay.py"
             ),
         })
-    else:
+    elif component == "chat-service":
         result.update({
             package + name: root / "libs" / "installer-engine" / name
             for name in (
-                "installer_engine.py", "installer_engine_process.py",
+                "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py",
                 "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
-                "installer_source_wheel_cache.py", "installer_source_build.py",
                 "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "runtime_launcher.py",
+                "installer_source_wheel_cache.py", "installer_source_build.py",
             )
         })
+    elif component == "worktree-manager":
+        from plugin_runtime_resources import application_resources
+        result.update(application_resources(root / COMPONENTS[component], "worktree_manager"))
     source = root / COMPONENTS[component]
     included_helper = source / "_standalone_runtime_build.py"
     optional = [(included_helper, trusted), *(
@@ -130,6 +136,12 @@ def validate_build(source: Path, *, component: str, root: Path) -> dict:
 
     try:
         injected_resources(component, root)
+        if component == "index-service" and (
+            source / "_build_runtime_resource.py"
+        ).read_bytes() != (
+            TRUSTED_ROOT / COMPONENTS[component] / "_build_runtime_resource.py"
+        ).read_bytes():
+            raise ArtifactBuildError("Index runtime build selector differs from canonical source")
         trusted_setup = (
             (TRUSTED_ROOT / COMPONENTS[component] / "setup.py").read_bytes()
             if component in _RESOURCE_PACKAGES else None

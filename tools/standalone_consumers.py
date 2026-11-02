@@ -13,10 +13,12 @@ STANDALONE_CONSUMERS = (
 
 def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Path, ...]:
     """Declare non-project inputs needed by a standalone distribution's build."""
+    if component == "plugins/agent-index/server":
+        return ()
     if component not in STANDALONE_CONSUMERS:
         raise ValueError(f"unknown standalone component: {component}")
     resources = (source_root / "libs" / "versioned-runtime",)
-    if component in {"fleet-manager", "services/pr", "services/chat", "services/ssh"}:
+    if component in {"worktree-manager", "fleet-manager", "services/pr", "services/chat", "services/ssh"}:
         resources += (source_root / "libs" / "installer-engine",)
     if component in {"fleet-manager", "services/pr", "services/ssh"}:
         resources += (source_root / "libs" / "agent-procutil" / "src" / "agent_procutil",)

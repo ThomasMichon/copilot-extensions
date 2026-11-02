@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "installation-context.sh"
@@ -32,11 +33,15 @@ def _function(source: str, name: str) -> str:
 
 
 class PosixPathCaptureTests(unittest.TestCase):
+    bash: ClassVar[str]
+    functions: ClassVar[str]
+
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bash = _bash()
-        if cls.bash is None:
+        bash = _bash()
+        if bash is None:
             raise unittest.SkipTest("A native Bash or Git Bash is required")
+        cls.bash = bash
         source = SCRIPT.read_text(encoding="utf-8")
         names = [
             "fail",
@@ -107,7 +112,7 @@ fixture_canonical() {
                 capture_output=True,
                 timeout=10,
                 check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
                 start_new_session=os.name != "nt",
             )
         return subprocess.CompletedProcess(

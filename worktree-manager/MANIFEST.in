@@ -1,0 +1,3 @@
+include setup.py
+include _standalone_runtime_build.py
+recursive-include src/worktree_manager/_runtime_assets *

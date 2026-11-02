@@ -20,6 +20,11 @@
 
 $ErrorActionPreference = 'Stop'
 
+if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
+    [Console]::Out.WriteLine('{"schema":"copilot-extensions.manager-source-inputs","version":1,"capabilities":["install-source"]}')
+    exit 0
+}
+
 if ($env:BOOTSTRAP_KILLSWITCH_STATE_FILE -and
     -not $env:BOOTSTRAP_KILLSWITCH_STATE_FILE.StartsWith('~')) {
     $holdPath = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
@@ -250,7 +255,8 @@ function ConvertFrom-BootstrapSourceString([string]$Text) {
     }
     throw 'Unterminated source string.'
 }
-$explicitSource = $args.Count -ge 4 -and $args[0] -ceq '--repair-update' -and $args[3] -ceq 'update'
+$explicitSource = ($args.Count -ge 4 -and $args[0] -ceq '--repair-update' -and $args[3] -ceq 'update') -or
+    ($args.Count -and $args[0] -ceq '--install-source')
 if ((Test-Path -LiteralPath $Config) -and -not $explicitSource) {
     $inSource = $false
     $seen = @{}
@@ -280,6 +286,22 @@ if ((Test-Path -LiteralPath $Config) -and -not $explicitSource) {
 
 $installerArgs = @()
 $commandArgs = @($args)
+$InstallSource = $null
+if ($commandArgs.Count -and $commandArgs[0] -ceq '--install-source') {
+    if ($commandArgs.Count -lt 2 -or -not [IO.Path]::IsPathRooted($commandArgs[1])) {
+        throw '--install-source requires an absolute immutable source snapshot.'
+    }
+    $InstallSource = [IO.Path]::GetFullPath($commandArgs[1])
+    $sourceItem = Get-Item -LiteralPath $InstallSource -Force
+    if (-not $sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw '--install-source requires an ordinary directory.'
+    }
+    $installerArgs += @('--install-source', $InstallSource)
+    $commandArgs = @($commandArgs | Select-Object -Skip 2)
+    if ($commandArgs.Count -and $commandArgs[0] -in @(
+        '--install-source', '--recover-for-repair', '--repair-update', '--bootstrap-update', '--system-python'
+    )) { throw 'Local installation source cannot be combined with another source or repair entry.' }
+}
 $SystemPythonRequested = $commandArgs.Count -and $commandArgs[0] -ceq '--system-python'
 if ($SystemPythonRequested) {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
@@ -355,7 +377,7 @@ $UvCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction
 $Uv = Resolve-BootstrapExecutable $UvCommand.Source
 
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
-if (-not $HaveGit) {
+if (-not $HaveGit -and -not $InstallSource) {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-BootstrapProgress 'git not found - attempting winget install (may prompt for elevation)...'
         try {
@@ -370,7 +392,9 @@ if (-not $HaveGit) {
 }
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
-if ($HaveGit) {
+if ($InstallSource) {
+    $PayloadParent = Join-Path $InstallSource 'source'
+} elseif ($HaveGit) {
     New-Item -ItemType Directory -Force -Path $Staging | Out-Null
     if (-not (Test-Path (Join-Path $Staging '.git'))) {
         if (Test-Path $Staging) { Remove-Item -Recurse -Force $Staging }

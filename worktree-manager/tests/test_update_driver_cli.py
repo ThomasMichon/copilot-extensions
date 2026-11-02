@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import pytest
 from pathlib import Path
 from types import SimpleNamespace
@@ -242,6 +243,36 @@ def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
     assert seen["runner"].argv[-4:] == ("update", "--force", "--project", "example")
     assert seen["wait"] == request.id
     assert "worker" in seen
+
+
+def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(queued, monkeypatch, tmp_path):
+    import update_driver
+    from worktree_manager import runtime_identity, self_install
+
+    seen, _request = queued
+    slot = tmp_path / "root" / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+
+    @contextmanager
+    def no_custody():
+        yield None
+
+    monkeypatch.setattr(
+        self_install, "_runtime_installer", lambda: SimpleNamespace(_installation_custody=no_custody),
+    )
+    monkeypatch.setattr(runtime_identity, "running_application_slot", lambda: slot)
+    monkeypatch.setattr(self_install, "default_root", lambda: slot.parent.parent)
+    monkeypatch.setattr(
+        self_install, "running_payload_dir",
+        lambda: pytest.fail("app-only installation cannot select a source workspace"),
+    )
+    monkeypatch.setattr(update_driver, "drain", lambda: seen.update(drained=True))
+    assert driver.self_install_request(lambda: pytest.fail("observer executed install")) == 6
+    assert seen["spec"].cwd == str(slot) and seen["runner"].cwd == str(slot)
+    assert seen["spec"].project == str(slot.parent.parent)
+    assert dict(seen["spec"].context)["WORKTREE_MANAGER_ROOT"] == str(slot.parent.parent)
+    assert seen["runner"].argv[-2:] == ("self-install", "--apply")
+    assert seen["drained"]
 
 
 def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypatch):

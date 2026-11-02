@@ -66,7 +66,7 @@ def test_explicit_standalone_identity_preserves_plugin_names(record, label, key)
 @pytest.mark.parametrize("record", [
     {"component": "../services/pr"},
     {"component": "services/pr"},
-    {"component": "index-service"},
+    {"component": "unregistered-service"},
     {"component": []},
     {"component": "pr-service", "plugin": "pr-service"},
 ], ids=["traversal", "path", "unregistered", "invalid-type", "plugin-alias"])

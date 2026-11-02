@@ -10,15 +10,15 @@ from agent_procutil import no_window_kwargs
 
 from .engine_environment import _engine_environment
 from .runtime_source import ResolvedSource
-from .self_install import _runtime_installer, running_payload_dir
+from .self_install import _runtime_installer, _runtime_scripts, running_payload_dir
 
 
 def preparer() -> Path:
-    payload = running_payload_dir()
-    packaged = payload / "scripts/runtime-source-tools/prepare_runtime_source.py"
+    packaged = _runtime_scripts() / "runtime-source-tools" / "prepare_runtime_source.py"
     if packaged.is_file():
         return packaged
     # Source development uses this checkout's canonical tools, never fetched code.
+    payload = running_payload_dir()
     if (payload.parent / ".git").exists():
         canonical = payload.parent / "tools/prepare_runtime_source.py"
         if canonical.is_file():
