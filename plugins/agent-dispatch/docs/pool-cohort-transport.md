@@ -5,7 +5,9 @@ configured supervisor observation into the existing coordinator catalog.
 `PoolCohortPreparation` accepts the actual local `TaskQueue` or a concrete
 `DispatchClient`; it does not derive membership from enrolled or reachable
 publishers. This is an explicit integration boundary, not a production
-configuration publisher or ordinary-lane activation.
+configuration publisher by default or ordinary-lane activation.
+The separate [opt-in cadence composition](pool-publication-cadence.md) now
+selects the actual existing coordinator and per-scope master.
 
 ## Running-peer selection and routes
 
@@ -92,11 +94,11 @@ A source change after commit yields a refusal while retaining the accepted
 original result for recovery.
 
 Construction, health and catalog reads do not project even an absent or empty
-cohort. This source-owner binding neither starts an automatic publisher nor
-changes ordinary spawning, initial prompts, metadata freshness or allocation.
-The eventual automatic composition must use this coordinator-local source for
-the whole cohort and the existing per-scope supervisor for effective definitions.
-It must not make every host-local master an independent whole-cohort writer.
+cohort. This source-owner binding alone starts no publisher. The default-off
+[existing-owner cadence](pool-publication-cadence.md) uses this coordinator-local
+source for the whole cohort and the existing per-scope supervisor for effective
+definitions; host-local masters never become independent whole-cohort writers.
+Ordinary spawning and initial-prompt migration remain separate.
 
 A matching result is checked against the original observation/CAS, then
 confirmed in the original coordinator's accepted history before custody is
@@ -111,7 +113,7 @@ atomically fence unmanaged file writes across a remote SQLite transaction.
 A post-write refusal retains the committed effect for recovery; it does not
 roll that projection back. The metadata contract continues to advertise
 `configured_scope_membership: false`, `lock_holder_verification: false` and
-`atomic_placement: false`. Automatic publication, old-writer exclusion,
+`atomic_placement: false`. Ordinary adoption of publication, old-writer exclusion,
 ordinary initial-prompt/allocator migration, membership activation and native
 qualification remain separate gates of the
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).
