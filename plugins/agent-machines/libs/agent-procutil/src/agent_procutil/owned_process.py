@@ -14,6 +14,7 @@ import time
 from typing import Callable, Protocol
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 
 class UnreapedChild(Protocol):
@@ -36,10 +37,15 @@ class OutputLimitExceeded(subprocess.SubprocessError):
 class OwnedCleanupError(subprocess.SubprocessError):
     """Cleanup is unconfirmed; retain exact process/Job custody for the owner."""
 
-    def __init__(self, process: UnreapedChild, job=None) -> None:
+    def __init__(self, process: UnreapedChild | None, job=None, *, cleanup_resources=()) -> None:
         self.process = process
         self.job = job
+        self.cleanup_resources = tuple(cleanup_resources)
         super().__init__("native child cleanup did not complete")
+
+
+class _PreparationTimeout(subprocess.TimeoutExpired):
+    """Known refusal before attempting any native process creation."""
 
 
 def _require_windows_job() -> None:
@@ -134,11 +140,23 @@ def _communicate_unreaped(
     process: subprocess.Popen, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
     binary: bool = False,
+    capture_timeout: bool = False,
 ) -> tuple[str | None, str | None]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
     data = memoryview(input_text.encode("utf-8")) if input_text is not None else None
     offset = 0
+    def remaining():
+        try:
+            return _remaining(deadline, argv, timeout)
+        except subprocess.TimeoutExpired as error:
+            if capture_limits is not None and capture_timeout:
+                error.output, error.stderr = (
+                    bytes(value) if stream is not None else None
+                    for value, stream in zip(output, streams)
+                )
+            raise
+
     with selectors.DefaultSelector() as selector:
         for index, stream in enumerate(streams):
             if stream is not None:
@@ -151,7 +169,7 @@ def _communicate_unreaped(
             else:
                 process.stdin.close()
         while selector.get_map():
-            for key, _mask in selector.select(_remaining(deadline, argv, timeout)):
+            for key, _mask in selector.select(remaining()):
                 if key.data == -1:
                     try:
                         offset += os.write(key.fd, data[offset:offset + 65536])
@@ -179,7 +197,7 @@ def _communicate_unreaped(
                     else:
                         selector.unregister(key.fileobj)
     while _observe_unreaped(process) is None:
-        time.sleep(min(.01, _remaining(deadline, argv, timeout)))
+        time.sleep(min(.01, remaining()))
     return tuple(
         (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
@@ -253,6 +271,7 @@ def _communicate_windows_bounded(
     process: subprocess.Popen, job, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int],
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> tuple[str | None, str | None]:
     if job is None:
         raise RuntimeError("native child Windows Job custody is unavailable")
@@ -269,17 +288,22 @@ def _communicate_windows_bounded(
                 primary.append(error)
 
     def retire() -> None:
-        with retirement:
+        acquired = retirement.acquire(timeout=budget.cleanup_timeout()) if budget else retirement.acquire()
+        if not acquired:
+            raise TimeoutError("owned retirement lock did not settle")
+        try:
             if retiring.is_set():
                 if retirement_error:
                     raise retirement_error[0]
                 return
             retiring.set()
             try:
-                process.retire_job(job, 2.0)
+                process.retire_job(job, budget.cleanup_timeout() if budget else 2.0)
             except BaseException as error:
                 retirement_error.append(error)
                 raise
+        finally:
+            retirement.release()
 
     def fail(error: BaseException) -> None:
         note(error)
@@ -375,16 +399,16 @@ def _communicate_windows_bounded(
             cleanup_error = error
         for worker, completed in attempted:
             try:
-                if not completed.wait(2.0):
+                if not completed.wait(budget.cleanup_timeout() if budget else 2.0):
                     raise RuntimeError("native child pipe worker startup or completion is unconfirmed")
-                worker.join(timeout=2.0)
+                worker.join(timeout=budget.cleanup_timeout() if budget else 2.0)
                 if worker.is_alive():
                     raise RuntimeError("native child pipe worker did not settle")
             except BaseException as error:
                 if cleanup_error is None:
                     cleanup_error = error
         try:
-            process.wait(timeout=2.0)
+            process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
         except BaseException as error:
             if cleanup_error is None:
                 cleanup_error = error
@@ -414,6 +438,8 @@ def _run_owned(
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
+    borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
@@ -425,10 +451,21 @@ def _run_owned(
     if type(allow_daemon_breakaway) is not bool:
         raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
-        require_contained_worker()
+        if borrow_parent_scope:
+            parent = os.getppid()
+            if os.name == "nt" or os.getpgrp() != parent or os.getsid(0) != parent:
+                raise RuntimeError("borrowed caller requires its enclosing parent's native group")
+        else:
+            require_contained_worker()
     if not windows:
         _require_posix_execution_support()
     deadline = time.monotonic() + timeout
+    if budget is not None:
+        if not isinstance(budget, OwnedExecutionBudget):
+            raise TypeError("budget must be an OwnedExecutionBudget")
+        deadline = min(deadline, budget.execution_deadline)
+        if deadline <= time.monotonic():
+            raise _PreparationTimeout(argv, timeout)
     bounded_windows = windows and capture_limits is not None
     if on_settled is not None and not (bounded_windows or confirm_posix_group):
         raise ValueError("settlement notification requires whole-scope native confirmation")
@@ -436,20 +473,25 @@ def _run_owned(
     if bounded_windows:
         from agent_procutil._windows_caller_owned import spawn
 
-    process, job = spawn(
-        argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
-        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-        stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
-        **({"text": False, "bufsize": 0} if bounded_windows else {
-            "text": True, "encoding": "utf-8", "errors": "strict",
-        }),
-        **no_window_kwargs(),
-        **({"start_new_session": True} if not windows and not inherit_process_group else {}),
-        **({"pass_fds": pass_fds} if pass_fds else {}),
-        **({"cwd": cwd} if cwd is not None else {}),
-        **({"env": env} if env is not None else {}),
-    )
+    try:
+        process, job = spawn(
+            argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+            **({"text": False, "bufsize": 0} if bounded_windows else {
+                "text": True, "encoding": "utf-8", "errors": "strict",
+            }),
+            **no_window_kwargs(),
+            **({"start_new_session": True} if not windows and not inherit_process_group else {}),
+            **({"pass_fds": pass_fds} if pass_fds else {}),
+            **({"cwd": cwd} if cwd is not None else {}),
+            **({"env": env} if env is not None else {}),
+            **({"budget": budget, "command_deadline": deadline, "on_settled": on_settled}
+               if bounded_windows and budget is not None else {}),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise subprocess.TimeoutExpired(argv, timeout) from error
     retained = False
     try:
         if bounded_windows:
@@ -457,6 +499,7 @@ def _run_owned(
                 process, job, input_text=input_text, deadline=deadline,
                 argv=argv, timeout=timeout, capture_limits=capture_limits,
                 binary=binary,
+                **({"budget": budget} if budget is not None else {}),
             )
         elif windows:
             stdout, stderr = _communicate_windows(
@@ -467,6 +510,7 @@ def _run_owned(
                 process, input_text=input_text, deadline=deadline, argv=argv, timeout=timeout,
                 capture_limits=capture_limits,
                 binary=binary,
+                **({"capture_timeout": True} if budget is not None else {}),
             )
     except OwnedCleanupError:
         retained = True
@@ -475,8 +519,8 @@ def _run_owned(
         try:
             if bounded_windows and not retained and job.handle:
                 try:
-                    process.retire_job(job, 2.0)
-                    process.wait(timeout=2.0)
+                    process.retire_job(job, budget.cleanup_timeout() if budget else 2.0)
+                    process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                 except BaseException as error:
                     retained = True
                     raise OwnedCleanupError(process, job) from error
@@ -486,14 +530,18 @@ def _run_owned(
 
                     try:
                         _retire_posix_group(process)
-                        _confirm_group(process)
-                        process.wait(timeout=2.0)
+                        _confirm_group(process, **({"budget": budget} if budget else {}))
+                        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                     except BaseException as error:
                         retained = True
                         raise OwnedCleanupError(process) from error
                 else:
-                    _retire_posix_group(process, inherit_process_group=inherit_process_group)
-                    process.wait(timeout=2.0)
+                    try:
+                        _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
+                    except BaseException as error:
+                        retained = True
+                        raise OwnedCleanupError(process) from error
         finally:
             if not retained:
                 for stream in (process.stdin, process.stdout, process.stderr):
@@ -551,6 +599,8 @@ def run_caller_owned(
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
+    borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
     """Execute with caller lifetime/stream budgets; binary capture preserves exact bytes."""
     from agent_procutil._caller_owned import run
@@ -562,6 +612,8 @@ def run_caller_owned(
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),
         **({"binary": binary} if binary is not False else {}),
+        **({"budget": budget} if budget is not None else {}),
+        **({"borrow_parent_scope": borrow_parent_scope} if borrow_parent_scope is not False else {}),
     )
 
 

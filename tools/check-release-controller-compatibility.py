@@ -14,7 +14,7 @@ from promotion_unit_contract import UnitEvidenceError
 from promotion_release_helpers import verify_helper_contract
 from release_controller_contract import (
     active_controller_compatibility, helper_implementations,
-    verify_controller_inputs, verify_helper_selection,
+    verify_candidate_typechecking, verify_controller_inputs, verify_helper_selection,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +29,7 @@ def main() -> int:
     implementations = {name: (ROOT / "tools" / name).read_bytes()
                        for name in sorted(helper_implementations(prepared))}
     verify_helper_selection(prepared)
+    verify_candidate_typechecking(prepared)
     verify_controller_inputs(prepared, implementations)
     manifest = json.loads((ROOT / "tools/promotion-unit-manifest.json").read_bytes())
     main = subprocess.run(
@@ -44,11 +45,26 @@ def main() -> int:
                                for name in sorted(helper_implementations(current))}
     verify_helper_contract(ROOT, manifest, controllers=(current_bytes.decode("utf-8"),))
     compatible, reason = active_controller_compatibility(current, current_implementations)
+    try:
+        verify_candidate_typechecking(current)
+        candidate_types_active = True
+    except UnitEvidenceError as error:
+        candidate_types_active = False
+        print(
+            f"::notice::Main candidate MyPy is not active; separate controller adoption is required: {error}",
+            file=sys.stderr,
+        )
     if not compatible:
         print(f"::warning::Main {main} requires a separately reviewed legacy controller bootstrap: {reason}")
-        print(json.dumps({"main": main, "active_compatible": False, "prepared_compatible": True}))
+        print(json.dumps({
+            "main": main, "active_compatible": False, "prepared_compatible": True,
+            "candidate_types_active": candidate_types_active, "candidate_types_prepared": True,
+        }))
     else:
-        print(json.dumps({"main": main, "active_compatible": True, "prepared_compatible": True}))
+        print(json.dumps({
+            "main": main, "active_compatible": True, "prepared_compatible": True,
+            "candidate_types_active": candidate_types_active, "candidate_types_prepared": True,
+        }))
     return 0
 
 

@@ -16,19 +16,24 @@ import threading
 import time
 from typing import Callable
 
+from agent_procutil import SyncProcessLaunchError
 from agent_procutil.owned_process import (
     OutputLimitExceeded,
     OwnedCleanupError,
     UnreapedChild,
     _observe_unreaped,
     _run_owned,
+    _PreparationTimeout,
     require_contained_worker,
 )
 from agent_procutil._linux_pidfd import open_pidfd
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
 _lifetime_writers: set[int] = set()
+_lifetime_readers: set[int] = set()
+_uncertain_lifetime_descriptors: set[int] = set()
 _BOOTSTRAP = (
     "import sys;sys.path.insert(0,sys.argv.pop(1));"
     "from agent_procutil._caller_owned import _main;_main()"
@@ -87,13 +92,13 @@ def _pidfd_exited(fd: int) -> bool:
     return any(mask & select.POLLIN for _fd, mask in events)
 
 
-def _confirm_group(process: UnreapedChild) -> None:
+def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | None = None) -> None:
     if sys.platform == "darwin":
         from agent_procutil._darwin_caller_owned import GroupCensus
 
         try:
             census = GroupCensus()
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + (budget.cleanup_timeout() if budget else 2.0)
             empty = 0
             while True:
                 active = _observe_unreaped(process) is None
@@ -107,13 +112,15 @@ def _confirm_group(process: UnreapedChild) -> None:
         except (OSError, RuntimeError, ValueError) as error:
             raise OwnedCleanupError(process) from error
         return
-    deadline = time.monotonic() + 2.0
+    deadline = time.monotonic() + (budget.cleanup_timeout() if budget else 2.0)
     empty = 0
     try:
         while True:
             active = _observe_unreaped(process) is None
             with os.scandir("/proc") as entries:
                 for entry in entries:
+                    if budget:
+                        budget.cleanup_timeout()
                     if not entry.name.isdigit():
                         continue
                     pid = int(entry.name)
@@ -144,7 +151,7 @@ def _confirm_group(process: UnreapedChild) -> None:
 
 
 def _validate(request: object) -> dict:
-    if not isinstance(request, dict) or set(request) - {"binary"} != {
+    if not isinstance(request, dict) or set(request) - {"binary", "budget"} != {
         "argv", "timeout", "input_text", "capture", "limits",
     }:
         raise ValueError("invalid caller-owned request")
@@ -164,6 +171,11 @@ def _validate(request: object) -> dict:
         raise ValueError("native child capture must be a boolean")
     if type(request.get("binary", False)) is not bool:
         raise ValueError("native child binary capture must be a boolean")
+    if "budget" in request:
+        value = request["budget"]
+        if not isinstance(value, dict) or set(value) != {"deadline", "cleanup_reserve"}:
+            raise ValueError("invalid owned aggregate budget")
+        OwnedExecutionBudget(**value)
     limits = request["limits"]
     if not isinstance(limits, list) or len(limits) != 2 or any(
         type(limit) is not int or limit <= 0 for limit in limits
@@ -182,7 +194,8 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
     fields = {
         "completed": {"returncode", "stdout", "stderr"},
         "output-limit": {"stream", "limit"},
-        "timeout": set(), "decode": set(), "execution": set(), "os-error": {"errno"},
+        "timeout": ({"output", "stderr"} if "output" in reply else set()),
+        "decode": set(), "execution": set(), "os-error": {"errno"},
     }
     if not isinstance(kind, str) or kind not in fields or set(reply) != {
         "version", "kind", *fields[kind],
@@ -211,7 +224,15 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
             raise RuntimeError("caller-owned stream limit is invalid")
         raise OutputLimitExceeded(stream, limit)
     if kind == "timeout":
-        raise subprocess.TimeoutExpired(request["argv"], request["timeout"])
+        partial = [None, None]
+        if "output" in reply:
+            try:
+                partial = [base64.b64decode(reply[name], validate=True) for name in ("output", "stderr")]
+                if any(len(value) > limit for value, limit in zip(partial, request["limits"])):
+                    raise ValueError("timeout evidence exceeds its byte budget")
+            except (TypeError, ValueError):
+                raise RuntimeError("caller-owned timeout evidence is invalid") from None
+        raise subprocess.TimeoutExpired(request["argv"], request["timeout"], *partial)
     if kind == "os-error":
         errno = reply.get("errno")
         if type(errno) is not int:
@@ -230,15 +251,36 @@ def run(
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
+    borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
+    execution_budget = budget
     try:
+        if type(borrow_parent_scope) is not bool:
+            raise TypeError("borrow_parent_scope must be a boolean")
+        if borrow_parent_scope and budget is None:
+            raise ValueError("borrowing an enclosing group requires an aggregate budget")
+        if borrow_parent_scope and os.name != "nt" and on_settled is not None:
+            raise ValueError("borrowed group settlement belongs to its enclosing owner")
+        if budget is not None and not isinstance(budget, OwnedExecutionBudget):
+            raise TypeError("budget must be an OwnedExecutionBudget")
+        if budget is not None and time.monotonic() >= budget.execution_deadline:
+            raise subprocess.TimeoutExpired(argv, timeout)
         request = _validate({
             "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
             "limits": [max_stdout_bytes, max_stderr_bytes],
             **({"binary": binary} if binary is not False else {}),
+            **({"budget": {"deadline": budget.deadline, "cleanup_reserve": budget.cleanup_reserve}}
+               if budget is not None else {}),
         })
+        if budget is not None and os.name != "nt" and not borrow_parent_scope:
+            target_deadline = min(time.monotonic() + timeout, budget.execution_deadline)
+            capped = OwnedExecutionBudget(target_deadline + budget.cleanup_reserve, budget.cleanup_reserve)
+            enclosed = capped.enclosed_budget()
+            execution_budget = OwnedExecutionBudget(capped.deadline, capped.cleanup_reserve / 2)
+            request["budget"] = {"deadline": enclosed.deadline, "cleanup_reserve": enclosed.cleanup_reserve}
         frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
         if len(frame) > _MAX_REQUEST:
             raise ValueError("caller-owned request exceeds its frame limit")
@@ -250,20 +292,36 @@ def run(
             on_settled()
         raise
     if os.name == "nt":
+        try:
+            return _run_owned(
+                argv, timeout=timeout, input_text=input_text, capture=capture,
+                capture_limits=(max_stdout_bytes, max_stderr_bytes),
+                on_settled=on_settled,
+                allow_daemon_breakaway=allow_daemon_breakaway,
+                binary=binary,
+                **({"budget": execution_budget} if execution_budget is not None else {}),
+                **({"cwd": cwd} if cwd is not None else {}),
+                **({"env": env} if env is not None else {}),
+            )
+        except _PreparationTimeout as error:
+            if on_settled is not None:
+                on_settled()
+            raise subprocess.TimeoutExpired(argv, timeout) from error
+    if borrow_parent_scope:
         return _run_owned(
             argv, timeout=timeout, input_text=input_text, capture=capture,
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
-            on_settled=on_settled,
-            allow_daemon_breakaway=allow_daemon_breakaway,
-            binary=binary,
-            **({"cwd": cwd} if cwd is not None else {}),
-            **({"env": env} if env is not None else {}),
+            inherit_process_group=True, borrow_parent_scope=True, budget=budget,
+            binary=binary, cwd=cwd, env=env,
         )
     reader = writer = None
     launch_attempted = False
+    preparation_refused = False
+    native_settled = []
     try:
         with _lifetime_lock:
             reader, writer = os.pipe()
+            _lifetime_readers.add(reader)
             _lifetime_writers.add(writer)
         os.set_inheritable(writer, False)
         launch_attempted = True
@@ -274,30 +332,51 @@ def run(
                     str(Path(__file__).resolve().parents[1]), str(reader),
                     *([str(os.getpid())] if sys.platform == "darwin" else []),
                 ],
-                timeout=timeout, input_text=frame, capture=True, pass_fds=(reader,),
+                timeout=timeout + (budget.cleanup_reserve / 2 if budget else 0),
+                input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
-                on_settled=on_settled,
+                on_settled=lambda: native_settled.append(True),
+                **({"budget": execution_budget} if execution_budget is not None else {}),
                 **({"cwd": cwd} if cwd is not None else {}),
                 **({"env": env} if env is not None else {}),
             )
+        except _PreparationTimeout as error:
+            preparation_refused = True
+            raise subprocess.TimeoutExpired(argv, timeout) from error
+        except SyncProcessLaunchError:
+            preparation_refused = True
+            raise
         except subprocess.TimeoutExpired as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
         except OutputLimitExceeded as error:
             raise RuntimeError("caller-owned completion frame exceeded its byte budget") from error
     finally:
-        try:
+        pending = sys.exc_info()[1]
+        failed = []
+        cause = None
+        for descriptor, owned in ((reader, _lifetime_readers), (writer, _lifetime_writers)):
+            if descriptor is None:
+                continue
             try:
-                if reader is not None:
-                    os.close(reader)
-            finally:
-                if writer is not None:
-                    with _lifetime_lock:
-                        _lifetime_writers.discard(writer)
-                        os.close(writer)
-        finally:
-            if not launch_attempted and on_settled is not None:
-                on_settled()
+                with _lifetime_lock:
+                    owned.discard(descriptor)
+                    try:
+                        os.close(descriptor)
+                    except BaseException:
+                        # The number may already be reused; never auto-close it at fork.
+                        _uncertain_lifetime_descriptors.add(descriptor)
+                        raise
+            except BaseException as error:
+                failed.append(("descriptor", descriptor))
+                cause = error
+        if failed:
+            raise OwnedCleanupError(
+                getattr(pending, "process", None), getattr(pending, "job", None),
+                cleanup_resources=(*getattr(pending, "cleanup_resources", ()), *failed),
+            ) from cause
+        if (native_settled or not launch_attempted or preparation_refused) and on_settled is not None:
+            on_settled()
     try:
         reply = json.loads(result.stdout)
     except (ValueError, TypeError) as error:
@@ -355,12 +434,14 @@ def _main() -> None:
         if len(frame) > _MAX_REQUEST or not frame.endswith(b"\n"):
             raise ValueError("caller-owned request frame is invalid")
         request = _validate(json.loads(frame))
+        budget = OwnedExecutionBudget(**request["budget"]) if "budget" in request else None
         try:
             result = _run_owned(
                 request["argv"], timeout=request["timeout"],
                 input_text=request["input_text"], capture=request["capture"],
                 inherit_process_group=True, capture_limits=tuple(request["limits"]),
                 binary=request.get("binary", False),
+                **({"budget": budget} if budget is not None else {}),
             )
             if request.get("binary", False) and request["capture"]:
                 result.stdout, result.stderr = (
@@ -372,8 +453,13 @@ def _main() -> None:
             )
         except OutputLimitExceeded as error:
             response.update(kind="output-limit", stream=error.stream, limit=error.limit)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
             response["kind"] = "timeout"
+            if error.output is not None or error.stderr is not None:
+                response.update(
+                    output=base64.b64encode(error.output or b"").decode("ascii"),
+                    stderr=base64.b64encode(error.stderr or b"").decode("ascii"),
+                )
         except UnicodeError:
             response["kind"] = "decode"
         except OSError as error:

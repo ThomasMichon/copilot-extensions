@@ -167,6 +167,25 @@ def _check_adoption(
     )
 
 
+def _assert_owned_policy(context: str, version: str) -> None:
+    assert context.startswith(f"[owner: efforts@{version}]\n")
+    assert "use `planning-efforts`; review its plan before code" in context
+    assert "Only the rightful head drives; others assist or hand off" in context
+    assert "explicit Done with every Plan/Validation item resolved or transferred" in context
+    assert "to named tracked work; phase/PR/session/handoff is not completion" in context
+    assert "host-owned unless verified adoption and explicit selection" in context
+    assert "permit a one-way-linked target effort" in context
+    assert "Handoffs retain effort/next slice; ramp-up is immediate only" in context
+    assert "`driving-effort-agendas`: tail queue, scoped subqueues, saved continuations" in context
+    assert "relevant new context and a viable changed approach, not metadata" in context
+    assert "Preserve history/caps; legacy count limits stay strict" in context
+    assert "New mode requires actual source support" in context
+    assert "investigate/refine/wait or choose other assigned work" in context
+    assert "not Operator steer from counts" in context
+    assert "Operator only for actual decisions/permissions/safety; honor holds and required review" in context
+    assert len(context.encode("utf-8")) < 1024
+
+
 def test_exact_adoption_config_emits_bounded_owned_policy(tmp_path: Path) -> None:
     repo = _repo(
         tmp_path / "repo",
@@ -176,15 +195,26 @@ def test_exact_adoption_config_emits_bounded_owned_policy(tmp_path: Path) -> Non
     results = [_run(producer, repo) for producer in _producers()]
     contexts = [_context(result) for result in results]
     for context, result in zip(contexts, results, strict=True):
-        assert context.startswith(f"[owner: efforts@{version}]\n")
-        assert "use `planning-efforts` to create or resume" in context
-        assert "Only the rightful head drives" in context
-        assert "A completed phase, PR, handoff, or session is not completion" in context
-        assert "required safety/admin confirmation" in context
-        assert "host-owned by default" in context
-        assert "explicitly selected target-owned sub-effort" in context
-        assert len(context.encode("utf-8")) < 900
-        assert len(context.encode("utf-8")) < 1024
+        _assert_owned_policy(context, version)
+        assert result.stderr == b""
+    assert len(set(contexts)) == 1
+
+
+@pytest.mark.parametrize("version", ["0.0.0", "1.1." + "0" * 60])
+def test_valid_manifest_version_extremes_preserve_policy_and_existing_byte_cap(
+    tmp_path: Path, version: str,
+) -> None:
+    repo = _repo(tmp_path / "repo", {"version": 1, "enforcement": "required"})
+    copied_plugin = tmp_path / "plugin"
+    shutil.copytree(PLUGIN / "scripts", copied_plugin / "scripts")
+    (copied_plugin / "plugin.json").write_text(json.dumps({"version": version}), encoding="utf-8")
+    results = [
+        _run(copied_plugin / "scripts" / producer.name, repo)
+        for producer in _producers()
+    ]
+    contexts = [_context(result) for result in results]
+    for context, result in zip(contexts, results, strict=True):
+        _assert_owned_policy(context, version)
         assert result.stderr == b""
     assert len(set(contexts)) == 1
 

@@ -56,6 +56,19 @@ def observation(revision=1, session="head-session", store="a" * 32):
     }
 
 
+def observation_v2(revision=1):
+    body = observation(revision)
+    body["version"] = 2
+    body["snapshot"].update(
+        cursor_version=4,
+        status="replanning",
+        stack=["Original root", "Dynamic subqueue continuation"],
+        queued=["Tail item"],
+        notes=["Context-qualified attempt reference: context-2"],
+    )
+    return body
+
+
 def publication(owner, body=None, **values):
     return {
         "contract_version": 1,
@@ -64,6 +77,158 @@ def publication(owner, body=None, **values):
         "observation": observation() if body is None else body,
         **values,
     }
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_observation_remains_exact_under_supported_request_versions(owned, version):
+    owner, *_rest = owned
+    body = observation()
+    assert contract.V2_CAPABILITY in owner.health()["capabilities"]
+    result = owner.agendas.publish(publication(owner, body, contract_version=version))
+    assert result["ok"] is True and result["contract_version"] == version
+    assert result["observation"] == body
+    assert owner.agendas.read(request(contract_version=version)) == result
+    assert owner.agendas.read(request())["observation"] == body
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_steering_status_remains_supported(owned, version):
+    owner, *_rest = owned
+    body = observation()
+    body["snapshot"]["status"] = "steering"
+    accepted = owner.agendas.publish(publication(owner, body, contract_version=version))
+    assert accepted["ok"] is True and accepted["observation"] == body
+    assert owner.agendas.read(request(contract_version=version)) == accepted
+
+
+@pytest.mark.parametrize("status", ["working", "waiting", "replanning", "complete"])
+def test_cursor_four_status_matches_context_qualified_core(owned, status):
+    owner, *_rest = owned
+    body = observation_v2()
+    body["snapshot"]["status"] = status
+    result = owner.agendas.publish(publication(owner, body, contract_version=2))
+    assert result["ok"] is True and result["observation"] == body
+
+
+def test_cursor_four_requires_v2_without_relabeling_or_replacing_legacy_cache(owned):
+    owner, *_rest = owned
+    legacy = observation()
+    assert owner.agendas.publish(publication(owner, legacy))["ok"] is True
+    body = observation_v2(2)
+    refused = owner.agendas.publish(publication(owner, body))
+    assert refused["error"]["code"] == "unsupported" and refused["contract_version"] == 1
+    assert owner.agendas.read(request())["observation"] == legacy
+    result = owner.agendas.publish(publication(owner, body, contract_version=2))
+    assert result["ok"] is True and result["contract_version"] == 2
+    assert result["observation"] == body
+    old = owner.agendas.read(request())
+    assert old["error"]["code"] == "unsupported" and old["contract_version"] == 1
+    assert "observation" not in old
+    assert owner.agendas.read(request(contract_version=2)) == result
+    stream = owner.agendas.stream(request(), lambda: False)
+    try:
+        error = next(stream)
+        assert error["type"] == "error" and error["error"]["code"] == "unsupported"
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize(
+    "body_version,cursor,status",
+    [
+        (1, 4, "working"),
+        (2, 1, "working"),
+        (2, 2, "working"),
+        (2, 3, "working"),
+        (3, 4, "working"),
+        (1, 2, "replanning"),
+        (2, 4, "unknown"),
+        (2, 4, "steering"),
+    ],
+)
+def test_observation_version_cursor_and_status_pairs_are_strict(
+    owned, body_version, cursor, status
+):
+    owner, *_rest = owned
+    body = observation()
+    body["version"] = body_version
+    body["snapshot"].update(cursor_version=cursor, status=status)
+    result = owner.agendas.publish(publication(owner, body, contract_version=2))
+    assert result["ok"] is False and result["contract_version"] == 2
+    assert owner.agendas.read(request())["availability"] == "not-published"
+
+
+@pytest.mark.parametrize("version", [0, 3, True, "2", 2.0])
+def test_unsupported_or_malformed_request_versions_do_not_claim_support(owned, version):
+    owner, *_rest = owned
+    for result in (
+        owner.agendas.read(request(contract_version=version)),
+        owner.agendas.publish(publication(owner, contract_version=version)),
+    ):
+        assert result["ok"] is False and result["contract_version"] == 1
+    stream = owner.agendas.stream(request(contract_version=version), lambda: False)
+    try:
+        assert next(stream)["ok"] is False
+    finally:
+        stream.close()
+
+
+def test_v2_control_publication_and_held_feed_preserve_exact_committed_body(
+    owned, monkeypatch, capsys
+):
+    from agent_worktrees import agenda_cli
+
+    owner, *_rest = owned
+    selected = request(contract_version=2)
+    body = observation_v2()
+    with socket_feed(owner, selected) as (client, reader):
+        first = contract.decode(reader.readline())
+        assert first["type"] == "snapshot" and first["contract_version"] == 2
+        receiver = agenda_cli.Receiver(selected, first["generation"])
+        receiver.receive(first)
+        monkeypatch.setattr(agenda_cli, "_control_client", lambda: client)
+        monkeypatch.setattr(agenda_cli.cfg, "project_name", lambda: "project")
+        monkeypatch.setattr(
+            agenda_cli.sys, "stdin", io.StringIO(contract.observation(body) + "\n")
+        )
+        assert (
+            agenda_cli.cmd_agenda(
+                SimpleNamespace(
+                    command="agenda-publish",
+                    contract_version=2,
+                    json=True,
+                )
+            )
+            == 0
+        )
+        result = json.loads(capsys.readouterr().out)
+        assert result["contract_version"] == 2 and result["observation"] == body
+        frame = contract.decode(reader.readline(contract.FRAME_BYTES + 1))
+        receiver.receive(frame)
+        assert frame == {"type": "update", **result}
+        assert client._request("agenda-read", selected) == result
+        assert client._request("agenda-read", request())["error"]["code"] == "unsupported"
+        assert (
+            owner.agendas.publish(
+                publication(owner, observation_v2(2), contract_version=2),
+            )["ok"]
+            is True
+        )
+        advanced = contract.decode(reader.readline(contract.FRAME_BYTES + 1))
+        receiver.receive(advanced)
+        assert advanced["sequence"] > frame["sequence"]
+        assert advanced["observation"] == observation_v2(2)
+
+
+def test_observation_upgrade_cannot_rewrite_same_revision_or_add_snapshot_fields(owned):
+    owner, *_rest = owned
+    assert owner.agendas.publish(publication(owner))["ok"] is True
+    conflicting = owner.agendas.publish(publication(owner, observation_v2(), contract_version=2))
+    assert conflicting["error"]["code"] == "revision-conflict"
+    extra = observation_v2(2)
+    extra["snapshot"]["attempts"] = []
+    assert owner.agendas.publish(publication(owner, extra, contract_version=2))["ok"] is False
+    assert owner.agendas.read(request())["observation"] == observation()
 
 
 @pytest.fixture

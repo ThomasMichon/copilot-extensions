@@ -152,7 +152,9 @@ class _ControlHandler(socketserver.StreamRequestHandler):
                     ):
                         raise agenda_contract.AgendaError("invalid agenda control frame")
                 except agenda_contract.AgendaError as exc:
-                    error = agenda_contract.failure(exc.code, str(exc))
+                    error = agenda_contract.failure(
+                        exc.code, str(exc), version=agenda_contract.error_version(request.get("payload")),
+                    )
                     reply = {"type": "error", **error} if action == "agenda-feed" else {
                         "version": 1, "result": error,
                     }

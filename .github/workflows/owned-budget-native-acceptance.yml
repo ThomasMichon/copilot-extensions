@@ -1,0 +1,63 @@
+name: Owned budget native acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["pr/**"]
+    paths:
+      - ".github/workflows/owned-budget-native-acceptance.yml"
+      - "libs/agent-procutil/tests/test_owned_budget_native.py"
+
+permissions:
+  contents: read
+
+jobs:
+  owned-budget-native-linux:
+    name: Borrowed budget native (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps: &owned-budget-native-steps
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare seasoned native test tooling
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" psutil
+      - name: Qualify exact source and enclosing native custody
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          root = Path.cwd()
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if actual != os.environ["EXPECTED_SHA"]:
+              raise SystemExit("native budget checkout differs from its immutable dispatch")
+          print(f"Checkout: {actual}", flush=True)
+          sys.path.insert(0, str(root / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          with TestSandbox(prefix=".owned-budget-", dir=root) as folder:
+              sandbox = Path(folder)
+              env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+              env["PYTHONPATH"] = os.pathsep.join((str(root / "tools"), str(root / "libs/agent-procutil/src")))
+              result = run_contained(
+                  [sys.executable, "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+                   "--timeout=30", f"--basetemp={sandbox / 'pytest'}",
+                   "libs/agent-procutil/tests/test_owned_budget_native.py"],
+                  cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=180),
+              )
+          raise SystemExit(result)
+          PY
+  owned-budget-native-macos:
+    name: Borrowed budget native (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps: *owned-budget-native-steps

@@ -1,7 +1,7 @@
 {
   "name": "efforts",
   "description": "Efforts planning and continuity for Copilot CLI: canonical effort contracts, explicit adoption, completion gates, backlog recovery and an optional agenda companion with exit criteria and bounded detour/return guidance.",
-  "version": "0.1.11-dev1",
+  "version": "0.1.12-dev1",
   "author": {
     "name": "Thomas Michon"
   },

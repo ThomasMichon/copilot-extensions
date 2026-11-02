@@ -41,6 +41,40 @@ feeds retain their meanings. Older residents do not support the agenda actions;
 callers must report unsupported delivery, not replay agenda mutations or infer
 support from an installed package version. No existing contract is retired.
 
+## Explicit version-2 agenda support
+
+The running resident separately advertises `worktree-agendas-v2`. All three
+agenda commands accept `--contract-version 2`; omitting the option preserves
+version 1. A caller must establish support against its selected executable and
+the authenticated resident before emitting a new option. The CLI checks the
+requested resident capability before sending a control action; it never
+downgrades a failed version-2 publication or repeats the canonical mutation.
+
+Read/feed/publish request fields remain exactly those below, with
+`contract_version: 2` when selected. Successful replies and structured errors
+carry that selected version; heartbeat and going-away fields are unchanged.
+Version-2 requests can carry an unchanged version-1 observation for a legacy
+cursor, or an `efforts.agenda-observation` version-2 body for execution cursor 4.
+The latter retains exactly the same Snapshot fields; its recognized statuses are
+exactly `working`, `waiting`, `replanning` and `complete`. `steering` remains a
+legacy observation-version-1 status and is not accepted for cursor 4.
+Observation version 1 admits only cursor 1/2; observation
+version 2 admits only cursor 4. Cursor 3 is not an execution observation.
+
+A version-1 request selecting a current cursor-4 publication receives explicit
+`unsupported` instead of an invented version-1 body or an older cached
+publication. The provider does not relabel, truncate or tunnel new queue,
+attempt or context state through another field. Those data remain with the
+canonical planning owner; this boundary carries its bounded coarse projection.
+An older provider lacking version-2 support leaves new delivery unsupported or
+pending, never acknowledged through mutation replay.
+
+Both versions retain the existing UTF-8 size/shape limits, head and store
+qualification, generation/sequence barriers, revision/digest fences, durable
+commit-before-notification and held-reader lifecycle. A version change is not
+permission to reset a revision, replace a same-head store, or clear observed
+evidence through a null availability update.
+
 ## Version-1 control contract
 
 `agenda-read` and `agenda-feed` accept exactly:

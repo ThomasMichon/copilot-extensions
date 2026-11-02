@@ -1,35 +1,6 @@
-"""Windows-headless / detached process-spawn helpers (shared, vendored per plugin).
-
-Windowless runtimes must not allocate a console when spawning console programs.
-These helpers keep the creation flags consistent across plugins:
-
-* :func:`no_window_kwargs` -- ``CREATE_NO_WINDOW`` for a non-interactive child
-  whose output is still captured over pipes (the common case: git/gh/az checks).
-* :func:`detached_kwargs` -- fully detach a background child so it outlives its
-  parent AND carries no console (so no window); optionally break away from a
-  parent Job object.
-* :func:`windowless_daemon_kwargs` -- keep a Windows daemon in a
-  ``CREATE_NO_WINDOW`` host while optionally breaking away from an inherited
-  Job object; use this when its own children must inherit the windowless host.
-* :func:`windowless_python` -- select the safest available ``pythonw.exe`` for a
-  detached Python daemon on Windows so neither a venv launcher nor its base
-  interpreter can allocate a second console.
-* :func:`windowless_python_env` -- preserve the original venv context when
-  ``windowless_python`` targets a base install's ``pythonw.exe``.
-* :func:`direct_python` -- keep a console daemon's PID on the actual interpreter,
-  not a Windows venv redirector, while retaining its venv context.
-* :func:`spawn_daemon` -- the one launch primitive for a long-lived daemon:
-  windowless, escapes the caller's Job object / session, runs from an
-  explicit durable ``cwd``, and appends its stdout/stderr to a log file.
-
-Off Windows, ``no_window_kwargs`` is empty and ``detached_kwargs`` selects a
-new session; call sites stay platform-agnostic.
-
-Development uses canonical editable references; release materializes consumer
-copies. See ``README.md`` for vendoring and
-``tools/check-vendored-libs-sync.py`` for source consistency.
-
-Synchronous imports stay asyncio-free; accessing the async helper loads it lazily.
+"""Self-contained headless creation and caller-owned finite containment.
+README.md owns the launch, interpreter and lifetime contracts.
+Async helpers and native ABI types load lazily.
 """
 
 from __future__ import annotations
@@ -63,14 +34,7 @@ _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 _CREATE_SUSPENDED = 0x00000004
 _CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-# Permit (but do not require) a contained descendant to opt out of the
-# kill-on-close job via its own CREATE_BREAKAWAY_FROM_JOB creation flag.
-# Without this, Windows rejects that child spawn outright -- a real hazard
-# for a command like `agent-worktrees update`, whose own daemon cutover
-# (``status_monitor_cutover.py``, via ``windowless_daemon_kwargs(breakaway=
-# True)``) deliberately spawns its successor with CREATE_BREAKAWAY_FROM_JOB
-# so the new daemon outlives the updater. Ordinary descendants that never
-# request breakaway stay contained and still die with the job as before.
+# Permit explicitly requested successor breakaway; ordinary descendants stay contained.
 _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 _JobObjectExtendedLimitInformation = 9
 _PROCESS_SET_QUOTA = 0x0100
@@ -215,7 +179,7 @@ class JobHandle:
         if not handle:
             raise RuntimeError("Job handle is closed; cannot confirm empty Job")
         import ctypes
-        from ._windows_job_types import _JobBasicAccountingInformation
+        accounting_type = __getattr__("_JobBasicAccountingInformation")
 
         kernel32 = _kernel32()
         _configure_job_teardown_api(kernel32)
@@ -223,7 +187,7 @@ class JobHandle:
         if not kernel32.TerminateJobObject(handle, 1):
             raise ctypes.WinError(ctypes.get_last_error())
         while True:
-            accounting = _JobBasicAccountingInformation()
+            accounting = accounting_type()
             returned = ctypes.c_uint32()
             if not kernel32.QueryInformationJobObject(
                 handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
@@ -363,13 +327,8 @@ def _log_job_failure(operation: str) -> None:
 def _assign_suspended_to_kill_on_close_job(
     pid: int, *, allow_breakaway: bool = True, name: str | None = None,
 ) -> JobHandle | None:
-    """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
-
-    The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
-    child process lifetime; close it once ordinary cleanup has finished.
-    Internal callers use either a still-suspended child or their own current
-    process, whose identity cannot be reused during this call. The latter
-    establishes inherited containment before a cross-OS owner creates children.
+    """Bind a still-suspended child or this process to an owned kill-on-close Job.
+    Hold the returned handle until ordinary child cleanup finishes.
     """
     if not _is_windows():
         return None
@@ -475,8 +434,25 @@ def __getattr__(name: str) -> Any:
         import asyncio
         value = asyncio
     elif name == "_JobBasicAccountingInformation":
-        from ._windows_job_types import _JobBasicAccountingInformation
-        value = _JobBasicAccountingInformation
+        if name in globals():
+            return globals()[name]
+        import threading
+        with globals().setdefault("_job_type_lock", threading.Lock()):
+            if name not in globals():
+                import ctypes
+                class _JobBasicAccountingInformation(ctypes.Structure):
+                    _fields_ = [
+                        ("TotalUserTime", ctypes.c_int64),
+                        ("TotalKernelTime", ctypes.c_int64),
+                        ("ThisPeriodTotalUserTime", ctypes.c_int64),
+                        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                        ("TotalPageFaultCount", ctypes.c_uint32),
+                        ("TotalProcesses", ctypes.c_uint32),
+                        ("ActiveProcesses", ctypes.c_uint32),
+                        ("TotalTerminatedProcesses", ctypes.c_uint32),
+                    ]
+                globals()[name] = _JobBasicAccountingInformation
+            return globals()[name]
     elif name == "spawn_in_kill_on_close_job":
         from ._async import asyncio, spawn_in_kill_on_close_job
         globals().setdefault("asyncio", asyncio)
@@ -512,26 +488,12 @@ def spawn_sync_in_kill_on_close_job(
     allow_breakaway: bool = True,
     **kwargs: Any,
 ) -> tuple[subprocess.Popen, JobHandle | None]:
-    """Synchronous (``subprocess.Popen``) counterpart to
-    :func:`spawn_in_kill_on_close_job`, for callers that cannot use ``asyncio``.
-
-    Windows creates the child suspended, assigns its named kill-on-close Job
-    and propagates the complete cleanup-scope chain before resume. Keep the
-    returned Job handle until child cleanup finishes. Close/terminate that Job
-    for whole-tree cleanup: ``proc.kill()`` alone leaves grandchildren alive,
-    possibly keeping captured pipes open.
-
-    With ``require_job=True``, failed Windows Job assignment kills the still
-    suspended child before it can launch descendants and raises explicitly.
-    ``allow_breakaway=False`` prohibits descendants from escaping this Job and
-    rejects an explicit CREATE_BREAKAWAY_FROM_JOB flag on the initial child.
-    The default permits explicit breakaway, preserving legacy daemon semantics.
-    Otherwise failed assignment resumes the child with ``job_handle=None``;
-    existing cleanup remains responsible. Its unresolved scope metadata
-    prevents descendants claiming verified daemon escape. Off Windows this is
-    plain ``Popen`` returning ``(process, None)``.
-    Process-creation OS errors are ``SyncProcessLaunchError`` instances;
-    subsequent containment or cleanup errors retain their original types.
+    """Create a suspended Windows child, bind its Job and scopes, then resume.
+    Retain the returned Job for whole-tree cleanup; root kill alone is not enough.
+    Required assignment fails before resume; disabling breakaway forbids escape.
+    Failed optional assignment resumes with unknown custody and unresolved scopes.
+    POSIX returns plain Popen; creation OS errors retain SyncProcessLaunchError.
+    README.md owns the full compatibility and lifetime contract.
     """
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")

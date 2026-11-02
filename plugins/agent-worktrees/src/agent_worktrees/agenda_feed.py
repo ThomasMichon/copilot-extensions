@@ -52,7 +52,14 @@ class AgendaFeed:
         try:
             project, _wid, _session = contract.selection(payload)
         except contract.AgendaError as exc:
-            yield {"type": "error", **contract.failure(exc.code, str(exc))}
+            yield {
+                "type": "error",
+                **contract.failure(
+                    exc.code,
+                    str(exc),
+                    version=contract.error_version(payload),
+                ),
+            }
             return
         key = object()
         with self._condition:
@@ -63,7 +70,14 @@ class AgendaFeed:
                 subscriber = {"project": project, "closed": None, "dirty": True}
                 self._subscribers[key] = subscriber
         if reason is not None:
-            yield {"type": "error", **contract.failure(reason, "agenda feed admission closed")}
+            yield {
+                "type": "error",
+                **contract.failure(
+                    reason,
+                    "agenda feed admission closed",
+                    version=contract.error_version(payload),
+                ),
+            }
             return
         previous = None
         try:
@@ -105,6 +119,7 @@ class AgendaFeed:
                             **contract.failure(
                                 "superseded",
                                 "agenda feed generation or sequence changed",
+                                version=contract.error_version(payload),
                             ),
                         }
                         return

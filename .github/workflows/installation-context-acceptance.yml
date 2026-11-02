@@ -941,6 +941,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_installer_guardian.py
+
       - name: Companion lifecycle retained through guidance and concurrent embody
         if: ${{ !cancelled() && steps.guardian-tooling.outcome == 'success' }}
         run: >-

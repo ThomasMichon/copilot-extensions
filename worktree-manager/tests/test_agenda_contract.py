@@ -1,7 +1,10 @@
 """Synthetic admission controls, independent of the efforts/provider packages."""
 
 from copy import deepcopy
+import json
+import subprocess
 import sys
+from threading import Event
 
 import pytest
 
@@ -31,6 +34,171 @@ def publication(sequence=0, *, kind="snapshot", revision=1, generation="a" * 32)
             },
         },
     }
+
+
+def publication_v2(sequence=0, *, kind="snapshot", revision=1, generation="a" * 32):
+    frame = publication(sequence, kind=kind, revision=revision, generation=generation)
+    frame["contract_version"] = frame["observation"]["version"] = 2
+    frame["observation"]["snapshot"].update(
+        cursor_version=4, status="replanning",
+        stack=["Original root", "Subqueue continuation"],
+        queued=["Tail item"], notes=["Context reference: context-2"],
+    )
+    return frame
+
+
+def test_v2_snapshot_supports_cursor_four_and_unchanged_legacy_observations():
+    modern = publication_v2()
+    validate_snapshot(modern, "example", "selected", "head-a", contract_version=2)
+    assert AgendaFeed("example", "selected", "head-a", contract_version=2).receive(modern) == modern
+    legacy = {**publication(), "contract_version": 2}
+    assert AgendaFeed("example", "selected", "head-a", contract_version=2).receive(legacy) == legacy
+    assert legacy["observation"]["version"] == 1
+    with pytest.raises(ValueError):
+        AgendaFeed("example", "selected", "head-a").receive(modern)
+
+
+@pytest.mark.parametrize("change", [
+    {"cursor_version": 1}, {"cursor_version": 2}, {"cursor_version": 3},
+    {"cursor_version": True}, {"attempts": []}, {"status": []}, {"status": "unknown"},
+    {"status": "steering"},
+])
+def test_v2_observation_version_cursor_and_fixed_fields_are_not_silently_downgraded(change):
+    frame = publication_v2()
+    frame["observation"]["snapshot"].update(change)
+    with pytest.raises(ValueError):
+        validate_snapshot(frame, "example", "selected", "head-a", contract_version=2)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_steering_status_remains_supported(version):
+    frame = publication()
+    frame["contract_version"] = version
+    frame["observation"]["snapshot"]["status"] = "steering"
+    assert AgendaFeed(
+        "example", "selected", "head-a", contract_version=version,
+    ).receive(frame) == frame
+
+
+@pytest.mark.parametrize("status", ["working", "waiting", "replanning", "complete"])
+def test_cursor_four_status_matches_context_qualified_core(status):
+    frame = publication_v2()
+    frame["observation"]["snapshot"]["status"] = status
+    assert AgendaFeed(
+        "example", "selected", "head-a", contract_version=2,
+    ).receive(frame) == frame
+
+
+@pytest.mark.parametrize("version", [0, 3, True, "2"])
+def test_unknown_manager_contract_selection_is_rejected(version):
+    with pytest.raises(ValueError):
+        AgendaFeed("example", "selected", "head-a", contract_version=version)
+    with pytest.raises(AgendaUnavailable):
+        agenda_transport.feed_argv(
+            "example", "selected", "head-a", engine_command=[sys.executable, "-m", "agent_worktrees"],
+            contract_version=version,
+        )
+
+
+def test_v2_null_updates_retain_store_revision_and_body_evidence():
+    feed = AgendaFeed("example", "selected", "head-a", contract_version=2)
+    first = publication_v2(5, revision=3)
+    feed.receive(first)
+    empty = {**publication_v2(6, kind="update"), "availability": "not-published", "observation": None}
+    feed.receive(empty)
+    with pytest.raises(ValueError):
+        feed.receive(publication_v2(7, kind="update", revision=2))
+    assert feed.fence.observed == first["observation"]
+    assert feed.receive(publication_v2(7, kind="update", revision=3))["observation"] == first["observation"]
+
+
+def test_negotiated_header_change_does_not_reset_or_weaken_publication_evidence():
+    fence = AgendaPublicationFence()
+    legacy = publication(5, revision=3)
+    AgendaFeed("example", "selected", "head-a", fence=fence).receive(legacy)
+    modern_header = {**legacy, "contract_version": 2}
+    assert AgendaFeed(
+        "example", "selected", "head-a", fence=fence, contract_version=2,
+    ).receive(modern_header) == modern_header
+    changed = publication_v2(6, revision=3)
+    with pytest.raises(ValueError):
+        AgendaFeed("example", "selected", "head-a", fence=fence, contract_version=2).receive(changed)
+    advanced = publication_v2(6, revision=4)
+    assert AgendaFeed(
+        "example", "selected", "head-a", fence=fence, contract_version=2,
+    ).receive(advanced) == advanced
+
+
+@pytest.mark.parametrize("caps,expected", [
+    (["worktree-agendas-v1"], 1),
+    (["worktree-agendas-v1", "worktree-agendas-v2"], 2),
+    (["worktree-agendas-v2"], 2),
+    ([], None),
+])
+def test_live_health_selects_contract_before_flags_with_one_probe(monkeypatch, caps, expected):
+    calls = []
+    base = [sys.executable, "-m", "agent_worktrees"]
+
+    def run(argv, timeout):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "ok": True, "health": {"capabilities": caps,
+                                 "worktrees": {"status": "ready", "generation": "a" * 32}},
+            "cli_contract_versions": [1, 2],
+        }), "")
+
+    monkeypatch.setattr(agenda_transport, "cancellable_read_runner", lambda *args, **kwargs: run)
+    supported = []
+    if expected is None:
+        with pytest.raises(AgendaUnavailable) as error:
+            agenda_transport.require_capability(
+                base, cancelled=Event(), cwd="synthetic", on_supported=lambda: supported.append(True),
+            )
+        assert error.value.code == "unsupported" and not supported
+    else:
+        selected = agenda_transport.require_capability(
+            base, cancelled=Event(), cwd="synthetic", on_supported=lambda: supported.append(True),
+        )
+        assert selected == expected and supported == [True]
+        argv = agenda_transport.feed_argv(
+            "example", "selected", "head-a", engine_command=base, contract_version=selected,
+        )
+        assert ("--contract-version" in argv) == (selected == 2)
+        if selected == 2:
+            assert argv[-2:] == ["--contract-version", "2"]
+        else:
+            assert argv[-2:] == ["head-a", "--json"]
+    assert calls == [agenda_transport.health_argv(base)]
+
+
+@pytest.mark.parametrize("cli_versions,expected", [([1], 1), ([1, 2], 2), ([3], None), (None, 1)])
+def test_new_resident_does_not_make_old_cli_accept_new_flags(monkeypatch, cli_versions, expected):
+    value = {"ok": True, "health": {
+        "capabilities": ["worktree-agendas-v1", "worktree-agendas-v2"],
+        "worktrees": {"status": "ready", "generation": "a" * 32},
+    }}
+    if cli_versions is not None:
+        value["cli_contract_versions"] = cli_versions
+    calls = []
+
+    def run(argv, timeout):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(agenda_transport, "cancellable_read_runner", lambda *args, **kwargs: run)
+    base = [sys.executable, "-m", "agent_worktrees"]
+    if expected is None:
+        with pytest.raises(AgendaUnavailable) as error:
+            agenda_transport.require_capability(base, cancelled=Event(), cwd="synthetic")
+        assert error.value.code == "unsupported"
+    else:
+        version = agenda_transport.require_capability(base, cancelled=Event(), cwd="synthetic")
+        assert version == expected
+        argv = agenda_transport.feed_argv(
+            "example", "selected", "head-a", engine_command=base, contract_version=version,
+        )
+        assert ("--contract-version" in argv) == (expected == 2)
+    assert len(calls) == 1
 
 
 def test_atomic_snapshot_update_heartbeat_and_invalidation():

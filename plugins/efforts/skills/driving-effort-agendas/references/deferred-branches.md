@@ -2,6 +2,9 @@
 
 [Driving Effort Agendas](../SKILL.md) owns this optional process. It does not
 execute graph data, infer approval, reserve another owner's work or create turns.
+The version-2 data examples below are strict legacy fixtures. The separately
+versioned [context-qualified procedure](context-qualified-continuations.md)
+does not reinterpret them or the version-3 refusal marker as cursor 4.
 
 ## Park an effect, not usefulness
 
@@ -20,6 +23,9 @@ proposal and already-authorized work nodes, with source references/exits/edges.
 Update its definition revision and reconcile affected frames explicitly.
 Do not invent an unrelated root or dependency, reset budgets, or treat every
 discovery as a new implementation mandate.
+Missing context calls for bounded diagnosis/refinement or another authorized
+avenue before an Operator question. An actual decision or safety/permission gate
+remains separate from anti-spin recovery.
 
 ## Version 2 cursor
 
@@ -64,6 +70,9 @@ bounded to 128 KiB; no repository crawl, live approval check or state write occu
    attributable. Do not let a second writer replace the saved return.
 
 Revisit and response signals are reinspection, not permission or consent.
+Record what the reinspection actually learned and how it changes a viable
+approach before claiming a productive revisit. A new timestamp/response label
+with unchanged information is not progress or a reason to erase shared visits.
 The provided examples show an effect qualified at **14:48**, still pending,
 then research while retaining an **18:48** revisit. Four hours is an example,
 not a polling default. Never label the operator unavailable from Autopilot or
@@ -93,6 +102,10 @@ retain its history and do not pop it twice after interrupted movement.
 A complete cursor cannot contain unresolved deferred branches, even with a
 terminal active node. The canonical effort/task—not clock, cursor or message—
 owns acceptance and completion.
+Legacy visit/detour bounds remain strict. A supported context-qualified mode
+preserves the same original roots, links, saved continuations and cumulative
+evidence while qualifying new attempts; it does not grant fresh resource or
+effect approval because more context is available.
 
 ## No hidden scheduler or effect authority
 

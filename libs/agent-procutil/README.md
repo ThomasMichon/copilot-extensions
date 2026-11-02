@@ -401,6 +401,79 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+### Aggregate execution and settlement budget
+
+`agent_procutil.owned_budget.OwnedExecutionBudget` is an optional additive
+contract for `owned_process.run_caller_owned(..., budget=budget)`. Construct one
+with `OwnedExecutionBudget.from_timeout(total_seconds, cleanup_reserve=seconds)`
+and reuse it across sequential observations. Its absolute monotonic `deadline`
+includes native cleanup and reader settlement; execution stops at
+`deadline - cleanup_reserve`, also bounded by each call's existing `timeout`.
+Passing an already-expired execution budget refuses before target creation.
+The reserve is never renewed by another call, pipe worker or POSIX guardian.
+Cwd, environment, raw-byte limits, binary capture and caller-death custody are
+unchanged. Omitting `budget` preserves every existing default.
+
+Windows retirement, retirement-lock acquisition, pipe-worker completion/join
+and process-exit waits consume the same remaining deadline.
+Native startup checks the earlier individual/aggregate execution cutoff
+immediately before target creation and before resuming the suspended target.
+Slow setup cannot admit execution into the reserve. Known no-target refusal or
+confirmed failed-startup retirement may notify settlement; ambiguous creation
+and unconfirmed cleanup cannot. Timeout exceptions retain the original command
+and individual timeout. POSIX passes that
+same clock through its finite guardian and retains unreaped group custody
+through native group confirmation and reaping. `OwnedCleanupError` still retains
+the exact process/Job when settlement cannot be confirmed; deadline expiry is
+not successful cleanup. A pre-creation Job-close failure retains only the Job
+(`process is None`) and does not notify settlement. The deadline bounds
+supervised waits, not arbitrary
+blocking kernel calls or caller-supplied callbacks. Settlement callbacks remain
+synchronous bounded bookkeeping, never permission or execution-success proof.
+Consumers must reserve response/serialization time outside this budget.
+Failed preparation or lifetime-descriptor closure also withholds notification.
+`OwnedCleanupError.cleanup_resources` retains exact `(kind, resource)` pairs
+alongside any process/Job custody; lifetime descriptors remain registered until
+confirmed closed or moved to separate uncertain-close tracking. Uncertain
+descriptor numbers never participate in automatic fork cleanup: an error can
+follow actual closure and number reuse. A failure is not permission to retry a
+possibly closed handle.
+
+For an explicitly enclosing finite POSIX owner, opt-in
+`borrow_parent_scope=True` keeps observations in that owner's native group
+instead of creating a separate guardian. Admission requires the caller's actual
+parent to be its current session/group leader and a supplied aggregate budget.
+The child remains exclusively unreaped until individual retirement; only the
+enclosing owner confirms the whole group. Borrowed calls therefore cannot claim
+whole-group `on_settled` callbacks. This is an explicit lifetime delegation,
+not application authority or a general ambient-containment fallback. Windows
+retains its strict owned Job. Ordinary callers keep the existing guardian.
+`budget.enclosed_budget()` places a nested owner's settlement deadline before
+the enclosing read cutoff, reserving a quarter-second for its bounded completion
+frame and retaining cleanup time inside that earlier bound.
+The single cleanup reserve is divided between nested and enclosing settlement,
+with publication charged to the nested share; it is not subtracted twice from
+the target's execution allowance. Publication scales down for smaller reserves. POSIX callers pass
+that nested budget to the guardian, also capped by the individual call timeout.
+The target keeps its individual execution allowance; guardian read time adds
+only cleanup/publication allowance within the aggregate deadline. A short
+individual timeout does not subtract the aggregate cleanup reserve from the
+target's available execution time.
+Consumers align their own nested work with its `execution_deadline`, rather
+than merely advancing execution while allowing cleanup past the reader's cutoff. Confirmed-cleanup timeouts retain bounded raw
+partial streams; no partial result is treated as successful execution.
+
+Windowless launch guidance lives here rather than in the package initializer:
+`no_window_kwargs` selects captured headless children; `detached_kwargs` and
+`windowless_daemon_kwargs` serve explicitly owned durable lifetimes.
+`windowless_python`/`windowless_python_env` preserve the selected GUI interpreter's
+venv, and `direct_python` avoids a Windows venv redirector while preserving
+console interpreter context. `spawn_daemon` owns durable cwd/log and launch
+identity. Off Windows, captured children inherit the session and detached work
+selects a new one. Synchronous package imports remain asyncio-free.
+Finite containment helpers remain self-contained in `__init__.py` for minimal
+single-file lifecycle consumers; release vendoring remains byte-identical.
+
 `run_caller_owned(..., binary=True)` returns exact captured stdout/stderr bytes,
 including invalid UTF-8, NUL and unchanged CR/LF sequences. Its default remains
 strict UTF-8 text with the existing newline normalization. Both modes retain the
@@ -454,6 +527,9 @@ The short-lived containment helpers and their typed process-creation errors
 remain self-contained. Bundles calling `python_cache_args` also carry the
 canonical sibling `python_cache.py`; calling `spawn_daemon` requires the full
 package.
+Job-scope construction and lazy native accounting also belong to that single
+file. The full-package scope and ABI adapters delegate to the same primitives;
+minimal consumers do not need sibling modules to start or retire a finite child.
 
 `agent_procutil.owned_process.run_owned()` executes a finite command with
 captured UTF-8 output, optional `input_text`, and a required positive `timeout`.

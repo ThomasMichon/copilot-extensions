@@ -171,6 +171,7 @@ class WorktreesRuntime:
                 "capabilities": [
                     CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
                     "worktree-agendas-v1",
+                    "worktree-agendas-v2",
                 ],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,

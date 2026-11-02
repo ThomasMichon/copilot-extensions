@@ -79,6 +79,10 @@ function validResult(value) {
     (value.additionalContext === undefined || typeof value.additionalContext === "string");
 }
 
+function unavailable(boundary) {
+  return { additionalContext: `[agent-worktrees pre-tool] Boundary: ${boundary}. Effect: this component could not evaluate policy; missing evidence is not authorization. This hook did not execute the tool; independent policy decisions remain in force. Next: inspect the selected installation pre-tool files and existing repairing-worktrees guidance; use its catalog command read-only doctor only if available. Retry: do not repeat the tool solely for this warning; inspect its result first, and retry evaluation only after this boundary changes.` };
+}
+
 export function createPythonPolicy({ scriptsRoot, python, environment = process.env }) {
   if (!isAbsolute(python) || !statSync(python).isFile()) {
     throw new Error("resident pre-tool policy requires an absolute existing interpreter");
@@ -87,7 +91,10 @@ export function createPythonPolicy({ scriptsRoot, python, environment = process.
     const frame = JSON.stringify(payload) + "\n";
     for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py",
       "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py"]) {
-      boundedFile(join(scriptsRoot, name), 131072);
+      try { boundedFile(join(scriptsRoot, name), 131072); }
+      catch (error) {
+        if (!GUARDS.includes(name) || error?.code !== "ENOENT") throw error;
+      }
     }
     let timer;
     let timedOut = false;
@@ -174,10 +181,7 @@ export function createResidentPreToolHook({
         try { report(reason); }
         catch { reason += "-diagnostic-failed"; }
       }
-      return {
-        permissionDecision: "deny",
-        permissionDecisionReason: `agent-worktrees resident pre-tool ${reason}; restore the command hook or repair its owning installation`,
-      };
+      return unavailable(reason);
     }
   };
 }
@@ -197,12 +201,11 @@ export function selectResidentPreToolHooks({
     if (typeof hook !== "function") throw new Error("resident-hook-unavailable");
     return { onPreToolUse: hook };
   } catch {
-    report("resident-policy-unavailable; repair interpreter or select command mode");
+    let reason = "policy activation unavailable";
+    try { report("resident-policy-unavailable; repair interpreter or select command mode"); }
+    catch { reason += "-diagnostic-failed"; }
     return {
-      onPreToolUse: async () => ({
-        permissionDecision: "deny",
-        permissionDecisionReason: "agent-worktrees resident pre-tool policy is unavailable; repair its interpreter or select command mode",
-      }),
+      onPreToolUse: async () => unavailable(reason),
     };
   }
 }
