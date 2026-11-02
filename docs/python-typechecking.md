@@ -6,7 +6,8 @@ and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
-Endpoint Rendezvous, Fleet Contracts, Installation Context, Lazy CLI Dispatch,
+Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
+Context, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -30,6 +31,7 @@ python tools/typecheck.py lib-core-delegation
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py lib-fleet-contracts
+python tools/typecheck.py lib-fleet-index-adapter lib-fleet-vault-adapter
 python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-peer-launch
@@ -110,6 +112,14 @@ keyword contracts, while intentionally invalid constructor vectors use
 narrow invocation boundaries confined to negative tests. The SSH consumer
 remains independently pending; canonical admission does not qualify its
 whole runtime.
+
+Fleet Index and Vault Adapters each check all four canonical source/test
+files in the base environment. Backend JSON objects retain an explicit dynamic
+serialization boundary; operation-specific parameter casts rely on the
+validated request contract and leave runtime validation unchanged. Positive
+request fixtures use direct typed constructors, and response-presence assertions
+narrow optional results without removing existing checks. These are canonical
+prototype-library admissions, not activation of a service or runtime.
 
 Repository Policy checks all six canonical source/test files with the declared
 YAML/stub environment. Its guest reader is a separately checked module whose
