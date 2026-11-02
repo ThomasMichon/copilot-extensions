@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import agent_procutil
 import pytest
@@ -31,6 +32,64 @@ pytestmark = pytest.mark.skipif(
     os.name != "nt" and sys.platform != "linux", reason="native Windows/Linux Logger bootstrap",
 )
 ACKNOWLEDGEMENT = "[agent-logger] driver launch acknowledgement: "
+
+
+def _cold_results_completed(root, callers, progress):
+    assert progress is not None, "Established foundation progress disappeared"
+    assert progress.state not in {"failed", "interrupted"}, (
+        f"Foundation {progress.state}: exit={progress.exit_code}, reason={progress.error}"
+    )
+    receipts = []
+    for caller in callers:
+        receipt = ordinary_receipt(caller.receipt_log)
+        if receipt is None and caller.exited():
+            receipt = ordinary_receipt(caller.receipt_log)
+            assert receipt is not None, "Native owner exited without an ordinary request receipt"
+        receipts.append(receipt)
+    if not all(receipts):
+        return False
+    requests = [status(receipt, root=root) for receipt in receipts]
+    assert all(item.state != "interrupted" for item in requests), "Ordinary bootstrap request interrupted"
+    return all(item.state == "completed" for item in requests)
+
+
+@pytest.mark.parametrize("state", ["failed", "interrupted"])
+def test_cold_results_reject_failed_foundation_before_waiting_for_receipts(area, state):
+    progress = SimpleNamespace(state=state, exit_code=7 if state == "failed" else None,
+                               error="fixture_foundation_failure")
+    with pytest.raises(AssertionError, match=f"Foundation {state}"):
+        _cold_results_completed(area, [], progress)
+
+
+def test_cold_results_reject_owner_exit_without_receipt(area):
+    progress = SimpleNamespace(state="running")
+    caller = SimpleNamespace(receipt_log=area / "absent.log", exited=lambda: True)
+    with pytest.raises(AssertionError, match="without an ordinary request receipt"):
+        _cold_results_completed(area, [caller], progress)
+
+
+def test_cold_results_recheck_receipt_committed_before_owner_exit(area, monkeypatch):
+    log = area / "receipt.log"
+
+    def exited():
+        log.write_text('{"request_id":"fixture-request","state":"pending"}\n', encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(sys.modules[__name__], "status", lambda _receipt, **_kwargs: SimpleNamespace(state="completed"))
+    caller = SimpleNamespace(receipt_log=log, exited=exited)
+    assert _cold_results_completed(area, [caller], SimpleNamespace(state="completed"))
+
+
+@pytest.mark.parametrize("state", ["pending", "running", "completed", "interrupted"])
+def test_cold_results_preserve_ordinary_request_outcomes(area, monkeypatch, state):
+    monkeypatch.setattr(sys.modules[__name__], "ordinary_receipt", lambda _path: "fixture-request")
+    monkeypatch.setattr(sys.modules[__name__], "status", lambda _receipt, **_kwargs: SimpleNamespace(state=state))
+    caller = SimpleNamespace(receipt_log=area / "receipt.log", exited=lambda: False)
+    if state == "interrupted":
+        with pytest.raises(AssertionError, match="request interrupted"):
+            _cold_results_completed(area, [caller], SimpleNamespace(state="completed"))
+    else:
+        assert _cold_results_completed(area, [caller], SimpleNamespace(state="completed")) == (state == "completed")
 
 
 def test_materialized_logger_has_complete_independent_foundation(materialized_logger):
@@ -169,10 +228,12 @@ def test_logger_bootstrap_refusal_keeps_independent_provider_and_guidance(materi
 def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     materialized_logger, area, native_window_observation,
 ):
+    print("Logger cold hook: preparing environment", file=sys.stderr, flush=True)
     payload, installation, project = materialized_logger
     profile = installation.parent
     root = profile / ".copilot-extensions/update-driver"
-    env = cold_environment(installation, project, area)
+    env = cold_environment(installation, project, area, python_prerequisite=True)
+    print("Logger cold hook: environment ready", file=sys.stderr, flush=True)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_LOGGER_HOME"] = str(installation)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(profile / "bootstrap-killswitch.json")
@@ -185,16 +246,21 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     command = hook_command(payload, project, profile)
 
     def diagnostic():
-        return "\n".join(
-            f"{path.relative_to(area)}:\n{path.read_text(errors='replace')[-16000:]}"
-            for path in area.rglob("*")
-            if path.is_file() and (path.suffix == ".log" or path.name in {"stdout", "stderr"})
-        )
+        reports = []
+        for path in area.rglob("*"):
+            if path.is_file() and (path.suffix == ".log" or path.name in {"stdout", "stderr"}):
+                print(f"Logger diagnostic read: {path.relative_to(area)}", file=sys.stderr, flush=True)
+                reports.append(f"{path.relative_to(area)}:\n{path.read_text(errors='replace')[-16000:]}")
+        return "\n".join(reports)
 
     def owned(label):
+        print(f"Logger cold hook: entering {label}", file=sys.stderr, flush=True)
         return owned_hook(
             command, env=env, project=project, directory=area / label,
             timeout=deadline, diagnostic=diagnostic, acknowledgement_prefix=ACKNOWLEDGEMENT,
+            keep_contained_job_until_settlement=(
+                os.name == "nt" and env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+            ),
         )
 
     def assert_admission(item, action):
@@ -205,21 +271,33 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
         assert Path(admission["project"]) == project
 
     with owned("cold-first") as first:
+        print("Logger cold hook: first owner acknowledged", file=sys.stderr, flush=True)
         observe(lambda: foundation_status(root=root) is not None, 90, diagnostic)
+        print("Logger cold hook: foundation observed", file=sys.stderr, flush=True)
         operation = foundation_status(root=root).operation_id
         assert foundation_status(root=root).state == "running" and not first.exited(), diagnostic()
         first.close_caller()
+        print("Logger cold hook: first caller closed", file=sys.stderr, flush=True)
         assert not first.exited(), diagnostic()
         with owned("cold-second") as second:
+            print("Logger cold hook: second owner acknowledged", file=sys.stderr, flush=True)
             second.close_caller()
+            last_progress = None
 
             def both_completed():
-                receipts = [ordinary_receipt(caller.receipt_log) for caller in (first, second)]
-                return all(receipts) and all(
-                    status(receipt, root=root).state == "completed" for receipt in receipts
+                nonlocal last_progress
+                progress = foundation_status(root=root)
+                snapshot = None if progress is None else (
+                    progress.state, progress.exit_code, progress.error,
                 )
+                if snapshot != last_progress:
+                    print(f"Logger cold foundation outcome: {snapshot}", file=sys.stderr, flush=True)
+                    last_progress = snapshot
+                return _cold_results_completed(root, (first, second), progress)
 
+            print("Logger cold hook: waiting for both ordinary results", file=sys.stderr, flush=True)
             observe(both_completed, 850, diagnostic)
+            print("Logger cold hook: both ordinary results observed", file=sys.stderr, flush=True)
             for caller in (first, second):
                 observe(caller.exited, 60, diagnostic)
     requests = status(root=root)

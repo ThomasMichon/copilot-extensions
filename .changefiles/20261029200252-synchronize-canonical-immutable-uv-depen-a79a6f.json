@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize canonical immutable UV dependency policy",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

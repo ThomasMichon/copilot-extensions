@@ -150,10 +150,18 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     file = tmp_path / f"harness.{ext}"
     file.write_text(script, encoding="utf-8")
     command = ["/bin/bash", str(file)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(file)]
-    return subprocess.run(
-        command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        return subprocess.run(
+            command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired as error:
+        log = tmp_path / "uv.jsonl"
+        calls = log.read_text() if log.is_file() else "no UV calls"
+        pytest.fail(
+            f"native fixture timeout; UV calls: {calls}; "
+            f"stdout: {error.stdout!r}; stderr: {error.stderr!r}"
+        )
 
 
 def _prelude(ext: str, engine: Path = ENGINE) -> str:
@@ -181,6 +189,7 @@ def _retained_uv_fixture_prelude() -> str:
     return """
 import re, tempfile, tomllib
 if args[:2] == ["pip", "install"]:
+    assert "--no-editable" not in args and "--editable" not in args
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private = config.parent
     assert config.is_file() and not config.is_symlink() and private.name == "inputs"
@@ -193,7 +202,12 @@ if args[:2] == ["pip", "install"]:
         source = Path(match[1])
         if not source.is_dir() or not (source / "pyproject.toml").is_file():
             continue
-        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        retained = tomllib.loads((source / "pyproject.toml").read_text())
+        project = retained["project"]
+        for entries in retained.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            for entry in entries if isinstance(entries, list) else [entries]:
+                if "path" in entry:
+                    assert not entry.get("editable", False)
         original = Path(expected[project["name"]])
         assert source.resolve() != original.resolve() and source.resolve().is_relative_to(private)
         assert project == tomllib.loads((original / "pyproject.toml").read_text())["project"]

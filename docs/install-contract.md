@@ -2180,6 +2180,9 @@ The byte-identical `payload-copy` block follows required output initialization
 and precedes contextual staging. Worktrees also uses it for its structured
 payload copy, without changing context selection, canonical-library handling,
 staging paths or watchdog ownership.
+Codespaces and Logger stamps reuse it for snapshot directories and dependency trees.
+Freshly copied materialized libraries retain that first copy; metadata rewriting
+still runs, while independent materialization still replaces its destination.
 Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
   `installed-plugins`) is authoritative. An inherited staging flag from another
@@ -3813,6 +3816,15 @@ not as dependency-seasoning rejection. Cleanup failure after otherwise successfu
 execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
 turns an incomplete cleanup into success. Context-owned runtime construction
 uses the same exception-preserving cleanup path.
+
+The deployment CLI and immutable runtime engine select non-editable retention.
+Explicit editable operands, including requirement-file entries, are refused.
+Admitted local `tool.uv.sources` mappings are preserved but their editable flags
+are disabled only in private retained metadata; the original checkout is unchanged.
+Deployment retention enforces non-editability through that private metadata
+without appending `--no-editable` to the caller's native UV argument list.
+Ordinary retained-source API callers keep their explicit
+editable-install behavior unless they select non-editable retention.
 
 Absolute, non-editable source-only installations retain the common source/resource
 layout without reproducing unrelated caller-directory or staging ancestry.
