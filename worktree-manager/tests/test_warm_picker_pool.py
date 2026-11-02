@@ -448,7 +448,7 @@ def test_private_resident_state_is_not_inherited_by_a_spare(pool):
         "HOME": "same-home", "COPILOT_AGENT_SESSION_ID": "old-session",
         "AGENT_WORKTREES_BIND_WORKTREE": "old-worktree", "GH_TOKEN": "old-token",
         "AGENT_WORKTREES_AHP_AUTH_TOKEN": "old-grant", "CONTEXT_HANDOFF_ID": "old-transfer",
-        "CE_UPDATE_AUTH": "old-auth",
+        "CE_UPDATE_AUTH": "old-auth", "CE_TERMINAL_LAUNCH": "expired-terminal-request",
     })
     assert clean == {"HOME": "same-home"}
 
@@ -469,6 +469,7 @@ def test_engine_and_manager_launch_context_contracts_match(monkeypatch):
         **environment, "TERM": "tmux-256color", "TERM_PROGRAM": "tmux",
         "TERM_PROGRAM_VERSION": "fixture-version", "TMUX": "fixture-transport",
         "TMUX_PANE": "%1",
+        "CE_TERMINAL_LAUNCH": "per-terminal-request",
     }
     assert module.invocation_context(pane_environment) == module.invocation_context(environment)
     assert invocation_context(pane_environment) == invocation_context(environment)

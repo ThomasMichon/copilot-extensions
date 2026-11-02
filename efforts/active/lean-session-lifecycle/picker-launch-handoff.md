@@ -3,7 +3,7 @@
 - **Parent:** [Lean Session Lifecycle](README.md), Phase 3
 - **Tracking:** #5579; no duplicate implementation owner or umbrella issue
 - **Created:** 2026-11-01
-- **Status:** Active; selected-runtime admission amendment proposed before further implementation
+- **Status:** Active; query-admission amendment reviewed, implementation pending
 - **Vision:** `visions/plugin-services/README.md` - transient callbacks and
   removal of session-scaled wait-only forwarding processes
 
@@ -35,22 +35,24 @@ After the original plan merged in #9913, the operator authorized source work:
 
 ## Scope Approvals
 
-The execution request authorizes source implementation and isolated
-qualification of this mini-effort. It does not authorize
+The final request authorizes source implementation and isolated qualification
+of this reviewed mini-effort. The earlier request authorized the focused plan.
+Neither authorizes
 terminating retained launchers, migrating live sessions, updating installed
-runtimes, changing Job policy, or lifting a deployment hold. Plan approval is
-not rollout authority. The parent effort's existing implementation owner and
-the #8669 installation-independent-session owner remain unchanged.
+runtimes, changing Job policy, or lifting a deployment hold. Implementation
+approval is not rollout authority. The #5579 driver owns this bounded Phase 3
+continuation; the #8669 installation-independent-session owner is unchanged.
 
 On 2026-11-02, the operator selected the admission choice, verbatim:
 
 > probe
 
 The selected form label was "Use a bounded selected-runtime capability query
-(recommended)". This selects the query direction below, including transient
-startup work, rather than constructor-owned capability metadata. The admission
-amendment clears source review before further protocol implementation; no
-installed rollout or live-session authority follows from this choice.
+(recommended)". This chooses the read-only selected-runtime query direction
+below, including its transient startup work. It does not approve the alternative
+constructor-metadata implementation, installed rollout, live-session changes
+or a deployment-hold change. The admission amendment cleared source review in
+#9943 before further protocol implementation.
 
 ## Context
 
@@ -121,35 +123,41 @@ caller state. Measure and report the query's real cold/warm startup work,
 including actual process counts; do not carry forward a claim of zero
 discovery work.
 
+Constructor-owned capability metadata was the unselected alternative. Existing
+runtime-selection facts may locate the query target, but cannot stand in for
+the actual capability response. The implementation remains drafted until the
+reviewed admission revision is implemented and qualified.
+
 ## Plan
 
 ### Slice 1 - Agree the finite handoff
 
-- [ ] Review this admission amendment before further protocol implementation.
-- [ ] Confirm the current cold/resident/provider-session and project-binstub
+- [x] Resolve and review the admission amendment in #9943 before further protocol
+  implementation; preserve the existing no-rollout boundary.
+- [x] Confirm the current cold/resident/provider-session and project-binstub
   consumers; agree the boundary with the existing #5579 and #8669 owners.
-- [ ] Specify the smallest structured result and shell consumption contract:
+- [x] Specify the smallest structured result and shell consumption contract:
   selected installation/runtime, literal argv/environment, cwd, cancellation,
   seed/attempt/receipt identity, exit status and cleanup custody.
-- [ ] Review the plan before runtime edits; identify the terminal/profile and
+- [x] Review the plan before runtime edits; identify the terminal/profile and
   same-window/new-window behavior without introducing an implicit preference.
 
 ### Slice 2 - Remove the two Python forwarding roles
 
 - [ ] Implement selected-runtime support discovery and foreground-only channel
   propagation, preserving unsupported-peer legacy behavior.
-- [ ] Implement the shell-owned preparation-to-attachment handoff for ordinary
+- [x] Implement the shell-owned preparation-to-attachment handoff for ordinary
   local Windows creation and resume, including existing-session joins.
-- [ ] Retain terminal input/output, Ctrl+C, post-exit versus detach behavior,
+- [x] Retain terminal input/output, Ctrl+C, post-exit versus detach behavior,
   installation-independent pane shells, exact process ownership and reaping.
 - [ ] Add focused lifecycle regressions, update launch documentation and
   required changefiles, and land through the normal source-review gate.
-- [ ] Record whether direct terminal-to-PSMux attachment is qualified; if not,
+- [x] Record whether direct terminal-to-PSMux attachment is qualified; if not,
   keep the shell-hosted result and record the precise remaining constraint.
 
 ### Slice 3 - Qualify the persistent shape
 
-- [ ] Prove the native process-lifetime contract in an isolated Windows terminal
+- [x] Prove the native process-lifetime contract in an isolated Windows terminal
   with one and several sessions; finish all test-owned resources explicitly.
 - [ ] Record release availability separately from a separately authorized
   installed rollout and running-state proof; do not migrate existing sessions.
@@ -168,18 +176,18 @@ discovery work.
   launches cannot reuse an expired offer after foreground completion.
 - [ ] Cold/warm capability-query measurements classify every transient process
   and retain the zero persistent-forwarder requirement after attachment.
-- [ ] After creation and resume/attach are ready, actual process observations
+- [x] After creation and resume/attach are ready, actual process observations
   show zero persistent Python workers or interpreter trampolines serving the
   two forwarding roles; transient preparation/helpers are classified separately.
-- [ ] Native console/PTY tests prove stdin, rendering, resize, Ctrl+C, detach,
+- [x] Native console/PTY tests prove stdin, rendering, resize, Ctrl+C, detach,
   rejoin, child exit and terminal close; no session loss or unowned child tree.
-- [ ] Literal argument tests cover spaces, quotes, Unicode, empty values,
+- [x] Literal argument tests cover spaces, quotes, Unicode, empty values,
   metacharacters and `--`; preserve selected runtime, cwd and profile behavior.
-- [ ] Cancellation, failed launch, missing/malformed/reused handoff, seed and
+- [x] Cancellation, failed launch, missing/malformed/reused handoff, seed and
   receipt failure cannot report success or launch a second session.
-- [ ] Existing post-exit, launch-attempt, native-incarnation and Job/reaping
+- [x] Existing post-exit, launch-attempt, native-incarnation and Job/reaping
   tests pass; no-mux, remote, new-window and POSIX behavior is preserved.
-- [ ] Fresh constructed-runtime and repeated/concurrent launch tests exercise
+- [x] Fresh constructed-runtime and repeated/concurrent launch tests exercise
   real binstubs and shell boundaries, not only mocked Python composition.
 - [ ] The shared Manager mux daemon remains a singleton after bounded cutover;
   per-session PSMux servers and actual Copilot processes remain permitted.
@@ -196,6 +204,143 @@ discovery work.
 - Captured the operator's required Python lifetime and preferred shorter chain.
   No runtime edits, live-session changes or deployment were performed.
 
+### 2026-11-01 - Source execution admitted
+
+- The proposal merged in #9913 after a clean approval and required CI.
+  The operator then explicitly requested implementation.
+- Implementing the outer PowerShell return channel and finite Manager producer.
+  Python-owned preparation Jobs settle before the shell invokes the ordinary
+  launcher; existing pane scripts and their custody remain unchanged.
+- Initial generated-launcher controls pass in the isolated native ARM Python
+  environment. The earlier x64 test environment was retained after Windows
+  Restart Manager identified its denied DLL's holder as the OS emulation cache;
+  no service was stopped or reconfigured. Full native handoff acceptance remains
+  open and is not inferred from those compatibility controls.
+
+### 2026-11-01 - Native source boundary qualified
+
+- The finite channel is shared through both forwarding layers. A capable
+  Manager publishes version-1 JSON; Python and its cleanup Jobs settle before
+  the terminal's PowerShell host consumes it. The host deletes the channel
+  before attachment, preserves literal argv, restores scoped environment/cwd
+  and records the actual return through a finite callback.
+- Native ConPTY controls exercise the actual Worktrees forwarder and copied
+  user/attributable entry scripts, generated retained Manager CMD/PowerShell
+  entries and a standalone Manager entry creating its own channel. Native
+  handles pin every preparation descendant, including interpreter trampolines;
+  none remains at the selected attachment boundary.
+- A separate real PSMux control runs two simultaneous fixture sessions, delivers
+  input and Ctrl+C, resizes, detaches/rejoins the same live pane and independently
+  exits each child. Fixture Jobs, retained handles, isolated data roots and
+  named-session cleanup own all test resources. The production launcher's
+  refusal path additionally preserves exit 3, its journal observation and the
+  original diagnostics without running preparation effects.
+- Engine discovery, runtime-selection responses and the successful selected
+  command are synthetic. These tests are not a full real-engine/Copilot launch,
+  live installed inventory or a Manager-daemon singleton claim. Those live
+  measurements remain with parent Phase 4 / #5579; copied-shell and lifecycle
+  behavior owned by #8669 is not taken over here.
+- Focused results: 134 launch/receipt/compatibility unit cases; 98 resident,
+  outcome and earlier native cases; 20 provider-session cases; 10 entry/terminal
+  cases plus the production-refusal case; one real concurrent mux lifecycle
+  case; two existing real-pane producer cases; and the earlier three generated
+  installed-slot and three selected-payload controls passed. These packets
+  overlap and are not an additive coverage count.
+- Existing post-exit/reaping controls pass (three cases), as do native-hosting
+  identity controls (26 cases; two exact-held-file cases require Linux procfs
+  and are explicitly skipped on Windows) and four launcher packaging/UTF-8
+  controls. The 13-plugin installation-contract check remains clean.
+- Native checks exposed and fixed nested-array PowerShell splats and a
+  malformed non-object request. Existing receipt fixtures were updated to
+  answer hosting admission before asserting the actual resolver behavior.
+  Independent pre-submit review found no high-confidence runtime defect.
+- Direct terminal-to-PSMux replacement is not qualified: the existing launcher
+  still owns attach-return, detach/exit and post-exit bookkeeping. The reviewed
+  shell-hosted target is retained rather than deleting those duties.
+- No installed runtime was updated, no live session was migrated or killed,
+  and no deployment hold was lifted. Source publication, promotion and a
+  separately authorized installed rollout remain distinct gates.
+- A CMD entry without PowerShell 7 retains its previous Python route. The
+  shell-host capability check uses CMD's built-in PATH expansion rather than
+  adding a discovery process or a new mandatory dependency. Native missing-host
+  and CMD handoff/selected-slot controls pass.
+
+### 2026-11-01 - Published review corrections
+
+- #9936's first review identified three concrete gaps: the shared wrapper
+  cleanup roster omitted the new helper; a standalone CMD replacement fixture
+  omitted its companion PS1; and a caller-defined `ERRORLEVEL` could shadow the
+  terminal-host result. All three are corrected before accepting the review.
+- Deployment/uninstall tests now derive owned files from the actual manifest,
+  exercising removal of the helper rather than repeating an incomplete tuple.
+  The CMD replacement cases include their companion PS1 and a deliberately
+  shadowing `ERRORLEVEL=0`, covering both retained and constructed runtimes and
+  real nonzero return.
+- The two deployment/uninstall controls and four native CMD replacement/exit
+  cases pass. Review and required CI must still clear on the updated head.
+
+### 2026-11-01 - Reused shell environment isolation
+
+- The next review reports no open inline issues but its overview identifies
+  reused-shell environment isolation. That is a real effect of replacing a
+  child PowerShell with in-process script invocation: restoring only the three
+  prepared variables would leak unrelated launcher additions/removals/changes.
+- The foreground helper now snapshots the process environment in memory before
+  applying the selected launch state and restores the complete snapshot on
+  return. No environment snapshot is serialized, logged or sent elsewhere.
+  This adds two environment enumerations per supported foreground launch, not
+  recurring work or another process.
+- The native selected script deliberately adds, removes and changes environment
+  values; every returning entry route must restore the original state. The final
+  12-case ConPTY/real-mux packet passes, including production refusal and
+  concurrent detach/rejoin.
+- Native process attribution additionally checks retained creation times before
+  joining Toolhelp parent PIDs, excluding older processes whose original parent
+  PID has been reused. Production launch adds no process census.
+
+### 2026-11-01 - Explicit environment selectors and native error policy
+
+- The next review overview identifies an environment-selected no-mux path and
+  in-progress JSON marker reads, despite having no new inline threads. Both
+  preparation and observation gates now honor the launcher's exact
+  `WORKTREE_NO_MUX=1` selector. Its legacy contained child path and actual return
+  observations remain intact; `WORKTREE_NO_MUX=0` still permits mux handoff.
+- The helper locally retains native exit-code semantics instead of inheriting
+  a caller's native-error-as-exception preference. Native fixtures now enable
+  that preference with terminating error handling and require the original
+  preference to survive return, including nonzero preparation and the real
+  production launcher's refusal.
+- Test marker readers retry incomplete UTF-8/JSON and transient sharing errors
+  within their existing deadline, surfacing the last error on expiry. The mux
+  resize marker uses the same complete-record reader.
+- All 12 native entry/mux cases pass under inherited error-as-exception policy.
+  The expanded 29-case producer/observation unit packet passes, including exact
+  environment selector 1/0 behavior and non-required post-effect observations.
+
+### 2026-11-01 - Admission revision held for decision
+
+- The next overview identifies inherited stale channels and literal empty
+  preparation arguments. The empty-value binding defect is independently
+  corrected with `AllowEmptyString`; a real ConPTY preparation call preserves
+  empty, quoted and Unicode values and native exit 7.
+- Tracing confirms that resident startup/control helpers otherwise inherit the
+  foreground environment. Existing new-worker filtering does not establish
+  compatibility with an older runtime that never recognized the channel.
+- The source PR is held as native draft, not merged or abandoned. The admission
+  alternatives above are recommendations pending a decision; no capability
+  probe or installer-contract revision has been implemented or authorized by
+  this record. Existing source/native results and all live/deployment limits
+  remain preserved.
+
+### 2026-11-02 - Query direction selected
+
+- Captured the exact `probe` answer and selected label in Scope Approvals.
+  The query direction is selected; its concrete receiver-admission, finite
+  cleanup and foreground-only transport design remains subject to the source
+  review gate.
+- No capability-query implementation, runtime installation, service restart,
+  live-session migration or hold change has been performed.
+
 ### 2026-11-02 - Admission amendment proposed
 
 - The original plan cleared review in #9913. Isolated implementation work
@@ -205,3 +350,12 @@ discovery work.
   capability surface or completed qualification.
 - The broader parent gates and the #8669 owner's scope remain unchanged.
   No installed runtime, live session or deployment hold has been changed.
+
+### 2026-11-02 - Admission amendment reviewed
+
+- #9943 merged after an approval at its exact source head, required green CI
+  and no open review threads (merge `8efd18c2fae5`). Its selected-runtime query,
+  foreground-only propagation and finite-cleanup obligations govern the next
+  implementation slice.
+- The implementation remains drafted. This completes the admission-plan review
+  gate, not capability implementation, source qualification, release or rollout.

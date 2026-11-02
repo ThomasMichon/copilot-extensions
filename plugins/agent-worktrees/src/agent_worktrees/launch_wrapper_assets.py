@@ -22,6 +22,7 @@ WRAPPER_FILES = (
     "psmux-passthrough.conf",
     "session-options.ps1",
     "session-options.sh",
+    "terminal-launch.ps1",
 )
 
 

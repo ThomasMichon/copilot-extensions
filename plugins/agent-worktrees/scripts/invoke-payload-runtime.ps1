@@ -485,7 +485,15 @@ else:
             [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
             exit 126
         }
-        & $Python -X "pycache_prefix=$selectedCache" -m agent_worktrees @forwardArgs
+        $terminalHost = Join-Path $payloadRoot 'bin\terminal-launch.ps1'
+        if (Test-Path -LiteralPath $terminalHost -PathType Leaf) {
+            . $terminalHost
+            Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments (
+                @('-X', "pycache_prefix=$selectedCache", '-m', 'agent_worktrees') + $forwardArgs
+            )
+        } else {
+            & $Python -X "pycache_prefix=$selectedCache" -m agent_worktrees @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }

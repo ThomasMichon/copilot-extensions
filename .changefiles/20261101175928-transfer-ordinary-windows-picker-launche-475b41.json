@@ -1,0 +1,13 @@
+{
+  "comment": "Transfer ordinary Windows Picker launches to the foreground shell after finite Python preparation, preserving launch custody and lifecycle observations.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

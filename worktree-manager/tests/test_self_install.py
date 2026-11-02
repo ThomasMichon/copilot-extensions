@@ -163,7 +163,8 @@ def test_windows_binstubs_force_utf8_mode():
     """
     assert 'set "PYTHONUTF8=1"' in si._cmd_binstub()
     assert "$env:PYTHONUTF8 = '1'" in si._ps1_binstub()
-    assert all("-X utf8" in body for body in (si._cmd_binstub(), si._ps1_binstub(), si._sh_binstub()))
+    assert all("-X utf8" in body for body in (si._cmd_binstub(), si._sh_binstub()))
+    assert '"-X", "utf8"' in si._ps1_binstub()
 
 
 def test_apply_retains_stranded_passive_and_constructs_a_distinct_slot(tmp_path, monkeypatch):
