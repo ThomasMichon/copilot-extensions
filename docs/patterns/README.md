@@ -10,6 +10,11 @@ Read this hub as a **map**: it states the shapes, the design principles, and the
 binding invariants, then links to focused pattern docs for the deep dives. It is
 the copilot-extensions analogue of a facility "service-architecture" guide.
 
+For the partial wheel-first migration, use
+[fast application installation and cutover](fast-application-install-and-cutover.md):
+the shared contributor contract, explicit implementation limits and link to the
+canonical effort's app-by-app progress/coordination matrix.
+
 ## The layered model
 
 | Layer | Question | Home |

@@ -12,6 +12,20 @@
 
 ## Guiding Intent
 
+**Contributor entry:** the [fast-install and cutover guide](../../../docs/patterns/fast-application-install-and-cutover.md)
+defines each app's required boundaries and qualification. The
+[ideal sequence, per-app status and contribution handoff](wheel-first-contributors.md)
+separate released support from retained/unmerged work and let independent app
+contributors coordinate through this same effort and #7028. Manager/Worktrees
+are the released first pair; remaining main services come next, with supported
+old/new coexistence. Index/Logger do not gate those independently releasable slices.
+
+**Ideal flow:** trusted source/promotion inputs -> Manager first -> repo-derived
+wanted apps -> bounded parallel staging -> app/optional whole-toolset readiness
+-> selected incoming startup -> verified serving result -> outgoing self-retire
+and retained last-good recovery. Background preparation and cheap subsequent
+launches complete the target; they are not all implemented by the first pair.
+
 Backing checkouts remain source inputs, but every source-install footprint is
 prepared by a promotion flow producing a main-equivalent snapshot and matching
 prebuilt wheels. Consume the existing cached-source-wheel-assembly effort's
@@ -48,7 +62,7 @@ service-supervision ownership changes.
 | Linux clean-room runner | Reproduces and verifies actual source installation and activation | Existing Docker clean-room rig; WSL is a supported host |
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
-| Wheel-first transition coordinator | Owns the reviewed proposal followed by local qualification and one final implementation PR | #7028 and #9688; existing source/resource custodians remain; deployment/fleet handoff is separate |
+| Wheel-first transition coordinator | Owns the reviewed proposal, prioritized independently releasable app slices and whole-flow qualification | #7028 and #9688; app assignments/evidence in the contributor matrix; existing custodians and separate deployment ownership remain |
 | Fresh recovery dispatcher implementer | Owns the bounded fresh-bootstrap/selected-source composition and disposable entry qualification | #7028; source handle `greased-latch`; existing application, footprint and execution owners retain their scopes |
 
 ## Coordination
@@ -85,6 +99,11 @@ implementer nor releases an original source/resource obligation.
 - **Delegates:** bounded evidence, implementation or validation scopes only; no shared mutable git ownership.
 - **Handoff:** the next owner reads this README and the current slice evidence before continuing. A merged PR resolves only its actual Plan and Validation Plan items.
 - **Existing owners:** preserve #3654 (vendor pointers), #5472 (immutability), #4876 (artifact admission), #5851 (source isolation), and #6812/#6820 (update outcomes/sequencing). Reuse their mechanisms; do not fork their campaigns.
+
+Independent, non-overlapping app slices may proceed concurrently, including
+contributors from other operators. The [contributor handoff](wheel-first-contributors.md#contributing-from-another-agent-or-operator)
+defines discovery/claim, evidence and publication steps. Existing ownership
+and review gates remain; this is not a second effort or a global merge queue.
 
 ## Context
 
@@ -128,6 +147,14 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**Contributor-ready fast-install/cutover documentation (2026-11-02), summary:**
+link the exact per-app support guide, record the ideal end-to-end sequence even
+where unimplemented, and maintain each app's progress so other agents/operators
+can contribute bounded updates. The [verbatim capture and app matrix](wheel-first-contributors.md)
+also retain the core-service priority and independently releasable old/new
+coexistence refinement. This changes documentation and coordination, not rollout
+authority or the parent completion gate.
 
 **Manager-controlled automatic updates (2026-11-02), operator refinement:**
 put the existing automatic-update control in Manager's Configuration /
@@ -393,15 +420,18 @@ disposable scope while preserving config and durable data.
 
 ### Phase W — Wheel-first independent suite (proposal extension)
 - [x] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction. #9623 lands the intent; implementation and installation/fleet acceptance remain open.
+- [x] Capture the [ideal sequence, app matrix and contributor handoff](wheel-first-contributors.md), linked to the shared [application support guide](../../../docs/patterns/fast-application-install-and-cutover.md); documentation does not qualify unfinished apps.
+- [x] Release the bounded Manager/Worktrees fast-install slice (#9990, Main promotion #10024), preserving supported legacy paths for the rest. Whole-system bootstrap and rollout remain open.
 - [ ] Review, implement and qualify the bounded [fresh recovery dispatcher composition](fresh-recovery-dispatch.md), keeping current dispatch independent of the selected installation source and reusing native source, footprint, application and execution owners.
 - [ ] Reconcile the promotion-mediated backing-checkout and every-app staging/activation contract with the existing #9290 owners; consume their UV-native, pyproject-strict implementation without taking over construction/cache/profile/publisher work.
-- [ ] Deliver the Manager-only fast path and complete locally promoted uv/wheel inputs through existing source/release owners.
+- [ ] Complete independent Manager-first bootstrap and locally promoted uv/wheel inputs through existing source/release owners, beyond the released bounded app pair.
+- [ ] Qualify and release remaining main-service slices using the [app matrix](wheel-first-contributors.md#per-app-tracking), without making Index/Logger a prerequisite.
 - [ ] Route configured Dev `<repo> update` through that local promotion provider,
   reusing complete unchanged-Git-hash outputs without local package-version
   increments; retain official Main version authority and the app stage/activate split.
 - [ ] Prove whole-system Windows-container installation, source/version update, cutover, state survival and the generic recovery cases.
 - [ ] Integrate independent maintenance and bounded prepared plugin/guidance selection without foreground rebuilds/scans.
-- [ ] Complete review/CI and Main promotion of one final implementation PR, then hand installation/fleet work to its assigned deployment owner.
+- [ ] Complete review/CI and Main promotion of the remaining coherent implementation slices, then hand installation/fleet work to its assigned deployment owner; resolve whole-flow acceptance independently of PR count.
 
 This new direction is not retroactively qualified by completed historical
 phases or the environment-only benchmark. Its detailed acceptance matrix is
@@ -1178,6 +1208,8 @@ implementation, rollout or parent completion is declared.
 
 ## Validation Plan
 
+- [x] Compare the contributor request capture with the operator's words and inventory every declared runtime root plus the separate SSH Manager dependency. Keep target behavior, released bounded evidence and unproven app/platform/rollout gates distinct.
+- [ ] Maintain the [app qualification matrix](wheel-first-contributors.md#per-app-tracking) against real front-door, failure/retry, state and native-lifetime evidence as contributions land; satisfy the [common app test contract](../../../docs/patterns/fast-application-install-and-cutover.md#app-specific-implementation-and-acceptance) for each claimed boundary.
 - [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
 - [ ] Keep [construction measurements](wheel-first-performance.md) distinct from installed readiness, native lifecycle, SSH-shaped execution and rollout evidence.
 - [ ] Prove preservation/explicit refusal for all [generic recovery classes](wheel-first-recovery-cases.md), without private identifiers or unofficial workarounds.
@@ -1295,9 +1327,11 @@ operator-requested I/O-only refusal boundary.
 
 ## Proposal
 
-The [wheel-first extension](wheel-first-transition.md) is proposed for initial
-upstream review and merge before implementation. That checkpoint is not
-application acceptance. One final code PR follows local qualification.
+The [wheel-first extension](wheel-first-transition.md) cleared its initial
+upstream intent review before implementation. That checkpoint is not
+application acceptance. Qualified app/integration slices now clear review
+independently under the [core-service refinement](wheel-first-contributors.md#request-capture);
+whole-flow qualification remains required regardless of PR count.
 Implementation remains scoped by its W0–W4 gates,
 native ownership and the explicit container-before-host requirement.
 
@@ -1314,6 +1348,31 @@ onto one branch.
 ## Journal
 
 - [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
+
+### 2026-11-02 - Contributor-ready fast-install and cutover map
+
+The operator requested an exact per-app support guide, the ideal end-to-end
+sequence and app tracking suitable for other agents/operators. The
+[contributor handoff](wheel-first-contributors.md) captures that request
+verbatim, the core-service priority refinement and a separately labeled
+implementation organization. Its eleven-step target remains distinct from
+today's environment-only staging and independently released app slices.
+
+The [guide](../../../docs/patterns/fast-application-install-and-cutover.md)
+records copyable UV projects, source/profile admission, stage/setup/activation,
+stable front doors, resident ownership, failure/commit boundaries and native
+qualification. The matrix covers the 21 current runtime roots and separately
+tracks the SSH Manager dependency, which has no independent app entry point.
+Manager/Worktrees have the bounded #9990/#10024 release evidence; Bridge/MCP
+remain in active qualification and other app scopes retain their owners.
+No runtime, source producer, installed system, maintenance hold or deployment
+authority changed.
+
+Documentation consistency, runbook references, canonical effort structure and
+the new guide/matrix's exact local paths/anchors pass. Runtime unit, clean-room
+and live-venue reruns are inapplicable to this documentation-only slice; the
+matrix retains their outstanding application gates instead of implying a pass.
+
 - [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
 
 ### 2026-10-28 - Fresh-default installation and recognizer manifests

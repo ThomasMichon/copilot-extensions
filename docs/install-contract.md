@@ -12,6 +12,13 @@ it needs. This document is the reference, and
 explicitly while developing; publication validation belongs in CI, not a
 git `pre-push` hook).
 
+The independently maintained wheel-first transition has a
+[per-application support and cutover guide](patterns/fast-application-install-and-cutover.md)
+and a [canonical ideal-flow/app-tracking map](../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md).
+They distinguish environment staging, candidate readiness, activation and
+release; they do not claim that every app already implements the target flow.
+Existing plugin-native installation remains supported during the migration.
+
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply
 [service-contract-evolution](patterns/service-contract-evolution.md): publish

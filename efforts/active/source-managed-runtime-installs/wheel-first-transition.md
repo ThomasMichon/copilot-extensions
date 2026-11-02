@@ -2,11 +2,14 @@
 
 Back to the [canonical effort](README.md).
 
-**Status: proposed direction; implementation and host deployment are not proven.**
-The effort, vision and performance proposal is reviewed and merged upstream
-before implementation. Local construction, live version-update/cutover and
-recovery qualification then feed one final whole-flow implementation PR.
-A proposal merge is an intent checkpoint, not installed-system acceptance.
+**Status: reviewed direction with partial implementation; whole-flow acceptance
+and host deployment remain open.** The
+[contributor handoff](wheel-first-contributors.md) records the ideal sequence,
+each app's progress and the subsequent core-service refinement permitting
+independently releasable slices with supported old/new coexistence. The first
+Manager/Worktrees slice is released; it is not whole-system acceptance.
+The [application guide](../../../docs/patterns/fast-application-install-and-cutover.md)
+defines the common support and test contract for subsequent contributions.
 
 ## Requested outcome
 
@@ -210,7 +213,8 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 ### W0 — Reviewed upstream intent first
 - [x] Capture the operator request and distinguish requested scope from recommendations.
 - [x] Review and merge the effort/vision/performance proposal upstream before implementation. #9623 lands the current intent checkpoint; W1–W4 implementation and qualification remain open.
-- [ ] Qualify locally, then submit one final implementation PR for the complete flow.
+- [x] Release the bounded Manager/Worktrees app slice (#9990/#10024); the contributor matrix names the remaining independently releasable scopes. W1–W4 whole-flow qualification remains open.
+- [ ] Qualify each bounded app/integration slice locally, then submit it through required review/CI; retain complete-flow qualification without requiring one final implementation PR.
 
 ### W1 — Complete local promotion and Manager fast path
 - [ ] Reuse canonical official Main version seeding before source/wheel locking;
@@ -243,8 +247,8 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 - [ ] Replace foreground reconciliation/projection/hoist work with bounded prepared selection while proving correct fresh-body delivery.
 - [ ] Verify Windows PowerShell and POSIX noninteractive SSH-shaped self-install without TTY, ambient PATH or profile assumptions where available.
 
-### W4 — Final implementation review and deployment-owner handoff
-- [ ] Clear required CI/review on the final whole-flow implementation PR and update actual operating documentation.
+### W4 — Implementation review and deployment-owner handoff
+- [ ] Clear required CI/review on each coherent app/integration slice and update actual operating documentation; independently releasable slices do not waive whole-flow acceptance.
 - [ ] Confirm actual merge and Main promotion before handing the released flow to its deployment owner.
 - [ ] Supply the local qualification, target-specific owner/readiness and independent rollback evidence; a healthy project doctor is not all-suite clearance.
 - [ ] Leave host installation, peer coordination and any declared-route remote fleet update with the separately assigned deployment owner.
@@ -252,8 +256,10 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 
 The phases and owner reuse above are implementation decomposition
 _(agent-recommended)_. The operator explicitly requested whole-system proof,
-local promotion inputs, proposal review before implementation, one final code
-PR, scoped recovery and preservation. The exact automatic/manual truth table is
+local promotion inputs, proposal review before implementation, scoped recovery
+and preservation. The later core-service refinement supersedes the earlier
+single-final-PR sequencing, not whole-flow acceptance.
+The exact automatic/manual truth table is
 operator-required, not a generic maintenance-active veto.
 If an unavoidable external credential/model/role is required, identify the
 blocked service and scope; do not claim the portfolio passed.
