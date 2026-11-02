@@ -171,7 +171,7 @@ def mkdir_private(path: Path, *, exist_ok: bool = False) -> None:
     from ctypes import wintypes
 
     _, kernel = _apis()
-    kernel.CreateDirectoryW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(_attributes_type())]
+    kernel.CreateDirectoryW.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p]
     kernel.CreateDirectoryW.restype = wintypes.BOOL
     with _creation_attributes(directory=True) as attributes:
         created = kernel.CreateDirectoryW(str(path), ctypes.byref(attributes))
@@ -192,7 +192,7 @@ def open_private(path: Path, flags: int, mode: int = 0o600) -> int:
     _, kernel = _apis()
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-        ctypes.POINTER(_attributes_type()), wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
     ]
     kernel.CreateFileW.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes, kernel.CloseHandle.restype = [wintypes.HANDLE], wintypes.BOOL

@@ -2,6 +2,10 @@
   "comment": "Create private daemon inventory entries with the Windows token user as owner, preserving existing-path admission and binary noninheritable handles.",
   "changes": [
     {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-bridge",
       "type": "patch"
     },

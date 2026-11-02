@@ -1,6 +1,8 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_daemon_instance_creation.py::test_creation_signatures_accept_interleaved_cold_layout_types[directory]",
+        "tools/promotion_unit_tests/test_daemon_instance_creation.py::test_creation_signatures_accept_interleaved_cold_layout_types[file]",
         "tools/promotion_unit_tests/test_daemon_instance_creation.py::test_windows_directory_owner_is_user_at_creation_not_launcher_default",
         "tools/promotion_unit_tests/test_daemon_instance_creation.py::test_windows_directory_creation_failure_stays_explicit[security]",
         "tools/promotion_unit_tests/test_daemon_instance_creation.py::test_windows_directory_creation_failure_stays_explicit[native]",
@@ -3666,7 +3668,7 @@
         "tools/promotion_unit_tests/test_build_source_publication.py::test_original_build_candidate_parent_is_pinned_and_unambiguous[identity]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_daemon_instance_creation.py": "23299f4d44a892abd3448e7e75c286aecb57158e79de00267c47a560ade29ee0",
+        "tools/promotion_unit_tests/test_daemon_instance_creation.py": "ddaea149e0f95383bdc4e8af15ee8e6609da3096a8df2d8d1fa03d02eb2635cb",
         "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "28dc351896ffb1bce5f630ecaf2fdb4b5fb81d25d6ac372779e7d892a145503c",
         "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py": "9a7fe55b700db622145650a2ea0842259a8598fb19a5df932ddc35547df8bfa5",
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3722,7 +3724,7 @@
         "libs/agent-procutil/src/agent_procutil/_caller_owned.py": "0ca03f889c30cafa28827d59ac4d57a942352db87d5ea7c952fed67f98635bc2",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "ed08eea8cda3d1b096c15b498be558ae1283120c204c1563d8519f052f3de656",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "67de453a10faa3685cf905c8936a3f02bb101e97d5c7f23622b48acd5ea52213",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "cc1943e93631e20f8ba9ba8b8b44b84db0e609306c1800ed9a62bd2981a7b8ef",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "7d3b8b65af7d5281b22bb462503990e97cc699c73e4f90ce1e354b56b620fe1a",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",

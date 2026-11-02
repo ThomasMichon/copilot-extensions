@@ -67,7 +67,7 @@ def native(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     def attributes(pointer: Any) -> None:
         value = pointer._obj
-        assert value.length == ctypes.sizeof(owner._attributes_type())
+        assert value.length == ctypes.sizeof(type(value))
         assert value.descriptor == 1234 and value.inherit_handle == 0
 
     def directory(path: str, pointer: Any) -> int:
@@ -122,7 +122,8 @@ def native(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(owner, "_apis", lambda: (advapi, kernel))
     monkeypatch.setattr(owner, "_current_sids", lambda pid: ("current-user", "launcher-default-owner"))
     monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(open_osfhandle=descriptor))
-    return SimpleNamespace(events=events, state=state, os=operating_system, advapi=advapi, kernel=kernel)
+    return SimpleNamespace(events=events, state=state, os=operating_system, advapi=advapi, kernel=kernel,
+                           ctypes=ctypes)
 
 
 def test_windows_directory_owner_is_user_at_creation_not_launcher_default(native: SimpleNamespace) -> None:
@@ -133,6 +134,30 @@ def test_windows_directory_owner_is_user_at_creation_not_launcher_default(native
         ("directory", str(path)), ("free-security",),
     ]
     assert all("launcher-default-owner" not in str(event) for event in native.events)
+
+
+@pytest.mark.parametrize("kind", ["directory", "file"])
+def test_creation_signatures_accept_interleaved_cold_layout_types(
+    native: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    factory = owner._attributes_type
+    layouts = []
+
+    def cold_layout() -> type[Structure]:
+        layout = factory()
+        layouts.append(layout)
+        return layout
+
+    monkeypatch.setattr(owner, "_attributes_type", cold_layout)
+    for index in range(2):
+        path = Path(f"C:/example/private-{index}")
+        if kind == "directory":
+            owner.mkdir_private(path)
+            assert native.kernel.CreateDirectoryW.argtypes[1] is native.ctypes.c_void_p
+        else:
+            assert owner.open_private(path, 0x501) == 12
+            assert native.kernel.CreateFileW.argtypes[3] is native.ctypes.c_void_p
+    assert len(layouts) == 2 and layouts[0] is not layouts[1]
 
 
 @pytest.mark.parametrize("failure", ["security", "native", "free-security"])
