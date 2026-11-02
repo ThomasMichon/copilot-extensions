@@ -32,8 +32,8 @@ Rules:
   (``name@marketplace``) sorts first wins and the other definition is ignored
   as a whole, with a warning. Definitions are never blended across plugins.
 * Relative ``devcontainer_path``, ``host_workspace_path`` and
-  ``host_home_path`` values (and ``devcontainer_config`` when the fragment sets
-  no ``devcontainer_path``) resolve relative to the fragment file's directory,
+  ``host_home_path`` values (and ``devcontainer_config`` when the fragment's
+  ``devcontainer_path`` is omitted or null) resolve relative to the fragment file's directory,
   matching how composed operator documents resolve source-relative paths.
 * An unreadable, invalid or cyclic fragment/declaration is skipped with a
   warning; it never fails the operator's own config load.
@@ -259,7 +259,9 @@ def load_fragment(
         for key in _SOURCE_RELATIVE_KEYS:
             if key in fleet:
                 fleet[key] = _rebase(fleet[key], base)
-        if "devcontainer_path" not in fleet and "devcontainer_config" in fleet:
+        # A relative config is native-relative to a shipped project path; with no
+        # project path (omitted or null) it is anchored at the fragment instead.
+        if fleet.get("devcontainer_path") is None and fleet.get("devcontainer_config") is not None:
             fleet["devcontainer_config"] = _rebase(fleet["devcontainer_config"], base)
         fleets[str(name)] = fleet
     return PluginFragment(plugin=source, path=path, fleets=fleets, root=root)

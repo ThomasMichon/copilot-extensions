@@ -742,3 +742,74 @@ def test_explicit_fleets_null_then_higher_tier_redefinition(tmp_path, layered, i
     owners = {p: o["id"] for p, o in cfg.configuration_provenance.items()
               if p.startswith("/fleets/example")}
     assert owners == {"/fleets/example/size": str(machine_file)}
+
+
+@pytest.mark.parametrize("project", ["", "        devcontainer_path: null\n"])
+def test_fragment_config_without_project_path_stays_fragment_rooted(
+    tmp_path, monkeypatch, isolated, project,
+):
+    root = _plugin(tmp_path / "plugins" / "example-harness", (
+        "fleets:\n  example:\n" + project.replace("        ", "    ")
+        + "    devcontainer_config: config/devcontainer.json\n"
+    ))
+    isolated.append(("example-harness@example", [root]))
+    workspace = tmp_path / "workspace"
+    _operator_config(tmp_path, monkeypatch, f"""\
+        schema_version: 2
+        fleets:
+          example:
+            devcontainer_path: {workspace}
+    """)
+
+    fleet = load_config(strict=True).fleets["example"]
+
+    assert fleet.devcontainer_path == str(workspace)
+    assert fleet.resolved_config() == str(root / "config" / "devcontainer.json")
+
+
+def test_fragment_null_devcontainer_config_is_unchanged(tmp_path, monkeypatch, isolated):
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            devcontainer_path: null
+            devcontainer_config: null
+    """)
+    isolated.append(("example-harness@example", [root]))
+    _operator_config(tmp_path, monkeypatch, f"""\
+        schema_version: 2
+        fleets:
+          example:
+            devcontainer_path: {tmp_path / "workspace"}
+    """)
+
+    fleet = load_config(strict=True).fleets["example"]
+
+    assert fleet.devcontainer_config is None
+    assert fleet.resolved_config() is None
+
+
+def test_shipped_project_path_keeps_native_config_resolution(tmp_path, monkeypatch, isolated):
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            devcontainer_path: project
+            devcontainer_config: .devcontainer/nested/devcontainer.json
+    """)
+    isolated.append(("example-harness@example", [root]))
+    shipped = load_config(strict=True).fleets["example"]
+    assert shipped.devcontainer_config == ".devcontainer/nested/devcontainer.json"
+    assert shipped.resolved_config() == str(
+        root / "project" / ".devcontainer" / "nested" / "devcontainer.json"
+    )
+
+    workspace = tmp_path / "workspace"
+    _operator_config(tmp_path, monkeypatch, f"""\
+        schema_version: 2
+        fleets:
+          example:
+            devcontainer_path: {workspace}
+    """)
+    overridden = load_config(strict=True).fleets["example"]
+    assert overridden.resolved_config() == str(
+        workspace / ".devcontainer" / "nested" / "devcontainer.json"
+    )

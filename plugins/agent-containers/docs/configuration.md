@@ -73,8 +73,10 @@ enabled plugin. Without an invoking checkout only global activation applies.
 - The plugin whose `name@marketplace` sorts first owns a duplicated fleet name;
   the other definition is ignored as a whole, with a warning.
 - Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
-  (and `devcontainer_config` without a `devcontainer_path`) resolve against the
-  fragment's directory.
+  (and `devcontainer_config` when the fragment's `devcontainer_path` is omitted
+  or null) resolve against the fragment's directory, so a later operator
+  `devcontainer_path` does not relocate it. With a non-null shipped project
+  path, `devcontainer_config` keeps its native project-relative resolution.
 - Unreadable, invalid, escaping or cyclic (self-referencing YAML anchor)
   fragments are skipped with a warning, including in strict reads.
 

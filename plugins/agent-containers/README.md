@@ -597,8 +597,9 @@ settings -- the same resolver as `codespaceConfig` and plugin-shipped
   scratch. (An empty entry for a fleet no plugin ships keeps its existing
   meaning: a fleet with default settings.)
 - Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
-  values in a fragment (and `devcontainer_config` when the fragment sets no
-  `devcontainer_path`) resolve against the fragment file's directory.
+  values in a fragment (and `devcontainer_config` when the fragment's
+  `devcontainer_path` is omitted or null) resolve against the fragment file's
+  directory.
 - If two plugins define the same fleet name, the plugin whose
   `name@marketplace` sorts first wins and the other definition is ignored as a
   whole (never blended), with a warning.
