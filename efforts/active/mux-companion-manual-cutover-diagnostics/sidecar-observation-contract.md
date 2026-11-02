@@ -87,6 +87,65 @@ The owner index may materialize existing records and mutation evidence. It is no
 a replacement claim/effort store. YAML save and index append are not silently
 advertised as one crash-atomic transaction.
 
+### Durable admission intent
+
+After validating mutation admission, commit a small journal-qualified intent in
+the existing observation index before attempting materialization. Commit the
+observation update and resolution of its matching intent in the same transaction.
+Takeover must distinguish resolved materialization from an unresolved admitted
+operation and preserve the latter as explicit retained-history uncertainty.
+Recovery does not rerun the canonical work or manufacture missing events.
+
+Malformed, conflicting, stale and foreign submissions must be rejected before
+creating an intent. Recheck elected-owner and admitted-source fences at the
+materialization boundary; a superseded owner cannot resolve another owner's
+uncertainty. A duplicate-only acknowledgement is not successful recovery.
+
+This adds a durable index admission boundary, not atomicity with canonical
+worktree persistence. Failure before observation intake or before the first
+intent can be committed remains an explicit operation failure, not evidence that
+all canonical transitions were captured. Fresh current facts and retained
+history coverage remain separately qualified.
+
+Detach validated caller-owned capture data before waiting for a writer lock;
+validation, content hashes, fences and publication must use that same capture.
+An acknowledgement containing only already-accepted events cannot clear a
+failed newer capture's invalidation. Recovery requires actual qualified
+materialization; retained history gaps remain explicit.
+
+An operation failing before its source/cursor/replacement checks establish
+admission reports an error without invalidating existing facts. Failure-driven
+invalidation requires fresh agreement with the admitted journal boundary or
+the materialized target, not a project/worktree key or a lock-timeout exception.
+If that agreement cannot be established, report the unavailable operation
+without guessing that the current projection belongs to the failed mutation.
+Pending invalidation belongs to the verified journal generation and source,
+not every retained journal for the same project/worktree. A replacement's
+failure cannot change its predecessor's healthy retained history; an existing
+predecessor gap remains its own coverage qualification across replacement
+failure and recovery.
+Size-only failures retain detached validated evidence through admission.
+Accepted batch/native identity conflicts are rejected before overflow can
+invalidate current facts; oversized content cannot impersonate previously
+accepted bounded evidence. Actual qualified new-batch delivery failure still
+reports its source-local gap.
+This includes conflicts among new identities within one batch. Comparison uses
+bounded canonical JSON content, retaining numeric/type distinctions; exhausting
+the comparison budget rejects the operation without invalidation.
+
+Native event identity is source, generation and record identity. A payload
+locator participates in content integrity, not identity: changed content or
+locator under one native identity conflicts rather than appending a new event.
+Snapshot observation time and current qualification can refresh without an
+event-cursor advance; deliver that snapshot without inventing a history event.
+
+Capture completeness and retained-history coverage remain distinct: preserve
+the former in the journal and qualify the latter in read frames. A successfully
+materialized replacement journal can recover without clearing the old journal's
+gap. Bounded change evidence explicitly marks omitted fact detail with capture
+references, content hashes and sizes; current facts remain independently present
+in the qualified snapshot.
+
 Every history entry distinguishes:
 
 - `persisted-mutation`: captured at an admitted owner mutation seam after
@@ -237,6 +296,11 @@ History/detail reads and source workers share caller-owned cancellation,
 stdout/frame bounds and late-epoch rejection. Observer exit closes only its
 subscriptions/processes. Existing Bridge watch/idle effects remain visible;
 this interface does not silently redefine session lifetime.
+Manager's internal adapters receive a request-local `stop` event. They must stop
+new reads cooperatively and await bounded cleanup of their own handles.
+Controller teardown signals that event and waits for the adapter task; it does
+not cancel a task that may already be finalizing a read. Caller cancellation
+cannot discard those handles, and cleanup failures remain explicit.
 
 Old/unsupported peers retain current Summary/Claims/Agenda/Recovery behavior.
 Optional unavailable sources and errors do not disable independent views.

@@ -181,6 +181,33 @@ class TestTranslateSdkEvent:
             },
         )]
 
+    def test_compaction_start_preserves_optional_sdk_start_fields(self) -> None:
+        raw = {
+            "currentTokens": 900, "tokenLimit": 2000, "compactionAttemptId": "attempt",
+            "model": "source-model", "switchTargetModel": "target-model",
+            "targetPromptTokenLimit": 1500, "execution": "background",
+            "trigger": "context-window",
+            "toolDefinitionsTokens": 200, "conversationTokens": 600, "systemTokens": 100,
+        }
+        assert translate_sdk_event("session.compaction_start", raw) == [(
+            "compaction_start", {
+                "current_tokens": 900, "token_limit": 2000, "compaction_attempt_id": "attempt",
+                "model": "source-model", "switch_target_model": "target-model",
+                "target_prompt_token_limit": 1500, "execution": "background", "trigger": "context-window",
+                "tool_definitions_tokens": 200, "conversation_tokens": 600, "system_tokens": 100,
+            },
+        )]
+
+    def test_compaction_start_absent_fields_keep_legacy_shape(self) -> None:
+        assert translate_sdk_event("session.compaction_start", {}) == [(
+            "compaction_start", {"conversation_tokens": None, "system_tokens": None},
+        )]
+        assert translate_sdk_event("session.compaction_start", {"currentTokens": None}) == [(
+            "compaction_start", {
+                "conversation_tokens": None, "system_tokens": None, "current_tokens": None,
+            },
+        )]
+
     def test_permission_is_read_only_without_request_id(self) -> None:
         out = translate_sdk_event(
             "permission.requested",

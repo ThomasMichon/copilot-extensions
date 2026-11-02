@@ -527,6 +527,220 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Durable admission-intent design amendment
+
+- Selected journal-qualified durable admission intents rather than downgrading
+  every unsealed owner interval. Validate admission before the intent commit;
+  materialization and resolution of the matching intent commit atomically.
+- An unresolved admitted operation survives takeover as explicit history
+  uncertainty. Recovery does not replay canonical work, invent events or equate
+  a fresh current capture with complete retained history.
+- The observation contract records this source-level transaction protocol and
+  its pre-intake/first-intent persistence limits. Canonical worktree writes and
+  the auxiliary index remain separate; no crash-atomic cross-store guarantee
+  or installed rollout is implied.
+- Implementation and isolated failure/recovery qualification are in progress.
+  The foundation PR and all original parent/native/Relay gates remain open.
+
+### 2026-11-02 - Durable admission-intent implementation qualification
+
+- Added auxiliary index protocol 1 with journal-qualified intent and gap tables.
+  Initialization, refresh, replacement, publication and admitted overflow retain
+  their exact owner/source/base-cursor and capture evidence across commits.
+- Successful materialization and intent resolution commit together. Failed gap
+  persistence leaves the admitted intent discoverable; takeover preserves
+  retained-history uncertainty without replaying canonical work.
+- The focused owner packet passed 226 cases, including interrupted admission,
+  stage-two SQL/connection failure, failed gap persistence, rollback of update
+  plus resolution, owner takeover fences and fresh-capture/history separation.
+  A known durable gap is partial coverage; original capture completeness remains
+  stored independently. Missing legacy intent coverage is explicitly unknown.
+- Independent protocol review is pending. No new capability is advertised and
+  no producer transport is attached. Agenda-home migration, logger archival and
+  cleanup-policy changes remain a separate design proposal, not implementation.
+
+### 2026-11-02 - Within-batch identity admission
+
+- Overflow admission checks the complete detached batch for conflicting native
+  identities, not only identities already stored in the journal. Matching
+  duplicates remain valid; null native IDs retain batch-offset identity.
+- Bounded streamed canonical JSON digests preserve boolean/integer/float/signed
+  zero distinctions without allocating an unrestricted oversized serialization.
+  Comparison-budget exhaustion rejects explicitly without changing facts or
+  sending gap notifications.
+- The expanded owner packet passed 200 cases, covering new and mixed identities,
+  combined/individual overflow, typed content conflicts, healthy/failed state,
+  duplicate controls, mutation during lock waits and comparison exhaustion.
+- This remains a source-review correction; provider attachment, native evidence,
+  deployment and the original whole-parent gates remain open.
+
+### 2026-11-02 - Conflict admission before overflow invalidation
+
+- Private size-only preflight failures retain detached, structurally validated
+  entries. Failure reconciliation checks accepted batch and native identities
+  inside the fenced owner transaction before changing projection availability.
+- Oversized reuse of an accepted batch returns `batch-conflict`; provably changed
+  accepted native evidence returns `event-conflict`. Existing facts, failure
+  qualification and subscriber notifications remain unchanged in both cases.
+- The focused owner packet passed 151 cases, including direct-history/runtime
+  entry and delta overflow, existing gaps, identity conflicts, admission refusals,
+  lock-wait caller-data mutation and unrepresentable reconciliation. Genuine
+  qualified new-batch overflow still yields unavailable/gap evidence.
+- This is another correction in the open source PR, not source feed attachment,
+  native acceptance, deployment or whole-parent completion.
+
+### 2026-11-02 - Cooperative observer teardown
+
+- Reproduced a controller race: a page already in its adapter's cleanup was
+  interrupted by teardown's task cancellation. Both close and selection
+  replacement failed the new regression while the prior ten cases passed.
+- Internal adapters now receive a request-local stop event for observation and
+  history. Teardown signals those events rather than canceling adapter tasks,
+  and retains all handles until their bounded owned cleanup finishes.
+- Late results remain revision-fenced. Cleanup errors after selection retirement
+  propagate through teardown rather than disappearing with stale callbacks.
+- All 14 controller cases passed, including cleanup already in progress, natural
+  observer completion, repeated caller cancellation and explicit cleanup failure.
+  The changed controller also passed strict checking.
+- This expands the unpublished internal adapter protocol; no provider transport,
+  CLI/resident capability, installed rollout or whole-parent gate is closed.
+
+### 2026-11-02 - Journal-local pending failures
+
+- Pending invalidation records the verified journal generation and source.
+  Snapshots, gaps, archived pages, initialization and append/recovery consume
+  only a matching failure; replacement B cannot contaminate healthy retained A.
+- Replacement persists A's own preexisting gap before retiring its pending
+  failure. B's failure/recovery neither changes that coverage nor erases it.
+  Recovery clears only the matching materialized target's pending failure.
+- Legacy key-based failure recording acquires the current owner/journal fence;
+  invalid reason metadata is rejected before any state change.
+- The focused owner packet passed 119 cases, including healthy and failed
+  predecessors across replacement failure/recovery and rejected legacy failure
+  admission. This remains source awaiting review, not attached feeds, rollout,
+  native qualification or whole-parent completion.
+
+### 2026-11-02 - Admission-qualified database failure handling
+
+- Connection and transaction-lock failures before source/cursor/replacement
+  checks report operation errors without invalidating existing facts or waking
+  subscribers as changed. Runtime wrappers consume an internal invalidation
+  qualification rather than repeating unconditional failure handling.
+- Failures after admitted mutation recheck the captured journal boundary or
+  successfully materialized target before withholding facts. A source that has
+  advanced, or an admission fence that cannot be reestablished, is not guessed
+  to match; the operation reports explicit unavailability.
+- The focused owner packet passed 116 cases. Real private SQLite lock fixtures
+  cover current, stale, wrong-source and replacement requests before admission;
+  SQL-trigger failures verify admitted refresh/replacement gaps still reach held
+  readers. A locked duplicate attempt preserves existing failed-newer state.
+- This is an open source-review correction, not installed source attachment,
+  native-client acceptance or whole-parent completion.
+
+### 2026-11-02 - Reject malformed batch metadata before invalidation
+
+- Runtime publication and reconciliation validate the batch reference before
+  capture/entry preflight or unchanged-capture refresh. Invalid batch metadata
+  cannot trigger oversized-delivery invalidation, alter current facts or wake
+  held subscribers.
+- Added malformed batch cases covering non-text, whitespace and overlong
+  identities with a matching current cursor and an otherwise oversized entry.
+- The focused owner contract/history/runtime packet passed 104 cases, including
+  unchanged complete/unknown reconciliation captures with invalid batch metadata.
+- This is a further review correction in the open foundation PR. Source
+  integration, native qualification and whole-parent gates remain open.
+
+### 2026-11-02 - Bounded change evidence and journal-local recovery
+
+- Large changed captures retain explicit before/after omission, capture-source
+  references, content hashes and byte sizes when full detail cannot fit the
+  entry budget. Unrepresentable admitted publication rechecks the current
+  source/cursor before invalidation and subscriber notification.
+- Journal rows preserve the capture's original completeness. Read frames alone
+  overlay retained-gap coverage, so unchanged recovery captures do not conflict
+  or append spurious observed-change history.
+- Successful fenced source replacement clears pending invalidation for the new
+  journal while retaining the old journal's gap. Same-source refreshes,
+  duplicate acknowledgements and rejected replacement fences cannot clear it.
+- The focused owner packet passed 98 cases, including changed large facts,
+  direct oversized publication, current/stale failure fences, complete/unknown
+  recovery and repeated/new reconciliation batch identities. Capture-valid
+  deeply nested facts use explicit bounded omission; malformed metadata remains
+  an error and cannot be hidden by the fallback.
+- This remains an open source review; no provider attachment, native result,
+  rollout or whole-parent completion is implied.
+
+### 2026-11-02 - Detached captures and visible keyboard selection
+
+- Publication, initialization and reconciliation detach validated nested capture
+  data before writer-lock waits. Hashes, fences and persisted facts all use that
+  detached input, not a caller-owned dictionary that can change during the wait.
+- Duplicate-only acknowledgements preserve failed-newer-capture invalidation.
+  Actual successful materialization can restore availability while retaining
+  history-gap qualification. Locator changes conflict under the same native
+  source/generation/record identity rather than creating another event.
+- Held readers receive refreshed snapshot metadata even when the event cursor
+  does not advance. Qualifier-only changes do not duplicate unchanged large facts.
+- Keyboard scrolling selects a visible event; Enter expands that selection.
+  Mouse selection is highlighted, Home requests bounded older history and
+  End/Follow selects the live bottom without changing focus or Escape handling.
+- Focused isolated packets passed: 86 owner contract/history/runtime cases and
+  80 Manager model/layout/widget/app cases. The unchanged controller, core/policy
+  and Bridge packets remain separately qualified.
+- These are further corrections in the open foundation PR, not attached source
+  feeds, native-client qualification, deployment or whole-effort completion.
+
+### 2026-11-02 - Observation freshness and viewer lifetime fences
+
+- Availability and completeness participate in both unchanged-capture and
+  duplicate-evidence checks; qualification changes require observed-change
+  publication rather than acknowledging stale observed facts.
+- Internal batch hashes use separately bounded inputs. Actual admitted
+  delivery overflow invalidates only the matching current source/cursor and
+  wakes subscribers with explicit unavailable/gap evidence.
+- Viewer teardown retains its reader/page handles and shields awaited cleanup
+  through caller cancellation. A concurrent close cannot start replacement readers.
+- Snapshot refresh merges preserve provider order and retained history after
+  display eviction. An unchanged effective before-boundary retains its pending
+  history demand, so a matching page remains admissible.
+- Updated focused packets passed: 88 Manager model/layout/widget/app/controller
+  cases and 73 owner cases; unchanged contract/policy and Bridge coverage remains
+  qualified. The independent four-module strict check also passed.
+- These source corrections remain in the same open foundation PR. No feed,
+  native, measurement or whole-effort gate is closed by this journal entry.
+
+### 2026-11-02 - Sidecar foundation source qualification
+
+- Authored the bounded typed timeline, virtual Line-API renderer and caller-owned
+  controller. Timeline is an alternate Companion tab; Summary remains initial.
+  Owner feeds are not attached yet, so current facts are not fabricated as history.
+- Added owner-fenced observation/history primitives and preserved optional SDK
+  start metadata with bounded evidence. Neither owner capability is advertised
+  by this foundation; writer, CLI, membership and consumer attachment remain open.
+- Focused isolated packets passed: 39 core/policy/controller cases, 65
+  model/layout/widget/app cases, 62 owner projection cases and 111 Bridge cases.
+  Required install-contract checks and the admitted type cohort passed; the four
+  independent new timeline core/model modules also passed strict checking.
+- Fixed actual Textual mount-context and delegated-message sender failures,
+  teardown ordering, stale sticky context, source-generation lane reservations
+  and a full-window scan in line painting. Source tests retain byte-limited
+  history continuation, explicit integrity reconciliation and unknown capacity.
+- This is tested source awaiting review, not a source merge or deployment.
+  Qualified pre-window measurement, attached push feeds, native clients,
+  performance measurement and all original parent/Relay gates remain open.
+
+### 2026-11-02 - Reviewed Sidecar source admission
+
+- Plan [#9960](https://github.com/ThomasMichon/copilot-extensions/pull/9960)
+  received current-head Copilot approval with no open issues, passed required
+  CI and merged as `c05dcb4dca059e4fff482a3c8816633814c54fa6`.
+- Re-read this complete parent contract and both linked plan/observation
+  documents, then pulled the retained source workspace forward. S0 admission
+  is complete; the bounded model/renderer/policy source slice can begin.
+- Source execution does not settle any original manual/head/native/Relay gate
+  or qualify an unknown pre-window denominator. No installed rollout, live
+  rebinding, runtime threshold change or process action was performed.
+
 ### 2026-11-02 - Live Sidecar implementation amendment
 
 - Continued under #8811 after verifying the retained source venue, current

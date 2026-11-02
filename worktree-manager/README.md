@@ -36,6 +36,25 @@ resource references, states and notes. Each observation retains its own
 confirmation marker and timestamp; unavailable data is not an empty ledger.
 Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 
+Timeline is an alternate view backed by a bounded timeline contract, virtual
+line renderer and caller-owned observation controller. Its compaction policy
+compares qualified pre-context counts without rounding; target-only capacity
+or unqualified measurements remain unknown. Owner feeds are not yet attached
+to this view: missing history stays explicit rather than being reconstructed
+from current Summary facts. Opening Timeline admits no new provider commands
+and leaves Summary as the initial view.
+Within the timeline canvas, arrow/PageUp/PageDown scrolling selects a visible
+event and Enter expands it; mouse selection is highlighted. Home browses the
+oldest loaded event and requests bounded older history. End/Follow returns
+selection to the live bottom. These controls do not change application focus
+or Escape behavior.
+Timeline adapters receive independent request-local stop events. Teardown waits
+for their bounded cleanup, including a naturally completed read already being
+finalized, without canceling adapter tasks or discarding their handles. Cleanup
+errors remain explicit after selection retirement.
+The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
+retains the provider, joined-app, native-client and installed-adoption gates.
+
 Agenda is an optional, display-only tab subscribed through the selected engine's
 `agenda-feed` CLI (`worktree-agendas-v1`). It starts only after the current
 worktree, project and exactly one head session are resolved. Complete pushed
