@@ -104,6 +104,11 @@ not every retained journal for the same project/worktree. A replacement's
 failure cannot change its predecessor's healthy retained history; an existing
 predecessor gap remains its own coverage qualification across replacement
 failure and recovery.
+Size-only failures retain detached validated evidence through admission.
+Accepted batch/native identity conflicts are rejected before overflow can
+invalidate current facts; oversized content cannot impersonate previously
+accepted bounded evidence. Actual qualified new-batch delivery failure still
+reports its source-local gap.
 
 Native event identity is source, generation and record identity. A payload
 locator participates in content integrity, not identity: changed content or

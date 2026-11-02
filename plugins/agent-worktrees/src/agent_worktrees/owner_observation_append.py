@@ -35,6 +35,24 @@ SCHEMA = (
 MAX_GUARDS = 50000
 
 
+class PreparationOverflow(c.ObservationError):
+    """Size-only failure retaining private, detached, structurally validated entries."""
+
+    def __init__(self, entries: list[dict]) -> None:
+        super().__init__("owner observation exceeds byte bound", "oversized")
+        self.entries = entries
+
+
+def checked_entry(value: dict) -> None:
+    c.entry(value, _check_size=False)
+    try:
+        c.entry(value)
+    except c.ObservationError as error:
+        if error.code != "oversized":
+            raise
+        raise PreparationOverflow(copy.deepcopy([value])) from error
+
+
 def freeze_record(record: CanonicalObservation) -> CanonicalObservation:
     from .owner_observation_history import CanonicalObservation
 
@@ -59,14 +77,65 @@ def prepare(
             item["record_fence"]
         ) != c.encode(record.record_fence):
             raise c.ObservationError("post-save evidence does not match the selected record fence")
-    for item in frozen:
-        c.entry(item, post_save=post_save)
-    c.encode(frozen, c.BODY_BYTES)
+    try:
+        for item in frozen:
+            c.entry(item, post_save=post_save)
+        c.encode(frozen, c.BODY_BYTES)
+    except c.ObservationError as error:
+        if error.code != "oversized":
+            raise
+        raise PreparationOverflow(frozen) from error
     digest = hashlib.sha256()
     for part in (capture, c.utf8(c.encode(frozen, c.BODY_BYTES)), c.utf8(c.encode(post_save))):
         digest.update(len(part).to_bytes(8, "big"))
         digest.update(part)
     return record, frozen, digest.hexdigest()
+
+
+def event_identity(source: c.Source, item: dict, batch_id: str, offset: int) -> str:
+    original = item["source_ref"]
+    identity = (
+        {key: original[key] for key in ("source", "generation", "record_id")}
+        if original["record_id"] is not None
+        else [batch_id, offset]
+    )
+    return (
+        "ow1:"
+        + hashlib.sha256(
+            c.utf8(c.encode([source.namespace(), source.source_generation, identity])),
+        ).hexdigest()
+    )
+
+
+def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
+    if (
+        conn.execute(
+            "SELECT 1 FROM owner_observation_batch WHERE generation=? AND id=?",
+            (row["generation"], batch_id),
+        ).fetchone()
+        is not None
+    ):
+        raise c.ObservationError(
+            "oversized content conflicts with an accepted batch identity", "batch-conflict"
+        )
+    for offset, item in enumerate(entries, 1):
+        prior = conn.execute(
+            "SELECT digest FROM owner_observation_identity WHERE generation=? AND id=?",
+            (row["generation"], event_identity(source, item, batch_id, offset)),
+        ).fetchone()
+        if prior is None:
+            continue
+        try:
+            text = c.encode(item, c.BODY_BYTES - 1024)
+        except c.ObservationError as error:
+            if error.code != "oversized":
+                raise
+            # Accepted entry content fits this bound; this content provably cannot match.
+            raise c.ObservationError(
+                "source record identity changed content", "event-conflict"
+            ) from error
+        if hashlib.sha256(c.utf8(text)).hexdigest() != prior[0]:
+            raise c.ObservationError("source record identity changed content", "event-conflict")
 
 
 def delivery_failed(
@@ -75,7 +144,11 @@ def delivery_failed(
     record: CanonicalObservation,
     expected_cursor: str,
     error: c.ObservationError,
+    *,
+    batch_id: str,
+    entries: list[dict],
 ) -> None:
+    c.reference(batch_id, "observation batch identity")
     try:
         with owner._lock, closing(owner._connect(write=True)) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -85,6 +158,7 @@ def delivery_failed(
                 raise c.ObservationError("record source incarnation changed", "source-replaced")
             if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
                 raise c.ObservationError("owner observation position changed", "stale-cursor")
+            reject_overflow_conflicts(conn, row, owner._source(row), batch_id, entries)
             owner._fence(conn)
             owner._mark_failed(row, error, reason="cursor-unavailable")
     except (OSError, sqlite3.Error) as failure:
@@ -107,18 +181,7 @@ def append(
     start = row["position"]
     stored, identities, pending = [], [], {}
     for offset, item in enumerate(entries, 1):
-        original = item["source_ref"]
-        identity = (
-            {key: original[key] for key in ("source", "generation", "record_id")}
-            if original["record_id"] is not None
-            else [batch_id, offset]
-        )
-        event_id = (
-            "ow1:"
-            + hashlib.sha256(
-                c.utf8(c.encode([source.namespace(), source.source_generation, identity])),
-            ).hexdigest()
-        )
+        event_id = event_identity(source, item, batch_id, offset)
         entry_digest = hashlib.sha256(c.utf8(c.encode(item))).hexdigest()
         prior = conn.execute(
             "SELECT digest FROM owner_observation_identity WHERE generation=? AND id=?",

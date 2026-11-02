@@ -12,7 +12,14 @@ from typing import Any
 
 from . import owner_observation_contract as c
 from . import owner_observation_failure as failures
-from .owner_observation_append import SCHEMA, append, delivery_failed, freeze_record, prepare
+from .owner_observation_append import (
+    SCHEMA,
+    PreparationOverflow,
+    append,
+    delivery_failed,
+    freeze_record,
+    prepare,
+)
 from .owner_observation_initialize import initialize
 
 
@@ -292,22 +299,20 @@ class OwnerObservationHistory:
         post_save: bool = False,
     ) -> dict:
         c.reference(batch_id, "observation batch identity")
-        if (
-            type(post_save) is not bool
-            or not isinstance(entries, list)
-            or not 1 <= len(entries) <= 64
-        ):
-            raise c.ObservationError(
-                "observation publication requires a bounded explicit entry batch"
-            )
         record = freeze_record(record)
         selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
         try:
             record, frozen, digest = prepare(record, entries, post_save)
-        except c.ObservationError as error:
-            if error.code != "oversized":
-                raise
-            delivery_failed(self, selected, record, expected_cursor, error)
+        except PreparationOverflow as error:
+            delivery_failed(
+                self,
+                selected,
+                record,
+                expected_cursor,
+                error,
+                batch_id=batch_id,
+                entries=error.entries,
+            )
             raise c.ObservationError(
                 "admitted owner publication requires reconciliation",
                 "cursor-unavailable",
@@ -347,7 +352,15 @@ class OwnerObservationHistory:
                     self._fence(conn)
             except c.ObservationError as error:
                 if admitted and error.code in {"oversized", "cursor-unavailable"}:
-                    delivery_failed(self, selected, record, expected_cursor, error)
+                    delivery_failed(
+                        self,
+                        selected,
+                        record,
+                        expected_cursor,
+                        error,
+                        batch_id=batch_id,
+                        entries=frozen,
+                    )
                     raise c.ObservationError(
                         "admitted owner publication requires reconciliation", "cursor-unavailable"
                     ) from error
@@ -468,16 +481,12 @@ class OwnerObservationHistory:
 
     def pending_failure(self, row) -> failures.PendingFailure | None:
         pending = self._failures.get((row["project"], row["worktree"]))
-        return (
-            pending
-            if pending is not None
-            and (
-                pending.generation,
-                pending.source,
-            )
-            == (row["generation"], row["source"])
-            else None
-        )
+        if pending is not None and (pending.generation, pending.source) == (
+            row["generation"],
+            row["source"],
+        ):
+            return pending
+        return None
 
     def _clear_failure(self, key, generation, source) -> None:
         pending = self._failures.get(key)

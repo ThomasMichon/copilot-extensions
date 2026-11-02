@@ -515,6 +515,319 @@ def oversized_delivery():
     return capture, item
 
 
+def overflowing_entries(capture, shape, *, identity=None):
+    if shape == "delta":
+        return [event(capture, identity=identity)]
+    first = event(capture, identity=identity)
+    first["payload"] = {"details": ["x" * 3500] * (9 if shape == "entry" else 5)}
+    c.entry(first, post_save=True, _check_size=False)
+    if shape == "entry":
+        with pytest.raises(c.ObservationError) as error:
+            c.entry(first, post_save=True)
+        assert error.value.code == "oversized"
+        return [first]
+    second = deepcopy(first)
+    second["source_ref"]["record_id"] = "native:additional"
+    c.entry(first, post_save=True)
+    c.entry(second, post_save=True)
+    with pytest.raises(c.ObservationError) as error:
+        c.encode([first, second], c.BODY_BYTES)
+    assert error.value.code == "oversized"
+    return [first, second]
+
+
+@pytest.mark.parametrize("boundary", ["runtime", "history"])
+@pytest.mark.parametrize("shape", ["entry", "batch", "delta"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_accepted_batch_overflow_conflicts_without_change_or_notification(
+    runtime, monkeypatch, boundary, shape, failed
+):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    accepted = owner.publish(
+        record(1),
+        [event(record(1))],
+        batch_id="accepted:A",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    if failed:
+        capture, item = oversized_delivery()
+        with pytest.raises(c.ObservationError) as error:
+            owner.publish(
+                capture,
+                [item],
+                batch_id="failed:B",
+                expected_cursor=accepted["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "cursor-unavailable"
+    before = owner.read(request())
+    pending = owner.history._failures.copy()
+    page = journal_page(owner, accepted["source_generation"])
+    capture = oversized_delivery()[0] if shape == "delta" else record(2)
+    entries = overflowing_entries(capture, shape)
+    notifications = []
+    original = owner._changed
+
+    def changed(key):
+        notifications.append(key)
+        original(key)
+
+    monkeypatch.setattr(owner, "_changed", changed)
+    publisher = owner if boundary == "runtime" else owner.history
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == before
+        if failed:
+            assert next(stream)["type"] == "gap"
+        with pytest.raises(c.ObservationError) as error:
+            publisher.publish(
+                capture,
+                entries,
+                batch_id="accepted:A",
+                expected_cursor=accepted["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "batch-conflict"
+        assert owner.read(request()) == before
+        assert owner.history._failures == pending
+        assert journal_page(owner, accepted["source_generation"]) == page
+        assert notifications == []
+        assert next(stream)["type"] == "heartbeat"
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("boundary", ["runtime", "history"])
+@pytest.mark.parametrize("shape", ["entry", "batch"])
+def test_new_batch_overflow_still_invalidates_matching_source(runtime, boundary, shape):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    publisher = owner if boundary == "runtime" else owner.history
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == initial
+        with pytest.raises(c.ObservationError) as error:
+            publisher.publish(
+                record(1),
+                overflowing_entries(record(1), shape),
+                batch_id="new:overflow",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "cursor-unavailable"
+        snapshot, gap = owner.history.snapshot(c.Selection("project", "full-worktree", "head"))
+        assert snapshot["facts"] is None and snapshot["cursor"] == initial["cursor"]
+        assert snapshot["availability"] == "unavailable" and snapshot["durability"] == "pending"
+        assert gap["reason"] == "cursor-unavailable"
+        if boundary == "runtime":
+            assert next(stream)["type"] == "gap"
+            assert next(stream)["facts"] is None
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("boundary", ["runtime", "history"])
+@pytest.mark.parametrize("shape", ["entry", "batch"])
+def test_oversized_reidentified_native_entry_conflicts_without_invalidation(
+    runtime, monkeypatch, boundary, shape
+):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    accepted = owner.publish(
+        record(1),
+        [event(record(1), identity="native:accepted")],
+        batch_id="accepted:A",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    publisher = owner if boundary == "runtime" else owner.history
+    before_page = journal_page(owner, accepted["source_generation"])
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == accepted
+        with pytest.raises(c.ObservationError) as error:
+            publisher.publish(
+                record(2),
+                overflowing_entries(record(2), shape, identity="native:accepted"),
+                batch_id="new:B",
+                expected_cursor=accepted["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "event-conflict"
+        assert owner.read(request()) == accepted
+        assert journal_page(owner, accepted["source_generation"]) == before_page
+        assert owner.history._failures == {} and notifications == []
+        assert next(stream)["type"] == "heartbeat"
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("boundary", ["runtime", "history"])
+@pytest.mark.parametrize("rejection", ["source", "stale", "cursor", "batch"])
+def test_overflow_conflict_guard_does_not_bypass_admission(
+    runtime, monkeypatch, boundary, rejection
+):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    accepted = owner.publish(
+        record(1),
+        [event(record(1))],
+        batch_id="accepted:A",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    capture = record(2, incarnation="record:forged" if rejection == "source" else "record:one")
+    cursor = (
+        initial["cursor"]
+        if rejection == "stale"
+        else "not-a-position"
+        if rejection == "cursor"
+        else accepted["cursor"]
+    )
+    batch = "invalid batch" if rejection == "batch" else "accepted:A"
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    publisher = owner if boundary == "runtime" else owner.history
+    with pytest.raises(c.ObservationError) as error:
+        publisher.publish(
+            capture,
+            overflowing_entries(capture, "entry"),
+            batch_id=batch,
+            expected_cursor=cursor,
+            post_save=True,
+        )
+    assert (
+        error.value.code
+        == {
+            "source": "source-replaced",
+            "stale": "stale-cursor",
+            "cursor": "invalid-request",
+            "batch": "invalid-request",
+        }[rejection]
+    )
+    assert owner.read(request()) == accepted
+    assert owner.history._failures == {} and notifications == []
+
+
+@pytest.mark.parametrize("boundary", ["runtime", "history"])
+def test_overflow_native_conflict_uses_detached_input_across_lock_wait(
+    runtime, monkeypatch, boundary
+):
+    from agent_worktrees import owner_observation_history, owner_observation_runtime
+    from agent_worktrees.owner_observation_append import PreparationOverflow
+
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    accepted = owner.publish(
+        record(1),
+        [event(record(1), identity="native:accepted")],
+        batch_id="accepted:A",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    supplied = record(2)
+    entries = overflowing_entries(supplied, "entry", identity="native:accepted")
+    captured = Event()
+    module = owner_observation_runtime if boundary == "runtime" else owner_observation_history
+    prepare = module.prepare
+
+    def detached(*args, **kwargs):
+        try:
+            return prepare(*args, **kwargs)
+        except PreparationOverflow:
+            captured.set()
+            raise
+
+    monkeypatch.setattr(module, "prepare", detached)
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    publisher = owner if boundary == "runtime" else owner.history
+    lock = owner._operations if boundary == "runtime" else owner.history._lock
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with lock:
+            future = workers.submit(
+                publisher.publish,
+                supplied,
+                entries,
+                batch_id="new:B",
+                expected_cursor=accepted["cursor"],
+                post_save=True,
+            )
+            assert captured.wait(2)
+            entries[0]["source_ref"]["record_id"] = "native:unaccepted"
+            entries[0]["source_ref"]["generation"] = "changed:incarnation"
+            entries[0]["payload"] = {}
+            supplied.facts["claims"]["held_count"] = 999
+        with pytest.raises(c.ObservationError) as error:
+            future.result(timeout=5)
+    assert error.value.code == "event-conflict"
+    assert owner.read(request()) == accepted
+    assert owner.history._failures == {} and notifications == []
+
+
+@pytest.mark.parametrize("accepted_batch", [False, True])
+def test_unrepresentable_reconcile_checks_batch_before_invalidation(
+    runtime, monkeypatch, accepted_batch
+):
+    from agent_worktrees.owner_observation_append import PreparationOverflow
+    from agent_worktrees.owner_observation_runtime import observed_entry
+
+    owner, _clock, _wakes = runtime
+    before = record(1, head="h" * 255, incarnation="s" * 512)
+    initial = owner.initialize(before)
+    item = event(before)
+    item["payload"] = {}
+    accepted = owner.publish(
+        before,
+        [item],
+        batch_id="b" * 512,
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    candidate = replace(
+        before,
+        facts={"change": True},
+        record_fence={"record_revision": 2, "padding": ["x" * 3500] * 8 + [""]},
+    )
+    unused = c.BODY_BYTES - 2048 - len(c.utf8(c.encode(asdict(candidate)))) - 1
+    assert 0 < unused <= 4096
+    fence = deepcopy(candidate.record_fence)
+    fence["padding"][-1] = "x" * unused
+    candidate = replace(candidate, record_fence=fence)
+    batch = ("b" if accepted_batch else "n") * 512
+    with pytest.raises(PreparationOverflow):
+        observed_entry(before, candidate, batch, accepted["source_generation"])
+    notifications = []
+    original = owner._changed
+
+    def changed(key):
+        notifications.append(key)
+        original(key)
+
+    monkeypatch.setattr(owner, "_changed", changed)
+    stream = owner.stream(request(before.head_session_id), lambda: False)
+    try:
+        assert next(stream) == accepted
+        with pytest.raises(c.ObservationError) as error:
+            owner.reconcile(candidate, batch_id=batch)
+        if accepted_batch:
+            assert error.value.code == "batch-conflict"
+            assert owner.read(request(before.head_session_id)) == accepted
+            assert owner.history._failures == {} and notifications == []
+            assert next(stream)["type"] == "heartbeat"
+        else:
+            assert error.value.code == "cursor-unavailable"
+            assert notifications == [before.key]
+            assert next(stream)["type"] == "gap"
+            assert next(stream)["facts"] is None
+    finally:
+        stream.close()
+
+
 def test_admitted_delivery_oversize_withholds_old_facts_and_notifies_gap(runtime):
     owner, _clock, _wakes = runtime
     initial = owner.initialize(record())
@@ -621,14 +934,14 @@ def test_oversize_failure_rechecks_owner_before_marking_source_unavailable(runti
     original = owner_observation_history.delivery_failed
     reached = []
 
-    def replaced(history, selected, current, expected_cursor, error):
+    def replaced(history, selected, current, expected_cursor, error, **kwargs):
         reached.append(error.code)
         with sqlite3.connect(history.path) as conn:
             conn.execute(
                 "UPDATE owner_observation_owner SET generation=?,writer=? WHERE singleton=1",
                 ("c" * 32, "d" * 32),
             )
-        return original(history, selected, current, expected_cursor, error)
+        return original(history, selected, current, expected_cursor, error, **kwargs)
 
     monkeypatch.setattr(owner_observation_history, "delivery_failed", replaced)
     with pytest.raises(c.ObservationError) as error:

@@ -527,6 +527,21 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Conflict admission before overflow invalidation
+
+- Private size-only preflight failures retain detached, structurally validated
+  entries. Failure reconciliation checks accepted batch and native identities
+  inside the fenced owner transaction before changing projection availability.
+- Oversized reuse of an accepted batch returns `batch-conflict`; provably changed
+  accepted native evidence returns `event-conflict`. Existing facts, failure
+  qualification and subscriber notifications remain unchanged in both cases.
+- The focused owner packet passed 151 cases, including direct-history/runtime
+  entry and delta overflow, existing gaps, identity conflicts, admission refusals,
+  lock-wait caller-data mutation and unrepresentable reconciliation. Genuine
+  qualified new-batch overflow still yields unavailable/gap evidence.
+- This is another correction in the open source PR, not source feed attachment,
+  native acceptance, deployment or whole-parent completion.
+
 ### 2026-11-02 - Cooperative observer teardown
 
 - Reproduced a controller race: a page already in its adapter's cleanup was

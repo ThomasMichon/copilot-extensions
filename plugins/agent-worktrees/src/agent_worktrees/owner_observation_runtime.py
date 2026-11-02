@@ -9,7 +9,13 @@ import time
 from typing import Any
 
 from . import owner_observation_contract as c
-from .owner_observation_append import delivery_failed, freeze_record, prepare
+from .owner_observation_append import (
+    PreparationOverflow,
+    checked_entry,
+    delivery_failed,
+    freeze_record,
+    prepare,
+)
 from .owner_observation_failure import MutationFailure
 from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
 
@@ -54,7 +60,7 @@ def observed_entry(
             "head_after": current.head_session_id,
         },
     }
-    c.entry(value)
+    checked_entry(value)
     before = c.utf8(c.encode(previous.facts, c.BODY_BYTES))
     after = c.utf8(c.encode(current.facts, c.BODY_BYTES))
     if before != after:
@@ -74,7 +80,7 @@ def observed_entry(
             )
         else:
             value["payload"] = payload
-    c.entry(value)
+    checked_entry(value)
     return value
 
 
@@ -217,9 +223,7 @@ class OwnerObservationRuntime:
         record = freeze_record(record)
         try:
             record, entries, _digest = prepare(record, entries, post_save)
-        except c.ObservationError as error:
-            if error.code != "oversized":
-                raise
+        except PreparationOverflow as error:
             with self._operations:
                 self._admit()
                 delivery_failed(
@@ -228,6 +232,8 @@ class OwnerObservationRuntime:
                     record,
                     expected_cursor,
                     error,
+                    batch_id=batch_id,
+                    entries=error.entries,
                 )
                 self._changed(record.key)
             raise c.ObservationError(
@@ -270,10 +276,16 @@ class OwnerObservationRuntime:
             previous, cursor, journal = self.history.last_record(selected)
             try:
                 item = observed_entry(previous, record, batch_id, journal)
-            except c.ObservationError as error:
-                if error.code != "oversized":
-                    raise
-                delivery_failed(self.history, selected, record, cursor, error)
+            except PreparationOverflow as error:
+                delivery_failed(
+                    self.history,
+                    selected,
+                    record,
+                    cursor,
+                    error,
+                    batch_id=batch_id,
+                    entries=error.entries,
+                )
                 self._changed(record.key)
                 raise c.ObservationError(
                     "admitted owner change requires reconciliation",
