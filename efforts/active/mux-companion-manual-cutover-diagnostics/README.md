@@ -527,6 +527,26 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Detached captures and visible keyboard selection
+
+- Publication, initialization and reconciliation detach validated nested capture
+  data before writer-lock waits. Hashes, fences and persisted facts all use that
+  detached input, not a caller-owned dictionary that can change during the wait.
+- Duplicate-only acknowledgements preserve failed-newer-capture invalidation.
+  Actual successful materialization can restore availability while retaining
+  history-gap qualification. Locator changes conflict under the same native
+  source/generation/record identity rather than creating another event.
+- Held readers receive refreshed snapshot metadata even when the event cursor
+  does not advance. Qualifier-only changes do not duplicate unchanged large facts.
+- Keyboard scrolling selects a visible event; Enter expands that selection.
+  Mouse selection is highlighted, Home requests bounded older history and
+  End/Follow selects the live bottom without changing focus or Escape handling.
+- Focused isolated packets passed: 86 owner contract/history/runtime cases and
+  80 Manager model/layout/widget/app cases. The unchanged controller, core/policy
+  and Bridge packets remain separately qualified.
+- These are further corrections in the open foundation PR, not attached source
+  feeds, native-client qualification, deployment or whole-effort completion.
+
 ### 2026-11-02 - Observation freshness and viewer lifetime fences
 
 - Availability and completeness participate in both unchanged-capture and

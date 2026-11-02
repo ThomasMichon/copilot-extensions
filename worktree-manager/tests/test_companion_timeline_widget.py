@@ -168,6 +168,94 @@ def test_keyboard_scrollbar_drag_and_history_demand_are_single_flight():
     asyncio.run(check())
 
 
+def test_keyboard_details_follow_visible_browsing_and_keep_selection_highlight() -> None:
+    window, source = window_with_events(64)
+    newest = window.events[-1].ref
+
+    async def check() -> None:
+        app = TimelineApp(window)
+        async with app.run_test(size=(80, 30)) as pilot:
+            timeline = app.query_one(SubwayTimeline)
+            timeline.focus()
+            await pilot.pause()
+            assert timeline.selected == newest
+            await pilot.press("pageup")
+            await pilot.pause()
+            older = timeline.selected
+            anchor = timeline.capture_anchor()
+            assert older is not None and older != newest
+            assert anchor is not None and older == anchor.event
+            assert any(
+                segment.style is not None and segment.style.reverse
+                for segment in timeline.render_line(anchor.screen_row)
+            )
+            await pilot.press("enter")
+            await pilot.pause()
+            assert older in window.expanded and newest not in window.expanded
+            assert timeline.selected == older
+            assert timeline.apply_delta(LiveDelta(
+                source, position(source, "live-0"), position(source, "live-1"),
+                (event(source, 64),),
+            )).applied
+            await pilot.pause()
+            assert timeline.selected == older and not window.follow_live
+            await pilot.resize_terminal(60, 24)
+            selected = timeline.selected
+            assert selected is not None and timeline.layout_index.is_visible(
+                selected, int(timeline.scroll_offset.y) - timeline._padding, timeline.size.height,
+            )
+            before = timeline.scroll_offset.y
+            await pilot.press("up")
+            await pilot.pause()
+            assert timeline.scroll_offset.y < before
+            await pilot.press("down", "pagedown")
+            await pilot.pause()
+            selected = timeline.selected
+            assert selected is not None and timeline.layout_index.is_visible(
+                selected, int(timeline.scroll_offset.y) - timeline._padding, timeline.size.height,
+            )
+            await pilot.press("home")
+            await pilot.pause()
+            assert timeline.scroll_offset.y == 0
+            assert timeline.selected == window.events[0].ref
+            assert len(app.requests) == 1
+            await pilot.press("end")
+            await pilot.pause()
+            assert window.follow_live and timeline.is_vertical_scroll_end
+            assert timeline.selected == window.events[-1].ref and timeline.has_focus
+
+    asyncio.run(check())
+
+
+def test_mouse_selection_repaints_and_enter_inspects_clicked_visible_event() -> None:
+    window, _source = window_with_events(64)
+
+    async def check() -> None:
+        app = TimelineApp(window)
+        async with app.run_test(size=(80, 30)) as pilot:
+            timeline = app.query_one(SubwayTimeline)
+            timeline.focus()
+            await pilot.pause()
+            anchor = timeline.capture_anchor()
+            assert anchor is not None and anchor.event != window.events[-1].ref
+            timeline.render_line(anchor.screen_row)
+            assert await pilot.click(
+                timeline, offset=(timeline.layout_index.prefix_width + 1, anchor.screen_row),
+            )
+            await pilot.pause()
+            assert timeline.selected == anchor.event
+            assert any(
+                segment.style is not None and segment.style.reverse
+                for segment in timeline.render_line(anchor.screen_row)
+            )
+            await pilot.press("enter")
+            await pilot.pause()
+            assert anchor.event in window.expanded
+            assert window.events[-1].ref not in window.expanded
+
+    asyncio.run(check())
+
+
 def test_render_is_lazy_literal_bounded_and_has_no_io(monkeypatch):
     source = token()
     window = TimelineWindow()

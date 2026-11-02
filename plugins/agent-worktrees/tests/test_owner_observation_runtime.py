@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import asdict, replace
+from threading import Event
 
 import pytest
 from test_owner_observation_history import event, record
@@ -472,6 +475,233 @@ def test_oversize_failure_rechecks_owner_before_marking_source_unavailable(runti
     assert owner.history._failures == {}
     with sqlite3.connect(owner.history.path) as conn:
         assert conn.execute("SELECT position FROM owner_observation_journal").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("operation", ["initialize", "publish", "reconcile"])
+def test_runtime_writer_boundaries_detach_before_waiting_on_operations_lock(
+    runtime, monkeypatch, operation
+):
+    from agent_worktrees import owner_observation_runtime
+
+    owner, _clock, _wakes = runtime
+    baseline = owner.initialize(record()) if operation != "initialize" else None
+    supplied = record(1)
+    item = event(supplied)
+    expected = deepcopy(supplied.facts)
+    captured = Event()
+    function = "prepare" if operation == "publish" else "freeze_record"
+    original = getattr(owner_observation_runtime, function)
+
+    def freeze(*args, **kwargs):
+        result = original(*args, **kwargs)
+        captured.set()
+        return result
+
+    monkeypatch.setattr(owner_observation_runtime, function, freeze)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with owner._operations:
+            if operation == "publish":
+                future = workers.submit(
+                    owner.publish,
+                    supplied,
+                    [item],
+                    batch_id="boundary:1",
+                    expected_cursor=baseline["cursor"],
+                    post_save=True,
+                )
+            elif operation == "reconcile":
+                future = workers.submit(owner.reconcile, supplied, batch_id="boundary:1")
+            else:
+                future = workers.submit(owner.initialize, supplied)
+            assert captured.wait(2)
+            supplied.facts["claims"]["held_count"] = 999
+            supplied.record_fence["record_revision"] = 999
+            item["payload"]["claims"]["held_count"] = 999
+        result = future.result(timeout=5)
+    assert result["facts"] == expected
+    assert owner.history.last_record(c.Selection("project", "full-worktree", "head"))[
+        0
+    ].record_fence == {
+        "record_revision": 1,
+    }
+
+
+@pytest.mark.parametrize("duplicate_batch", [True, False])
+def test_duplicate_old_capture_cannot_clear_newer_failed_materialization(runtime, duplicate_batch):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    one, two = record(1), record(2)
+    accepted = owner.publish(
+        one, [event(one)], batch_id="batch:A", expected_cursor=initial["cursor"], post_save=True
+    )
+    stream = owner.stream(request(), lambda: False)
+    try:
+        next(stream)
+        with sqlite3.connect(owner.history.path) as conn:
+            conn.execute(
+                "CREATE TRIGGER fail_newer BEFORE INSERT ON owner_observation_entry "
+                "BEGIN SELECT RAISE(ABORT,'newer capture failure'); END",
+            )
+        with pytest.raises(c.ObservationError):
+            owner.publish(
+                two,
+                [event(two)],
+                batch_id="batch:B",
+                expected_cursor=accepted["cursor"],
+                post_save=True,
+            )
+        assert next(stream)["type"] == "gap"
+        assert next(stream)["facts"] is None
+        with sqlite3.connect(owner.history.path) as conn:
+            conn.execute("DROP TRIGGER fail_newer")
+        duplicate = owner.publish(
+            one,
+            [event(one)],
+            batch_id="batch:A" if duplicate_batch else "batch:A-again",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+        assert duplicate["cursor"] == accepted["cursor"]
+        assert duplicate["availability"] == "unavailable" and duplicate["facts"] is None
+        assert owner.read(request())["facts"] is None
+        assert next(stream)["type"] == "gap"
+        assert next(stream)["facts"] is None
+        assert owner.initialize(replace(one, observed_at="2026-11-02T00:00:05Z"))["facts"] is None
+        assert next(stream)["type"] == "gap"
+        assert next(stream)["facts"] is None
+        recovered = owner.publish(
+            two,
+            [event(two)],
+            batch_id="batch:B",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+        assert recovered["facts"] == two.facts and recovered["cursor"] != accepted["cursor"]
+        assert next(stream)["type"] == "gap"
+        assert next(stream)["facts"] == two.facts
+        assert owner.read(request())["facts"] == two.facts
+    finally:
+        stream.close()
+
+
+def test_qualification_only_large_facts_reconcile_without_duplicating_payload(runtime):
+    owner, _clock, _wakes = runtime
+    large = replace(record(), facts={"details": ["x" * 3500] * 8})
+    initial = owner.initialize(large)
+    unavailable = replace(large, availability="unavailable", completeness="partial")
+    failed = owner.reconcile(unavailable, batch_id="large:unavailable")
+    assert failed["facts"] is None and failed["cursor"] != initial["cursor"]
+    recovered = owner.reconcile(large, batch_id="large:observed")
+    assert recovered["facts"] == large.facts and recovered["cursor"] != failed["cursor"]
+    page = owner.history.page(
+        c.Selection("project", "full-worktree", "head"),
+        initial["source_generation"],
+        None,
+    )
+    assert len(page["entries"]) == 2
+    assert all(
+        "before" not in item["payload"] and "after" not in item["payload"]
+        for item in page["entries"]
+    )
+
+
+def test_failed_same_fact_qualification_cannot_be_cleared_by_old_duplicate(runtime):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    one = record(1)
+    accepted = owner.publish(
+        one, [event(one)], batch_id="batch:A", expected_cursor=initial["cursor"], post_save=True
+    )
+    unavailable = replace(one, availability="unavailable", completeness="partial")
+    unavailable_entry = event(unavailable, identity="save:qualification-B")
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_qualification BEFORE INSERT ON owner_observation_entry "
+            "BEGIN SELECT RAISE(ABORT,'qualification failure'); END",
+        )
+    with pytest.raises(c.ObservationError):
+        owner.publish(
+            unavailable,
+            [unavailable_entry],
+            batch_id="batch:B",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute("DROP TRIGGER fail_qualification")
+    repeated = owner.publish(
+        one, [event(one)], batch_id="batch:A", expected_cursor=accepted["cursor"], post_save=True
+    )
+    assert repeated["facts"] is None and repeated["durability"] == "pending"
+    recovered = owner.publish(
+        unavailable,
+        [unavailable_entry],
+        batch_id="batch:B",
+        expected_cursor=accepted["cursor"],
+        post_save=True,
+    )
+    assert recovered["facts"] is None and recovered["availability"] == "unavailable"
+    assert recovered["durability"] == "committed" and recovered["cursor"] != accepted["cursor"]
+
+
+def test_new_resident_requires_current_capture_before_recovering_failed_newer_state(runtime):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_newer BEFORE INSERT ON owner_observation_entry "
+            "BEGIN SELECT RAISE(ABORT,'capture failed'); END",
+        )
+    with pytest.raises(c.ObservationError):
+        owner.publish(
+            record(1),
+            [event(record(1))],
+            batch_id="batch:B",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute("DROP TRIGGER fail_newer")
+    replacement = OwnerObservationRuntime(
+        OwnerObservationHistory(
+            owner.history.path,
+            resident_generation="c" * 32,
+            writer_id="d" * 32,
+            authority_check=lambda: True,
+        )
+    )
+    replacement.activate(expected_generation=owner.history.resident_generation)
+    try:
+        assert replacement.read(request())["error"]["code"] == "unready"
+        latest = replacement.reconcile(record(1), batch_id="requalify:current")
+        assert latest["facts"] == record(1).facts
+        assert latest["source_generation"] == initial["source_generation"]
+        assert latest["completeness"] == "unknown"
+    finally:
+        replacement.shutdown()
+
+
+def test_same_cursor_current_timestamp_refresh_reaches_held_reader_without_history_event(runtime):
+    owner, _clock, _wakes = runtime
+    supplied = record()
+    initial = owner.initialize(supplied)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == initial
+        refreshed = owner.initialize(replace(supplied, observed_at="2026-11-02T00:00:05Z"))
+        current = next(stream)
+        assert current["type"] == "snapshot"
+        assert current["cursor"] == refreshed["cursor"] == initial["cursor"]
+        assert current["observed_at"] == "2026-11-02T00:00:05Z"
+        assert current["entries"] == []
+        page = owner.history.page(
+            c.Selection("project", "full-worktree", "head"),
+            initial["source_generation"],
+            None,
+        )
+        assert page["entries"] == []
+    finally:
+        stream.close()
 
 
 def test_identity_guard_bound_is_gap_not_silent_eviction_or_empty_history(runtime, monkeypatch):

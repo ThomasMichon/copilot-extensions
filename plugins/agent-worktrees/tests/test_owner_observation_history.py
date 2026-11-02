@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, replace
+from threading import Event
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -137,6 +139,86 @@ def test_digest_is_not_a_wire_envelope_and_separately_valid_inputs_can_publish(h
     assert accepted["facts"] == large.facts
     replay, gap = store.snapshot(selected(large), initial["cursor"])
     assert gap is None and replay["entries"][0]["record_fence"] == large.record_fence
+
+
+@pytest.mark.parametrize("operation", ["initialize", "publish"])
+def test_history_freezes_nested_caller_data_before_waiting_on_owner_lock(
+    history, monkeypatch, operation
+):
+    from agent_worktrees import owner_observation_history
+
+    store, _alive = history
+    baseline = store.initialize(record()) if operation == "publish" else None
+    supplied = record(1)
+    supplied_entry = event(supplied)
+    expected = deepcopy(supplied.facts)
+    expected_fence = deepcopy(supplied.record_fence)
+    captured = Event()
+    function = "prepare" if operation == "publish" else "freeze_record"
+    original = getattr(owner_observation_history, function)
+
+    def freeze(*args, **kwargs):
+        result = original(*args, **kwargs)
+        captured.set()
+        return result
+
+    monkeypatch.setattr(owner_observation_history, function, freeze)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with store._lock:
+            if operation == "publish":
+                future = workers.submit(
+                    store.publish,
+                    supplied,
+                    [supplied_entry],
+                    batch_id="capture:1",
+                    expected_cursor=baseline["cursor"],
+                    post_save=True,
+                )
+            else:
+                future = workers.submit(store.initialize, supplied)
+            assert captured.wait(2)
+            supplied.facts["claims"]["held_count"] = 999
+            supplied.record_fence["record_revision"] = 999
+            supplied_entry["payload"]["claims"]["held_count"] = 999
+        result = future.result(timeout=5)
+    assert result["facts"] == expected
+    frozen, _cursor, _journal = store.last_record(selected())
+    assert frozen.record_fence == expected_fence
+    if operation == "publish":
+        page = store.page(selected(), result["source_generation"], None)
+        assert page["entries"][0]["record_fence"] == expected_fence
+        assert page["entries"][0]["payload"] == expected
+
+
+@pytest.mark.parametrize("change_summary", [False, True])
+def test_payload_locator_is_content_not_source_record_identity(history, change_summary):
+    store, _alive = history
+    baseline = store.initialize(record())
+    one = record(1)
+    original = event(one)
+    accepted = store.publish(
+        one,
+        [original],
+        batch_id="event:1",
+        expected_cursor=baseline["cursor"],
+        post_save=True,
+    )
+    changed = deepcopy(original)
+    changed["source_ref"]["payload_ref"] = "payload:relocated"
+    if change_summary:
+        changed["summary"] = "changed summary"
+    with pytest.raises(c.ObservationError) as error:
+        store.publish(
+            one,
+            [changed],
+            batch_id="event:another",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+    assert error.value.code == "event-conflict"
+    page = store.page(selected(), accepted["source_generation"], None)
+    assert len(page["entries"]) == 1
+    assert page["entries"][0]["source_ref"]["payload_ref"] is None
 
 
 @pytest.mark.parametrize("qualifier", ["availability", "completeness"])

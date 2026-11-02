@@ -210,6 +210,13 @@ class TimelineLayout:
             return candidate
         return block.start
 
+    def is_visible(self, ref: EventRef, top: int, height: int) -> bool:
+        block = self._refs.get(ref)
+        return (
+            block is not None and height > 0
+            and block.start < top + height and block.start + block.height > top
+        )
+
     def prefix(self, row: TimelineRow, window: TimelineWindow) -> str:
         if self.prefix_width != self._lane_count * 2:
             value = f"[{row.lane}] "

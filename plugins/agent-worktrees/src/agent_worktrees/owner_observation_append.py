@@ -34,9 +34,21 @@ SCHEMA = (
 MAX_GUARDS = 50000
 
 
+def freeze_record(record: CanonicalObservation) -> CanonicalObservation:
+    from .owner_observation_history import CanonicalObservation
+
+    if not isinstance(record, CanonicalObservation):
+        raise c.ObservationError("owner capture must be a canonical observation")
+    capture = c.utf8(c.encode(asdict(record), c.BODY_BYTES - 2048))
+    return CanonicalObservation(**c.decode(capture, c.BODY_BYTES - 2048))
+
+
 def prepare(
     record: CanonicalObservation, entries: list[dict], post_save: bool
-) -> tuple[list, str]:
+) -> tuple[CanonicalObservation, list, str]:
+    if type(post_save) is not bool or not isinstance(entries, list) or not 1 <= len(entries) <= 64:
+        raise c.ObservationError("observation publication requires a bounded explicit entry batch")
+    record = freeze_record(record)
     capture = c.utf8(c.encode(asdict(record), c.BODY_BYTES - 2048))
     frozen = c.decode(c.utf8(c.encode(entries, c.BODY_BYTES)), c.BODY_BYTES)
     for item in frozen:
@@ -49,7 +61,7 @@ def prepare(
     for part in (capture, c.utf8(c.encode(frozen, c.BODY_BYTES)), c.utf8(c.encode(post_save))):
         digest.update(len(part).to_bytes(8, "big"))
         digest.update(part)
-    return frozen, digest.hexdigest()
+    return record, frozen, digest.hexdigest()
 
 
 def delivery_failed(
@@ -79,13 +91,17 @@ def append(
     entries: list[dict],
     batch_id: str,
     digest: str,
-) -> None:
+) -> bool:
     source = owner._source(row)
     start = row["position"]
     stored, identities, pending = [], [], {}
     for offset, item in enumerate(entries, 1):
         original = item["source_ref"]
-        identity = original if original["record_id"] is not None else [batch_id, offset]
+        identity = (
+            {key: original[key] for key in ("source", "generation", "record_id")}
+            if original["record_id"] is not None
+            else [batch_id, offset]
+        )
         event_id = (
             "ow1:"
             + hashlib.sha256(
@@ -139,7 +155,7 @@ def append(
             "INSERT INTO owner_observation_batch VALUES (?,?,?,?)",
             (row["generation"], batch_id, digest, start),
         )
-        return
+        return False
     candidate = dict(row)
     candidate.update(
         position=start + len(stored),
@@ -195,6 +211,7 @@ def append(
         (row["generation"], batch_id, digest, candidate["position"]),
     )
     retain(owner, conn, row["generation"])
+    return True
 
 
 def retain(owner: OwnerObservationHistory, conn: sqlite3.Connection, journal: str) -> None:

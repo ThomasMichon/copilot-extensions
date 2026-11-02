@@ -87,6 +87,18 @@ The owner index may materialize existing records and mutation evidence. It is no
 a replacement claim/effort store. YAML save and index append are not silently
 advertised as one crash-atomic transaction.
 
+Detach validated caller-owned capture data before waiting for a writer lock;
+validation, content hashes, fences and publication must use that same capture.
+An acknowledgement containing only already-accepted events cannot clear a
+failed newer capture's invalidation. Recovery requires actual qualified
+materialization; retained history gaps remain explicit.
+
+Native event identity is source, generation and record identity. A payload
+locator participates in content integrity, not identity: changed content or
+locator under one native identity conflicts rather than appending a new event.
+Snapshot observation time and current qualification can refresh without an
+event-cursor advance; deliver that snapshot without inventing a history event.
+
 Every history entry distinguishes:
 
 - `persisted-mutation`: captured at an admitted owner mutation seam after

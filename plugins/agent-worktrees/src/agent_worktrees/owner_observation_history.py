@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import owner_observation_contract as c
-from .owner_observation_append import SCHEMA, append, delivery_failed, prepare
+from .owner_observation_append import SCHEMA, append, delivery_failed, freeze_record, prepare
 
 
 @dataclass(frozen=True)
@@ -278,6 +278,7 @@ class OwnerObservationHistory:
         expected_source_generation: str | None = None,
     ) -> dict:
         """Qualify explicit current record input, preserving old journal identities."""
+        record = freeze_record(record)
         selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
         with self._lock, closing(self._connect(write=True)) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -352,10 +353,11 @@ class OwnerObservationHistory:
             raise c.ObservationError(
                 "observation publication requires a bounded explicit entry batch"
             )
-        frozen, digest = prepare(record, entries, post_save)
+        record, frozen, digest = prepare(record, entries, post_save)
         selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
         with self._lock:
             admitted = False
+            materialized = False
             try:
                 with closing(self._connect(write=True)) as conn, conn:
                     conn.execute("BEGIN IMMEDIATE")
@@ -380,7 +382,7 @@ class OwnerObservationHistory:
                                 "owner observation position changed", "stale-cursor"
                             )
                         admitted = True
-                        append(self, conn, row, record, frozen, batch_id, digest)
+                        materialized = append(self, conn, row, record, frozen, batch_id, digest)
                     self._fence(conn)
             except c.ObservationError as error:
                 if admitted and error.code in {"oversized", "cursor-unavailable"}:
@@ -397,8 +399,9 @@ class OwnerObservationHistory:
             try:
                 with closing(self._connect()) as conn:
                     self._fence(conn)
-                self._failures.pop(record.key, None)
-                self._failure_reasons.pop(record.key, None)
+                if materialized:
+                    self._failures.pop(record.key, None)
+                    self._failure_reasons.pop(record.key, None)
                 return self.snapshot(selected)[0]
             except (OSError, sqlite3.Error) as error:
                 self.append_failed(record.key, error)

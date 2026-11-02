@@ -43,6 +43,11 @@ or unqualified measurements remain unknown. Owner feeds are not yet attached
 to this view: missing history stays explicit rather than being reconstructed
 from current Summary facts. Opening Timeline admits no new provider commands
 and leaves Summary as the initial view.
+Within the timeline canvas, arrow/PageUp/PageDown scrolling selects a visible
+event and Enter expands it; mouse selection is highlighted. Home browses the
+oldest loaded event and requests bounded older history. End/Follow returns
+selection to the live bottom. These controls do not change application focus
+or Escape behavior.
 The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
 retains the provider, joined-app, native-client and installed-adoption gates.
 

@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from . import owner_observation_contract as c
+from .owner_observation_append import freeze_record, prepare
 from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
 
 MAX_SUBSCRIBERS = 32
@@ -22,7 +23,7 @@ def observed_entry(
     journal: str,
 ) -> dict:
     """Describe observations, never infer claim/effort/lifecycle transitions."""
-    return {
+    value = {
         "kind": "observed-change",
         "evidence_kind": "observed-change",
         "native_kind": None,
@@ -43,8 +44,6 @@ def observed_entry(
         "reason": None,
         "phase": None,
         "payload": {
-            "before": previous.facts,
-            "after": current.facts,
             "previous_availability": previous.availability,
             "availability": current.availability,
             "previous_completeness": previous.completeness,
@@ -53,6 +52,9 @@ def observed_entry(
             "head_after": current.head_session_id,
         },
     }
+    if c.encode(previous.facts) != c.encode(current.facts):
+        value["payload"].update(before=previous.facts, after=current.facts)
+    return value
 
 
 class OwnerObservationRuntime:
@@ -164,6 +166,7 @@ class OwnerObservationRuntime:
         *,
         expected_source_generation: str | None = None,
     ) -> dict:
+        record = freeze_record(record)
         with self._operations:
             self._admit()
             try:
@@ -189,6 +192,7 @@ class OwnerObservationRuntime:
         expected_cursor: str,
         post_save: bool = False,
     ) -> dict:
+        record, entries, _digest = prepare(record, entries, post_save)
         with self._operations:
             self._admit()
             try:
@@ -212,6 +216,7 @@ class OwnerObservationRuntime:
 
     def reconcile(self, record: CanonicalObservation, *, batch_id: str) -> dict:
         """Only explicitly captured differences, not sampled mutation history."""
+        record = freeze_record(record)
         with self._operations:
             self._admit()
             try:
@@ -331,7 +336,26 @@ class OwnerObservationRuntime:
                     return
                 if gap is not None and not initial:
                     yield gap
-                if previous is None or result["cursor"] != previous["cursor"] or gap is not None:
+                refreshed = previous is not None and any(
+                    result[field] != previous[field]
+                    for field in (
+                        "observed_at",
+                        "facts",
+                        "availability",
+                        "completeness",
+                        "durability",
+                        "head_session_id",
+                        "source_generation",
+                        "resident_generation",
+                        "history_floor",
+                    )
+                )
+                if (
+                    previous is None
+                    or result["cursor"] != previous["cursor"]
+                    or gap is not None
+                    or refreshed
+                ):
                     yield result
                     previous = result
                 if gap is not None and initial:

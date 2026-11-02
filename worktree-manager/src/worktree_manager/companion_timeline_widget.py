@@ -9,6 +9,7 @@ from datetime import datetime
 from itertools import islice
 
 from rich.segment import Segment
+from rich.style import Style
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -33,7 +34,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
     """
     BINDINGS = [
         ("end", "follow_live", "Follow live"),
-        ("home", "request_history", "Older"),
+        ("home", "browse_oldest", "Oldest loaded"),
         ("enter", "expand_selected", "Details"),
     ]
 
@@ -96,14 +97,26 @@ class SubwayTimeline(ScrollView, can_focus=True):
                 return ViewportAnchor(row.event, row.logical_line, screen_row)
         return None
 
+    def _select_event(self, ref: EventRef | None) -> None:
+        if self.selected != ref:
+            self.selected = ref
+            self._clear_cache()
+            self.refresh()
+
+    def _select_visible_event(self) -> None:
+        if self.selected is not None and self.layout_index.is_visible(
+            self.selected, int(self.scroll_offset.y) - self._padding, self.size.height,
+        ):
+            return
+        anchor = self.capture_anchor()
+        self._select_event(anchor.event if anchor is not None else None)
+
     def _reflow(self, anchor: ViewportAnchor | None) -> None:
         self.layout_index.rebuild(self.window, self.size.width or 1, now=self._clock)
         self._padding = max(0, self.size.height - self.layout_index.height)
         self.virtual_size = Size(max(1, self.size.width), max(self.size.height, self.layout_index.height))
         self._layout_generation += 1
         self._clear_cache()
-        if self.selected is None or self.window.event(self.selected) is None:
-            self.selected = self.window.events[-1].ref if self.window.events else None
         self._programmatic = True
         try:
             if self.window.follow_live:
@@ -114,6 +127,10 @@ class SubwayTimeline(ScrollView, can_focus=True):
                     self.scroll_to(y=max(0, row + self._padding - anchor.screen_row), animate=False, immediate=True)
         finally:
             self._programmatic = False
+        if self.window.follow_live:
+            self._select_event(self.window.events[-1].ref if self.window.events else None)
+        else:
+            self._select_visible_event()
         self.refresh()
 
     def _change(self, apply: Callable[[], WindowResult]) -> WindowResult:
@@ -164,6 +181,8 @@ class SubwayTimeline(ScrollView, can_focus=True):
         super().watch_scroll_y(old_value, new_value)
         if not self._programmatic and old_value != new_value:
             self.window.set_follow_live(False)
+            anchor = self.capture_anchor()
+            self._select_event(anchor.event if anchor is not None else None)
             self._post_timeline_message(self.Changed())
             if new_value <= OVERSCAN_LINES and self.demand_visible:
                 self.action_request_history()
@@ -175,6 +194,15 @@ class SubwayTimeline(ScrollView, can_focus=True):
             self.scroll_end(animate=False, immediate=True, x_axis=False)
         finally:
             self._programmatic = False
+        self._select_event(self.window.events[-1].ref if self.window.events else None)
+        self._post_timeline_message(self.Changed())
+
+    def action_browse_oldest(self) -> None:
+        self.window.set_follow_live(False)
+        self.scroll_to(y=0, animate=False, immediate=True)
+        anchor = self.capture_anchor()
+        self._select_event(anchor.event if anchor is not None else None)
+        self.action_request_history()
         self._post_timeline_message(self.Changed())
 
     def action_request_history(self) -> None:
@@ -198,6 +226,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
             self._post_timeline_message(self.ReconciliationRequested(state.token, state.position))
 
     def action_expand_selected(self) -> None:
+        self._select_visible_event()
         if self.selected is not None:
             self._change(lambda: self.window.toggle_expansion(self.selected))
 
@@ -206,7 +235,8 @@ class SubwayTimeline(ScrollView, can_focus=True):
             int(self.scroll_offset.y) + event.offset.y - self._padding, self.window,
         )
         if row is not None:
-            self.selected = row.event
+            self.window.set_follow_live(False)
+            self._select_event(row.event)
             if row.heading and event.offset.x < self.layout_index.prefix_width:
                 self.action_expand_selected()
 
@@ -239,8 +269,9 @@ class SubwayTimeline(ScrollView, can_focus=True):
                 return self._store(key, strip)
             return Strip.blank(width, self.rich_style)
         prefix = self.layout_index.prefix(row, self.window)
+        style = self.rich_style + Style(reverse=True) if row.event == self.selected else self.rich_style
         strip = Strip([
-            Segment(prefix, self.rich_style), Segment(row.text, self.rich_style),
+            Segment(prefix, style), Segment(row.text, style),
         ]).crop_extend(0, width, self.rich_style)
         return self._store(key, strip)
 
