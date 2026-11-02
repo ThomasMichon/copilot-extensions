@@ -38,7 +38,8 @@ assert endpoint.hostname == "127.0.0.1" and endpoint.port
 assert os.environ["COPILOT_OFFLINE"] == "true"
 assert "--no-custom-instructions" not in sys.argv
 assert "--disable-builtin-mcps" not in sys.argv
-assert "--no-auto-update" in sys.argv and "--no-remote" in sys.argv
+assert "--no-auto-update" in sys.argv
+assert "--no-remote" not in sys.argv
 assert os.environ["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] == "synthetic-instructions"
 assert "GH_TOKEN" not in os.environ
 assert os.environ["COPILOT_PROVIDER_MODEL_ID"] == "synthetic-model"
