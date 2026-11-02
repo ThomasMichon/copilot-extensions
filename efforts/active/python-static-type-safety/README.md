@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -891,3 +891,40 @@ composition prerequisites, and review/validation rules.
   are not changed; local native consumer tests exercise the actual boundary.
   The campaign remains 13 strict projects and 55 pending, including canonical
   test and independent-copy qualification.
+
+### 2026-11-02 - Production boundaries merged; shared test fixtures selected
+
+- #9991 merged as `55af5adfeda80e411a3fe3e11674e3b11612e2a8`
+  after exact-head approval with no findings, zero open review comments and
+  all required checks in
+  [run 41453768629](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41453768629).
+  The source worktree is pulled forward; #9986 is complete.
+- #9993 selects the shared receipt-layout and runner/helper typing boundary.
+  Close fixture-type cascades before consumer batches, retain every assertion
+  and the module-size ceiling, and rerun full declared-platform probes plus
+  focused real consumers. No blanket ignore, replacement stub or filtered
+  admission qualifies the library. All outstanding Plan/Validation items and
+  the 13-strict / 55-pending portfolio remain active.
+
+- Shared layouts now name their path and string fields; snapshot-stamp and
+  slot-provision helpers retain precise result contracts across the JSON and
+  dynamic SDK boundaries. The bounded host fixture names its iterator result,
+  receipt-name parameters retain their literal alternatives, and the digest
+  helper no longer reuses one local for text and bytes. Runtime values and
+  assertions remain unchanged.
+- Full declared-platform probes retain zero production diagnostics and reduce
+  the remaining test errors to Linux 159 basic / 370 strict and Windows
+  149 basic / 361 strict (25 basic and 28 strict errors removed per target).
+  These remain failing exploratory probes, not library admission.
+- Validation: 96 complete checker and focused receipt/slot-release consumer
+  tests pass, including actual MyPy positive/negative fixture-client controls,
+  real Python/PowerShell snapshot publication, completion and linked/stale
+  receipt cases. All 26 already-enforced MyPy targets, changed-file Ruff,
+  documentation consistency, install contracts, source-copy synchronization,
+  vendoring and diff whitespace checks pass.
+- Documentation impact: this is below-altitude test-contract preparation;
+  existing developer commands and operational documentation remain accurate.
+  No shipped plugin payload changes, so no changefile is required. Fresh-box
+  and remote-venue tests are skipped because production/provisioning behavior
+  is unchanged; local real consumer tests cover the affected helpers.
+  The governed unit packet and its budget remain unchanged.
