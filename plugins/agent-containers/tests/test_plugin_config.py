@@ -813,3 +813,21 @@ def test_shipped_project_path_keeps_native_config_resolution(tmp_path, monkeypat
     assert overridden.resolved_config() == str(
         workspace / ".devcontainer" / "nested" / "devcontainer.json"
     )
+
+
+def test_claude_plugin_manifest_layout_declares_a_fragment(tmp_path, isolated):
+    root = tmp_path / "plugins" / "example-harness"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({
+        "name": "example-harness", plugin_config.MANIFEST_FIELD: "config/containers.yaml",
+    }))
+    (root / "config").mkdir()
+    (root / "config" / "containers.yaml").write_text(textwrap.dedent(EXAMPLE_FRAGMENT))
+    isolated.append(("example-harness@example", [root]))
+
+    cfg = load_config(strict=True)
+
+    assert cfg.fleets["example"].repo == "example-org/example"
+    assert Path(cfg.fleets["example"].devcontainer_path) == root / "config" / "devcontainer"
+    owner = cfg.configuration_provenance["/fleets/example/repo"]
+    assert owner["source"] == {"root": str(root.resolve()), "path": "config/containers.yaml"}

@@ -140,8 +140,17 @@ def _active_plugin_roots(repository: Path | None = None) -> list[tuple[str, list
 
 
 def _declared_fragment(source: str, root: Path) -> Path | None:
-    """Return the fragment declared by ``root/plugin.json``, or None."""
-    manifest = root / "plugin.json"
+    """Return the fragment declared by the plugin's manifest, or None.
+
+    The manifest is selected from the same ordered locations the activation
+    resolver accepts (``plugin.json``, then ``.claude-plugin/plugin.json``);
+    the declared path is always relative to the plugin root.
+    """
+    from plugin_resolve.conventions import PLUGIN_MANIFEST_RELS, first_existing
+
+    manifest = first_existing(root, PLUGIN_MANIFEST_RELS)
+    if manifest is None:
+        return None
     try:
         raw = json.loads(manifest.read_text(encoding="utf-8"))
     except FileNotFoundError:
