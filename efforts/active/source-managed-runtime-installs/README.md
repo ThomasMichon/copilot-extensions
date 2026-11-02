@@ -128,6 +128,15 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**Manager-controlled automatic updates (2026-11-02), operator refinement:**
+put the existing automatic-update control in Manager's Configuration /
+Installation & Updates. Automatic invocations use `<repo> update --auto`;
+the setting may inhibit those requests, but not explicit user or agent
+`<repo> update` calls, which retain normal re-entrancy protection.
+The [verbatim request and bounded follow-up](automatic-update-control.md)
+preserve the distinction from general maintenance vetoes, recurring-worker
+enrollment and separately authorized rollout.
+
 **Git-addressed local promotion (2026-11-01), settled summary:** when local
 configuration selects Dev installation, `<repo> update` uses local promotion
 and reuses complete outputs for the unchanged selected Git hash. Locally
@@ -500,6 +509,25 @@ matrix; no schedule or cadence is enabled by this plan.
 - [ ] After the Phase 3 and Phase 4 prerequisites, extend that same maintenance owner for bounded source health, selected-ref synchronization and canonical source-backed installation; do not add another updater.
 - [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
 - [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
+
+### Phase 4a.1 - Manager automatic-update controls
+
+The [bounded control refinement](automatic-update-control.md) extends the
+existing maintenance and installation workspace owners, not another updater.
+
+- [ ] Review the automatic-control intent and validation plan before implementation.
+- [ ] Expose the applicable existing automatic-update control and independent
+  maintenance veto in Configuration / Installation & Updates with truthful
+  scope, persistence, errors and an actionable ON/OFF interaction.
+- [ ] Route automatic software updates after Manager startup and before
+  worktree creation/resume through canonical `<repo> update --auto`, preserving
+  origin through queued execution and retaining the existing single executor.
+- [ ] Prove that disabling automatic updates blocks only automatic requests;
+  explicit user/agent and selected-component updates retain their ordinary
+  path and re-entrancy guards without requiring force.
+- [ ] Qualify UI cancellation/persistence, queued policy changes, both launcher
+  adapters and supported mixed-version behavior; update owner docs and land
+  the bounded source through normal review and required CI.
 
 ### Phase 4b - Durable installation execution driver
 The [execution-driver slice](execution-driver.md), tracked by #7758, separates

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
@@ -12,7 +12,9 @@ from .events import EventBus
 from .pool_instances import POOL_DEFINITION_VERSION, PoolDefinitionError, PoolInstanceDefinition
 from .queue import TaskQueue
 from .queue_pool_catalog import POOL_CATALOG_VERSION, PoolCatalogSnapshot, PoolPublicationScope
+from .queue_pool_cohort import PoolConfiguredCohort
 from .queue_records import TaskError
+from .registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
 
 POOL_CATALOG_PROTOCOL = "pool_catalog_transport/v1"
 
@@ -28,6 +30,7 @@ def pool_catalog_contract(control_token: str | None) -> dict[str, object]:
         "lock_holder_verification": False,
         "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
+        "configured_cohort_projection_versions": [1],
         "atomic_placement": False,
     }
 
@@ -55,6 +58,59 @@ class PublishPoolCatalogBody(PoolScopeBody):
     reason: StrictStr | None = None
 
 
+class ConfiguredSupervisorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    machine: StrictStr
+    execution_machine: StrictStr
+    env: StrictStr
+
+
+class ConfiguredCohortObservationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["complete", "unconfirmed", "unavailable"]
+    source_revision: StrictStr | None
+    revision: Annotated[StrictInt, Field(ge=0)] | None
+    members: list[ConfiguredSupervisorBody]
+    reason: StrictStr
+
+    def observation(self) -> ConfiguredSupervisorCohort:
+        return ConfiguredSupervisorCohort(
+            self.state, self.source_revision, self.revision,
+            tuple(sorted(
+                (SupervisorScopeIntent(member.machine, member.execution_machine, member.env)
+                 for member in self.members),
+                key=lambda member: (member.execution_machine, member.env),
+            )),
+            self.reason,
+        )
+
+
+class ProjectConfiguredCohortBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Annotated[StrictInt, Field(ge=1, le=1)]
+    expected_revision: Annotated[StrictInt, Field(ge=0)]
+    observation: ConfiguredCohortObservationBody
+
+
+def _cohort_payload(cohort: PoolConfiguredCohort) -> dict[str, object]:
+    observation = cohort.observation
+    return {
+        "revision": cohort.revision,
+        "observation": None if observation is None else {
+            "state": observation.state, "source_revision": observation.source_revision,
+            "revision": observation.revision, "reason": observation.reason,
+            "members": [
+                {"machine": member.machine, "execution_machine": member.execution_machine,
+                 "env": member.env}
+                for member in observation.members
+            ],
+        },
+    }
+
+
 def _scope_payload(scope: PoolPublicationScope) -> dict[str, object]:
     return {
         "machine": scope.machine,
@@ -76,8 +132,6 @@ def _scope_payload(scope: PoolPublicationScope) -> dict[str, object]:
 
 
 def _catalog_payload(snapshot: PoolCatalogSnapshot) -> dict[str, object]:
-    cohort = snapshot.configured_cohort
-    observation = cohort.observation
     return {
         "protocol": POOL_CATALOG_PROTOCOL,
         "version": snapshot.version,
@@ -88,18 +142,7 @@ def _catalog_payload(snapshot: PoolCatalogSnapshot) -> dict[str, object]:
         "blockers": list(snapshot.blockers),
         "metadata_ready": snapshot.ready,
         "configured_metadata_ready": snapshot.configured_ready,
-        "configured_cohort": {
-            "revision": cohort.revision,
-            "observation": None if observation is None else {
-                "state": observation.state, "source_revision": observation.source_revision,
-                "revision": observation.revision, "reason": observation.reason,
-                "members": [
-                    {"machine": member.machine, "execution_machine": member.execution_machine,
-                     "env": member.env}
-                    for member in observation.members
-                ],
-            },
-        },
+        "configured_cohort": _cohort_payload(snapshot.configured_cohort),
     }
 
 
@@ -143,6 +186,47 @@ def register_pool_catalog_routes(
                 status=400,
             )
         return _catalog_payload(queue.pool_catalog_snapshot())
+
+    @app.get("/pool-catalog/cohort", dependencies=[control])
+    def cohort(request: Request) -> dict[str, object]:
+        """Read the whole retained configuration, never infer it from enrollment."""
+        if request.query_params:
+            raise refused(
+                "cohort-snapshot", TaskError("pool cohort does not accept partial reads"),
+                status=400,
+            )
+        return {
+            "protocol": POOL_CATALOG_PROTOCOL, "version": POOL_CATALOG_VERSION,
+            "cohort": _cohort_payload(queue.pool_configured_cohort()),
+        }
+
+    @app.post("/pool-catalog/cohort/project", dependencies=[control])
+    def project_cohort(body: ProjectConfiguredCohortBody) -> dict[str, object]:
+        """Project the original whole owner observation under the existing CAS."""
+        try:
+            result = queue.observe_pool_configured_cohort(
+                body.observation.observation(), expected_revision=body.expected_revision,
+            )
+        except TaskError as exc:
+            raise refused("cohort-project", exc) from exc
+        return {
+            "protocol": POOL_CATALOG_PROTOCOL, "version": POOL_CATALOG_VERSION,
+            "cohort": _cohort_payload(result),
+        }
+
+    @app.post("/pool-catalog/cohort/recover", dependencies=[control])
+    def recover_cohort(body: ProjectConfiguredCohortBody) -> dict[str, object]:
+        """Read exact original history without another projection or source read."""
+        try:
+            result = queue.recover_pool_configured_cohort(
+                body.observation.observation(), expected_revision=body.expected_revision,
+            )
+        except TaskError as exc:
+            raise refused("cohort-recover", exc) from exc
+        return {
+            "protocol": POOL_CATALOG_PROTOCOL, "version": POOL_CATALOG_VERSION,
+            "cohort": None if result is None else _cohort_payload(result),
+        }
 
     @app.post("/pool-catalog/scopes/begin", dependencies=[control])
     def begin(body: BeginPoolPublicationBody) -> dict[str, object]:

@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-31
+- **Last revised:** 2026-11-02
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -277,6 +277,9 @@ Manual update without the automatic flag, raw self-install, setup/install-source
 doctor/list and ordinary launch still reach their normal owner. A launch's
 skipped automatic preparation is not a launch failure. This distinction never
 removes independent source, privilege, active-owner or unsettled-effect guards.
+The [configuration workbench](configurator/README.md#installation-and-updates)
+makes automatic-update policy visible and adjustable, with a clear distinction
+between allowing an automatic request and enrolling a recurring controller.
 
 ### setup-invocation-authorizes-dependencies
 A user or authorized agent directly invoking the trusted harness setup flow

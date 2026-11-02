@@ -165,6 +165,7 @@ def test_running_health_advertises_only_the_registered_metadata_contract(queue) 
         "control_authority_configured": True, "metadata_only": True,
         "lock_holder_verification": False, "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
+        "configured_cohort_projection_versions": [1],
         "atomic_placement": False,
     }
     assert queue.pool_catalog_snapshot() == before
@@ -237,7 +238,8 @@ def test_configured_projection_get_and_fenced_writes_preserve_metadata_only_cont
     assert contract["metadata_only"]
     assert not contract["configured_scope_membership"]
     assert not contract["lock_holder_verification"] and not contract["atomic_placement"]
-    assert not any("cohort" in route.path for route in client.app.routes)
+    assert {"/pool-catalog/cohort", "/pool-catalog/cohort/project",
+            "/pool-catalog/cohort/recover"} <= {route.path for route in client.app.routes}
 
 
 @pytest.mark.parametrize("field", ["expected_cohort_revision"])

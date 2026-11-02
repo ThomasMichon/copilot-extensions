@@ -263,12 +263,26 @@ def translate_sdk_event(
         )]
 
     if sdk_type == "session.compaction_start":
+        start = {
+            "conversation_tokens": d.get("conversationTokens"),
+            "system_tokens": d.get("systemTokens"),
+        }
+        for original, represented in (
+            ("currentTokens", "current_tokens"),
+            ("tokenLimit", "token_limit"),
+            ("compactionAttemptId", "compaction_attempt_id"),
+            ("model", "model"),
+            ("switchTargetModel", "switch_target_model"),
+            ("targetPromptTokenLimit", "target_prompt_token_limit"),
+            ("execution", "execution"),
+            ("trigger", "trigger"),
+            ("toolDefinitionsTokens", "tool_definitions_tokens"),
+        ):
+            if original in d:
+                start[represented] = d[original]
         return [(
             "compaction_start",
-            _out({
-                "conversation_tokens": d.get("conversationTokens"),
-                "system_tokens": d.get("systemTokens"),
-            }),
+            _out(start),
         )]
 
     if sdk_type == "session.compaction_complete":
