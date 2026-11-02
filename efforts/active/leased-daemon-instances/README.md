@@ -183,9 +183,13 @@ their existing owners and guarantees.
   regenerating consumers through their normal owner.
 - [ ] Complete actual compiler-free construction and lifecycle qualification,
   update current docs and journal reviewed merged results.
-- [ ] Qualify new private inventory creation across same-user Windows
-  launchers with different TokenOwner values; preserve existing-path admission
-  and borrowed runtime anchors. See the [ownership journal](journal/2026/11.02%20private-inventory-ownership.md)
+- [x] Land atomic TokenUser-owned private inventory creation and qualify the
+  four actual Windows SDK owner, binary and concurrent-cold-cache selectors
+  through reviewed source #9956.
+- [ ] Complete the retained Git-Bash Manager callback with the reviewed creator
+  in a canonical complete candidate; preserve the same-user/different-TokenOwner
+  boundary, existing-path admission and borrowed runtime anchors. See the
+  [ownership journal](journal/2026/11.02%20private-inventory-ownership.md)
   and the existing #7028 consumer report.
 
 ## Validation Plan
