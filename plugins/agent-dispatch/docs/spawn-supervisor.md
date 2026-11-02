@@ -66,6 +66,17 @@ triggers; they do not launch an evaluator child in the supervisor daemon.
 Bridge owns session hosting and native resume, while Worktrees owns workspace
 allocation. The lane orchestrates those capabilities rather than replacing them.
 
+The explicit control-owned `POST /pool-placements` operation now commits
+priority-ordered complete configured-pool selection, instance capacity,
+reservation binding and `QUEUED -> CLAIMED` together. The selected assignment
+is inspectable through `TaskQueue.task_pool_assignment`; no workspace or native
+identity is fabricated at claim time. `STARTED` requires an affirmative current
+worker request matching the retained workspace, execution machine, native
+identity and task generation. Recording a spawn or delivering a prompt leaves
+the task `CLAIMED`. See [pool placement](pool-placement.md) for the supported
+API and compatibility boundary. Existing lane callers have not been switched
+to this operation; this source support is not an installed allocation guarantee.
+
 The installer manages the coordinator and supervisor daemon as separate local
 services. Coordinator cutover deliberately leaves the supervisor running;
 clients reconnect through endpoint discovery/routing to the retained task store.
@@ -320,6 +331,9 @@ reservation still has `conclusion_state=pending`, the entire rearm transaction
 is rejected: pending session/worktree cleanup remains durable and continues to
 fence that worktree until a claimed cleanup result reaches `complete` or
 `held`.
+Pool-bound recovery additionally requires qualified retirement of every
+accountable original attempt before rearm or fresh-conversation authorization
+can write retirement markers; see [pool placement](pool-placement.md).
 
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**

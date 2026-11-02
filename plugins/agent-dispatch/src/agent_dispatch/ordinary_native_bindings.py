@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from .ordinary_agent_facts import identity
 from .queue_records import SpawnState, Status, TaskError
+
+RESERVATION_NATIVE_IDENTITY_PROTOCOL = "reservation-native-identity/v1"
 
 
 def is_native_retired(row: Any) -> bool:
     """Use the reservation owner's marker or completed exact-absence release."""
     return bool(row["conversation_retired"]) or bool(
         row["release_requested"]
+        and not ("native_release_pending" in row.keys() and row["native_release_pending"])
         and row["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
     )
 
@@ -81,10 +85,24 @@ def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
             raise TaskError("inherited workspace replay binding conflicts with its allocation")
 
 
-def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str]]:
-    """Classify handles using their producing driver, not the retry's driver."""
+@dataclass(frozen=True)
+class NativeBindingEvidence:
+    known: tuple[str, ...]
+    retired: tuple[str, ...]
+    qualified_empty: bool
+
+
+def native_binding_evidence(
+    conn: Any, row: Any, task: Any, *, require_owned_workspace: bool = True,
+    reject_pending_native: str | None = None,
+) -> NativeBindingEvidence:
+    """Classify driver identities; creation/recovery callers also require origin ownership.
+
+    Pool capacity and acceptance inspect history even for explicitly targeted
+    external workspaces. That classification does not grant allocation ownership.
+    """
     origin = row["allocation_reservation_key"]
-    if row["worktree_ownership"] == "reused" and row["inherited_worktree"]:
+    if require_owned_workspace and row["worktree_ownership"] == "reused" and row["inherited_worktree"]:
         _validate_origin(conn, row, origin)
     known = {task.owner_session_id} if task.owner_session_id else set()
     retired: set[str] = set()
@@ -112,27 +130,61 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
                     raise TaskError("retained session handle has conflicting native identities")
                 handle_natives[handle] = native
         evidence.append((history, native))
+    empty_keys = {
+        history["key"] for history, native in evidence
+        if native is None and not history["session_handle"] and not history["agent_info"]
+        and history["release_requested"] and not history["native_release_pending"]
+        and (history["startup_complete"] or history["startup_fenced"])
+        and is_native_retired(history)
+    }
+    retired_identity_keys = {
+        history["key"] for history, native in evidence if native and is_native_retired(history)
+    }
     for history, native in evidence:
         handle = history["session_handle"]
         native = native or handle_natives.get(handle)
+        if (
+            reject_pending_native is not None and native in (None, reject_pending_native)
+            and history["native_release_pending"]
+        ):
+            raise TaskError("native has pending retirement")
         is_retired = is_native_retired(history)
         if native:
             known.add(native)
             if is_retired:
                 retired.add(native)
         elif is_retired and (handle or history["release_requested"]):
-            raise TaskError("retired conversation has no proven native identity")
+            inherited_marker = (
+                history["conversation_retired"] and not handle
+                and history["allocation_reservation_key"] not in (None, history["key"])
+                and len(empty_keys) + len(retired_identity_keys) > (
+                    int(history["key"] in empty_keys) + int(history["key"] in retired_identity_keys)
+                )
+            )
+            if history["key"] not in empty_keys and not inherited_marker:
+                raise TaskError("retired conversation has no proven native identity")
         elif handle and not handle.startswith("local-body:"):
             raise TaskError("retained bare session handle has no proven native identity")
-    return sorted(known), sorted(retired)
+    return NativeBindingEvidence(tuple(sorted(known)), tuple(sorted(retired)), bool(empty_keys))
+
+
+def native_bindings(
+    conn: Any, row: Any, task: Any, *, require_owned_workspace: bool = True,
+    reject_pending_native: str | None = None,
+) -> tuple[list[str], list[str]]:
+    evidence = native_binding_evidence(
+        conn, row, task, require_owned_workspace=require_owned_workspace,
+        reject_pending_native=reject_pending_native,
+    )
+    return list(evidence.known), list(evidence.retired)
 
 
 def inherited_retirement(conn: Any, row: Any, task: Any) -> bool:
     """Permit inspection of a derived marker, never revival of its old native."""
     if not row["conversation_retired"] or row["agent_info"] or row["session_handle"]:
         return False
-    _, retired = native_bindings(conn, row, task)
-    return bool(retired)
+    evidence = native_binding_evidence(conn, row, task)
+    return bool(evidence.retired) or evidence.qualified_empty
 
 
 def retained_start_generation(conn: Any, task: Any, info: dict) -> bool:

@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktree-identity"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Dependency-free decoding of explicit worktree machine identity metadata"
 readme = "README.md"
 license = "MIT"

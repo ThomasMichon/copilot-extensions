@@ -82,6 +82,8 @@ class QueueBackedClient:
         repo=None,
         label=None,
         conclusion_state=None,
+        native_release_pending=None,
+        pool_accountable=False,
         resume_requested=None,
         limit=200,
     ):
@@ -92,10 +94,12 @@ class QueueBackedClient:
             repo=repo,
             label=label,
             conclusion_state=conclusion_state,
+            native_release_pending=native_release_pending,
+            pool_accountable=pool_accountable,
             resume_requested=resume_requested,
             limit=limit,
         )
-        return [asdict(r) for r in rows]
+        return [{**asdict(r), **({"pool_accountable": True} if pool_accountable else {})} for r in rows]
 
     def reserve_spawn(self, task_id, *, reserved_by=None, allow_suspended_reembodiment=False, allocation_revision=None, driver=None):
         res, ok = self._q.reserve_spawn(
@@ -124,10 +128,11 @@ class QueueBackedClient:
             raise DispatchError(409, str(exc)) from exc
 
     def get_reservation(self, key):
+        from agent_dispatch.ordinary_agent_storage import reservation_native_facts
         reservation = self._q.get_reservation(key)
         if reservation is None:
             raise DispatchError(404, f"no such reservation: {key}")
-        return asdict(reservation)
+        return {**asdict(reservation), **reservation_native_facts(self._q, key)}
 
     def attachments(self, task_id):
         return [asdict(item) for item in self._q.attachment_history(task_id)]

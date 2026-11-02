@@ -74,6 +74,8 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
         reasons.append(str(exc))
     retired_sessions = set()
     for row in captured["reservations"]:
+        if row["native_release_pending"]:
+            reasons.append("historical native retirement remains pending")
         if row["cooling_token"] is not None:
             reasons.append("reservation cooling remains unresolved")
         if row["state"] in SpawnState.ACTIVE:

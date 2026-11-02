@@ -102,7 +102,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         from_states=frozenset({Status.QUEUED}),
         to_state=Status.CLAIMED,
         recovery_mode=RecoveryMode.SAFE_RETRY,
-        implemented_by="TaskQueue.claim (atomic conditional UPDATE)",
+        implemented_by="TaskQueue.claim / reserve_spawn(pool_catalog_revision) (atomic placement)",
     ),
     Transition(
         name="start",

@@ -10,7 +10,7 @@ exclude-newer = "7 days"
 # dependency-confusion; the import module is ``remote_login_shell``.
 # Mirrors agent-procutil / agent-dropin-registry.
 name = "agent-remote-login-shell"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Shared POSIX login-shell command wrapping for remote SSH exec across Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

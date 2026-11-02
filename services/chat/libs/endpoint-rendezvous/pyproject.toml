@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-endpoint-rendezvous"
-version = "0.1.0-dev6"
+version = "0.1.1-dev1"
 description = "Rendezvous (port-mapping) files for discoverable, collision-free local endpoints in Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
