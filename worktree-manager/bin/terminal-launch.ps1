@@ -16,6 +16,7 @@ function Invoke-WorktreeTerminalLaunch {
     )
     $nonce = [Guid]::NewGuid().ToString('N')
     $savedEnvironment = @{}
+    $restoreEnvironment = $false
     try {
         [IO.Directory]::CreateDirectory($directory) | Out-Null
         $request = Join-Path $directory 'request.json'
@@ -59,8 +60,11 @@ function Invoke-WorktreeTerminalLaunch {
         }
         [IO.File]::Delete($request)
         [IO.Directory]::Delete($directory)
+        foreach ($item in Get-ChildItem Env:) {
+            $savedEnvironment[$item.Name] = $item.Value
+        }
+        $restoreEnvironment = $true
         foreach ($name in @('WORKTREE_MANAGER_ENGINE_ARGV', 'WORKTREE_MANAGER_ROOT', 'WORKTREE_NO_MUX')) {
-            $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
             $value = $result.environment.$name
             if ($null -ne $value -and $value -isnot [string]) {
                 throw 'Invalid prepared terminal environment.'
@@ -100,10 +104,13 @@ function Invoke-WorktreeTerminalLaunch {
         $global:LASTEXITCODE = 1
     } finally {
         Remove-Item Env:CE_TERMINAL_LAUNCH -ErrorAction SilentlyContinue
-        foreach ($name in $savedEnvironment.Keys) {
-            if ($null -eq $savedEnvironment[$name]) {
-                Remove-Item -LiteralPath ('Env:' + $name) -ErrorAction SilentlyContinue
-            } else {
+        if ($restoreEnvironment) {
+            foreach ($item in Get-ChildItem Env:) {
+                if (-not $savedEnvironment.ContainsKey($item.Name)) {
+                    Remove-Item -LiteralPath ('Env:' + $item.Name) -ErrorAction Stop
+                }
+            }
+            foreach ($name in $savedEnvironment.Keys) {
                 Set-Item -LiteralPath ('Env:' + $name) -Value $savedEnvironment[$name]
             }
         }

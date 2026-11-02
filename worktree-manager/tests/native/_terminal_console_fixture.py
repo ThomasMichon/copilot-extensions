@@ -72,6 +72,7 @@ class Console:
             "WriteFile": ([w.HANDLE, w.LPCVOID, w.DWORD, ctypes.POINTER(w.DWORD), w.LPVOID], w.BOOL),
             "CloseHandle": ([w.HANDLE], w.BOOL),
             "OpenProcess": ([w.DWORD, w.BOOL, w.DWORD], w.HANDLE),
+            "GetProcessTimes": ([w.HANDLE, *([ctypes.POINTER(w.FILETIME)] * 4)], w.BOOL),
             "CreateToolhelp32Snapshot": ([w.DWORD, w.DWORD], w.HANDLE),
             "Process32FirstW": ([w.HANDLE, ctypes.POINTER(ProcessEntry)], w.BOOL),
             "Process32NextW": ([w.HANDLE, ctypes.POINTER(ProcessEntry)], w.BOOL),
@@ -175,10 +176,18 @@ class Console:
         self._hresult(self.api.ResizePseudoConsole(self.pseudo, Coord(width, height)))
 
     def pin(self, pid):
-        handle = self.api.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+        handle = self.api.OpenProcess(0x101000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
         self._check(handle)
         self.handles.append(handle)
         return handle
+
+    def birth(self, handle):
+        created, exited, kernel, user = (w.FILETIME() for _ in range(4))
+        self._check(self.api.GetProcessTimes(
+            handle, ctypes.byref(created), ctypes.byref(exited),
+            ctypes.byref(kernel), ctypes.byref(user),
+        ))
+        return (created.dwHighDateTime << 32) | created.dwLowDateTime
 
     def pin_descendants(self):
         snapshot = self.api.CreateToolhelp32Snapshot(2, 0)
@@ -196,16 +205,23 @@ class Console:
                     break
         finally:
             self._check(self.api.CloseHandle(snapshot))
-        descendants = {self.process.pid}
-        while True:
-            found = {pid for pid, (parent, _) in entries.items() if parent in descendants}
-            if found <= descendants:
-                break
-            descendants |= found
-        return {
-            pid: (entries[pid][1], self.pin(pid))
-            for pid in descendants - {self.process.pid}
-        }
+        births = {self.process.pid: self.birth(self.process.process)}
+        frontier = [self.process.pid]
+        pinned = {}
+        for parent in frontier:
+            for pid, (ancestor, name) in entries.items():
+                if ancestor != parent or pid in births:
+                    continue
+                handle = self.pin(pid)
+                born = self.birth(handle)
+                # Toolhelp parent PIDs can refer to an older, reused incarnation.
+                if born < births[parent]:
+                    self._close(handle)
+                    continue
+                births[pid] = born
+                pinned[pid] = (name, handle)
+                frontier.append(pid)
+        return pinned
 
     def exited(self, handle, timeout=0):
         result = self.api.WaitForSingleObject(handle, timeout)

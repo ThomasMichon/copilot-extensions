@@ -215,3 +215,22 @@ wait-only process. Keep POSIX process replacement and standalone behavior.
   real nonzero return.
 - The two deployment/uninstall controls and four native CMD replacement/exit
   cases pass. Review and required CI must still clear on the updated head.
+
+### 2026-11-01 - Reused shell environment isolation
+
+- The next review reports no open inline issues but its overview identifies
+  reused-shell environment isolation. That is a real effect of replacing a
+  child PowerShell with in-process script invocation: restoring only the three
+  prepared variables would leak unrelated launcher additions/removals/changes.
+- The foreground helper now snapshots the process environment in memory before
+  applying the selected launch state and restores the complete snapshot on
+  return. No environment snapshot is serialized, logged or sent elsewhere.
+  This adds two environment enumerations per supported foreground launch, not
+  recurring work or another process.
+- The native selected script deliberately adds, removes and changes environment
+  values; every returning entry route must restore the original state. The final
+  12-case ConPTY/real-mux packet passes, including production refusal and
+  concurrent detach/rejoin.
+- Native process attribution additionally checks retained creation times before
+  joining Toolhelp parent PIDs, excluding older processes whose original parent
+  PID has been reused. Production launch adds no process census.

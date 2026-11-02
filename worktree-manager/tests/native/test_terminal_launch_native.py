@@ -121,6 +121,7 @@ def _scripts(root, mode, entry):
         "$code=$LASTEXITCODE\n"
         f"[IO.File]::WriteAllText({_quote(root / 'host-result.json')},"
         "(@{code=$code;channel=$env:CE_TERMINAL_LAUNCH;pid=$PID;"
+        "kept=$env:FIXTURE_KEPT;added=$env:FIXTURE_ADDED;removed=$env:FIXTURE_REMOVED;"
         "root=$env:WORKTREE_MANAGER_ROOT;cwd=(Get-Location).Path}|ConvertTo-Json -Compress))\n"
         "exit $code\n", encoding="utf-8",
     )
@@ -130,6 +131,9 @@ def _scripts(root, mode, entry):
         "(@{pid=$PID;arguments=@($args);redirected=[Console]::IsInputRedirected;"
         "channel=$env:CE_TERMINAL_LAUNCH;cwd=(Get-Location).Path;"
         "engine=$env:WORKTREE_MANAGER_ENGINE_ARGV}|ConvertTo-Json -Compress))\n"
+        "$env:FIXTURE_KEPT='changed-in-launcher'\n"
+        "$env:FIXTURE_ADDED='launch-only'\n"
+        "Remove-Item Env:FIXTURE_REMOVED\n"
         "[Console]::WriteLine('HANDOFF-RENDERED')\n"
         "$line=[Console]::ReadLine()\n"
         f"[IO.File]::WriteAllText({_quote(root / 'input.json')},"
@@ -156,6 +160,8 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
     for name in ("CE_TERMINAL_LAUNCH", "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_NO_MUX"):
         env.pop(name, None)
     env["WORKTREE_MANAGER_ROOT"] = str(tmp_path / "manager")
+    env["FIXTURE_KEPT"] = env["FIXTURE_REMOVED"] = "original"
+    env.pop("FIXTURE_ADDED", None)
     if entry.startswith("aw-"):
         env["USERPROFILE"] = env["HOME"] = str(tmp_path / "profile")
         env["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(tmp_path / "payload")
@@ -174,7 +180,11 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
         if mode in {"selected", "terminal-close"}:
             attached = _wait(tmp_path / "attached.json", console)
             assert attached["pid"] == console.process.pid
-            assert all(console.exited(handle) for _, handle in descendants.values())
+            survivors = {
+                pid: name for pid, (name, handle) in descendants.items()
+                if not console.exited(handle)
+            }
+            assert not survivors, survivors
             assert attached["arguments"] == literal
             assert attached["redirected"] is False
             assert not attached["channel"]
@@ -194,6 +204,8 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
         result = json.loads((tmp_path / "host-result.json").read_text(encoding="utf-8-sig"))
         assert not result["channel"]
         assert result["root"] == env["WORKTREE_MANAGER_ROOT"]
+        assert result["kept"] == result["removed"] == "original"
+        assert not result["added"]
         assert Path(result["cwd"]) == tmp_path
         assert not request.parent.exists()
         assert list(temporary.glob("ce-terminal-*")) == []

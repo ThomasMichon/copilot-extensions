@@ -21,6 +21,9 @@ of the `worktree-manager-control-plane` effort.
   cleanup duties; neither forwarding interpreter is a session-lifetime host.
   The consumed result and request directory are removed before attachment;
   literal argv arrays are splatted without shell evaluation or flattening.
+  The selected script runs in the foreground host, but its process-environment
+  additions, removals and changed values are restored on return, matching the
+  previous child-shell isolation when the caller reuses its PowerShell session.
   A finite callback records a journaled attempt's actual launcher return, not
   preparation success. No credentials or seed prompt bodies use this channel.
   If that observer fails, a diagnostic is emitted without replacing the

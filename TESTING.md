@@ -19,6 +19,8 @@ user and attributable PowerShell entry scripts, generated Manager CMD/PowerShell
 entries and standalone Manager channel creation. Engine discovery, runtime
 selection answers and the selected interactive command remain synthetic;
 the production launcher's refusal path is exercised separately.
+Return-path checks restore process-environment additions, removals and changed
+values before a caller reuses its PowerShell session.
 Two simultaneous real PSMux sessions cover rendering, input, Ctrl+C delivery,
 resize, detach/rejoin and independent child exit. Strict fixture Jobs and
 isolated PSMux roots retain cleanup custody. This is native source-boundary
