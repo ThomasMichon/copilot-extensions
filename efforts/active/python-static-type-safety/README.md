@@ -1811,3 +1811,23 @@ composition prerequisites, and review/validation rules.
   Transport) and #10108 (Plugin Activation). Both retain their pending level and
   use the existing seasoned YAML checker lock after their initial missing-stub
   prerequisite was diagnosed. The lead retains shared metadata and publication.
+
+### 2026-11-02 - Process packet admission reconciled to incoming Dev
+
+- #10115 received exact-head approval with no findings. Its source-unit job
+  correctly refused the changed `tools/dependency_age.py` bytes: incoming Dev
+  had added that tool to the admitted packet after the initial impact snapshot.
+  The completed job log names the stale source input directly; this is neither
+  a flaky test nor permission to bypass the gate.
+- Only that one source digest is refreshed. The current 3,773 nodes, 513 source
+  inputs, 211 coverage targets, nineteen existing deselections and 300-second
+  budget remain unchanged. Complete local qualification passes all 3,773 tests
+  in 282.171 seconds, including the single coverage collection.
+- The PR's impact statement is corrected to describe the new tracked policy
+  input. The updated head requires fresh review and required CI; earlier approval
+  and the initial snapshot's lack of a policy input do not qualify it.
+- The next Machine Transport artifact is independently verified to preserve
+  all 214 test names, 324 assertions and 134 parametrizations. All 763 tests pass
+  with zero skips on actual Linux/Python 3.10.21 in 2.41 seconds, matching its
+  contained Windows result. Plugin Activation independently preserves its 105
+  test names, 333 assertions and 43 parametrizations; integration remains pending.

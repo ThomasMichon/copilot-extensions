@@ -4288,7 +4288,7 @@
         "tools/bundle_lock.py": "83fb9d1cfd1b8901db4e8d72a521799d00fcc23390ddeb11dc6584f698c1b2f4",
         "tools/bundle_input_cases.py": "e7cd20d8ac9fb1ebeb8c9033cd77dbb6c888230dabf85117fe28795405236075",
         "tools/promotion_unit_tests/test_bundle_inputs.py": "58fe264c28fe361c0e0417b6ed4f09d3ff04ebd053dcfb9310485093fa590d20",
-        "tools/dependency_age.py": "8e0cbc94c78cfa9d1a3649b939571bb46c5c395601a695460fbc938c6e319a07"
+        "tools/dependency_age.py": "f7b76d7b94eb0b44b973ad76f76a941da256e1ac0a3ed9be53e8b10cd542350b"
     },
     "coverage_targets": [
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py",
