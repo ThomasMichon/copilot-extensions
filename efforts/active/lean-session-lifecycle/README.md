@@ -107,15 +107,23 @@ Phase 3 without replacing this effort or taking over adjacent ownership.
 
 Focused mini-effort: [Picker Launch Handoff](picker-launch-handoff.md).
 
-- [ ] Establish the per-session launch contract for muxed, non-muxed,
+- [x] Establish the per-session launch contract for muxed, non-muxed,
   resumed, new-window, and remote paths before changing ownership.
-- [ ] Transfer the ordinary launch to the final execution host without
+- [x] Transfer the ordinary launch to the final execution host without
   retaining `agent_worktrees` or `worktree_manager` Python workers merely
   to wait. Preserve the selected runtime, environment, stdio, and argument fidelity.
-- [ ] Preserve exit status, Ctrl+C, launch receipt, post-exit bookkeeping,
+- [x] Preserve exit status, Ctrl+C, launch receipt, post-exit bookkeeping,
   terminal attachment, and ownership/reaping semantics; do not replace
   the waiters with a detached unowned process.
-- [ ] Land code, lifecycle regression tests, docs, and required changefiles.
+- [x] Land code, lifecycle regression tests, docs, and required changefiles.
+
+Phase 3's source slice landed in #9936. The changed boundary is ordinary
+Windows foreground preparation and terminal-owned attachment; unchanged
+no-mux, remote, new-window and POSIX paths retain their prior behavior.
+This does not satisfy Phase 4's authorized installed rollout, exhaustive
+transient-process inventory or live shared-daemon singleton proof. The
+mini-effort retains those distinct open gates; Phase 2's bounded-retry work
+and the other tracking issues are unchanged.
 
 ### Phase 4 - Release and measured completion
 

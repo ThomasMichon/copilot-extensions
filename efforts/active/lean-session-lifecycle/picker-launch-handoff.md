@@ -3,7 +3,7 @@
 - **Parent:** [Lean Session Lifecycle](README.md), Phase 3
 - **Tracking:** #5579; no duplicate implementation owner or umbrella issue
 - **Created:** 2026-11-01
-- **Status:** Active; query admission implemented and source-qualified, publication pending
+- **Status:** Active; implementation merged in #9936, release and installed proof pending
 - **Vision:** `visions/plugin-services/README.md` - transient callbacks and
   removal of session-scaled wait-only forwarding processes
 
@@ -150,7 +150,7 @@ reviewed admission revision is implemented and qualified.
   local Windows creation and resume, including existing-session joins.
 - [x] Retain terminal input/output, Ctrl+C, post-exit versus detach behavior,
   installation-independent pane shells, exact process ownership and reaping.
-- [ ] Add focused lifecycle regressions, update launch documentation and
+- [x] Add focused lifecycle regressions, update launch documentation and
   required changefiles, and land through the normal source-review gate.
 - [x] Record whether direct terminal-to-PSMux attachment is qualified; if not,
   keep the shell-hosted result and record the precise remaining constraint.
@@ -505,3 +505,17 @@ reviewed admission revision is implemented and qualified.
   attribution. No installed runtime or live session was changed.
 - This new head still requires its own review and CI before source merge;
   the old head's green result is not carried forward as exact-head evidence.
+
+### 2026-11-02 - Source implementation merged
+
+- #9936 merged at `bea5b3fff3c9261ef77c4ec07fe207c950739a5f` after exact-head
+  required CI `41450218957`, review `5737068171`, all ten resolved threads and
+  the recorded assessment of its repeated overview. The managed merge used
+  the repository's owner review exception, not a CI bypass.
+- Post-merge `dev` CI `41451356628` passed. Release promotion is pending;
+  a merged contribution and a green trigger are not release availability.
+- Re-read this mini-effort and the parent after merge. The source/regression/
+  documentation slice is complete; exhaustive transient-query attribution,
+  release availability and authorized installed singleton/running-state
+  qualification remain unchecked. No rollout, retained launcher retirement,
+  live-session migration or deployment-hold change was performed.
