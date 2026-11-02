@@ -466,6 +466,32 @@ def test_worktree_override_preserves_git_index_repository(tmp_path, option, guar
     assert bool(result) is guarded_repository
 
 
+@pytest.mark.parametrize("command", [
+    "git commit-tree HEAD",
+    "git checkout-index -a",
+    "git merge-base HEAD HEAD",
+    "git -c alias.commit=status commit -m new",
+    "git -calias.commit=status commit -m new",
+    "git --config-env=alias.commit=COMMAND_VALUE commit -m new",
+])
+@pytest.mark.parametrize("guarded_repository", [False, True])
+def test_git_dashed_writes_and_builtin_alias_names_preserve_guard(tmp_path, command, guarded_repository):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(anchor if guarded_repository else outside),
+        "toolArgs": {"command": command},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is (guarded_repository and "merge-base" not in command)
+
+
 def test_map_scope_does_not_borrow_other_installation(tmp_path):
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")

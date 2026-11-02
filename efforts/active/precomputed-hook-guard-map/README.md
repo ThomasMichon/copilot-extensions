@@ -353,3 +353,11 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   classification boundary, while a global-option read fails a test if it
   acquires Git identity. The complete map, consumer, deployment and relevance
   packet passed 195 cases with four native-capability skips.
+- Restored dashed write-subcommand classification with the existing write
+  prefix policy, keeping `merge-base` read-only. The shared invocation parser
+  now retains intrinsic write names when same-name alias configuration is
+  present; Git cannot replace a built-in with such an alias. Cross-repo controls
+  cover dashed writes, three alias forms and read/unrelated decisions. Anchor
+  controls preserve ordinary commit denial and fast-forward-only pull access.
+  The complete map, both guards, deployment and relevance packet passed
+  370 cases with six native-capability skips.

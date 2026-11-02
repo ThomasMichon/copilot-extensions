@@ -383,14 +383,16 @@ def _git_invocation(
         if token.startswith("-"):
             index += 1
             continue
-        subcommand = "__configured-alias__" if lower in configured_aliases else lower
+        subcommand = "__configured-alias__" if (
+            lower in configured_aliases and not _git_subcommand_is_write(lower)
+        ) else lower
         resolved_targets = _git_resolved_targets(
             targets, git_cwd, git_cwd_overridden, subcommand,
         )
         return subcommand, tokens[index + 1:], resolved_targets, has_repo_override
     if index < len(tokens):
         subcommand = tokens[index].lower()
-        if subcommand in configured_aliases:
+        if subcommand in configured_aliases and not _git_subcommand_is_write(subcommand):
             subcommand = "__configured-alias__"
         resolved_targets = _git_resolved_targets(
             targets, git_cwd, git_cwd_overridden, subcommand,

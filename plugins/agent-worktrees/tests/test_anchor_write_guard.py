@@ -334,6 +334,21 @@ def test_shell_git_write_with_global_options_still_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize("subcommand,arguments,denied", [
+    ("commit", "-m example", True),
+    ("pull", "--ff-only", False),
+])
+def test_builtin_git_write_name_is_not_replaced_by_alias(
+    tmp_path, anchor, subcommand, arguments, denied,
+):
+    gp = anchor[0]["path"]
+    result = guard.decide(
+        _shell(f'git -C "{gp}" -c alias.{subcommand}=status {subcommand} {arguments}', tmp_path),
+        env={}, home=tmp_path, anchors=anchor,
+    )
+    assert bool(result) is denied
+
+
 @pytest.mark.parametrize(
     "config",
     [
