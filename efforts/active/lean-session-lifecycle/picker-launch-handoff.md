@@ -3,7 +3,7 @@
 - **Parent:** [Lean Session Lifecycle](README.md), Phase 3
 - **Tracking:** #5579; no duplicate implementation owner or umbrella issue
 - **Created:** 2026-11-01
-- **Status:** Active; implementation merged in #9936, release and installed proof pending
+- **Status:** Active; implementation released, authorized installed qualification underway
 - **Vision:** `visions/plugin-services/README.md` - transient callbacks and
   removal of session-scaled wait-only forwarding processes
 
@@ -159,9 +159,9 @@ reviewed admission revision is implemented and qualified.
 
 - [x] Prove the native process-lifetime contract in an isolated Windows terminal
   with one and several sessions; finish all test-owned resources explicitly.
-- [ ] Record release availability separately from a separately authorized
+- [x] Record release availability separately from a separately authorized
   installed rollout and running-state proof; do not migrate existing sessions.
-- [ ] Journal the bounded outcome in the parent and retain its unrelated open
+- [x] Journal the bounded outcome in the parent and retain its unrelated open
   Plan/Validation items and #5579's remaining launcher-depth acceptance.
 
 ## Validation Plan
@@ -519,3 +519,63 @@ reviewed admission revision is implemented and qualified.
   release availability and authorized installed singleton/running-state
   qualification remain unchecked. No rollout, retained launcher retirement,
   live-session migration or deployment-hold change was performed.
+
+### 2026-11-02 - Release and authorized adoption
+
+- Promotion #9992 merged Main `59aef9f0bf6a8f0f40215a92c743ee68dd15a54d`
+  from the qualified #9936 source. Run `41452050809` passed qualification,
+  source publication/readback and exact candidate merge. The five handoff
+  shell/module blobs matched the merged source. Release availability is
+  distinct from installed adoption; #5579 retains the release journal.
+- The operator subsequently authorized an as-needed ordinary local update and
+  continuation of this effort. That does not authorize terminating retained
+  sessions, weakening Job policy or taking another writer's work.
+- The first update's monitor health check rolled Worktrees back; its
+  interrupted receipt was retained and released through the supported
+  operator-repair exclusion, without claiming native cleanup or replaying it.
+  The next ordinary update completed Worktrees `1.24.419-dev1`'s transition
+  and Manager `0.6.252-dev1`'s activation, but its final suite child failed
+  implicit project resolution from staging. That failed whole-suite result
+  is not recorded as successful adoption.
+- #10079 owns the newly observed context regression. The source correction
+  applies the already-captured caller directory to the engine update child,
+  preserving durable queue/source identities and other verbs' cwd. Invalid
+  captured directories fail before child execution. An explicit-project
+  ordinary update is separately progressing through the existing updater;
+  its result and the new source correction's release remain separate gates.
+- The focused Manager/update/constructor packet passes 215 cases with five
+  existing platform skips. The new isolated real-child cwd/argv/exit control
+  passes separately. Constructor units reuse the synthetic constructor's
+  custody fixture; real queue-worker controls now own a private registry,
+  renewable test lease and checked cleanup, and use the installation-owned
+  observer boundary for their deliberately surviving worker. Production Job
+  policy and contained-test suppression are unchanged.
+- This is a below-altitude correction of the existing invocation-context
+  contract, not a new provisioning design. The real-child control exercises
+  the fresh caller-versus-staging boundary without another full installation.
+  Required exact-head CI/review, publication of #10079's fix, successful
+  whole-suite adoption and actual new-session shape remain open. No external
+  venue is substituted for the local Windows consumer being qualified.
+
+### 2026-11-02 - Adoption blocker correction qualified
+
+- The cwd correction lives in the existing update handoff adapter, retaining
+  the engine client's source-module ceiling without widening its baseline.
+  Update/request tests pass 136 cases with three existing platform skips.
+- The complete uninstrumented native context selection passes all 12 cases.
+  Its repair fixture now borrows its already-held real update custody rather
+  than deadlocking on a second queue drain. Native installer calls retain
+  finite child/stream ownership at their original 30/45-second deadlines;
+  the unowned control explicitly omits witness export. Routing assertions
+  retain exact interpreter and trailing arguments without expecting two
+  independent unsealed-cache nonce allocations to match.
+- Earlier native selections exposed cold scoped-repair timeouts; the final
+  complete selection passed without increasing those deadlines. These native
+  cases are not promoted into actor-free unit evidence. Source admission,
+  module-size and installation-contract checks pass; exact published-head
+  CI/review are still required.
+- The explicit-project whole-suite update reached its terminal failure result
+  after core adoption: Bridge timed out during cutover and Index during build.
+  The installed core selection is not evidence that the full requested update
+  succeeded. Owner-scoped health inspection and repair remain open alongside
+  new-session qualification; no retained session is terminated to hide them.

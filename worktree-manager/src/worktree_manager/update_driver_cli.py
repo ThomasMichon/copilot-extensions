@@ -40,9 +40,16 @@ def handoff_environment(args: list[str]) -> dict[str, str]:
     return {}
 
 
-def handoff_launch_options(environment: dict[str, str], handoff: dict[str, str]) -> dict[str, object]:
+def handoff_launch_options(
+    environment: dict[str, str], handoff: dict[str, str], *, update: bool = False,
+) -> dict[str, object]:
     """Keep scoped Windows updates headless without changing interactive passthrough."""
     options: dict[str, object] = {"env": {**environment, **handoff}}
+    if update and "AGENT_WORKTREES_UPDATE_CONTEXT" in environment:
+        directory = Path(environment["AGENT_WORKTREES_UPDATE_CONTEXT"])
+        if not directory.is_absolute() or not directory.is_dir():
+            raise ValueError("update invocation context must be an existing absolute directory")
+        options["cwd"] = str(directory)
     if handoff and os.name == "nt":
         from agent_procutil import no_window_kwargs
 

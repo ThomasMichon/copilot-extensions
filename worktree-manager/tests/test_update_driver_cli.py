@@ -14,11 +14,22 @@ _NATIVE_QUEUE_TIMEOUT = 30
 
 
 @pytest.fixture
-def short_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def short_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
+    from agent_procutil.daemon_instances import REGISTRY_ENV, daemon_test_lifecycle
+
     # Exercise queue ownership, not the platform's AF_UNIX address-length limit.
     home = tmp_path_factory.mktemp("ud") / "home"
     home.mkdir()
-    return home
+    registry = home.parent / "daemon-instances"
+    cleanup = []
+    with daemon_test_lifecycle(
+        owner="manager-update-cli-tests", registry_root=registry, cleanup_results=cleanup,
+    ) as environment:
+        monkeypatch.setenv(REGISTRY_ENV, str(registry))
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        yield home
+    assert all(result.status != "held" for result in cleanup), cleanup
 
 
 def test_default_wait_preserves_canonical_update_arguments():
@@ -441,7 +452,7 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     from concurrent.futures import ThreadPoolExecutor
     from pathlib import Path
 
-    from agent_procutil.owned_process import run_owned
+    from agent_procutil.owned_process import run_installation_owned
     import update_driver
 
     home = short_home
@@ -453,7 +464,10 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     command = [sys.executable, str(fixture), "submit", "--wait"]
     with ThreadPoolExecutor(max_workers=2) as callers:
         futures = [
-            callers.submit(run_owned, command, timeout=_NATIVE_QUEUE_TIMEOUT) for _ in range(2)
+            callers.submit(
+                run_installation_owned, command, timeout=_NATIVE_QUEUE_TIMEOUT,
+                max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+            ) for _ in range(2)
         ]
         results = [future.result() for future in futures]
     assert [result.returncode for result in results] == [6, 6]
@@ -477,7 +491,7 @@ def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
 ):
     import json
     import sys
-    from agent_procutil.owned_process import run_owned
+    from agent_procutil.owned_process import run_installation_owned
     import update_driver
 
     events = tmp_path / "events.jsonl"
@@ -489,9 +503,10 @@ def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
     monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
     monkeypatch.setenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", "1")
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
-    result = run_owned(
+    result = run_installation_owned(
         [sys.executable, str(fixture), "submit", "--wait", *(["--auto"] if automatic else [])],
         timeout=_NATIVE_QUEUE_TIMEOUT,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
     )
     skipped = automatic and held
     assert result.returncode == (3 if skipped else 6), result.stderr
@@ -517,7 +532,7 @@ def test_actual_queued_manager_keeps_consumed_provider(
     import json
     import sys
     from pathlib import Path
-    from agent_procutil.owned_process import run_owned
+    from agent_procutil.owned_process import run_installation_owned
     from worktree_manager import engine_client
 
     home = short_home
@@ -529,9 +544,10 @@ def test_actual_queued_manager_keeps_consumed_provider(
     monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(provider))
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
     forwarded = ["--repair-engine", str(tmp_path / "fresh source")] if fresh_repair else []
-    result = run_owned(
+    result = run_installation_owned(
         [sys.executable, str(fixture), "submit", "--wait", *forwarded],
         timeout=_NATIVE_QUEUE_TIMEOUT,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
     )
     assert result.returncode == 6, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
@@ -597,7 +613,7 @@ def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
     import json
     import sys
     import update_driver
-    from agent_procutil.owned_process import run_owned
+    from agent_procutil.owned_process import run_installation_owned
 
     events = tmp_path / "events.jsonl"
     key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
@@ -607,9 +623,10 @@ def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
     monkeypatch.setenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", "1")
     monkeypatch.setenv(key, "600")
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
-    result = run_owned(
+    result = run_installation_owned(
         [sys.executable, str(fixture), "submit", "--wait"],
         timeout=3 * _NATIVE_QUEUE_TIMEOUT,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
     )
     assert result.returncode == 6, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]

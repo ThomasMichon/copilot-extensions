@@ -1334,6 +1334,11 @@ only legacy selection requires a shared deployment manifest. Fresh orchestration
 re-resolves the repaired installation instead of reusing an inherited command
 that still names an older shared slot.
 Project arguments and the original invocation context cross the bootstrap.
+The final engine `update` child uses that captured caller directory even when
+fresh Manager bootstrap is executing from staging. A supplied
+`AGENT_WORKTREES_UPDATE_CONTEXT` must name an existing absolute directory;
+invalid context fails before launching the engine rather than registering or
+guessing a project for staging. Other engine verbs retain their ordinary cwd.
 Installing the Manager alone never counts as suite success: repair failures
 and the eventual update's native exit status
 propagate to the caller. `--no-manager`, read-only `--auth-report`, update help,

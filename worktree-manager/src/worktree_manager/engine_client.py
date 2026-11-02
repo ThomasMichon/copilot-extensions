@@ -350,13 +350,13 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            **{**handoff_launch_options(child_environment, handoff),
+            **{**handoff_launch_options(child_environment, handoff, update=args[:1] == ["update"]),
                **(_terminal_aware_launch_options() if terminal_aware else {}),
                **headless_options},
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
-    except OSError as e:
+    except (OSError, ValueError) as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
 
 
