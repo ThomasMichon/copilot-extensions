@@ -12,13 +12,16 @@ from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
+from typing import TypedDict
 
 import pytest
 
 from docker_resource_producer import Endpoint, Identity, VerificationError, birth_labels
 from docker_resource_producer.local_session import LocalDaemonAdmission, LocalDaemonSession
+from docker_resource_producer.http_stream import ResponseStream
 from docker_resource_producer.models import LABEL_TOKEN
 from docker_resource_producer.verification import LocalDockerVerifier
+from fake_docker import Resource
 
 TOKEN = "r" * 43
 CREATOR = "machine/project/creator"
@@ -26,21 +29,26 @@ IDENTIFIER = "a" * 64
 CREATED = "2026-10-13T00:00:00.123456789Z"
 
 
+class VolumeInventory(TypedDict):
+    Volumes: list[Resource]
+    Warnings: object
+
+
 class FixtureDaemon:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.accepts = 0
         self.calls: list[tuple[str, str]] = []
-        self.resources = {IDENTIFIER: {
+        self.resources: dict[str, Resource] = {IDENTIFIER: {
             "Id": IDENTIFIER, "Created": CREATED, "Config": {"Labels": birth_labels(TOKEN, CREATOR, 1)},
         }}
-        self.volumes: dict[str, dict] = {}
+        self.volumes: dict[str, Resource] = {}
         self.failure_route: str | None = None
         self.behavior = ""
         self.warning: object = None
         self.connection: socket.socket | None = None
         self.error: BaseException | None = None
-        self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.listener = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
         self.listener.bind(str(path))
         path.chmod(0o600)
         self.listener.listen(2)
@@ -77,16 +85,20 @@ class FixtureDaemon:
                             break
                         if self.behavior == "disconnect" and route != "/info":
                             break
+                        result: dict[str, str] | list[Resource] | VolumeInventory | Resource
                         if route == "/info":
                             result = {"ID": "daemon-a" if self.accepts == 1 else "daemon-b"}
                         elif route == "/containers/json":
                             result = self.inventory(target, "container")
                         elif route == "/volumes":
-                            result = {"Volumes": self.inventory(target, "volume"), "Warnings": []}
+                            volume_inventory: VolumeInventory = {
+                                "Volumes": self.inventory(target, "volume"), "Warnings": [],
+                            }
                             if self.behavior == "custom-warning":
-                                result["Warnings"] = self.warning
+                                volume_inventory["Warnings"] = self.warning
                             elif self.behavior == "warning":
-                                result["Warnings"] = ["incomplete"]
+                                volume_inventory["Warnings"] = ["incomplete"]
+                            result = volume_inventory
                         elif method == "DELETE":
                             identifier = route.split("/")[2]
                             resource = self.resources.get(identifier) or next((
@@ -153,10 +165,10 @@ class FixtureDaemon:
             if not self.stopping.is_set() and not expected_rejection:
                 self.error = error
 
-    def inventory(self, target: str, kind: str) -> list[dict]:
-        filters = json.loads(parse_qs(urlsplit(target).query).get("filters", ["{}"])[0])
+    def inventory(self, target: str, kind: str) -> list[Resource]:
+        filters: dict[str, list[str]] = json.loads(parse_qs(urlsplit(target).query).get("filters", ["{}"])[0])
         records = self.resources if kind == "container" else self.volumes
-        result = []
+        result: list[Resource] = []
         for record in records.values():
             labels = record.get("Config", {}).get("Labels", {}) if kind == "container" else record.get("Labels", {})
             if all(labels.get(key) == value for key, value in (
@@ -174,7 +186,7 @@ class FixtureDaemon:
 
 
 @pytest.fixture
-def daemon():
+def daemon() -> Iterator[FixtureDaemon]:
     if os.name != "posix" or not hasattr(socket, "AF_UNIX"):
         pytest.skip("Authoritative direct Unix adapter is POSIX-only; other routes fail closed")
     with tempfile.TemporaryDirectory(prefix="ce-d-") as directory:
@@ -367,7 +379,7 @@ def test_interrupted_admission_closes_every_resource_and_propagates(
     resources: list[tuple[socket.socket | None, io.BufferedReader | None, io.RawIOBase | None]] = []
     read = local_session.read_response
 
-    def interrupt(source: io.BufferedReader) -> tuple[int, bytes]:
+    def interrupt(source: ResponseStream) -> tuple[int, bytes]:
         read(source)
         resources.append((session.connection, session.reader, session.raw_reader))
         raise interruption
@@ -419,12 +431,14 @@ def test_nested_json_closes_all_session_resources_without_reconnect(
     assert all(method != "DELETE" for method, _target in daemon.calls)
 
 
-def test_expiry_during_json_decode_closes_before_return(daemon: FixtureDaemon, monkeypatch) -> None:
+def test_expiry_during_json_decode_closes_before_return(
+    daemon: FixtureDaemon, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from docker_resource_producer import local_session
     decode = local_session._json
     host = "unix://" + str(daemon.path)
     with LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host)) as session:
-        def expired_decode(raw: str):
+        def expired_decode(raw: str) -> object:
             result = decode(raw)
             session.deadline = time.monotonic() - 1
             return result
@@ -445,9 +459,11 @@ def test_session_refuses_mutating_requests_before_transport(daemon: FixtureDaemo
     assert daemon.calls == [("GET", "/info")]
 
 
-def test_expiry_during_inventory_projection_cannot_return_absence(daemon: FixtureDaemon, monkeypatch) -> None:
+def test_expiry_during_inventory_projection_cannot_return_absence(
+    daemon: FixtureDaemon, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = verifier(daemon)
-    def expired_inventory(session, _kind):
+    def expired_inventory(session: LocalDaemonSession, _kind: str) -> list[str]:
         session.deadline = time.monotonic() - 1
         return []
     monkeypatch.setattr(client, "_inventory", expired_inventory)
@@ -560,7 +576,7 @@ def test_symlink_socket_refuses_before_connect(daemon: FixtureDaemon) -> None:
     assert daemon.accepts == 0
 
 
-def test_platform_without_admitted_adapter_refuses(monkeypatch) -> None:
+def test_platform_without_admitted_adapter_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     from docker_resource_producer import local_session
     session = LocalDaemonSession(Endpoint("unix:///trusted.sock", "daemon-a"), LocalDaemonAdmission("unix:///trusted.sock"))
     monkeypatch.setattr(local_session, "_DIRECT_LOCAL_SUPPORTED", False)

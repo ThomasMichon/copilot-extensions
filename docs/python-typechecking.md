@@ -5,7 +5,8 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
-Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
+Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resource
+Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
 Context, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Update Telemetry, Work
@@ -29,6 +30,7 @@ python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-configuration-layers
 python tools/typecheck.py lib-core-delegation
+python tools/typecheck.py lib-docker-resource-producer
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py lib-fleet-contracts
@@ -85,6 +87,15 @@ fall-through remain intact. Socket addresses and the pointer-correct Windows
 API signatures are typed without adding a runtime wrapper or changing native
 calls. Real loopback/rendezvous tests remain separate from static analysis;
 the existing Unix-socket skip still applies on Windows.
+
+Docker Resource Producer checks all eleven canonical source/test files on both
+targets in the base environment. Validated identity fields retain their existing
+constructor checks; JSON responses remain dynamically shaped until validation.
+A minimal binary-read protocol describes HTTP framing, and synthetic Docker
+state/invocation records remain separate from malformed response vectors.
+Standard-library socket capabilities retain their native transport admission.
+The existing minimum-Python fixture lane uses a fake Docker process, not a live
+daemon; canonical admission grants no resource or cleanup authority.
 
 Bootstrap Killswitch checks all three canonical Python source/test files in
 the base environment on both declared targets. State documents expose

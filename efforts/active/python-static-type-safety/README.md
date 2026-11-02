@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10043 canonical Update Telemetry source/test contracts, with isolated Installer Readiness (#10044) and Docker Resource Producer (#10045) implementations. Work Coalescing Singleton (#10039) is complete.
+- **Current slice:** #10045 canonical Docker Resource Producer admission, followed by Installer Readiness (#10044). Faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10043, all shared admission/coverage manifests, global documentation, the effort, integration and full completion judgment. Separate source-only worktrees own the non-overlapping library implementations for #10044 and #10045; they return qualified local commits, not independently published PRs. Prior implementation workers are complete.
+- **Delegates:** The lead owns #10045 integration, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. Separate source-only worktrees retain the completed implementation commits for #10044 and #10045 until their admissions land; publication remains with the lead. Prior implementation workers are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -105,7 +105,7 @@ rewrite.
 ### Phase 2 - Source and platform qualification
 
 - [x] Land the bounded canonical Installation Context composition/source-map adapter (#9916); keep copies independently pending.
-- [ ] Expose the faithful composed Installation Context dependency to normal consumer checks without stubs or target reassignment (#10048).
+- [x] Expose the faithful composed Installation Context dependency to normal consumer checks without stubs or target reassignment (#10048).
 - [ ] Make executed source fragments statically visible with source-mapped composition or genuine typed modules; qualify every source line and byte-identical copy without suppressing errors.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
@@ -122,7 +122,7 @@ rewrite.
 - [x] Strictly admit canonical Repository Policy source/test modules, including the executable guest reader (#10029).
 - [x] Strictly admit all canonical Fleet Index and Vault adapter source/test modules (#10036).
 - [x] Strictly admit all canonical Work Coalescing Singleton source/test modules (#10039).
-- [ ] Strictly admit all canonical Update Telemetry source/test modules (#10043).
+- [x] Strictly admit all eight canonical Update Telemetry source modules; owning consumer tests remain independently pending (#10043).
 - [ ] Strictly admit all canonical Installer Readiness source/test modules (#10044).
 - [ ] Strictly admit all canonical Docker Resource Producer source/test modules (#10045).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
@@ -1506,3 +1506,71 @@ composition prerequisites, and review/validation rules.
   installed update, live external service or container mutation is part of this
   static admission. Required remote CI/review remain before merge; #10044 and
   #10045 remain integration-pending and #10048 remains the checker prerequisite.
+
+### 2026-11-02 - Update Telemetry merged; faithful dependency delivery selected
+
+- #10053 merged as `b924eae22610b5f0f7f638c802f4fddd30d96667`
+  after exact-head approval, zero open review threads and green required CI in
+  [run 41515936607](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41515936607).
+  #10043 is complete; managed source sync passed. Re-reading this Plan and
+  Validation Plan leaves 46 pending projects and the full campaign gate open.
+- The lead's separate source-only worktree implements #10048. Import-only
+  views retain the consumer's original target list and physical counts while
+  using the same verified canonical composition. The preserved #10044 worker
+  implementation now passes a real ten-file strict probe on both targets
+  through the changed checker; it remains pending until normal checker
+  publication and library admission complete.
+- Focused actual-MyPy and actor-free checker controls pass all 60 tests.
+  Positive/negative imports preserve argument and return typing; source drift
+  refuses qualification and releases the view, target files and environment
+  lease. The source-bound packet admits only the two changed input hashes and
+  splits one existing custody node into its original and import-only variants;
+  its complete qualification remains before publication.
+
+### 2026-11-02 - Faithful checker dependency delivery merged
+
+- #10068 merged as `209d6a04c51b0d91941c59bbf64aeed2d3a4f4f8`
+  after exact-head approval, zero open review threads and green required CI in
+  [run 41520633399](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41520633399).
+  #10048 is complete; managed source sync passed. Re-reading this Plan and
+  Validation Plan leaves 46 projects pending and the overall gate open.
+- The final post-sync 22-project enforced cohort passed on both targets, with
+  7,544 physical files classified. The source-bound packet passed all 3,666
+  admitted nodes, retained sixteen existing deselections and completed in
+  241.703 seconds within the unchanged 300-second budget. The import context
+  now reaches actual consumers without reassigning dependency targets.
+- The lead selected #10045 for the next independent admission and integrated
+  its preserved worker commit. Both consumer maps report no shipped consumers
+  or physical copies, and the library is outside the source-bound packet.
+  Complete current open-PR file inspection, including pagination for four large
+  Dev PRs, found no overlapping library edits. The existing required fixture
+  lane will provide Linux/minimum-Python coverage; no live Docker mutation is
+  authorized. #10044 follows now that its checker prerequisite has landed.
+
+### 2026-11-02 - Docker Resource Producer strict qualification
+
+- The integrated eleven-file canonical source/test project passes the normal
+  strict checker command on Linux and Windows analysis targets. The full
+  proposed cohort passes all 23 strict projects; 45 remain pending, with 7,545
+  physical Python files classified. The manifest adds no exclusion or exception.
+- Identity fields are narrowed before construction while retaining the
+  constructor's existing refusal contract. A structural binary-read protocol
+  covers HTTP framing, and typed synthetic resource/context/invocation records
+  remain distinct from malformed response vectors. Native transport admission,
+  creator evidence, generation checks, custody and cleanup authority remain.
+- Parent verification preserves the exact ASTs of all 71 test names and 153
+  assertions. The integrated contained Windows suite passes 107 tests with 53
+  existing POSIX-only skips in 36.97 seconds. Required PR guards already select
+  this fake-Docker suite on minimum Python 3.10; their Linux result remains a
+  merge gate, not a claim inferred from the Windows run.
+- Both consumer maps report no shipped consumers or copies. No source-bound
+  packet input changes, so packet hashes, nodes and budget remain unchanged.
+  The single library changefile, README command and shared typing guide cover
+  the admission. Ruff, install-contract, vendoring, documentation and diff checks
+  pass; commit-based publication guards and remote review/CI remain.
+- Validation tiers: existing canonical fixtures exercise actual synthetic
+  subprocesses and transport behavior under containment. The required Linux lane
+  covers native POSIX/minimum-runtime fixtures. Live Docker lifecycle acceptance,
+  host provisioning, service rollout and container mutation are not part of this
+  static admission, and none was performed. The worker worktree remains held
+  until the library admission is merged.

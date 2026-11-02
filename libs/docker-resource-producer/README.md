@@ -129,6 +129,22 @@ pytest interpreter, wrapped by the adopting harness's bounded test launcher:
 <bounded-test-launcher> -- <pytest-python> -m pytest libs/docker-resource-producer/tests -q
 ```
 
+The repository checker inventories the complete canonical source and tests on
+both Linux and Windows targets:
+
+```text
+python tools/typecheck.py lib-docker-resource-producer --prepare
+python tools/typecheck.py lib-docker-resource-producer --strict
+```
+
+JSON decoding remains a dynamic boundary with runtime shape and identity
+validation before use; persisted identities retain their constructor checks.
+Synthetic resource, context, state and invocation records are typed separately
+from malformed response vectors. The HTTP parser consumes a structural binary
+read protocol, while platform-only socket capabilities and the raw I/O buffer
+remain at their standard-library adapter boundaries. Typing does not grant
+resource ownership, cleanup authority or admission to unsupported transports.
+
 Source tests and API inspection are not a live or native Docker lifecycle proof.
 Required PR CI runs this fixture-only suite on the declared minimum Python 3.10
 when the library or its CI selector changes. The selector uses the actual PR

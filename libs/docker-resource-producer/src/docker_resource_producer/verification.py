@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 from urllib.parse import quote, urlencode
 
 from .local_session import LocalDaemonAdmission, LocalDaemonSession
@@ -39,10 +38,13 @@ class LocalDockerVerifier:
         if not isinstance(result, list):
             raise VerificationError("Malformed Docker inventory")
         field = "Id" if kind == "container" else "Name"
-        identifiers = [entry.get(field) if isinstance(entry, dict) else None for entry in result]
+        identifiers: list[str] = []
         pattern = r"[0-9a-f]{64}" if kind == "container" else r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}"
-        if any(not isinstance(value, str) or re.fullmatch(pattern, value) is None for value in identifiers):
-            raise VerificationError("Malformed Docker inventory identity")
+        for entry in result:
+            value = entry.get(field) if isinstance(entry, dict) else None
+            if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
+                raise VerificationError("Malformed Docker inventory identity")
+            identifiers.append(value)
         if len(set(identifiers)) != len(identifiers):
             raise VerificationError("Duplicate Docker inventory identity")
         return identifiers
@@ -56,10 +58,13 @@ class LocalDockerVerifier:
         labels = config.get("Labels") if isinstance(config, dict) else None
         if not isinstance(labels, dict) or labels.get(LABEL_TOKEN) != token or labels.get(LABEL_CREATOR) != creator:
             raise VerificationError("Docker creator evidence does not match")
-        epoch: Any = labels.get(LABEL_GENERATION)
+        epoch = labels.get(LABEL_GENERATION)
         if not isinstance(epoch, str) or not re.fullmatch(r"[1-9][0-9]{0,18}", epoch):
             raise VerificationError("Malformed Docker generation label")
-        return Identity(kind, identifier, result.get("Created" if kind == "container" else "CreatedAt"),
+        created = result.get("Created" if kind == "container" else "CreatedAt")
+        if not isinstance(created, str):
+            raise VerificationError("Invalid creation evidence")
+        return Identity(kind, identifier, created,
                         self.endpoint.daemon_id, token, creator, int(epoch))
 
     def _probe(self, session: LocalDaemonSession, identity: Identity) -> bool:

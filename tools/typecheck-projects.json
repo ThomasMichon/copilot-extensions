@@ -97,7 +97,7 @@
         "libs/docker-resource-producer"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-dropin-registry",
