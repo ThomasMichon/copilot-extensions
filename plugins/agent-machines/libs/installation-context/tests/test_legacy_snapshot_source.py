@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 
 import pytest
-from test_installation_mode_governance import ALL_RUNNERS, _environment, _load_module, _write_json
+from test_installation_mode_governance import (
+    ALL_RUNNERS, _ResolveArguments, _environment, _load_module, _write_json,
+)
 from test_runtime_deployment_adapters import _run_adapter
 
 
@@ -48,7 +50,7 @@ def test_snapshot_source_revalidates_identity_and_live_policy(
     _write_json(path, receipt)
     publisher.rmdir()
     current = _environment()
-    arguments = {
+    arguments: _ResolveArguments = {
         "payload_root": snapshot, "plugin_id": "agent-example", "legacy_root": root,
         "durable_home": durable, "policy_path": tmp_path / "missing-mode-policy.json",
         "os_profile": Path(current["homeRealPath"]), "platform": current["platform"],
