@@ -14,9 +14,19 @@ source façade. Native operations remain synchronous under their existing caller
 lifetime; service operations use their existing async client and handler/drain.
 The façade creates no thread, process, watcher, ledger or transport.
 Synchronous LocalReviewSource operations are available only through a native
-synchronous client. An async service host without an existing owned source
-execution/drain adapter reports source/source-read unsupported instead of blocking
-its event loop or launching untracked work. This slice does not invent that owner.
+synchronous client. An async service host may bind Worktrees' `AsyncReviewSource`
+under its existing resource lifetime. That adapter uses tracked shielded blocking
+work and original owner checkpoints; it is not another resource/service owner.
+An async host without that binding still reports source/source-read unsupported.
+The host must stop admission and await terminal `drain(timeout=...)` before
+releasing the member. Cancellation withdraws the operation but does not release
+its worker. Drain timeout retains pending work and custody; `status()` reports
+that distinction. Never infer cleanup from a caller timeout or response buffer.
+Original process/Job cleanup errors remain in `cleanup_errors`; drain re-raises
+them and cannot report drained. Forced cancellation of the retained worker itself
+also latches unconfirmed completion rather than treating a canceled task as
+terminal native cleanup. The host must preserve the existing cleanup owner's
+handles and cannot release the member from either outcome.
 
 The public contract is `agent-pull-requests.workspace-tools/v1`. Discovery reports
 the actual supplied client's supported operations and source-read descriptor.
@@ -38,6 +48,7 @@ agent-pull-requests workspace load --request request.json
 agent-pull-requests workspace sync --request -
 agent-pull-requests workspace materialize --request request.json
 agent-pull-requests workspace source --request request.json
+agent-pull-requests workspace source-prepare --request request.json
 agent-pull-requests workspace source-read --request request.json
 agent-pull-requests workspace submit --request request.json
 agent-pull-requests workspace inspect --request request.json
@@ -64,6 +75,7 @@ Original host cancellation/authority and retained unknown effects remain separat
 | sync | load fields plus previous_id |
 | materialize | number, generation_id |
 | source | number, generation_id, budget_seconds |
+| source-prepare | source fields; only for a separately bound acquisition owner |
 | source-read | source fields plus source_attachment, path, side |
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
@@ -103,11 +115,27 @@ contract remains unchanged. Source Git environment isolation was moved into a
 lightweight module with the original Git helper aliases preserved, avoiding an
 unrelated registry/credential import in this prepared-object reader.
 
-**Exact source acquisition remains unsupported here.** Default-base worktree
-creation and whole-remote Git fetch are not exact shallow head/common preparation.
-No clone/fetch command, allocation manager or fabricated preparation factory is
-added. Actual allocation, object preparation and resource custody stay with their
-existing owner until its narrow review API is admitted and adopted.
+**Exact acquisition is separately bound, never inferred.** An existing resource
+owner may construct LocalReviewSource with its `acquisition` callable
+(`git_review_acquisition.fetch_exact`) and selected configured `remote`.
+Only then does capability discovery expose `source-prepare`. Requests cannot
+choose paths/remotes/accounts or adopt a member. The normal pipeline must first
+reject occupied, foreign, reference, guarded, unbound and unknown resources.
+There is no new resource selector or installed preparation command.
+
+The existing Git owner fetches only the immutable full head/common IDs at depth
+one, with no configured refspec expansion, tags, submodules, FETCH_HEAD/ref
+updates, checkout, target merge/rebase or history deepening. Before credential
+acquisition it verifies dedicated already shallow storage with no shared
+worktrees or alternates. Original owner/checkpoint/auth/transport and bounded
+process cleanup remain authoritative. Full/shared storage is refused rather
+than modified. The existing inspector then verifies all actual native path,
+tree/blob/content mappings before its immutable retention transaction. Missing
+or partial objects/ref completion never become a ready attachment.
+
+The strict prepared-source/read descriptors remain unchanged; additive
+acquisition/execution descriptors signal the optional binding. These source APIs
+do not prove any real resource/credential factory or installed-host adoption.
 
 ## Source proof and remaining gates
 

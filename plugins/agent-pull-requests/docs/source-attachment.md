@@ -28,6 +28,11 @@ These are actual finite Git/IO limits, not delegate permissions or read counts.
 Git must support explicit `--no-lazy-fetch`; unsupported Git fails honestly,
 without trying another backend or acquiring missing objects. Prepare exact
 head/common objects through the existing source owner before invoking this API.
+Optional exact preparation and async execution have separately bound descriptors;
+see [workspace tools](workspace-tools.md). The default prepared-only contract
+above never acquires credentials or fetches objects. The normal resource owner
+must select dedicated shallow storage before binding exact preparation, and must
+drain any owned async adapter before releasing that resource.
 There is no checkout, working-tree read, merge, build or dependency restore.
 
 `attach_source` requires complete, consistent PR/iteration/change evidence, not

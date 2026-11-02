@@ -215,6 +215,14 @@ contract.
 
 ## Journal
 
+### 2026-11-02 - Source-owner API admission merged; realization in progress
+- #9907 merged as `f6858bdffe06c724d193ef15caace59c889d3775` from head
+  `7f7a057817f0435d813c9d6a4ed56bc9836ae9a7` after exact-head approval and
+  required CI success. The prior tool acceptance journal is now upstream.
+- Realize only the admitted existing Git/source/lifetime APIs with synthetic
+  selected repositories and actual client/store/tool consumers. This is not
+  a resource selector, live fetch, installed-host adoption or rollout.
+
 ### 2026-11-01 - Exact acquisition and async source owner API proposed
 - Continue #9535 through the bounded
   [existing source-owner API admission](source-owner-api-slice.md).

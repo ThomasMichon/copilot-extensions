@@ -91,13 +91,6 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     return repo_path
 
 
-#: A hooks directory guaranteed to hold no hooks, used to disable a repo's
-#: client-side guard hooks for trusted mechanical git ops (squash re-commit /
-#: rebase -- NOT ``push()``, which must let a repo's real pre-push release
-#: guard run -- #3561; see :func:`git` ``no_hooks``). Server-side branch
-#: protection is unaffected. #3707.
-
-
 def git(
     *args: str,
     cwd: str | Path | None = None,
@@ -109,6 +102,7 @@ def git(
     isolated_repository: bool = False,
     auth_acquisition: bool = False,
     input_data: bytes | None = None,
+    max_output_bytes: int | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run a git command with consistent error handling.
 
@@ -129,6 +123,7 @@ def git(
         isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
         auth_acquisition: Record update-auth use only after this acquisition child runs.
         input_data: Captured binary stdin/output for plumbing protocols.
+        max_output_bytes: Opt into existing caller-owned bounded binary/text capture.
     Returns:
         CompletedProcess with text output, or bytes when input_data is supplied.
     """
@@ -140,6 +135,13 @@ def git(
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
 
     def execute():
+        if max_output_bytes is not None:
+            from agent_procutil.owned_process import run_caller_owned
+            return run_caller_owned(
+                cmd, cwd=cwd, env=env, timeout=timeout,
+                max_stdout_bytes=max_output_bytes, max_stderr_bytes=8192,
+                input_text=input_data, binary=input_data is not None,
+            )
         if kill_tree and timeout is not None:
             return push_timeout.run_bounded(
                 cmd, cwd=cwd, env=env, timeout=timeout,
@@ -671,6 +673,44 @@ def fetch(
             f"fetch from '{remote}' timed out after {timeout}s "
             "(remote unreachable?)",
         ) from exc
+
+
+def fetch_review_objects(remote, head, common, *, cwd, timeout, checkpoint):
+    """Fetch only a selected immutable review range in dedicated shallow storage."""
+    import math
+    import time
+    from .git_review_acquisition import validate_selection
+    from .pr_review_source import SourceIncomplete
+    from agent_procutil.owned_process import OutputLimitExceeded
+
+    if (
+        not isinstance(remote, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", remote) is None
+        or type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0
+        or not callable(checkpoint)
+    ):
+        raise ValueError("selected remote, finite IO budget and current owner required")
+    deadline = time.monotonic() + timeout
+    validate_selection(cwd, head, common, checkpoint=checkpoint, deadline=deadline)
+    checkpoint()
+    auth = _auth_config_args(remote, cwd=cwd)
+    validate_selection(cwd, head, common, checkpoint=checkpoint, deadline=deadline)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SourceIncomplete("deadline_exhausted")
+    try:
+        git(
+            *auth, "-c", "protocol.ext.allow=never", "fetch",
+            "--depth=1", "--no-tags", "--no-recurse-submodules",
+            "--no-write-fetch-head", "--no-auto-maintenance", "--no-write-commit-graph",
+            "--refmap=", "--no-filter", "--quiet", remote, *dict.fromkeys((head, common)),
+            cwd=cwd, timeout=remaining, kill_tree=True, isolated_repository=True,
+            no_hooks=True, auth_acquisition=True, max_output_bytes=65536,
+        )
+    except (GitError, subprocess.TimeoutExpired, OutputLimitExceeded):
+        raise SourceIncomplete("exact_source_fetch_incomplete") from None
+    checkpoint()
+    if time.monotonic() >= deadline:
+        raise SourceIncomplete("deadline_exhausted")
 
 
 def rebase(onto: str, *, cwd: str | Path) -> bool:

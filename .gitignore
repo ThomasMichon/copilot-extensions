@@ -37,6 +37,9 @@ uv.lock
 # Cached per-plugin dev venvs built by tools/run-plugin-tests.py
 /.test-venvs/
 .test-runs/
+# Canonical dependency-input staging can remain after a reported cleanup failure.
+# Ignoring it neither deletes the evidence nor confirms terminal cleanup.
+/libs/uv-????????/
 /.validation/
 /.v/
 

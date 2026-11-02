@@ -1,0 +1,9 @@
+{
+  "comment": "Acquire exact reviewed objects and retain owned async source work through terminal drain",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

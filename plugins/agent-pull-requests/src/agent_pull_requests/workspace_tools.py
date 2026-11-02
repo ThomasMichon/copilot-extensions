@@ -7,19 +7,20 @@ import inspect
 from collections import OrderedDict
 import hashlib
 
-from .source_attachment import attach_source
+from .source_attachment import ACQUISITION_CONTRACT, EXECUTION_CONTRACT, attach_source, attach_source_async
 from .workspace_operations import PROTOCOL, encoded
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
-COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect")
+COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-prepare", "source-read", "submit", "inspect")
 FIELDS = {
     "capabilities": (),
     "load": ("number", "expected_current", "budget_seconds"),
     "sync": ("number", "expected_current", "previous_id", "budget_seconds"),
     "materialize": ("number", "generation_id"),
     "source": ("number", "generation_id", "budget_seconds"),
+    "source-prepare": ("number", "generation_id", "budget_seconds"),
     "source-read": ("number", "generation_id", "budget_seconds", "source_attachment", "path", "side"),
     "submit": ("number", "intent", "source_attachment", "budget_seconds"),
     "inspect": ("number", "operation_id"),
@@ -60,6 +61,15 @@ class WorkspaceTools:
         self._generations = OrderedDict()
         self._native_execution = client is not None and not inspect.iscoroutinefunction(client.exchange)
 
+    def _async_source(self):
+        declaration = getattr(self.source_owner, "execution_contract", None)
+        value = declaration() if callable(declaration) else None
+        return (
+            isinstance(value, dict) and type(value.get("version")) is int and value == EXECUTION_CONTRACT
+            and inspect.iscoroutinefunction(getattr(self.source_owner, "execute", None))
+            and callable(getattr(self.source_owner, "drain", None))
+        )
+
     async def capabilities(self):
         operations = ["capabilities"]
         backend = None
@@ -75,23 +85,32 @@ class WorkspaceTools:
                 source_contract = getattr(self.source_owner, "contract", None)
                 declared = source_contract() if callable(source_contract) else None
                 if (
-                    self._native_execution and isinstance(declared, dict)
+                    (self._native_execution or self._async_source()) and isinstance(declared, dict)
                     and type(declared.get("version")) is int and declared == SOURCE_CONTRACT
                 ):
                     operations.append("source")
+                    acquisition = getattr(self.source_owner, "acquisition_contract", None)
+                    prepared = acquisition() if callable(acquisition) else None
+                    if (
+                        isinstance(prepared, dict) and type(prepared.get("version")) is int
+                        and prepared == ACQUISITION_CONTRACT
+                    ):
+                        operations.append("source-prepare")
                     reader = getattr(self.source_owner, "read_contract", None)
                     read = reader() if callable(reader) else None
                     if (
                         isinstance(read, dict) and type(read.get("version")) is int and read == READ_CONTRACT
-                        and callable(getattr(self.source_owner, "read_retained", None))
+                        and (self._async_source() or callable(getattr(self.source_owner, "read_retained", None)))
                     ):
                         operations.append("source-read")
         return {
             "protocol": TOOL_PROTOCOL, "operations": operations,
             "owner_binding": "supplied" if self.client is not None else "unavailable",
             "backend_contract": backend, "installed_tool_adoption": False,
-            "source_acquisition": False, "source_preparation": "existing_owner_not_adopted",
-            "source_execution": "native_synchronous" if self._native_execution else "async_owner_unavailable",
+            "source_acquisition": "source-prepare" in operations,
+            "source_preparation": "bound_exact_owner" if "source-prepare" in operations else "existing_owner_not_adopted",
+            "source_execution": "owned_async" if self._async_source() else (
+                "native_synchronous" if self._native_execution else "async_owner_unavailable"),
         }
 
     async def definitions(self):
@@ -135,7 +154,7 @@ class WorkspaceTools:
         if command in ("load", "sync", "submit", "inspect"):
             return await _call(self.client.exchange, command, copy.deepcopy(request))
         required = {"number", "generation_id"}
-        if command in ("source", "source-read"):
+        if command in ("source", "source-prepare", "source-read"):
             required.add("budget_seconds")
         if command == "source-read":
             required.update(("source_attachment", "path", "side"))
@@ -145,8 +164,10 @@ class WorkspaceTools:
         _generation(generation, _scope(generation.get("scope")))
         if command == "materialize":
             return generation
-        if command == "source":
-            return attach_source(generation, self.source_owner, budget=request["budget_seconds"])
+        if command in ("source", "source-prepare"):
+            attachment = attach_source_async if self._async_source() else attach_source
+            return await _call(attachment, generation, self.source_owner,
+                               prepare=command == "source-prepare", budget=request["budget_seconds"])
         attachment = request["source_attachment"]
         if (
             not isinstance(attachment, dict) or attachment.get("schema") != "agent-pull-requests.source-attachment"
@@ -159,6 +180,11 @@ class WorkspaceTools:
             or attachment["source"].get("revision") != generation["revision"]
         ):
             raise ValueError("source attachment differs from selected generation")
+        if self._async_source():
+            return await self.source_owner.execute(
+                "read_retained", attachment["source"], request["path"], request["side"],
+                budget=request["budget_seconds"],
+            )
         return self.source_owner.read_retained(
             attachment["source"], request["path"], request["side"], budget=request["budget_seconds"],
         )
