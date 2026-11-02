@@ -41,7 +41,7 @@ def test_machine_transport_preinstall(tmp_path, suffix, layout):
     if suffix == "sh":
         scripts = plugin / "scripts"
         scripts.mkdir()
-        for helper in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+        for helper in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
             shutil.copyfile(PLUGIN / "scripts" / helper, scripts / helper)
         script = (
             "set -euo pipefail\n"

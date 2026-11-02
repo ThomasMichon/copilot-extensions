@@ -48,6 +48,7 @@ def _engine() -> ModuleType:
             "versioned_runtime", "versioned_runtime_source",
             "installer_engine_process", "installer_dependency_policy",
             "installer_wheel_inputs", "installer_wheel_snapshot",
+            "installer_source_wheel_cache", "installer_source_build",
         )
         if any(name in sys.modules for name in names):
             raise ClientError(

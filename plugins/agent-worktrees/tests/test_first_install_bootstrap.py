@@ -120,7 +120,7 @@ def test_installed_bootstrap_payload_has_release_owned_sources(tmp_path: Path) -
     payload = tmp_path / "agent-worktrees"
     for relative in (
         "plugin.json", "pyproject.toml",
-        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py",
+        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py", "scripts/installer_retained_content.py",
     ):
         destination = payload / relative
         destination.parent.mkdir(parents=True, exist_ok=True)

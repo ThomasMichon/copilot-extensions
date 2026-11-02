@@ -1020,7 +1020,15 @@ jobs:
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_python_installer_engine.py --timeout 600
           -k "local_role or local_package or role_health or selected_extras
-          or selected_extra_dependency or dev_candidate_refuses_nonbase or construction_identity"
+          or selected_extra_dependency or dev_candidate_refuses_nonbase or construction_identity
+          or numbered_construction_uses_real_uv or source_phase_initial_retention"
+      - name: Source-absent installed bootstrap closure
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_python_runtime_install.py
+          --test-file tests/test_first_install_bootstrap.py
+          -k "prepared_bootstrap_loads_actual_installer_without_source
+          or installed_bootstrap_payload_has_release_owned_sources"
 
   candidate-profiles-windows:
     if: ${{ inputs.candidate_profiles }}

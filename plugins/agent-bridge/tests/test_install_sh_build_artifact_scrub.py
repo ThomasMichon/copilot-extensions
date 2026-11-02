@@ -108,6 +108,10 @@ def _owned_plugin_fixture(tmp_path: Path) -> Path:
         _ENGINE_SH.with_name("installer_dependency_config.py"),
         scripts / "installer_dependency_config.py",
     )
+    shutil.copyfile(
+        _ENGINE_SH.with_name("installer_retained_content.py"),
+        scripts / "installer_retained_content.py",
+    )
     return plugin_dir
 
 

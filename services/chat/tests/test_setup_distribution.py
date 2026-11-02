@@ -12,7 +12,7 @@ from agent_procutil.owned_process import run_caller_owned
 @pytest.mark.parametrize("missing", [
     "_standalone_runtime_build.py",
     "src/agent_chat_service/versioned_runtime_publication.py",
-    "src/agent_chat_service/installer_dependency_config.py",
+    "src/agent_chat_service/installer_dependency_config.py", "src/agent_chat_service/installer_retained_content.py",
     "src/agent_chat_service/installer_wheel_inputs.py",
     "src/agent_chat_service/installer_wheel_snapshot.py",
 ])
@@ -57,10 +57,12 @@ import installer_engine as engine
 assert Path(engine.__file__).parent == root
 assert engine.runtime is runtime
 for name in ("versioned_runtime_source","installer_engine_process","installer_dependency_policy",
-             "installer_wheel_inputs","installer_wheel_snapshot"):
+             "installer_wheel_inputs","installer_wheel_snapshot",
+             "installer_source_wheel_cache","installer_source_build"):
     assert Path(sys.modules[name].__file__).parent == root
 policy=sys.modules["installer_dependency_policy"]
 assert Path(policy._configuration_path).parent == root
+assert Path(policy._configuration._content_path).parent == root
 assert callable(engine.numbered_candidate)
 assert callable(runtime.remove_owned_candidate)
 print(json.dumps({"construction":"ready","artifact_contained":True}))
@@ -85,6 +87,7 @@ from agent_chat_service.construction import _engine
 names=("versioned_runtime","versioned_runtime_source",
        "installer_dependency_policy","installer_engine_process",
        "installer_wheel_inputs","installer_wheel_snapshot")
+names += ("installer_source_wheel_cache","installer_source_build")
 for name in names:
     foreign=ModuleType(name)
     sys.modules[name]=foreign
@@ -104,7 +107,7 @@ print(json.dumps({"foreign_imports_preserved":len(names)}))
 """
     assert json.loads(installed_chat.run(
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
-    )) == {"foreign_imports_preserved": 6}
+    )) == {"foreign_imports_preserved": 8}
 
 
 def independent_inputs(tmp_path, installed_chat, chat_library_sdists):
@@ -158,6 +161,7 @@ assert not any(name in sys.modules for name in (
     "versioned_runtime","versioned_runtime_source",
     "installer_dependency_policy","installer_engine_process",
     "installer_wheel_inputs","installer_wheel_snapshot",
+    "installer_source_wheel_cache","installer_source_build",
 ))
 assert not (project.parents[1]/"libs"/"versioned-runtime").exists()
 assert not (project.parents[1]/"libs"/"installer-engine").exists()
