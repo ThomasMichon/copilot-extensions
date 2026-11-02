@@ -95,7 +95,10 @@ timeout/cancellation without duplicate work, shutdown custody and bounded
 source-lock contention.
 
 The existing client-authority test also checks both enabled and disabled
-`supervise serve` composition. These are contained source controls, not evidence
+`supervise serve` composition. Four actual `_cmd_serve()` controls verify that
+the command's reconstructed configuration preserves both the opt-in and its
+GC interval, including explicit refusal when publication is enabled with GC
+disabled. These are contained source controls, not evidence
 of live activation, native continuity or full assignment/startup acceptance.
 
 See also: [metadata publication](pool-publication.md),

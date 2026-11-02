@@ -391,3 +391,35 @@ def test_actual_server_lifespan_selects_its_source_on_the_existing_gc_owner(
         assert projected.wait(5)
         assert owners.queue.pool_configured_cohort().revision == 1
     assert owners.source._closed and owners.source._maintenance is None
+
+
+@pytest.mark.parametrize("publication,interval", [(False, 0), (False, 1), (True, 1), (True, 0)])
+def test_actual_serve_command_preserves_publication_and_its_gc_prerequisite(
+    owners: Any, monkeypatch: pytest.MonkeyPatch, publication: bool, interval: int,
+) -> None:
+    from agent_dispatch import coordinator_cli
+
+    monkeypatch.setenv("AGENT_DISPATCH_POOL_PUBLICATION", "1" if publication else "0")
+    monkeypatch.setenv("AGENT_DISPATCH_GC_INTERVAL", str(interval))
+    monkeypatch.setenv("AGENT_DISPATCH_DB", str(owners.base / "cli.db"))
+    monkeypatch.setattr(coordinator_cli, "_reroot_serve_cwd", lambda: None)
+    seen = []
+
+    def serve(cfg: config.Config, **_kwargs: Any) -> None:
+        seen.append(cfg)
+        server.build_app(cfg)
+
+    monkeypatch.setattr(server, "serve", serve)
+    args = SimpleNamespace(
+        host="127.0.0.1", port=None, db=None, token="data",
+        control_token="control", passive=True,
+    )
+    if publication and interval == 0:
+        with pytest.raises(ValueError, match="enabled GC cadence"):
+            coordinator_cli._cmd_serve(args)
+    else:
+        assert coordinator_cli._cmd_serve(args) == 0
+    assert len(seen) == 1
+    assert seen[0].pool_publication_enabled is publication
+    assert seen[0].sweep_interval == interval
+    assert owners.queue.pool_configured_cohort().revision == 0

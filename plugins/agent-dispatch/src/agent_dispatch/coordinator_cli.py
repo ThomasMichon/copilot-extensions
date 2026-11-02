@@ -208,6 +208,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         db_path=args.db or base.db_path,
         token=effective_token,
         control_token=getattr(args, "control_token", None) or _config.resolve_control_token(),
+        sweep_interval=base.sweep_interval,
+        pool_publication_enabled=base.pool_publication_enabled,
     )
     try:
         serve(cfg, passive=passive, force=force)
