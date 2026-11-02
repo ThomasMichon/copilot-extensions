@@ -26,6 +26,10 @@ A failure anywhere before the commit point rolls back: re-publish the old
 endpoint as active, undrain the old daemon, and terminate the freshly spawned
 passive. After the commit point the new daemon is the sole survivor, so
 remaining steps are best-effort and never roll back.
+
+An adopter with resident-owned supersession can opt into ``self_retirement``.
+Its ``activate_successor`` callback promotes the published successor; readiness
+commits installation without contacting or waiting for the predecessor.
 """
 
 from __future__ import annotations
@@ -94,6 +98,7 @@ class CutoverResult:
     serving_endpoint: Endpoint | None = None
     retirement_requested: bool = False
     retirement_confirmed: bool = False
+    retirement_pending: bool = False
     conditional: bool = False
     publication_uncertain: bool = False
 
@@ -116,6 +121,8 @@ class CutoverResult:
             data["retirement_requested"] = self.retirement_requested
         if self.publication_uncertain:
             data["publication_uncertain"] = True
+        if self.retirement_pending:
+            data["retirement_pending"] = True
         return data
 
 
@@ -149,11 +156,17 @@ class CutoverOrchestrator:
         expected_old: Endpoint | None = None,
         on_published: Callable[[Endpoint], None] | None = None,
         predecessor_health_check: Callable[[str, int], bool] | None = None,
+        self_retirement: bool = False,
+        activate_successor: Callable[[Endpoint], None] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
         if on_published is not None and expected_old is None:
             raise ValueError("publication notification requires an observed predecessor")
+        if self_retirement and (activate_successor is None or drain_before_publish):
+            raise ValueError("self-retirement requires successor activation without predecessor drain")
+        if activate_successor is not None and not self_retirement:
+            raise ValueError("successor activation requires self-retirement")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -169,6 +182,8 @@ class CutoverOrchestrator:
         self.drain_before_publish = drain_before_publish
         self.expected_old = expected_old
         self.on_published = on_published
+        self.self_retirement = self_retirement
+        self.activate_successor = activate_successor
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -298,6 +313,8 @@ class CutoverOrchestrator:
         """
         from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError, lock_path
 
+        if self.self_retirement and conditional is not None:
+            return CutoverResult(ok=False, error="conditional cutover cannot defer retirement", conditional=True)
         if self.drain_before_publish and conditional is not None:
             reason = "conditional cutover cannot use pre-publication drain"
             log.error(reason)
@@ -718,6 +735,27 @@ class CutoverOrchestrator:
                 detail={"old_port": old.port if old is not None else None},
             )
 
+            if self.self_retirement:
+                successor = Endpoint(
+                    bind=self.bind, port=new_port, pid=new_pid, version=self.version,
+                    process_start_time=new_process_start_time,
+                )
+                activate_successor = self.activate_successor
+                assert activate_successor is not None
+                activate_successor(successor)
+                if not self._await_health(new_port, health_timeout, poll, health_check):
+                    raise CutoverError("published successor did not become ready")
+                result.committed = True
+                result.ok = True
+                result.retirement_pending = old is not None and old.port != new_port
+                result.steps.append("successor ready; predecessor retirement is asynchronous")
+                write_breadcrumb(
+                    state="committed", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at,
+                )
+                breadcrumb.clear_breadcrumb(self.config_dir)
+                return result
+
             if conditional and conditional.snapshot.activate_successor is not None:
                 conditional.activate_successor()
                 result.steps.append("published successor activated and ready")
@@ -884,6 +922,7 @@ class CutoverOrchestrator:
                 self._rollback(
                     old, handle, new_port, result, flipped=flipped,
                     expected_old=old_for_cas, expected_new=new_for_cas,
+                    drain_started=not self.self_retirement,
                 )
             # Record the terminal outcome durably. On a clean rollback (or
             # commit-forward) no daemon is left stranded; the breadcrumb marks

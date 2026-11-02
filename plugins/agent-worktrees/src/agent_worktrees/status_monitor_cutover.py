@@ -659,6 +659,7 @@ def activate_after_update(
     cutover_guard: SingleInstance | None = None,
     spawned_handles: list[subprocess.Popen] | None = None,
     transition_custody: ExitStack | None = None,
+    asynchronous_retirement: bool = False,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
     from . import status_monitor_reap_stale
@@ -764,6 +765,16 @@ def activate_after_update(
                 print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
             return handle
 
+        def activate_successor(endpoint: routing.Endpoint) -> None:
+            if make_client(endpoint.base_url).promote().get("adopted") is not True:
+                raise ValueError("status-monitor successor refused promotion")
+            if transition_custody is not None:
+                from .runtime_monitor_demand import retain_transition_demand
+
+                transition_custody.enter_context(retain_transition_demand(
+                    routing_dir().parent, endpoint.pid,
+                ))
+
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,
@@ -773,6 +784,8 @@ def activate_after_update(
             predecessor_health_check=_predecessor_health_check,
             make_client=make_client,
             pick_free_port=pick_free_port,
+            self_retirement=asynchronous_retirement,
+            activate_successor=activate_successor if asynchronous_retirement else None,
         )
         if spawned_handles is not None:
             print("Monitor transition: entering native cutover", flush=True)
