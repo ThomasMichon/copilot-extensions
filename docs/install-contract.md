@@ -2183,6 +2183,12 @@ staging paths or watchdog ownership.
 Codespaces and Logger stamps reuse it for snapshot directories and dependency trees.
 Freshly copied materialized libraries retain that first copy; metadata rewriting
 still runs, while independent materialization still replaces its destination.
+
+The shared PowerShell self-stage reentry inherits the caller's execution policy.
+It must not add an execution-policy override or retry a refused staged script
+through another interpreter. Child failure remains terminal with its exit code;
+staging does not change script trust or unblock copied files.
+
 Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
   `installed-plugins`) is authoritative. An inherited staging flag from another

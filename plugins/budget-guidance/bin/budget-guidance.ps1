@@ -269,7 +269,7 @@ try {
 if (-not $_hostExe) {
     $_hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 }
-& $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_installer stamp 2>&1 |
+& $_hostExe -NoProfile -File $_installer stamp 2>&1 |
     ForEach-Object { [Console]::Error.WriteLine($_) }
 $_provisionRc = $LASTEXITCODE
 
@@ -281,7 +281,7 @@ $_provisionRc = $LASTEXITCODE
                 [Console]::Error.WriteLine("[$_command] stamped snapshot installer not found: $_snapshotInstaller")
                 $_provisionRc = 127
             } else {
-                & $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_snapshotInstaller provision 2>&1 |
+                & $_hostExe -NoProfile -File $_snapshotInstaller provision 2>&1 |
                     ForEach-Object { [Console]::Error.WriteLine($_) }
                 $_provisionRc = $LASTEXITCODE
             }

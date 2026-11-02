@@ -94,7 +94,25 @@ try {
             Assert-BootstrapPublication
             $pw = Get-Command pwsh -ErrorAction SilentlyContinue
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-            & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
+            $global:LASTEXITCODE = 1
+            $stampOutput = @()
+            $stampCode = 1
+            $previousEap = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $stampOutput = @(& $exe -NoProfile -File $stampInst stamp 2>&1)
+                $stampCode = $LASTEXITCODE
+            } catch {
+                $stampOutput += $_
+            } finally {
+                $ErrorActionPreference = $previousEap
+            }
+            if ($stampCode -ne 0) {
+                $stampOutput | ForEach-Object { [Console]::Error.WriteLine($_) }
+                [Console]::Error.WriteLine("[$name] first-install stamp failed (exit $stampCode).")
+                Write-SessionStartJson
+                exit $stampCode
+            }
         }
         Exit-SessionStart
     }
@@ -180,7 +198,7 @@ try {
     # headless console and stay hidden too.
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
     $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
-        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
+        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     try {
         if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }
     } catch { }

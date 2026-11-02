@@ -201,7 +201,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
-                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                $__selfStageArgs = (@('-NoProfile', '-File', $__selfStagedEntry) + $__selfStageFwd |
                     ForEach-Object {
                         '"' + ([regex]::Replace(
                             [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
@@ -436,7 +436,7 @@ function Deploy-SelfProvisioningBinstub {
     $boundContext = [string]$env:COPILOT_EXTENSIONS_CONTEXT
     $boundMode = 'unknown'
     $bindingArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        '-NoProfile', '-File',
         (Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'),
         'status', '-PayloadRoot', $sourceRoot, '-PluginId', 'agent-containers', '-LegacyRoot', $InstallDir
     )
@@ -614,7 +614,7 @@ if not exist "%_PS1%" (echo [agent-containers] binstub not found: %_PS1%>&2 & ex
 set "_PSHOST="
 for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
 if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
+"%_PSHOST%" -NoProfile -File "%_PS1%" %*
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)

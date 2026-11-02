@@ -61,7 +61,7 @@ in. It does not enable a repair worker or supply inference/repository authority.
 
 1. Enable the plugin, then run the cheap stamp action if the binstub is not
    already on PATH:
-   - Windows: `pwsh -NoProfile -ExecutionPolicy Bypass -File <plugin>\scripts\init.ps1 stamp`
+   - Windows: `pwsh -NoProfile -File <plugin>\scripts\init.ps1 stamp`
    - POSIX: `bash <plugin>/scripts/init.sh stamp`
 2. First use self-provisions a standalone runtime under `~/.agent-containers/`
    (or `%USERPROFILE%\.agent-containers\`) if the versioned venv is not built
@@ -83,6 +83,12 @@ without provisioning or runtime repair; existing ready-runtime boot tracing is
 unchanged. Standalone
 provisioning retains the exact selected root, context, installer exit code and
 stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
+
+Windows launchers preserve inherited PowerShell execution policy, including
+native context reads, first-use provisioning, installer staging, and CMD
+forwarders. A failed native invocation is not retried through another host or
+evaluator. A failed session-start stamp returns its nonzero exit code and
+diagnostics on stderr while keeping the hook's JSON on stdout.
 
 On Windows, initial installation `status` and selected-context `validate`
 reads use the payload's canonical SDK in a fresh isolated, no-site Python

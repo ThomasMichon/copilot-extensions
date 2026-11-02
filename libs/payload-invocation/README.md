@@ -16,6 +16,9 @@ Generated shims:
 - leave a replaceable payload working directory before provisioning or launch;
 - resolve the runtime only through the payload's canonical runtime resolver;
 - preserve caller arguments and child exit status;
+- inherit PowerShell execution policy without a launcher-added override,
+  including CMD forwarding and deferred installer calls; a failed invocation
+  never retries another interpreter;
 - send enabled Python bytecode caches to the resolved legacy state root's
   `cache/python`, outside version slots (extended paths for native Windows
   interpreters, including Windows Git Bash), with installation-scoped reuse or
@@ -77,6 +80,19 @@ editable installation.
 Dispatch-only fixtures may omit runtime sources only when execution is refused
 before dispatch or the test supplies its own explicit CLI stub. Tests invoking
 the real Worktrees CLI retain the complete copied runtime and staged dependencies.
+
+The explicit Windows launch-policy portfolio runs with
+`python tools/run-plugin-tests.py payload-invocation --test-file
+tests/test_generate.py -k generated_windows --allow-explicit-tiers`.
+The refusal cases mark only an inert unsigned installer fixture with
+`Zone.Identifier` (`ZoneId=3`) under inherited `RemoteSigned`; inherited
+`AllSigned` or `Restricted` can reject local unsigned scripts. Unsupported
+policy/filesystem combinations skip without changing policy or relaxing trust.
+Set `PAYLOAD_INVOCATION_WINDOWS_LAUNCH_POLICY=1` only on a quiet interactive
+Windows desktop to include the consoleless-parent cases. Those observe two
+first-use cycles and timeout-tree retirement; unavailable desktop observation
+fails closed, and does not qualify window/focus behavior. Neither portfolio
+adds execution-policy flags or changes policy settings.
 
 ### Source-qualified command binding
 

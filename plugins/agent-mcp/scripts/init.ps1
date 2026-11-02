@@ -214,7 +214,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
-                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                $__selfStageArgs = (@('-NoProfile', '-File', $__selfStagedEntry) + $__selfStageFwd |
                     ForEach-Object {
                         '"' + ([regex]::Replace(
                             [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'

@@ -62,6 +62,231 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.mark.parametrize("provision_mode", ["direct", "snapshot"])
+def test_generated_windows_launches_inherit_execution_policy(
+    tmp_path: Path, provision_mode: str,
+) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["provisionMode"] = provision_mode
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    for path, content in generator.expected_files(manifest).items():
+        if path.suffix in {".ps1", ".cmd"}:
+            assert not re.search(r"-ExecutionPolicy\b", content, re.IGNORECASE), path
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(30)
+@pytest.mark.skipif(os.name != "nt", reason="native Windows first-use contract")
+@pytest.mark.parametrize("provision_mode", ["direct", "snapshot"])
+def test_generated_windows_first_use_preserves_policy_and_failure(
+    tmp_path: Path, provision_mode: str,
+) -> None:
+    host = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert host, "native PowerShell is required"
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "LOCALAPPDATA": str(tmp_path / "AppData/Local"),
+        "APPDATA": str(tmp_path / "AppData/Roaming"),
+    }
+    control = subprocess.run(
+        [host, "-NoLogo", "-NoProfile", "-Command", "Get-ExecutionPolicy"],
+        env=environment, capture_output=True, text=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert control.returncode == 0, control.stderr
+    policy = control.stdout.strip()
+    if policy in {"AllSigned", "Restricted"}:
+        pytest.skip(f"inherited {policy} rejects this unsigned fixture; run the refusal cases")
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["provisionMode"] = provision_mode
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    (manifest.parent / "scripts/install.ps1").write_text(
+        "param([string]$Action)\n"
+        "$record=@{action=$Action;policy=[string](Get-ExecutionPolicy)}|ConvertTo-Json -Compress\n"
+        "[IO.File]::AppendAllText((Join-Path $env:USERPROFILE 'installer-action'),$record+\"`n\")\n"
+        "[Console]::Out.WriteLine('recorded installer output')\n"
+        "[Console]::Error.WriteLine('recorded installer diagnostic')\nexit 37\n",
+        encoding="utf-8-sig",
+    )
+    assert generator.process_manifest(manifest, check=False) == []
+    result = subprocess.run(
+        [os.environ["COMSPEC"], "/d", "/c",
+         str(manifest.parent / "bin/agent-example.cmd"), "--help"],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 37, (result.stdout, result.stderr)
+    assert result.stdout == ""
+    assert "recorded installer output" in result.stderr
+    assert "recorded installer diagnostic" in result.stderr
+    records = (tmp_path / "installer-action").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(record) for record in records] == [{
+        "action": "provision" if provision_mode == "direct" else "stamp", "policy": policy,
+    }]
+    print(json.dumps({"provision_mode": provision_mode, "policy": policy, "exit": result.returncode}))
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(30)
+@pytest.mark.skipif(os.name != "nt", reason="native Windows execution policy")
+@pytest.mark.parametrize("provision_mode", ["direct", "snapshot"])
+def test_generated_windows_inherited_policy_refusal_is_terminal(
+    tmp_path: Path, provision_mode: str,
+) -> None:
+    host = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert host, "native PowerShell is required"
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "LOCALAPPDATA": str(tmp_path / "AppData/Local"),
+        "APPDATA": str(tmp_path / "AppData/Roaming"),
+    }
+    control = subprocess.run(
+        [host, "-NoLogo", "-NoProfile", "-Command", "Get-ExecutionPolicy"],
+        env=environment, capture_output=True, text=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert control.returncode == 0, control.stderr
+    policy = control.stdout.strip()
+    if policy not in {"RemoteSigned", "AllSigned", "Restricted"}:
+        pytest.skip(
+            f"inherited {policy} does not reject this unsigned fixture; policy is not changed"
+        )
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["provisionMode"] = provision_mode
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    marker = tmp_path / "installer-ran"
+    marker_literal = str(marker).replace("'", "''")
+    installer = manifest.parent / "scripts/install.ps1"
+    installer.write_text(
+        f"[IO.File]::WriteAllText('{marker_literal}','ran')\n",
+        encoding="utf-8-sig",
+    )
+    if policy == "RemoteSigned":
+        zone = Path(str(installer) + ":Zone.Identifier")
+        try:
+            zone.write_text("[ZoneTransfer]\nZoneId=3\n", encoding="ascii")
+        except OSError as error:
+            if error.winerror in {1, 50, 123}:
+                pytest.skip(f"fixture filesystem does not support remote-zone streams: {error.winerror}")
+            raise
+        assert zone.read_text(encoding="ascii") == "[ZoneTransfer]\nZoneId=3\n"
+    assert generator.process_manifest(manifest, check=False) == []
+    result = subprocess.run(
+        [os.environ["COMSPEC"], "/d", "/c",
+         str(manifest.parent / "bin/agent-example.cmd"), "--help"],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert re.search(
+        r"PSSecurityException|UnauthorizedAccess|not digitally signed", result.stderr, re.IGNORECASE,
+    ), result.stderr
+    assert not marker.exists(), "a policy refusal must not retry through another evaluator"
+    after = subprocess.run(
+        control.args, env=environment, capture_output=True, text=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert after.returncode == 0 and after.stdout.strip() == policy, after.stderr
+    print(json.dumps({
+        "provision_mode": provision_mode, "policy": policy, "exit": result.returncode,
+        "remote_marked": policy == "RemoteSigned", "installer_ran": marker.exists(),
+    }))
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("PAYLOAD_INVOCATION_WINDOWS_LAUNCH_POLICY") != "1",
+    reason="explicit Windows consoleless-parent and quiet-desktop integration",
+)
+@pytest.mark.parametrize("provision_mode", ["direct", "snapshot"])
+def test_generated_windows_consoleless_first_use_and_timeout(
+    tmp_path: Path, provision_mode: str,
+) -> None:
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["provisionMode"] = provision_mode
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    (manifest.parent / "scripts/install.ps1").write_text(
+        "param([string]$Action)\n"
+        "$record=@{action=$Action;policy=[string](Get-ExecutionPolicy)}|ConvertTo-Json -Compress\n"
+        "[IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'installer-action.json'),$record)\n"
+        "[Console]::Out.WriteLine('recorded installer output')\n"
+        "[Console]::Error.WriteLine('recorded installer diagnostic')\n"
+        "if($env:LAUNCH_POLICY_STALL -eq '1'){\n"
+        " $start=[Diagnostics.ProcessStartInfo]::new()\n"
+        " $start.FileName=$env:LAUNCH_POLICY_PYTHON\n"
+        " $start.Arguments='-c \"import time; time.sleep(60)\"'\n"
+        " $start.UseShellExecute=$false\n"
+        " $start.CreateNoWindow=$true\n"
+        " $start.RedirectStandardOutput=$true\n"
+        " $start.RedirectStandardError=$true\n"
+        " $child=[Diagnostics.Process]::Start($start)\n"
+        " $childOut=$child.StandardOutput.ReadToEndAsync()\n"
+        " $childErr=$child.StandardError.ReadToEndAsync()\n"
+        " $null=$child.Handle\n"
+        " [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'grandchild.pid'),[string]$child.Id)\n"
+        " Start-Sleep -Seconds 60\n"
+        " $child.WaitForExit()\n"
+        " $null=$childOut.GetAwaiter().GetResult()\n"
+        " $null=$childErr.GetAwaiter().GetResult()\n"
+        " $child.Dispose()\n"
+        "}\nexit 37\n",
+        encoding="utf-8-sig",
+    )
+    assert generator.process_manifest(manifest, check=False) == []
+    procutil = REPO / "libs/agent-procutil/src"
+    sys.path.insert(0, str(procutil))
+    try:
+        from agent_procutil import (
+            no_window_kwargs,
+            spawn_sync_in_kill_on_close_job,
+            windowless_python,
+            windowless_python_env,
+        )
+    finally:
+        sys.path.remove(str(procutil))
+    host = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert host, "native PowerShell is required"
+    request_path = tmp_path / "request.json"
+    report_path = tmp_path / "report.json"
+    request_path.write_text(json.dumps({
+        "workspace": str(tmp_path),
+        "launcher": str(manifest.parent / "bin/agent-example.cmd"),
+        "host": host,
+        "python": sys._base_executable,
+        "action": "provision" if provision_mode == "direct" else "stamp",
+        "report": str(report_path),
+    }), encoding="utf-8")
+    environment = {**os.environ, **windowless_python_env()}
+    process, job = spawn_sync_in_kill_on_close_job(
+        [windowless_python(), "-B", str(Path(__file__).with_name("native_launch_policy.py")),
+         str(procutil), str(request_path)],
+        cwd=tmp_path, env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        require_job=True, allow_breakaway=False, **no_window_kwargs(),
+    )
+    assert job is not None
+    try:
+        assert process.wait(timeout=45) == 0, (
+            report_path.read_text() if report_path.exists() else "native driver did not report"
+        )
+        report = json.loads(report_path.read_text())
+        assert report["failure"] == ""
+        assert report["cycles"] == 2 and report["timeout_job_empty"] is True
+        assert report["new_visible_windows"] == report["foreground_transitions"] == 0
+        assert report["observer_errors"] == []
+        assert report["child_policies"] == [report["inherited_policy"]] * 3
+        print(json.dumps({"provision_mode": provision_mode, **report}))
+    finally:
+        job.terminate_and_wait(5)
+
+
 @pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher", "dispatcher-installed"] if os.name == "nt"
                          else ["sh", "ps1", "dispatcher", "dispatcher-installed",
                                "dispatcher-sh", "dispatcher-sh-installed"])
