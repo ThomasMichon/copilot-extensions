@@ -327,3 +327,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   The full map, standalone consumer and deployment packet passed 108 cases
   with one native FIFO capability skip, including six directory-identity
   regressions and the existing 20-root identity-cost control.
+- Restricted Git directory consumption to quoted literal global `-C`
+  arguments before the write subcommand. Message text can no longer redirect
+  the inferred repository or manufacture a guard hit. Four explicit/implicit
+  directory-message controls pass, and relative path cases exercise repeated
+  directory arguments. The full packet passed 112 cases with one native FIFO
+  capability skip.

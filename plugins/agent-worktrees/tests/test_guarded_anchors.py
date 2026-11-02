@@ -376,13 +376,36 @@ def test_literal_git_directory_uses_repository_identity(tmp_path, kind, relative
         "identity": guard._guard_map.repository_identity(anchor),
     }
     raw = os.path.relpath(target, tmp_path) if relative else str(target)
+    repeated = "-C . " if relative else ""
 
     result = guard.decide({
         "toolName": "powershell", "cwd": str(tmp_path),
-        "toolArgs": {"command": f"git -C '{raw}' commit -m new"},
+        "toolArgs": {"command": f"git -C '{raw}' {repeated}commit -m new"},
     }, home=tmp_path, env={}, guarded_roots=[row])
 
     assert bool(result) is (kind != "nested")
+
+
+@pytest.mark.parametrize("guarded_target", [False, True])
+@pytest.mark.parametrize("explicit_directory", [False, True])
+def test_git_message_directory_option_is_not_a_write_target(tmp_path, guarded_target, explicit_directory):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    target, mentioned = (anchor, outside) if guarded_target else (outside, anchor)
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+    directory = f"-C '{target}' " if explicit_directory else ""
+    command = f'git {directory}commit -m "note -C {mentioned}"'
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(target),
+        "toolArgs": {"command": command},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is guarded_target
 
 
 def test_map_scope_does_not_borrow_other_installation(tmp_path):

@@ -112,15 +112,14 @@ _WRITE_CMD_START = re.compile(
     )\b""",
     re.IGNORECASE | re.VERBOSE,
 )
-_GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
+_GIT_START = re.compile(r"""^\s*(?:"git"|'git'|git)(?=\s|$)""", re.IGNORECASE)
 _GIT_WRITE_SUB = re.compile(
-    r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init)\b",
+    r"(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
+    r"merge|rebase|pull|cherry-pick|revert|init)(?=\s|$)",
     re.IGNORECASE,
 )
-_GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 _GIT_DASH_C_TARGET = re.compile(
-    r"""(?:^|\s)-C\s+(?:"([^"]*)"|'([^']*)'|([^\s"';&|]+))""", re.IGNORECASE,
+    r"""^\s*-C\s+(?:"([^"]*)"|'([^']*)'|([^\s"';&|]+))(?=\s|$)""",
 )
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
@@ -162,16 +161,19 @@ def _cd_target(eff_seg: str, base: str) -> str | None:
 
 
 def _git_target(eff_seg: str, base: str) -> str | None:
+    start = _GIT_START.match(eff_seg)
+    if start is None:
+        return None
+    remaining = eff_seg[start.end():]
     target = base
-    found = False
-    for match in _GIT_DASH_C_TARGET.finditer(eff_seg):
-        found = True
+    while match := _GIT_DASH_C_TARGET.match(remaining):
         raw = next(value for value in match.groups() if value is not None)
         if "$" in raw or "%" in raw or raw.startswith("~"):
             return None
         if raw:
             target = raw if os.path.isabs(raw) else os.path.join(target, raw)
-    return target if found else None
+        remaining = remaining[match.end():]
+    return target if _GIT_WRITE_SUB.match(remaining.lstrip()) else None
 
 
 def _root_token(root_str: str) -> str:
@@ -332,9 +334,6 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
-        is_git = bool(_GIT_START.match(eff))
-        git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
-        has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for g in guarded:
             gp = g.get("path")
             if not gp:
@@ -349,8 +348,8 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
                 # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
                 if at_write_cmd and re.search(tok, seg_hay):
                     return {**g, "reason": reason}
-        git_cwd = _git_target(eff, eff_cwd) if has_dash_c else eff_cwd
-        if git_write and git_cwd:
+        git_cwd = _git_target(eff, eff_cwd)
+        if git_cwd:
             for g in guarded:
                 gp = g.get("path")
                 if gp and _guard_map.matches(git_cwd, g, identity_cache=identity_cache):
