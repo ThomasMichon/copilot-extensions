@@ -241,3 +241,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
 - Applied the same unavailable-versus-empty distinction to unreadable declared
   guarded checkouts. The focused unreadable-target and unregistered-write
   controls passed three cases; no incomplete observation became an empty view.
+- Captured the configuration owner's suppressed binding/YAML failures and
+  isolated each publication from an outer warm configuration cache. Activation
+  now uses the same `AGENT_HOME` as configuration. Optional presence ambiguity
+  is refined through the existing source probe; appeared or unreadable inputs
+  refuse publication. The focused packet passed 46 cases with one native FIFO
+  capability skip, including malformed binding/recovery and cache controls.

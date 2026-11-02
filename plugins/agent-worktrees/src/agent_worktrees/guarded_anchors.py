@@ -49,9 +49,33 @@ def _reader():
     return module
 
 
+def _require_configuration_observations(observations) -> None:
+    from .source_probes import probe_source
+
+    reasons = set()
+    for observation in observations:
+        if observation.authority is not ScanAuthority.INDETERMINATE:
+            continue
+        findings = {finding.reason for finding in observation.findings}
+        if findings == {"owner-coverage-unavailable"}:
+            continue  # This observation is not a stable owner-input proof.
+        if findings == {"presence-provenance-unavailable"}:
+            coverage = []
+            present = probe_source(observation.source, "exists", coverage, observation.stage)
+            if not present and coverage and all(
+                item.authority is ScanAuthority.ABSENT for item in coverage
+            ):
+                continue
+        reasons.update(findings or {"indeterminate-configuration"})
+    if reasons:
+        raise GuardPublicationError("configuration acquisition unavailable: " + ", ".join(sorted(reasons)))
+
+
 def build_snapshot(caller: str, root: Path, generation: str, prior_project: str | None = None) -> dict:
     """Acquire one caller's effective overlays; never union other callers."""
     from . import config as cfg
+    from .config_acquisition import capture_config_observations
+    from .config_cache import ConfigCacheSession
     from .related_acquisition import (
         _related_config_source_anchors_report,
         read_related_grafted_report,
@@ -83,15 +107,17 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         if registration_unavailable:
             raise CallerRegistrationUnavailable("caller registration identity is unavailable")
         raise CallerNotRegistered("caller has no available selected-registry registration")
-    configuration = cfg.load_config(
-        cfg.project_dir(project) / "config.yaml", project=project,
-        include_control_plane_related_pr=False, include_knowledge_preferences=False,
-    )
-    activation = resolve_active_plugins(project_root=Path(caller))
-    sources = _related_config_source_anchors_report(
-        caller, configuration=configuration, activation_report=activation,
-    )
-    effective = read_related_grafted_report(sources.value)
+    with ConfigCacheSession(ttl=None).scope(), capture_config_observations() as observations:
+        configuration = cfg.load_config(
+            cfg.project_dir(project) / "config.yaml", project=project,
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
+        activation = resolve_active_plugins(home=cfg._home(), project_root=Path(caller))
+        sources = _related_config_source_anchors_report(
+            caller, configuration=configuration, activation_report=activation,
+        )
+        effective = read_related_grafted_report(sources.value)
+    _require_configuration_observations(observations)
     for report in (sources, effective):
         if report.authority is ScanAuthority.INDETERMINATE:
             reasons = sorted({f.reason for f in report.findings})

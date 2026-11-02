@@ -303,6 +303,7 @@ def producer(tmp_path, monkeypatch):
 
     def sources(caller, **kwargs):
         assert kwargs["activation_report"]["project_root"] == Path(caller)
+        assert kwargs["activation_report"]["home"] == config._home()
         assert kwargs["configuration"]["project"] == Path(caller).name
         return AcquisitionReport("sources", [caller], (observation,))
 
@@ -357,6 +358,88 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
     with pytest.raises(p.module.GuardPublicationError, match="views withdrawn"):
         p.module.refresh(registry_root=p.root)
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+
+
+def test_binding_load_failure_is_observed_despite_an_outer_warm_config_cache(producer, monkeypatch):
+    from agent_worktrees import config, config_acquisition
+    from agent_worktrees.config_cache import ConfigCacheSession, memoize_in_scope
+
+    p = producer
+    binding = p.root.parent / "binding.yaml"
+    binding.write_text("knowledge_repo: knowledge\n")
+    original = config.load_config
+
+    def compute(*args, **kwargs):
+        config_acquisition.full_load_started()
+        config._load_yaml_safe(binding)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(config, "load_config", lambda *args, **kwargs: (
+        memoize_in_scope(compute, *args, **kwargs)
+    ))
+    with ConfigCacheSession(ttl=None).scope():
+        config.load_config(
+            p.root / "first" / "config.yaml", project="first",
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
+        p.module.refresh(p.callers, registry_root=p.root)
+        binding.write_text("knowledge_repo: [\n")
+        with pytest.raises(p.module.GuardPublicationError, match="configuration acquisition unavailable"):
+            p.module.refresh(registry_root=p.root)
+        assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+        binding.write_text("knowledge_repo: knowledge\n")
+        assert p.module.refresh(registry_root=p.root)["published"] == 2
+
+
+def test_activation_acquisition_uses_the_configuration_agent_home(producer, monkeypatch):
+    p = producer
+    home = p.root.parent / "selected-home"
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    selected = []
+
+    def activation(**kwargs):
+        selected.append(kwargs["home"])
+        return kwargs
+
+    monkeypatch.setattr(p.module, "resolve_active_plugins", activation)
+    assert p.module.refresh(p.callers, registry_root=p.root)["published"] == 2
+    assert selected == [home, home]
+
+
+@pytest.mark.parametrize("state", ["absent", "appeared", "unreadable"])
+def test_optional_presence_observation_is_qualified_before_publication(producer, monkeypatch, state):
+    from agent_worktrees import config, config_acquisition
+
+    p = producer
+    source = p.root.parent / "optional.yaml"
+    original = config.load_config
+    original_exists = Path.exists
+    original_stat = os.stat
+    if state == "unreadable":
+        monkeypatch.setattr(Path, "exists", lambda path, *args, **kwargs: (
+            False if path == source else original_exists(path, *args, **kwargs)
+        ))
+
+        def unreadable(path, *args, **kwargs):
+            if isinstance(path, (str, Path)) and Path(path) == source:
+                raise PermissionError("synthetic inaccessible optional source")
+            return original_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "stat", unreadable)
+
+    def load(*args, **kwargs):
+        present = config_acquisition.source_exists(source, "optional-source")
+        if state == "appeared" and not present:
+            source.write_text("value: changed\n")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(config, "load_config", load)
+    if state == "absent":
+        assert p.module.refresh(p.callers, registry_root=p.root)["published"] == 2
+    else:
+        with pytest.raises(p.module.GuardPublicationError, match="configuration acquisition unavailable"):
+            p.module.refresh(p.callers, registry_root=p.root)
+        assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
 
 
 def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, monkeypatch):

@@ -23,6 +23,13 @@ caller in the selected installation. Each caller is acquired independently
 using its registered project configuration, its own effective plugin activation,
 and the existing ordered related/knowledge overlays. Unavailable local
 registrations do not become guessed checkout paths.
+Configuration and activation acquisition share the configuration owner's
+`AGENT_HOME`. Each publication uses a fresh, request-scoped configuration cache
+and captures suppressed YAML/binding failures; a degraded loader result cannot
+be published as complete. Optional presence observations must be positively
+absent, not merely unreadable or changed during acquisition. Missing stable
+owner-input provenance remains a documented qualification limit, not evidence
+that a readable value is a reusable snapshot.
 Launch/session preparation updates only that caller's view, not every prepared
 worktree. Initial resident preparation and explicit refresh cover prepared views.
 An ordinary related-index mutation does not require registering its checkout.
