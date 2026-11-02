@@ -294,7 +294,7 @@
         "libs/update-telemetry"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-venue-copilot",
