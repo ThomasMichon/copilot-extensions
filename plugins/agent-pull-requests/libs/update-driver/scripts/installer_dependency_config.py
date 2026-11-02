@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time as clock
+import types
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path, PureWindowsPath
@@ -56,6 +57,17 @@ def immutable_install_arguments(arguments, pairs, *, error_type):
     return result
 
 
+_content_path = Path(__file__).with_name("installer_retained_content.py")
+_content = types.ModuleType(__name__ + "_content")
+_content.__file__ = str(_content_path)
+exec(compile(_content_path.read_bytes(), str(_content_path), "exec"), _content.__dict__)
+bounded_content_map = _content.bounded_content_map
+retained_source_hashes = _content.retained_source_hashes
+verify_retained_sources = retained_source_hashes
+
+
+
+
 def remaining_timeout(deadline, *, error_type, cap=None):
     if deadline is None:
         return cap
@@ -87,29 +99,6 @@ def copy_retained_file(source, destination, *, native_path, deadline, error_type
     return result
 
 
-def verify_retained_sources(
-    projects, mirror, *, native_path, check_time, error_type, on_progress=None,
-):
-    source_hashes = {}
-    verified_pairs = set()
-    for project in projects:
-        destination = Path(native_path(mirror(project)))
-        for path in destination.rglob("*"):
-            check_time()
-            if path.is_file():
-                original_path = project / path.relative_to(destination)
-                # Preserve exact names even where Path equality folds case.
-                pair = (str(original_path), str(path))
-                if pair in verified_pairs:
-                    continue
-                retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-                if hashlib.sha256(Path(native_path(original_path)).read_bytes()).hexdigest() != retained_hash:
-                    raise error_type("source content changed while retaining UV inputs")
-                source_hashes[original_path] = retained_hash
-                verified_pairs.add(pair)
-                if on_progress is not None:
-                    on_progress()
-    return source_hashes
 
 
 def prepare_uv_install(

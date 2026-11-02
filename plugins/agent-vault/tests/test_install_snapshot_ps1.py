@@ -618,7 +618,7 @@ def stamped_snapshot(tmp_path_factory):
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
         "versioned_runtime_source.py",
         "versioned_runtime_publication.py",
-        "installer_dependency_config.py",
+        "installer_dependency_config.py", "installer_retained_content.py",
     ):
         assert (snapshot / "scripts" / helper).is_file()
     policy = runpy.run_path(str(snapshot / "scripts" / "installer_dependency_policy.py"))

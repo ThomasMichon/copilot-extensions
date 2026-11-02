@@ -2115,7 +2115,22 @@ UV construction, installed-origin health, immutable profile reuse and refusal of
 an unavailable extra dependency before completion. They also retain the original
 base fingerprint and preserve an existing active selector on failure. These are
 on-demand construction controls, not additions to the eligible-unit packet.
-The same file exercises explicit `local_packages` role closures against real
+`tests/test_installer_content_reads.py` in the same development runner exercises
+real threaded content comparisons: four-reader/pending-work bounds, ordered
+errors, main-thread shutdown cancellation, caller-thread progress, progress-sink
+failure settlement, deadline settlement, mutation refusal and cleanup. The canonical
+`installer_retained_content.py` helper is synchronized through the existing
+installer materializer; source construction retains its current progress contract. Its
+case-distinct filename control requires a case-sensitive native filesystem.
+The promotion packet's retained-input fixtures use a deterministic serial
+scheduler only for their existing overlap/remapping contracts; those unit
+results do not qualify concurrency.
+The existing native candidate-profile lane also runs
+`tests/native/test_retained_worktrees_construction.py`: a real materialized
+Worktrees graph, an empty private UV cache, installed provenance preparation,
+full installed health and settled retained-source cleanup under the original
+480-second cold-construction watchdog. It never publishes a runtime selector.
+The candidate-engine file also exercises explicit `local_packages` role closures against real
 UV and fresh interpreters: client-only omission, a service's transitive local
 closure, complete source retention, immutable reuse without construction tools,
 receipt drift and excluded installed-distribution refusal. Incomplete direct or

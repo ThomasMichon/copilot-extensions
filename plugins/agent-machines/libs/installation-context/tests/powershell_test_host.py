@@ -59,6 +59,7 @@ class PowerShellTestHost:
     ) -> subprocess.CompletedProcess[str]:
         assert self._process.stdin is not None
         assert self._process.stdout is not None
+        stdout = self._process.stdout
         with self._lock:
             if self._process.poll() is not None:
                 raise AssertionError(self._failure_message("exited before a request"))
@@ -80,7 +81,7 @@ class PowerShellTestHost:
             response_line: list[str] = []
 
             def read_response() -> None:
-                response_line.append(self._process.stdout.readline())
+                response_line.append(stdout.readline())
 
             reader = threading.Thread(target=read_response, daemon=True)
             reader.start()

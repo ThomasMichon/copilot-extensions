@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current test cohorts:** #10003 (installation-mode governance and its shared fixture clients) and #10004 (runtime-profile policy); #10006 (native bootstrap/lock handoff) and #10007 (payload source/selection) are preparing follow-on cohorts. #9998, #9999 and #10001 are complete.
+- **Current test cohorts:** #10006 (native bootstrap/lock handoff), #10007 (payload source/selection) and #10010 (lead-owned lightweight fixtures/helpers). #10003 (governance/shared clients) and #10004 (runtime-profile policy) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** #10003 and #10004 returned isolated implementation commits. #10006 owns only `test_powershell_bootstrap.py` and `test_directory_lock_handoff.py`; #10007 owns only `test_payload_source.py` and `test_bootstrap_context_selection.py`, each family in an independent source worktree. Their first milestone is diagnosis and a bounded plan, not publication. The lead retains directly dependent fixture clients, the effort, shared checker controls and full completion judgment.
+- **Delegates:** #10006 owns only `test_powershell_bootstrap.py` and `test_directory_lock_handoff.py`; #10007 owns only `test_payload_source.py` and `test_bootstrap_context_selection.py`, each family in an independent source worktree. Their diagnosis/planning milestones passed; isolated implementation and validation are authorized. The lead retains directly dependent fixture clients, the effort, shared checker controls and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -1056,3 +1056,55 @@ composition prerequisites, and review/validation rules.
   families in independent worktrees. Their current authorization is bounded
   diagnosis/planning only. No project admission, production change or
   installed-runtime rollout is included.
+
+### 2026-11-02 - Governance/profile contracts merged; native/source cohorts selected
+
+- #10009 merged as `398a17386239d315dd5bc1fcb53df6e59a2627ed`
+  after exact-head approval with no findings, zero open review comments and
+  all required checks in
+  [run 41473701489](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41473701489).
+  The source worktree is pulled forward; #10003 and #10004 are complete.
+- Re-reading this Plan and Validation Plan leaves library admission,
+  remaining helper/test families, independent copies and portfolio
+  qualification open. #10006 and #10007 passed their bounded diagnosis
+  milestones; implementation and full module/platform validation are
+  authorized only in their isolated, updated source worktrees.
+- The lead retains remaining small fixture/adapter families. Last measured
+  library debt is Linux 60 basic / 139 strict and Windows 47 basic /
+  127 strict, with zero production diagnostics. The library remains pending
+  and the full campaign stays active under #9807.
+- #10010 selects the lead-owned `test_installation_context.py`,
+  `test_vendoring.py`, `test_json_query_bytes.py`,
+  `test_directory_evidence_cost.py` and `powershell_test_host.py` contracts.
+  Keep unknown-payload discovery fixtures outside a real repository during
+  runtime validation; an in-checkout temporary directory legitimately
+  inherits the enclosing marketplace and is not an isolated unknown payload.
+
+### 2026-11-02 - Native/source and lightweight helper contracts integrated
+
+- #10006 and #10007 supply native host, lock-handoff, source-provenance and
+  selection test contracts. #10010 supplies concrete source vectors,
+  vendoring-tool members, heterogeneous JSON fixtures, optional executable
+  narrowing and a captured non-null PowerShell response stream.
+- Whole-project probes report zero diagnostics in all nine changed modules
+  and production on both declared targets. Remaining test debt is Linux
+  30 basic / 48 strict and Windows 33 basic / 51 strict, in eight untouched
+  modules. The library remains pending; 13 strict / 55 pending project
+  admission counts and governed CI budgets are unchanged.
+- Combined validation of all changed test modules and checker regressions
+  passes 187 tests, with 174 existing platform/tool skips, in 431.71 seconds.
+  Windows-native PowerShell/Python paths ran. Bash/AWK-dependent cases retain
+  their existing unavailable-tool skips; source-discovery fixtures ran outside
+  a real marketplace. All original assertions remain; new loader, identity and
+  executable assertions only narrow or verify existing fixture boundaries.
+- All 26 already-enforced platform checks, changed-file Ruff, installation
+  contracts, documentation consistency, source-copy sync, vendoring and
+  whitespace checks pass. Documentation impact: below-altitude test-only
+  preparation; existing developer commands and production guarantees remain
+  accurate. Fresh-box provisioning and external-venue validation do not apply
+  to unchanged runtime code. #9807 and the full campaign remain active.
+- Review of #10012 caught a nullable `ref` in a descriptor fixture; the
+  descriptor contract now includes `None` while normalized fields remain
+  strings. Both full-project strict counts are unchanged. The fixture
+  consistency test passes, and a real MyPy client control accepts `str | None`
+  but rejects using that descriptor value as a definite string.

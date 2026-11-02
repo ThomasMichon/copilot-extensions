@@ -844,7 +844,7 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
             assert ref is not None and ier.is_local_ref(ref, selected)
     for name in (
         "installer_dependency_policy.py",
-        "installer_dependency_config.py",
+        "installer_dependency_config.py", "installer_retained_content.py",
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
@@ -852,7 +852,7 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
         "versioned_runtime_publication.py",
     ):
         source = ENGINE if name in (
-            "installer_dependency_policy.py", "installer_dependency_config.py",
+            "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
         ) else PLUGIN / "scripts"
         assert (snapshot / "scripts" / name).read_bytes() == (source / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())

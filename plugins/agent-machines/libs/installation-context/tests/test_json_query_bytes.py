@@ -15,6 +15,7 @@ pytestmark = pytest.mark.skipif(AWK is None, reason="awk is unavailable")
 
 
 def _query(document: bytes) -> subprocess.CompletedProcess[bytes]:
+    assert AWK is not None
     return subprocess.run(
         [AWK, "-f", str(READER), "-v", "mode=hex", "-v", "query_path=value"],
         input=document,
@@ -22,7 +23,7 @@ def _query(document: bytes) -> subprocess.CompletedProcess[bytes]:
         env={**os.environ, "LC_ALL": "C"},
         check=False,
         timeout=10,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
 

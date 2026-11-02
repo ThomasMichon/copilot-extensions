@@ -183,7 +183,7 @@ def chat_library_sdists(tmp_path_factory):
         )
 
     with ThreadPoolExecutor(max_workers=3) as workers:
-        artifacts = dict(workers.map(build, LIBRARIES))
+        artifacts = dict(workers.map(build, (*LIBRARIES, "zdd")))
     shutil.rmtree(root / "source")
     return artifacts
 
