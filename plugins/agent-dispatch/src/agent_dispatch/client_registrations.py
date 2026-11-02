@@ -15,12 +15,13 @@ if TYPE_CHECKING:
     import httpx
 
 from .client_errors import DispatchUpgradeRequired
+from .client_pool_cohort import PoolCohortClientMixin
 from .pool_publication_custody import PoolCatalogRead, PoolMetadataRequest
 from .pool_publication_response import read_pool_metadata_result
 from .queue_pool_catalog import PoolPublicationScope
 
 
-class RegistrationClientMixin:
+class RegistrationClientMixin(PoolCohortClientMixin):
     """Supervisor-registration HTTP calls, mixed into ``DispatchClient``.
 
     Relies on ``self._unwrap`` and ``self._http`` from the composing class.
