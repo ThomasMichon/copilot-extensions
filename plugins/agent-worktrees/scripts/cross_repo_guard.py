@@ -170,6 +170,12 @@ def _git_targets(eff_seg: str, base: str, tool: str) -> list[str]:
     return [path for _kind, path in targets if path] + ([] if overridden else [base])
 
 
+def _shell_may_write(cmd: str, tool: str) -> bool:
+    return bool(_WRITE_VERBS.search(cmd)) or any(
+        _git_targets(_effective_seg(seg), "", tool) for seg in _SHELL_SEP.split(cmd)
+    )
+
+
 def _root_token(root_str: str) -> str:
     """Regex for a repo root as a whole path token: the root itself OR a path
     INTO it, with a terminator so a sibling dir sharing the string prefix is not
@@ -320,7 +326,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") 
     command-position write verb argument / git mutation via ``-C <repo>`` or the
     cwd), never a path merely mentioned in an assignment, ``cd``, or a quoted
     data payload (dotfiles#1144)."""
-    if not _WRITE_VERBS.search(cmd):
+    if not _shell_may_write(cmd, tool):
         return None
     eff_cwd = cwd
     identity_cache = {}
@@ -410,7 +416,7 @@ def decide(payload: dict, *, env=None, home=None,
                     else payload.get("tool_input"))
     if tool in SHELL_TOOLS:
         cmd = _pick(args, CMD_ARG_KEYS)
-        if not cmd or not _WRITE_VERBS.search(cmd):
+        if not cmd or not _shell_may_write(cmd, tool):
             return None  # identical to _shell_hit's topology-independent allow
 
     override = env.get("AGENT_HOME", "").strip()

@@ -347,3 +347,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   repository alongside explicit work-tree targets unless Git's repository/cwd
   was explicitly overridden. Four work-tree controls and the complete focused
   Git identity/message/options packet passed 27 cases.
+- Made pre-map shell relevance use the existing pure Git parser when the
+  legacy write regex misses a mutating subcommand behind global options.
+  Configuration/literal-pathspec commit controls now exercise that first
+  classification boundary, while a global-option read fails a test if it
+  acquires Git identity. The complete map, consumer, deployment and relevance
+  packet passed 195 cases with four native-capability skips.
