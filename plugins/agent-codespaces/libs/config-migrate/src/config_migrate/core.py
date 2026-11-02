@@ -70,7 +70,7 @@ def read_version(doc: dict[str, Any], *, baseline: int = 1) -> int:
     """
     if SCHEMA_VERSION_KEY not in doc:
         return baseline
-    raw = doc[SCHEMA_VERSION_KEY]
+    raw: object = doc[SCHEMA_VERSION_KEY]
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
         raise MigrationError(
             f"invalid {SCHEMA_VERSION_KEY}: {raw!r} (expected a positive integer)"

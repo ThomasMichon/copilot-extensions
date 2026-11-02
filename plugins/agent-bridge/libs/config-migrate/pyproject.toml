@@ -10,7 +10,7 @@ exclude-newer = "7 days"
 # "config-migrate") to prevent dependency-confusion; the import module stays
 # ``config_migrate``. Mirrors agent-ssh-manager / agent-zdd.
 name = "agent-config-migrate"
-version = "0.1.0-dev2"
+version = "0.1.1-dev1"
 description = "By-convention YAML config schema versioning + scripted migration for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

@@ -4,12 +4,12 @@ The repository is migrating to strict MyPy through the
 [Python Static Type Safety effort](../efforts/active/python-static-type-safety/README.md)
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
-The local checker foundation qualifies its own code/tests and the source of
-Remote Login Shell, Session Liveness Probe and Worktree Identity. Their remaining
-tests/helpers and the other projects are explicitly pending. This foundation
-is enforced by source CI for executable-impact changes. Candidate-release
-qualification remains a separate slice. A passing admitted cohort is not
-repository-wide type safety.
+The admitted cohort qualifies the checker code/tests, the complete Config
+Migrate source/test project, and the source of Remote Login Shell, Session
+Liveness Probe and Worktree Identity. The latter libraries' remaining
+tests/helpers and the other projects are explicitly pending. Source CI and the
+exact-candidate release gate enforce this cohort. A passing admitted cohort is
+not repository-wide type safety.
 
 ## Local commands
 
@@ -20,6 +20,8 @@ python tools/typecheck.py --prepare
 python tools/typecheck.py --enforced
 python tools/typecheck.py --changed --base origin/dev
 python tools/typecheck.py lib-worktree-identity
+python tools/typecheck.py lib-config-migrate --prepare
+python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
@@ -36,6 +38,15 @@ same bytes for both the environment key and installation. Nested requirement
 includes are refused until a complete graph snapshot is qualified. The dependency
 install subprocess has a five-minute bound. Cache-path validation stays independent of Python
 3.11-only installer imports, preserving the checker's Python 3.10 bootstrap.
+
+Config Migrate selects `tools/typecheck-yaml-requirements.txt`, a separate flat
+hash lock containing the same checker/pytest pins plus seasoned PyYAML and its
+third-party stubs. Its complete source and tests pass strict checking for both
+declared analysis targets. Serialization documents remain explicitly dynamic
+`dict[str, Any]` boundaries; the version marker is narrowed from `object` by the
+existing runtime validation. There are no new missing-import ignores or
+unchecked first-party stubs. Other projects do not implicitly gain YAML
+dependencies from this environment.
 
 `--enforced` is the default when no project name or selector is supplied. It
 validates the complete physical-Python inventory, then checks admitted projects
@@ -89,7 +100,8 @@ CI checks every admitted project, not only changed Python files. Checker,
 manifest, dependency or workflow changes therefore cannot quietly skip an
 activated consumer. Local `--enforced` uses the same pinned checker and target
 policy; `--changed` is an intentionally conservative local parity command.
-Additional project dependency contexts remain subsequent slices.
+The YAML project exercises independent dependency preparation; additional
+project dependency contexts remain subsequent slices.
 
 ## Fixed fragment source views
 

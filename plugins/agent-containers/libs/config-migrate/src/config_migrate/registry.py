@@ -20,12 +20,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 # A migrator is a pure transform of a parsed config document: dict-in, dict-out.
 # It upgrades a document from version N to version N+1. It must not mutate its
 # input in place (the runner deep-copies defensively, but purity keeps migrators
 # testable and composable).
-Migrator = Callable[[dict], dict]
+Migrator = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class SchemaError(Exception):
