@@ -924,7 +924,7 @@ async def ack_live_controls(
 
 @router.get("/{session_id}/messages", response_model=LiveMessageListResponse)
 async def list_live_messages(
-    session_id: str, request: Request, plugin_readiness: bool = False,
+    session_id: str, request: Request, plugin_readiness: bool = False, exact_native: bool = False,
 ) -> LiveMessageListResponse:
     """Pending (undelivered) messages for a live session, oldest-first.
 
@@ -939,6 +939,8 @@ async def list_live_messages(
     rows = db.list_pending_live_messages(target_session_id)
     messages = []
     for r in rows:
+        if r["exact_session"] and not exact_native:
+            continue
         readiness = None
         kind = r.get("kind") or "prompt"
         if kind.startswith("startup:prompt:"):
@@ -960,6 +962,8 @@ async def list_live_messages(
                 delivery=r.get("delivery") or "queue",
                 created_at=r["created_at"],
                 plugin_readiness=readiness,
+                exact_session=bool(r["exact_session"]),
+                original_session_id=r["session_id"] if r["exact_session"] else None,
         ))
     return LiveMessageListResponse(messages=messages)
 

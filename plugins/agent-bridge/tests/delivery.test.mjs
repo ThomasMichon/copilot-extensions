@@ -29,7 +29,7 @@ test("a same-process resume switches registration to the resumed id", () => {
   assert.equal(adoptSessionId(state, "placeholder"), false); // same id: nothing to do
   assert.equal(adoptSessionId(state, undefined), false); // an event without an id
   assert.equal(adoptSessionId(state, "resumed"), true); // the resume renamed it
-  assert.deepEqual(state, { sessionId: "resumed", registered: false });
+  assert.deepEqual(state, { sessionId: "resumed", nativeSessionId: "resumed", registered: false });
   assert.equal(adoptSessionId(state, "resumed"), false);
 });
 
@@ -361,6 +361,106 @@ function interruptHarness(messages) {
     },
   };
 }
+
+const exactMessage = (id, kind = "prompt") => ({
+  id, kind, sender: "peer", body: `input ${id}`, delivery: "steer",
+  exact_session: true, original_session_id: "s",
+});
+
+function exactHarness(messages) {
+  const { calls, deps } = interruptHarness(messages);
+  const state = { sessionId: "s", nativeSessionId: "s", registered: true };
+  let native = "s";
+  deps.session.rpc = { metadata: { snapshot: async () => ({ sessionId: native }) } };
+  deps.isCurrent = () => state.registered && state.sessionId === "s" && state.nativeSessionId === "s";
+  deps.log = (message) => calls.push(["held", message]);
+  const rollover = () => { native = "successor"; adoptSessionId(state, native); };
+  return { calls, deps, state, rollover };
+}
+
+for (const kind of ["prompt", "notify"]) {
+  test(`an in-flight exact ${kind} poll cannot deliver after native rollover`, async () => {
+    const message = exactMessage(1, kind);
+    const { calls, deps, rollover } = exactHarness([message]);
+    deps.getJson = async () => { rollover(); return { messages: [message] }; };
+    assert.deepEqual(await drainInbox("s", deps), []);
+    assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+    assert.equal(calls[0][0], "held");
+  });
+
+  test(`a preceding awaited SDK send fences the later exact ${kind}`, async () => {
+    const { calls, deps, rollover } = exactHarness([exactMessage(1), exactMessage(2, kind)]);
+    deps.session.send = async () => { calls.push(["send"]); rollover(); };
+    assert.deepEqual(await drainInbox("s", deps), [1]);
+    assert.equal(calls.filter(([type]) => type === "send").length, 1);
+    assert.deepEqual(calls.at(-1), ["ack", [1]]);
+  });
+}
+
+test("registration fallback cannot restore the original exact native context", async () => {
+  const { calls, deps, state, rollover } = exactHarness([exactMessage(1)]);
+  const register = serializedRegister(state, async (id) => id === "s" ? true : "rejected");
+  await register();
+  rollover();
+  await register();
+  assert.equal(state.sessionId, "s");
+  assert.equal(state.registered, true);
+  assert.equal(state.nativeSessionId, "successor");
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send").length, 0);
+  await register.close();
+});
+
+test("actual SDK metadata fences an exact message even before a rollover event arrives", async () => {
+  const { calls, deps } = exactHarness([exactMessage(1)]);
+  deps.session.rpc.metadata.snapshot = async () => ({ sessionId: "successor" });
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+});
+
+test("rollover during an abort holds exact interrupted input and its pending replay", async () => {
+  const interrupt = { ...exactMessage(5), delivery: "interrupt" };
+  const { calls, deps, rollover } = exactHarness([interrupt]);
+  const earlier = exactMessage(4);
+  deps.inFlight.sent(earlier);
+  deps.session.abort = async () => { calls.push(["abort"]); rollover(); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+  assert.deepEqual(deps.inFlight.takeBefore(5), [earlier]);
+});
+
+test("rollover during an earlier replay fences the next replay and interrupt", async () => {
+  const interrupt = { ...exactMessage(5), delivery: "interrupt" };
+  const { calls, deps, rollover } = exactHarness([interrupt]);
+  deps.inFlight.sent(exactMessage(3));
+  const earlier = exactMessage(4);
+  deps.inFlight.sent(earlier);
+  deps.session.send = async () => { calls.push(["send"]); rollover(); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send").length, 1);
+  assert.deepEqual(deps.inFlight.takeBefore(5).map((row) => row.id), [3, 4]);
+  assert.equal(calls.filter(([type]) => type === "ack").length, 0);
+});
+
+test("exact delivery requires raw native provenance and the public metadata observer", async () => {
+  for (const change of ["missing-id", "wrong-id", "missing-rpc"]) {
+    const message = exactMessage(1);
+    const { calls, deps } = exactHarness([message]);
+    if (change === "missing-id") delete message.original_session_id;
+    if (change === "wrong-id") message.original_session_id = "other";
+    if (change === "missing-rpc") delete deps.session.rpc;
+    assert.deepEqual(await drainInbox("s", deps), []);
+    assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+  }
+});
+
+test("legacy alias-following messages keep their delivery behavior across a rollover", async () => {
+  const message = { id: 1, sender: "peer", body: "legacy" };
+  const { calls, deps, rollover } = exactHarness([message]);
+  deps.getJson = async () => { rollover(); return { messages: [message] }; };
+  assert.deepEqual(await drainInbox("s", deps), [1]);
+  assert.deepEqual(calls, [["send", "immediate"], ["ack", [1]]]);
+});
 
 test("an interrupt to a session whose main turn is idle never aborts (background sub-agents survive)", async () => {
   const { calls, deps } = interruptHarness([{ id: 5, sender: "a", body: "x", delivery: "interrupt" }]);

@@ -297,7 +297,9 @@ test("owned inbox send is held while pending without holding ordinary traffic", 
   f.session.send = async (options) => { sent.push(options); };
   const options = {
     getJson: async (path) => {
-      assert.ok(path.endsWith("?plugin_readiness=true"));
+      const query = new URL(path, "http://fixture").searchParams;
+      assert.equal(query.get("plugin_readiness"), "true");
+      assert.equal(query.get("exact_native"), "true");
       return { messages };
     },
     post: async (...args) => { posts.push(args); return { ok: true }; },

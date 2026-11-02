@@ -100,13 +100,26 @@ agent-bridge --json send <exact-session-id> --live-exact \
 
 Admission uses the existing inbox transaction and checks the raw original
 session identity in its insert and persists `live_messages.exact_session`.
-Writable schema-39 preparation adds this provenance with a false default for
-legacy rows; read-only adoption requires prepared storage. Exact rows stay at
+Writable schema-40 preparation adds this provenance with a false default for
+legacy rows and upgrades the existing canonical inbox input guard. That guard
+retains the exact flag, raw native ID and original input, and its changed
+definition makes schema-38/39 cold writable readers refuse before opening the
+inbox. Rollback therefore requires the current schema owner, not merely refusing
+new exact endpoints; already-admitted inputs remain protected. Read-only
+adoption requires prepared storage. Exact rows stay at
 the original native during same-process conversation rollover. A successor's
 poll, acknowledgement or consumption cannot deliver or settle them. Original
 receipt reads and delayed original acknowledgement remain possible; an old
 alias poll does not inject the retained prompt into its successor. Legacy
-messages retain their alias-following behavior. The input is `prompt`-kind with `steer` delivery; there is no
+messages retain their alias-following behavior. Only an `exact_native=true` poll
+returns exact inputs, carrying the exact flag and original native ID; old
+extensions cannot ignore unfamiliar provenance and inject those inputs.
+The extension observes actual SDK metadata and checks
+the independent current native identity immediately before each exact SDK send,
+including replay after an interrupt and later messages in an awaited batch.
+Rejected rollover registration cannot restore the previous native identity;
+held inputs are not acknowledged as delivered.
+The input is `prompt`-kind with `steer` delivery; there is no
 hosted pending-prompt queue, force, replacement or alternate transport.
 Idempotent replay returns only the already-admitted original message.
 

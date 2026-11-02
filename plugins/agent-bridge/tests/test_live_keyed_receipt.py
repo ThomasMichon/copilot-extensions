@@ -141,6 +141,9 @@ def test_schema_38_migration_preserves_legacy_rows_and_requires_writable_prepara
     from agent_bridge.db import Database
 
     mid = tmp_db.enqueue_live_message("live-1", "peer", "legacy", time.time())
+    from agent_bridge.inbox_custody import schema_triggers
+    tmp_db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
+    tmp_db.execute_write(schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1])
     tmp_db.execute_write("ALTER TABLE live_messages DROP COLUMN exact_session")
     tmp_db.execute_write("UPDATE schema_version SET version=38")
     with pytest.raises(ValueError, match="writable preparation"):
@@ -149,11 +152,23 @@ def test_schema_38_migration_preserves_legacy_rows_and_requires_writable_prepara
     try:
         row = migrated.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]
         assert row["session_id"] == "live-1" and row["exact_session"] == 0
-        assert migrated.execute_read("SELECT version FROM schema_version")[0]["version"] == 39
+        assert migrated.execute_read("SELECT version FROM schema_version")[0]["version"] == 40
         readonly = Database(tmp_db.db_path, read_only=True)
         readonly.close()
     finally:
         migrated.close()
+
+
+def test_exact_poll_serializes_original_native_and_legacy_response_stays_unchanged(api, tmp_db):
+    sent = api.post(path(operation="keyed-exact"), json=binding())
+    mid = sent.json()["receipt"]["message_id"]
+    legacy = tmp_db.enqueue_live_message("live-1", "peer", "legacy", time.time())
+    rows = api.get("/api/v1/live-sessions/live-1/messages?exact_native=true").json()["messages"]
+    exact, ordinary = {row["id"]: row for row in rows}[mid], {row["id"]: row for row in rows}[legacy]
+    assert exact["exact_session"] is True and exact["original_session_id"] == "live-1"
+    assert "exact_session" not in ordinary and "original_session_id" not in ordinary
+    old = api.get("/api/v1/live-sessions/live-1/messages").json()["messages"]
+    assert [row["id"] for row in old] == [legacy]
 
 
 @pytest.mark.parametrize("receipt_only", [True, False])

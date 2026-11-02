@@ -96,12 +96,17 @@ class LiveMessage(BaseModel):
     delivery: LiveMessageDelivery = "steer"
     created_at: float
     plugin_readiness: dict | None = None
+    exact_session: bool = False
+    original_session_id: str | None = None
 
     @model_serializer(mode="wrap")
     def serialize_message(self, handler):
         result = handler(self)
         if self.plugin_readiness is None:
             result.pop("plugin_readiness", None)
+        if not self.exact_session:
+            result.pop("exact_session", None)
+            result.pop("original_session_id", None)
         return result
 
 

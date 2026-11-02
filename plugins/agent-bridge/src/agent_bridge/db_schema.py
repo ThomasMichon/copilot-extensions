@@ -58,7 +58,7 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 28:
                     validate_schema(conn)
                 if recorded is not None and recorded["version"] >= 30:
-                    validate_inbox_schema(conn)
+                    validate_inbox_schema(conn, exact_native=recorded["version"] >= 40)
                 if recorded is not None and recorded["version"] >= 31:
                     validate_consumer_schema(
                         conn, require_history_indexes=recorded["version"] >= 32,
@@ -861,3 +861,13 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (39,))
             conn.commit()
             log.info("Schema migrated to version 39: durable exact-native live messages")
+
+        if from_version < 40:
+            from .inbox_custody import migrate_exact_native_guard
+
+            self._ensure_current_columns(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            with conn:
+                migrate_exact_native_guard(conn)
+                conn.execute("UPDATE schema_version SET version=?", (40,))
+            log.info("Schema migrated to version 40: exact-native input and cold rollback fence")

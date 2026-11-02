@@ -93,7 +93,7 @@ def handoff_stage(row: sqlite3.Row | dict) -> str:
     return "sending" if row["handoff_started_at"] is not None else "offered"
 
 
-def schema_triggers() -> dict[str, tuple[str, str]]:
+def schema_triggers(*, exact_native: bool = True) -> dict[str, tuple[str, str]]:
     triggers = operation_triggers(("live_messages",))
     for operation in ("INSERT", "UPDATE"):
         name = f"live_messages_control_{operation.lower()}_unsupported"
@@ -127,6 +127,20 @@ def schema_triggers() -> dict[str, tuple[str, str]]:
         "NEW.delivery IS NOT OLD.delivery OR NEW.idempotency_key IS NOT OLD.idempotency_key) "
         "BEGIN SELECT RAISE(ABORT,'bridge_inbox_handoff_input_immutable'); END",
     )
+    if exact_native:
+        triggers["live_messages_handoff_input_immutable"] = (
+            "live_messages",
+            "CREATE TRIGGER IF NOT EXISTS live_messages_handoff_input_immutable "
+            "BEFORE UPDATE OF session_id,exact_session,sender,body,reply_to,kind,delivery,"
+            "idempotency_key ON live_messages "
+            "WHEN (OLD.exact_session=1 AND ("
+            "NEW.session_id IS NOT OLD.session_id OR NEW.exact_session IS NOT OLD.exact_session)) OR "
+            "((OLD.exact_session=1 OR OLD.handoff_json IS NOT NULL) AND ("
+            "NEW.sender IS NOT OLD.sender OR NEW.body IS NOT OLD.body OR "
+            "NEW.reply_to IS NOT OLD.reply_to OR NEW.kind IS NOT OLD.kind OR "
+            "NEW.delivery IS NOT OLD.delivery OR NEW.idempotency_key IS NOT OLD.idempotency_key)) "
+            "BEGIN SELECT RAISE(ABORT,'bridge_inbox_handoff_input_immutable'); END",
+        )
     for column in ("handoff_started_at", "delivered_at", "consumed_at"):
         name = f"live_messages_handoff_{column}_monotonic"
         triggers[name] = (
@@ -149,14 +163,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection) -> None:
+def validate_schema(conn: sqlite3.Connection, *, exact_native: bool = True) -> None:
     """Require exact prepared custody guards without creating or repairing them."""
     columns = {row[1]: row for row in conn.execute("PRAGMA table_info(live_messages)")}
     for name, kind in COLUMNS.items():
         row = columns.get(name)
         if row is None or row[2].upper() != kind or row[3] != 0 or row[5] != 0:
             raise RuntimeCustodyError(f"Inbox custody requires writable preparation: {name}")
-    for name, (table, statement) in schema_triggers().items():
+    for name, (table, statement) in schema_triggers(exact_native=exact_native).items():
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
         ).fetchone()
@@ -165,3 +179,17 @@ def validate_schema(conn: sqlite3.Connection) -> None:
             or _normalized_schema(row[2]) != _normalized_schema(statement)
         ):
             raise RuntimeCustodyError(f"Inbox custody requires writable preparation: {name}")
+
+
+def migrate_exact_native_guard(conn: sqlite3.Connection) -> None:
+    """Replace only the known legacy guard; old cold readers refuse the new SQL."""
+    name = "live_messages_handoff_input_immutable"
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()
+    current = schema_triggers()[name][1]
+    if row is not None and _normalized_schema(row[0]) == _normalized_schema(current):
+        validate_schema(conn)
+        return
+    validate_schema(conn, exact_native=False)
+    conn.execute(f"DROP TRIGGER {name}")
+    conn.execute(current)
+    validate_schema(conn)

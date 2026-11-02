@@ -9,6 +9,9 @@ from unittest.mock import Mock
 
 from agent_bridge import __main__ as core
 from agent_bridge.client import BridgeClient, BridgeClientError
+from agent_bridge.db import Database
+from agent_bridge.db_schema import _SchemaMixin
+from test_live_exact_rollback import prior_owners
 
 
 def observe(api, db, vector, monkeypatch, capsys, *, client_factory) -> dict:
@@ -83,6 +86,35 @@ def observe(api, db, vector, monkeypatch, capsys, *, client_factory) -> dict:
     notify_id = notify["admission"]["message_id"]
     row = db.execute_read("SELECT * FROM live_messages WHERE id=?", (notify_id,))[0]
     observed["notify"] = {"exit": status, "kind": row["kind"], "delivery": row["delivery"]}
+    original = [dict(row) for row in db.execute_read("SELECT * FROM live_messages")]
+    exact_poll = api.get(root + "?exact_native=true").json()["messages"]
+    observed["poll_binding"] = {
+        "old_reader_hidden": api.get(root).json()["messages"] == [],
+        "original_native": len(exact_poll) == 2 and all(
+            item["exact_session"] is True and item["original_session_id"] == sid
+            for item in exact_poll
+        ),
+    }
+    prior = prior_owners(monkeypatch)
+    import sys
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "agent_bridge.inbox_custody", prior["inbox_custody"])
+        patch.setattr(_SchemaMixin, "_init_schema", prior["db_schema"]._SchemaMixin._init_schema)
+        try:
+            rolled_back = Database(db.db_path)
+        except ValueError as exc:
+            refused = "live_messages_handoff_input_immutable" in str(exc)
+        else:
+            rolled_back.close()
+            refused = False
+    observed["cold_rollback"] = {
+        "refused": refused,
+        "unchanged": original == [dict(row) for row in db.execute_read("SELECT * FROM live_messages")],
+        "no_fabricated_custody": all(
+            row["runtime_custody_json"] is None and row["handoff_json"] is None
+            for row in original
+        ),
+    }
     for mode, capability in (("prompt", "live_keyed_receipt"), ("notify", "live_exact_notify")):
         masked[0] = capability
         posts.clear()

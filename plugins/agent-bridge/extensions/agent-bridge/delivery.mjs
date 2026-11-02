@@ -257,6 +257,7 @@ export function transcriptTail(text, types, maxEvents = REPLAY_MAX_EVENTS) {
 export const REJECTED_RETRY_MS = 5 * 60 * 1000;
 
 export function adoptSessionId(state, eventSessionId, now = Date.now()) {
+  if (eventSessionId) state.nativeSessionId = eventSessionId;
   if (!eventSessionId || eventSessionId === state.sessionId) return false;
   // An id the bridge refused for this process (see serializedRegister) is
   // tried again only after a while, not on every event.
@@ -358,16 +359,32 @@ export function serializedRegister(
 export async function drainInbox(sid, { getJson, post, session, inFlight, mainTurn,
   pluginReadiness = false, isCurrent = () => true, log = () => {} }) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
-  const inbox = `${base}/messages${pluginReadiness ? "?plugin_readiness=true" : ""}`;
+  const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
   const delivered = [];
   let interrupted = false;
+  const currentNative = async (msg) => {
+    if (!msg.exact_session) return true;
+    if (!isCurrent() || msg.original_session_id !== sid
+        || typeof session.rpc?.metadata?.snapshot !== "function") {
+      log(`exact message ${msg.id} held: native context unavailable or changed`);
+      return false;
+    }
+    const context = await session.rpc.metadata.snapshot();
+    if (!isCurrent() || context?.sessionId !== msg.original_session_id) {
+      log(`exact message ${msg.id} held: native context changed before delivery`);
+      return false;
+    }
+    return true;
+  };
+  const stillCurrent = (msg) => !msg.exact_session || isCurrent();
   for (const incoming of messages) {
     let msg = incoming;
     if (!msg || typeof msg.id !== "number") continue;
     try {
+      if (!await currentNative(msg) || !stillCurrent(msg)) continue;
       if (String(msg.kind || "").startsWith("startup:prompt:")) {
         if (!pluginReadiness || !msg.plugin_readiness) {
           log(`startup message ${msg.id} held: readiness context unavailable`);
@@ -403,10 +420,15 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
         // The abort discarded every message still pending in the CLI;
         // re-send those (oldest first) so the interrupt loses nothing.
         for (const earlier of inFlight.takeBefore(msg.id)) {
+          if (!await currentNative(earlier) || !stillCurrent(earlier)) {
+            inFlight.sent(earlier);
+            continue;
+          }
           await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
           inFlight.sent(earlier);
         }
       }
+      if (!await currentNative(msg) || !stillCurrent(msg)) continue;
       await session.send(plan.options);
       inFlight.sent(msg);
       delivered.push(msg.id);

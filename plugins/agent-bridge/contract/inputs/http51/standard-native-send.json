@@ -47,6 +47,8 @@
       "prompt": {"exit": 0, "stage": "admitted"},
       "receipt": {"exit": 0, "same_original": true, "readonly": true},
       "notify": {"exit": 0, "kind": "notify", "delivery": "steer"},
+      "poll_binding": {"old_reader_hidden": true, "original_native": true},
+      "cold_rollback": {"refused": true, "unchanged": true, "no_fabricated_custody": true},
       "old_prompt": {"exit": 69, "outcome": "refused_unavailable", "posts": []},
       "old_notify": {"exit": 69, "outcome": "refused_unavailable", "posts": []},
       "rollover": {"original_rows": true, "successor_pending": [], "successor_ack": 0,
