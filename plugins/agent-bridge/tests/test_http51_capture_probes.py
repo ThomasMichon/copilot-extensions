@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import bridge_http51_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
+from http51_live_cli_probes import observe as observe_live_cli
 from agent_bridge import __main__ as core
 from agent_bridge.models import SessionStatus
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
@@ -110,6 +111,9 @@ def test_http51_capture_actual_observations(
     observed["receipt_only"] = observe_receipt(
         api, manager, session, body, vector, monkeypatch, capsys,
         client_factory=receipt_client_factory,
+    )
+    observed["live_cli"] = observe_live_cli(
+        api, db, vector, monkeypatch, capsys, client_factory=receipt_client_factory,
     )
     api.headers.pop("Authorization")
     observed["unauthenticated"] = api.post(path, json=body).status_code

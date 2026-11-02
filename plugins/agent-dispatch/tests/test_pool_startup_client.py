@@ -482,6 +482,26 @@ def test_reachable_worker_cannot_report_a_startup_failure_or_exhausted_attempts(
     assert q.pool_startup(t.id) == before and q.get(t.id).status == Status.CLAIMED
 
 
+@pytest.mark.parametrize("kind", ["startup_failed", "startup_rejected", "startup_unknown"])
+def test_classified_original_outcome_cannot_open_reachable_decision_clock(
+    q: TaskQueue, api: TestClient, kind: str,
+) -> None:
+    t, r = claim(q, api, [])
+    record_native(q, r)
+    with connected(api, []) as client:
+        client.record_pool_startup_outcome(
+            t.id, r.key, generation=t.generation, startup_revision=1,
+            outcome_kind=kind, detail="original caller outcome", native_id="native",
+        )
+        before = q.get(t.id), q.get_reservation(r.key), q.pool_startup(t.id)
+        with pytest.raises(DispatchError):
+            invoke(client, "reachable", t, r)
+        assert (q.get(t.id), q.get_reservation(r.key), q.pool_startup(t.id)) == before
+        budget = q.pool_startup(t.id)
+        assert budget.reachable_at is None and budget.decision_deadline is None
+        assert budget.next_nudge_at is None and budget.outcome_kind == kind
+
+
 @pytest.mark.parametrize("changed", ["native", "decision_clock", "outcome_shape"])
 def test_mutation_response_validates_native_decision_and_outcome_shape(
     q: TaskQueue, api: TestClient, changed: str,

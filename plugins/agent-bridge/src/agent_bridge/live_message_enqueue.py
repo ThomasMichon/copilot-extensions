@@ -45,7 +45,7 @@ def _duplicate(
         "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
     )
     existing = db.execute_read(
-        "SELECT id, session_id, sender, body, reply_to, kind, delivery, runtime_custody_json, handoff_json, "
+        "SELECT id, session_id, sender, body, reply_to, kind, delivery, exact_session, runtime_custody_json, handoff_json, "
         f"{msg_canon} = {_CANON} AS same_target, "
         f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
         "FROM live_messages WHERE idempotency_key = ?",
@@ -56,7 +56,7 @@ def _duplicate(
     if not existing:
         return None
     row = existing[0]
-    retained = row["runtime_custody_json"] is not None or row["handoff_json"] is not None
+    retained = bool(row["exact_session"]) or row["runtime_custody_json"] is not None or row["handoff_json"] is not None
     same_target = row["session_id"] == request.session_id if retained or request.exact_session else bool(row["same_target"])
     same_expected = (
         request.expected_session_id is None or request.expected_session_id == row["session_id"]
@@ -66,6 +66,7 @@ def _duplicate(
         and row["sender"] == request.sender and row["body"] == request.body
         and row["reply_to"] == request.reply_to and row["kind"] == request.kind
         and row["delivery"] == request.delivery
+        and bool(row["exact_session"]) == request.exact_session
         and (original_association or row["runtime_custody_json"] == association)
     ):
         return int(row["id"]), ("duplicate" if request.report_duplicate else None)
@@ -139,8 +140,8 @@ def _insert(
     cur = execute(
         "INSERT OR IGNORE INTO live_messages "
         "(session_id, sender, body, reply_to, kind, delivery, "
-        "idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
-        f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1, ? "
+        "idempotency_key, created_at, consumption_tracked, exact_session, runtime_custody_json) "
+        f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1, ?, ? "
         "WHERE EXISTS ("
         "  SELECT 1 FROM live_sessions ls "
         f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
@@ -167,7 +168,7 @@ def _insert(
         (
             request.session_id, request.session_id, request.sender, request.body,
             request.reply_to, request.kind, request.delivery, request.idempotency_key,
-            request.now, association, request.session_id, request.session_id, cutoff, cutoff,
+            request.now, request.exact_session, association, request.session_id, request.session_id, cutoff, cutoff,
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
             request.exact_session, request.session_id, request.expected_session_id,
             request.require_idle,

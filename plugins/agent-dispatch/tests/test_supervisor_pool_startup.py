@@ -348,7 +348,10 @@ def test_exact_notification_uses_existing_transport_without_new_work(monkeypatch
     assert arguments["machine"] == "host-a" and prompt == "decision reminder"
     assert argv[argv.index("--expected-session-id") + 1] == "native"
     assert argv[argv.index("--kind") + 1] == "notify"
+    assert "--live-exact-notify" in argv and "--json" in argv
     assert "--queue" not in argv and "--new" not in argv and "--force" not in argv
-    assert argv[-3:] == ["worktree", "--prompt-file", "-"]
+    assert argv[-3:] == ["native", "--prompt-file", "-"]
     with pytest.raises(ValueError, match="exact retained"):
         bridge.send_nudge("worktree", "reminder", machine="host-a")
+    with pytest.raises(ValueError, match="notification key"):
+        bridge.send_nudge("worktree", "reminder", machine="host-a", expected_session_id="native")

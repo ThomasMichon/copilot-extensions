@@ -755,7 +755,8 @@ def send_nudge(
     worker is handled by liveness recovery, not the nudge).
 
     Supplying ``machine`` requires ``expected_session_id`` and uses the existing
-    host-bound command transport. That fence refuses a changed live target;
+    host-bound command transport and negotiated exact-notify operation.
+    That raw fence refuses a changed live target, including a routing alias;
     notification never requests a new native or queues a work-bearing prompt.
     """
     if expected_session_id is not None or machine is not None:
@@ -763,12 +764,14 @@ def send_nudge(
 
         if not isinstance(expected_session_id, str) or not expected_session_id.strip():
             raise ValueError("host-bound nudge requires an exact retained session")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise ValueError("host-bound nudge requires an original notification key")
         return send_command(
             [
-                "send", "--no-wait", "--kind", "notify", "--sender", sender,
+                "send", "--json", "--no-wait", "--live-exact-notify", "--kind", "notify", "--sender", sender,
                 "--expected-session-id", expected_session_id,
-                *(["--idempotency-key", idempotency_key] if idempotency_key else []),
-                worktree, "--prompt-file", "-",
+                "--idempotency-key", idempotency_key,
+                expected_session_id, "--prompt-file", "-",
             ],
             message, machine=machine, launch_prefix=_agent_bridge_launch_prefix,
             run_ssh=run_ssh_command, timeout=timeout,

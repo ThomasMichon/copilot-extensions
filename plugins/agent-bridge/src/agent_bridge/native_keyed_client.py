@@ -19,6 +19,8 @@ from .client import BridgeClientError
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--live-exact-notify", action="store_true",
+                        help="Notify only the exact live CLI native; never follow aliases or admit work")
     parser.add_argument("--live-receipt-only", action="store_true",
                         help="Inspect an exact keyed live inbox admission without sending or resuming")
     parser.add_argument("--live-exact", action="store_true",

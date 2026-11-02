@@ -979,7 +979,7 @@ async def ack_live_messages(
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
     now = time.time()
-    acked = db.ack_live_messages(target_session_id, body.ids, now=now)
+    acked = db.ack_live_messages(session_id, body.ids, now=now)
     if acked:
         # An ACK arriving after consumption must not overwrite a later idle
         # boundary. Unconsumed acceptance still reserves the upcoming turn.

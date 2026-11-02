@@ -21,15 +21,23 @@ AFFECTED = tuple(previous.PREFIX + name for name in (
     "native_keyed_admission.py", "routes/prompts.py", "send_outcome.py",
     "session_prompts.py", "session_targeting_cli.py", "native_send_receipt.py",
     "native_keyed_client.py", "routes/health.py",
+    "db_core.py", "db_schema.py", "db_live_sessions.py", "db_live_session_aliases.py",
+    "db_live_message_receipts.py", "live_message_enqueue.py", "live_message_models.py",
+    "live_keyed_receipt.py", "live_exact_notify.py", "routes/live_inbox.py",
+    "routes/live_sessions.py", "routes/live_message_receipts.py",
 ))
 TEST = "plugins/agent-bridge/tests/test_http51_capture_probes.py"
 EXTRA_PATHS = (
     INPUT, TEST, "plugins/agent-bridge/tests/test_native_send_admission.py",
     "plugins/agent-bridge/tests/http51_receipt_probes.py",
+    "plugins/agent-bridge/tests/http51_live_cli_probes.py",
     "plugins/agent-bridge/tests/test_native_bound_prompt.py",
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
     "plugins/agent-bridge/tests/test_loop_governance_custody.py",
+    "plugins/agent-bridge/tests/test_live_keyed_receipt.py",
+    "plugins/agent-bridge/tests/test_live_exact_notify.py",
 )
+CAPABILITY_VERSIONS = {"live_keyed_receipt": 1, "live_exact_notify": 1}
 PROBES = {
     "test_http51_capture_actual_observations": 2,
     "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,

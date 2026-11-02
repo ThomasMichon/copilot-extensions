@@ -33,6 +33,12 @@ async def send_keyed_exact(session_id: str, body: ReceiptBinding, request: Reque
     return observe(session_id, body, request) | {"admission": result.model_dump()}
 
 
+@router.post("/{session_id}/messages/exact-notify/v1")
+async def send_exact_notify(session_id: str, body: ReceiptBinding, request: Request) -> dict:
+    from ..live_exact_notify import admit
+    return await admit(session_id, body, request)
+
+
 @router.get("/{session_id}/messages/{message_id}/receipt", response_model=LiveMessageReceipt)
 def get_live_message_receipt(
     session_id: str, message_id: int, request: Request,

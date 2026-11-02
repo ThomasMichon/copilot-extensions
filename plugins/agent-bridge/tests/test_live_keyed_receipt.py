@@ -88,6 +88,74 @@ def test_raw_native_fence_does_not_follow_legacy_session_alias(api, tmp_db):
     assert api.post(path(), json=binding()).json()["receipt"] is None
 
 
+def rollover(tmp_db):
+    now = time.time()
+    tmp_db.register_live_session(
+        "live-1", machine="host", cwd="/workspace", worktree_id="wt-1", repo="repo",
+        branch="dev", pid=42, role=None, process_started_at=now - 60, now=now,
+    )
+    tmp_db.execute_write("UPDATE live_sessions SET cli_mode=1 WHERE session_id='live-1'")
+    assert tmp_db.register_live_session(
+        "successor", machine="host", cwd="/workspace", worktree_id="wt-1", repo="repo",
+        branch="dev", pid=42, role=None, process_started_at=now - 60, now=now + 1,
+    ) == "live"
+    assert tmp_db.get_live_session("live-1")["session_id"] == "successor"
+    assert not tmp_db.execute_read("SELECT 1 FROM live_sessions WHERE session_id='live-1'")
+
+
+def test_admitted_exact_prompt_survives_actual_rollover_without_successor_delivery(api, tmp_db):
+    sent = api.post(path(operation="keyed-exact"), json=binding())
+    assert sent.status_code == 200, sent.text
+    mid = sent.json()["receipt"]["message_id"]
+    legacy = tmp_db.enqueue_live_message("live-1", "peer", "legacy", time.time())
+    rollover(tmp_db)
+    row = tmp_db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]
+    assert row["session_id"] == "live-1" and row["exact_session"] == 1
+    assert [item["id"] for item in tmp_db.list_pending_live_messages("successor")] == [legacy]
+    assert [item["id"] for item in tmp_db.list_pending_live_messages("live-1")] == [legacy]
+    for session in ("live-1", "successor"):
+        pending = api.get(f"/api/v1/live-sessions/{session}/messages")
+        assert pending.status_code == 200
+        assert [item["id"] for item in pending.json()["messages"]] == [legacy]
+    assert api.post(path(), json=binding()).json()["receipt"]["message_id"] == mid
+    assert api.get(f"/api/v1/live-sessions/successor/messages/{mid}/receipt").status_code == 404
+    assert tmp_db.consume_live_message("successor", mid, time.time()) == 0
+    assert api.post("/api/v1/live-sessions/successor/messages/ack", json={"ids": [mid]}).json()["acked"] == 0
+    assert tmp_db.ack_live_messages("live-1", [mid], time.time()) == 1
+    assert tmp_db.consume_live_message("live-1", mid, time.time()) == 1
+    assert api.post(path(), json=binding()).json()["receipt"]["stage"] == "consumed"
+    assert api.post(path("successor", "keyed-exact"),
+                    json=binding(expected_session_id="successor")).status_code == 409
+    assert len(tmp_db.execute_read("SELECT * FROM live_messages")) == 2
+
+
+def test_legacy_key_cannot_be_recovered_as_exact_provenance(api, tmp_db):
+    tmp_db.enqueue_live_message("live-1", binding()["sender"], binding()["body"], time.time(),
+                                delivery="steer", idempotency_key=binding()["idempotency_key"])
+    for operation in ("keyed-exact", "keyed-receipt"):
+        assert api.post(path(operation=operation), json=binding()).status_code == 409
+    assert len(tmp_db.execute_read("SELECT * FROM live_messages")) == 1
+
+
+def test_schema_38_migration_preserves_legacy_rows_and_requires_writable_preparation(tmp_db):
+    from agent_bridge.db import Database
+
+    mid = tmp_db.enqueue_live_message("live-1", "peer", "legacy", time.time())
+    tmp_db.execute_write("ALTER TABLE live_messages DROP COLUMN exact_session")
+    tmp_db.execute_write("UPDATE schema_version SET version=38")
+    with pytest.raises(ValueError, match="writable preparation"):
+        Database(tmp_db.db_path, read_only=True)
+    migrated = Database(tmp_db.db_path)
+    try:
+        row = migrated.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]
+        assert row["session_id"] == "live-1" and row["exact_session"] == 0
+        assert migrated.execute_read("SELECT version FROM schema_version")[0]["version"] == 39
+        readonly = Database(tmp_db.db_path, read_only=True)
+        readonly.close()
+    finally:
+        migrated.close()
+
+
 @pytest.mark.parametrize("receipt_only", [True, False])
 @pytest.mark.parametrize("supported", [True, False])
 def test_cli_negotiates_actual_peer_and_never_ensures_or_falls_back(

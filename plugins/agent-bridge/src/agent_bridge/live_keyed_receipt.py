@@ -33,7 +33,7 @@ def observe(session_id: str, body: ReceiptBinding, request: Request) -> dict:
     db = request.app.state.db
     rows = db.execute_read(
         "SELECT session_id,id AS message_id,created_at AS admitted_at,"
-        "delivered_at AS sdk_accepted_at,consumed_at,sender,body,kind,delivery"
+        "delivered_at AS sdk_accepted_at,consumed_at,sender,body,kind,delivery,exact_session"
         " FROM live_messages WHERE session_id=? AND idempotency_key=?",
         (session_id, body.idempotency_key),
     )
@@ -43,6 +43,7 @@ def observe(session_id: str, body: ReceiptBinding, request: Request) -> dict:
         if len(rows) != 1 or (
             row["sender"] != body.sender or row["body"] != body.body
             or row["kind"] != "prompt" or row["delivery"] != "steer"
+            or row["exact_session"] != 1
         ):
             raise HTTPException(409, detail="live receipt invocation binding conflicts")
         receipt = {name: row[name] for name in (
@@ -68,6 +69,7 @@ def send(args: argparse.Namespace) -> None:
         or any(getattr(args, name, False) for name in (
             "new", "force", "queue", "steer", "interrupt", "notify", "status_check",
             "wait_reply", "receipt_only", "plugin_context_stdin", "full_history",
+            "live_exact_notify",
         ))
         or getattr(args, "expected_native_session_id", None) is not None
         or getattr(args, "native_invocation_file", None) is not None

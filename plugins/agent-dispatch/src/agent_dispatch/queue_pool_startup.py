@@ -306,6 +306,8 @@ class PoolStartupMixin:
             )
             if not reservation["startup_complete"]:
                 raise TaskError("pool reachability requires a completed current startup")
+            if assignment["outcome_kind"] is not None:
+                raise TaskError("classified startup outcomes cannot establish worker reachability")
             from .queue_pool_placement import require_pool_start
             worker = f"{assignment['machine']}/{reservation['worktree']}"
             require_pool_start(conn, task, worker, native_id, generation)

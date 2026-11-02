@@ -161,8 +161,12 @@ native, workspace and execution machine before the supervisor records
 reachability. A different or missing live-session result is unknown, not
 absence. A failed, rejected or unknown original invocation is not reclassified
 as successful merely because its process is live. Once reachable, the durable
-five-minute slot controls notification through the existing Bridge transport,
-with an exact expected-session fence and recorded host. The message is
+five-minute slot controls notification through the existing host-bound Bridge
+transport and its [distinct exact-native informational operation](../../agent-bridge/docs/delegation-contract.md#exact-live-cli-inbox-admission-and-observation).
+The provider refuses classified failed, rejected or unknown startup outcomes
+before opening the reachable decision clock. The notification independently
+negotiates its running receiver's capability and cannot follow a rollover alias,
+including after the liveness probe. The message is
 `notify`-kind: it does not enqueue work, perform legacy evaluation claiming,
 start another native or accept the task.
 
