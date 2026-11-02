@@ -260,6 +260,10 @@ live claim token. No new blanket ACK or executor appointment is created.
       [#10050](https://github.com/ThomasMichon/copilot-extensions/pull/10050).
       This connects the existing owner/custody boundary; it does not activate
       ordinary publication, membership, allocation or worker-prompt migration.
+- [x] Land the [configured-cohort legacy admission fence](journal/2026/11.02-configured-admission-fence.md)
+      in [#10059](https://github.com/ThomasMichon/copilot-extensions/pull/10059).
+      Fresh queued legacy spawning cannot bypass projected cohort placement;
+      ordinary publication/caller migration and installed qualification remain open.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,

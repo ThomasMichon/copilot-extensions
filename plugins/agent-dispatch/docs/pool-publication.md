@@ -20,6 +20,9 @@ storage fences only, not an active configuration publisher or runtime admission.
 The separate `configured_cohort_projection_versions: [1]` advertises the
 [explicit whole-owner projection transport](pool-cohort-transport.md), not
 automatic configuration discovery or membership activation.
+The route's [source-owner composition](pool-cohort-transport.md#coordinator-owned-source-composition)
+binds ordinary server projection to its coordinator-local registrar; it does not
+activate publication from each supervisor's host-local pointer registry.
 The descriptor explicitly advertises metadata-only support and no lock-holder
 verification, configured-scope completeness or atomic placement. Read this
 running-peer declaration rather than inferring support from a package version
