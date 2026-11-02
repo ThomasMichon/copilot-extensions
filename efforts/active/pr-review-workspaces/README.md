@@ -215,6 +215,45 @@ contract.
 
 ## Journal
 
+### 2026-11-01 - Exact acquisition and async source owner API proposed
+- Continue #9535 through the bounded
+  [existing source-owner API admission](source-owner-api-slice.md).
+  Existing default-base/full-remote preparation is not reused as exact review
+  acquisition; the selected Worktrees Git owner and source lifetime gain
+  optional exact-object and owned async execution seams.
+- Dedicated shallow storage and terminal drain protect actual Git/caller
+  custody. Resource selection, credentials and installed/live adoption remain
+  with their existing owners; no operational action is admitted by this plan.
+
+### 2026-11-01 - Tool/read source acceptance merged; operational owners remain open
+- #9845 merged as `620efadfb542e64bd8d999bd0f2b28344193aab5`
+  from head `5dbc3b7c084a5c88f4e80a870ef555f74500d260`. The exact-head
+  Copilot review was COMMENTED with no open issues; all five published findings
+  were resolved. Its remaining overview cache advisory was assessed against
+  the guarded LRU promotion and passing actual async-client eviction control.
+  The owner-authored clean-comment policy and ordinary managed completion
+  applied, with required current-head CI green.
+- Final bounded packets pass all 25 tool/frontdoor cases and all 35 retained
+  source consumer cases. Earlier compatibility packets pass 65 CLI/native
+  cases and four Git environment controls. These are contained synthetic
+  consumers, not installed-host, actual credential or live reviewer proof.
+- Review fixes bind nested source scope/revision, coalesce initial discovery,
+  translate settled Git IO limits, validate cache IDs and preserve reads after
+  concurrent eviction. Source consumers cover malformed blob framing/hashes,
+  metadata mismatches and text/binary/symlink/gitlink/absent/container values.
+- The optional review-nudge workflow failed before requesting review because
+  its PR-event timestamp check refused the input. Explicit current-head review
+  completed; no required failing check was bypassed or workflow repaired.
+- The bounded tool-surface source acceptance is complete. Exact shallow source
+  allocation/fetch and owned async source execution/drain APIs remain unavailable;
+  corresponding capabilities are not advertised. Existing resource, credential,
+  tool-host and reader/lifecycle owners must qualify actual adoption. No backend
+  call, runtime installation, service activation or rollout was performed.
+- Keep this effort Active: original Phase 2/3/4 operational items and the live
+  Validation Plan remain unresolved. First-touch installed-host and live external
+  tiers were not exercised because this continuation admits source-only tests,
+  not installation, real backend effects or serving adoption.
+
 ### 2026-11-01 - Reviewed tool/read source realization
 - #9832 merged as `a3c3d1bf977256b20454f2e61c5d576a3a8a2b51`
   from head `c183a42fb55b3248fa9f1b600762201ebfbdf3c0` after actual approval
