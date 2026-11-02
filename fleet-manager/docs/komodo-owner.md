@@ -164,6 +164,34 @@ update actually invokes the fixed profile, `fixed_profile` evidence requires
 strict image environment, entrypoint, command, labels, storage and isolation.
 Original adoption provenance remains immutable across later updates.
 
+### Retained generation-5 journal observation
+
+`node_journal_legacy.inspect_legacy_external` is a separate read-only bridge
+for an explicitly supplied immutable SQLite generation-5 snapshot, never a
+database path. The original owner must independently authenticate and capture
+coherent rollback-mode snapshot bytes. WAL/hot-journal capture is not supported.
+The optional bridge requires `sqlite3.Connection.deserialize` support (normally
+Python 3.11+ with a compatible SQLite build); absence refuses explicitly without
+changing ordinary journal APIs.
+
+The bridge deserializes at most 64 MiB into memory, validates the selected
+authority/installation/target, exact original manager intent and external
+resource owner, bounded receipt history and complete original plan/step
+observations. Its `request` is the original encoded v5 intent, including
+`parameters.instance`, not a current `OperationIntent` with that field removed.
+The immutable result retains original intent, receipt and plan bytes and only
+the actually attempted step rows. An absent row remains pending; a retained
+NULL remains UNKNOWN, never inferred completed. Every selected blob is bounded
+to 1 MiB, receipt history to 256 and attempted steps to 32. Unsupported or
+ambiguous evidence refuses rather than being projected away.
+
+This observation does not authenticate a snapshot producer, establish live
+currentness or transfer writer custody. It publishes no receipts, converts no
+schema and never opens the source database. Existing current-writer and
+existing-only `NodeJournal` paths continue to reject generation 5. Original
+runtime repair, live capture, migration and any new-writer handover remain
+separately admitted contracts; parsing this snapshot grants none of them.
+
 ### Explicit incumbent-only storage contract
 
 An explicitly selected `profile: preserve-incumbent` uses the separate
