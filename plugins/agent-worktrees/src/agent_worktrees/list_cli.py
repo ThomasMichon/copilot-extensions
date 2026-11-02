@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -370,14 +371,15 @@ def _warm_list_cache_for_active_project(*, interval: float = 15, cleanup_owner=N
                 args, enrichment.records, stamp_session_state=False, enrichment=enrichment,
                 **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
             )
-        if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
-            break
-        list_cache.write(
-            demand["key"],
-            payload,
-            fresh_for=list_cache.resident_fresh_for(interval),
-        )
-        warmed += 1
+        with cleanup_owner.observation_scope(project) if cleanup_owner is not None else nullcontext(False) as blocked:
+            if blocked:
+                break
+            list_cache.write(
+                demand["key"],
+                payload,
+                fresh_for=list_cache.resident_fresh_for(interval),
+            )
+            warmed += 1
     return warmed
 
 

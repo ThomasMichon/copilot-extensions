@@ -317,3 +317,31 @@ def test_actual_consumer_propagates_command_cutoff_through_native_setup(launch, 
         pt._run_observation(["git"], cwd=r"C:\fixture", env={}, timeout=10, deadline=110)
     assert "resume" not in launch.calls
     assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)
+
+
+@pytest.mark.parametrize("created", [False, True])
+def test_actual_consumer_retains_uncertain_preparation_close(launch, monkeypatch, created):
+    from agent_procutil import _windows_caller_owned as native
+
+    close, closed = native.os.close, []
+
+    def interrupted_close(fd):
+        closed.append(fd)
+        close(fd)
+        if len(closed) == 1:
+            raise KeyboardInterrupt("close outcome uncertain")
+
+    launch.kernel.deny_attribute = not created
+    monkeypatch.setattr(native.os, "close", interrupted_close)
+    monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    with pytest.raises(pt.ObservationCleanupError) as captured:
+        pt._spawn_observation(
+            ["git"], cwd=r"C:\fixture", env={}, deadline=110, command_deadline=105,
+        )
+    error = captured.value
+    assert error.cleanup_resources == (("descriptor", closed[0]),)
+    before = list(closed)
+    assert [error.try_settle() for _ in range(3)] == [False, False, False]
+    assert closed == before
+    assert (error.process.native is not None) is created

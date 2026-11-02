@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import threading
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,66 @@ import test_windows_observation_custody as custody
 from agent_worktrees import __main__ as core
 
 owner = custody.owner
+
+
+@pytest.mark.parametrize("phase", ["gather", "commit"])
+def test_warm_list_cache_commit_is_atomic_with_new_custody(owner, monkeypatch, phase):
+    from agent_worktrees import list_cli
+
+    committing, release, attempted, acquired = (threading.Event() for _ in range(4))
+    errors, results, writes = [], [], []
+    monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "A")
+    monkeypatch.setattr(list_cli.cfg, "cached_load_config_scope", nullcontext)
+    monkeypatch.setattr(list_cli.list_cache, "ttl_seconds", lambda: 10)
+    monkeypatch.setattr(list_cli.list_cache, "recent_demands", lambda project: [{"args": {}, "key": "key"}])
+    monkeypatch.setattr(list_cli.list_cache, "resident_fresh_for", lambda interval: 20)
+    monkeypatch.setattr(list_cli, "_core_helper", lambda name, default: {
+        "_list_records_for_args": lambda args: [],
+        "_build_list_json_payload": gather,
+    }[name])
+
+    def gather(*args, **kwargs):
+        if phase == "gather":
+            custody.pending(owner)
+        return {"worktrees": []}
+
+    def write(*args, **kwargs):
+        committing.set()
+        assert release.wait(10)
+        writes.append((args, kwargs))
+
+    def warm():
+        try:
+            results.append(list_cli._warm_list_cache_for_active_project(cleanup_owner=owner))
+        except BaseException as error:
+            errors.append(error)
+
+    def claim():
+        try:
+            attempted.set()
+            custody.pending(owner)
+            acquired.set()
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(list_cli.list_cache, "write", write)
+    worker, claimant = threading.Thread(target=warm), threading.Thread(target=claim)
+    worker.start()
+    try:
+        if phase == "commit":
+            assert committing.wait(10)
+            claimant.start()
+            assert attempted.wait(10)
+            assert not acquired.wait(.1)
+    finally:
+        release.set()
+        worker.join(10)
+        if claimant.ident is not None:
+            claimant.join(10)
+    assert not worker.is_alive() and not claimant.is_alive() and not errors
+    assert results == [0 if phase == "gather" else 1]
+    assert len(writes) == (0 if phase == "gather" else 1)
+    assert owner.observation_counts() == (0, 1)
 
 
 @pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])

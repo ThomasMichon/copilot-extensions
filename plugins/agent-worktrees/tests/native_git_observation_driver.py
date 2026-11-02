@@ -11,7 +11,9 @@ from pathlib import Path
 
 
 def marker(root, name, data):
-    (root / name).write_text(json.dumps(data), encoding="utf-8")
+    temporary = root / (name + ".tmp")
+    temporary.write_text(json.dumps(data), encoding="utf-8")
+    temporary.replace(root / name)
 
 
 def run_alias(root: Path, mode: str):

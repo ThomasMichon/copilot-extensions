@@ -287,6 +287,66 @@ def test_guarded_shutdown_native_identity_failure_precedes_control(owner, monkey
         client.shutdown()
 
 
+@pytest.mark.parametrize("expiry", [None, "connect", "send"])
+def test_real_shutdown_request_bounds_connect_send_and_retirement(owner, monkeypatch, expiry):
+    from zdd import process_exit
+
+    clock, events, timeouts = [100.0], [], []
+    monkeypatch.setattr(control, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    @contextmanager
+    def opened(pid, start):
+        def wait(timeout):
+            events.append("wait")
+            assert timeout == 27
+            return True
+        yield SimpleNamespace(wait=wait)
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            events.append("close")
+
+        def settimeout(self, timeout):
+            timeouts.append(timeout)
+
+        def sendall(self, body):
+            assert json.loads(body)["action"] == "shutdown"
+            events.append("send")
+            clock[0] = 130 if expiry == "send" else 102
+
+        def shutdown(self, direction):
+            events.append("shutdown")
+
+        def recv(self, size):
+            events.append("recv")
+            clock[0] = 103
+            return b'{"version":1,"result":{"shutdown":true}}\n'
+
+    def connect(address, *, timeout):
+        assert timeout == 30
+        events.append("connect")
+        clock[0] = 130 if expiry == "connect" else 101
+        return Socket()
+
+    monkeypatch.setattr(process_exit, "open_process", opened)
+    monkeypatch.setattr(control.socket, "create_connection", connect)
+    client = control.ControlClient(owner.route.base_url, token="fixture", timeout=65,
+                                   guarded_predecessor=owner.retained)
+    if expiry:
+        with pytest.raises(TimeoutError, match="deadline"):
+            client.shutdown()
+        assert events == (["connect", "close"] if expiry == "connect"
+                          else ["connect", "send", "close"])
+        assert timeouts == ([] if expiry == "connect" else [29])
+    else:
+        assert client.shutdown() == {"shutdown": True, "retired": True}
+        assert events == ["connect", "send", "shutdown", "recv", "close", "wait"]
+        assert timeouts == [29, 28, 28]
+
+
 @pytest.mark.parametrize("missing", [None, "published", "worktrees", "repositories", "pid"])
 def test_successor_serving_gate_is_stricter_than_passive_preflight(owner, missing):
     health = {"status": "ready", "pid": owner.route.pid, "published": True,

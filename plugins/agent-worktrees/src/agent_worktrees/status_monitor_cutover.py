@@ -33,23 +33,9 @@ _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
 _CUTOVER_LOCK_TIMEOUT_S = 300.0
 
-# A single resident sweep pass (core._monitor_sweep) is one atomic,
-# non-interruptible unit of work covering every tracked worktree across every
-# registered project/machine -- "busy: ['sweep']" in a drain's busy_sessions
-# means that pass hasn't finished yet, not that anything is stuck. On a large
-# fleet that one pass can legitimately take well over 30s (observed
-# 44s-2m10s+), and this module's own `activate_after_update()` was overriding
-# CutoverOrchestrator's already-generous built-in drain_timeout default
-# (zdd.cutover.CutoverOrchestrator, 300.0s) down to a needlessly aggressive
-# 30.0s -- making cutover's drain lose the race essentially every time and
-# leave the superseded daemon un-reaped, accumulating orphaned
-# status-monitor processes on every auto-update (#5326). Fix: stop
-# overriding the orchestrator's own default drain_timeout, and align
-# health_timeout with its default too (both were previously hardcoded here
-# to match the orchestrator's defaults anyway, so this is a no-op for
-# health_timeout and a pure increase for drain_timeout). Both remain
-# overridable per-machine via env var so an even larger fleet can be tuned
-# without another code change.
+# A resident sweep is atomic across the fleet; "busy: ['sweep']" need not mean
+# stuck. Keep the orchestrator's 300s drain default: a former 30s override
+# stranded superseded monitors (#5326). Health/drain remain machine-tunable.
 def _env_timeout(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw:
@@ -331,18 +317,22 @@ class ControlClient:
         else:
             body = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
         deadline = None if total_timeout is None else time.monotonic() + total_timeout
-        with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
-            sock.settimeout(self.timeout if read_timeout is None else read_timeout)
+
+        def remaining(cap):
+            budget = cap if deadline is None else min(cap, deadline - time.monotonic())
+            if budget <= 0:
+                raise TimeoutError("status-monitor request deadline exceeded")
+            return budget
+
+        with socket.create_connection((self.host, self.port), timeout=remaining(self.timeout)) as sock:
+            sock.settimeout(remaining(self.timeout))
             sock.sendall(body)
+            sock.settimeout(remaining(self.timeout))
             sock.shutdown(socket.SHUT_WR)
             chunks = []
             size = 0
             while True:
-                if deadline is not None:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("status-monitor current-roster read deadline exceeded")
-                    sock.settimeout(min(self.timeout, remaining))
+                sock.settimeout(remaining(self.timeout if read_timeout is None else read_timeout))
                 chunk = sock.recv(65536)
                 if not chunk:
                     break

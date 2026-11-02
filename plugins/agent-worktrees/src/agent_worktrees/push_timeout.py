@@ -173,6 +173,7 @@ def _spawn_observation(cmd, *, cwd, env, deadline, command_deadline):
             attachment_error = interrupted_attachment
         failure = ObservationCleanupError("atomic creation cleanup was not confirmed")
         failure.process, failure.job = process, error.job
+        failure.cleanup_resources = error.cleanup_resources
         failure.operation_error = getattr(error, "operation_error", error.__cause__)
         cleanup_error = getattr(error, "cleanup_error", None)
         if isinstance(cleanup_error, (KeyboardInterrupt, SystemExit)) and not isinstance(
@@ -204,6 +205,9 @@ class ObservationCleanupError(subprocess.SubprocessError):
     def try_settle(self) -> bool:
         if getattr(self, "_settled", False):
             return True
+        if getattr(self, "cleanup_resources", ()):
+            # An interrupted close may already have released a reusable handle.
+            return False
         if not getattr(self, "_job_empty_confirmed", False):
             if self.job is None:
                 raise RuntimeError("no owned Job to confirm")

@@ -116,10 +116,12 @@ def serve(root: Path, mode: str):
         control._ControlHandler.setup = lose_one_reply
     server = control.ControlServer(dispatch, token=token)
     server.start()
-    (root / "ready.json").write_text(json.dumps({
+    ready = root / "ready.json.tmp"
+    ready.write_text(json.dumps({
         "pid": os.getpid(), "start": locks.process_start_time(os.getpid()),
         "port": server.port, "token": token,
     }), encoding="utf-8")
+    ready.replace(root / "ready.json")
     closed = mode == "closed-listener"
     if closed:
         server.close()
