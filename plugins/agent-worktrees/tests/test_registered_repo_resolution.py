@@ -101,6 +101,7 @@ def test_registered_only_cli_refuses_malformed_remote(registry_path, tmp_path, c
 
 
 @pytest.mark.guard
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize("operation", ["find", "list"])
 def test_registered_only_native_cli_first_touch(tmp_path, operation):
     home = tmp_path / "home"
@@ -123,7 +124,7 @@ def test_registered_only_native_cli_first_touch(tmp_path, operation):
         [sys.executable, "-m", "agent_worktrees", "repos", *arguments],
         cwd=tmp_path,
         env={**os.environ, "AGENT_HOME": str(home)},
-        capture_output=True, text=True, check=False, timeout=20,
+        capture_output=True, text=True, check=False, timeout=45,
         **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
@@ -191,6 +192,7 @@ def test_strict_inventory_dangling_link_is_unavailable_not_absent(registry_path,
 
 
 @pytest.mark.guard
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize("ancestor", ["absent", "dangling", "file", "loop"])
 def test_native_strict_inventory_distinguishes_missing_and_unavailable_ancestors(tmp_path, ancestor):
     home = tmp_path / "home"
@@ -204,7 +206,7 @@ def test_native_strict_inventory_distinguishes_missing_and_unavailable_ancestors
     result = subprocess.run(
         [sys.executable, "-m", "agent_worktrees", "repos", "list", "--strict", "--json"],
         cwd=tmp_path, env={**os.environ, "AGENT_HOME": str(home)},
-        capture_output=True, text=True, check=False, timeout=20, **no_window_kwargs(),
+        capture_output=True, text=True, check=False, timeout=45, **no_window_kwargs(),
     )
     payload = json.loads(result.stdout)
     if ancestor == "absent":

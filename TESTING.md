@@ -3572,8 +3572,17 @@ item guard for native filesystem/import contention. This is a functional
 import-boundary check, not latency qualification; authentication deadlines,
 two-worker execution and the 240/900-second packet limits remain unchanged.
 Registered-only find and strict-list first-touch calls use independent cases,
-preserving each real CLI launch, twenty-second child deadline and thirty-second
-item limit rather than accumulating two child deadlines in one item.
+preserving each real CLI launch rather than accumulating two child deadlines
+in one item. These calls and native strict-inventory ancestor controls use the
+same 45-second child watchdog and 60-second item guard after native cold starts
+exceeded twenty seconds. These functional allowances do not qualify startup
+latency or change the original performance-packet limits.
+The manual `Installation context full` workflow's `worktrees-git-probes`
+portfolio runs the complete nine-file Git/credential packet on hosted Linux and
+Windows at the exact dispatch SHA through the canonical contained runner.
+It retains two actual workers, 240 seconds per group and 900 seconds including
+preparation and cleanup. It is opt-in source qualification, not required PR CI,
+installed rollout or completion of the broader publication-performance effort.
 
 `tools/promotion_unit_tests/test_worktree_identity.py` re-exports the eight
 original codec test functions and their unchanged parameterization from

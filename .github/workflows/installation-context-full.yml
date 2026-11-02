@@ -39,12 +39,53 @@ on:
           - manager-uninstall
           - komodo-recovery
           - manager-suite
+          - worktrees-git-probes
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  worktrees-git-probes:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
+    name: Worktrees Git probe packet (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-n 2 --max-worker-restart=0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        run: >-
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Qualify the complete Git and credential probe packet
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_bounded_process.py
+          --test-file tests/test_git_ops.py
+          --test-file tests/test_pr_remote_evidence.py
+          --test-file tests/test_pr_target_probes.py
+          --test-file tests/test_registered_repo_resolution.py
+          --test-file tests/test_update_auth.py
+          --test-file tests/test_update_auth_cleanup.py
+          --test-file tests/test_update_auth_probe.py
+          --test-file tests/test_update_auth_usage.py
+          --max-files-per-sub-suite 1
+          --subsuite-timeout 240 --plugin-timeout 900
   dispatch-publication-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-publication'
     name: Dispatch admission publication (Ubuntu)
