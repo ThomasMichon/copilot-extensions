@@ -215,6 +215,33 @@ contract.
 
 ## Journal
 
+### 2026-11-02 - Source-owner candidate held at actual capacity boundary
+- Draft #9928 implements the admitted APIs as a source candidate, not an
+  accepted or merged slice. Initial synthetic packets pass 12 source-owner
+  cases and all 26 tool/client cases in bounded packets. Those results do not
+  discharge the ten current-head review findings or required CI.
+- Review identifies a real boundary gap: depth-one fetch includes unchanged
+  trees/blobs before inspection bounds apply. Stream capture limits and the
+  existing execution deadline do not bound Git's on-disk input. The existing
+  resource owner must supply actual pre-write transfer/storage capacity custody;
+  this candidate must not fabricate a quota issuer or another transfer client.
+- Two bounded continuations remain: bind a real capacity-protected acquisition
+  seam through that resource owner, with reviewed contract detail before
+  realization; or retain prepared-only source while a named owner handles
+  acquisition separately. Neither silently closes the original acquisition
+  objective or permits use of the current draft.
+- Other active review work includes admission deadlines, independently retained
+  worker results/cleanup handles, bounded/headless credential discovery, CLI loop
+  lifetime, byte-input compatibility, configured remote names and error mapping.
+  The required guard also found one line beyond the Git module ceiling.
+- Generated dependency-input cleanup reported a Windows file lock during local
+  validation. Its input artifact remains retained and excluded as generated
+  source by the canonical staging-name pattern; nothing was deleted, repaired
+  or declared cleaned. Interrupted preparation/full packets are not passes.
+  The static install contract passed against an exact clean tracked archive.
+- Keep #9535 and this effort Active. No current resource/credential/tool-host
+  adoption, live source fetch, backend effect, installation or rollout occurred.
+
 ### 2026-11-02 - Source-owner API admission merged; realization in progress
 - #9907 merged as `f6858bdffe06c724d193ef15caace59c889d3775` from head
   `7f7a057817f0435d813c9d6a4ed56bc9836ae9a7` after exact-head approval and

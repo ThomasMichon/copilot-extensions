@@ -682,7 +682,6 @@ def fetch_review_objects(remote, head, common, *, cwd, timeout, checkpoint):
     from .git_review_acquisition import validate_selection
     from .pr_review_source import SourceIncomplete
     from agent_procutil.owned_process import OutputLimitExceeded
-
     if (
         not isinstance(remote, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", remote) is None
         or type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0

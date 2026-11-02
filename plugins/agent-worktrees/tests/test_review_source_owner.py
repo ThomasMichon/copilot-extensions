@@ -68,15 +68,23 @@ def test_actual_exact_fetch_preserves_refs_and_depth_without_target_or_worktree(
     assert owner.read_retained(second, "/edit.txt", "after", budget=60)["content"] == "after\r\n"
 
 
-@pytest.mark.parametrize("shape", ["full", "shared", "alternates"])
+@pytest.mark.parametrize("shape", ["full", "shared", "alternates", "redirected"])
 def test_unsafe_storage_refuses_before_existing_transport(acquisition, monkeypatch, shape):
     owner, _, request, _ = acquisition
     if shape == "full":
         (owner.root / ".git" / "shallow").unlink()
     elif shape == "shared":
         (owner.root / ".git" / "worktrees").mkdir()
-    else:
+    elif shape == "alternates":
         (owner.root / ".git" / "objects" / "info" / "alternates").write_text("", encoding="utf-8")
+    else:
+        objects = owner.root / ".git" / "objects"
+        retained = owner.root.parent / "other-object-store"
+        objects.rename(retained)
+        try:
+            objects.symlink_to(retained, target_is_directory=True)
+        except OSError:
+            pytest.skip("fixture cannot create a directory link on this platform")
     from agent_worktrees import git_ops
     monkeypatch.setattr(git_ops, "_auth_config_args", lambda *a, **k: pytest.fail("credential acquisition entered"))
     with pytest.raises(SourceIncomplete, match="dedicated_shallow"):

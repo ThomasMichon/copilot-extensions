@@ -22,6 +22,9 @@ def validate_selection(root, head, common, *, checkpoint, deadline):
     git_dir = Path(git("rev-parse", "--absolute-git-dir")).resolve()
     if (
         common_dir != git_dir or common_dir not in (root, root / ".git")
+        or any(path.resolve() != path for path in (
+            common_dir / "objects", common_dir / "objects" / "pack", common_dir / "objects" / "info",
+        ))
         or (common_dir / "worktrees").exists()
         or (common_dir / "objects" / "info" / "alternates").exists()
         or (common_dir / "objects" / "info" / "http-alternates").exists()
