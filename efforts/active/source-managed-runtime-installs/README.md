@@ -1852,32 +1852,8 @@ rollout occurred.
 ### 2026-11-01 - Worktrees installation and resident retirement separation
 
 #9919 / #9935 implement the bounded Worktrees incoming-start-first slice.
-The installer qualifies the actual target's asynchronous-retirement capability,
-commits the route before promotion opens admission, attests serving and returns
-without an old drain RPC or predecessor-exit join. Failed postcommit activation
-remains an error and preserves the possibly admitted successor. Existing direct
-and conditional cutover defaults are unchanged.
-
-The elected resident uses durable native-identity records and canonical runtime
-references to retain displaced code and its own demand until positive exit,
-including an unretained legacy slot. Deferred dev release compares the exact
-claim snapshot under publication authority; a changed claim or pending dev
-rebuild refuses rather than rewriting retained code. This uses the existing
-resident loop, not an installer-owned subscription or another cleanup process.
-
-Focused Worktrees regressions pass 329 tests, with 12 native/construction cases
-deselected; subsequent end-to-end failure/dev-release corrections pass their
-81-test installer/modes packet. Shared ZDD compatibility passes 81 tests with
-two platform skips. The actual Windows source-process A-B-C control holds
-accepted work on both predecessors, delays B's first loop until C is promoted,
-observes both installer processes exit with no successor subscription, keeps C
-alive through its normal idle window, then releases work and observes independent
-native exits within the unchanged grace. All bounded runs verified cleanup.
-A full constructor-backed attempt stopped on a package-host TLS handshake
-failure before construction; it is not complete installed-runtime acceptance.
-
-Review and required CI on the revised source still gate merge. This slice does
-not complete the parent Plan/Validation Plan, settle an adopter's interrupted
-installation, authorize rollout or qualify every suite consumer/platform.
+The [source and qualification record](<journal/2026/11.01 asynchronous-installer-drain.md>)
+retains the resident-owned custody, review corrections and source-process proof.
+Review and required CI still gate merge; parent acceptance and rollout remain open.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

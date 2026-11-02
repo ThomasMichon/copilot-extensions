@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import breadcrumb, routing
-from zdd.cutover import CutoverError, CutoverOrchestrator
+from zdd.cutover import CutoverOrchestrator
 
 from . import locks, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
@@ -583,25 +583,9 @@ def start_application(*, health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S) -> i
 
 
 def _health_check(host: str, port: int, *, require_async_retirement: bool = False) -> bool:
-    try:
-        status = ControlClient(f"http://{host}:{port}").health()
-        if status.get("status") != "ready":
-            return False
-        if require_async_retirement:
-            from .runtime_monitor_retirements import CAPABILITY
+    from .status_monitor_health import check_successor
 
-            if CAPABILITY not in status.get("capabilities", []):
-                raise CutoverError("Incoming monitor does not support asynchronous predecessor retirement")
-        roster = status.get("worktrees")
-        if not isinstance(roster, dict):
-            return True
-        return roster.get("status") == "ready" or (
-            status.get("published") is False and roster.get("status") == "unready"
-        )
-    except CutoverError:
-        raise
-    except Exception:
-        return False
+    return check_successor(host, port, ControlClient, require_async_retirement=require_async_retirement)
 
 
 def _make_client(base_url: str) -> ControlClient:
@@ -919,17 +903,9 @@ def activate_after_update(
                 if cutover_guard is None:
                     lease.release()
         finally:
-            # Legacy callers require the async backstop, even on an unexpected
-            # exception escaping stale recovery, orchestration, or the
-            # lease release itself above (copilot-extensions#5453): the
-            # installer wrapper suppresses a raised exception from this
-            # whole function as a non-fatal failure, so without this
-            # living in its own nested `finally` (sequential with
-            # `lease.release()` would let a release failure itself skip
-            # it) any such exception would skip scheduling the one thing
-            # meant to heal an ambiguous daemon state left behind by that
-            # very failure. An owner supplying both the guard and child
-            # handles instead settles those processes under retained custody.
+            # Only legacy transitions use the delayed backstop, including when
+            # local cleanup or lease release raises. Owned asynchronous
+            # retirement never adds a second cleanup owner.
             if transition_started and not asynchronous_retirement and (
                 cutover_guard is None or spawned_handles is None
             ):

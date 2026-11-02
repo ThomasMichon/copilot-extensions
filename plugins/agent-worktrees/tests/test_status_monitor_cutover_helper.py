@@ -381,7 +381,15 @@ def _wait_for(predicate, *, timeout: float = 10.0, interval: float = 0.05, messa
     raise AssertionError(message)
 
 
-def test_installation_promotes_successor_without_draining_busy_predecessor(tmp_path, monkeypatch):
+@pytest.mark.parametrize("guarded_enabled", [False, True])
+def test_installation_promotes_successor_without_draining_busy_predecessor(
+    tmp_path, monkeypatch, guarded_enabled,
+):
+    monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: guarded_enabled)
+    monkeypatch.setattr(
+        smc.guarded_recovery, "negotiate",
+        lambda *_args, **_kwargs: pytest.fail("asynchronous installation negotiated predecessor drain"),
+    )
     old = _FakeDaemon(101, port=0)
     new = _FakeDaemon(202)
     old.busy.set()
