@@ -306,3 +306,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   Common Git identity also requires its object/ref directories, with two
   missing-metadata and recovery controls. The combined map, consumer and
   deployment-contract packet passed 101 cases with one native FIFO skip.
+- Corrected two existing denial fixtures after the new common-directory
+  validation exposed incomplete synthetic Git metadata. Both installation
+  scopes now include object/ref directories, and the resident fixture selects
+  its map through the matching `AGENT_HOME`. The contained three-case packet
+  passes without weakening metadata validation or borrowing another map.

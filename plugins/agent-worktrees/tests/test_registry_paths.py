@@ -1061,6 +1061,9 @@ def test_cross_repo_guard_isolates_shared_checkout_by_installation(
     target = tmp_path / "delegated" / "never-written.txt"
     (target.parent / ".git").mkdir(parents=True)
     (target.parent / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    for root in (consumer, target.parent):
+        (root / ".git" / "objects").mkdir()
+        (root / ".git" / "refs").mkdir()
     request = {
         "toolName": "create", "cwd": str(consumer),
         "toolArgs": {"path": str(target)},

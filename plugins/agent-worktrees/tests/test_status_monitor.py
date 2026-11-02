@@ -1432,6 +1432,9 @@ def test_resident_agent_bridge_policy_denies_guarded_write(tmp_path, monkeypatch
     (guarded / ".git").mkdir(parents=True)
     for root in (control, guarded):
         (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        (root / ".git" / "objects").mkdir()
+        (root / ".git" / "refs").mkdir()
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     reader = guarded_anchors._reader()
     registry = tmp_path / ".agent-worktrees"
     monkeypatch.setattr(registry_paths, "registry_root", lambda: registry)
