@@ -354,13 +354,13 @@ def render(
         "pwsh 2^>nul') do if not defined _PSHOST set \"_PSHOST=%%I\"\n"
         'if not defined _PSHOST set "_PSHOST=%SystemRoot%\\System32\\'
         'WindowsPowerShell\\v1.0\\powershell.exe"\n'
-        '"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*'
+        '"%_PSHOST%" -NoProfile -File "%_PS1%" %*'
     )
     installer_name = str(data["installer"])
     if data["provisionMode"] == "direct":
         provision_posix = 'bash "$_installer" provision >&2'
         provision_powershell = (
-            "& $_hostExe -NoProfile -ExecutionPolicy Bypass -File "
+            "& $_hostExe -NoProfile -File "
             "$_installer provision 2>&1 |\n"
             "    ForEach-Object { [Console]::Error.WriteLine($_) }\n"
             "$_provisionRc = $LASTEXITCODE"
@@ -378,7 +378,7 @@ def render(
             'bash "$_snapshot_installer" provision >&2'
         )
         provision_powershell = (
-            "& $_hostExe -NoProfile -ExecutionPolicy Bypass -File "
+            "& $_hostExe -NoProfile -File "
             "$_installer stamp 2>&1 |\n"
             "    ForEach-Object { [Console]::Error.WriteLine($_) }\n"
             "$_provisionRc = $LASTEXITCODE\n\n"
@@ -397,7 +397,7 @@ def render(
             '$_snapshotInstaller")\n'
             "                $_provisionRc = 127\n"
             "            } else {\n"
-            "                & $_hostExe -NoProfile -ExecutionPolicy Bypass "
+            "                & $_hostExe -NoProfile "
             "-File $_snapshotInstaller provision 2>&1 |\n"
             "                    ForEach-Object { "
             "[Console]::Error.WriteLine($_) }\n"

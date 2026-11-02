@@ -56,6 +56,7 @@ from update_machine_gate_contract import check_machine_gate
 from install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
+    check_powershell_launch_policy,
     check_runtime_retention as _check_runtime_retention,
     declares_stamp_provision as _declares_stamp_provision,
     is_ignored_scan_path,
@@ -734,6 +735,7 @@ def check() -> int:
         return 1
 
     violations.extend(_runtime_scope_violations(PLUGINS_DIR))
+    violations.extend(check_powershell_launch_policy(REPO))
     violations.extend(check_footprints(REPO))
     violations.extend(check_machine_gate(PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"))
     violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))

@@ -50,6 +50,26 @@ def containers_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
     ("legacy", state, "global")
     for state in ("missing-helper", "old-resolver")
 ] + [
+    pytest.param(
+        scope, "standalone-native-paths", entry,
+        marks=pytest.mark.skipif(os.name != "nt", reason="native Windows path semantics"),
+    )
+    for scope, entry in (
+        ("legacy", "payload"), ("selected-cell", "payload"), ("legacy", "global"),
+    )
+] + [
+    pytest.param(
+        "legacy", "native-status-failed", entry,
+        marks=pytest.mark.skipif(os.name != "nt", reason="native Windows context reader"),
+    )
+    for entry in ("payload", "global")
+] + [
+    pytest.param(
+        "legacy", "standalone-stderr", entry,
+        marks=pytest.mark.skipif(os.name != "nt", reason="native Windows CMD launch"),
+    )
+    for entry in ("payload-cmd", "global-cmd")
+] + [
     ("legacy", "opt-out", entry) for entry in ("payload", "global")
 ] + [
     ("legacy", "failed-resolver", entry) for entry in ("payload", "global")
@@ -95,8 +115,9 @@ def test_containers_actual_first_use_publication(
 ) -> None:
     fixture = binding_fixture
     environment = _adopter(fixture, "agent-containers", containers_release)
-    if state.endswith("-unicode"):
-        root = fixture["home"] / "custom-\u00e9\u6d4b\u8bd5"
+    if state.endswith(("-unicode", "-native-paths")) or state == "native-status-failed":
+        name = "custom-\u00e9\u6d4b\u8bd5" if state.endswith("-unicode") else "native%path"
+        root = fixture["home"] / name
         root.mkdir()
         fixture["legacy"] = root
         fixture["arguments"]["legacy_root"] = root
@@ -122,7 +143,7 @@ def test_containers_actual_first_use_publication(
     shell = "powershell" if os.name == "nt" else "bash"
     suffix = "ps1" if os.name == "nt" else "sh"
     retained = None
-    if entry != "payload":
+    if not entry.startswith("payload"):
         stamp_shell = "powershell" if entry == "compat-global" else shell
         stamp = [*_command(fixture, stamp_shell, "init"), "stamp"]
         stamp += ["-InstallDir" if stamp_shell == "powershell" else "--install-dir",
@@ -140,7 +161,7 @@ def test_containers_actual_first_use_publication(
     healthy = state.startswith("healthy-")
     standalone = state in {
         "missing", "standalone", "standalone-stderr", "standalone-no-flock", "policy-under-lock",
-        "standalone-unicode",
+        "standalone-unicode", "standalone-native-paths",
         "mode-under-lock",
     }
     policy_state = (
@@ -177,6 +198,19 @@ def test_containers_actual_first_use_publication(
             + 'printf reached > "$3/installer-ran"\nexit 37\n',
             encoding="utf-8-sig" if os.name == "nt" else "utf-8",
         )
+
+    portable_retry = fixture["home"] / "portable-retry"
+    if state == "native-status-failed":
+        for payload in roots:
+            (payload / "scripts/installation-context/installation-context.ps1").write_text(
+                "[Console]::Error.WriteLine('recorded native status failure')\nexit 67\n",
+                encoding="utf-8-sig",
+            )
+            (payload / "scripts/installation-context/installation_context.py").write_text(
+                "from pathlib import Path\n"
+                f"Path({str(portable_retry)!r}).write_text('unexpected retry')\n",
+                encoding="utf-8",
+            )
 
     if healthy:
         python = _completed_slot({**fixture, "legacy": root})
@@ -260,20 +294,22 @@ def test_containers_actual_first_use_publication(
         pointer.rename(pointer.with_name(pointer.name + ".unavailable"))
 
     path = (
-        fixture["payload"] / "bin/agent-containers" if entry == "payload" else
+        fixture["payload"] / "bin/agent-containers" if entry.startswith("payload") else
         fixture["home"] / ".local/bin/agent-containers"
     )
     if os.name == "nt":
-        path = path.with_suffix(".ps1")
+        path = path.with_suffix(".cmd" if entry.endswith("-cmd") else ".ps1")
     forwarded = (
         ["--help", 'spaces "quotes" & pipes | ; bangs !', "", "tail space\\"]
         if healthy else ["--help"]
     )
     command = (
+        [os.environ["COMSPEC"], "/d", "/c", str(path), *forwarded]
+        if entry.endswith("-cmd") else
         [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(path), *forwarded]
         if os.name == "nt" else ["bash", str(path), *forwarded]
     )
-    host = powershell_host(fixture, environment) if os.name == "nt" else None
+    host = powershell_host(fixture, environment) if os.name == "nt" and not entry.endswith("-cmd") else None
     before = snapshot_home()
     result = _run(fixture, environment, command, host)
     after = snapshot_home()
@@ -305,6 +341,7 @@ def test_containers_actual_first_use_publication(
         return
     if not (standalone or healthy):
         expected = (
+            "installation context could not be resolved" if state == "native-status-failed" else
             "runtime resolver failed" if state == "failed-resolver" else
             "read-only runtime resolver is unavailable" if state == "old-resolver" else
             "installation-context runtime support is unavailable" if state.startswith("missing-") else
@@ -316,6 +353,10 @@ def test_containers_actual_first_use_publication(
         assert result.returncode != 0 and expected in result.stderr, evidence
         if state == "failed-resolver":
             assert result.returncode == 126, evidence
+        if state == "native-status-failed":
+            assert result.returncode == 126, evidence
+            assert "recorded native status failure" in result.stderr, evidence
+            assert not portable_retry.exists(), evidence
         assert not changed and not marker.exists(), evidence
         return
     allowed = {relative, f"{relative}/logs", f"{relative}/logs/boot-trace.jsonl"}

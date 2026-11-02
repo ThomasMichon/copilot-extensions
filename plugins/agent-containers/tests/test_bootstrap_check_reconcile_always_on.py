@@ -65,6 +65,59 @@ def test_ps1_has_no_opt_in_gate():
     assert "background reconcile SKIPPED" not in text
 
 
+@pytest.mark.parametrize("script", ["bootstrap-check.ps1", "init.ps1", "runtime-gate.ps1"])
+def test_powershell_launches_inherit_execution_policy(script):
+    text = (_PLUGIN_ROOT / "scripts" / script).read_text(encoding="utf-8")
+    assert "-executionpolicy" not in text.lower()
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(45)
+@pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell launch contract")
+@pytest.mark.parametrize("engine", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("exit_code", [0, 37])
+def test_powershell_first_stamp_preserves_failure_and_diagnostics(
+    tmp_path, engine, exit_code,
+):
+    host = shutil.which(engine)
+    if host is None:
+        pytest.skip(f"{engine} unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    scripts = tmp_path / "plugin" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts.parent / "plugin.json").write_text(
+        json.dumps({"name": _PLUGIN_NAME}), encoding="utf-8",
+    )
+    shutil.copyfile(_PS1, scripts / "bootstrap-check.ps1")
+    (scripts / "init.ps1").write_text(
+        "param([ValidateSet('stamp')][string]$Action)\n"
+        "[Console]::Out.WriteLine('recorded stamp output')\n"
+        "[Console]::Error.WriteLine('recorded stamp diagnostic')\n"
+        "[IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'stamp-action'),$Action)\n"
+        f"exit {exit_code}\n",
+        encoding="utf-8-sig",
+    )
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_", "AGENT_")) and key != "PSModulePath"
+    }
+    environment.update({"HOME": str(home), "USERPROFILE": str(home)})
+    result = subprocess.run(
+        [host, "-NoLogo", "-NoProfile", "-File", str(scripts / "bootstrap-check.ps1")],
+        cwd=home, env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert (home / "stamp-action").read_text() == "stamp", result.stderr
+    assert result.returncode == exit_code, (result.stdout, result.stderr)
+    assert result.stdout == "{}"
+    if exit_code:
+        assert "recorded stamp output" in result.stderr
+        assert "recorded stamp diagnostic" in result.stderr
+    else:
+        assert not result.stderr
+
+
 def test_sh_has_no_opt_in_gate():
     text = _SH.read_text(encoding="utf-8")
     assert "optInKey" not in text

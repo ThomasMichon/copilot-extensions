@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tools import install_contract_guard
 from tools.install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
@@ -172,3 +173,85 @@ def test_unterminated_adapter_does_not_hide_persistent_access():
     assert persistent_environment_violations(text) == [
         "line 2: direct .NET environment target \"'User'\"",
     ]
+
+
+@pytest.fixture
+def launch_policy_repo(tmp_path):
+    for relative in (
+        "libs/payload-invocation/generate.py",
+        "libs/payload-invocation/templates/powershell-shim.tmpl",
+        "libs/payload-invocation/templates/cmd-shim.tmpl",
+        "plugins/agent-containers/scripts/bootstrap-check.ps1",
+        "plugins/agent-containers/scripts/init.ps1",
+        "plugins/agent-containers/scripts/runtime-gate.ps1",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# inert source fixture\n", encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.parametrize(("relative", "body"), [
+    ("libs/payload-invocation/generate.py",
+     "launcher = 'powershell -ExecutionPolicy Bypass -File script.ps1'\n"),
+    ("libs/payload-invocation/templates/powershell-shim.tmpl",
+     "& $host -ExecutionPolicy RemoteSigned -File $installer\n"),
+    ("libs/payload-invocation/templates/cmd-shim.tmpl",
+     '"%_PSHOST%" -executionpolicy Bypass -File "%_PS1%" %*\n'),
+    ("plugins/agent-containers/scripts/bootstrap-check.ps1",
+     "$args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script)\n"),
+    ("plugins/agent-containers/scripts/init.ps1",
+     "$args = @('-NoProfile', '-EP', 'Bypass', '-File', $script)\n"),
+    ("plugins/agent-containers/scripts/runtime-gate.ps1",
+     "& $host -ExecutionPolicy Bypass -File $helper status\n"),
+    ("plugins/agent-example/scripts/install.ps1",
+     "# === install-contract:v4 self-stage -- keep byte-identical across plugins ===\n"
+     "& $host -ExecutionPolicy Bypass -File $stagedScript\n"
+     "# === end install-contract:v4 self-stage ===\n"),
+])
+def test_powershell_launch_policy_rejects_owned_source_overrides(
+    launch_policy_repo, relative, body,
+):
+    path = launch_policy_repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    problems = install_contract_guard.check_powershell_launch_policy(launch_policy_repo)
+    assert any(relative in problem and "overrides inherited" in problem for problem in problems)
+
+
+def test_powershell_launch_policy_ignores_comments_and_unrelated_legacy_emitters(
+    launch_policy_repo,
+):
+    source = launch_policy_repo / "libs/payload-invocation/generate.py"
+    source.write_text("# example: -ExecutionPolicy Bypass\nlauncher = '-NoProfile -File'\n",
+                      encoding="utf-8")
+    scripts = launch_policy_repo / "plugins/agent-example/scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "install.ps1").write_text(
+        "# === install-contract:v4 self-stage -- keep byte-identical across plugins ===\n"
+        "# example: -ExecutionPolicy Bypass\n& $host -NoProfile -File $stagedScript\n"
+        "# === end install-contract:v4 self-stage ===\n"
+        "& $legacy -ExecutionPolicy Bypass -File $unrelated\n",
+        encoding="utf-8",
+    )
+    (scripts / "installer-engine.ps1").write_text(
+        "& $legacy -ExecutionPolicy Bypass -File $unrelated\n", encoding="utf-8",
+    )
+    assert install_contract_guard.check_powershell_launch_policy(launch_policy_repo) == []
+
+
+@pytest.mark.parametrize("failure", ["missing", "syntax"])
+def test_powershell_launch_policy_refuses_unverifiable_source(launch_policy_repo, failure):
+    path = launch_policy_repo / "libs/payload-invocation/generate.py"
+    if failure == "missing":
+        path.unlink()
+    else:
+        path.write_text("def broken(:\n", encoding="utf-8")
+    problems = install_contract_guard.check_powershell_launch_policy(launch_policy_repo)
+    assert any("generate.py" in problem and "cannot verify" in problem for problem in problems)
+
+
+def test_powershell_launch_policy_accepts_current_source():
+    assert install_contract_guard.check_powershell_launch_policy(
+        Path(__file__).resolve().parents[1],
+    ) == []

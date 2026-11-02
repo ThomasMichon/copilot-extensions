@@ -9,5 +9,5 @@ if not exist "%_PS1%" (
 set "_PSHOST="
 for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
 if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
+"%_PSHOST%" -NoProfile -File "%_PS1%" %*
 exit /b %ERRORLEVEL%

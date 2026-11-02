@@ -3262,6 +3262,16 @@ pushes, manual and unknown events also run them. Diff/encoding/admission errors
 fail the checks job instead of emitting a skipped-success selection. All other
 guards, including the ungated workflow-policy guard, remain unchanged.
 
+The required install-contract guard also reads the canonical payload launcher
+generator and Windows templates, Containers launch scripts, and shared
+PowerShell self-stage blocks to reject execution-policy overrides. This is a
+portable source-only contract: it imports no generator, invokes no installer or
+PowerShell, and adds nothing to the exact unit packet. The existing required
+generator-drift check covers emitted launchers. Focused controls live in
+`tools/test_install_contract_guard.py` and `tools/test_check_install_contract.py`
+(select `powershell_launch_policy`); real policy refusal, first-use subprocess
+cases and interactive Windows visibility remain separate explicit portfolios.
+
 Selected AST work runs through `tools/run-source-ast-guards.py`: three fixed
 workers invoke the original full tracking-write, headless-launch and
 asyncio-timeout scanners, each with a 300-second deadline. The runner joins

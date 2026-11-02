@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import tempfile
 from pathlib import Path
@@ -111,6 +112,61 @@ def _lexical_views(text: str) -> tuple[str, str]:
             calls[index] = " "
         index += 1
     return "".join(source), "".join(calls)
+
+
+def check_powershell_launch_policy(repo: Path) -> list[str]:
+    """Read owned launcher sources without importing generators or running scripts."""
+    override = re.compile(r"(?<![\w-])-(?:ExecutionPolicy|EP)(?![\w-])", re.IGNORECASE)
+    problems: list[str] = []
+    sources = [
+        repo / "libs/payload-invocation/generate.py",
+        *(repo / "plugins/agent-containers/scripts" / name for name in (
+            "bootstrap-check.ps1", "init.ps1", "runtime-gate.ps1",
+        )),
+        *sorted((repo / "libs/payload-invocation/templates").glob("*powershell.tmpl")),
+        repo / "libs/payload-invocation/templates/powershell-shim.tmpl",
+        repo / "libs/payload-invocation/templates/cmd-shim.tmpl",
+    ]
+
+    def scan(path: Path, text: str, offset: int = 0) -> None:
+        if path.suffix == ".py":
+            fragments = [
+                (node.lineno, node.value) for node in ast.walk(ast.parse(text))
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            ]
+        else:
+            fragments = enumerate(_lexical_views(text)[0].splitlines(), 1)
+        for line, fragment in fragments:
+            if override.search(fragment):
+                problems.append(
+                    f"{path.relative_to(repo).as_posix()}:{line + offset}: "
+                    "overrides inherited PowerShell execution policy"
+                )
+
+    for path in sources:
+        try:
+            scan(path, path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, SyntaxError) as error:
+            problems.append(f"{path.relative_to(repo).as_posix()}: cannot verify launch policy: {error}")
+
+    start_marker = "# === install-contract:v4 self-stage"
+    end_marker = "# === end install-contract:v4 self-stage ==="
+    for path in sorted({
+        *repo.glob("plugins/*/scripts/install.ps1"),
+        *repo.glob("plugins/*/scripts/init.ps1"),
+    } - set(sources)):
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+            start = text.find(start_marker)
+            if start < 0:
+                continue
+            end = text.find(end_marker, start)
+            if end < 0:
+                raise ValueError("unterminated self-stage block")
+            scan(path, text[start:end], text.count("\n", 0, start))
+        except (OSError, UnicodeError, ValueError) as error:
+            problems.append(f"{path.relative_to(repo).as_posix()}: cannot verify launch policy: {error}")
+    return problems
 
 
 def _call_arguments(text: str, open_paren: int) -> tuple[str | None, int]:

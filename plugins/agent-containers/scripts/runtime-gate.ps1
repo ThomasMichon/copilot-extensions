@@ -94,7 +94,7 @@ function Invoke-ContextRead {
 
 try {
     $statusArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+        '-NoProfile', '-File', $modeRunner,
         'status',
         '-PayloadRoot', $payloadRoot,
         '-PluginId', 'agent-containers',
@@ -174,7 +174,7 @@ try {
             $validationDurableHome = Split-Path -Parent $validationDurableHome
         }
         $validationArgs = @(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+            '-NoProfile', '-File', $modeRunner,
             'validate',
             '-Context', $context,
             '-DurableHome', $validationDurableHome,
@@ -281,7 +281,7 @@ if ($env:AGENT_CONTAINERS_NO_SELFPROVISION) {
 
 function Assert-RuntimePublication {
     $publicationArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+        '-NoProfile', '-File', $modeRunner,
         'probe-plugin-publication', '-PayloadRoot', $payloadRoot,
         '-PluginId', 'agent-containers', '-LegacyRoot', $runtimeRoot
     )
@@ -308,7 +308,7 @@ function Assert-RuntimePublication {
         } else {
             if (-not (Test-LegacyInvocationAllowed $decision)) { throw ($response -join ' ') }
             $legacyArgs = @(
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+                '-NoProfile', '-File', $modeRunner,
                 'probe-legacy', '-PayloadRoot', $payloadRoot,
                 '-PluginId', 'agent-containers', '-LegacyRoot', $runtimeRoot
             )
@@ -376,7 +376,7 @@ try {
         $ErrorActionPreference = 'Continue'
         $global:LASTEXITCODE = 1
         try {
-            & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
+            & $hostExe -NoProfile -File $installer provision -InstallDir $runtimeRoot 2>&1 |
                 ForEach-Object { [Console]::Error.WriteLine($_) }
             $_provisionRc = $LASTEXITCODE
         } finally { $ErrorActionPreference = $previousEap }

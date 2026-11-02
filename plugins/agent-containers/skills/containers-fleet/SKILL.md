@@ -20,7 +20,7 @@ description: >-
 > session, stamp a management binstub from an explicitly chosen payload:
 >
 > - Windows:
->   `pwsh -NoProfile -ExecutionPolicy Bypass -File "<explicit-payload-path>\scripts\init.ps1" stamp`
+>   `pwsh -NoProfile -File "<explicit-payload-path>\scripts\init.ps1" stamp`
 > - POSIX:
 >   `bash "<explicit-payload-path>/scripts/init.sh" stamp`
 >

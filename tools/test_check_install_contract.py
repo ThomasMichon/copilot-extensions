@@ -87,6 +87,20 @@ def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
     assert "synthetic machine-gate violation" in output.out + output.err
 
 
+def test_install_guard_runs_powershell_launch_policy_contract(monkeypatch, capsys) -> None:
+    called = []
+
+    def fail(source):
+        called.append(source)
+        return ["synthetic PowerShell launch-policy violation"]
+
+    monkeypatch.setattr(checker, "check_powershell_launch_policy", fail)
+    assert checker.check() == 1
+    assert called == [REPO]
+    output = capsys.readouterr()
+    assert "synthetic PowerShell launch-policy violation" in output.out + output.err
+
+
 @pytest.mark.parametrize("name,before,after", [
     ("update_gate.py", 'if scope != "machine-gated":', "if True:"),
     ("update_gate.py", "repo_dir = context", "repo_dir = None"),
