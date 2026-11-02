@@ -185,7 +185,7 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
     for path in _view_paths(directory) if paths is None else paths:
         try:
             data = _view_data(path, reader)
-        except (OSError, ValueError):
+        except (FileNotFoundError, ValueError):
             data = {}
         scope = {
             key: data[key] for key in ("source_root", "registry_root", "source_project")
@@ -224,7 +224,7 @@ def _refresh_locked(
                 project = data.get("source_project")
                 if isinstance(project, str) and project:
                     prior_projects[source] = project
-        except (OSError, ValueError, TypeError):
+        except (FileNotFoundError, ValueError, TypeError):
             pass  # Corrupt prior views are withdrawn, never retained as facts.
     if not include_prepared:
         old_paths = [reader.map_path(caller, root) for caller in selected]
@@ -238,7 +238,7 @@ def _refresh_locked(
                     project = data.get("source_project")
                     if isinstance(project, str) and project:
                         prior_projects[caller] = project
-            except (OSError, ValueError, TypeError):
+            except (FileNotFoundError, ValueError, TypeError):
                 pass
     # Withdraw before acquisition: even an interrupted or failed producer must
     # not leave the old policy looking current after a managed mutation.

@@ -261,3 +261,10 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   report empty success, change source bytes or leave old facts paired with a
   newly changed policy. The focused listing/concurrency/real-graft selection
   passed four cases.
+- Preserved retry scope when an existing map has a transient file-read error.
+  Withdrawal and prepared-caller scans now distinguish unavailable I/O from
+  missing or malformed maps. An unreadable map refuses a pre-mutation write;
+  post-mutation errors retain unavailable tombstones and report incomplete
+  publication. Seven phase-specific controls prove a later refresh recovers
+  every caller and its original guard. The complete map packet passed 57 cases
+  with one native FIFO capability skip.

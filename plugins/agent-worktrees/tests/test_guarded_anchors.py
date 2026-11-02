@@ -592,6 +592,50 @@ def test_indirected_map_store_cannot_read_or_mutate_another_store(producer, monk
     assert list(foreign.iterdir()) == [path]
 
 
+@pytest.mark.parametrize("operation,failed_read", [
+    ("refresh", 1), ("refresh", 2),
+    ("prepare", 1), ("prepare", 2),
+    ("managed_write", 1), ("managed_write", 2), ("managed_write", 3),
+])
+def test_transient_map_read_failure_preserves_retry_scope(producer, monkeypatch, operation, failed_read):
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *args: p.root)
+    p.module.refresh(p.callers)
+    path = p.reader.map_path(p.callers[0], p.root)
+    original = p.module._view_data
+    reads = 0
+    effects = []
+
+    def unavailable(selected, reader):
+        nonlocal reads
+        if selected == path:
+            reads += 1
+            if reads == failed_read:
+                raise PermissionError("synthetic transient map read failure")
+        return original(selected, reader)
+
+    monkeypatch.setattr(p.module, "_view_data", unavailable)
+    if operation == "prepare":
+        assert "transient map read failure" in p.module.prepare(p.callers[0])
+    else:
+        with pytest.raises((PermissionError, p.module.GuardPublicationError), match="transient map read failure"):
+            if operation == "refresh":
+                p.module.refresh()
+            else:
+                p.module.managed_write(lambda: effects.append("source written"))
+    assert reads == failed_read
+    assert effects == (["source written"] if operation == "managed_write" and failed_read > 1 else [])
+    for caller, project in zip(p.callers, ("first", "second")):
+        data = json.loads(p.reader.map_path(caller, p.root).read_bytes())
+        assert data["source_root"] == p.reader.canonical(caller)
+        assert data["source_project"] == project
+    if effects:
+        assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+    monkeypatch.setattr(p.module, "_view_data", original)
+    assert p.module.refresh()["published"] == 2
+    assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
+
+
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native FIFO unavailable")
 def test_native_fifo_does_not_block_hook_withdrawal_or_prepared_scan(producer):
     p = producer
