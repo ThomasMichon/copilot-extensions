@@ -1,0 +1,377 @@
+"""Bounded identity-fenced materialization inside the caller's SQLite transaction."""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import sqlite3
+from contextlib import closing
+from dataclasses import asdict
+from typing import TYPE_CHECKING
+
+from . import owner_observation_contract as c
+
+if TYPE_CHECKING:
+    from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
+
+SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS owner_observation_owner "
+    "(singleton INTEGER PRIMARY KEY CHECK(singleton=1), generation TEXT, writer TEXT)",
+    "CREATE TABLE IF NOT EXISTS owner_observation_active "
+    "(project TEXT, worktree TEXT, generation TEXT, PRIMARY KEY(project,worktree))",
+    "CREATE TABLE IF NOT EXISTS owner_observation_journal "
+    "(generation TEXT PRIMARY KEY, project TEXT, worktree TEXT, source TEXT, head TEXT, "
+    "qualified TEXT, position INTEGER, floor INTEGER, facts TEXT, fence TEXT, observed_at TEXT, "
+    "availability TEXT, completeness TEXT, gap TEXT)",
+    "CREATE TABLE IF NOT EXISTS owner_observation_entry "
+    "(generation TEXT, position INTEGER, id TEXT, payload TEXT, bytes INTEGER, "
+    "PRIMARY KEY(generation,position), UNIQUE(generation,id))",
+    "CREATE TABLE IF NOT EXISTS owner_observation_batch "
+    "(generation TEXT, id TEXT, digest TEXT, position INTEGER, PRIMARY KEY(generation,id))",
+    "CREATE TABLE IF NOT EXISTS owner_observation_identity "
+    "(generation TEXT, id TEXT, digest TEXT, position INTEGER, PRIMARY KEY(generation,id))",
+)
+MAX_GUARDS = 50000
+COMPARISON_BYTES = c.FRAME_BYTES * c.PAGE_ENTRIES
+
+
+class PreparationOverflow(c.ObservationError):
+    """Size-only failure retaining private, detached, structurally validated entries."""
+
+    def __init__(self, entries: list[dict]) -> None:
+        super().__init__("owner observation exceeds byte bound", "oversized")
+        self.entries = entries
+
+
+def checked_entry(value: dict) -> None:
+    c.entry(value, _check_size=False)
+    try:
+        c.entry(value)
+    except c.ObservationError as error:
+        if error.code != "oversized":
+            raise
+        raise PreparationOverflow(copy.deepcopy([value])) from error
+
+
+def freeze_record(record: CanonicalObservation) -> CanonicalObservation:
+    from .owner_observation_history import CanonicalObservation
+
+    if not isinstance(record, CanonicalObservation):
+        raise c.ObservationError("owner capture must be a canonical observation")
+    capture = c.utf8(c.encode(asdict(record), c.BODY_BYTES - 2048))
+    return CanonicalObservation(**c.decode(capture, c.BODY_BYTES - 2048))
+
+
+def prepare(
+    record: CanonicalObservation, entries: list[dict], post_save: bool
+) -> tuple[CanonicalObservation, list, str]:
+    if type(post_save) is not bool or not isinstance(entries, list) or not 1 <= len(entries) <= 64:
+        raise c.ObservationError("observation publication requires a bounded explicit entry batch")
+    record = freeze_record(record)
+    capture = c.utf8(c.encode(asdict(record), c.BODY_BYTES - 2048))
+    c.bounded(entries, 3)
+    frozen = copy.deepcopy(entries)
+    for item in frozen:
+        c.entry(item, post_save=post_save, _check_size=False)
+        if item["evidence_kind"] == "persisted-mutation" and c.encode(
+            item["record_fence"]
+        ) != c.encode(record.record_fence):
+            raise c.ObservationError("post-save evidence does not match the selected record fence")
+    try:
+        for item in frozen:
+            c.entry(item, post_save=post_save)
+        c.encode(frozen, c.BODY_BYTES)
+    except c.ObservationError as error:
+        if error.code != "oversized":
+            raise
+        raise PreparationOverflow(frozen) from error
+    digest = hashlib.sha256()
+    for part in (capture, c.utf8(c.encode(frozen, c.BODY_BYTES)), c.utf8(c.encode(post_save))):
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    return record, frozen, digest.hexdigest()
+
+
+def event_identity(source: c.Source, item: dict, batch_id: str, offset: int) -> str:
+    original = item["source_ref"]
+    identity = (
+        {key: original[key] for key in ("source", "generation", "record_id")}
+        if original["record_id"] is not None
+        else [batch_id, offset]
+    )
+    return (
+        "ow1:"
+        + hashlib.sha256(
+            c.utf8(c.encode([source.namespace(), source.source_generation, identity])),
+        ).hexdigest()
+    )
+
+
+def content_digest(
+    item: dict, *, limit: int = c.BODY_BYTES - 1024, budget: list[int] | None = None
+) -> str:
+    """Hash already validated JSON incrementally, with explicit byte/work bounds."""
+    digest, used = hashlib.sha256(), 1
+    encoder = c.json.JSONEncoder(
+        ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    )
+    for text in encoder.iterencode(item):
+        raw = c.utf8(text)
+        used += len(raw)
+        if budget is not None:
+            budget[0] -= len(raw)
+            if budget[0] < 0:
+                raise c.ObservationError("owner identity comparison exceeds work bound")
+        if used > limit:
+            raise c.ObservationError("owner observation exceeds byte bound", "oversized")
+        digest.update(raw)
+    return digest.hexdigest()
+
+
+def comparison_digest(item: dict, budget: list[int]) -> str:
+    try:
+        return content_digest(item, limit=COMPARISON_BYTES, budget=budget)
+    except c.ObservationError as error:
+        if error.code != "oversized":
+            raise
+        raise c.ObservationError("owner identity comparison exceeds work bound") from error
+
+
+def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> bool:
+    if (
+        conn.execute(
+            "SELECT 1 FROM owner_observation_batch WHERE generation=? AND id=?",
+            (row["generation"], batch_id),
+        ).fetchone()
+        is not None
+    ):
+        raise c.ObservationError(
+            "oversized content conflicts with an accepted batch identity", "batch-conflict"
+        )
+    pending, budget, novel = {}, [COMPARISON_BYTES], False
+    for offset, item in enumerate(entries, 1):
+        event_id = event_identity(source, item, batch_id, offset)
+        previous = pending.get(event_id)
+        if previous is None:
+            pending[event_id] = (item, None)
+        else:
+            previous_item, previous_digest = previous
+            if previous_digest is None:
+                previous_digest = comparison_digest(previous_item, budget)
+            if comparison_digest(item, budget) != previous_digest:
+                raise c.ObservationError(
+                    "source record identity changed content within batch", "event-conflict"
+                )
+            pending[event_id] = (previous_item, previous_digest)
+        prior = conn.execute(
+            "SELECT digest FROM owner_observation_identity WHERE generation=? AND id=?",
+            (row["generation"], event_id),
+        ).fetchone()
+        if prior is None:
+            novel = True
+            continue
+        try:
+            digest = content_digest(item, budget=budget)
+        except c.ObservationError as error:
+            if error.code != "oversized":
+                raise
+            # Accepted entry content fits this bound; this content provably cannot match.
+            raise c.ObservationError(
+                "source record identity changed content", "event-conflict"
+            ) from error
+        if digest != prior[0]:
+            raise c.ObservationError("source record identity changed content", "event-conflict")
+    return novel
+
+
+def delivery_failed(
+    owner: OwnerObservationHistory,
+    selected: c.Selection,
+    record: CanonicalObservation,
+    expected_cursor: str,
+    error: c.ObservationError,
+    *,
+    batch_id: str,
+    entries: list[dict],
+    admission=None,
+) -> None:
+    from . import owner_observation_intent as intents
+
+    c.reference(batch_id, "observation batch identity")
+    token = admission
+    staged = None
+    try:
+        with owner._lock, closing(owner._connect(write=True)) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            owner._fence(conn)
+            if admission is not None:
+                intents.verify(owner, conn, admission, record)
+            row = owner._row(conn, selected)
+            if row["source"] != record.source:
+                raise c.ObservationError("record source incarnation changed", "source-replaced")
+            if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
+                raise c.ObservationError("owner observation position changed", "stale-cursor")
+            novel = reject_overflow_conflicts(conn, row, owner._source(row), batch_id, entries)
+            if not novel:
+                from .owner_observation_publication import same_capture
+
+                if not same_capture(row, record):
+                    raise c.ObservationError(
+                        "duplicate source records cannot replace current facts", "event-conflict"
+                    )
+                raise c.ObservationError("duplicate-only batch exceeds byte bound", "oversized")
+            owner._fence(conn)
+            if admission is None:
+                staged = intents.start(owner, conn, record, row, kind="overflow", batch=batch_id)
+        if admission is None:
+            token = staged
+        with owner._lock:
+            if admission is None:
+                intents.checkpoint(owner, token)
+    except (OSError, sqlite3.Error) as failure:
+        raise intents.fail(owner, record, token, failure) from failure
+    failure = intents.fail(owner, record, token, error, reason="cursor-unavailable")
+    if not failure.gap_persisted:
+        raise failure
+
+
+def append(
+    owner: OwnerObservationHistory,
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    record: CanonicalObservation,
+    entries: list[dict],
+    batch_id: str,
+    digest: str,
+) -> bool:
+    source = owner._source(row)
+    start = row["position"]
+    stored, identities, pending = [], [], {}
+    for offset, item in enumerate(entries, 1):
+        event_id = event_identity(source, item, batch_id, offset)
+        entry_digest = content_digest(item)
+        prior = conn.execute(
+            "SELECT digest FROM owner_observation_identity WHERE generation=? AND id=?",
+            (row["generation"], event_id),
+        ).fetchone()
+        known = pending.get(event_id) if prior is None else prior[0]
+        if known is not None:
+            if known != entry_digest:
+                raise c.ObservationError(
+                    "source record identity changed content", "event-conflict"
+                )
+            continue
+        seq = start + len(stored) + 1
+        if seq > c.MAX_POSITION:
+            raise c.ObservationError("owner position exhausted", "unavailable")
+        value = {
+            **item,
+            "event_id": event_id,
+            "cursor": c.position(source, seq),
+            "head_session_id": record.head_session_id,
+        }
+        c.entry(value, stored=True, post_save=True)
+        stored.append(value)
+        pending[event_id] = entry_digest
+        identities.append((row["generation"], event_id, entry_digest, seq))
+    for table, added in (("identity", len(identities)), ("batch", 1)):
+        count = conn.execute(
+            f"SELECT count(*) FROM owner_observation_{table} WHERE generation=?",
+            (row["generation"],),
+        ).fetchone()[0]
+        if count + added > MAX_GUARDS:
+            raise c.ObservationError("owner identity guard bound reached", "cursor-unavailable")
+    if not stored:
+        if (
+            row["facts"] != c.encode(record.facts)
+            or row["head"] != record.head_session_id
+            or row["fence"] != c.encode(record.record_fence)
+            or row["availability"] != record.availability
+            or row["completeness"] != record.completeness
+        ):
+            raise c.ObservationError(
+                "duplicate source records cannot replace current facts", "event-conflict"
+            )
+        conn.execute(
+            "INSERT INTO owner_observation_batch VALUES (?,?,?,?)",
+            (row["generation"], batch_id, digest, start),
+        )
+        return False
+    candidate = dict(row)
+    candidate.update(
+        position=start + len(stored),
+        head=record.head_session_id,
+        facts=c.encode(record.facts),
+        availability=record.availability,
+        completeness=record.completeness,
+    )
+    source = owner._source(candidate)
+    body = owner._body(
+        candidate, c.Selection(*record.key, record.head_session_id), _materializing=True
+    )
+    body.update(
+        base_cursor=c.position(source, start),
+        entries=stored,
+        facts=record.facts if body["availability"] == "observed" else None,
+    )
+    c.frame("delta", source, c.position(source, candidate["position"]), body)
+    for value in stored:
+        text = c.encode(value, c.BODY_BYTES - 1024)
+        conn.execute(
+            "INSERT INTO owner_observation_entry VALUES (?,?,?,?,?)",
+            (
+                row["generation"],
+                c.sequence(value["cursor"], source),
+                value["event_id"],
+                text,
+                len(c.utf8(text)),
+            ),
+        )
+    conn.executemany("INSERT INTO owner_observation_identity VALUES (?,?,?,?)", identities)
+    pending_failure = owner.pending_failure(row)
+    gap = pending_failure.reason if pending_failure is not None else row["gap"]
+    conn.execute(
+        "UPDATE owner_observation_journal SET head=?,qualified=?,position=?,facts=?,fence=?,"
+        "observed_at=?,availability=?,completeness=?,gap=? WHERE generation=?",
+        (
+            record.head_session_id,
+            owner.resident_generation,
+            candidate["position"],
+            c.encode(record.facts),
+            c.encode(record.record_fence),
+            record.observed_at,
+            record.availability,
+            record.completeness,
+            gap,
+            row["generation"],
+        ),
+    )
+    conn.execute(
+        "INSERT INTO owner_observation_batch VALUES (?,?,?,?)",
+        (row["generation"], batch_id, digest, candidate["position"]),
+    )
+    retain(owner, conn, row["generation"])
+    return True
+
+
+def retain(owner: OwnerObservationHistory, conn: sqlite3.Connection, journal: str) -> None:
+    rows = conn.execute(
+        "SELECT position,bytes FROM owner_observation_entry "
+        "WHERE generation=? ORDER BY position DESC",
+        (journal,),
+    ).fetchall()
+    used, keep = 0, 0
+    for item in rows:
+        if keep >= owner.max_entries or used + item["bytes"] > owner.max_bytes:
+            break
+        used, keep = used + item["bytes"], keep + 1
+    removed = rows[keep:]
+    if removed:
+        floor = max(item["position"] for item in removed)
+        conn.execute(
+            "DELETE FROM owner_observation_entry WHERE generation=? AND position<=?",
+            (journal, floor),
+        )
+        conn.execute(
+            "UPDATE owner_observation_journal SET floor=? WHERE generation=?", (floor, journal)
+        )

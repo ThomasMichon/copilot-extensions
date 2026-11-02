@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 
+from .client import DispatchClient
 from .pool_publication_custody import PoolPublicationError
 from .queue import TaskQueue
 from .queue_pool_cohort import PoolConfiguredCohort, _encode_observation
@@ -25,7 +26,7 @@ class PoolCohortProjectionRequest:
     observation: ConfiguredSupervisorCohort
     previous: PoolConfiguredCohort
     source_path: Path
-    coordinator_path: Path
+    coordinator_path: Path | str
 
     @property
     def expected_revision(self) -> int:
@@ -54,8 +55,8 @@ def _comparable_observation(observation: ConfiguredSupervisorCohort) -> None:
 class PoolCohortPreparation:
     """Explicit source-only custody through the actual registrar and queue owners."""
 
-    def __init__(self, sources: RegistrarSources, queue: TaskQueue) -> None:
-        if not isinstance(sources, RegistrarSources) or not isinstance(queue, TaskQueue):
+    def __init__(self, sources: RegistrarSources, queue: TaskQueue | DispatchClient) -> None:
+        if not isinstance(sources, RegistrarSources) or not isinstance(queue, (TaskQueue, DispatchClient)):
             raise PoolPublicationError(
                 "cohort preparation requires the registrar and queue owners"
             )
@@ -64,6 +65,11 @@ class PoolCohortPreparation:
         self._lock = Lock()
         self._pending: PoolCohortProjectionRequest | None = None
         self._settled: tuple[PoolCohortProjectionRequest, PoolConfiguredCohort] | None = None
+
+    def _coordinator_target(self) -> Path | str:
+        if isinstance(self._queue, DispatchClient):
+            return self._queue.base_url
+        return Path(self._queue.db_path).absolute()
 
     @contextmanager
     def _state(self) -> Iterator[None]:
@@ -90,7 +96,7 @@ class PoolCohortPreparation:
             if self._pending is not None:
                 raise PoolPublicationError("original configured cohort request remains unresolved")
             source_path = pointers_file(self._sources.base).absolute()
-            coordinator_path = Path(self._queue.db_path).absolute()
+            coordinator_path = self._coordinator_target()
             before = self._queue.pool_configured_cohort()
             observation = self._sources.configured_supervisor_cohort()
             _comparable_observation(observation)
@@ -99,7 +105,7 @@ class PoolCohortPreparation:
             after = self._queue.pool_configured_cohort()
             if (
                 source_path != pointers_file(self._sources.base).absolute()
-                or coordinator_path != Path(self._queue.db_path).absolute()
+                or coordinator_path != self._coordinator_target()
             ):
                 raise PoolPublicationError(
                     "configured cohort source or coordinator target changed"
@@ -139,7 +145,7 @@ class PoolCohortPreparation:
     ) -> None:
         if self._pending is not request:
             raise PoolPublicationError("cohort result does not match the original request")
-        if Path(self._queue.db_path).absolute() != request.coordinator_path:
+        if self._coordinator_target() != request.coordinator_path:
             raise PoolPublicationError(
                 "cohort acknowledgment lost the original coordinator target"
             )
@@ -164,7 +170,7 @@ class PoolCohortPreparation:
             request.observation,
             expected_revision=request.expected_revision,
         )
-        if Path(self._queue.db_path).absolute() != request.coordinator_path:
+        if self._coordinator_target() != request.coordinator_path:
             raise PoolPublicationError(
                 "cohort acknowledgment lost the original coordinator target"
             )
@@ -187,7 +193,7 @@ class PoolCohortPreparation:
     def _require_original_source(self, request: PoolCohortProjectionRequest) -> None:
         if (
             pointers_file(self._sources.base).absolute() != request.source_path
-            or Path(self._queue.db_path).absolute() != request.coordinator_path
+            or self._coordinator_target() != request.coordinator_path
         ):
             raise PoolPublicationError(
                 "configured cohort projection lost an original owner target"
@@ -196,7 +202,7 @@ class PoolCohortPreparation:
         _comparable_observation(observation)
         if (
             pointers_file(self._sources.base).absolute() != request.source_path
-            or Path(self._queue.db_path).absolute() != request.coordinator_path
+            or self._coordinator_target() != request.coordinator_path
         ):
             raise PoolPublicationError(
                 "configured cohort projection lost an original owner target"
@@ -206,6 +212,12 @@ class PoolCohortPreparation:
                 "configured owner source changed before projection settlement"
             )
 
+    @contextmanager
+    def _original_source_boundary(self, request: PoolCohortProjectionRequest) -> Iterator[None]:
+        self._require_original_source(request)
+        yield
+        self._require_original_source(request)
+
     def project(self, request: PoolCohortProjectionRequest) -> PoolConfiguredCohort:
         """Explicit optimistic projection; managed writers share the registrar lock."""
         with self._state():
@@ -213,7 +225,7 @@ class PoolCohortPreparation:
                 raise PoolPublicationError(
                     "cohort projection requires the original pending request"
                 )
-            if Path(self._queue.db_path).absolute() != request.coordinator_path:
+            if self._coordinator_target() != request.coordinator_path:
                 raise PoolPublicationError(
                     "cohort projection lost the original coordinator target"
                 )
@@ -226,12 +238,16 @@ class PoolCohortPreparation:
                 return retained
             try:
                 with _pointer_transaction(request.source_path.parent):
-                    self._require_original_source(request)
-                    result = self._queue.observe_pool_configured_cohort(
-                        request.observation,
-                        expected_revision=request.expected_revision,
-                    )
-                    self._require_original_source(request)
+                    if isinstance(self._queue, DispatchClient):
+                        result = self._queue.observe_pool_configured_cohort(
+                            request.observation, expected_revision=request.expected_revision,
+                            boundary=lambda: self._original_source_boundary(request),
+                        )
+                    else:
+                        with self._original_source_boundary(request):
+                            result = self._queue.observe_pool_configured_cohort(
+                                request.observation, expected_revision=request.expected_revision,
+                            )
                     self._acknowledge(request, result)
                     return result
             except RegistrarError as exc:
@@ -245,7 +261,7 @@ class PoolCohortPreparation:
             request = self._pending
             if request is None:
                 raise PoolPublicationError("cohort recovery requires an original prepared request")
-            if Path(self._queue.db_path).absolute() != request.coordinator_path:
+            if self._coordinator_target() != request.coordinator_path:
                 raise PoolPublicationError("cohort recovery lost the original coordinator target")
             result = self._queue.recover_pool_configured_cohort(
                 request.observation,

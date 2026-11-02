@@ -17,12 +17,15 @@ The running coordinator's existing `/health` response adds
 metadata/definition versions and whether control authority is configured.
 The additive `configured_cohort_fencing_versions: [1]` advertises parsing and
 storage fences only, not an active configuration publisher or runtime admission.
+The separate `configured_cohort_projection_versions: [1]` advertises the
+[explicit whole-owner projection transport](pool-cohort-transport.md), not
+automatic configuration discovery or membership activation.
 The descriptor explicitly advertises metadata-only support and no lock-holder
 verification, configured-scope completeness or atomic placement. Read this
 running-peer declaration rather than inferring support from a package version
 or newer installed payload.
 
-All three new routes require the existing control bearer, independently of
+All catalog and cohort routes require the existing control bearer, independently of
 whether ordinary API authentication is enabled. On an authenticated coordinator,
 the app-wide API dependency runs first: a missing or invalid bearer yields `401`
 with a string `detail`. Only after that check passes does the catalog dependency
@@ -221,9 +224,10 @@ cohort observations. It retains one immutable original observation and its
 original coordinator CAS only when both source reads and both coordinator
 observations agree. It does not accept a preferred member subset or inferred
 enrollment roster. Logical names and intended execution identities remain
-separate. Original source/coordinator target paths remain in local request
-custody, not the metadata body; equal bytes or revisions at a different target
-cannot silently replace either owner.
+separate. Original source and coordinator targets remain in local request
+custody, not the metadata body. A local queue retains its database path; a
+concrete `DispatchClient` retains its existing bound base URL. Equal bytes or
+revisions at a different target cannot silently replace either owner.
 
 Confirmed file absence, digest-bearing legacy configuration, explicit empty
 membership and digest-bearing invalid cohort metadata retain their distinct
@@ -249,11 +253,14 @@ renews freshness or erases retained publication/startup history.
 `observe_pool_configured_cohort()` likewise recovers an exact historical
 original result before applying current-state admission to a fresh write.
 
-`PoolCohortPreparation.project()` is an **explicit local projection operation**,
+`PoolCohortPreparation.project()` is an **explicit projection operation**,
 not an automatic publisher. It recovers an already-accepted original result
 before reading current sources or attempting another write. A fresh attempt
 uses the existing registrar pointer-writer lock and rechecks the original whole
 source observation and both owner targets before and after the coordinator CAS.
+For a client-backed projection, these final source checks surround the POST
+after running-peer negotiation; ordinary metadata support alone cannot select
+the new operation. The same source lock covers that bounded synchronous request.
 A changed source, changed target, stale CAS, lock failure or interrupted write
 leaves the original request pending. A later history-only recovery can account
 for an accepted write even when the post-write source recheck refused settlement.
@@ -264,11 +271,12 @@ writer can still race a source read or replace the file; no transaction spans
 the external file and coordinator database. A post-write refusal preserves
 custody, not a rollback of a committed projection. Unmanaged-writer exclusion,
 current-file atomicity and executing-runtime qualification remain separate
-prerequisites before admission. No caller is wired to this operation.
+prerequisites before admission. No automatic caller is wired to this operation.
 
 This is **source-only optimistic preparation and result accounting**. No
-projection sender, live HTTP configuration publisher, ordinary caller,
-configuration setter, membership activation or placement is wired. The local
+ordinary caller, configuration setter, membership activation or placement is
+wired. The [explicit HTTP sender](pool-cohort-transport.md) reuses this custody
+without changing those gates. The local
 custody mutex is not an OS-lock acquisition or coordinator lease. External-file
 atomicity, admitted execution, mixed-writer exclusion and rollback remain
 separate integration gates; a projected observation is not current-file or
