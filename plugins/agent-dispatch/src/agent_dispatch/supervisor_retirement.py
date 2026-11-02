@@ -103,6 +103,12 @@ def finish_serving(daemon, *, single_instance: bool) -> None:
     else:
         interrupted = _settle_local_work(daemon, interrupted, pools=pools)
         drained = True
+    if drained:
+        try:
+            daemon._close_retained_pool_metadata_client()
+        except BaseException as exc:
+            if interrupted is None:
+                interrupted = exc
     try:
         if daemon._client_factory is not None:
             close = getattr(daemon.client, "close", None)

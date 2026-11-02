@@ -1982,12 +1982,16 @@ class SupervisorDaemon(BoundedReconciliation):
         except Exception:  # pragma: no cover -- re-resolve is environment-dependent
             log.exception("failed to re-resolve coordinator endpoint; will retry")
             return False
-        old = self.client
-        self.client = new_client
-        close = getattr(old, "close", None)
-        if callable(close):
-            with contextlib.suppress(Exception):
-                close()
+        try:
+            self._replace_pool_metadata_client(new_client)
+        except Exception:
+            log.exception("coordinator reconnect did not complete cleanly")
+            if self.client is not new_client:
+                close = getattr(new_client, "close", None)
+                if callable(close):
+                    with contextlib.suppress(Exception):
+                        close()
+                return False
         log.info("re-resolved coordinator endpoint after a connection failure")
         return True
 
