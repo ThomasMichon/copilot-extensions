@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -704,3 +704,45 @@ composition prerequisites, and review/validation rules.
   provisioning, launch protocol or lifecycle semantics change, so a separate
   provisioning clean room and live external runtime rollout are not
   applicable. Actual peer installation or activation is not requested.
+
+### 2026-11-02 - Peer Launch merged; larger canonical qualification resumed
+
+- #9969 merged as `cbe46f258dcf585f3c7c277089fc61a12601377a`
+  after exact-head Copilot approval with no findings, zero open review
+  comments and all required checks in
+  [run 41436563919](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41436563919).
+  The source worktree is pulled forward. Thirteen projects are strict and 55
+  remain pending; the full effort stays active.
+- Return to Phase 2's larger Installation Context qualification gate using
+  its already-qualified composed source view. Measure the complete current
+  project, including tests, before selecting a bounded basic/strict ratchet.
+  Canonical admission will not silently qualify physical copies or close
+  the independently pending composition/correspondence obligations.
+- The complete 51-file project maps to 32 checker targets. Its Linux basic
+  probe reports 249 diagnostics across 35 mapped physical files; strict
+  reports 496 across 43. MyPy groups the composed source as one module, so
+  its own file-summary counts differ from physical source-map counts.
+- #9971 selects a preparatory base/files-fragment slice, not admission.
+  The always-raising failure helper has an honest `NoReturn` contract;
+  native field/FFI result types and distinct descriptor/path helper names
+  remove false flow/signature conflicts. The final digest loop avoids
+  shadowing its path-encoding callable. Runtime validation, traversal,
+  failure, hashing, publication and cleanup behavior are preserved.
+- Remaining whole-project diagnostics are 219 basic / 458 strict on Linux
+  and 205 basic / 445 strict on Win32. Both edited fragments have no mapped
+  diagnostics on either declared target, but every whole-project probe still
+  exits nonzero. No filtered result, ignored diagnostic, new exclusion or
+  unchecked first-party substitute is treated as qualification. Counts remain
+  13 strict / 55 pending projects.
+- Nine focused native snapshot/reparse/hash controls pass; the two POSIX
+  replacement-primitive cases retain their explicit Windows skip. All 26
+  admitted targets, Ruff, source-unit admission, install contract and the
+  complete canonical-copy check pass. The source owner synchronizes exactly
+  54 copied fragment files. Only two unit-source hashes and MCP's source-only
+  producer hashes change; revision 36, nodes, decision targets and packet
+  budget are unchanged.
+- Hosted unit/source CI and normal review remain required. These are typing
+  preparations, not provisioning or lifecycle changes; no separate fresh-box
+  clean room or installed rollout is requested. Later source/test preparations,
+  signature preservation for the validation decorator, genuine whole-project
+  admission and physical-copy qualification remain open.

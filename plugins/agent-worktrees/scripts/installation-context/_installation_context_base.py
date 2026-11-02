@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, NoReturn, cast
 from urllib.parse import quote, urlsplit, urlunsplit
 
 LOCK_SCHEMA = "copilot-extensions.installation-lock"
@@ -113,7 +113,7 @@ class NormalizedSource:
     ref: str = ""
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     raise InstallationContextError(message)
 
 
@@ -220,10 +220,10 @@ def _is_link_or_junction(path: Path) -> bool:
     if is_junction and is_junction():
         return True
     try:
-        attributes = os.lstat(path).st_file_attributes
+        attributes = cast(int, getattr(os.lstat(path), "st_file_attributes"))
     except (AttributeError, FileNotFoundError, OSError):
         return False
-    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return bool(attributes & cast(int, getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")))
 
 
 def path_is_within(child: str | os.PathLike[str], parent: str | os.PathLike[str]) -> bool:
@@ -252,6 +252,7 @@ def _rename_directory_no_replace(source: Path, destination: Path) -> None:
     source_bytes = os.fsencode(source)
     destination_bytes = os.fsencode(destination)
     library = ctypes.CDLL(None, use_errno=True)
+    result: int
     if sys.platform.startswith("linux"):
         rename_no_replace = getattr(library, "renameat2", None)
         if rename_no_replace is None:
