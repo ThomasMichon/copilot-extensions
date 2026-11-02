@@ -1996,7 +1996,7 @@ def test_completed_runtime_launch_failure_requests_distinct_repair(
 def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
     engine, tmp_path, monkeypatch, failure,
 ):
-    monkeypatch.setattr(engine, "_input_origins", lambda inputs: {})
+    monkeypatch.setattr(engine, "_input_origins", lambda inputs, slot: {})
 
     def failed(*args, **kwargs):
         raise failure

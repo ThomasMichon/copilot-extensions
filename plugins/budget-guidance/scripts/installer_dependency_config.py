@@ -18,7 +18,14 @@ import types
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path, PureWindowsPath
-from installer_dependency_arguments import argument_pairs as argument_pairs, balanced as balanced, uv_command
+
+_arguments_path = Path(__file__).with_name("installer_dependency_arguments.py")
+_arguments = types.ModuleType(__name__ + "_arguments")
+_arguments.__file__ = str(_arguments_path)
+exec(compile(_arguments_path.read_bytes(), str(_arguments_path), "exec"), _arguments.__dict__)
+argument_pairs = _arguments.argument_pairs
+balanced = _arguments.balanced
+uv_command = _arguments.uv_command
 
 _WINDOWS = os.name == "nt"
 

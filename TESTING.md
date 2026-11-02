@@ -1665,6 +1665,12 @@ The copied Python fixture follows the typed passwd accessors; its existing
 POSIX/Windows regression checks quoted homes and unchanged original SDK bytes.
 The PowerShell transport uses the already-redirected Python SDK resolution.
 
+`tools/test_installer_dependency_policy.py` checks that copied configuration
+loads its sibling argument grammar even with a foreign ambient module, and
+refuses a missing sibling. The real application handoff and changed-wheel,
+installed-content and origin controls in `tools/test_local_install_source.py`
+exercise that companion loading through staged nested environments.
+
 ```bash
 gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \
   -f immutable_runtime=true -f immutable_runtime_ref=<full-40-hex-candidate-commit>

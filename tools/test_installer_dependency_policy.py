@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import ModuleType
 
 import pytest
 
@@ -29,6 +30,38 @@ SPEC = importlib.util.spec_from_file_location("installer_dependency_policy", PAT
 policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_copied_configuration_loads_only_its_sibling_argument_grammar(
+    tmp_path, monkeypatch, missing,
+):
+    for name in (
+        "installer_dependency_config.py", "installer_dependency_arguments.py",
+        "installer_retained_content.py",
+    ):
+        if not (missing and name == "installer_dependency_arguments.py"):
+            shutil.copyfile(PATH.with_name(name), tmp_path / name)
+    foreign = ModuleType("installer_dependency_arguments")
+
+    def refused(*args, **kwargs):
+        pytest.fail("copied configuration used an ambient argument grammar")
+
+    for name in ("argument_pairs", "balanced", "uv_command"):
+        setattr(foreign, name, refused)
+    monkeypatch.setitem(sys.modules, foreign.__name__, foreign)
+    spec = importlib.util.spec_from_file_location(
+        "copied_dependency_configuration", tmp_path / "installer_dependency_config.py",
+    )
+    copied = importlib.util.module_from_spec(spec)
+    if missing:
+        with pytest.raises(FileNotFoundError):
+            spec.loader.exec_module(copied)
+    else:
+        spec.loader.exec_module(copied)
+        assert list(copied.argument_pairs(
+            ["--python", "python", "example"], {"--python"}, error_type=ValueError,
+        )) == [("--python", "python"), ("", "example")]
 
 
 @pytest.mark.parametrize("names", [
