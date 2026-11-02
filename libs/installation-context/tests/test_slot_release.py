@@ -52,6 +52,26 @@ def run_release(runner, arguments):
     return subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=env, timeout=300)
 
 
+def test_missing_directory_evidence_refuses_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout, slot, receipt, arguments = reservation(tmp_path)
+    module = _load_python_module()
+    original = module._path_evidence
+    before = receipt.read_bytes()
+    install = Path(layout["install"]).read_bytes()
+
+    def evidence(path: Path) -> object:
+        return None if path == slot else original(path)
+
+    monkeypatch.setattr(module, "_path_evidence", evidence)
+    with pytest.raises(module.InstallationContextError, match="directory evidence is missing"):
+        module.release_runtime_slot(**arguments)
+    assert receipt.read_bytes() == before
+    assert Path(layout["install"]).read_bytes() == install
+    assert {path.name for path in slot.iterdir()} == {receipt.name}
+
+
 @pytest.mark.installation_context_smoke
 @pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda r: r[0])
 @pytest.mark.parametrize("hidden", [False, True])

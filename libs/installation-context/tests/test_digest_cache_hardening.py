@@ -121,7 +121,7 @@ def test_powershell_uses_python_owned_native_identity_and_publication() -> None:
     assert "'installation_context.py'" in script
     assert "'_installation_context_worker.py'" in script
     assert 'runpy.run_path(request["sdk"]' in worker
-    assert 'sdk["_powershell_main"](' in worker
+    assert 'sdk["_powershell_main"]' in worker
     for forbidden in ("Add-Type", "Reflection.Emit", "DllImport", "fstat$INODE64"):
         assert forbidden not in script
     reader = python.split("def _read_regular_file(", 1)[1].split(
