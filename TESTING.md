@@ -3306,6 +3306,12 @@ checkout, change Git settings or weaken byte verification to reconcile them.
 Working-tree cleanliness is a separate admission question. An ordinary
 `git archive` may also apply export attributes, so it is not a substitute for
 the existing complete-source reader when every tracked blob is required.
+Run Git-object acquisition on the source-owning OS. A consumer on another OS
+receives the canonical archive and inventory and verifies them against the
+pinned tree with `verify_tree_archive`; it need not open the producer's Git
+directory over UNC or add a `safe.directory` exception. Byte verification does
+not transfer execution authority: source preparation and a native test attempt
+retain their separate resource owners and admission limits.
 
 The three retained-input cardinality/remapping controls live in
 `tools/promotion_unit_tests/test_installer_retention.py` and are shared with

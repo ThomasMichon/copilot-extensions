@@ -132,3 +132,11 @@ correction is the existing raw-object/complete-source reader, not changing
 fresh-Git source-reader regression record that distinction. The refused
 attempt remains refused, and native execution remains unqualified until the
 renewed attempt actually completes.
+
+The renewed attempt also refused before test collection: native Git would not
+trust the source repository through its cross-OS path. No ownership exception
+or Git-setting change was applied. Source preparation therefore stays with
+the Linux Git owner, producing the canonical complete-tree archive and
+inventory for independent native verification. The file-only source input
+reconstructs the exact pinned tree and preserves checkout bytes; it does not
+authorize another native attempt or qualify unperformed tests.
