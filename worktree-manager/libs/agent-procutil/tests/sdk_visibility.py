@@ -54,9 +54,10 @@ def validate_request(mode: str, value: object) -> dict:
         "identity": {"parent_pid", "parent_birth"},
         "passive": {"python", "output"},
     }
-    if mode not in fields or not isinstance(value, dict) or set(value) != {
-        "nonce", "deadline", *fields[mode],
-    }:
+    expected = {"nonce", "deadline", *fields.get(mode, ())}
+    if mode == "process-safety" and isinstance(value, dict) and "original_start_monotonic" in value:
+        expected.add("original_start_monotonic")
+    if mode not in fields or not isinstance(value, dict) or set(value) != expected:
         raise ObservationBlocked("qualification request fields differ from the selected mode")
     if not isinstance(value["nonce"], str) or re.fullmatch(r"[a-f0-9]{32}", value["nonce"]) is None:
         raise ObservationBlocked("qualification requires a fresh correlated request")
@@ -64,6 +65,13 @@ def validate_request(mode: str, value: object) -> dict:
     if (type(deadline) not in (int, float) or not math.isfinite(deadline)
             or not 0 < deadline - time.monotonic() <= 180):
         raise ObservationBlocked("qualification requires an existing deadline within 180 seconds")
+    if "original_start_monotonic" in value:
+        origin = value["original_start_monotonic"]
+        if (
+            type(origin) not in (int, float) or not math.isfinite(origin)
+            or not 0 < origin <= time.monotonic() or deadline > origin + 165
+        ):
+            raise ObservationBlocked("process safety requires its original immutable work origin")
     for key in ("output", "sdk_root"):
         if key in value and (
             not isinstance(value[key], str) or not Path(value[key]).is_absolute()
@@ -589,7 +597,9 @@ def _non_desktop_control(request: dict, *, process_only: bool) -> int:
     mode = "process-safety" if process_only else "functional"
     validate_request(mode, request)
     source_before = verify_sources(request["sources"])
-    start = time.monotonic()
+    start = request["original_start_monotonic"] if (
+        process_only and "original_start_monotonic" in request
+    ) else time.monotonic()
     deadline = min(request["deadline"], start + 165)
     require_time(deadline, "functional source verification")
     root = Path(request["output"])

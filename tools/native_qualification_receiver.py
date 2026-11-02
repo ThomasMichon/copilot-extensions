@@ -48,21 +48,18 @@ def _json(data: bytes) -> dict[str, Any]:
 
 def terminal(
     output: bytes, *, boundary: Boundary, scope: int, native_exit: int,
-    captured_at: float,
+    captured_at: float, mode: str = "functional-only",
 ) -> dict[str, Any]:
-    prefix, separator, data = output.partition(b"\n")
-    if not separator or not prefix.startswith(f"FUNCTIONAL START: scope {scope};".encode("ascii")):
-        raise ReceiverError("Native launcher did not publish its expected start and terminal.")
-    value = _json(data)
+    value = contract.decode_terminal(output, scope, mode)
     if (
         type(native_exit) is not int or native_exit != 0
         or type(scope) is not int or scope <= 0
         or type(value.get("execution_scope")) is not int or value["execution_scope"] != scope
-        or value.get("qualification") != "functional-only"
+        or value.get("qualification") != mode
         or value.get("desktop_qualified") is not False
         or type(value.get("visible_controls_attempted")) is not int
         or value["visible_controls_attempted"] != 0
-        or value.get("functional_positive") is not True
+        or (mode == "functional-only" and value.get("functional_positive") is not True)
         or value.get("evidence_phase") != contract.DESCENDANT_PHASE
         or value.get("original_job_drained") is not False
         or value.get("original_owner_settlement_required") is not True
@@ -126,6 +123,16 @@ def _command(
     launcher = Path(command[5])
     if not launcher.is_absolute() or launcher.resolve() != launcher or not launcher.is_file():
         raise ReceiverError("Receiver launcher must be an ordinary absolute prepared file.")
+    if launcher.name == "native-process-qualification.ps1":
+        if __package__:
+            from .native_process_sources import load
+        else:
+            from native_process_sources import load
+        load(launcher, manifest_sha256, boundary, clock)
+        return [
+            *command, "-OriginalRuntimeRoot", str(runtime_root),
+            "-OriginalStartMonotonic", repr(boundary.start), "-OriginalStartUtc", boundary.utc,
+        ]
     manifest = launcher.with_name("prepared-manifest.json")
     manifest_data = _read_bounded(manifest, boundary, clock)
     if hashlib.sha256(manifest_data).hexdigest() != manifest_sha256:
@@ -266,6 +273,12 @@ def receive(
         "process_handle_closed": False, "errors": [],
         "desktop_qualified": False, "visible_controls_attempted": 0,
     }
+    mode = contract.PROCESS_MODE if (
+        isinstance(command, list) and len(command) > 5
+        and isinstance(command[5], str) and Path(command[5]).name == "native-process-qualification.ps1"
+    ) else "functional-only"
+    if mode == contract.PROCESS_MODE:
+        report.update(qualification=mode, desktop_observed=False)
     process = None
     readers: list[threading.Thread] = []
     streams = [Stream(), Stream()]
@@ -350,6 +363,7 @@ def receive(
         value = terminal(
             bytes(streams[0].data), boundary=boundary, scope=scope,
             native_exit=report["native_exit"], captured_at=captured_at,
+            mode=mode,
         )
         _command(command, scope, manifest_sha256, boundary, clock, runtime_root=runtime_root)
         report["preparation_sources_unchanged_after"] = True
