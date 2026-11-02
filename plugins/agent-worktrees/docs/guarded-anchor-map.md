@@ -11,6 +11,8 @@ policy read the same small JSON projection:
 The selected installation owns this directory. A different installation's map,
 or a map for another caller checkout, is not a fallback. Linked caller worktrees
 have their own caller keys; their policy is not unioned with other callers.
+Without an explicit installation context, the supplied `AGENT_HOME` selects the
+legacy root for both the map and live break-glass grants.
 
 ## Publication
 
@@ -70,11 +72,10 @@ directories, relative/absolute gitdir pointers, linked worktree `commondir`,
 bare repositories and the nearest nested repository/submodule. No Git
 subprocess, object scan, index/config read or RPC is needed. A nested repository
 does not inherit its containing checkout's guard. Direct write tools match the
-repository common-directory identity, including linked target worktrees. Shell
-and direct-write evaluation resolve each distinct target identity only once per
-event, not once per guarded row; no identity result is retained across events.
-Shell
-handling retains the existing command-position/write-target heuristic; this
+repository common-directory identity, including linked target worktrees.
+Shell and direct-write evaluation resolve each distinct target identity only
+once per event, not once per guarded row; no identity result is retained across
+events. Shell handling retains the existing command-position/write-target heuristic; this
 change does not introduce a shell parser or extend its syntax coverage.
 
 Current kill switches, policy modes and selected-installation `allow-edits.json`

@@ -410,19 +410,17 @@ def decide(payload: dict, *, env=None, home=None,
         if not cmd or not _WRITE_VERBS.search(cmd):
             return None  # identical to _shell_hit's topology-independent allow
 
-    selected_root = (
-        resolve_registry_root(legacy_root=home / ".agent-worktrees", environment=env)
-        if env.get("COPILOT_EXTENSIONS_CONTEXT", "").strip() else None
+    override = env.get("AGENT_HOME", "").strip()
+    legacy_home = Path(os.path.abspath(override)) if override else home
+    selected_root = resolve_registry_root(
+        legacy_root=legacy_home / ".agent-worktrees", environment=env,
     )
     cwd = str(payload.get("cwd") or "")
     if guarded_roots is None:
         root = find_repo_root(cwd)
         if root is None:
             return None
-        guarded = (
-            load_guarded_roots(str(root), home, deadline, registry_root=selected_root)
-            if selected_root is not None else load_guarded_roots(str(root), home, deadline)
-        )
+        guarded = load_guarded_roots(str(root), home, deadline, registry_root=selected_root)
     else:
         guarded = guarded_roots
     if not guarded:

@@ -174,6 +174,7 @@ def test_native_and_resident_share_file_only_decisions_and_live_controls(tmp_pat
     assert guard.decide(payload, env={}, home=tmp_path)["permissionDecision"] == "deny"
     assert policy.guarded_roots(str(caller)) == [row]
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     assert policy.pre(payload)["permissionDecision"] == "deny"
     monkeypatch.setattr(main, "_activate_project_for_path", lambda *a, **k: pytest.fail("pre activated project"))
     assert main._resident_hook_decision(
@@ -246,6 +247,33 @@ def test_map_scope_does_not_borrow_other_installation(tmp_path):
     foreign.parent.mkdir(parents=True)
     foreign.write_bytes(path.read_bytes())
     assert reader.read_map(caller, second).status == "unusable"
+
+
+def test_legacy_agent_home_selects_map_and_grants_without_borrowing_real_home(tmp_path):
+    guard = _load("cross_repo_guard")
+    reader = _load("guarded_anchor_map")
+    caller = _repo(tmp_path / "caller")
+    target = _repo(tmp_path / "target")
+    real_home, sandbox = tmp_path / "real", tmp_path / "sandbox"
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(target),
+        "identity": reader.repository_identity(target), "locus": None,
+    }
+    for home in (real_home, sandbox):
+        registry = home / ".agent-worktrees"
+        path = reader.map_path(caller, registry)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(_snapshot(reader, caller, registry, [row])))
+    payload = {"toolName": "edit", "cwd": str(caller), "toolArgs": {"path": str(target / "new")}}
+    environment = {"AGENT_HOME": str(sandbox)}
+    grant = json.dumps({"grants": {"target": {"expires_at_ms": 1e15}}})
+    (real_home / ".agent-worktrees" / "allow-edits.json").write_text(grant)
+    assert guard.decide(payload, env=environment, home=real_home)["permissionDecision"] == "deny"
+    (sandbox / ".agent-worktrees" / "allow-edits.json").write_text(grant)
+    assert guard.decide(payload, env=environment, home=real_home) is None
+    (sandbox / ".agent-worktrees" / "allow-edits.json").unlink()
+    reader.map_path(caller, sandbox / ".agent-worktrees").unlink()
+    assert guard.decide(payload, env=environment, home=real_home) is None
 
 
 @pytest.fixture
@@ -529,7 +557,7 @@ def test_native_entry_cold_warm_missing_map_and_deployed_reader_closure(tmp_path
         "name": "target", "delegate": "agent-bridge", "path": str(target),
         "locus": None, "identity": reader.repository_identity(target),
     }])))
-    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "CROSS_REPO_GUARD", "CROSS_REPO_GUARD_MODE"):
         environment.pop(key, None)
     payload = {"toolName": "edit", "cwd": str(caller), "toolArgs": {"path": str(target / "new")}}

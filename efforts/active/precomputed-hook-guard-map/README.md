@@ -212,3 +212,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   rediscovered callers removed from registration, and reuse each target identity
   only within its current event. The focused packet passed 29 cases, including
   actual concurrent registry-owned work and interruption/retry recovery.
+- Corrected the incremental review's legacy `AGENT_HOME` mismatch. Map and
+  live-grant reads now use the same selected root, without borrowing real-home
+  state. The root-isolation, native, guard and registry packet passed its
+  other 95 cases with one capability skip; the resident live-grant fixture
+  needed an explicit matching `AGENT_HOME` and its corrected case passed.
