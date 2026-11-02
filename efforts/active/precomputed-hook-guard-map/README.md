@@ -275,3 +275,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   the unavailable result and recover the correct identity after repair.
   The combined map, standalone consumer and deployment-contract packet passed
   95 cases with one native FIFO capability skip.
+- Made machine-wide related-policy selection failure-visible in the existing
+  configuration acquisition report, reusing its source probe rather than an
+  error-suppressing file predicate. The real producer regression now refuses
+  an unreadable global layer, retains unavailable caller maps and restores
+  both callers' effective guards after repair. The focused producer and
+  configuration-source packet passed seven cases.

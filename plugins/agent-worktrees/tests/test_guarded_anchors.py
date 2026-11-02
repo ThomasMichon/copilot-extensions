@@ -1169,3 +1169,18 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     assert rows("first")["target"]["delegate"] == "agent-bridge"
     assert rows("first")["target"]["locus"]["preferred"] == "machine:global"
     assert "plugin-only" in rows("first")
+    original_stat = os.stat
+
+    def unreadable_global(path, *args, **kwargs):
+        if isinstance(path, (str, Path)) and Path(path) == root / "related.yaml":
+            raise PermissionError("synthetic unreadable machine-wide policy")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", unreadable_global)
+    with pytest.raises(guarded_anchors.GuardPublicationError, match="unreadable-source"):
+        guarded_anchors.refresh()
+    assert all(reader.read_map(caller, root).status == "unusable" for caller in callers.values())
+    monkeypatch.setattr(os, "stat", original_stat)
+    assert guarded_anchors.refresh()["published"] == 2
+    assert rows("second") == second
+    assert rows("first")["target"]["locus"]["preferred"] == "machine:global"

@@ -11,6 +11,7 @@ from dropin_registry import ScanAuthority
 
 from . import config as cfg
 from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe
+from .source_probes import probe_source
 
 
 @dataclass(frozen=True)
@@ -329,7 +330,10 @@ def _config_source_anchors(
         try:
             global_root = cfg.install_dir()
             candidate = global_root / "related.yaml"
-            present = candidate.is_file()
+            present = (
+                candidate.is_file() if observations is None
+                else probe_source(candidate, "file", observations, "machine-wide-source")
+            )
         except (OSError, ValueError) as error:
             failed(observations, "machine-wide", "config-sources", "source-selection-failed",
                    type(error).__name__)
