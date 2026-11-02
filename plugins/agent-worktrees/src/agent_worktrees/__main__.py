@@ -3936,6 +3936,10 @@ def _run_session_lifecycle(
         _migrate_legacy_marketplace_overrides(payload, cwd)
         _reconcile_knowledge_plugin_overlay(payload, cwd)
 
+        from . import guarded_anchors
+
+        diagnostics += guarded_anchors.prepare(cwd)
+
         from . import local_cache_refresh
 
         diagnostics += local_cache_refresh.sessionstart_diagnostic(
@@ -4038,7 +4042,6 @@ class _ResidentHookPolicy:
         self.hook_client = hook_client
         self.ttl = ttl
         self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (0.0, None, [])
-        self._guarded: dict[str, tuple[float, list[dict]]] = {}
         self._plugin_related_anchors: list[str] | None = None
 
     def _module(self, name: str):
@@ -4084,44 +4087,15 @@ class _ResidentHookPolicy:
         return value
 
     def guarded_roots(self, cwd: str) -> list[dict]:
-        from . import related, repos
+        from . import registry_paths
 
         module = self._module("cross_repo_guard.py")
         root = module.find_repo_root(cwd) if module else None
         if root is None:
             return []
-        key = os.path.normcase(os.path.realpath(root))
-        now = time.monotonic()
-        cached = self._guarded.get(key)
-        if cached and now - cached[0] < self.ttl:
-            return cached[1]
-        try:
-            anchors = _related_config_source_anchors(
-                str(root),
-                installed_anchors=self.plugin_related_anchors(),
-            )
-            entries = related.list_related_grafted(anchors)
-            value = []
-            for entry in entries:
-                if not entry.delegate or entry.delegate == "none":
-                    continue
-                path = repos.resolve_path(entry.name)
-                if path:
-                    value.append(
-                        {
-                            "name": entry.name,
-                            "delegate": entry.delegate,
-                            "path": path,
-                            "locus": {
-                                "preferred": entry.locus.preferred,
-                                "machines": list(entry.locus.machines),
-                            },
-                        }
-                    )
-        except Exception:
-            value = []
-        self._guarded[key] = (now, value)
-        return value
+        return module.load_guarded_roots(
+            str(root), Path.home(), registry_root=registry_paths.registry_root(),
+        )
 
     def pre(self, payload: dict) -> dict:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
@@ -4217,6 +4191,9 @@ def _resident_hook_decision(
     deadline: float | None = None,
     provisioning_start_event: threading.Event | None = None,
 ) -> dict:
+    if kind == "preToolUse":
+        return policy.pre(payload)
+
     # Stage D: status_updater_cli/session_binding_cli are cluster-free.
     from . import session_binding_cli as _session_binding_cli
     from . import status_updater_cli as _status_updater_cli
@@ -4232,8 +4209,6 @@ def _resident_hook_decision(
     previous_project = cfg.active_project()
     segment_cache.activate_hook_project(cwd, _activate_project_for_path)
     try:
-        if kind == "preToolUse":
-            return policy.pre(payload)
         if kind == "postToolUse":
             targets = policy.mutation_targets(payload)
             if targets is None:
@@ -6453,6 +6428,7 @@ def main(argv: list[str] | None = None) -> int:
         parser = build_parser()
         parser.print_help()
         print("One-shot: pr-sweep <repo> --fleet --json")
+        print("Guard facts: refresh-guards [--repo PATH] [--json]")
         return 0
 
     # Fast path (checked before manual-dispatch verbs + the blanket
@@ -6476,7 +6452,7 @@ def main(argv: list[str] | None = None) -> int:
     # and the COMMAND_MAP fallback still need the cross-referencing cluster.
     if (
         args_list[0] not in {
-            "state-root", "coordination-readiness", "config-root", "knowledge",
+            "state-root", "coordination-readiness", "config-root", "knowledge", "refresh-guards",
         }
         and args_list[:2] not in (["repos", "list"], ["repos", "map"])
     ):
@@ -6545,6 +6521,11 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
+
+    if args_list[0] == "refresh-guards":
+        from . import guarded_anchors
+
+        return guarded_anchors.main(args_list[1:])
 
     # Related (per-project related repos) -- manual dispatch.
     if args_list[0] == "related":

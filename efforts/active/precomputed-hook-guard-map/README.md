@@ -85,28 +85,29 @@ The decomposition and implementation details below are **agent-recommended**.
 ### Phase 1 - Reviewed contract and coordination
 
 - [x] Identify both request-time discovery paths and existing producer reuse.
-- [ ] Establish a deduplicated public issue and land this plan.
-- [ ] Specify repository/common-directory identity, caller/installation scope,
+- [x] Establish a deduplicated public issue and land this plan.
+- [x] Specify repository/common-directory identity, caller/installation scope,
   complete local-repo coverage and unavailable-state behavior.
 
 ### Phase 2 - Producer-owned facts
 
-- [ ] Build and atomically publish the small guard map from the existing
+- [x] Build and atomically publish the small guard map from the existing
   resident lifecycle, outside hook handling and the shared hook lock.
-- [ ] Bind complete snapshots to source inputs and elected producer generation;
-  invalidate changed registry, related, binding and plugin contribution facts.
-- [ ] Publish through existing managed mutation/preparation boundaries and
+- [x] Serialize managed source mutation and fresh acquisition before publication;
+  bind the observation to caller/registry identity and its publication generation.
+  Do not promote incomplete acquisition observations into stable-input proof.
+- [x] Publish through existing managed mutation/preparation boundaries and
   expose explicit refresh for out-of-band edits; no watchers or periodic scan.
-- [ ] Preserve complete-empty versus unavailable observations and report
-  producer health without making reads refresh or start a service.
+- [x] Preserve complete-empty versus unavailable observations and surface
+  publication failures without making reads refresh or start a service.
 
 ### Phase 3 - Lookup-only hook consumers
 
-- [ ] Replace standalone discovery and resident lazy acquisition with the same
+- [x] Replace standalone discovery and resident lazy acquisition with the same
   bounded map reader and local Git repository-key lookup.
-- [ ] Preserve current modes, kill switches, expiring grants, target extraction,
+- [x] Preserve current modes, kill switches, expiring grants, target extraction,
   delegation nudges and installation isolation.
-- [ ] Update deployment/reconciliation inventories and compatibility behavior;
+- [x] Update deployment/reconciliation inventories and compatibility behavior;
   remove the hook's obsolete discovery/runtime-resolution dependencies.
 
 ### Phase 4 - Qualification and delivery
@@ -118,25 +119,27 @@ The decomposition and implementation details below are **agent-recommended**.
 
 ## Validation Plan
 
-- [ ] A missing map fails open without topology/CLI discovery, refresh,
+- [x] A missing map fails open without topology/CLI discovery, refresh,
   installation, daemon start or an infrastructure-shaped deny.
-- [ ] Both native and resident consumers fail a test if topology, plugin
+- [x] Both native and resident consumers fail a test if topology, plugin
   activation, registry acquisition or full config resolution is invoked.
   Git identity uses bounded metadata reads, not a subprocess or RPC.
-- [ ] Positive, negative, complete-empty, malformed, stale, incomplete and
-  wrong-scope inputs retain distinct truthful outcomes without discovery.
+- [x] Positive, negative, complete-empty, malformed, incomplete and wrong-scope
+  views retain distinct truthful outcomes. Managed mutations withdraw old views
+  before committing; out-of-band changes require explicit refresh/preparation.
 - [ ] Cover ordinary subdirectories, new files, relative/absolute and multiple
   targets, linked worktrees, bare anchors, nested repositories/submodules,
   aliases, UNC paths and platform case/normalization semantics.
-- [ ] Verify live mode/kill-switch/grant-expiry changes and existing decisions.
-- [ ] Verify coherent input revisions, invalidation, atomic concurrent reads,
-  producer failure and superseded-owner publication refusal.
+- [x] Verify live mode/kill-switch/grant-expiry changes and existing decisions.
+- [x] Verify serialized current acquisition, atomic concurrent reads,
+  failure withdrawal before source mutation and retained retry scopes.
 - [ ] Exercise related add/remove/primary and registry mutation publication,
   preparation/startup publication and explicit refresh; prove no watcher,
   TTL-driven or periodic topology acquisition is installed.
-- [ ] Exercise the actual cold/warm/missing-map native entry, bounded Git and
+- [x] Exercise the actual cold/warm/missing-map native entry, bounded Git and
   cleanup; preserve one implementation per event and supported ACP behavior.
-- [ ] Verify the actual reader dependency closure in a clean disposable install.
+- [x] Verify the actual installer-owned fresh wrapper copy and its reader
+  dependency closure in a disposable root.
 
 ## Proposal
 
@@ -162,3 +165,38 @@ evaluation is distinct from authorization or successful lifecycle mutation.
 - Reconciled the existing #9911 owner and accepted its managed-push/no-watchers
   design refinement. Closed the subsequently discovered duplicate #9920;
   source work continues against #9911 without acquiring the earlier checkout.
+- Planning merged in #9923 after approval and required green checks.
+- Implemented the shared file-only reader, managed producer, existing mutation/
+  preparation integration, explicit refresh, deployment closure and documentation.
+  Preparation updates only its caller; it does not rebuild every prepared
+  worktree. Managed mutations and explicit refresh cover prepared views.
+- Integrated Windows share-delete reads after a real concurrent publication
+  failure, withdrew old views before source mutation, and retained unavailable
+  caller scopes after a partially failed writer. Plugin contribution writes
+  refresh existing views without treating their containing checkout as a caller.
+- The directly affected contained packet passed 515 tests with four
+  symlink-capability skips. PowerShell 5/7 entry controls passed eight selected
+  cases with the matching prepared source SDK. The older selected SDK lacks
+  `agent_procutil.owned_budget`; its separate six admission failures do not
+  qualify mixed-version operation and were not hidden by changing the adapter.
+- The actual Python installer wrapper-copy owner and cold/warm/missing-reader
+  consumer passed in a disposable root. These results do not establish installed
+  activation, full runtime construction or unexecuted platform/native lanes.
+- Final producer/reader controls passed 21 cases, including caller-only
+  preparation and explicit completed-source/incomplete-publication outcomes.
+  The existing create/resume lifecycle packet passed 45 cases. Complete
+  complementary instruction-preparation selections passed 144 cases with
+  13 platform/capability skips under unchanged deadlines.
+- Corrected the five native nonregular-file fixtures to model both `stat` and
+  `lstat` explicitly. A full preparation group exceeded its existing bound;
+  smaller complementary selections, not a larger timeout, qualified the file.
+- Rebased onto current `dev`, preserving checkout profile preparation and
+  Windows Git observation behavior. The pre-tool no-project-acquisition
+  assertion now covers both observation modes. The rebased monitor packet
+  passed 188 cases and deployment closure passed seven.
+- Routed actual map reads through the existing share-delete opener. A focused
+  overlapping reader/real atomic writer test preserves a whole snapshot and
+  permits bounded writer completion. Windows replacement can still encounter
+  a transient open-target conflict; the existing writer retries it rather than
+  requiring another rename implementation. The final map/profile-preparation
+  packet passed 24 cases.

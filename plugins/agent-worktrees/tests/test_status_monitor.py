@@ -1303,8 +1303,9 @@ def test_segment_cache_get_works_without_full_command_surface_loaded(monkeypatch
     assert cache.get("/w/unloaded") == "REAL-SEGMENT"
 
 
-def test_resident_hook_scopes_and_restores_project(monkeypatch):
-    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
+@pytest.mark.parametrize("bounded_windows", [False, True])
+def test_resident_pre_hook_does_not_acquire_project(monkeypatch, bounded_windows):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: bounded_windows)
     prior = m.cfg.active_project()
     seen = []
 
@@ -1316,7 +1317,7 @@ def test_resident_hook_scopes_and_restores_project(monkeypatch):
     monkeypatch.setattr(
         m,
         "_activate_project_for_path",
-        lambda cwd, force: m.cfg.set_active_project("request-project"),
+        lambda cwd, force: pytest.fail("preToolUse must not resolve a project"),
     )
     try:
         m.cfg.set_active_project("prior-project")
@@ -1327,7 +1328,7 @@ def test_resident_hook_scopes_and_restores_project(monkeypatch):
             policy=Policy(),
         )
         assert result == {}
-        assert seen == ["request-project"]
+        assert seen == ["prior-project"]
         assert m.cfg.active_project() == "prior-project"
     finally:
         m.cfg.set_active_project(prior)
@@ -1423,27 +1424,30 @@ def test_load_hook_client_module_prefers_selected_runtime_bin(tmp_path, monkeypa
 
 
 def test_resident_agent_bridge_policy_denies_guarded_write(tmp_path, monkeypatch):
-    from agent_worktrees import related, repos
+    from agent_worktrees import guarded_anchors, registry_paths
 
     control = tmp_path / "control"
     guarded = tmp_path / "guarded"
     (control / ".git").mkdir(parents=True)
     (guarded / ".git").mkdir(parents=True)
-    entry = types.SimpleNamespace(
-        name="guarded",
-        delegate="agent-bridge",
-        locus=types.SimpleNamespace(
-            preferred="machine:devbox",
-            machines=["devbox"],
-        ),
-    )
-    monkeypatch.setattr(
-        m,
-        "_related_config_source_anchors",
-        lambda root, **_kwargs: [root],
-    )
-    monkeypatch.setattr(related, "list_related_grafted", lambda anchors: [entry])
-    monkeypatch.setattr(repos, "resolve_path", lambda name: str(guarded))
+    for root in (control, guarded):
+        (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    reader = guarded_anchors._reader()
+    registry = tmp_path / ".agent-worktrees"
+    monkeypatch.setattr(registry_paths, "registry_root", lambda: registry)
+    path = reader.map_path(control, registry)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "schema": reader.SCHEMA, "version": reader.VERSION,
+        "source_root": reader.canonical(control), "registry_root": reader.canonical(registry),
+        "source_identity": reader.repository_identity(control),
+        "inventory_authority": "complete", "generation": "fixture",
+        "roots": [{
+            "name": "guarded", "delegate": "agent-bridge", "path": str(guarded),
+            "locus": {"preferred": "machine:worker", "machines": ["worker"]},
+            "identity": reader.repository_identity(guarded),
+        }],
+    }))
 
     hook_client = m._load_hook_client_module()
     assert hook_client is not None
@@ -1457,7 +1461,7 @@ def test_resident_agent_bridge_policy_denies_guarded_write(tmp_path, monkeypatch
         }
     )
     assert decision["permissionDecision"] == "deny"
-    assert "agent-bridge send devbox" in decision["permissionDecisionReason"]
+    assert "agent-bridge send worker" in decision["permissionDecisionReason"]
 
 
 def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):

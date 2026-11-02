@@ -197,8 +197,9 @@ def write_registry(registry: ReposRegistry) -> None:
     """Write repos.yaml, refusing to overwrite a changed read baseline."""
     from .repos_registry_transaction import write_checked
     from .repos_registry_writer import render_registry
+    from .guarded_anchors import managed_write
 
-    write_checked(_repos_yaml_path(), registry, render_registry(registry))
+    managed_write(lambda: write_checked(_repos_yaml_path(), registry, render_registry(registry)))
 
 
 def _quote(v: str) -> str:

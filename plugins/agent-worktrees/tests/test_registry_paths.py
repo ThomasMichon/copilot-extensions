@@ -1053,46 +1053,40 @@ def test_cross_repo_guard_isolates_shared_checkout_by_installation(
         )
         for label in ("unprotected", "protected")
     ]
-    interpreters = []
-    for _, root in cells:
-        slot = root / "versions" / "1.0.0"
-        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        python.parent.mkdir(parents=True)
-        python.touch()
-        (root / "current-version").write_text("1.0.0", encoding="utf-8")
-        (slot / ".install-complete.json").write_text(json.dumps({
-            "version": "1.0.0", "completed_at": "2026-10-28T00:00:00Z", "pid": 1,
-        }), encoding="utf-8")
-        interpreters.append(str(python))
+    import guarded_anchor_map as reader
+
     consumer = tmp_path / "consumer"
     (consumer / ".git").mkdir(parents=True)
+    (consumer / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     target = tmp_path / "delegated" / "never-written.txt"
+    (target.parent / ".git").mkdir(parents=True)
+    (target.parent / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     request = {
         "toolName": "create", "cwd": str(consumer),
         "toolArgs": {"path": str(target)},
     }
     legacy = tmp_path / ".agent-worktrees"
     legacy.mkdir()
-    guard._write_cache(guard._cache_path(str(consumer), tmp_path), [])
+    for index, (_, root) in enumerate(cells):
+        path = reader.map_path(consumer, root)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({
+            "schema": reader.SCHEMA, "version": reader.VERSION,
+            "source_root": reader.canonical(consumer), "registry_root": reader.canonical(root),
+            "source_identity": reader.repository_identity(consumer),
+            "inventory_authority": "complete", "generation": "fixture",
+            "roots": [] if index == 0 else [{
+                "name": "delegated", "delegate": "agent-bridge", "path": str(target.parent),
+                "locus": None, "identity": reader.repository_identity(target.parent),
+            }],
+        }))
     if legacy_grant:
         (legacy / "allow-edits.json").write_text(json.dumps({"grants": {
             "delegated": {"expires_at_ms": 9999999999999},
         }}), encoding="utf-8")
-    calls = []
-
-    def related(argv, **kwargs):
-        calls.append(argv)
-        assert argv[:3] == [interpreters[selected[0]], "-m", "agent_worktrees"]
-        assert kwargs["cwd"] == str(consumer)
-        if argv[4] == "list":
-            data = {"related": [] if selected[0] == 0 else [
-                {"name": "delegated", "delegate": "agent-bridge"},
-            ]}
-        else:
-            data = {"registry": {"path": str(target.parent)}}
-        return SimpleNamespace(returncode=0, stdout=json.dumps(data))
-
-    monkeypatch.setattr(guard.subprocess, "run", related)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: pytest.fail("hook started a subprocess"),
+    )
     client_spec = importlib.util.spec_from_file_location(
         "cell_test_hook_client", scripts / "hook_client.py"
     )
@@ -1106,9 +1100,7 @@ def test_cross_repo_guard_isolates_shared_checkout_by_installation(
             registry if name == "registry_root.py" else other_policy
         ),
     )
-    selected = [0]
     for index in (0, 1, 0, 1):
-        selected[0] = index
         context, _ = cells[index]
         _select(monkeypatch, context, payload)
         decision = guard.decide(request, home=tmp_path)
@@ -1119,16 +1111,13 @@ def test_cross_repo_guard_isolates_shared_checkout_by_installation(
         assert client.decide(
             "preToolUse", request, home=tmp_path, require_policy=True,
         ) == (decision or {})
-    assert len(calls) == 3
-    assert guard._read_cache(guard._cache_path(str(consumer), tmp_path)) == []
-    assert all(list((root / "cache").glob("guarded-roots.*.json")) for _, root in cells)
+    assert all(reader.read_map(consumer, root).status == "ready" for _, root in cells)
     (cells[1][1] / "allow-edits.json").write_text(json.dumps({"grants": {
         "delegated": {"expires_at_ms": 9999999999999},
     }}), encoding="utf-8")
     assert client.decide(
         "preToolUse", request, home=tmp_path, require_policy=True,
     ) == {}
-    assert len(calls) == 3
     assert not target.exists()
 
 
@@ -1142,7 +1131,6 @@ def test_cross_repo_guard_invalid_cell_never_reuses_legacy_cache(monkeypatch, tm
     spec.loader.exec_module(guard)
     consumer = tmp_path / "consumer"
     (consumer / ".git").mkdir(parents=True)
-    guard._write_cache(guard._cache_path(str(consumer), tmp_path), [])
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "missing.json"))
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(PLUGIN_ROOT))
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)

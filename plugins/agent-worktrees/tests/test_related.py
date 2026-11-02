@@ -2724,6 +2724,16 @@ def _deny_source_stat_with_loop(monkeypatch, denied: Path):
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "stat", loop)
+    # Native Windows predicates may bypass os.stat; model suppression separately.
+    for name in ("exists", "is_file", "is_dir"):
+        original_predicate = getattr(Path, name)
+
+        def suppressed(path, *args, _original=original_predicate, **kwargs):
+            if os.path.normcase(os.fspath(path)) == os.path.normcase(str(denied)):
+                return False
+            return _original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, name, suppressed)
 
 
 @pytest.mark.parametrize("layer", ["base", "marketplace-overlay"])
