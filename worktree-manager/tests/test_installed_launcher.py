@@ -387,6 +387,7 @@ def test_missing_selected_slot_is_not_another_project(launcher, tmp_path):
 def test_cmd_does_not_resume_replaced_launcher(tmp_path, exit_code, runtime_kind):
     launcher = tmp_path / "manager.cmd"
     launcher.write_text(si._cmd_binstub(), encoding="utf-8", newline="")
+    (tmp_path / "worktree-manager.ps1").write_text(si._ps1_binstub(), encoding="utf-8")
     root = tmp_path / "manager root"
     slot = root / "versions" / "1.2.3"
     runtime = slot if runtime_kind == "retained" else slot / ".venv"
@@ -400,7 +401,10 @@ def test_cmd_does_not_resume_replaced_launcher(tmp_path, exit_code, runtime_kind
         "print('fixture session exited')\n"
         f"raise SystemExit({exit_code})\n"
     )
-    env = dict(os.environ, WORKTREE_MANAGER_ROOT=str(root), FIXTURE_LAUNCHER=str(launcher))
+    env = dict(
+        os.environ, WORKTREE_MANAGER_ROOT=str(root), FIXTURE_LAUNCHER=str(launcher),
+        ERRORLEVEL="0",
+    )
     if runtime_kind == "retained":
         bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
         bootstrap.parent.mkdir()

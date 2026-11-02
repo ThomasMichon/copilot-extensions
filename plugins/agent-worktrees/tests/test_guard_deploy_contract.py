@@ -137,7 +137,10 @@ def test_legacy_python_installer_uses_manager_wrapper_manifest():
     assert "resolve_source_dir(" in python_installer
     assets = launch_wrapper_assets.load_manifest(_PLUGIN)
     source = launch_wrapper_assets.resolve_source_dir(_PLUGIN.parents[1], assets)
-    for wrapper in ("pane-args.ps1", "pane-launch.ps1", "pane-wrapper.ps1", "pane-wrapper.sh"):
+    for wrapper in (
+        "pane-args.ps1", "pane-launch.ps1", "pane-wrapper.ps1", "pane-wrapper.sh",
+        "terminal-launch.ps1",
+    ):
         assert wrapper in manifest["files"]
         assert (source / wrapper).is_file()
 

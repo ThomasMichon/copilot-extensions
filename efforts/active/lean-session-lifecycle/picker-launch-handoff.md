@@ -201,3 +201,17 @@ wait-only process. Keep POSIX process replacement and standalone behavior.
   shell-host capability check uses CMD's built-in PATH expansion rather than
   adding a discovery process or a new mandatory dependency. Native missing-host
   and CMD handoff/selected-slot controls pass.
+
+### 2026-11-01 - Published review corrections
+
+- #9936's first review identified three concrete gaps: the shared wrapper
+  cleanup roster omitted the new helper; a standalone CMD replacement fixture
+  omitted its companion PS1; and a caller-defined `ERRORLEVEL` could shadow the
+  terminal-host result. All three are corrected before accepting the review.
+- Deployment/uninstall tests now derive owned files from the actual manifest,
+  exercising removal of the helper rather than repeating an incomplete tuple.
+  The CMD replacement cases include their companion PS1 and a deliberately
+  shadowing `ERRORLEVEL=0`, covering both retained and constructed runtimes and
+  real nonzero return.
+- The two deployment/uninstall controls and four native CMD replacement/exit
+  cases pass. Review and required CI must still clear on the updated head.
