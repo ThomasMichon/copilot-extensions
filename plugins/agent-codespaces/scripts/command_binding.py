@@ -82,6 +82,8 @@ def publish_legacy_binding(
         "plugin_id": arguments["plugin_id"],
         "project_root": arguments.get("project_root"),
         "environment": arguments.get("environment"),
+        **{key: value for key, value in (arguments.get("mode_arguments") or {}).items()
+           if key == "source_descriptor"},
     }
     try:
         provenance = primitive.resolve_payload_source(**source_arguments)
@@ -92,7 +94,8 @@ def publish_legacy_binding(
             ) from error
         raise SourceProvenanceUnavailable(str(error)) from error
     mode = primitive.resolve_installation_mode(
-        **source_arguments, legacy_root=arguments["legacy_root"],
+        **{key: value for key, value in source_arguments.items() if key != "source_descriptor"},
+        legacy_root=arguments["legacy_root"],
         **dict(arguments.get("mode_arguments") or {}),
     )
     if (
@@ -302,6 +305,8 @@ def resolve_command_binding(
             plugin_id=arguments["plugin_id"],
             project_root=arguments.get("project_root"),
             environment=arguments.get("environment"),
+            **{key: value for key, value in (arguments.get("mode_arguments") or {}).items()
+               if key == "source_descriptor"},
         )
     except primitive.InstallationContextError as error:
         result["diagnostic"] = str(error)
@@ -474,6 +479,38 @@ def binding_for_payload(
     )
 
 
+def runtime_installation_status(binding: dict[str, Any] | None, legacy_root: Path) -> str:
+    """Inspect the existing installation without invoking its tools or service."""
+    if binding is not None and binding.get("status") == "selected":
+        root = Path(binding["installation"]["runtimeRoot"])
+    elif os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or (
+        binding is not None and binding.get("status") == "blocked"
+    ):
+        return "Backend installation: could not be verified for this installation context. No setup was attempted."
+    else:
+        root = legacy_root
+    try:
+        if not root.exists():
+            return "Backend installation: not installed. Explicit package setup is required."
+        spec = importlib.util.spec_from_file_location(
+            "_flight_runtime_selection", Path(__file__).with_name("versioned_runtime.py"),
+        )
+        if spec is None or spec.loader is None:
+            raise ValueError("read-only runtime selector is unavailable")
+        runtime = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = runtime
+        spec.loader.exec_module(runtime)
+        python = runtime.resolve_python(root)
+        if python is None:
+            return "Backend installation: incomplete or unavailable. Explicit package setup is required."
+        return (
+            "Backend installation: already installed. "
+            "This read-only flight check does not start the service or establish service liveness."
+        )
+    except (ImportError, OSError, KeyError, TypeError, ValueError):
+        return "Backend installation: could not be verified. No setup or service startup was attempted."
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--payload-root", required=True, type=Path)
@@ -482,6 +519,7 @@ def main() -> int:
     parser.add_argument("--project-root", type=Path)
     parser.add_argument("--publish-legacy", action="store_true")
     parser.add_argument("--source-payload-root", type=Path)
+    parser.add_argument("--source-descriptor", type=json.loads)
     parser.add_argument("--write-manifest", action="store_true")
     parser.add_argument("--run-lifecycle", action="store_true")
     parser.add_argument("--check-lifecycle", action="store_true")
@@ -491,11 +529,14 @@ def main() -> int:
     parser.add_argument("--teardown", action="store_true")
     parser.add_argument("--lifecycle-timeout", type=float)
     parser.add_argument("--human-operation", choices=("install", "update"))
+    parser.add_argument("--flight-check", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
     if arguments.payload_root.resolve() != Path(__file__).resolve().parents[1]:
         parser.error("The requested payload does not own this binding helper.")
     lifecycle_action = arguments.run_lifecycle or arguments.check_lifecycle
+    if arguments.flight_check and (lifecycle_action or arguments.publish_legacy):
+        parser.error("--flight-check is read-only and cannot publish or run lifecycle operations.")
     if sum((arguments.run_lifecycle, arguments.check_lifecycle, arguments.publish_legacy)) > 1:
         parser.error("Specify only one lifecycle operation.")
     if arguments.deferred_runtime and not arguments.run_lifecycle:
@@ -512,6 +553,8 @@ def main() -> int:
         parser.error("--teardown requires --run-lifecycle without --deferred-runtime.")
     if arguments.source_payload_root is not None and not (arguments.publish_legacy or lifecycle_action):
         parser.error("--source-payload-root belongs to explicit lifecycle publication.")
+    if arguments.source_descriptor is not None and not (arguments.publish_legacy or lifecycle_action):
+        parser.error("--source-descriptor belongs to explicit lifecycle publication.")
     if arguments.project_root is not None and not (arguments.publish_legacy or lifecycle_action):
         parser.error("--project-root belongs to explicit lifecycle publication.")
     if arguments.write_manifest and not arguments.publish_legacy:
@@ -523,6 +566,8 @@ def main() -> int:
                 payload_root=source_payload, plugin_id=arguments.plugin_id,
                 legacy_root=arguments.legacy_root, project_root=arguments.project_root or Path.cwd(),
                 environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(source_payload)},
+                **({"mode_arguments": {"source_descriptor": arguments.source_descriptor}}
+                   if arguments.source_descriptor is not None else {}),
             )
             primitive = _load_primitive(arguments.payload_root)
             if lifecycle_action:
@@ -570,7 +615,13 @@ def main() -> int:
     except (OSError, ValueError) as error:
         print(f"Command binding unavailable: {error}", file=sys.stderr)
         return 3 if arguments.publish_legacy else 1
-    print(json.dumps(binding, sort_keys=True))
+    if arguments.flight_check:
+        print(json.dumps({
+            "binding": binding,
+            "runtimeStatus": runtime_installation_status(binding, arguments.legacy_root),
+        }, sort_keys=True))
+    else:
+        print(json.dumps(binding, sort_keys=True))
     return 0
 
 

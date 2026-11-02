@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 from . import mux_mapping_registry as mappings, source_config
+from .runtime_identity import running_slot
 
 SCHEMA = "worktree-manager.pane-lifecycle"
 VERSION = 1
@@ -33,14 +34,14 @@ def installation_identity(root: Path) -> str:
 
 def require_current_runtime(root: Path) -> None:
     """Refuse a captured old slot, source-mode fallback or incomplete install."""
-    prefix = Path(sys.prefix)
+    slot = running_slot()
     if (
-        prefix.parent.name != "versions"
-        or os.path.normcase(os.path.abspath(prefix.parent.parent))
+        slot is None
+        or os.path.normcase(os.path.abspath(slot.parent.parent))
         != os.path.normcase(os.path.abspath(root))
-        or (root / "current-version").read_text(encoding="utf-8").strip() != prefix.name
-        or not (prefix / ".install-complete.json").is_file()
-        or not (prefix / ".runtime-bootstrap" / "runtime_launcher.py").is_file()
+        or (root / "current-version").read_text(encoding="utf-8").strip() != slot.name
+        or not (slot / ".install-complete.json").is_file()
+        or not (slot / ".runtime-bootstrap" / "runtime_launcher.py").is_file()
     ):
         raise ValueError("Pane lifecycle requires this installation's current completed runtime")
 

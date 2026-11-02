@@ -46,11 +46,15 @@ def _payload_root() -> Path:
 
 
 def _helper() -> ModuleType:
-    bootstrap = Path(sys.prefix) / ".runtime-bootstrap"
+    environment = Path(sys.prefix)
+    slot = environment.parent if environment.name == ".venv" else environment
+    bootstrap = slot / ".runtime-bootstrap"
     if bootstrap.is_symlink():
         raise ValueError("agent-worktrees installed registry bootstrap is a symlink")
+    assets = Path(__file__).resolve().parent / "_runtime_assets" / "scripts"
     helper = (
         bootstrap / "registry_root.py" if bootstrap.is_dir()
+        else assets / "registry_root.py" if assets.is_dir()
         else _payload_root() / "scripts" / "registry_root.py"
     )
     if not helper.is_file() or helper.is_symlink():

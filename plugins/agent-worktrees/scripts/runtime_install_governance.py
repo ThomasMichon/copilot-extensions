@@ -19,7 +19,7 @@ class InstallationRefused(RuntimeError):
 
 
 class Governance:
-    def __init__(self, root: Path, payload: Path):
+    def __init__(self, root: Path, payload: Path, *, source_descriptor: dict | None = None):
         self.root = root.resolve()
         self.payload = payload.resolve(strict=True)
         helper = SCRIPTS / "installation-context" / "installation_context.py"
@@ -29,6 +29,16 @@ class Governance:
         self.helper = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = self.helper
         spec.loader.exec_module(self.helper)
+        if source_descriptor is not None:
+            normalized = self.helper.normalize_source(source_descriptor)
+            source_descriptor = {
+                "kind": normalized.kind, "canonical": normalized.canonical, "ref": normalized.ref,
+            }
+        self.source_descriptor = source_descriptor
+        self.binding_options = (
+            {"mode_arguments": {"source_descriptor": source_descriptor}}
+            if source_descriptor is not None else {}
+        )
         self.context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
         self.project_root = (
             Path(os.environ["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"]).resolve()
@@ -52,6 +62,8 @@ class Governance:
             "payload_root": self.payload,
             "plugin_id": "agent-worktrees",
             "durable_home": self.durable_home,
+            **({"source_descriptor": self.source_descriptor}
+               if self.source_descriptor is not None else {}),
         }
         if not self.context:
             arguments["project_root"] = self.project_root
@@ -97,6 +109,7 @@ class Governance:
                 binding._rules(), self.helper, payload_root=self.payload,
                 plugin_id="agent-worktrees", legacy_root=self.root,
                 project_root=self.project_root,
+                **self.binding_options,
             )
             if lease is not None and lease.purpose["origin"] == "management":
                 return
@@ -130,6 +143,8 @@ class Governance:
             "receipt": None if receipt is None else {key: receipt[key] for key in (
                 "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
             )},
+            **({"source_descriptor": self.source_descriptor}
+               if self.source_descriptor is not None else {}),
         }
 
     @contextmanager
@@ -144,6 +159,7 @@ class Governance:
                 self.helper, self.command_lock, payload_root=self.payload,
                 plugin_id="agent-worktrees", legacy_root=self.root,
                 project_root=self.project_root,
+                **self.binding_options,
             )
             if ownership != self.retained_binding:
                 raise InstallationRefused("Retained command ownership changed during restoration")
@@ -162,6 +178,7 @@ class Governance:
             self.helper, json.loads(content), payload_root=self.payload,
             plugin_id="agent-worktrees", legacy_root=self.root,
             project_root=self.project_root,
+            **self.binding_options,
         ) as (manifest, result, _lock):
             if result["status"] == "unresolved":
                 print(
@@ -192,6 +209,7 @@ class Governance:
                 arguments = {
                     "payload_root": self.payload, "plugin_id": "agent-worktrees",
                     "legacy_root": self.root, "project_root": self.project_root,
+                    **self.binding_options,
                 }
                 command_lock = stack.enter_context(binding._load_lifecycle()._lock(
                     self.helper, arguments,
@@ -206,6 +224,7 @@ class Governance:
                     payload_root=self.payload, plugin_id="agent-worktrees",
                     legacy_root=self.root, project_root=self.project_root,
                     lock_timeout=max(0, deadline - time.monotonic()),
+                    **self.binding_options,
                 ))
                 command_lock = lease.lock
             elif receipt is not None and os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):

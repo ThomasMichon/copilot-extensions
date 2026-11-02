@@ -1034,6 +1034,7 @@ def _knowledge_owner(api, monkeypatch):
 
     api.stub("git_ops", git=git, GitError=RuntimeError)
     api.load("inrepo_config_source")
+    api.load("runtime_paths")
     owner = api.load("config")
     launch = Path("synthetic-launch")
     knowledge = Path("synthetic-knowledge")

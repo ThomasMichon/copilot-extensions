@@ -227,8 +227,10 @@ def test_default_legacy_stamp_publishes_every_payload_command(
             "USERPROFILE": str(home),
             "LOCALAPPDATA": str(home / "AppData" / "Local"),
             "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+            "AGENT_BRIDGE_CONFIG_DIR": str(home / ".agent-bridge"),
         }
     )
+    env.pop("AGENT_BRIDGE_PROVIDERS_DIR", None)
     for key in tuple(env):
         if key.startswith(
             (

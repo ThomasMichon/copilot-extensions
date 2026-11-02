@@ -37,17 +37,18 @@ def engine(monkeypatch):
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, engine):
     root = tmp_path / "sources"
-    procutil = root / "procutil"
-    shutil.copytree(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil", procutil)
-    shutil.copytree(Path(__file__).resolve().parents[1] / "libs" / "zdd", root / "zdd")
+    frozen = engine.freeze_inputs(
+        Path(__file__).resolve().parents[1] / "libs" / "agent-procutil", root,
+    )
     plugin = root / "plugin"
     plugin.mkdir()
     (plugin / "pyproject.toml").write_text(
         '[project]\nname="demo-pkg"\nversion="1.0"\ndependencies=[]\n'
         '[project.optional-dependencies]\nbootstrap=["agent-procutil"]\n'
-        '[tool.uv.sources]\nagent-procutil={path="../procutil"}\n',
+        '[tool.uv.sources]\nagent-procutil={path=' +
+        json.dumps(os.path.relpath(frozen.plugin, plugin).replace(os.sep, "/")) + '}\n',
         encoding="utf-8",
     )
     return plugin
@@ -615,7 +616,7 @@ def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows absolute-deadline guardian")
-def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp_path):
+def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp_path, monkeypatch):
     from test_installer_wheel_acquisition import worker_procutil
     import installer_engine_process as guardian
 
@@ -627,7 +628,10 @@ def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp
         "def _supervise_windows(args, argv):\n"
         "    Path(" + repr(str(guardian_marker)) + ").write_text('entered')\n    time.sleep(1.5)",
     ))
-    selected = guardian._load_resource("absolute_deadline_guardian", delayed)
+    spec = importlib.util.spec_from_file_location("absolute_deadline_guardian", delayed)
+    selected = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, selected)
+    spec.loader.exec_module(selected)
     runtime = engine.runtime
     root = tmp_path / "runtime"
     root.mkdir()

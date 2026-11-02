@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 import tempfile
 import uuid
 from contextlib import ExitStack, contextmanager
@@ -37,6 +38,8 @@ def source_install_selection(
     identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
     if identity is None:
         return version, True
+    if _source_profile_reuse(payload, identity, selected) is not None:
+        return identity.runtime_version, True
     if selected is None or not (
         selected.name == identity.runtime_version
         or selected.name.startswith(identity.runtime_version + ".repair.")
@@ -50,12 +53,73 @@ def source_install_selection(
     return identity.runtime_version, matches
 
 
+def _source_profile_reuse(payload: Path, identity, selected: Path | None):
+    """Qualify an existing closed-wheel generation, never construct from a receipt."""
+    if selected is None or re.fullmatch(
+        re.escape(identity.runtime_version) + r"\.profile\.[0-9a-f]{16}(?:\.repair\.[0-9a-f]{32})?",
+        selected.name,
+    ) is None:
+        return None
+    root = selected.parent.parent
+    if not runtime.is_complete(root, selected.name):
+        return None
+    if runtime_source.read_source_identity(
+        selected / "payload", identity.package_version, plugin="worktree-manager",
+    ) != identity:
+        return None
+    reader = runtime._runtime_component("versioned_runtime_construction")
+    try:
+        record = reader.read_completion(
+            selected / ".runtime-input-origins.json",
+            object_pairs_hook=runtime._unique_object_pairs_hook,
+        )
+        if not isinstance(record, dict) or record.get("schema") != "installer-engine.frozen-input-origins":
+            raise ValueError("source profile has no constructor origins")
+        if type(record.get("version")) is not int or record["version"] != 2:
+            raise ValueError("source profile has unsupported constructor origins")
+        reuse = engine.WheelReuseInputs(
+            selected.name,
+            json.dumps(record["wheel_inputs"], sort_keys=True, separators=(",", ":"), allow_nan=False),
+            time.monotonic() + 30,
+        )
+        receipt = reuse.receipt()
+        profile = receipt["binding"]
+        if (
+            profile.get("component") != "worktree-manager" or profile.get("mode") != "source"
+            or profile.get("release") != {
+                "identity": "source:" + identity.source_commit,
+                "sha256": "sha256:" + identity.assembly_hash,
+            }
+            or re.fullmatch(
+                re.escape(identity.runtime_version + ".profile." + receipt["lock_id"][7:23])
+                + r"(?:\.repair\.[0-9a-f]{32})?", selected.name,
+            ) is None
+        ):
+            raise ValueError("source profile differs from its selected source/generation")
+        packages = engine._package_roots(payload)
+        expected_local = tuple(sorted(
+            engine._package_name(package) for package in packages
+            if engine._package_name(package) in receipt["distributions"]
+        ))
+        if record.get("local_packages") != list(expected_local):
+            raise ValueError("source profile differs from its local package selection")
+        construction = engine._wheel_construction_hash(
+            engine._construction_hash(engine._source_files(packages), (), expected_local), reuse,
+        )
+        if not runtime.is_complete(root, selected.name, expect_hash=construction):
+            raise ValueError("source profile differs from its completed construction")
+        return reuse, expected_local
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise RuntimeError("Manager source-profile evidence is invalid") from error
+
+
 @contextmanager
 def candidate(
     payload: Path, root: Path, *, assemble, uv: Path | None = None,
     python: Path | None = None,
     wheel_inputs: engine.WheelInstallInputs | engine.WheelReuseInputs | None = None,
     local_packages: tuple[str, ...] | None = None, validate_candidate=None,
+    application: Path | None = None,
 ):
     """Retain a healthy target; never publish selectors during construction."""
     if os.name == "nt":
@@ -82,6 +146,13 @@ def candidate(
         ):
             raise ValueError("Manager construction requires its attributed project name and version")
         identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
+        if wheel_inputs is None and identity is not None:
+            current = runtime.current_version(root)
+            reused = _source_profile_reuse(
+                payload, identity, runtime.version_dir(root, current) if current else None,
+            )
+            if reused is not None:
+                wheel_inputs, local_packages = reused
         if wheel_inputs is not None:
             if identity is None:
                 raise ValueError("Manager source wheels require an attributed source identity")
@@ -120,6 +191,8 @@ def candidate(
             arguments.update(wheel_inputs=wheel_inputs, local_packages=local_packages)
         if validate_candidate is not None:
             arguments["validate_candidate"] = validate_candidate
+        if application is not None:
+            arguments["application"] = application
         current = runtime.current_version(root)
         if (
             not reuse_only and identity is not None and current and current.startswith(generation + ".repair.")
@@ -189,7 +262,10 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                     before = baseline[path]
                     backup = workspace / f"before.{index}"
                     if before is not None:
-                        backup.write_bytes(contents[path])
+                        with os.fdopen(publication._created_file(backup), "wb") as stream:
+                            stream.write(contents[path])
+                            stream.flush()
+                            os.fsync(stream.fileno())
                         backup.chmod(stat.S_IMODE(before.mode))
                     bindings.append([str(path), str(backup) if before else "",
                                      before.digest if before else ""])
@@ -235,7 +311,9 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                     raise
 
 
-def _activate_after_bootstrap_update(root: Path, slot: Path) -> None:
+def _activate_after_bootstrap_update(
+    root: Path, slot: Path, *, start_if_missing: bool = False,
+) -> None:
     python = runtime.slot_python(root, slot.name)
     if python is None:
         raise RuntimeError("Constructed Manager has no activation interpreter")
@@ -244,8 +322,11 @@ def _activate_after_bootstrap_update(root: Path, slot: Path) -> None:
         str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager.bootstrap_activation", "--root", str(root),
     ]
+    if start_if_missing:
+        command.append("--start-if-missing")
     process = subprocess.Popen(
-        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        command, executable=command[0], stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8",
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         **_installation_child_options(),
@@ -393,7 +474,7 @@ def _automatic_bootstrap_inhibited(args) -> bool:
         return False
     driver = _execution_driver(args.payload)
     return driver._automatic_update_inhibited(driver.RequestSpec(
-        "manager-bootstrap", context=tuple(request_context().items()),
+        "manager-bootstrap", ("update", "--auto"), context=tuple(request_context().items()),
         killswitch_path=_bootstrap_hold_path(),
     ))
 
@@ -415,7 +496,11 @@ def _foreground_install(args, driver) -> Path | int:
         "--root", str(args.root.resolve()), "--payload", str(args.payload.resolve()),
         "--install-only", "--source-digest", digest,
     ]
-    identity = ["install"]
+    identity = ["update" if automatic else "install"]
+    if getattr(args, "install_source", None) is not None:
+        source_path = str(args.install_source)
+        arguments.extend(["--install-source", source_path])
+        identity.extend(["install-source", source_path])
     if args.skip_instance_reconcile:
         arguments.append("--skip-instance-reconcile")
         identity.append("skip-instance-reconcile")
@@ -515,6 +600,25 @@ def _uninstall(args) -> int:
 
 
 def _install(args) -> Path | int:
+    if getattr(args, "install_source", None) is None:
+        return _install_payload(args)
+    from install_source import _member, manager_inputs
+
+    with manager_inputs(args.install_source) as (selected, wheels):
+        if selected.payload.resolve() != args.payload.resolve():
+            raise ValueError("Manager installation source selection changed")
+        installed = {row[0] for row in wheels.distributions}
+        local = tuple(
+            engine._package_name(path) for path in engine._package_roots(args.payload)
+            if engine._package_name(path) in installed
+        )
+        options = {"wheel_inputs": wheels, "local_packages": local}
+        if "application" in selected.project:
+            options["application"] = _member(args.install_source, selected.project["application"])
+        return _install_payload(args, **options)
+
+
+def _install_payload(args, *, wheel_inputs=None, local_packages=None, application=None) -> Path | int:
     reconcile = not args.skip_instance_reconcile
     if args.repair_update:
         from update_entry import validate_manager_ownership
@@ -534,7 +638,7 @@ def _install(args) -> Path | int:
     from worktree_manager.self_install import self_install
 
     install_payload = args.payload
-    if args.recover_adopted is None:
+    if args.recover_adopted is None and getattr(args, "install_source", None) is None:
         from source_acquisition import manager_payload
 
         try:
@@ -548,7 +652,8 @@ def _install(args) -> Path | int:
             raise RuntimeError("Recovery adoption names another Manager root")
         from worktree_manager.self_install import _copy_payload
 
-        with candidate(args.payload, args.root, assemble=_copy_payload) as ready:
+        candidate_options = {"application": application} if application is not None else {}
+        with candidate(args.payload, args.root, assemble=_copy_payload, **candidate_options) as ready:
             slot = ready.slot
             python = runtime.slot_python(args.root, slot.name)
             if python is None:
@@ -582,18 +687,26 @@ def _install(args) -> Path | int:
             if process.returncode:
                 return process.returncode
     else:
-        if args.repair_update:
+        source_options = (
+            {"_wheel_inputs": wheel_inputs, "_local_packages": local_packages}
+            if wheel_inputs is not None else {}
+        )
+        if application is not None:
+            source_options["_application"] = application
+        if args.repair_update or wheel_inputs is not None:
             result = self_install(
                 install_payload, root=args.root, dry_run=False,
                 _before_publish=before_publish,
                 _after_activate=lambda slot: _activate_after_bootstrap_update(args.root, slot),
                 _transactional_activation=True,
                 _reconcile_instances=reconcile,
+                **source_options,
             )
         else:
             result = self_install(
                 install_payload, root=args.root, dry_run=False, _reconcile_instances=reconcile,
                 _before_publish=before_publish,
+                **source_options,
             )
         if result.action == "error":
             print(result.reason, file=sys.stderr)
@@ -631,7 +744,7 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path)
     parser.add_argument("--payload", type=Path, default=SCRIPTS.parent)
     parser.add_argument("--recover-adopted", type=Path)
@@ -644,8 +757,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--install-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--source-digest", help=argparse.SUPPRESS)
     parser.add_argument("--skip-instance-reconcile", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--describe-source-inputs", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.describe_source_inputs:
+        if any((
+            args.root, args.install_source, args.command, args.uninstall, args.apply,
+            args.recover_adopted, args.describe_recovery, args.repair_update,
+            args.recover_for_repair, args.json, args.install_only, args.source_digest,
+            args.skip_instance_reconcile,
+        )):
+            parser.error("Source-input discovery cannot be combined with an operation")
+        print(json.dumps({
+            "schema": "copilot-extensions.manager-source-inputs", "version": 1,
+            "capabilities": ["install-source"],
+        }))
+        return 0
+    if args.install_source is not None:
+        if args.uninstall or args.recover_for_repair or args.recover_adopted or args.describe_recovery:
+            parser.error("--install-source cannot change recovery or uninstall source")
+        from install_source import select
+
+        selected = select(args.install_source)
+        args.payload = selected.payload
     if args.uninstall:
         if (
             args.root is None or args.recover_adopted or args.describe_recovery

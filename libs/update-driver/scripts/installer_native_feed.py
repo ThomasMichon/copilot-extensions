@@ -96,7 +96,9 @@ def _optional(value: str) -> str | None:
 
 def _index_url(value: str) -> tuple[str, str, bool]:
     verbatim = _fields(_body(_body(value, "Url", "(", ")").strip(), "VerbatimUrl"))
-    safe = _fields(_body(verbatim.get("url", ""), "SafeUrl"))
+    url = verbatim.get("url", "")
+    wrapper = "DisplaySafeUrl" if url.startswith("DisplaySafeUrl") else "SafeUrl"
+    safe = _fields(_body(url, wrapper))
     scheme, path = _string(safe.get("scheme", "")), _string(safe.get("path", ""))
     host = _body(safe.get("host", ""), "Some", "(", ")").strip().rstrip(",")
     if host.startswith("Domain("):
@@ -237,8 +239,10 @@ def _credentials(index, transaction, location, username, password_present, raw, 
                 raise AcquisitionUnavailable("native stored credentials require an explicit selected username")
             password = result.stdout.rstrip("\r\n")
         else:
-            missing = "error: Failed to fetch credentials for `" + _url(location)[1] + "/`"
-            if result.returncode != 2 or result.stderr.strip() != missing:
+            missing = "error: Failed to fetch credentials for "
+            endpoint = _url(location)[1] + "/"
+            messages = (missing + endpoint, missing + "`" + endpoint + "`")
+            if result.returncode != 2 or result.stderr.strip() not in messages:
                 raise NativeFeedError("native feed credential lookup failed") from None
     if password is None:
         if index["authenticate"] == "Always":

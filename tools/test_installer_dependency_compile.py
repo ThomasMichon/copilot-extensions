@@ -50,7 +50,7 @@ def test_compile_projection_preserves_installer_refusals(projection):
 
 @pytest.mark.parametrize("arguments", [
     ["-"], ["--show-settings"], ["--dry-run"], ["--no-deps"], ["--no-build-isolation"],
-    ["--format", "pylock.toml"], ["--emit-index-url"], ["--no-emit-package", "fixture"],
+    ["--format", "unsupported"], ["--emit-index-url"], ["--no-emit-package", "fixture"],
     ["--group", "runtime"], ["--editable", "."], ["--unknown-option"],
     ["--output-file", "-"], ["--generate-hashes=false"],
 ])
@@ -301,7 +301,7 @@ def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, mon
 
 
 @pytest.mark.parametrize("native_format", ["PylockToml", "RequirementsTxt"])
-def test_only_explicit_source_compile_can_export_verified_native_wheel_lock(
+def test_explicit_source_compile_can_export_verified_native_wheel_lock(
     tmp_path, monkeypatch, native_format,
 ):
     project = source_project(tmp_path / "root")
@@ -327,6 +327,42 @@ def test_only_explicit_source_compile_can_export_verified_native_wheel_lock(
             trusted_source_roots=(tmp_path,), now=NOW,
         ) as transaction:
             assert transaction.argv[transaction.argv.index("--format") + 1] == "pylock.toml"
+
+
+@pytest.mark.parametrize("native_format", ["PylockToml", "RequirementsTxt"])
+def test_registry_compile_retains_inputs_and_verifies_native_wheel_lock_format(
+    tmp_path, monkeypatch, native_format,
+):
+    requirements = tmp_path / "registry.in"
+    requirements.write_text("fixture-registry>=1\n", encoding="utf-8")
+    output = tmp_path / "pylock.toml"
+    projection = compile_settings(output=str(output)).replace(
+        "settings: PipSettings {",
+        "settings: PipSettings {\nformat: Some(" + native_format + ",),",
+    )
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, projection, ""),
+    )
+    arguments = [str(requirements), "--format", "pylock.toml", "--output-file", str(output)]
+    if native_format == "RequirementsTxt":
+        with pytest.raises(policy.DependencyPolicyError, match="format"):
+            with policy.retain_uv_compile(
+                "fixture-uv", arguments, env={}, cwd=tmp_path, now=NOW,
+            ):
+                pytest.fail("wrong native output format was retained")
+    else:
+        with policy.retain_uv_compile(
+            "fixture-uv", arguments, env={}, cwd=tmp_path, now=NOW,
+        ) as transaction:
+            assert transaction.argv[transaction.argv.index("--format") + 1] == "pylock.toml"
+            retained = next(Path(value) for value in transaction.argv if value.endswith("registry.in"))
+            assert retained != requirements
+            assert retained.read_bytes() == requirements.read_bytes()
+            assert str(output) == transaction.argv[transaction.argv.index("--output-file") + 1]
+            assert transaction.sources == {}
+        assert not retained.exists()
+        assert not output.exists()
 
 
 @pytest.mark.parametrize("expire_at", [1, 2])
@@ -361,8 +397,8 @@ def test_retained_compile_deadline_is_checked_during_copy(tmp_path, monkeypatch)
     original = policy._copy_retained_file
     copied = []
 
-    def copy(source, destination, *, deadline=None):
-        result = original(source, destination, deadline=deadline)
+    def copy(source, destination, *, deadline=None, on_progress=None):
+        result = original(source, destination, deadline=deadline, on_progress=on_progress)
         copied.append(Path(destination))
         clock[0] = 102.0
         return result

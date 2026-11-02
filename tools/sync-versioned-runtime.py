@@ -76,7 +76,7 @@ RESOLVER_NAMES = ("resolve-runtime.sh", "resolve-runtime.ps1")
 # a hardcoded root and its own deploy path, #1106/#742); it is intentionally not
 # the parameterized canonical, so the fan-out never overwrites it.
 RESOLVER_BESPOKE = frozenset({"agent-worktrees"})
-BUILD_HELPER_CONSUMERS = frozenset({"agent-containers"})
+BUILD_HELPER_CONSUMERS = frozenset({"agent-containers", "agent-worktrees", "worktree-manager"})
 
 
 def _has_installer(plugin: Path) -> bool:

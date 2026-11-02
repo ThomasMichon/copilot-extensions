@@ -104,6 +104,53 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     driver.wait.assert_called_once_with("request", output=sys.stderr)
 
 
+@pytest.mark.parametrize("action", ["install", "repair"])
+def test_native_source_installation_retains_selection_through_the_driver(
+    adapter, tmp_path, monkeypatch, action,
+):
+    monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
+    snapshot = tmp_path / "source inputs"
+    descriptor = {"kind": "github", "canonical": "github:example/suite", "ref": ""}
+    args = _arguments(
+        tmp_path, action=action, install_source=snapshot, source_descriptor=descriptor,
+    )
+    queued = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
+    )
+    assert adapter._foreground(args, driver) == 0
+    spec, runner = queued[0]
+    index = spec.argv.index("-InstallSource")
+    assert spec.argv[index + 1] == str(snapshot)
+    index = runner.argv.index("--install-source")
+    assert runner.argv[index + 1] == str(snapshot)
+    index = spec.argv.index("-RuntimeSourceDescriptor")
+    assert json.loads(spec.argv[index + 1]) == descriptor
+    index = runner.argv.index("--source-descriptor")
+    assert json.loads(runner.argv[index + 1]) == descriptor
+
+
+@pytest.mark.parametrize("action", ["uninstall", "dev", "dev-release"])
+def test_native_driver_refuses_source_selection_for_other_actions(
+    adapter, tmp_path, monkeypatch, action, capsys,
+):
+    bootstrap = Mock()
+    monkeypatch.setattr(adapter, "bootstrap", bootstrap)
+    with pytest.raises(SystemExit) as failure:
+        adapter.main([
+            "--payload", str(SCRIPTS.parent), "--root", str(tmp_path / "runtime"),
+            "--shell", str(tmp_path / "powershell.exe"), "--action", action,
+            "--install-source", str(tmp_path / "inputs"),
+        ])
+    assert failure.value.code == 2
+    assert "--install-source selects only" in capsys.readouterr().err
+    bootstrap.assert_not_called()
+
+
 @pytest.mark.parametrize("ticket", [
     "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
 ])

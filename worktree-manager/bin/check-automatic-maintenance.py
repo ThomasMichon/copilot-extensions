@@ -4,7 +4,13 @@ from pathlib import Path
 import sys
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+script = Path(__file__).resolve()
+package = script.parents[2]
+source = (
+    package.parent if script.parents[1].name == "_runtime_assets"
+    and package.name == "worktree_manager" else script.parents[1] / "src"
+)
+sys.path.insert(0, str(source))
 
 from worktree_manager.manager_config import load_config, ManagerConfigError
 

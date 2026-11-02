@@ -1,98 +1,64 @@
 #!/usr/bin/env bash
-# Self-provisioning check -- runs on session start via hooks.json (dotfiles #693).
-#
-# "Enabling a runtime plugin" should be the whole install: on any session start,
-# bring each enabled plugin's runtime into existence and keep it version-matched
-# to its payload -- not only when the session was launched through the
-# agent-worktrees worktree launcher. This shim runs the same version-keyed
-# `reconcile-plugins` logic universally.
-#
-# Non-blocking by construction: the foreground does only a cheap read-only
-# `--peek` (no cache side effects). A cold first provision builds a venv (slow),
-# so when there is work we spawn the `--apply` worker DETACHED and return
-# immediately -- session start never waits on a runtime build.
-
+# Report-only compatibility contract: provision-status-v1
+# Report retained failures without resolving, previewing or constructing runtimes.
 set -uo pipefail
-
-_LOG="${WORKTREE_SETUP_LOG:-/dev/null}"
-_log() { printf '[%s] [%s] provision-check: %s\n' "$(date '+%H:%M:%S')" "$1" "$2" >> "$_LOG" 2>/dev/null || true; }
-
-# Opt-out: honor the launcher's reconcile switch plus a provisioning-scoped one.
-if [[ "${WORKTREE_NO_RECONCILE:-}" == "1" || "${WORKTREE_NO_PROVISION:-}" == "1" ]]; then
+status="$HOME/.agent-worktrees/logs/provision-status.json"
+if [[ ! -e "$status" && ! -L "$status" ]]; then exit 0; fi
+python="$(command -v python3 || command -v python || true)"
+if [[ -z "$python" ]]; then
+    printf '[agent-worktrees] Could not read provisioning status: %s (Python unavailable)\n' "$status" >&2
     exit 0
 fi
-
-_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
-[ -f "$_awresolve" ] && . "$_awresolve"
-PYTHON="${AW_PY:-}"
-if [[ ! -x "$PYTHON" ]]; then exit 0; fi
-repo_dir="$PWD"
-log_dir="$HOME/.agent-worktrees/logs"
-status="$log_dir/provision-status.json"
-
-if [[ -f "$status" ]]; then
-    previous="$(PYTHONPATH="" "$PYTHON" - "$status" "$repo_dir" <<'PY'
+if ! PYTHONPATH="" "$python" -I -B - "$status" "$PWD" <<'PY'
 import json
 import os
+from pathlib import Path
+import stat
 import sys
 
+status = Path(sys.argv[1])
 try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError):
-    sys.exit(0)
-if data.get("ok") is not False:
-    sys.exit(0)
-if os.path.realpath(str(data.get("repo", ""))) != os.path.realpath(sys.argv[2]):
-    sys.exit(0)
-failed = ", ".join(
-    str(item.get("service", "?")) for item in data.get("failed", [])
-)
-print(failed or data.get("reason", "unknown failure"))
+    named = status.lstat()
+    if not stat.S_ISREG(named.st_mode):
+        raise ValueError("status is not an ordinary file")
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_NONBLOCK"):
+        raise ValueError("native nonblocking file access is unavailable")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(status, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_size > 65536:
+            raise ValueError("status is not an ordinary bounded file")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(65537)
+    finally:
+        os.close(descriptor)
+    if len(raw) > 65536:
+        raise ValueError("status exceeds the report budget")
+    previous = json.loads(raw.decode("utf-8-sig"))
+    if not isinstance(previous, dict):
+        raise ValueError("status is not an object")
+    repo = previous.get("repo")
+    if previous.get("ok") is not False or not isinstance(repo, str) or not repo:
+        raise SystemExit(0)
+    if os.path.realpath(repo) != os.path.realpath(sys.argv[2]):
+        raise SystemExit(0)
+    failures = previous.get("failed")
+    names = [
+        item["service"][:200] for item in failures
+        if isinstance(item, dict) and isinstance(item.get("service"), str) and item["service"]
+    ][:8] if isinstance(failures, list) else []
+    reason = previous.get("reason")
+    failed = ", ".join(names) or (reason[:512] if isinstance(reason, str) and reason else "unknown failure")
+    print(
+        f"[agent-worktrees] Previous background provisioning failed: {failed}. "
+        f"Inspect {status.parent}/provision-*.log* and rerun reconcile-plugins.",
+        file=sys.stderr,
+    )
+except (OSError, UnicodeError, ValueError, TypeError, RecursionError):
+    print(f"[agent-worktrees] Could not read provisioning status: {status}", file=sys.stderr)
 PY
-)" || previous=""
-    if [[ -n "$previous" ]]; then
-        echo "[agent-worktrees] Previous background provisioning failed: $previous. Inspect $log_dir/provision-*.log* and rerun reconcile-plugins." >&2
-    fi
+then
+    printf '[agent-worktrees] Could not read provisioning status: %s\n' "$status" >&2
 fi
-
-# Read-only preview: does anything need provisioning? (No throttle side effects.)
-peek="$(PYTHONPATH="" "$PYTHON" -m agent_worktrees reconcile-plugins --repo "$repo_dir" --peek 2>/dev/null)" || exit 0
-[[ -n "$peek" ]] || exit 0
-
-diagnostics="$(printf '%s' "$peek" | PYTHONPATH="" "$PYTHON" -c \
-'import sys, json
-for d in json.load(sys.stdin).get("diagnostics", []):
-    print(f"{d.get('service', '?')} [{d.get('reason', 'diagnostic')}] {d.get('message', '')}")' \
-    2>/dev/null)" || diagnostics=""
-while IFS= read -r diagnostic; do
-    [[ -n "$diagnostic" ]] || continue
-    echo "[agent-worktrees] Reconcile diagnostic: $diagnostic" >&2
-    _log WARN "reconcile diagnostic: $diagnostic"
-done <<< "$diagnostics"
-
-# Decide + extract the services needing work in one python pass (no jq dep).
-# Exits non-zero when there is nothing to do, so the shim returns immediately.
-services="$(printf '%s' "$peek" | PYTHONPATH="" "$PYTHON" -c \
-'import sys, json
-d = json.load(sys.stdin)
-if d.get("action") != "reconcile":
-    sys.exit(1)
-print(", ".join(sorted({u["service"] for u in d.get("updates", [])})))' 2>/dev/null)" || exit 0
-
-echo "[agent-worktrees] Provisioning runtime(s) in background: $services"
-_log INFO "provisioning in background: $services"
-
-# Background apply: execute the plan detached so the slow build never blocks the
-# session. Fully detach so the child outlives this hook. Move out of the plugin
-# payload first for parity with Windows, where an inherited payload cwd prevents
-# an in-place marketplace refresh.
-mkdir -p "$log_dir" 2>/dev/null || true
-stamp="$(date -u '+%Y%m%d-%H%M%S')"
-(
-    cd "$HOME" || exit 0
-    PYTHONPATH="" nohup "$PYTHON" -m agent_worktrees reconcile-plugins \
-        --repo "$repo_dir" --status "$status" --apply --auto \
-        >> "$log_dir/provision-$stamp.log" 2>&1 &
-) >/dev/null 2>&1
-
 exit 0

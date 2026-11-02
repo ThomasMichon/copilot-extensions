@@ -181,13 +181,16 @@ def test_retained_bootstrap_pins_before_pth_or_application_imports(
             diagnostics.terminate_pid_if_identity(child_pid, child_identity, exit_timeout=10)
 
 
-def test_original_slot_is_preserved_before_interpreter_conversion(tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+def test_original_slot_is_preserved_before_interpreter_conversion(tmp_path, nested):
     slot = tmp_path / "versions" / "1.0.0"
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir(parents=True)
     for name in ("runtime_launcher.py", "versioned_runtime.py"):
         (bootstrap / name).write_text("fixture", encoding="utf-8")
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python = (slot / ".venv" if nested else slot) / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
     original = [str(python), "-m", "agent_worktrees", "status-monitor"]
     assert retained_monitor_argv(original) == [
         str(python), "-I", "-S", "-B", str(bootstrap / "runtime_launcher.py"), *original[1:],

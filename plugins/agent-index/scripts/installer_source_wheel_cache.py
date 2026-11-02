@@ -172,7 +172,7 @@ def cached_source_wheel(
                 if os.path.lexists(entry):
                     raise WheelError("source wheel publication destination appeared during construction")
                 try:
-                    candidate.rename(entry)
+                    Path(_native_retained_path(candidate)).rename(_native_retained_path(entry))
                     break
                 except OSError as error:
                     if (

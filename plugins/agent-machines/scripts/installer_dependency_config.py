@@ -708,7 +708,7 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
         elif option == "--no-emit-package":
             omissions.append(value)
         elif option == "--format":
-            if value not in (("requirements.txt", "pylock.toml") if source_graph else ("requirements.txt",)):
+            if value not in ("requirements.txt", "pylock.toml"):
                 raise error_type("lock export format is unsupported for this transaction")
             output_format = value
         elif option in ("--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate") and value:
@@ -733,10 +733,10 @@ def check_compile_projection(
     projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False, native_target=False,
 ):
     """Output policy is effective configuration, not merely a CLI intention."""
-    if dict(argument_pairs(arguments)).get("--format") == "pylock.toml" and (
-        not source_graph or not re.search(r"(?m)^\s*format:\s*Some\(\s*PylockToml,\s*\),\s*$", projection)
+    if dict(argument_pairs(arguments)).get("--format") == "pylock.toml" and not re.search(
+        r"(?m)^\s*format:\s*Some\(\s*PylockToml,\s*\),\s*$", projection,
     ):
-        raise error_type("UV source wheel-lock format differs from the selected output")
+        raise error_type("UV wheel-lock format differs from the selected output")
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
         ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),
@@ -868,8 +868,10 @@ def write_toml(path, data, *, error_type):
         stream.write(text + "\n")
 
 
-def private_retained_root(parent, *, error_type):
-    root = parent / "inputs"
+def private_retained_root(parent, *, error_type, name="inputs"):
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) is None:
+        raise error_type("private dependency-input directory requires one ordinary name")
+    root = parent / name
     if os.name != "nt":
         root.mkdir(mode=0o700)
         return root
@@ -898,7 +900,7 @@ def private_retained_root(parent, *, error_type):
         raise error_type("private dependency-input permissions could not be constructed")
     try:
         attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
-        if not create(str(root), ctypes.byref(attributes)):
+        if not create(native_retained_path(root), ctypes.byref(attributes)):
             raise error_type("private dependency-input directory could not be created")
     finally:
         kernel.LocalFree(descriptor)

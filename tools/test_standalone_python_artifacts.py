@@ -6,6 +6,11 @@ import json
 import hashlib
 from pathlib import Path
 import subprocess
+import shutil
+import sys
+import zipfile
+import os
+import venv
 
 import pytest
 
@@ -40,6 +45,7 @@ def _source(root, component):
         "fleet-manager": "fleet_manager", "pr-service": "agent_pull_requests_service",
         "chat-service": "agent_chat_service", "dispatch-service": "agent_dispatch_service",
         "ssh-service": "agent_ssh_service", "worktree-manager": "worktree_manager",
+        "index-service": "agent_index_service", "index-engine": "agent_index_engine",
     }[component]
     (source / "src" / package).mkdir(parents=True)
     (source / "src" / package / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
@@ -48,20 +54,46 @@ def _source(root, component):
         f'[project]\nname = "{package}"\nversion = "1.0"\n'
         '[tool.setuptools.packages.find]\nwhere = ["src"]\n', encoding="utf-8",
     )
-    for resource in standalone.standalone_build_resources(
+    resources = standalone.standalone_build_resources(
         standalone.COMPONENTS[component], source_root=root,
-    ):
+    )
+    for resource in resources:
         resource.mkdir(parents=True, exist_ok=True)
     helper = root / "libs" / "versioned-runtime" / "standalone_build.py"
+    helper.parent.mkdir(parents=True, exist_ok=True)
     helper.write_bytes((ROOT / "libs" / "versioned-runtime" / "standalone_build.py").read_bytes())
-    if component in {"fleet-manager", "chat-service"}:
+    if component in {"fleet-manager", "chat-service", "index-service", "worktree-manager"}:
         (source / "setup.py").write_bytes(
             (ROOT / standalone.COMPONENTS[component] / "setup.py").read_bytes()
         )
         for path in standalone.injected_resources(component, root).values():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"# controlled canonical runtime resource\n")
+    if component == "index-service":
+        (source / "_build_runtime_resource.py").write_bytes(
+            (ROOT / standalone.COMPONENTS[component] / "_build_runtime_resource.py").read_bytes()
+        )
     return source
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("modified", [False, True])
+def test_trusted_manager_setup_accepts_git_line_endings_but_not_changed_body(
+    tmp_path, newline, modified,
+):
+    from build_toolchain_lock import ArtifactBuildError
+
+    source = _source(tmp_path, "worktree-manager")
+    setup = source / "setup.py"
+    content = setup.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", newline)
+    setup.write_bytes(content + (b"\nprint('untrusted build action')\n" if modified else b""))
+    if modified:
+        with pytest.raises(ArtifactBuildError, match="unsupported executable"):
+            standalone.validate_build(source, component="worktree-manager", root=tmp_path)
+    else:
+        assert standalone.validate_build(
+            source, component="worktree-manager", root=tmp_path,
+        )["project"]["version"] == "1.0"
 
 
 def _build(tmp_path, monkeypatch, component):
@@ -153,7 +185,7 @@ def test_standalone_changed_bytes_and_toolchain_refused(tmp_path, monkeypatch, m
         artifacts.validate_bundle(directory / entry["filename"], entry, candidate_root=tmp_path)
 
 
-@pytest.mark.parametrize("component", ["fleet-manager", "chat-service"])
+@pytest.mark.parametrize("component", ["fleet-manager", "chat-service", "index-service", "worktree-manager"])
 @pytest.mark.parametrize("mutation", ["setup", "helper", "alternate", "included"])
 def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, component):
     source = _source(tmp_path, component)
@@ -168,6 +200,13 @@ def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, comp
         standalone.validate_build(source, component=component, root=tmp_path)
 
 
+def test_index_build_selector_substitution_is_refused(tmp_path):
+    source = _source(tmp_path, "index-service")
+    (source / "_build_runtime_resource.py").write_bytes(b"raise RuntimeError('not canonical')\n")
+    with pytest.raises(builder.ArtifactBuildError, match="selector"):
+        standalone.validate_build(source, component="index-service", root=tmp_path)
+
+
 def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_path, monkeypatch):
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "fleet-manager")
     wheel = manifest["wheels"][0]
@@ -180,6 +219,109 @@ def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_p
             component="fleet-manager", candidate_root=tmp_path,
         )
     assert archive.is_file()
+
+
+@pytest.mark.parametrize("relative,package", [
+    ("worktree-manager", "worktree_manager"),
+    ("plugins/agent-worktrees", "agent_worktrees"),
+])
+def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, relative, package):
+    project = tmp_path / "project"
+    shutil.copytree(
+        ROOT / relative, project,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist",
+        ),
+    )
+    expected = {
+        name: path.read_bytes()
+        for name, path in __import__("plugin_runtime_resources").application_resources(
+            project, package,
+        ).items()
+    }
+    assert expected
+    before = {path: path.read_bytes() for path in project.rglob("*.py")}
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    program = (
+        "import setuptools.build_meta as backend; out=__import__('sys').argv[1]; "
+        "backend.build_wheel(out); backend.build_sdist(out)"
+    )
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(archives)],
+        cwd=project, capture_output=True, text=True, encoding="utf-8", timeout=90,
+        **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    wheel = next(archives.glob("*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
+        assert not any("/payload/" in name for name in archive.namelist())
+    assert all(path.read_bytes() == value for path, value in before.items())
+    unpacked = tmp_path / "sdist"
+    source_archives = [path for path in archives.iterdir() if path != wheel]
+    assert len(source_archives) == 1
+    shutil.unpack_archive(source_archives[0], unpacked)
+    source = next(unpacked.iterdir())
+    assert not (source / "scripts").exists()
+    rebuilt = tmp_path / "rebuilt"
+    rebuilt.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import setuptools.build_meta as backend; backend.build_wheel(__import__('sys').argv[1])",
+         str(rebuilt)],
+        cwd=source, capture_output=True, text=True, encoding="utf-8", timeout=90,
+        **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    with zipfile.ZipFile(next(rebuilt.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
+    slot = tmp_path / "runtime" / "versions" / "1.0"
+    environment = slot / ".venv"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    uv = shutil.which("uv")
+    assert uv, "native uv is required for the installed-wheel consumer control"
+    result = subprocess.run(
+        [uv, "pip", "install", "--python", str(python), "--no-deps", "--no-index", str(wheel)],
+        capture_output=True, text=True, encoding="utf-8", timeout=30, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    shutil.rmtree(project)
+    if package == "worktree_manager":
+        probe = (
+            "from pathlib import Path; from worktree_manager import self_install as owner; "
+            "from types import SimpleNamespace; import sys; "
+            "from worktree_manager import relocated_launch; "
+            "relocated_launch._core=lambda: SimpleNamespace(_is_windows=lambda: sys.platform=='win32'); "
+            "assert not (Path(__import__('sys').prefix).parent/'payload').exists(); "
+            "assert '_runtime_assets' in str(owner._runtime_installer().__file__); "
+            "assert '_runtime_assets' in str(owner._provider_manifest_template_path()); "
+            "assert owner._expected_control_plane_provider_manifest()['provider']=='worktree-manager'; "
+            "launcher=relocated_launch._relocated_launch_script(); assert launcher.is_file(); "
+            "assert '_runtime_assets' in str(launcher)"
+        )
+    else:
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        (bootstrap / "build-info.json").write_text(json.dumps({
+            "version": "1.0", "commit": "wheel-consumer-control", "runtime_generation": "a" * 32,
+        }), encoding="utf-8")
+        probe = (
+            "from pathlib import Path; import agent_worktrees; "
+            "from agent_worktrees._build_info import BUILD_INFO; "
+            "assert BUILD_INFO['commit']=='wheel-consumer-control'; "
+            "assets=Path(agent_worktrees.__file__).parent/'_runtime_assets'/'scripts'; "
+            "assert (assets/'runtime_install.py').is_file(); "
+            "assert (assets/'installation-context'/'installation_context.py').is_file(); "
+            "assert (assets/'installation-context'/'json-query.awk').is_file()"
+        )
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", probe], cwd=tmp_path,
+        capture_output=True, text=True, encoding="utf-8", timeout=30, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_standalone_signature_failure_remains_blocking(tmp_path, monkeypatch):

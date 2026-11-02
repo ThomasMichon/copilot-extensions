@@ -111,9 +111,12 @@ def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:
 
 
 def detached_child_argv(root: Path | None = None) -> list[str]:
+    from update_driver import runtime_command
+
+    command, _environment = runtime_command("worktree_manager", ("mux-daemon", "run"))
     argv = [
         sys.executable, *python_cache_args(selected_root(root)),
-        "-m", "worktree_manager", "mux-daemon", "run",
+        *command[1:],
     ]
     if root is not None:
         argv.append(f"--root={root}")

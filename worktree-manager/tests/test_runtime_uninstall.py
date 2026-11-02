@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import py_compile
@@ -66,6 +67,40 @@ def fixture_slot(root, version="1.2.3", *, python_source=False):
 def tree_bytes(root):
     return {str(path.relative_to(root)): path.read_bytes()
             for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows legacy path-length behavior")
+def test_inventory_inspects_long_wheel_assets_without_system_long_paths(tmp_path, monkeypatch):
+    slot = tmp_path / "versions" / ("source-" + "a" * 130)
+    directory = slot / ".venv" / "Lib" / "site-packages" / "worktree_manager" / "_runtime_assets"
+    while len(str(directory)) < 270:
+        directory /= "nested-assets"
+    native_directory = Path(removal.native_retained_path(directory))
+    native_directory.mkdir(parents=True)
+    artifact = directory / "installer_engine_uninstall_controllers.py"
+    contents = b"retained operational asset\n"
+    Path(removal.native_retained_path(artifact)).write_bytes(contents)
+    original_lstat = Path.lstat
+    original_open = Path.open
+    original_iterdir = Path.iterdir
+
+    def legacy_call(operation):
+        def call(path, *args, **kwargs):
+            if len(str(path)) >= 260 and not str(path).startswith("\\\\?\\"):
+                raise FileNotFoundError("legacy Windows path exceeds MAX_PATH")
+            return operation(path, *args, **kwargs)
+        return call
+
+    monkeypatch.setattr(Path, "lstat", legacy_call(original_lstat))
+    monkeypatch.setattr(Path, "open", legacy_call(original_open))
+    monkeypatch.setattr(Path, "iterdir", legacy_call(original_iterdir))
+    inventory = removal._tree(slot)
+    relative = artifact.relative_to(slot).as_posix()
+    assert inventory[relative]["kind"] == "file"
+    assert inventory[relative]["digest"] == hashlib.sha256(contents).hexdigest()
+    assert all(not name.startswith("\\\\?\\") for name in inventory)
+    Path(removal.native_retained_path(artifact)).write_bytes(b"changed")
+    assert removal._tree(slot)[relative] != inventory[relative]
 
 
 def invoke(*args, installer=INSTALLER):

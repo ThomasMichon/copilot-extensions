@@ -37,7 +37,8 @@ SUPPORT_FILES = (
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
-    "installer_engine.py", "runtime_launcher.py", "installer_driver.py",
+    "installer_engine.py", "installer_engine_health.py", "runtime_launcher.py", "installer_driver.py",
+    "install_source.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",

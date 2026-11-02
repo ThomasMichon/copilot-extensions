@@ -14,6 +14,39 @@ RUNTIME_RESOURCES = {
     "versioned_runtime_publication.py": "versioned_runtime_publication.py",
     "versioned_runtime_source.py": "versioned_runtime_source.py",
 }
+APPLICATION_RESOURCES = {
+    "worktree_manager": (
+        "scripts/installer*.py", "scripts/runtime*.py", "scripts/versioned_runtime*.py",
+        "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py",
+        "scripts/repair_recovery.py", "scripts/update_entry.py",
+        "scripts/daemon_instances.*", "scripts/daemon_instance_runtime.pyz",
+        "scripts/installer-instance-reconcile.*",
+        "scripts/runtime-source-tools/**/*",
+        "bin/**/*",
+        "references/control-plane-provider.json", "references/uninstall-contract.json",
+    ),
+    "agent_worktrees": ("scripts/**/*",),
+}
+
+
+def application_resources(project, package):
+    """Keep operational assets in the wheel, without retaining a source payload."""
+    project = Path(project)
+    included = project / "src" / package / "_runtime_assets"
+    patterns = APPLICATION_RESOURCES[package]
+    sources = {
+        path.relative_to(project).as_posix(): path
+        for pattern in patterns for path in project.glob(pattern)
+        if path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk"}
+    }
+    if sources:
+        return {"_runtime_assets/" + name: path for name, path in sources.items()}
+    if not included.is_dir():
+        raise RuntimeError("application runtime resources are missing")
+    return {
+        "_runtime_assets/" + path.relative_to(included).as_posix(): None
+        for path in included.rglob("*") if path.is_file()
+    }
 
 
 def ordinary_file(path):

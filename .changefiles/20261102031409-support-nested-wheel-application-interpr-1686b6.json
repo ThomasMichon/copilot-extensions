@@ -1,0 +1,13 @@
+{
+  "comment": "Support nested wheel application interpreter and cache paths",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

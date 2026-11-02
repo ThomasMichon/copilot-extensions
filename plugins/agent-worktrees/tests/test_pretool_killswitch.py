@@ -177,7 +177,7 @@ def test_relative_override_diagnostic_does_not_skip_normal_guard_evaluation(monk
 
 
 @pytest.mark.parametrize("selected", ["central", "legacy", "override"])
-def test_first_install_honors_each_bootstrap_namespace_before_stamp(
+def test_first_install_never_consults_bootstrap_hold_namespaces(
     tmp_path, monkeypatch, selected,
 ):
     from types import SimpleNamespace
@@ -205,7 +205,7 @@ def test_first_install_honors_each_bootstrap_namespace_before_stamp(
     monkeypatch.setattr(client.shutil, "which", lambda name: str(tmp_path / "powershell.exe"))
     monkeypatch.setattr(client.subprocess, "run", lambda *a, **k: pytest.fail("paused bootstrap reached stamp"))
     result = client._bootstrap_first_install({"sessionId": "namespace-control"})
-    assert selected + " pause" in result["_stderr"]
+    assert result == {}
 
 
 def test_first_install_central_inactive_does_not_revive_legacy_pause(tmp_path, monkeypatch):
@@ -232,5 +232,4 @@ def test_first_install_central_inactive_does_not_revive_legacy_pause(tmp_path, m
         returncode=0, stdout="", stderr="",
     ))
     assert client._bootstrap_first_install({"sessionId": "namespace-off"}) == {}
-    assert len(calls) == 1
-    assert "--run-lifecycle" in calls[0]
+    assert calls == []

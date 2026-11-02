@@ -136,6 +136,76 @@ def test_packaged_pywin32_bootstrap_is_validated_without_execution(installed):
     assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
 
 
+@pytest.mark.parametrize("layout", ["Lib/site-packages", "lib/python3.14/site-packages"])
+@pytest.mark.parametrize("damage_case", [None, "system-site-packages", "editable-origin", "external-path"])
+def test_nested_application_environment_admission(tmp_path, layout, damage_case):
+    root = tmp_path / "runtime"
+    slot = runtime.slot(root, "2.0")
+    environment = slot / ".venv"
+    site = environment.joinpath(*layout.split("/"))
+    site.mkdir(parents=True)
+    (environment / "pyvenv.cfg").write_text("include-system-site-packages = false\n")
+    metadata = site / "sample-1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "direct_url.json").write_text(json.dumps({"dir_info": {}}))
+    interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_bytes(b"not executed")
+    assert runtime.slot_python(root, "2.0") == interpreter
+    runtime.mark_complete(root, "2.0", payload_hash="same")
+    if damage_case is None:
+        assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
+    else:
+        damage(environment, site, damage_case, tmp_path)
+        assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_HEALTH_REPAIR_REQUIRED
+        with pytest.raises(RuntimeError):
+            runtime.mark_complete(root, "2.0", payload_hash="same")
+    assert runtime.current_version(root) is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows legacy path-length behavior")
+@pytest.mark.parametrize("damage_case", [None, "editable-origin", "egg-link"])
+def test_long_installed_content_retains_immutable_admission(tmp_path, monkeypatch, damage_case):
+    root = tmp_path / "runtime"
+    slot = runtime.slot(root, "2.0")
+    environment = slot / ".venv"
+    site = environment / "Lib" / "site-packages"
+    directory = site
+    while len(str(directory)) < 270:
+        directory /= "nested-package"
+    native_directory = Path("\\\\?\\" + str(directory))
+    native_directory.mkdir(parents=True)
+    (native_directory / "sample.py").write_text("VALUE = 'frozen'\n")
+    metadata = native_directory / "sample-1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "direct_url.json").write_text(json.dumps({
+        "dir_info": {"editable": damage_case == "editable-origin"},
+    }))
+    if damage_case == "egg-link":
+        (native_directory / "sample.egg-link").write_text("external source\n")
+    (environment / "pyvenv.cfg").write_text("include-system-site-packages = false\n")
+    original_lstat = Path.lstat
+    original_open = Path.open
+
+    def legacy_call(operation):
+        def call(path, *args, **kwargs):
+            if len(str(path)) >= 260 and not str(path).startswith("\\\\?\\"):
+                raise FileNotFoundError("legacy Windows path exceeds MAX_PATH")
+            return operation(path, *args, **kwargs)
+        return call
+
+    monkeypatch.setattr(Path, "lstat", legacy_call(original_lstat))
+    monkeypatch.setattr(Path, "open", legacy_call(original_open))
+    if damage_case is None:
+        runtime.mark_complete(root, "2.0", payload_hash="same")
+        assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
+    else:
+        with pytest.raises(RuntimeError, match="Editable installation"):
+            runtime.mark_complete(root, "2.0", payload_hash="same")
+        assert not runtime.marker_path(root, "2.0").exists()
+    assert runtime.current_version(root) is None
+
+
 @pytest.mark.parametrize("published", [False, True])
 def test_linked_installed_package_is_refused(installed, tmp_path, published):
     root, slot, site = installed
@@ -190,7 +260,7 @@ def test_metadata_io_failure_is_not_absence(installed, monkeypatch, metadata):
     original = Path.read_text
 
     def denied(path, *args, **kwargs):
-        if path == target:
+        if Path(runtime._normalize_windows_extended_path(str(path))) == target:
             raise PermissionError("metadata denied")
         return original(path, *args, **kwargs)
 

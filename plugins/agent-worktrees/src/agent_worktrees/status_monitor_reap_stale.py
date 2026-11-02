@@ -159,6 +159,8 @@ def current_runtime_python() -> str:
         current = _cfg.venv_python()
         if current.exists():
             root = current.parents[1] if current.parent.name in ("Scripts", "bin") else current.parent
+            if root.name == ".venv":
+                root = root.parent
             if _slot_marker_valid(root, root.name):
                 return str(current)
     except Exception:
@@ -400,4 +402,3 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     elif outcome.startswith("error:"):
         _record(f"status-monitor-reap-stale: ensure-monitor attempt failed (non-fatal): {outcome[6:]}")
     return 0
-

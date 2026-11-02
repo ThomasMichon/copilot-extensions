@@ -6,7 +6,8 @@ function Enter-NativeInstallerDriver {
         [Parameter(Mandatory)][string]$Action,
         [string[]]$Options = @(),
         [string]$RetainedRuntime,
-        [string]$RetainedRuntimeSha256
+        [string]$RetainedRuntimeSha256,
+        [string]$InstallSource
     )
     $probe = @'
 import json,sys
@@ -60,6 +61,7 @@ print(json.dumps(str(python)))
     foreach ($option in $Options) { $arguments += @('--option', $option) }
     if ($RetainedRuntime) { $arguments += @('--retained-runtime', $RetainedRuntime) }
     if ($RetainedRuntimeSha256) { $arguments += @('--retained-runtime-sha256', $RetainedRuntimeSha256) }
+    if ($InstallSource) { $arguments += @('--install-source', $InstallSource) }
     $participant = $env:COPILOT_EXTENSIONS_NATIVE_INSTALLER -eq $Plugin
     if ($participant) { $arguments += '--check-native' }
     $previousErrorAction = $ErrorActionPreference

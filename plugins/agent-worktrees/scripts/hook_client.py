@@ -503,82 +503,14 @@ def _version_key(version: str) -> tuple:
 
 
 def _bootstrap_first_install(payload: dict) -> dict:
-    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
-        return {}
-    scripts = Path(__file__).resolve().parent
-    direct_stamp = False
-    if os.name == "nt":
-        script = scripts / "bootstrap-check.ps1"
-        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        argv = [
-            shell, "-NoLogo", "-NoProfile", "-File", str(script),
-            "-BootstrapPython", sys.executable,
-        ] if shell else []
-        installer = scripts / "install.ps1"
-        binding = scripts / "command_binding.py"
-        if shell and installer.is_file() and binding.is_file():
-            state_path = Path(
-                os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
-                or Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
-            )
-            if not os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE") and not state_path.exists():
-                state_path = Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
-            try:
-                state = json.loads(state_path.read_text(encoding="utf-8-sig"))
-            except (OSError, UnicodeError, ValueError):
-                state = None
-            if isinstance(state, dict) and state.get("active") is True:
-                reason = state.get("reason")
-                message = f"ACTIVE -- {reason}" if reason else "ACTIVE"
-                return {"_stderr": (
-                    f"[bootstrap-killswitch] {message}; skipping automatic reconcile.\n"
-                )}
-            argv = [
-                sys.executable, "-I", "-B", "-X", "utf8", str(binding),
-                "--payload-root", str(scripts.parent), "--plugin-id", "agent-worktrees",
-                "--legacy-root", str(Path.home() / ".agent-worktrees"),
-                "--source-payload-root", str(scripts.parent),
-                "--deferred-runtime", "--run-lifecycle",
-                "--lifecycle-timeout", str(_SESSION_START_TIMEOUT_S - 2), "--",
-                shell, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-File", str(installer), "stamp", "-BootstrapPython", sys.executable,
-            ]
-            direct_stamp = True
-    else:
-        script = scripts / "bootstrap-check.sh"
-        shell = shutil.which("bash")
-        argv = [shell, str(script)] if shell else []
-    if not argv or not script.is_file():
-        return {}
-    try:
-        completed = subprocess.run(
-            argv,
-            input=json.dumps(payload, separators=(",", ":")),
-            text=True,
-            encoding="utf-8",
-            timeout=None if direct_stamp else _SESSION_START_TIMEOUT_S,
-            check=False,
-            capture_output=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        if direct_stamp:
-            return {"_stderr": f"[agent-worktrees] Bootstrap stamp unavailable: {error}\n"}
-        return {}
-    if direct_stamp:
-        diagnostic = (completed.stdout or "") + (completed.stderr or "")
-        if completed.returncode:
-            diagnostic += (
-                f"[agent-worktrees] Bootstrap stamp failed (exit {completed.returncode}).\n"
-            )
-        return {"_stderr": diagnostic} if diagnostic else {}
-    helper = _load_sibling("hook_lifecycle_runtime.py")
-    if helper is None:
-        return {"_stderr": "[agent-worktrees] Bootstrap result helper unavailable.\n"}
-    return helper.bootstrap_result(completed)
+    """Compatibility entry: missing runtime installation is never hook work."""
+    return {}
 
 
-def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = False) -> dict:
+def _fallback_legacy_session_start(
+    payload: dict, *, skip_reconcile: bool = False, report_only: bool = False,
+) -> dict:
+    """Run non-install hooks; the legacy skip argument has no remaining install work."""
     scripts = Path(__file__).resolve().parent
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -591,7 +523,6 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
     if not prefix:
         return {}
     specs = (
-        ("bootstrap-check", ()),
         ("project-hooks", ()),
         ("register-nudge", ("--side-effect-only",)),
         ("register-session", ("--side-effect-only",)),
@@ -600,21 +531,31 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
     )
     encoded = json.dumps(payload, separators=(",", ":"))
     processes = []
+    diagnostics = []
     group_kwargs = (
         {"start_new_session": True}
         if os.name == "posix"
         else {
             "creationflags": getattr(
                 subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-            )
+            ) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         }
     )
     for name, extra in specs:
-        if skip_reconcile and name in {"bootstrap-check", "provision-check"}:
+        if report_only and name != "provision-check":
             continue
         script = scripts / f"{name}{suffix}"
         if not script.is_file():
             continue
+        if name == "provision-check":
+            try:
+                with script.open("rb") as stream:
+                    header = stream.read(512)
+            except OSError:
+                header = b""
+            if b"# Report-only compatibility contract: provision-status-v1" not in header:
+                diagnostics.append("[agent-worktrees] Report-only provisioning status helper unavailable; no legacy provisioning attempted.\n")
+                continue
         try:
             processes.append(
                 subprocess.Popen(
@@ -626,10 +567,6 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
                     env={
                         **os.environ,
                         "PYTHONPATH": "",
-                        **(
-                            {"WORKTREE_NO_RECONCILE": "1", "WORKTREE_NO_PROVISION": "1"}
-                            if skip_reconcile else {}
-                        ),
                     },
                     **group_kwargs,
                 )
@@ -638,7 +575,6 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
             continue
     deadline = time.monotonic() + _SESSION_START_TIMEOUT_S
     result: dict = {}
-    diagnostics = []
     for process in processes:
         try:
             stdout, stderr = process.communicate(
@@ -731,7 +667,7 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
     if python is None:
         if contextual:
             return {}
-        return _bootstrap_first_install(payload)
+        return _fallback_legacy_session_start(payload, report_only=True)
     metadata = payload.get("_agentWorktrees")
     payload_version = (
         metadata.get("pluginVersion")
@@ -750,10 +686,6 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
                 "[agent-worktrees] Native source registration requires the current runtime; "
                 "older lifecycle fallback refused.\n"
             )}
-        if _external_update_driver_active(home, python):
-            return {} if contextual else _fallback_legacy_session_start(
-                payload, skip_reconcile=True
-            )
         return {} if contextual else _fallback_legacy_session_start(payload)
     helper = _load_sibling("hook_lifecycle_runtime.py")
     if helper is None:
