@@ -12,6 +12,10 @@ _path = sys.path.copy()
 try:
     sys.path[:0] = [
         str(WORKTREES / "src"),
+        *(str(ROOT / "libs" / name / "src") for name in (
+            "config-migrate", "configuration-layers", "dropin-registry",
+            "machine-transport", "update-telemetry",
+        )),
     ]
     _spec = importlib.util.spec_from_file_location(
         "promotion_original_pr_target_probes",
