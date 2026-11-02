@@ -353,6 +353,15 @@ class AgendaRuntime:
                 return self._reply(request)
         except contract.AgendaError as exc:
             self._restore_pending(pending)
+            if exc.code == "superseded":
+                try:
+                    with self.owner._activation_lock, self._lock:
+                        project, _wid, _session = contract.selection(request)
+                        self._fence(expected=self._generation, read=True)
+                        self._request_project(project, read=True)
+                        return self._reply(request)
+                except contract.AgendaError as cached_error:
+                    exc = cached_error
             return contract.failure(exc.code, str(exc), version=contract.error_version(request))
         except (OSError, sqlite3.Error, ProjectionUnavailable, ValueError) as exc:
             self._restore_pending(pending)

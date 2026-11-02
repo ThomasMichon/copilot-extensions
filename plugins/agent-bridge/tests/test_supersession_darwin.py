@@ -32,7 +32,9 @@ def native(monkeypatch):
 
     def birth(pid):
         calls.append(("birth", pid))
-        return state.birth
+        if state.birth is None:
+            raise OSError("native birth is unavailable")
+        return state.birth, False
 
     monkeypatch.setattr(process_exit, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(select, "kqueue", lambda: SimpleNamespace(
@@ -46,7 +48,7 @@ def native(monkeypatch):
         "KQ_NOTE_EXIT": 0x80000000, "KQ_EV_ERROR": 0x4000,
     }.items():
         monkeypatch.setattr(select, name, value, raising=False)
-    monkeypatch.setattr(darwin_identity, "birth_time", birth)
+    monkeypatch.setattr(darwin_identity, "native_identity", birth)
     return state, calls
 
 
@@ -128,9 +130,13 @@ async def test_darwin_unpinned_identity_cannot_drain_or_shutdown(
         previous, successor, make_client=lambda _: client,
     )
     assert (client.drains, client.shutdowns, client.undrains) == (0, 0, 0)
-    recover.assert_not_awaited()
+    if failure == "reuse":
+        recover.assert_awaited_once()
+        assert recover.await_args.kwargs["predecessor_exited"] is True
+    else:
+        recover.assert_not_awaited()
     if failure != "unsupported":
-        assert calls[-1] == ("close",)
+        assert calls.count(("close",)) == 1
 
 
 @pytest.mark.asyncio

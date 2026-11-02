@@ -108,6 +108,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import resident_push, status_monitor_cutover, status_monitor_runtime, status_updater_cli
     from .status_monitor_handover import MonitorHandover
     from .runtime_monitor_completion import recover as complete_publication
+    from . import runtime_monitor_preparation as preparation
     from .runtime_monitor_identity import publish_lock
     from . import repository_map, tracking_write
     from . import handoff_prompt_receipt_control as receipt_control
@@ -129,6 +130,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         else _DEFAULT_SWEEP_INTERVAL_S
     )
     passive_mode = bool(getattr(args, "passive", False))
+    if passive_mode and not preparation.register(status_monitor_runtime._aw_runtime_home(), getattr(args, "control_port", None)):
+        return 0
 
     # Stage D (agent-cli-lazy-dispatch): these six are owned by
     # status_updater_cli/status_monitor_runtime (both already cluster-free);
@@ -599,6 +602,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     def _handle_control(action: str, payload: dict, *, routing_held: bool = False) -> dict:
         nonlocal admission_closed, published_lock
+        if action == preparation.ACTION:
+            with state_lock:
+                if published_lock or not preparation.cancel(
+                    payload, root=status_monitor_runtime._aw_runtime_home(), port=control_server.port, passive=passive_mode,
+                ):
+                    return {"shutdown": False}
+                return _handle_control("shutdown", {})
         if action == "health":
             health = guarded_recovery.monitor_health(
                 worktrees_runtime, receipts, repositories_runtime, allocations=allocation_linker,
@@ -607,6 +617,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             )
             health["predecessorRetirement"] = retirements.health()
             health["drain"] = _drain_observations()
+            health["capabilities"].append(preparation.CAPABILITY)
             return health
         if action == receipt_control.ACTION:
             return receipts.handle(payload)

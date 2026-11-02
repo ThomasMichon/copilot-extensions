@@ -29,8 +29,16 @@ def routed_identity(
         endpoints.append((key, endpoint))
     endpoint = None
     for key, candidate in endpoints:
+        from .runtime_monitor_retirements import _exit_state, retirement_only
+
+        if candidate.process_start_time is not None and _exit_state({
+            "pid": candidate.pid, "start": candidate.process_start_time,
+        }) is True:
+            continue
         if diagnostics._pid_alive(candidate.pid):
             if key != "active":
+                if retirement_only(directory.parent, candidate.to_dict()):
+                    continue
                 raise ValueError("Live fallback monitor requires owner-led route recovery")
             endpoint = candidate
             break

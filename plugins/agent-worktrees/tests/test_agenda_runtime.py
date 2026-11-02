@@ -567,7 +567,10 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
             if operation == "publish"
             else owner.agendas.read(request(), refresh=operation != "pending-read")
         )
-        assert result["ok"] is False and result["error"]["code"] == "superseded"
+        if lost_authority == "database" and operation in {"read", "pending-read"}:
+            assert result["ok"] is True and result["observation"]["revision"] == 1
+        else:
+            assert result["ok"] is False and result["error"]["code"] == "superseded"
     assert injected[0]
     assert owner.agendas._rows == rows
     assert owner.agendas._sequence == sequence
@@ -762,6 +765,31 @@ def test_cached_handoff_reads_and_held_feed_keep_admitted_read_fence(owned, monk
         assert owner.agendas.feed.active_count() == 0
     finally:
         stream.close()
+
+
+def test_read_crossing_writer_flip_retries_cached_and_restores_pending(owned, monkeypatch):
+    owner, _head, elected, _path = owned
+    expected = owner.agendas.publish(publication(owner))
+    monkeypatch.setattr(owner, "_admitted", lambda: True)
+    pending = {("project", "full-worktree-id")}
+    owner.agendas._pending.update(pending)
+    sequence = owner.agendas._sequence
+    fresh = owner.agendas._fresh_fence
+    successor = WorktreesRuntime(owner.store.db_path)
+    def flip(expected, *, read=False):
+        if not read:
+            elected[0] = False
+            successor.activate()
+        return fresh(expected, read=read)
+
+    monkeypatch.setattr(owner.agendas, "_fresh_fence", flip)
+    try:
+        assert owner.agendas.read(request()) == expected
+        assert owner.agendas._pending == pending
+        assert owner.agendas._sequence == sequence
+        assert owner.agendas.publish(publication(owner, observation(2)))["error"]["code"] == "superseded"
+    finally:
+        successor.shutdown()
 
 
 @contextmanager
@@ -1413,17 +1441,19 @@ def test_sqlite_failure_preserves_previous_commit_and_reports_fault(owned):
     assert owner.agendas.read(request()) == accepted
 
 
-def test_generation_fence_refuses_old_read_and_write_without_election_guess(owned):
+def test_writer_replacement_preserves_admitted_cache_but_fences_old_writes(owned):
     owner, *_rest = owned
-    owner.agendas.publish(publication(owner))
+    accepted = owner.agendas.publish(publication(owner))
     successor = WorktreesRuntime(owner.store.db_path)
     successor.activate()
     try:
-        assert owner.agendas.read(request())["error"]["code"] == "superseded"
+        assert owner.agendas.read(request()) == accepted
         assert (
             owner.agendas.publish(publication(owner, observation(2)))["error"]["code"]
             == "superseded"
         )
+        owner.close_admission("superseded")
+        assert owner.agendas.read(request())["error"]["code"] == "superseded"
     finally:
         successor.shutdown()
 

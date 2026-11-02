@@ -26,3 +26,9 @@ def retained_monitor_argv(argv: list[str]) -> list[str]:
     if bootstrap.is_symlink():
         raise RuntimeError(f"Monitor process-retention bootstrap is linked: {bootstrap}")
     return [argv[0], "-I", "-S", "-B", str(bootstrap / "runtime_launcher.py"), *argv[1:]]
+
+
+def preparation_environment(directory, env):
+    from .runtime_monitor_preparation import launch_environment
+
+    launch_environment(directory, env)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 import os
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 from zdd import breadcrumb, diagnostics, publication_history, routing, routing_persistence
@@ -256,7 +258,7 @@ def test_dead_committed_successor_never_revokes_grants_or_waits_for_old_work(int
 @pytest.mark.parametrize("selected", [False, True])
 def test_cold_interruption_can_settle_without_inventing_a_predecessor(tmp_path, monkeypatch, selected):
     directory = tmp_path / "status-monitor-routing"
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "2002")
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "2002" if pid == 202 else None)
     witness = routing.publication_witness(directory, deadline=time.monotonic() + 1)
     if selected:
         routing.publish_active(directory, bind="127.0.0.1", port=41002, pid=202, process_start_time="2002")
@@ -296,3 +298,104 @@ def test_publication_during_passive_health_cannot_authorize_disposal(interrupted
     assert not events
     assert breadcrumb.read_breadcrumb(directory) == record
     assert retirements._records(root)[0][1]["state"] == "prepared"
+
+
+@pytest.mark.parametrize("predecessor", ["dead", "reused", "unknown"])
+def test_precommit_predecessor_exit_cancels_without_undrain(interrupted, predecessor):
+    root, directory, _old, record, _claim, identities, alive, events = interrupted
+    identities.pop(101)
+    if predecessor == "dead":
+        alive.remove(101)
+    elif predecessor == "reused":
+        identities[101] = "3003"
+    with CutoverLock(directory):
+        if predecessor == "unknown":
+            with pytest.raises(ValueError, match="native exit is unavailable"):
+                abort.recover_abandoned(root)
+        else:
+            assert abort.recover_abandoned(root)
+    assert "guarded-undrain" not in events
+    if predecessor != "unknown":
+        assert breadcrumb.read_breadcrumb(directory) is None
+        assert not retirements._records(root)
+        assert routing.read_table(directory, strict=True).get("active") is None
+
+
+def test_successful_handoff_successor_crash_preserves_granted_fallback(interrupted):
+    from agent_worktrees.runtime_monitor_identity import routed_identity
+
+    root, directory, old, _record, predecessor, identities, alive, events = interrupted
+    retirements.commit(root, predecessor)
+    routing.publish_active(
+        directory, bind="127.0.0.1", port=41002, pid=202, process_start_time="2002", demote_existing=True,
+    )
+    breadcrumb.clear_breadcrumb(directory)
+    identities.pop(202)
+    alive.remove(202)
+    assert routed_identity(root, require_async_retirement=True) is None
+    with CutoverLock(directory):
+        assert not abort.recover_abandoned(root)
+    assert routing.read_table(directory, strict=True).get("active") is None
+    assert routed_identity(root, require_async_retirement=True) is None
+    assert retirements.retirement_only(root, old.to_dict())
+    assert retirements._records(root)[0][1]["state"] == "retiring"
+    assert not events
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_darwin_passive_cancellation_uses_pinned_exit_and_exact_cooperative_operation(
+    interrupted, monkeypatch, accepted,
+):
+    root, directory, _old, record, _claim, identities, alive, events = interrupted
+    from agent_worktrees import runtime_monitor_preparation as preparation
+
+    client = abort.cutover.ControlClient
+    health = client.health
+    def capable(self):
+        body = health(self)
+        body["capabilities"].append(preparation.CAPABILITY)
+        return body
+
+    def request(self, action, payload):
+        assert action == preparation.ACTION
+        assert payload == {
+            "pid": 202, "start": "2002", "port": 41002,
+            "started_at": record["started_at"], "publication_witness": record["publication_witness"],
+        }
+        events.append("cooperative-cancel")
+        if accepted:
+            identities.pop(202)
+            alive.remove(202)
+        return {"shutdown": accepted}
+
+    @contextmanager
+    def native(pid, start):
+        assert (pid, start) == (202, "2002")
+        events.append("native-reference")
+        yield SimpleNamespace(wait=lambda timeout: 202 not in alive)
+
+    monkeypatch.setattr(abort, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(client, "health", capable)
+    monkeypatch.setattr(client, "_request", request, raising=False)
+    monkeypatch.setattr(abort.process_exit, "open_process", native)
+    monkeypatch.setattr(
+        diagnostics, "terminate_pid_if_identity", lambda *a, **k: pytest.fail("Darwin must not signal by PID"),
+    )
+    with CutoverLock(directory):
+        assert abort.recover_abandoned(root) is accepted
+    assert events[:2] == ["native-reference", "cooperative-cancel"]
+    assert (breadcrumb.read_breadcrumb(directory) is None) is accepted
+
+
+@pytest.mark.parametrize("birth", ["2002", None])
+def test_reused_installer_pid_does_not_keep_recovery_alive(interrupted, birth):
+    root, directory, _old, record, _claim, identities, alive, _events = interrupted
+    routing_persistence.write(
+        breadcrumb.breadcrumb_path(directory), {**record, "owner_process_start_time": "1001"},
+    )
+    alive.add(303)
+    if birth is not None:
+        identities[303] = birth
+    with CutoverLock(directory):
+        assert abort.recover_abandoned(root) is (birth is not None)
+    assert (breadcrumb.read_breadcrumb(directory) is None) is (birth is not None)

@@ -5030,6 +5030,22 @@ withdrawing only its exact dead route while preserving retiring predecessors
 and their accepted work. An exact granted retiree's discovery record is not
 an unrouted incumbent for the next installation; uncommitted and unknown
 identities retain the original refusal. No new recovery worker is introduced.
+The installer witness also records its own native birth. A matching live birth
+keeps custody; positive original exit or PID reuse permits abandoned recovery,
+and unavailable identity remains fenced. Passive launch carries that exact
+attempt to the child, which durably registers its own PID/birth before opening
+an endpoint. Missing-PID cancellation closes startup under the routing lease
+before clearing custody, so a delayed child cannot silently survive the gap
+between spawn and the installer's first PID write. Same-attempt parent writes
+cannot erase an already registered candidate birth.
+On Darwin, passive disposal uses the authenticated `cancel-preparation`
+operation only when the actual endpoint advertises
+`status-monitor-passive-cancel-v1`. The request binds PID, birth, port,
+`started_at` and publication witness; the receiver requires its own still-passive,
+never-published identity before closing. A pre-captured kqueue exit reference
+confirms completion. Unsupported peers refuse explicitly, with no PID-signaling
+fallback. Windows/Linux retain native identity-bound termination of proven
+passives. Ordinary successor publication never drains its predecessor.
 Cancellation is fsynced before cleanup and revokes the claim grant while keeping
 execution protection for any still-live code. Completed retirement is an
 idempotent commit outcome, not a missing-record loop.

@@ -171,7 +171,7 @@ def _validate_identity(pid: int, expected_start_time: str) -> None:
 def _open_darwin(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
     import select
 
-    from .darwin_identity import birth_time
+    from .darwin_identity import native_identity
 
     if not hasattr(select, "kqueue"):
         raise NotImplementedError("native Darwin process exit references require kqueue")
@@ -199,9 +199,7 @@ def _open_darwin(pid: int, token: str, *, allow_exited: bool = False) -> Process
     reference = ProcessExitReference(pid, token, wait, queue.close)
 
     def require_birth_match() -> None:
-        actual = birth_time(pid)
-        if actual is None:
-            raise OSError("native Darwin process birth evidence is unavailable")
+        actual, _exited = native_identity(pid)
         if actual != token:
             raise ProcessLookupError("process identity does not match captured reference")
 
@@ -289,6 +287,18 @@ def _observe_windows(pid: int, token: str) -> bool:
         close()
 
 
+def _observe_darwin(pid: int, token: str) -> bool:
+    from .darwin_identity import native_identity
+
+    try:
+        actual, exited = native_identity(pid)
+    except ProcessLookupError as exc:
+        if exc.errno == errno.ESRCH:
+            return True
+        raise
+    return actual != token or exited
+
+
 def observe_original_exit(pid: int, expected_start_time: str) -> bool:
     """Read-only crash recovery: prove the original identity is no longer live.
 
@@ -301,4 +311,6 @@ def observe_original_exit(pid: int, expected_start_time: str) -> bool:
         return _observe_windows(pid, expected_start_time)
     if sys.platform == "linux":
         return _observe_linux(pid, expected_start_time)
-    raise NotImplementedError("native original-exit observation requires Windows or Linux")
+    if sys.platform == "darwin":
+        return _observe_darwin(pid, expected_start_time)
+    raise NotImplementedError("native original-exit observation requires Windows, Linux or Darwin")

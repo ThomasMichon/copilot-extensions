@@ -442,7 +442,9 @@ def retirement_only(root: Path, record: dict | None) -> bool:
     if not isinstance(record, dict) or type(record.get("pid")) is not int:
         return False
     start = locks.process_start_time(record["pid"])
-    return start is not None and any(
+    return start is not None and (
+        record.get("process_start_time") in (None, start)
+    ) and any(
         value["state"] == "retiring" and (value["pid"], value["start"]) == (record["pid"], start)
         for _path, value in _records(root)
     )

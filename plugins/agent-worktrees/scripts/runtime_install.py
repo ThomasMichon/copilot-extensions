@@ -388,12 +388,29 @@ def _settle_monitor(
             if action == "interrupted" else None
         )
         if action == "interrupted" and (
-            interrupted_record is not None and breadcrumb.is_stale(interrupted_record)
+            interrupted_record is not None and (
+                breadcrumb.is_stale(interrupted_record)
+                or interrupted_record.get("self_retirement") is True
+                and interrupted_record.get("state") == "committed"
+            )
             or interrupted_record is None and breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists()
         ):
             result["publication_uncertain"] = True
         if result.get("publication_uncertain"):
             record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
+            if record is not None and record.get("self_retirement") is True and record.get("state") == "committed":
+                from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
+
+                try:
+                    recovered = recover_owned_publication(root, record, predecessor, handles)
+                except (OSError, ValueError, ConnectionError) as error:
+                    recovered = False
+                    result["error"] = f"Committed monitor recovery unavailable: {error}"
+                result.update(committed=True, publication_uncertain=False, ok=recovered == "committed")
+                if recovered == "committed":
+                    result["error"] = None
+                summary["result"] = result
+                return _settle_monitor(root, slot, summary, predecessor, handles)
             # Missing/corrupt evidence cannot settle a durable-publication
             # failure. Only the recovery owner's terminal witness can.
             if record is None or record.get("state") not in ("committed", "rolled_back", "failed"):
@@ -404,7 +421,7 @@ def _settle_monitor(
                     try:
                         recovered = recover_owned_publication(root, record, predecessor, handles)
                         if recovered == "committed":
-                            result.update(committed=True, publication_uncertain=False)
+                            result.update(committed=True, publication_uncertain=False, ok=True, error=None)
                             summary["result"] = result
                             return _settle_monitor(root, slot, summary, predecessor, handles)
                         if recovered == "rolled_back":
@@ -419,7 +436,7 @@ def _settle_monitor(
                 continue
             committed = record["state"] == "committed"
             if committed:
-                result.update(committed=True, publication_uncertain=False)
+                result.update(committed=True, publication_uncertain=False, ok=True, error=None)
                 summary["result"] = result
                 return _settle_monitor(root, slot, summary, predecessor, handles)
         try:

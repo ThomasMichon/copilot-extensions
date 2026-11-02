@@ -31,7 +31,9 @@ def native(monkeypatch):
 
     def birth(pid):
         calls.append(("birth", pid))
-        return state.birth
+        if state.birth is None:
+            raise OSError("native birth is unavailable")
+        return state.birth, False
 
     monkeypatch.setattr(process_exit, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(select, "kqueue", lambda: SimpleNamespace(
@@ -45,7 +47,7 @@ def native(monkeypatch):
         "KQ_NOTE_EXIT": 0x80000000, "KQ_EV_ERROR": 0x4000,
     }.items():
         monkeypatch.setattr(select, name, value, raising=False)
-    monkeypatch.setattr(darwin_identity, "birth_time", birth)
+    monkeypatch.setattr(darwin_identity, "native_identity", birth)
     return state, calls
 
 

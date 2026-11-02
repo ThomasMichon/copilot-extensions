@@ -415,8 +415,8 @@ def spawn_passive(runtime_python: str, *, port: int):
         "--control-port",
         str(port),
     ]
-    from .runtime_monitor_launch import retained_monitor_argv
-
+    from .runtime_monitor_launch import preparation_environment, retained_monitor_argv
+    preparation_environment(routing_dir(), child_env)
     argv = retained_monitor_argv(argv)
     if os.name == "nt":
         argv[0], extra_env = direct_monitor_python(runtime_python)

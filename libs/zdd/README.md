@@ -51,6 +51,12 @@ Initial and updated witnesses use the same flushed-file and durable replacement
 boundary as routing. Adopters own guarded cancellation of proven uncommitted
 preparation and settlement of positively exited successors; neither permits
 revoking an irreversible retirement grant or discarding live admitted work.
+`owner_process_start_time` captures the original installer's native birth;
+`breadcrumb.owner_exited()` distinguishes proven original exit from a matching
+live process and unknown evidence. Same-attempt recovery preserves that birth
+instead of inferring it from a reused PID. Exact asynchronous child registration
+also preserves its native candidate birth across a parent update that has not
+yet acquired that token.
 Candidate publication binds a freshly verified native birth after health
 preparation and refuses a changed identity at the publication boundary.
 On macOS, native birth identity uses the process start seconds and microseconds;
@@ -250,8 +256,10 @@ confirmed exit through an opened reference, or a different native birth at
 the same PID. Access denial, unavailable/malformed birth evidence, native
 API failures and unsupported platforms raise rather than mean absence.
 Windows uses query/synchronization rights only; Linux uses a pidfd and strict
-birth evidence without tolerant diagnostics. macOS remains explicitly
-unsupported. This observation cannot signal a reused PID, authorize graceful
+birth evidence without tolerant diagnostics. Darwin queries native libproc
+birth and zombie state; only native `ESRCH` proves absence. Denied, incomplete
+or malformed evidence does not mean exit. These Darwin paths remain
+mock-qualified only. This observation cannot signal a reused PID, authorize graceful
 control, transfer writer authority or substitute for installation/transaction
 custody. A consumer must still acquire the real writer lease before reload
 or resumption.

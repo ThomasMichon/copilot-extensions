@@ -6,7 +6,7 @@ import logging
 import os
 
 from single_instance_lease import AlreadyRunningError
-from zdd import breadcrumb, diagnostics, routing
+from zdd import breadcrumb, routing
 from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
 from . import locks, status_monitor_cutover as cutover
@@ -78,7 +78,7 @@ def recover(root, *, promote, ready) -> None:
         return
     pid, start = os.getpid(), locks.process_start_time(os.getpid())
     if record.get("new_pid") != pid or start is None or record.get("new_process_start_time") != start:
-        if type(record.get("pid")) is not int or diagnostics._pid_alive(record["pid"]):
+        if breadcrumb.owner_exited(record) is not True:
             return
     guard = None
     sdk_guard = CutoverLock(directory)

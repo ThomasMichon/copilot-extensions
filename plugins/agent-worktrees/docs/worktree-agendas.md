@@ -198,6 +198,9 @@ An admitted predecessor's cached errors and unready results use its in-memory
 read/generation fence, not the successor's SQLite writer identity. Writer
 acquisition alone therefore cannot erase a cached failure before serving
 handoff; publication and cache refresh keep their independent writer fences.
+If writer authority is lost during a read that already began refreshing, the
+runtime restores pending work and retries only the admitted cached read.
+Uncommitted refresh results never change rows, sequence or notifications.
 Activation/schema failures are resident-wide. Reconciliation failures are
 project-local and remain unavailable until that same project successfully
 reconciles, including across same-generation drain/reactivation. Another

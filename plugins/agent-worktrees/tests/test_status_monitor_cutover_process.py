@@ -694,7 +694,7 @@ os._exit(29)
 
 
 @pytest.mark.skipif(sys.platform not in {"win32", "linux"}, reason="native passive termination contract")
-@pytest.mark.parametrize("phase", ["initial", "passive", "dead-selected"])
+@pytest.mark.parametrize("phase", ["initial", "spawn-unrecorded", "passive", "dead-selected"])
 @pytest.mark.parametrize("owner", ["resident", "next-installer"])
 def test_marked_interrupted_publication_has_native_recovery(tmp_path, phase, owner):
     from agent_procutil import no_window_kwargs
@@ -733,11 +733,13 @@ def test_marked_interrupted_publication_has_native_recovery(tmp_path, phase, own
 import json, os, sys, time
 from pathlib import Path
 from agent_worktrees.status_monitor_cutover import ControlServer
+from agent_worktrees.runtime_monitor_preparation import register
 from zdd import diagnostics
 root = Path(sys.argv[1])
+assert register(root, int(sys.argv[2]))
 server = ControlServer(lambda action, payload: {
     "pid": os.getpid(), "status": "ready", "published": False,
-}, token="synthetic-native-recovery-token")
+}, token="synthetic-native-recovery-token", port=int(sys.argv[2]))
 server.start()
 (root / "candidate.json").write_text(json.dumps({
     "pid": os.getpid(), "start": diagnostics.process_start_time(os.getpid()), "port": server.port,
@@ -750,6 +752,8 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 from agent_worktrees import runtime_monitor_retirements as retirements
 from agent_worktrees.status_monitor_cutover import _acquire_cutover_lock
+from agent_worktrees.status_monitor_cutover import pick_free_port
+from agent_worktrees.runtime_monitor_preparation import launch_environment
 from zdd import breadcrumb, diagnostics, routing
 from zdd.cutover_lock import CutoverLock
 root, phase = Path(sys.argv[1]), sys.argv[2]
@@ -761,9 +765,14 @@ with CutoverLock(directory):
         "pid": old.pid, "start": old.process_start_time, "slot": None, "release_claim": None,
     })
     witness = routing.publication_witness(directory, deadline=time.monotonic() + 3)
+    port = pick_free_port()
+    breadcrumb.write_breadcrumb(directory, state="started", old=old.to_dict(),
+        new_port=port, publication_witness=witness, self_retirement=True)
     candidate = {}
     if phase != "initial":
-        subprocess.Popen([sys.executable, "-B", "-c", sys.argv[3], str(root)],
+        env = os.environ.copy()
+        launch_environment(directory, env)
+        subprocess.Popen([sys.executable, "-B", "-c", sys.argv[3], str(root), str(port)], env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             **no_window_kwargs())
         deadline = time.monotonic() + 15
@@ -771,9 +780,11 @@ with CutoverLock(directory):
             assert time.monotonic() < deadline, "passive did not publish identity"
             time.sleep(0.05)
         candidate = json.loads((root / "candidate.json").read_text())
+    if phase == "spawn-unrecorded":
+        os._exit(29)
     breadcrumb.write_breadcrumb(directory, state="started", old=old.to_dict(),
         new_pid=candidate.get("pid"), new_process_start_time=candidate.get("start"),
-        new_port=candidate.get("port", 41002), publication_witness=witness, self_retirement=True)
+        new_port=candidate.get("port", port), publication_witness=witness, self_retirement=True)
     if phase == "dead-selected":
         routing.publish_active(directory, bind="127.0.0.1", port=candidate["port"],
             pid=candidate["pid"], process_start_time=candidate["start"], demote_existing=True)

@@ -22,6 +22,7 @@ File layout (``<config_dir>/cutover.json``)::
       "started_at": "2026-07-02T22:40:00Z",
       "updated_at": "2026-07-02T22:41:03Z",
       "pid": 12345,                     # the deploy orchestrator pid
+      "owner_process_start_time": "123456789",  # original orchestrator birth
       "old": {"bind": "127.0.0.1", "port": 9281},
       "new_port": 9282,
       "new_pid": 12401,                 # the spawn_passive daemon's own pid
@@ -125,6 +126,64 @@ def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) ->
     return None
 
 
+def _owner_start_time(
+    config_dir: str | os.PathLike[str], pid: int, state: str, started_at: str | None,
+) -> str | None:
+    from .darwin_identity import valid_start_time
+    from .diagnostics import process_start_time
+
+    previous = read_breadcrumb(config_dir)
+    fresh_local_attempt = (
+        pid == os.getpid() and started_at is None
+        and state in ("started", "conditional-started")
+    )
+    if not fresh_local_attempt and previous is not None and previous.get("pid") == pid and (
+        started_at is None or previous.get("started_at") == started_at
+    ):
+        # Preserve even missing/invalid evidence: a later PID occupant cannot
+        # retroactively supply the original installer's birth.
+        return previous.get("owner_process_start_time")
+    if pid != os.getpid():
+        return None
+    try:
+        token = process_start_time(pid)
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return token if valid_start_time(token) else None
+
+
+def owner_exited(record: dict | None) -> bool | None:
+    """True for proven exit, False for a live birth match, otherwise None.
+
+    A missing legacy birth permits only positive native PID-absence evidence.
+    Unreadable identity/liveness and malformed records never authorize recovery.
+    """
+    from . import diagnostics
+    from .darwin_identity import valid_start_time
+
+    if not isinstance(record, dict):
+        return None
+    pid = record.get("pid")
+    if type(pid) is not int or pid <= 0:
+        return None
+    recorded = record.get("owner_process_start_time")
+    if recorded is not None and not valid_start_time(recorded):
+        return None
+    try:
+        current = diagnostics.process_start_time(pid)
+        matched = recorded is not None and valid_start_time(current)
+        if matched and current != recorded:
+            return True
+        alive = diagnostics._pid_alive(pid)
+        if alive is False:
+            return True
+        if matched and alive is True:
+            return False
+    except (OSError, ValueError, RuntimeError):
+        pass
+    return None
+
+
 def write_breadcrumb(
     config_dir: str | os.PathLike[str],
     *,
@@ -148,6 +207,10 @@ def write_breadcrumb(
     ``started_at`` is preserved across updates (pass the value from the initial
     ``started`` record); ``updated_at`` is always refreshed.
 
+    ``owner_process_start_time`` captures only this process's original birth,
+    retaining it across same-attempt phase/recovery writes. A foreign ``pid``
+    never acquires a retroactive birth; missing identity remains unknown.
+
     ``new_pid`` is the pid of the passive daemon ``spawn_passive`` stood up for
     this cutover (recorded as soon as it is known -- before the health gate,
     flip, or drain even begin) so :func:`reap_abandoned_passive` can find and
@@ -155,12 +218,17 @@ def write_breadcrumb(
     ``new_pid`` through every subsequent update for this cutover attempt (like
     ``started_at``); omitting it on a later call clears it, which is only
     correct once the cutover has resolved one way or the other.
+
+    An asynchronous child's registered birth survives a missing caller birth
+    only when the explicit attempt, original owner and candidate binding match.
     """
+    owner_pid = pid if pid is not None else os.getpid()
     record = {
         "state": state,
         "started_at": started_at or _now_iso(),
         "updated_at": _now_iso(),
-        "pid": pid if pid is not None else os.getpid(),
+        "pid": owner_pid,
+        "owner_process_start_time": _owner_start_time(config_dir, owner_pid, state, started_at),
         "old": old,
         "new_port": new_port,
         "new_pid": new_pid,
@@ -168,6 +236,21 @@ def write_breadcrumb(
         "publication_witness": publication_witness,
         "new_process_start_time": new_process_start_time,
     }
+    if self_retirement is True and started_at is not None and new_process_start_time is None:
+        from .darwin_identity import valid_start_time
+
+        previous = read_breadcrumb(config_dir)
+        if (
+            previous is not None and previous.get("self_retirement") is True
+            and valid_start_time(record["owner_process_start_time"])
+            and type(new_pid) is int and new_pid > 0
+            and valid_start_time(previous.get("new_process_start_time"))
+            and all(previous.get(key) == record[key] for key in (
+                "pid", "owner_process_start_time", "started_at",
+                "publication_witness", "new_port", "new_pid",
+            ))
+        ):
+            record["new_process_start_time"] = previous["new_process_start_time"]
     if requires_writer_reconciliation:
         record["requires_writer_reconciliation"] = True
     if self_retirement:
@@ -416,7 +499,7 @@ def reap_abandoned_passive(
                 current is None or any(
                     current.get(key) != record.get(key)
                     for key in (
-                        "pid", "started_at", "old", "new_pid", "new_port",
+                        "pid", "owner_process_start_time", "started_at", "old", "new_pid", "new_port",
                         "publication_witness", "new_process_start_time",
                     )
                 )

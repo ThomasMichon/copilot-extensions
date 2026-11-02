@@ -112,6 +112,8 @@ def test_status_monitor_passive_mode_skips_the_lease_entirely(monkeypatch):
     """Passive mode never competes for ownership (matches the pre-existing
     `_other_current_monitor` early return for `passive_mode`) -- it must not
     even attempt to acquire the lease."""
+    from agent_worktrees import status_monitor_cutover
+
     constructed: list = []
 
     class _Tracking:
@@ -122,6 +124,7 @@ def test_status_monitor_passive_mode_skips_the_lease_entirely(monkeypatch):
             raise AssertionError("passive mode must never acquire the lease")
 
     monkeypatch.setattr(single_instance_lease, "SingleInstance", _Tracking)
+    monkeypatch.setattr(status_monitor_cutover, "SingleInstance", _Tracking)
 
     def _raise_to_exit_before_the_loop(*_a, **_kw):
         raise RuntimeError("reached the resident loop -- test stops here by design")

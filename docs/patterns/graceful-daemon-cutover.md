@@ -121,7 +121,11 @@ resident completes an interrupted committed install through its existing loop,
 retaining the witness until its grant and serving readiness are durable. See
 the [install contract](../install-contract.md) for the custody and idle-exit
 serialization boundaries, explicitly marked pre-`flipped` recovery, exact
-prepared-dev retry and guarded rollback's private routing-lock reuse.
+prepared-dev retry, child-owned passive registration and guarded rollback's
+private routing-lock reuse. Recovery consumes a marked committed witness as
+commit-forward even when recording uncertainty failed. Positive predecessor
+exit permits cancellation without undrain; a granted draining fallback never
+blocks a replacement's readiness on its accepted-work retirement.
 
 ## Bounded cold takeover
 

@@ -845,11 +845,36 @@ def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
     monkeypatch.setattr(breadcrumb, "read_breadcrumb", witness)
     monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", lambda *a: outcome)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *a: True)
-    summary = {"action": "cutover", "result": {"publication_uncertain": True}}
+    summary = {"action": "cutover", "result": {"publication_uncertain": True, "ok": False, "error": "uncertain"}}
     assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is (
         outcome == "committed"
     )
     assert summary["result"]["publication_uncertain"] is False
+    if outcome == "committed":
+        assert summary["result"]["ok"] is True and summary["result"]["error"] is None
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_interrupted_marked_committed_witness_is_never_rolled_back(
+    driver, tmp_path, monkeypatch, ready,
+):
+    from zdd import breadcrumb
+    from agent_worktrees import runtime_monitor_recovery
+
+    record = {"state": "committed", "self_retirement": True}
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda path: record)
+    calls = []
+    def recover(*args):
+        calls.append(True)
+        return "committed"
+
+    monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", recover)
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *args: ready)
+    summary = {"action": "interrupted"}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
+    assert calls == [True]
+    assert summary["result"]["committed"] is True
+    assert summary["result"]["ok"] is ready
 
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):
