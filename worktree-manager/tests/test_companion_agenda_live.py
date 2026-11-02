@@ -101,6 +101,27 @@ async def until(pilot, predicate):
     assert predicate()
 
 
+@pytest.mark.parametrize("synthetic_peer", [2], indirect=True)
+def test_agenda_field_contract_displays_markdown_and_rich_markup_literally(synthetic_peer, tmp_path):
+    async def check():
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test() as pilot:
+            peer = await asyncio.to_thread(accept, synthetic_peer)
+            with peer:
+                frame = publication_v2()
+                literal = "# Action\n**bold** `code` [bold red]literal[/bold red] [link](https://example.com)"
+                frame["observation"]["snapshot"]["next_action"] = literal
+                frame["observation"]["snapshot"]["exit_criteria"] = ["**literal criterion**"]
+                send(peer, frame)
+                await until(pilot, lambda: literal in widget(app))
+                content = app.query_one("#agenda", Static).content
+                assert isinstance(content, Text)
+                assert literal in content.plain
+                assert json.dumps(["**literal criterion**"]) in content.plain
+
+    asyncio.run(check())
+
+
 def test_committed_push_changes_real_widget_without_reload_or_agenda_scan(synthetic_peer, tmp_path):
     async def check():
         app = companion.MuxCompanionApp(cwd=str(tmp_path))

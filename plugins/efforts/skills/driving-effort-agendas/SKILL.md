@@ -212,6 +212,10 @@ another owner of claims or completion.
 
 ## Managed command path (preferred for adopted writable homes)
 
+For field-level enum, reference, prose, raw-JSON and Markdown/literal presentation
+rules, use the [field contract](references/field-contract.md). JSON acceptance
+does not imply Markdown rendering or execution.
+
 Use the payload's [scripts/agenda_cli.py](scripts/agenda_cli.py) through an
 existing Python interpreter:
 
@@ -293,6 +297,7 @@ the safety of a later write or the authority of its caller.
 - [Managed CLI and transactional command contract](references/managed-agenda.md)
 - [Queue, continuations and context-qualified revisits](references/context-qualified-continuations.md)
 - [Context-qualified source CLI and worked fixtures](references/context-qualified-commands.md)
+- [Field types, enums, prose and Markdown](references/field-contract.md)
 - [Deferred branches, decision packets and revisit points](references/deferred-branches.md)
 - [Deferred board example](assets/agenda.deferred.example.json)
 - [Version-2 deferred cursor example](assets/cursor.deferred.example.json)

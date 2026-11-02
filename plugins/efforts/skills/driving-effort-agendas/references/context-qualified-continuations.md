@@ -26,17 +26,27 @@ Before revisiting the same stable item, identify:
 - the viable changed approach and why that information changes the next attempt;
 - what remains unknown, including whether relevance is measured or agent judgment.
 
-An identifier, timestamp, session, definition revision or freshness digest alone
-does not supply useful context. Rewording the same evidence is not progress.
+An item identifier, caller timestamp/session, definition revision or freshness
+digest alone does not supply useful context. Rewording the same evidence is not
+progress.
 Equivalent numeric representations (`1` and `1.0`, or `0.0` and `-0.0`) are
-the same input; booleans remain distinct from numbers. Omitting a known fact
-and later restoring it is not newly learned context. Novelty must hold against
-the item's retained lineage, not merely its immediately preceding fact bundle.
-Declare raw source/configuration content as an `input` fact: its strings retain
-significant whitespace recursively, while prose facts normalize cosmetic
-formatting. Each subject keeps the policy established at its first lineage
-occurrence; changing its kind or omitting it cannot change that treatment.
-Exact input differences still require an attributable causal relevance judgment.
+the same input; booleans remain distinct from numbers. Omitting an outer fact
+and later restoring its known value is not newly learned context. Novelty must
+hold against the item's retained lineage, not merely its preceding fact bundle.
+
+Declare raw source/configuration content as an `input` fact. Its entire JSON
+value is the observed payload: strings preserve significant whitespace; nulls,
+empty values, member names (including `id`) and membership remain meaningful.
+Compare complete values against that subject's retained input history. A
+never-observed configuration combining known values can be a changed input;
+returning to an already-observed complete configuration cannot. Do not mix
+caller/generated metadata into the raw payload and then claim it is ignored.
+
+Prose/knowledge facts instead normalize cosmetic formatting and retain known
+scoped facts across omissions. Each subject keeps the input/prose policy
+established at its first lineage occurrence; changing kind or omitting it cannot
+change that treatment. A structurally different input still needs an attributable
+causal relevance judgment; exact comparison does not prove that judgment true.
 Structural acceptance can check supplied lineage/evidence relationships; it
 cannot prove that a reasoning claim is meaningful or that an effect is approved.
 Keep the judgment attributable and its uncertainty explicit.

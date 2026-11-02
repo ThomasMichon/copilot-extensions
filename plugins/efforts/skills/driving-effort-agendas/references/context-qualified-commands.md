@@ -4,6 +4,9 @@
 [Context qualification](context-qualified-continuations.md) explains relevance
 and authority; the [managed command guide](managed-agenda.md) covers durability,
 legacy compatibility and optional delivery.
+See the [field value and formatting contract](field-contract.md) for exact enums,
+identifiers, prose, raw JSON and the distinction between accepted Markdown
+characters and actual rendering.
 
 ## Explicit fresh adoption
 
@@ -96,8 +99,11 @@ not a new attempt or permission to replay its effect.
 `context` contains exactly `facts`; each fact is `{kind, subject, value,
 evidence_ref}`. Kinds are `input`, `condition`, `constraint`,
 `prerequisite-result`, `observation`, `insight`; each subject belongs to the
-current definition's `relevant_subjects` and appears once. Values are finite,
-substantive JSON, not metadata-only records. `judgment` contains exactly
+current definition's `relevant_subjects` and appears once. Values are finite JSON:
+raw `input` retains the whole payload, including identifiers/null/empty values;
+knowledge/prose comparison has separate nonempty/novelty rules. See
+[raw input versus knowledge](field-contract.md#raw-input-versus-knowledgeprose).
+`judgment` contains exactly
 `qualification: "agent-judgment"`, `changed_subjects`, `causal_change`,
 `evidence_refs`. Explain exactly the added/changed relevant subjects and retain
 the actual evidence references. `approach` is exactly `{action}`; an unchanged
@@ -145,8 +151,9 @@ are available for already-authorized append or necessary decomposition:
    of causal relevance or external success.
 
 The [metadata-only contrast](../assets/revisit.metadata-only.example.json) keeps
-input A and changes UUID/time/session labels, evidence reference and causal
-wording. It cannot manufacture new context. The CLI can return a persisted
+the complete input A and changes only its evidence reference and causal wording.
+Caller UUID/time/session labels are metadata too, not part of this raw payload.
+Metadata cannot manufacture new context. The CLI can return a persisted
 `not-admitted` decision with `reason_code`, null `attempt_id`, and a concrete
 replanning action. That is accepted decision history, not an accepted attempt or
 successful work. Remain at the continuation and investigate/refine/wait or choose

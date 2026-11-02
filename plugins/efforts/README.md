@@ -32,6 +32,10 @@ The optional agenda helper is invoked directly from the skill's payload path
 using an existing Python 3 interpreter and an explicit journal/state-home path.
 The [managed command contract](skills/driving-effort-agendas/references/managed-agenda.md)
 owns `read`/`next`/`check`/`history` and explicit `init`/semantic `update`/`publish`.
+The [field contract](skills/driving-effort-agendas/references/field-contract.md)
+distinguishes exact enums/identifiers from prose/raw JSON and documents literal
+text versus Markdown rendering; accepted string punctuation does not imply a
+rich-text renderer.
 SQLite transactions preserve full state/history, stable retry results and finite
 budgets. Optional argv-only delivery is separate from durable acceptance.
 The legacy inspector remains read-only. Explicit quiescent same-home adoption

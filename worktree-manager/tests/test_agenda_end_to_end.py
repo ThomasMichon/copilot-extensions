@@ -472,9 +472,9 @@ def context_board():
     }
 
 
-def context_facts(value):
+def context_facts(value, *, evidence_ref="fixture-input"):
     return {"facts": [{
-        "kind": "input", "subject": "dataset", "value": value, "evidence_ref": "fixture-input",
+        "kind": "input", "subject": "dataset", "value": value, "evidence_ref": evidence_ref,
     }]}
 
 
@@ -674,10 +674,10 @@ def test_context_qualified_core_cli_subqueues_revisits_and_delivery_reach_textua
             refused, state = await change({
                 "operation": "revisit", "frame_id": frame, "item_id": item,
                 "predecessor_attempt_id": previous,
-                "context": context_facts({"content": "corrected-5", "uuid": "cosmetic", "timestamp": "later"}),
+                "context": context_facts({"content": "corrected-5"}, evidence_ref="renamed-input-reference"),
                 "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
-                             "causal_change": "New prose does not change the current facts.",
-                             "evidence_refs": ["fixture-input"]},
+                             "causal_change": "New provenance and prose do not change the complete input.",
+                             "evidence_refs": ["renamed-input-reference"]},
                 "approach": {"action": "Run parent"},
             })
             assert refused["transition"]["decision"] == "not-admitted"

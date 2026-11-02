@@ -355,3 +355,39 @@ def test_source_cli_legacy_guidance_assets_stay_explicitly_legacy(tmp_path: Path
     state = lane.read()
     assert state["snapshot"]["cursor_version"] == cursor["version"] in (1, 2)
     assert state["delivery"]["state"] == "not-configured"
+
+
+def test_source_cli_field_contract_preserves_literal_prose_and_declared_outcome(tmp_path: Path) -> None:
+    lane = SourceLane(tmp_path)
+    request = asset("init.context-qualified.example.json")
+    literal = "**Inspect** `input`\n[reference](https://example.com) [bold]literal[/bold]"
+    definition = request["change"]["board"]["items"]["parent"]
+    definition.update(action=literal, label="**Parent**", exit=["Record the `literal` outcome."])
+    definition["on"] = {"custom-result": "replan"}
+    request["change"]["baseline_context"]["facts"][0]["value"] = "# Raw input\n**not formatting**"
+    lane.submit(request, init=True)
+    state = lane.read()
+    assert state["snapshot"]["next_action"] == literal
+    assert state["snapshot"]["exit_criteria"] == definition["exit"]
+    assert state["snapshot"]["declared_outcomes"] == {"custom-result": "replan"}
+    assert state["documents"]["boards"]["root"]["items"]["parent"] == definition
+    assert lane.outcome("custom-result")["result"]["persisted"] is True
+    assert lane.read()["snapshot"]["status"] == "replanning"
+
+
+@pytest.mark.parametrize("field", ["mode", "source-kind", "transition", "fact-kind"])
+def test_source_cli_field_contract_rejects_prose_or_markdown_in_enums(tmp_path: Path, field: str) -> None:
+    lane = SourceLane(tmp_path)
+    request = asset("init.context-qualified.example.json")
+    if field == "mode":
+        request["mode"] = "**context-qualified**"
+    elif field == "source-kind":
+        request["change"]["board"]["source"]["kind"] = "an effort"
+    elif field == "transition":
+        request["change"]["board"]["items"]["parent"]["on"]["done"] = "**advance**"
+    else:
+        request["change"]["baseline_context"]["facts"][0]["kind"] = "Input"
+    path = lane.requests / "invalid-enum.json"
+    path.write_text(json.dumps(request), encoding="utf-8")
+    result = lane.run("init", "--mode", "context-qualified", "--request", str(path))
+    assert result.returncode == 2 and result.stderr

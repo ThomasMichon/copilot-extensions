@@ -76,6 +76,36 @@ The execution request:
 These requests contain no private source identifiers; their intent and uncertainty
 are preserved rather than replaced with a preselected implementation.
 
+### Implementation clarification - complete raw inputs
+
+The coordinator asked:
+
+> A real design choice remains before merge: should a previously unseen complete input configuration count as new context even when it combines individually known values?
+
+The choices were:
+
+- `whole-input`: "Use complete input configurations (recommended); retain strict knowledge/prose guards"
+- `leaf-knowledge`: "Require newly learned leaf facts even for input configurations; revisit the representation/design"
+
+The operator selected:
+
+> whole-input
+
+This accepts complete raw-input comparison, including previously unobserved
+configurations of known values. It does not declare causal relevance proven or
+relax outer metadata, knowledge/prose, history, review or action-authority gates.
+
+### Implementation clarification - field contracts
+
+The operator additionally requested:
+
+> We want to be clear about which fields accept Markdown and which don't. And also which fields expect enum-type values and which allow arbitrary prose
+
+Document field-level enum vocabularies, identifiers/references, prose and raw
+JSON separately. Distinguish a validator accepting Markdown characters as literal
+text from a consumer actually interpreting/rendering Markdown; this request is
+contract clarity, not implicit authorization to introduce a new formatting mode.
+
 ## Scope Approvals
 
 - **Allowed:** generic vision/effort updates, source implementation, bounded
@@ -93,6 +123,11 @@ are preserved rather than replaced with a preselected implementation.
 - **Judgment:** schema acceptance can validate structure, prior-attempt links and
   supplied evidence changes, not prove that a reasoning claim is meaningful.
   Measured inputs and agent judgment remain qualified rather than conflated.
+- **Raw-input clarification:** compare each declared input's complete JSON value,
+  including nulls, empty values, member names and membership. A never-observed
+  configuration may qualify even when its individual leaves were known.
+  Previously observed complete inputs and omitted/restored outer facts remain
+  non-progress; knowledge/prose and caller metadata keep their anti-churn guards.
 
 ## Plan
 
@@ -122,6 +157,8 @@ are preserved rather than replaced with a preselected implementation.
 
 - [x] Update concise ambient and on-demand guidance, examples and owned CLI
   invocation so agents use the intended queue/continuation policy.
+- [x] Document field-level value/format contracts, including exact enum
+  vocabularies, free-form prose, raw JSON and Markdown acceptance/rendering.
 - [x] Keep old-policy lanes readable and correctly enforced; gate new required
   policy/state against old writers and independently installed consumers.
 - [x] Extend the existing projection only where the new state requires it,
@@ -161,6 +198,8 @@ are preserved rather than replaced with a preselected implementation.
   and process/cancellation controls continue to pass.
 - [x] The coordinator's adopted lane demonstrates current-next-action and
   preserved continuation at meaningful boundaries without an automatic turn driver.
+- [x] Field-contract guidance agrees with the actual validators and consumers;
+  literal Markdown characters are not misrepresented as interpreted formatting.
 - [ ] Public artifacts remain generic, review/CI pass and source completion is
   distinguished from promotion, installation and active-agent adoption.
 
@@ -190,6 +229,54 @@ These are design recommendations subject to review, not additional operator
 grants, native qualification or claims of implementation.
 
 ## Journal
+
+### 2026-11-01 - Whole-input and field-contract validation
+
+- Implemented the operator-selected complete-input policy without new schema
+  fields: raw nulls, empty values, membership and payload `id` keys remain data;
+  whole-value history still refuses known returns. Prose retains conservative
+  knowledge guards and outer fact omission cannot manufacture novelty.
+- Added the linked field contract distinguishing exact enum vocabularies,
+  author-defined outcome names, references, prose, numbers/timestamps and raw
+  JSON. No agenda data field promises Markdown rendering. CLI output is
+  JSON/plain text and Companion appends provider data as literal `Text`, not
+  Markdown or Rich markup.
+- Coordinator regressions exercise actual CLI prose preservation, author-defined
+  outcomes and rejection of prose/Markdown-decorated enum tokens. The combined
+  core/fault/store/guidance/producer packet passed 314 cases with two explicit
+  dependency/platform skips.
+- The joined run initially caught its own obsolete fixture: it changed raw
+  payload UUID/time fields while expecting metadata-only refusal. The corrected
+  fixture keeps the complete payload unchanged and varies outer provenance,
+  preserving every original no-attempt/history assertion. The actual connected
+  chain and a real Textual literal-Markdown/Rich-markup case then passed all six
+  selected cases without skips. Both runs verified cleanup; Ruff passed.
+- Independent field-guide inspection confirms the literal rendering path and
+  shared text validation. The guide links to the operation/schema owners rather
+  than introducing a new formatting flag. Fresh review, required CI, merge and
+  canonical completion remain open.
+
+### 2026-11-01 - Complete raw-input semantics decision
+
+- The latest review has no open findings, but its summary flagged structured
+  deletions/nulls. Actual store assessment confirmed the concern: a raw null
+  replacement and an `id`-only payload can be rejected as empty, while a
+  meaningful member deletion can be refused as previously known facts.
+- The coordinator recommends completing the lineage-anchored distinction:
+  treat declared raw input as the whole observed JSON value, including nulls,
+  empty values, member names and membership; retain normalized knowledge
+  comparison for prose and outer facts. Returning to a known whole input remains
+  non-progress, and omitting/restoring an outer fact cannot manufacture novelty.
+- The operator explicitly selected `whole-input` after the clarification
+  recorded in Request. A never-observed raw configuration combining known leaf
+  values counts as changed input, not newly learned individual facts. Source
+  implementation and regressions must now follow that selected distinction.
+  Causal relevance remains attributable judgment, and this decision grants no
+  additional action authority.
+- The operator also requested explicit Markdown and enum/prose field contracts.
+  The guidance owner is tracing validator and presentation behavior and will
+  publish a linked field reference rather than relying on ambiguous `string`
+  descriptions. The completed clarification and validation are recorded above.
 
 ### 2026-11-01 - Structured whitespace value follow-up
 

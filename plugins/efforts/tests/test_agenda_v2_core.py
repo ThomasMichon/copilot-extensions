@@ -33,8 +33,8 @@ def board() -> dict[str, Any]:
         "order": ["parent", "sibling-a", "sibling-b"]}
 
 
-def context(value: Any, evidence_ref: str = "fixture-input") -> dict[str, Any]:
-    return {"facts": [{"kind": "input", "subject": "dataset", "value": value, "evidence_ref": evidence_ref}]}
+def context(value: Any, evidence_ref: str = "fixture-input", *, kind: str = "input") -> dict[str, Any]:
+    return {"facts": [{"kind": kind, "subject": "dataset", "value": value, "evidence_ref": evidence_ref}]}
 
 
 def v2(change: dict[str, Any], revision: int, identity: str) -> dict[str, Any]:
@@ -126,7 +126,6 @@ def test_v2_productive_same_command_exceeds_old_visit_threshold(lane: Path) -> N
 
 @pytest.mark.parametrize("value", [
     {"content": "initial"},
-    {"content": "initial", "uuid": "new", "timestamp": "later", "session": "new"},
 ])
 def test_v2_cosmetic_context_replans_without_a_new_attempt(lane: Path, value: Any) -> None:
     outcome(lane)
@@ -227,7 +226,7 @@ def test_v2_real_cli_queue_outcome_revisit_and_return(tmp_path: Path) -> None:
     assert result["transition"]["attempt_id"] != attempt
 
 
-@pytest.mark.parametrize("fault", ["unknown-subject", "duplicate-subject", "empty-value", "bad-kind", "bad-judgment"])
+@pytest.mark.parametrize("fault", ["unknown-subject", "duplicate-subject", "empty-facts", "bad-kind", "bad-judgment"])
 def test_v2_invalid_context_has_no_accepted_partial_mutation(lane: Path, fault: str) -> None:
     outcome(lane)
     frame, item, attempt = current(lane)
@@ -238,8 +237,8 @@ def test_v2_invalid_context_has_no_accepted_partial_mutation(lane: Path, fault: 
         candidate["facts"][0]["subject"] = "foreign"
     elif fault == "duplicate-subject":
         candidate["facts"].append(deepcopy(candidate["facts"][0]))
-    elif fault == "empty-value":
-        candidate["facts"][0]["value"] = {"timestamp": "later", "uuid": "new"}
+    elif fault == "empty-facts":
+        candidate["facts"] = []
     elif fault == "bad-kind":
         candidate["facts"][0]["kind"] = []
     else:
@@ -428,7 +427,7 @@ def test_v2_cannot_fork_deferred_root_or_reassign_original_attempt(lane: Path) -
 def test_v2_new_ids_labels_and_fact_kind_do_not_make_context(lane: Path) -> None:
     outcome(lane)
     frame, item, attempt = current(lane)
-    candidate = context({"content": "initial", "metadata": {"uuid": "brand-new"}, "evidence_ref": "new"})
+    candidate = context({"content": "initial"}, evidence_ref="brand-new-evidence-id")
     candidate["facts"][0]["kind"] = "observation"
     result = update(lane, {"operation": "revisit", "frame_id": frame, "item_id": item,
         "predecessor_attempt_id": attempt, "context": candidate,
@@ -773,10 +772,10 @@ def test_v2_boolean_number_changes_are_type_aware(
 
 
 @pytest.mark.parametrize("value", [True, False, 1, 0, {"nested": [True, False, 1, 0]}])
-def test_v2_typed_values_with_metadata_churn_remain_duplicate(tmp_path: Path, value: Any) -> None:
+def test_v2_prose_typed_values_with_metadata_churn_remain_duplicate(tmp_path: Path, value: Any) -> None:
     baseline = {"payload": value}
     STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
-        "baseline_context": context(baseline), "resource_caps": CAPS}, 0, "init"))
+        "baseline_context": context(baseline, kind="observation"), "resource_caps": CAPS}, 0, "init"))
     outcome(tmp_path)
     result = revisit(tmp_path, {"payload": value, "uuid": "new-uuid", "timestamp": "later"})
     assert result["transition"]["decision"] == "not-admitted"
@@ -980,7 +979,7 @@ def test_v2_historical_context_signatures_share_numeric_equivalence(
     assert result["transition"]["reason_code"] == "previously-used-context"
 
 
-def test_v2_nested_omitted_knowledge_readdition_cannot_reset_parent_budget(tmp_path: Path) -> None:
+def test_v2_new_complete_raw_config_combination_admits_with_original_history(tmp_path: Path) -> None:
     STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
         "baseline_context": context({"nested": {"input": "A", "condition": "ready"}}),
         "resource_caps": CAPS}, 0, "init"))
@@ -993,5 +992,5 @@ def test_v2_nested_omitted_knowledge_readdition_cannot_reset_parent_budget(tmp_p
     update(tmp_path, {"operation": "return", "frame_id": child["frame_id"],
         "expansion_id": child["expansion_id"], "acceptance_ref": "child accepted", "evidence": proof()})
     result = revisit(tmp_path, {"nested": {"input": "B", "condition": "ready"}})
-    assert result["transition"]["reason_code"] == "previously-known-facts"
-    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]["decompositions"] == 1
+    assert result["transition"]["decision"] == "revisit-admitted"
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]["decompositions"] == 0

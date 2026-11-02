@@ -26,7 +26,7 @@ def semantic(value: Any, *, raw_input: bool = False) -> Any:
         if any(not isinstance(key, str) for key in value):
             raise AgendaError("semantic value keys must be text")
         return {key: semantic(item, raw_input=raw_input)
-                for key, item in sorted(value.items()) if key not in METADATA}
+                for key, item in sorted(value.items()) if raw_input or key not in METADATA}
     if isinstance(value, list):
         return [semantic(item, raw_input=raw_input) for item in value]
     if value is None or type(value) in (bool, int):
@@ -64,8 +64,9 @@ def facts(value: Any, subjects: set[str], *,
             raise AgendaError("unsupported context fact kind")
         _text(fact["evidence_ref"], "context evidence reference")
         policy = input_policy if input_policy is not None else {}
-        content = semantic(fact["value"], raw_input=policy.get(subject, fact["kind"] == "input"))
-        if not nonempty(content):
+        raw_input = policy.get(subject, fact["kind"] == "input")
+        content = semantic(fact["value"], raw_input=raw_input)
+        if not raw_input and not nonempty(content):
             raise AgendaError("context value is normalized-empty or metadata-only")
         # A later category-label change cannot alter the original comparison policy.
         normalized[subject] = {"value": content}
@@ -122,7 +123,7 @@ def knowledge(value: Any, path: tuple[Any, ...] = ()) -> set[tuple[Any, ...]]:
 
 def qualification(
     proposed: dict[str, Any], current: dict[str, Any], used: list[dict[str, Any]],
-    subjects: set[str], judgment: Any,
+    subjects: set[str], judgment: Any, *, input_policy: dict[str, bool] | None = None,
 ) -> tuple[bool, str, dict[str, list[str]]]:
     fields(judgment, {"qualification", "changed_subjects", "causal_change", "evidence_refs"})
     if judgment["qualification"] != "agent-judgment":
@@ -151,14 +152,19 @@ def qualification(
     if any(signature(previous, subjects) == candidate for previous in used):
         return False, "previously-used-context", delta
     for subject in added + changed:
+        if input_policy is not None and input_policy.get(subject, False):
+            if not any(subject in previous and canonical_equal(proposed[subject], previous[subject])
+                       for previous in [current, *used]):
+                return True, "qualified-agent-judgment", delta
+            continue
         known: set[tuple[Any, ...]] = set()
         for previous in [current, *used]:
             if subject in previous:
                 known.update(knowledge(previous[subject]))
         if knowledge(proposed[subject]) - known:
             return True, "qualified-agent-judgment", delta
-    # Omission never erases learned facts. A different bundle of known values
-    # needs a genuinely new scoped relationship/insight, not a new wrapper.
+    # Outer omission never erases learned facts. Raw payload membership is
+    # observed data; prose/knowledge still needs more than a known-leaf bundle.
     return False, "previously-known-facts", delta
 
 

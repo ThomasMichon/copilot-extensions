@@ -173,13 +173,15 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
             raise AgendaError("successful attempts cannot be resurrected")
         subjects = set(definition(state.documents, item)["relevant_subjects"])
         prior = record(state.records, previous["context_id"], "context")
-        proposed = context_body(change["context"], subjects,
-                                input_policy=context_policy(state.records, previous["context_id"]))
+        policy = context_policy(state.records, previous["context_id"])
+        proposed = context_body(change["context"], subjects, input_policy=policy)
+        for fact in proposed["facts"]:
+            policy.setdefault(fact["subject"], fact["kind"] == "input")
         used = [record(state.records, record(state.records, identity, "attempt")["context_id"], "context")["semantic"]
                 for identity in item["attempts"]]
         baseline = record(state.records, item["baseline_context_id"], "context")
         admitted, reason, delta = qualification(proposed["semantic"], prior["semantic"],
-                                                used + [baseline["semantic"]], subjects, change["judgment"])
+            used + [baseline["semantic"]], subjects, change["judgment"], input_policy=policy)
         if not admitted:
             decision = state.replan(reason, change["item_id"])
             state.add("context-proposal", {"item_id": change["item_id"],

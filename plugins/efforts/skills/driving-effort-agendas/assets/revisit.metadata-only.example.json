@@ -5,10 +5,7 @@
         "kind": "input",
         "subject": "validation-input",
         "value": {
-          "content": "fixture-input-A",
-          "uuid": "new-placeholder",
-          "timestamp": "later-placeholder",
-          "session": "new-placeholder"
+          "content": "fixture-input-A"
         },
         "evidence_ref": "example:renamed-reference-to-unchanged-input"
       }
@@ -17,7 +14,7 @@
   "judgment": {
     "qualification": "agent-judgment",
     "changed_subjects": ["validation-input"],
-    "causal_change": "This proposal asserts novelty but changes only metadata and wording; the relevant input is still unchanged.",
+    "causal_change": "This proposal asserts novelty but changes only the evidence reference and wording; the complete input is still unchanged.",
     "evidence_refs": ["example:renamed-reference-to-unchanged-input"]
   },
   "approach": {
