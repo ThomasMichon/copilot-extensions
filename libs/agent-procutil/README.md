@@ -434,7 +434,10 @@ Consumers must reserve response/serialization time outside this budget.
 Failed preparation or lifetime-descriptor closure also withholds notification.
 `OwnedCleanupError.cleanup_resources` retains exact `(kind, resource)` pairs
 alongside any process/Job custody; lifetime descriptors remain registered until
-confirmed closed. A failure is not permission to retry a possibly closed handle.
+confirmed closed or moved to separate uncertain-close tracking. Uncertain
+descriptor numbers never participate in automatic fork cleanup: an error can
+follow actual closure and number reuse. A failure is not permission to retry a
+possibly closed handle.
 
 For an explicitly enclosing finite POSIX owner, opt-in
 `borrow_parent_scope=True` keeps observations in that owner's native group

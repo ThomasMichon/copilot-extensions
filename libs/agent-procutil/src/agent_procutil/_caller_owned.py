@@ -33,6 +33,7 @@ _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
 _lifetime_writers: set[int] = set()
 _lifetime_readers: set[int] = set()
+_uncertain_lifetime_descriptors: set[int] = set()
 _BOOTSTRAP = (
     "import sys;sys.path.insert(0,sys.argv.pop(1));"
     "from agent_procutil._caller_owned import _main;_main()"
@@ -359,8 +360,13 @@ def run(
                 continue
             try:
                 with _lifetime_lock:
-                    os.close(descriptor)
                     owned.discard(descriptor)
+                    try:
+                        os.close(descriptor)
+                    except BaseException:
+                        # The number may already be reused; never auto-close it at fork.
+                        _uncertain_lifetime_descriptors.add(descriptor)
+                        raise
             except BaseException as error:
                 failed.append(("descriptor", descriptor))
                 cause = error

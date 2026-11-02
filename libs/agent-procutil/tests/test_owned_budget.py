@@ -231,10 +231,9 @@ def test_between_check_expiry_retains_failed_lifetime_close_without_settlement(m
         assert settled == []
         assert os.fstat(failed)
         assert ("descriptor", failed) in caught.value.cleanup_resources
-        if failed_side == "writer":
-            assert failed in protocol._lifetime_writers
-        else:
-            assert failed in protocol._lifetime_readers
+        assert failed in protocol._uncertain_lifetime_descriptors
+        assert failed not in protocol._lifetime_writers
+        assert failed not in protocol._lifetime_readers
         with pytest.raises(OSError):
             os.fstat(fds[1 if failed_side == "reader" else 0])
     finally:
@@ -245,6 +244,7 @@ def test_between_check_expiry_retains_failed_lifetime_close_without_settlement(m
                 pass
         protocol._lifetime_writers.difference_update(set(fds) - before_writers)
         getattr(protocol, "_lifetime_readers", set()).difference_update(fds)
+        protocol._uncertain_lifetime_descriptors.difference_update(fds)
 
 
 def test_typed_no_target_guardian_refusal_settles_after_lifetime_closure_and_retains_ask(monkeypatch, capsys):
@@ -304,6 +304,62 @@ def test_typed_no_target_guardian_refusal_settles_after_lifetime_closure_and_ret
     ) == 0
     assert settled == [True] and len(descriptors) == 2
     assert __import__("json").loads(capsys.readouterr().out)["permissionDecision"] == "ask"
+
+
+def test_close_then_error_cannot_put_a_reused_descriptor_in_fork_cleanup(monkeypatch, tmp_path):
+    from agent_procutil import _caller_owned as protocol
+
+    original_close, original_pipe = os.close, os.pipe
+    local_os = SimpleNamespace(**vars(os))
+    local_os.name = "posix"
+    monkeypatch.setattr(protocol, "os", local_os)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    descriptors, settled = [], []
+    before_writers, before_readers = set(protocol._lifetime_writers), set(protocol._lifetime_readers)
+    assert not before_writers
+    def pipe():
+        values = original_pipe()
+        descriptors.extend(values)
+        return values
+    def close(fd):
+        original_close(fd)
+        if fd == descriptors[1]:
+            raise OSError("fixture close released descriptor before reporting error")
+    def refuse(argv, **kwargs):
+        raise owned_process._PreparationTimeout(argv, kwargs["timeout"])
+    monkeypatch.setattr(local_os, "pipe", pipe)
+    monkeypatch.setattr(local_os, "close", close)
+    monkeypatch.setattr(protocol, "_run_owned", refuse)
+    replacement = None
+    try:
+        with pytest.raises(OwnedCleanupError):
+            run_caller_owned(
+                ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+                budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+                on_settled=lambda: settled.append(True),
+            )
+        target = descriptors[1]
+        source = os.open(tmp_path / "unrelated", os.O_CREAT | os.O_RDWR, 0o600)
+        if source != target:
+            os.dup2(source, target)
+            original_close(source)
+        replacement = target
+        monkeypatch.setattr(local_os, "close", original_close)
+        protocol._lifetime_lock.acquire()
+        protocol._after_fork_child()
+        assert os.write(replacement, b"still owned by the unrelated caller") > 0
+        assert settled == []
+    finally:
+        if replacement is not None:
+            try:
+                original_close(replacement)
+            except OSError:
+                pass
+        protocol._lifetime_writers.clear()
+        protocol._lifetime_writers.update(before_writers)
+        protocol._lifetime_readers.clear()
+        protocol._lifetime_readers.update(before_readers)
+        getattr(protocol, "_uncertain_lifetime_descriptors", set()).difference_update(descriptors)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job preparation")

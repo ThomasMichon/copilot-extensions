@@ -84,6 +84,64 @@ def test_normal_legacy_completion_stops_its_native_caller_watch(monkeypatch, cap
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native fork descriptor reuse")
+def test_uncertain_writer_number_is_not_closed_after_reuse_in_a_real_fork(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from agent_procutil import _caller_owned as protocol, owned_process
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    original_close, original_pipe = os.close, os.pipe
+    local_os = SimpleNamespace(**vars(os))
+    monkeypatch.setattr(protocol, "os", local_os)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    descriptors = []
+    def pipe():
+        pair = original_pipe()
+        descriptors.extend(pair)
+        return pair
+    def close(fd):
+        original_close(fd)
+        if fd == descriptors[1]:
+            raise OSError("fixture close completed before its error")
+    def refuse(argv, **kwargs):
+        raise owned_process._PreparationTimeout(argv, kwargs["timeout"])
+    monkeypatch.setattr(local_os, "pipe", pipe)
+    monkeypatch.setattr(local_os, "close", close)
+    monkeypatch.setattr(protocol, "_run_owned", refuse)
+    replacement = child = None
+    try:
+        with pytest.raises(owned_process.OwnedCleanupError):
+            owned_process.run_caller_owned(
+                ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+                budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+            )
+        replacement = descriptors[1]
+        source = os.open(tmp_path / "unrelated", os.O_CREAT | os.O_RDWR, 0o600)
+        if source != replacement:
+            os.dup2(source, replacement)
+            original_close(source)
+        monkeypatch.setattr(local_os, "close", original_close)
+        child = os.fork()
+        if child == 0:
+            try:
+                os.write(replacement, b"unrelated ownership preserved")
+            except BaseException:
+                os._exit(3)
+            os._exit(0)
+        expected = child
+        pid, status = os.waitpid(child, 0)
+        child = None
+        assert pid == expected and os.waitstatus_to_exitcode(status) == 0
+        assert (tmp_path / "unrelated").read_bytes() == b"unrelated ownership preserved"
+    finally:
+        if child:
+            os.waitpid(child, 0)
+        if replacement is not None:
+            original_close(replacement)
+        protocol._uncertain_lifetime_descriptors.difference_update(descriptors)
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX guardian refusal")
 def test_missing_guardian_cwd_notifies_only_after_lifetime_descriptors_close(tmp_path):
     from agent_procutil import SyncProcessLaunchError, _caller_owned
