@@ -78,6 +78,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from registry_root import resolve_registry_root
 from anchor_shell_parser import (
+    GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
@@ -145,12 +146,6 @@ _GIT_WRITE_SUBCOMMANDS = frozenset({
     "revert", "init", "branch", "__configured-alias__",
 })
 _GIT_READ_ONLY_DASHED_SUBCOMMANDS = frozenset({"merge-base"})
-_GIT_READ_BUILTINS = frozenset({
-    "blame", "cat-file", "describe", "diff", "diff-files", "diff-index",
-    "diff-tree", "grep", "help", "log", "ls-files", "ls-remote", "ls-tree",
-    "merge-base", "name-rev", "rev-list", "rev-parse", "show", "show-ref",
-    "status", "version", "whatchanged",
-})
 _GIT_WORKTREE_WRITE_SUBCOMMANDS = frozenset({
     "apply", "checkout", "checkout-index", "cherry-pick", "clean", "merge",
     "merge-file", "mv", "pull", "rebase", "reset", "restore", "revert", "rm",

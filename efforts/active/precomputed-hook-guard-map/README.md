@@ -384,3 +384,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   Git regex, which could mistake `merge-base` or message data for mutation.
   The first focused run exposed that duplicate classifier; the corrected
   complete packet passed 400 cases with six native-capability skips.
+- Preserved the existing fetch recovery path under same-name alias configuration.
+  The intrinsic-command facts now live with the existing shell parser instead
+  of growing the anchor guard beyond its hard module cap. The exact changed
+  source hashes are re-admitted without changing the cap or baseline.
+  The focused alias/builtin packet passed 39 cases.

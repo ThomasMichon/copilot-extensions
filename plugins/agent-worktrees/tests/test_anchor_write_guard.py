@@ -349,7 +349,7 @@ def test_builtin_git_write_name_is_not_replaced_by_alias(
     assert bool(result) is denied
 
 
-@pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base"])
+@pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base", "fetch"])
 def test_builtin_git_read_name_is_not_replaced_by_alias(tmp_path, anchor, subcommand):
     gp = anchor[0]["path"]
     assert guard.decide(

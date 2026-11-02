@@ -448,7 +448,7 @@ def test_git_global_options_read_does_not_acquire_guard_facts(tmp_path, monkeypa
     }, home=tmp_path, env={}) is None
 
 
-@pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base"])
+@pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base", "fetch"])
 def test_same_name_alias_cannot_turn_git_read_into_guarded_write(tmp_path, monkeypatch, subcommand):
     guard = _load("cross_repo_guard")
     monkeypatch.setattr(
