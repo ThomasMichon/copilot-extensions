@@ -31,6 +31,9 @@ of the `worktree-manager-control-plane` effort.
   before receiving it. Worktrees additionally probes its selected Manager through
   the existing read-only version route before forwarding. The response includes
   that executing Manager's isolated module command and scoped state root.
+  A configured relative state root is resolved against the query's working
+  directory. The resident Picker selector is withheld from the version query
+  and restored only on the pinned execution command.
   Worktrees launches this pinned command, not the resolving front door a second
   time: advancing the current-version selector cannot redirect the offer to an
   older receiver. A numbered runtime reacquires its existing slot-local retention

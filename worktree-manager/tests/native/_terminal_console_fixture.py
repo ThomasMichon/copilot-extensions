@@ -264,7 +264,7 @@ class Console:
 
 
 def _fixture(root, layer, mode):
-    if layer == "outer":
+    if layer in {"outer", "outer-resident"}:
         repository = Path(__file__).resolve().parents[3]
         sys.path[:0] = [
             str(repository / "plugins" / "agent-worktrees" / "src"),
@@ -280,9 +280,20 @@ def _fixture(root, layer, mode):
             "fixture-engine", "literal engine",
         ]
         (root / "outer.json").write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
-        manager_launch_cli._exec_worktree_manager([
+        command = [
             shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(root / "nested.ps1"),
-        ], None)
+        ]
+        if layer == "outer-resident":
+            from agent_worktrees import picker_fast_entry
+
+            picker_fast_entry.registry_paths.registry_root = lambda: root
+            picker_fast_entry._request = lambda *_args: {
+                "manager_command": [*command, "--resident-picker"],
+                "bootstrap": {"project": "fixture"}, "runtime_root": str(root),
+                "manager_session": {"unused": "foreground offer bypasses reusable session"},
+            }
+            return picker_fast_entry.dispatch(["--project", "fixture"])
+        manager_launch_cli._exec_worktree_manager(command, None)
         raise AssertionError("Windows forwarding unexpectedly returned")
     from worktree_manager import engine_client, terminal_launch
 

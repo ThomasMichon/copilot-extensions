@@ -24,11 +24,12 @@ def answer_query(arguments: list[str] | None = None) -> bool:
         return False
     from .warm_picker_contract import runtime_command
 
+    root = os.environ.get("WORKTREE_MANAGER_ROOT")
     print(json.dumps({
         "package": "worktree_manager", "capability": CAPABILITY,
         "runtime": {
             "command": runtime_command("worktree_manager"),
-            "root": os.environ.get("WORKTREE_MANAGER_ROOT"),
+            "root": str(Path(root).resolve()) if root else None,
         },
     }))
     return True

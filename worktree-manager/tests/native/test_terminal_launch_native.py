@@ -57,7 +57,7 @@ def _aw_front_door(root, entry, fixture):
         " print(json.dumps({'package':'agent_worktrees','capability':'ce-terminal-launch-v1'}))\n"
         " raise SystemExit(0)\n"
         f"sys.path[:0]={[str(path) for path in (HELPER.parents[2] / 'libs').glob('*/src')]!r}\n"
-        f"sys.argv={[str(fixture), str(root), 'outer', 'selected']!r}\n"
+        f"sys.argv={[str(fixture), str(root), 'outer-resident' if entry == 'aw-resident' else 'outer', 'selected']!r}\n"
         f"runpy.run_path({str(fixture)!r},run_name='__main__')\n", encoding="utf-8",
     )
     runtime = root / "profile" / ".agent-worktrees"
@@ -122,6 +122,8 @@ def _scripts(root, mode, entry):
         "import runpy,sys\n"
         "from worktree_manager import terminal_launch\n"
         "if terminal_launch.answer_query(): raise SystemExit(0)\n"
+        + ("assert sys.argv[1:]==['--resident-picker','--project','fixture']\n"
+           if entry == "aw-resident" else "") +
         f"sys.argv={[str(fixture), str(root), 'inner', mode]!r}\n"
         f"runpy.run_path({str(fixture)!r}, run_name='__main__')\n"
     )
@@ -131,7 +133,7 @@ def _scripts(root, mode, entry):
         "-S", str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager",
     ]
-    if entry in {"ps1", "cmd", "manager-standalone"}:
+    if entry in {"manager-cmd", "manager-standalone"}:
         from worktree_manager import runtime_launchers
 
         _query_owner(slot / "payload")
@@ -140,7 +142,7 @@ def _scripts(root, mode, entry):
             (root / f"worktree-manager.{kind}").write_text(
                 getattr(runtime_launchers, f"_{kind}_binstub")(), encoding="utf-8",
             )
-        kind = "ps1" if entry == "manager-standalone" else entry
+        kind = "ps1" if entry == "manager-standalone" else "cmd"
         invocation = f"& {_quote(root / ('worktree-manager.' + kind))}\n"
     nested.write_text(
         common +
@@ -176,8 +178,15 @@ def _scripts(root, mode, entry):
     )
     if entry.startswith("aw-"):
         outer_invocation = f"& {_quote(_aw_front_door(root, entry, fixture))}\n"
-    elif entry == "manager-standalone":
+    elif entry in {"manager-standalone", "manager-cmd"}:
         outer_invocation = invocation
+    if entry == "manager-cmd":
+        outer_invocation = (
+            "$savedNativePreference=$PSNativeCommandUseErrorActionPreference\n"
+            "$PSNativeCommandUseErrorActionPreference=$false\n"
+            + outer_invocation +
+            "$PSNativeCommandUseErrorActionPreference=$savedNativePreference\n"
+        )
     host.write_text(
         common + outer_invocation +
         "$code=$LASTEXITCODE\n"
@@ -210,9 +219,8 @@ def _scripts(root, mode, entry):
 @pytest.mark.parametrize(("mode", "entry"), [
     ("selected", "helper"), ("terminal-close", "helper"),
     ("cancel", "helper"), ("failed", "helper"), ("malformed", "helper"),
-    ("selected", "ps1"), ("selected", "cmd"),
     ("selected", "manager-standalone"), ("selected", "aw-user"), ("selected", "aw-payload"),
-    ("selected", "aw-selector-race"),
+    ("selected", "manager-cmd"), ("selected", "aw-selector-race"), ("selected", "aw-resident"),
 ])
 def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(tmp_path, mode, entry):
     from _terminal_console_fixture import Console
@@ -244,12 +252,21 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
         (tmp_path / "release").touch()
         if mode in {"selected", "terminal-close"}:
             attached = _wait(tmp_path / "attached.json", console)
-            assert attached["pid"] == console.process.pid
+            if entry == "manager-cmd":
+                assert attached["pid"] in descendants
+                assert descendants[attached["pid"]][0].lower() == "pwsh.exe"
+            else:
+                assert attached["pid"] == console.process.pid
             survivors = {
                 pid: name for pid, (name, handle) in descendants.items()
                 if not console.exited(handle)
             }
-            assert not survivors, survivors
+            if entry == "manager-cmd":
+                assert survivors[attached["pid"]].lower() == "pwsh.exe"
+                assert not any(name.lower().startswith("python") for name in survivors.values())
+                assert all(name.lower() in {"cmd.exe", "pwsh.exe"} for name in survivors.values())
+            else:
+                assert not survivors, survivors
             assert attached["arguments"] == literal
             assert attached["redirected"] is False
             assert not attached["channel"]
@@ -265,7 +282,9 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
             console.send(b"typed input\r")
             typed = _wait(tmp_path / "input.json", console)
             assert typed == {"line": "typed input", "width": 118, "height": 37}
-        assert console.wait() == {"selected": 23, "cancel": 0, "failed": 7, "malformed": 1}[mode]
+        assert console.wait() == {"selected": 23, "cancel": 0, "failed": 7, "malformed": 1}[mode], (
+            console.output.decode("utf-8", "replace")
+        )
         result = json.loads((tmp_path / "host-result.json").read_text(encoding="utf-8-sig"))
         assert not result["channel"]
         assert result["nativePreference"] is True

@@ -12,6 +12,22 @@ import pytest
 from worktree_manager import engine_client, launch_observations, relocated_launch, terminal_launch
 
 
+@pytest.mark.parametrize("root", [None, "", "manager", "manager with spaces"])
+def test_query_binds_configured_root_against_the_actual_working_directory(
+    tmp_path, monkeypatch, capsys, root,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CE_TERMINAL_CAPABILITY_QUERY", "1")
+    if root is None:
+        monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    else:
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", root)
+    assert terminal_launch.answer_query(["--version"])
+    binding = json.loads(capsys.readouterr().out)["runtime"]
+    assert binding["root"] == (str(tmp_path / root) if root else None)
+    assert os.environ.get("WORKTREE_MANAGER_ROOT") == root
+
+
 @pytest.fixture
 def channel(tmp_path, monkeypatch):
     request = tmp_path / "request.json"

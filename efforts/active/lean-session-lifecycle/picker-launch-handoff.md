@@ -406,3 +406,36 @@ reviewed admission revision is implemented and qualified.
   refuses ordinary roster/CLI imports and passes with the query packet
   (13 cases); the entry module stays at its existing ceiling without widening
   the baseline.
+
+### 2026-11-02 - Exact-head review and CI corrections
+
+- Review #9936 identified three actionable gaps. The fixed resident selector
+  is now excluded from `--version` and restored only for pinned execution;
+  configured relative Manager roots resolve against the query cwd. A native
+  fast-entry control exercises the real Worktrees dispatch with a synthetic
+  discovery response and requires the selected receiver to see the exact
+  resident/project arguments.
+- Replaced the former bypassed CMD/PS1 fixture parameters with a direct
+  generated-CMD ConPTY entry. Its real terminal host and command-shell shim
+  are classified separately; all preparation Python descendants retire before
+  literal arguments, input/resize and exit 23 pass. The test's outer PowerShell
+  wrapper captures that native exit under its own explicit preference; this
+  does not claim a CMD child can change its caller's error policy.
+- The Worktrees query/resident packet passes 44 cases. Manager's producer and
+  native packet passes 55 cases with the direct-CMD wrapper correction passing
+  separately; these overlapping packets are not additive counts.
+- CI exposed omitted installation-context copies of the canonical native
+  caller archive and the changed shell source's stale unit admission digest.
+  Synchronized all fourteen dependent archives, retained the MCP footprint
+  contract revision, added the installation-context changefile, and refreshed
+  only that reviewed source binding. Existing actor-free unit nodes and their
+  effect guards are unchanged; native query/terminal actors remain excluded.
+- A full local admitted-unit attempt reached 1933 passing cases but could not
+  qualify the packet on this Windows token: existing fixture symlink creation
+  needs a privilege it does not hold, and the packet also reported platform
+  skips. No privileges, fixtures or unit gates were weakened. Required Linux
+  CI must run the exact new source packet before merge; partial local output
+  is not a passing unit-evidence claim.
+- The three review findings, required CI, source merge, promotion and installed
+  proof remain open until their respective owners confirm them. No installed
+  rollout, live-session change or hold change occurred.

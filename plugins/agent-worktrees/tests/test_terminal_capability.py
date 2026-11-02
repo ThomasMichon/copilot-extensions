@@ -36,10 +36,13 @@ def test_actual_query_entry_exits_before_roster_and_cli_imports():
 
 
 @pytest.mark.parametrize("response", ["current", "legacy", "malformed", "foreign", "failed"])
-def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypatch, response, tmp_path):
+@pytest.mark.parametrize("resident", [False, True])
+def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypatch, response, resident, tmp_path):
     monkeypatch.setattr(terminal_launch, "_channel", "foreground-request")
     monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
     command = ["selected-manager", "fixed-prefix"]
+    selector = ["--resident-picker"] if resident else []
+    invocation = [*command, *selector]
     pinned = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "worktree_manager"]
     root = str(tmp_path / "selected-root")
     environment = {"PATH": "unchanged", "CE_TERMINAL_LAUNCH": "stale-request"}
@@ -64,8 +67,8 @@ def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypat
 
     monkeypatch.setattr(owned_process, "run_caller_owned", query)
     if response in {"current", "legacy"}:
-        selected, result = terminal_launch.select_receiver(command, environment)
-        assert selected == (pinned if response == "current" else command)
+        selected, result = terminal_launch.select_receiver(invocation, environment)
+        assert selected == ([*pinned, *selector] if response == "current" else invocation)
         assert result.get("CE_TERMINAL_LAUNCH") == (
             "foreground-request" if response == "current" else None
         )
@@ -74,7 +77,7 @@ def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypat
         assert result.get("WORKTREE_MANAGER_ROOT") == (root if response == "current" else None)
     else:
         with pytest.raises(RuntimeError):
-            terminal_launch.select_receiver(command, environment)
+            terminal_launch.select_receiver(invocation, environment)
 
 
 def test_no_foreground_offer_does_not_probe_or_reuse_an_inherited_channel(monkeypatch):

@@ -34,6 +34,8 @@ def select_receiver(
     environment.pop(ENVIRONMENT, None)
     if not _channel or os.name != "nt":
         return list(command), environment
+    selector = command[-1:] if command[-1:] == ["--resident-picker"] else []
+    query_command = command[:-1] if selector else command
     from agent_procutil.owned_process import run_caller_owned
 
     query_environment = {
@@ -42,7 +44,7 @@ def select_receiver(
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
     }
     result = run_caller_owned(
-        [*command, "--version"], env=query_environment, timeout=10,
+        [*query_command, "--version"], env=query_environment, timeout=10,
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     if result.returncode != 0 or result.stderr:
@@ -90,4 +92,4 @@ def select_receiver(
     else:
         environment["WORKTREE_MANAGER_ROOT"] = root
     environment[ENVIRONMENT] = _channel
-    return selected, environment
+    return [*selected, *selector], environment
