@@ -1,9 +1,0 @@
-{
-  "comment": "Bound native HTTP deadline fixtures and verify expiry before connection.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

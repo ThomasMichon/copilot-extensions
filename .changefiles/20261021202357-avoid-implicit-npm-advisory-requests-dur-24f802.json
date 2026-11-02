@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid implicit npm advisory requests during admitted locked tooling installation.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

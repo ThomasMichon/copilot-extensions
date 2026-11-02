@@ -1,9 +1,0 @@
-{
-  "comment": "Start registered serve-only Windows supervisors without legacy labels while preserving native disablement.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

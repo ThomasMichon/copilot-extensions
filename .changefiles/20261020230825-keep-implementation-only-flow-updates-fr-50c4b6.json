@@ -1,9 +1,0 @@
-{
-  "comment": "Keep implementation-only flow updates from forcing unrelated contract fixture recapture",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

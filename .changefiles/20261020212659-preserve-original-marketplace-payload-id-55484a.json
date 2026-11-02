@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve staged marketplace origin and reuse only content-verified registry validator code",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
