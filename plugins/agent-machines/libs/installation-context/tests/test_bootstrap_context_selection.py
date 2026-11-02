@@ -565,9 +565,13 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(
 
     before = evidence()
     try:
-        result = host.run([
-            POWERSHELL, "-File", str(REPO / "plugins/agent-index/scripts/bootstrap-check.ps1"),
-        ]) if host else runner("agent-index", environment)
+        if host:
+            assert POWERSHELL is not None
+            result = host.run([
+                POWERSHELL, "-File", str(REPO / "plugins/agent-index/scripts/bootstrap-check.ps1"),
+            ])
+        else:
+            result = runner("agent-index", environment)
         assert result.returncode == 0
         # The compatibility hook is an unconditional no-op, including for
         # missing, malformed and foreign contexts.

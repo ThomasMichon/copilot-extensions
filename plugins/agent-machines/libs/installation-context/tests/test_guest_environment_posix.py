@@ -8,18 +8,20 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from test_guest_environment_native import _initialized_host
+from test_guest_environment_native import _initialized_host as _initialized_host
 from _powershell_fixture import _copy_sdk, _inject_owner_hook
 
 LIB = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="native POSIX guest adapter boundary")
 
 
-def _snapshot(root: Path) -> dict:
+def _snapshot(root: Path) -> dict[str, tuple[bool, int, bytes | None]]:
     return {
         path.relative_to(root).as_posix(): (
             path.is_dir(), path.stat().st_mtime_ns,
@@ -88,11 +90,13 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         {"HOME": str(profile), "USERPROFILE": str(profile), "WSL_DISTRO_NAME": distribution},
         monkeypatch,
     )
+    getuid = cast(Callable[[], int], getattr(os, "getuid"))
+    getgid = cast(Callable[[], int], getattr(os, "getgid"))
     lookup = profile / "test-bin" / "getent"
     lookup.write_text(
         "#!/bin/sh\n"
-        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {os.getuid()} ] || exit 1\n'
-        f"printf '%s\\n' {shlex.quote(f'fixture:x:{os.getuid()}:{os.getgid()}:fixture:{profile}:/bin/sh')}\n",
+        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {getuid()} ] || exit 1\n'
+        f"printf '%s\\n' {shlex.quote(f'fixture:x:{getuid()}:{getgid()}:fixture:{profile}:/bin/sh')}\n",
         encoding="utf-8",
     )
     lookup.chmod(0o755)
@@ -117,7 +121,7 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         encoding="utf-8",
     )
 
-    def run(runner: str, action: str, observation: str | None) -> subprocess.CompletedProcess:
+    def run(runner: str, action: str, observation: str | None) -> subprocess.CompletedProcess[str]:
         if runner == "powershell":
             command = (
                 [powershell, "-NoProfile", "-File", str(registration_wrapper)]

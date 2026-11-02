@@ -5,7 +5,7 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
-Killswitch, Config Migrate, Dropin Registry, Endpoint Rendezvous, Lazy CLI Dispatch,
+Killswitch, Config Migrate, Dropin Registry, Endpoint Rendezvous, Installation Context, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Session Liveness Probe and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -26,6 +26,7 @@ python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
+python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-remote-login-shell-remaining
@@ -187,20 +188,19 @@ python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-installation-context --strict
 ```
 
-This is still a **pending diagnostic probe**: neither the library's tests nor its
-remaining annotation delta is admitted by composing its namespace. Physical
-file counts remain distinct from checker-target counts. Vendored copies also
-remain independent pending inputs; the existing installation-context vendoring
-owner must qualify correspondence before any copy can inherit canonical checking.
-Other fragment families and independent package/module environments remain
-separate campaign work.
+The complete canonical project is **strictly admitted** on both declared targets:
+51 physical source/test files qualify as 32 checker targets, including the
+composed implementation, standalone worker and every test/helper module. Physical
+file counts remain distinct from checker-target counts. Reflective module and
+native callback boundaries retain precise callable/protocol contracts; JSON
+serialization remains explicitly dynamic where required by the existing API.
+Fixture vectors and layouts retain their actual nullable and heterogeneous
+values. No runtime validation, assertions, skip policy or cleanup is weakened.
 
-Bounded preparatory changes can reduce this project's measured debt without
-activating it. Its always-raising failure helper uses `NoReturn`, native
-platform fields retain explicit types, and differently shaped descriptor/path
-traversal helpers have distinct local names. These contracts do not waive
-remaining diagnostics or qualify a subset by filtering errors. The complete
-project stays pending until its full basic or strict check passes.
+Vendored copies remain independent pending inputs; the existing
+installation-context vendoring owner must qualify correspondence before any copy
+can inherit canonical checking. Other fragment families and independent
+package/module environments remain separate campaign work.
 
 ## Exact-candidate release enforcement
 
