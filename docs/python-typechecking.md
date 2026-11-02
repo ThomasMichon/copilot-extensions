@@ -73,6 +73,11 @@ type variable. Their narrow casts document the existing dynamic boundary:
 an override must honor the callable contract it replaces. Runtime lookup still
 checks callability and keeps the existing selection order; typing does not
 add runtime signature validation or qualify pending callers.
+Exact callable-type assertions in the library tests run as part of the required
+MyPy cohort, detecting parameter or return-type erasure. The checker test suite
+also retains real positive/negative clients for both helpers. Its type-only
+`typing_extensions` import uses the existing pinned checker dependency, not a
+new library runtime dependency.
 
 The three initially admitted leaf libraries retain separate source and
 `-remaining` project names so existing local selectors remain valid. Both

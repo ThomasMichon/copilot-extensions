@@ -581,3 +581,11 @@ composition prerequisites, and review/validation rules.
   source/packet CI and normal review remain required. No installation,
   bootstrap, dispatch selection or lifecycle behavior changes, so a separate
   provisioning clean room and installed-runtime rollout are not applicable.
+- #9953's first review recommended retaining the locally exercised MyPy
+  clients as automated regressions. Four checked-in checker cases now cover
+  valid and invalid clients for both helpers; exact callable assertions in the
+  library tests also run in the required static cohort, so signature erasure
+  cannot quietly pass CI. The tests reuse the existing checker environment
+  and dependency pins. All 58 library/checker tests and both library targets
+  pass; the updated test-source digest is refreshed without changing packet
+  selection or budgets.

@@ -4,12 +4,17 @@ own Validation Plan requirement)."""
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import sys
 import types
+from typing import TYPE_CHECKING
 
 import pytest
 
 from lazy_cli_dispatch import core_helper, dispatch_lazy, self_override
+
+if TYPE_CHECKING:
+    from typing_extensions import assert_type
 
 
 def _make_fake_module(
@@ -148,16 +153,18 @@ class TestDispatchLazy:
 
 class TestSelfOverride:
     def test_prefers_a_monkeypatched_global_over_local(self) -> None:
-        def real_impl() -> str:
-            return "real"
+        def real_impl(value: int, /) -> str:
+            return f"real:{value}"
 
-        def fake_impl() -> str:
-            return "fake"
+        def fake_impl(value: int, /) -> str:
+            return f"fake:{value}"
 
         module_globals = {"some_name": fake_impl}
         resolved = self_override(module_globals, "some_name", real_impl)
+        if TYPE_CHECKING:
+            assert_type(resolved, Callable[[int], str])
         assert resolved is fake_impl
-        assert resolved() == "fake"
+        assert resolved(3) == "fake:3"
 
     def test_falls_back_to_local_when_absent(self) -> None:
         def real_impl() -> str:
@@ -185,16 +192,18 @@ class TestSelfOverride:
 
 class TestCoreHelper:
     def test_prefers_a_bound_attribute_on_core_module_over_local(self) -> None:
-        def real_impl() -> str:
-            return "real"
+        def real_impl(value: int, /) -> str:
+            return f"real:{value}"
 
-        def fake_impl() -> str:
-            return "fake"
+        def fake_impl(value: int, /) -> str:
+            return f"fake:{value}"
 
         core = types.SimpleNamespace(some_name=fake_impl)
         resolved = core_helper(core, "some_name", real_impl)
+        if TYPE_CHECKING:
+            assert_type(resolved, Callable[[int], str])
         assert resolved is fake_impl
-        assert resolved() == "fake"
+        assert resolved(3) == "fake:3"
 
     def test_falls_back_to_local_when_core_module_lacks_the_attribute(self) -> None:
         def real_impl() -> str:
