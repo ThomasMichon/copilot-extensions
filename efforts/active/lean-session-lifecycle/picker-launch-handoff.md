@@ -486,3 +486,22 @@ reviewed admission revision is implemented and qualified.
   and refreshed only its reviewed source admission. Its 170 focused cases
   pass; the Worktrees admission packet passes 41 and Manager query/native
   packet passes 63. Full required unit evidence still awaits the new head.
+
+### 2026-11-02 - Merge-time native API reconciliation
+
+- Required CI passed on `705dd3976670`, including eligible units, guards/lint
+  and the PR gate. Its exact-head Copilot review reported no open inline
+  findings; all ten threads were resolved. Recorded the shared-validator,
+  isolated pinned-runtime and absolute-journal corrections against the
+  overview's repeated failure classes before attempting the managed merge.
+- The merge did not occur: the base advanced to #9985 during the operation.
+  Rebased onto its native platform API typing, retained the current footprint
+  contract revision and regenerated both canonical archive families. Only
+  generated MCP producer digests required conflict resolution and refresh.
+- The rebased SDK observer/process/functional packet passes 247 cases, and
+  Manager preparation/native terminal handoff passes 63. The latest query
+  sample measures 1024.41 ms cold and 739.32 ms warm; its six Python and four
+  console-host observations remain a birth-pinned lower bound, not exhaustive
+  attribution. No installed runtime or live session was changed.
+- This new head still requires its own review and CI before source merge;
+  the old head's green result is not carried forward as exact-head evidence.
