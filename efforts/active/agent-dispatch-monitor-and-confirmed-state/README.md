@@ -277,12 +277,18 @@ live claim token. No new blanket ACK or executor appointment is created.
       in [#10090](https://github.com/ThomasMichon/copilot-extensions/pull/10090),
       including actual serve-command configuration and bounded worker custody.
 - [ ] Complete ordinary publication/caller integration before activating it.
-      Cross-endpoint same-queue continuity, complete direct rows, obsolete-scope
-      withdrawal, ordinary allocator/initial prompts and mixed-driver adoption
+      Complete direct rows, obsolete-scope withdrawal,
+      ordinary allocator/initial prompts and mixed-driver adoption
       remain required; the default-off source seam is not that completion gate.
-      The [queue-bound continuation source](journal/2026/11.02-queue-bound-publication.md)
-      connects the existing sender and transaction owners; review/merge and the
-      broader integration gate remain distinct.
+- [ ] Land explicit [lossless direct worker definitions](journal/2026/11.02-direct-pool-definitions.md)
+      through the registration API/spec/store and effective-source owner.
+      Preserve full policy, reversible precedence and supported rollback;
+      this source slice does not activate ordinary allocation.
+- [x] Land actual [queue-bound publisher continuation](journal/2026/11.02-queue-bound-publication.md)
+      in [#10099](https://github.com/ThomasMichon/copilot-extensions/pull/10099),
+      including pre-collection fresh identity admission, original request/child
+      custody and transactional write/replay fences. This is bounded source
+      acceptance, not ordinary integration or installed/native qualification.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
@@ -1081,6 +1087,9 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+The [November 2 direct-definition receipt](journal/2026/11.02-direct-pool-definitions.md)
+records lossless direct registration/source integration and its retained gates.
 
 The [November 2 startup-source receipt](journal/2026/11.02-bounded-startup-source.md)
 records #9976's actual merge, bounded source evidence and the next integration gate.
