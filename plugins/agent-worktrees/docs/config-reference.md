@@ -720,6 +720,9 @@ config nor a running Bridge. It does not register, bind or launch anything.
 Missing, malformed and conflicting declarations return an explicit error.
 The platform comes from the shared execution-root classifier, not a caller's
 `WSL_DISTRO_NAME`; containers on a WSL kernel remain Linux.
+The POSIX installer follows the same precedence when recording platform:
+Docker/OCI marker files or container cgroups identify Linux before Microsoft
+kernel-release or `/proc/version` hints identify genuine WSL.
 Legacy scalar/project-only declarations retain their executable project and
 report no companion.
 
