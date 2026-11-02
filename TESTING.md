@@ -5414,6 +5414,8 @@ archive metadata remains a refusal.
 The process SDK's native interpreter controls launch both file-backed and
 retained-byte output relays twice from a selected Windows venv whose executable
 path exceeds 260 characters, preserving exact output and owned-Job settlement.
+The caller-owned launcher also preserves that selected venv's imports, arguments,
+streams and exit status over two cycles; bare executable lookup remains supported.
 
 Native development and repair fixtures use the SDK's caller-owned runner with
 their existing absolute command limits and eight-MiB per-channel capture bounds.
