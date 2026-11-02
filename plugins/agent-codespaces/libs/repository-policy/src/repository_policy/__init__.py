@@ -6,7 +6,6 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -21,7 +20,9 @@ _BASES = (
 
 
 class _PolicyLoader(yaml.SafeLoader):
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+    def construct_mapping(
+        self, node: yaml.MappingNode, deep: bool = False,
+    ) -> dict[object, object]:
         self.flatten_mapping(node)
         keys = [key.value for key, _ in node.value if key.tag == "tag:yaml.org,2002:str"]
         if keys.count("expose_agent") > 1:
@@ -47,7 +48,7 @@ class AgentHostingDenied(AgentHostingError):
     code = "repository-agent-exposure-denied"
 
 
-def validate_hosting_result(payload: Any) -> None:
+def validate_hosting_result(payload: object) -> None:
     """Require the complete versioned check answer, not merely a policy object."""
     if (
         not isinstance(payload, dict)
