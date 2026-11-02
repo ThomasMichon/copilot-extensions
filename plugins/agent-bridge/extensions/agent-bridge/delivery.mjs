@@ -424,7 +424,8 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
         // Only an observed user.message consumes an acknowledged input.
         for (const earlier of replay) inFlight.sent(earlier);
         for (const earlier of replay) {
-          if (!await currentNative(earlier) || !stillCurrent(earlier)) {
+          if (!await currentNative(earlier) || !stillCurrent(earlier)
+              || !inFlight.pending.has(earlier.id)) {
             continue;
           }
           await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });

@@ -515,6 +515,52 @@ test("a rejected legacy replay retains acknowledged inputs for a later interrupt
   assert.equal(deps.inFlight.pending.size, 0);
 });
 
+for (const consumedId of [1, 2]) {
+  test(`consumed input ${consumedId} is not replayed after an awaited metadata observation`, async () => {
+    const earlier = [1, 2, 3].map((id) => exactMessage(id));
+    const { deps } = exactHarness(earlier);
+    assert.deepEqual(await drainInbox("s", deps), [1, 2, 3]);
+    deps.getJson = async () => ({ messages: [{ ...exactMessage(5), delivery: "interrupt" }] });
+    let metadataCalls = 0;
+    deps.session.rpc.metadata.snapshot = async () => {
+      if (++metadataCalls === consumedId + 1) {
+        deps.inFlight.observe(recorded(exactMessage(consumedId)));
+        if (consumedId === 1) {
+          for (let id = 100; id <= 150; id++) deps.inFlight.observe(recorded(exactMessage(id)));
+          assert.equal(deps.inFlight.consumed.has(consumedId), false);
+        }
+      }
+      return { sessionId: "s" };
+    };
+    const sent = [];
+    deps.session.send = async (options) => {
+      const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+      sent.push(id);
+      deps.inFlight.observe(recorded(exactMessage(id)));
+    };
+    assert.deepEqual(await drainInbox("s", deps), [5]);
+    assert.deepEqual(sent, [1, 2, 3, 5].filter((id) => id !== consumedId));
+    assert.equal(deps.inFlight.pending.size, 0);
+  });
+}
+
+test("consumed later input is not replayed after an earlier awaited SDK send", async () => {
+  const earlier = [1, 2, 3].map((id) => exactMessage(id));
+  const { deps } = exactHarness(earlier);
+  assert.deepEqual(await drainInbox("s", deps), [1, 2, 3]);
+  deps.getJson = async () => ({ messages: [{ ...exactMessage(5), delivery: "interrupt" }] });
+  const sent = [];
+  deps.session.send = async (options) => {
+    const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+    sent.push(id);
+    deps.inFlight.observe(recorded(exactMessage(id)));
+    if (id === 1) deps.inFlight.observe(recorded(exactMessage(2)));
+  };
+  assert.deepEqual(await drainInbox("s", deps), [5]);
+  assert.deepEqual(sent, [1, 3, 5]);
+  assert.equal(deps.inFlight.pending.size, 0);
+});
+
 test("legacy alias-following messages keep their delivery behavior across a rollover", async () => {
   const message = { id: 1, sender: "peer", body: "legacy" };
   const { calls, deps, rollover } = exactHarness([message]);

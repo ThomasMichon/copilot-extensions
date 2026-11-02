@@ -768,7 +768,7 @@ def send_nudge(
             raise ValueError("host-bound nudge requires an original notification key")
         return send_command(
             [
-                "send", "--json", "--no-wait", "--live-exact-notify", "--kind", "notify", "--sender", sender,
+                "--json", "send", "--no-wait", "--live-exact-notify", "--kind", "notify", "--sender", sender,
                 "--expected-session-id", expected_session_id,
                 "--idempotency-key", idempotency_key,
                 expected_session_id, "--prompt-file", "-",

@@ -1,6 +1,8 @@
 """Recorded subprocess boundaries never substitute ACP, queue or blind replay."""
 
 import json
+from pathlib import Path
+import shlex
 import subprocess
 
 import pytest
@@ -70,3 +72,39 @@ def test_confirmed_new_invocation_uses_distinct_exact_cli_send_not_legacy_or_que
         assert "--queue" not in argv and "--force" not in argv and "--expected-native-session-id" not in argv
         assert argv[argv.index("send") + 1] == "native"
         assert argv[argv.index("--expected-session-id") + 1] == "native"
+
+
+@pytest.mark.parametrize("machine", ["host-a", "host-b"])
+def test_actual_host_bound_nudge_argv_is_accepted_by_bridge_root_parser(monkeypatch, machine):
+    from agent_dispatch import bridge, bridge_command_delivery as transport
+
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins/agent-bridge/src"))
+    from agent_bridge.__main__ import build_parser
+
+    parser = build_parser()
+    seen = []
+    monkeypatch.setattr(transport.remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: ["fixture-bridge"])
+    monkeypatch.setattr(transport.shutil, "which", lambda name: "/fixture/ssh")
+
+    def run(command, *, input, **kwargs):
+        argv = shlex.split(command[-1])[1:] if machine == "host-b" else command[1:]
+        args = parser.parse_args(argv)
+        assert args.json and args.command == "send" and args.no_wait
+        assert args.live_exact_notify and args.kind == "notify" and args.prompt_file == "-"
+        assert args.target == args.expected_session_id == "native"
+        assert args.idempotency_key == "original-nudge" and input == "notification"
+        with pytest.raises(SystemExit) as rejected:
+            parser.parse_args(["send", "--json", *argv[2:]])
+        assert rejected.value.code == 2
+        seen.append(argv)
+        return subprocess.CompletedProcess(command, 0, "{}", "")
+
+    monkeypatch.setattr(transport.subprocess, "run", run)
+    monkeypatch.setattr(bridge, "run_ssh_command", run)
+    assert bridge.send_nudge(
+        "workspace", "notification", machine=machine, expected_session_id="native",
+        idempotency_key="original-nudge",
+    )
+    assert len(seen) == 1 and seen[0][:2] == ["--json", "send"]

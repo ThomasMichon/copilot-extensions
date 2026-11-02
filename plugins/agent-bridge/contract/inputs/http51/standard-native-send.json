@@ -49,7 +49,7 @@
       "notify": {"exit": 0, "kind": "notify", "delivery": "steer"},
       "poll_binding": {"old_reader_hidden": true, "original_native": true},
       "cold_rollback": {"refused": true, "unchanged": true, "no_fabricated_custody": true},
-      "replay_rejections": {"passed": 5, "failed": 0},
+      "replay_rejections": {"passed": 9, "failed": 0},
       "old_prompt": {"exit": 69, "outcome": "refused_unavailable", "posts": []},
       "old_notify": {"exit": 69, "outcome": "refused_unavailable", "posts": []},
       "rollover": {"original_rows": true, "successor_pending": [], "successor_ack": 0,

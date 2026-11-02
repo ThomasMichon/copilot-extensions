@@ -153,13 +153,13 @@ def schema_triggers(*, exact_native: bool = True) -> dict[str, tuple[str, str]]:
     return triggers
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
+def ensure_schema(conn: sqlite3.Connection, *, exact_native: bool = True) -> None:
     """Prepare additive inbox storage only through the writable migration owner."""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(live_messages)")}
     for name, kind in COLUMNS.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE live_messages ADD COLUMN {name} {kind}")
-    for _table, statement in schema_triggers().values():
+    for _table, statement in schema_triggers(exact_native=exact_native).values():
         conn.execute(statement)
 
 

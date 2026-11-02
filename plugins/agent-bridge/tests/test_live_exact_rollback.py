@@ -149,3 +149,37 @@ def test_interrupted_guard_upgrade_rolls_back_both_guard_and_schema_marker(tmp_d
     ).fetchone()[0] == before
     resumed = Database(tmp_db.db_path)
     resumed.close()
+
+
+@pytest.mark.parametrize("start_version", [28, 29])
+@pytest.mark.parametrize("checkpoint", range(30, 40))
+def test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint(
+    tmp_db, monkeypatch, start_version, checkpoint,
+):
+    from agent_bridge import db_schema
+
+    mid = tmp_db.enqueue_live_message("live-1", "peer", "legacy input", time.time())
+    before = dict(tmp_db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0])
+    tmp_db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
+    tmp_db.execute_write("UPDATE schema_version SET version=?", (start_version,))
+    info = db_schema.log.info
+
+    def interrupt_after_commit(message, *args, **kwargs):
+        info(message, *args, **kwargs)
+        if message.startswith(f"Schema migrated to version {checkpoint}:"):
+            raise RuntimeError("interrupted after committed migration checkpoint")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db_schema.log, "info", interrupt_after_commit)
+        with pytest.raises(RuntimeError, match="committed migration checkpoint"):
+            tmp_db._migrate(tmp_db._get_conn(), start_version)
+    assert tmp_db.execute_read("SELECT version FROM schema_version")[0][0] == checkpoint
+    from agent_bridge.inbox_custody import validate_schema
+    validate_schema(tmp_db._get_conn(), exact_native=False)
+    resumed = Database(tmp_db.db_path)
+    try:
+        assert resumed.execute_read("SELECT version FROM schema_version")[0][0] == 40
+        validate_schema(resumed._get_conn())
+        assert dict(resumed.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]) == before
+    finally:
+        resumed.close()

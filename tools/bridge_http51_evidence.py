@@ -55,6 +55,7 @@ PROBES = {
     "test_http51_capture_actual_observations": 2,
     "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,
     "test_failed_resume_without_a_matching_receipt_remains_a_failure": 1,
+    "test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint": 20,
 }
 POLICY = common.POLICY
 encode = common.encode

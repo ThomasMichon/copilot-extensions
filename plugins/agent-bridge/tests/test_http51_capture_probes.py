@@ -10,6 +10,10 @@ import bridge_http51_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+from test_live_exact_rollback import (
+    test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint
+    as test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint,
+)
 from agent_bridge import __main__ as core
 from agent_bridge.models import SessionStatus
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION

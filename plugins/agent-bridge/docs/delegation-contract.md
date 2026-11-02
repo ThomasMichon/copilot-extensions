@@ -104,7 +104,10 @@ Writable schema-40 preparation adds this provenance with a false default for
 legacy rows and upgrades the existing canonical inbox input guard. That guard
 retains the exact flag, raw native ID and original input, and its changed
 definition makes schema-38/39 cold writable readers refuse before opening the
-inbox. Rollback therefore requires the current schema owner, not merely refusing
+inbox. Intermediate migrations from pre-30 storage retain the legacy input
+guard at every committed version-30 through version-39 checkpoint; interrupted
+startup can reopen and resume until the atomic version-40 replacement.
+Rollback therefore requires the current schema owner, not merely refusing
 new exact endpoints; already-admitted inputs remain protected. Read-only
 adoption requires prepared storage. Exact rows stay at
 the original native during same-process conversation rollover. A successor's
@@ -121,6 +124,8 @@ An interrupt restores the whole acknowledged replay batch to tracking before
 any awaited metadata observation or SDK send. A rejection retains all
 unconsumed inputs for a later interrupt; only observed root `user.message`
 events remove them, without delivering exact inputs into a successor.
+Consumption is rechecked after each awaited metadata observation, immediately
+before replay, so a delayed root event cannot cause consumed input to be resent.
 Rejected rollover registration cannot restore the previous native identity;
 held inputs are not acknowledged as delivered.
 The input is `prompt`-kind with `steer` delivery; there is no

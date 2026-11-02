@@ -777,8 +777,8 @@ class _SchemaMixin:
         if from_version < 30:
             from .inbox_custody import ensure_schema, validate_schema
 
-            ensure_schema(conn)
-            validate_schema(conn)
+            ensure_schema(conn, exact_native=False)
+            validate_schema(conn, exact_native=False)
             conn.execute("UPDATE schema_version SET version=?", (30,))
             conn.commit()
             log.info("Schema migrated to version 30: retained inbox handoff storage")
