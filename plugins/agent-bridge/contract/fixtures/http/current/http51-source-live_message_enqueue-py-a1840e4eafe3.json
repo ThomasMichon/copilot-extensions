@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http51-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-live_message_enqueue-py-a1840e4eafe3.json",
-    "sha256": "5f6bae3d88986f8d306874ce8cb54524099f6534c05a18329d44d4960e943791"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http51-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "f23ad252d8881f8d28f90cf970081fcee1781a41e9708bcdf804997f764c68da"
+    "sha256": "50a07d4b95df52568bd34ff9cb3f1a1c93943d24cf610b62718c4c2c0de77902"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "de7207f728b9c754fd2387a40cb21ca00f358fbe",
+    "commit": "b7a60683c81651b3aafce22ff205ea4ee688d412",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_enqueue.py",
-    "source_git_blob": "bfc64174c276565ed3d4229bfc10ae98bf76b66d",
-    "source_sha256": "db656d672e90dfd043b0eccc00fa587142ad2587a6226d7069ca7188433f3380"
+    "source_git_blob": "b10af1c46c647660c1243e1950c86876c562f7d0",
+    "source_sha256": "ba35d861c6c643e2a9e8e2543b5de4586ad59fe54e2f8eda6244b608cef99989"
   }
 }
