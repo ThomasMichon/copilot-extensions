@@ -24,7 +24,12 @@ qualification remain open.
 The [explicit caller boundary](../../../plugins/agent-dispatch/docs/pool-claim-start.md)
 adds negotiated allocator requests and opt-in current-worker acceptance;
 its source merged in [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955).
-Automatic supervisor/prompt migration and startup policy remain separate gates.
+The [explicit startup-policy source](journal/2026/11.02-bounded-startup-source.md)
+merged in [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976):
+existing supervision consumes bounded claim episodes and original same-native
+retry receipts for explicitly placed assignments. Complete configured
+publication, ordinary supervisor/initial-prompt migration and installed/native
+qualification remain separate gates.
 Existing submission/conversation phases and their custodians remain unchanged.
 
 **Priority clarification (2026-10-31):** drive the
@@ -241,8 +246,15 @@ live claim token. No new blanket ACK or executor appointment is created.
       callers in [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955).
       The opt-in CLI and rollback-safe explicit start route have coupled
       transport/parser coverage. Automatic publisher/cohort/supervisor/prompt
-      migration, startup decisions/exhaustion/counters and native qualification
+      migration and native qualification
       remain open; this is not the comprehensive implementation item's exit.
+- [x] Land explicit bounded claim-episode startup, decision/exhaustion/cooldown
+      and original same-native retry source in
+      [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976).
+      Coupled provider, transport and existing-supervisor controls establish
+      this source boundary only; complete configured publication, ordinary
+      initial-prompt/caller migration, suspended recovery, closeout and
+      installed/native qualification remain open.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
@@ -1041,6 +1053,9 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+The [November 2 startup-source receipt](journal/2026/11.02-bounded-startup-source.md)
+records #9976's actual merge, bounded source evidence and the next integration gate.
 
 ### 2026-10-30 - Assignment/startup design reviewed and merged
 
