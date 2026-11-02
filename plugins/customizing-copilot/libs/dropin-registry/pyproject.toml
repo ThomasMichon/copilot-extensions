@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dropin-registry"
-version = "0.1.0-dev2"
+version = "0.1.1-dev1"
 description = "Dependency-free primitives for resilient plugin drop-in registry scans"
 readme = "README.md"
 license = "MIT"

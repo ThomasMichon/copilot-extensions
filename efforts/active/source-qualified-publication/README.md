@@ -12,10 +12,11 @@
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
 
-### Private F3 checkpoint (2026-10-24)
+### Private F3 checkpoint (source merged 2026-10-31)
 
 An isolated new-file-only reducer and focused `test_source_publications.py`
-candidate are unit-qualified for review, disconnected from production.
+checkpoint merged in #8530 after current-head approval and required CI,
+disconnected from production.
 The model boundary is documented in [implementation.md](implementation.md)
 and the bounded command evidence in [validation.md](validation.md).
 This is not source/loader integration, owner receipt support, issue closure,
@@ -189,6 +190,27 @@ and exact shared-file owners. Its source review merged in #8139;
 it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
+
+### 2026-10-31 — Private reducer source slice merged; broader gates retained
+- #8530 actually merged at `2026-10-31T23:19:32Z` as
+  `8973eb78f68615705eb99507171874e9850dcadf`, from accepted head
+  `67591d09e57fe7135cdf21963e87f1093d2fcdc0`.
+- Current-head Copilot review `5725408799` approved the private checkpoint;
+  all eight threads were resolved. `PR gate (required check)`,
+  `workflow-lockdown-guard` and `source-attribution` succeeded for that exact
+  head. The native managed merge used only the configured review-rule
+  exception, not a CI bypass.
+- The 87-case pure reducer/F1 packet, four fail-first regressions, order and
+  heartbeat work controls and source guards are recorded in [validation.md](validation.md).
+  #7936 and #7937 were independently verified still Open after merge.
+- The ordinary post-merge sync refused a squash replay conflict and safely
+  aborted. Native `pr-complete` then reconciled past the provider-verified
+  squash with its retained backup; no unpublished source was discarded.
+- Only the private reducer source slice is complete. F2 receipts, production
+  F3 source/loader/Inbox wiring, F4 maintenance, F5 integrated/native/GUI/
+  installed qualification and nominal performance remain open under the
+  existing owners and retained acceptance matrix. This effort remains
+  Blocked, not Done; no rollout or finalization occurred.
 
 ### 2026-10-31 — Existing private checkpoint reconciled for source review
 - Fresh review of `145f5f2dae` identified two Medium private-model defects:

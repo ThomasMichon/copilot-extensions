@@ -36,6 +36,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 
 #: How long a cached bundle is trusted before an ordinary (non-forced) read
@@ -139,6 +140,7 @@ class WorktreeStatusCache:
         demand_ttl_seconds: float = DEMAND_TTL_SECONDS,
         max_refresh_per_sweep: int = DEFAULT_MAX_REFRESH_PER_SWEEP,
         now: Callable[[], float] = time.time,
+        cleanup_owner=None,
     ) -> None:
         # Copilot review, PR #3348: an unvalidated negative
         # max_refresh_per_sweep silently defeats the cap's own purpose.
@@ -151,6 +153,7 @@ class WorktreeStatusCache:
                 "max_refresh_per_sweep must be a non-negative int, got "
                 f"{max_refresh_per_sweep!r}"
             )
+        self._cleanup_owner = cleanup_owner
         self._db_path = db_path
         self._ttl = ttl_seconds
         self._demand_ttl = demand_ttl_seconds
@@ -324,6 +327,9 @@ class WorktreeStatusCache:
         with self._lock:
             return bool(self._entries)
 
+    def _observation_scope(self, project: str):
+        return self._cleanup_owner.observation_scope(project) if self._cleanup_owner is not None else nullcontext(False)
+
     # -- reads / refresh -----------------------------------------------------
 
     def get_or_refresh(
@@ -352,8 +358,12 @@ class WorktreeStatusCache:
         """
         key = (project, worktree_id)
         now = self._now()
-        with self._lock:
+        with self._lock, self._observation_scope(project) as blocked:
             entry = self._entries.get(key)
+            if blocked:
+                return self._cleanup_owner.degraded_bundle(
+                    project, worktree_id, entry[0] if entry else None,
+                )
             fresh = entry is not None and (now - entry[1]) < self._ttl
             if fresh and not force:
                 bundle, computed_at, demanded_at = entry
@@ -398,7 +408,19 @@ class WorktreeStatusCache:
         # callers for the SAME worktree are protected instead by
         # `CoalescingServer`'s own per-(kind, key) coalescing one layer up
         # (see `worktree_status_daemon.py`), not by this cache.
-        bundle = compute()
+        from . import push_timeout
+        try:
+            bundle = compute()
+        except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending) as error:
+            if self._cleanup_owner is None:
+                raise
+            if isinstance(error, push_timeout.ObservationCleanupError):
+                self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
+            with self._lock:
+                entry = self._entries.get(key)
+                return self._cleanup_owner.degraded_bundle(
+                    project, worktree_id, entry[0] if entry else None,
+                )
         # Stamp `computed_at`/`demanded_at` from completion time, not the
         # `now` sampled before `compute()` ran -- a slow git refresh can
         # exceed the TTL itself (each classification subprocess is allowed
@@ -406,7 +428,12 @@ class WorktreeStatusCache:
         # store a result already expired, immediately triggering another
         # refresh on the very next read.
         completed_at = self._now()
-        with self._lock:
+        with self._lock, self._observation_scope(project) as blocked:
+            if blocked:
+                entry = self._entries.get(key)
+                return self._cleanup_owner.degraded_bundle(
+                    project, worktree_id, entry[0] if entry else None,
+                )
             self._entries[key] = (bundle, completed_at, completed_at)
             self._persist(project, worktree_id, bundle, completed_at, completed_at)
         return bundle
@@ -457,11 +484,19 @@ class WorktreeStatusCache:
                 key: computed_at
                 for key, (_, computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at <= self._demand_ttl and now - computed_at >= self._ttl
+                and not (
+                    self._cleanup_owner is not None
+                    and self._cleanup_owner.observation_blocked(key[0])
+                )
             }
             expired = [
                 key
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at > self._demand_ttl
+                and not (
+                    self._cleanup_owner is not None
+                    and self._cleanup_owner.observation_blocked(key[0])
+                )
             ]
             last_attempted_snapshot = dict(self._last_attempted)
         if len(sampled) > self._max_refresh_per_sweep:
@@ -479,7 +514,9 @@ class WorktreeStatusCache:
             )
             sampled = dict(stalest)
         for project, worktree_id in expired:
-            with self._lock:
+            with self._lock, self._observation_scope(project) as blocked:
+                if blocked:
+                    continue
                 # Re-check at pop time, not just at sampling time: a
                 # concurrent request between the sample above and this pop
                 # could have refreshed (and re-demanded) this exact entry,
@@ -503,18 +540,26 @@ class WorktreeStatusCache:
                 self._delete_row(project, worktree_id, if_demanded_at=stale_demanded_at)
         refreshed = 0
         for (project, worktree_id), sampled_computed_at in sampled.items():
+            if self._cleanup_owner is not None and self._cleanup_owner.observation_blocked(project):
+                continue
             try:
                 bundle = refresh(project, worktree_id)
-            except Exception:
+            except Exception as error:
+                from .push_timeout import ObservationCleanupError
+                if self._cleanup_owner is not None and isinstance(error, ObservationCleanupError):
+                    self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
                 # Record the attempt even on failure -- see the docstring's
                 # `_last_attempted` rationale: this is what lets a
                 # persistently-failing entry rotate out of "stalest first"
                 # rather than monopolizing every cap slot forever.
-                with self._lock:
-                    self._last_attempted[(project, worktree_id)] = self._now()
+                with self._lock, self._observation_scope(project) as blocked:
+                    if not blocked:
+                        self._last_attempted[(project, worktree_id)] = self._now()
                 continue
             ts = self._now()
-            with self._lock:
+            with self._lock, self._observation_scope(project) as blocked:
+                if blocked:
+                    continue
                 self._last_attempted[(project, worktree_id)] = ts
                 existing = self._entries.get((project, worktree_id))
                 if existing is not None and existing[1] != sampled_computed_at:

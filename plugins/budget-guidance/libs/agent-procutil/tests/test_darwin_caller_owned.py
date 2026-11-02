@@ -286,7 +286,9 @@ def test_libproc_rejects_failed_or_malformed_census(monkeypatch, size):
 def test_darwin_public_dispatch_uses_guard_and_caller_pid(monkeypatch):
     probes, invocations = [], []
     monkeypatch.setattr(darwin, "require_support", lambda: probes.append(True))
-    monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="darwin", executable=sys.executable))
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(
+        platform="darwin", executable=sys.executable, exc_info=sys.exc_info,
+    ))
     monkeypatch.setattr(protocol, "os", SimpleNamespace(
         name="posix", getpid=lambda: 40, pipe=os.pipe, close=os.close,
         set_inheritable=os.set_inheritable,

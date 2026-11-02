@@ -21,11 +21,22 @@ function Invoke-NativeOwnedProcess {
             throw 'Native process paths must be fully qualified and normalized.'
         }
     }
-    . $script:NativeOwnedInstances
     $environment = @{}
     foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
         $environment[[string]$entry.Key] = [string]$entry.Value
     }
+    if ($environment.ContainsKey('COPILOT_EXTENSIONS_OWNED_JOB_SCOPES')) {
+        $scopes = [string]$environment['COPILOT_EXTENSIONS_OWNED_JOB_SCOPES']
+        $names = $scopes.Split(';')
+        if ($scopes.Length -gt 4096 -or $names.Count -ge 64 -or
+            @($names | Select-Object -Unique).Count -ne $names.Count -or
+            @($names | Where-Object { $_ -cnotmatch '\ALocal\\ce-owned-job-[0-9a-f]{32}\z' }).Count) {
+            $failure = [ArgumentException]::new('Owned Job scope metadata is invalid or has no child capacity.')
+            $failure.Data['CleanupConfirmed'] = $true
+            throw $failure
+        }
+    }
+    . $script:NativeOwnedInstances
     try {
         $result = Invoke-DaemonInstanceRequest @{command='run-owned'; parameters=@{
             executable=$FilePath; arguments=@($Arguments); cwd=$WorkingDirectory; log=$LogPath

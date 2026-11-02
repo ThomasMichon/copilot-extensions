@@ -5,6 +5,24 @@ below are **agent-recommended**, subject to source review and exact-hunk
 integration admission. Paths use `A = plugins/agent-worktrees/src/agent_worktrees`
 and `T = plugins/agent-worktrees/tests`.
 
+## Admitted platform amendment
+
+R1a now follows the explicit **Windows-first** amendment in
+[caller-custody-and-platform-slice.md](caller-custody-and-platform-slice.md).
+The total-D and independently contained cleanup guarantee below applies to
+that Windows slice only. Ordinary POSIX initial/default/classification calls
+retain baseline timeout and fallback behavior, without new per-probe census.
+An explicitly requested bounded Windows observation refuses POSIX before
+spawn. The unreaped-anchor proposal is not implemented: identity pinning is
+not a cleanup executor after caller death. POSIX #7944 remains open.
+
+The admitted same-instance segment carrier retains Job/process/pipe objects,
+gates affected continuations and preserves stale data without renewing ages.
+One nonblocking settlement step uses no new deadline, Git command or PID scan.
+Shutdown cannot report success or release ownership merely because grace or
+thread join expired. Native proof remains a separate admission gate; R1b
+lock separation, R2 and wider #2619/#6086 are unchanged open dependencies.
+
 ## Current causal counterexamples
 
 Source baseline: `68f40c7209f1ed6c66d381bc80ac02611bb3d680`.
