@@ -1902,3 +1902,35 @@ Linux/Windows, changed Python lint and install/documentation contracts pass.
 Broader legacy mixin typing is not qualified. Current-head review, actual
 merge, caller/startup-policy integration and every parent/native gate remain
 open. This is source-only; it does not activate a runtime.
+
+### 2026-11-01 - Empty-origin, receipt-first and active-pool correction prepared
+
+The shared native-history owner distinguishes qualified empty allocation
+absence from a retired native identity. A successor on the same logical
+allocation may publish or retain its first native without assigning that
+native its predecessor's retirement. Incomplete startup and unknown pending
+retirement remain blocking. Empty and native retirement evidence are
+precomputed once, including for long histories of unbound inherited markers.
+
+The durable CLI acquisition receipt arrives before normal native publication.
+Its existing binding transaction therefore checks the real validated native
+against the same history before insertion, clearing only a proven inherited
+marker. Exact Bridge authority, generation, workspace, immutable receipt and
+affirmative start checks remain independent. Receipt replay cannot replace a
+bound native or revive its completed retirement.
+
+Supervisor accountability queries include active pool attempts as well as
+terminal ones. A startup-complete suspended CLI task with an unresolved waiter
+wake retains capacity even when the legacy process classifier reports no live
+process. Unassigned legacy handling is unchanged.
+
+Final contained validation passed **1504 controls**, one existing skip, across
+twenty-six coupled selectors. Fifteen new native/receipt controls cover actual
+same-dedup successor publication/release, empty-origin negative cases, real
+receipt-before-publication/start ordering, stale/foreign/retired identity
+refusals and linear retirement work at one hundred/one thousand history entries.
+Four additional owner/waiter pending/unknown controls exercise actual supervisor
+spawn refusal. Focused native/receipt typing, four admitted strict projects on
+Linux/Windows, changed Python lint and install/documentation contracts pass.
+Current-head review, actual merge, caller/startup-policy integration and all
+canonical parent/native gates remain open. No runtime was activated.

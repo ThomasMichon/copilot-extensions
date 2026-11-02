@@ -282,7 +282,7 @@ def pool_native_publication(
         require_pool_workspace(
             conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
         )
-    from .ordinary_native_bindings import native_bindings, reservation_native_identity
+    from .ordinary_native_bindings import native_binding_evidence, reservation_native_identity
     candidate = {**dict(row), "session_handle": session_handle, "conversation_retired": 0}
     native = reservation_native_identity(conn, candidate)
     previous = reservation_native_identity(conn, row)
@@ -303,14 +303,17 @@ def pool_native_publication(
         # Qualified absence for a handleless root cannot retire a first
         # native that was never recorded. Retain the late return for release.
         return bool(row["conversation_retired"])
-    _, retired = native_bindings(
+    evidence = native_binding_evidence(
         conn, row, task, require_owned_workspace=False,
         reject_pending_native=None if releasing else native,
     )
-    if native is not None and native in retired:
+    if native is not None and native in evidence.retired:
         raise TaskError("pool publication cannot revive a retired native")
     if row["conversation_retired"]:
-        if not retired or native is None or row["session_handle"] or row["agent_info"]:
+        if (
+            not (evidence.retired or evidence.qualified_empty)
+            or native is None or row["session_handle"] or row["agent_info"]
+        ):
             raise TaskError("pool publication requires a distinct proven replacement native")
         return True
     return False

@@ -77,6 +77,42 @@ def test_failed_native_without_release_intent_blocks_actual_legacy_spawn(q, labe
     assert supervisor._active_reservations() == []
 
 
+@pytest.mark.parametrize("state", ["pending", "unknown"])
+@pytest.mark.parametrize("outbox", ["wake_outbox", "run_waiter_wakes"])
+def test_active_suspended_pool_wake_blocks_actual_legacy_spawn(q, state, outbox):
+    publish(q, pool())
+    t = task(q)
+    original, _ = place(q, t)
+    record_native(q, original)
+    q.record_spawn(original.key, session_handle="native", startup_complete=True, startup_revision=1)
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.suspend(t.id, "host-a/worktree", reason="external wait")
+    if outbox == "wake_outbox":
+        q.resume(t.id, "host-a/worktree", wake_requested=True, wake_message="continue")
+    else:
+        waiter = q.register_run_waiter(
+            t.id, pid=123, host="host-a", start_token="synthetic-waiter",
+            resume_worktree="host-a/worktree", command=["synthetic-wait"],
+        )
+        q.recover_dead_run_waiter(
+            t.id, generation=waiter["generation"], reason="external",
+            message="continue", sender="recovery",
+        )
+    with q._connect() as conn:
+        conn.execute(f"UPDATE {outbox} SET execution_send_state=? WHERE task_id=?", (state, t.id))
+    queued = task(q)
+    supervisor = Supervisor(
+        QueueBackedClient(q), spawn_fn=no_spawn, machine="host-a", max_concurrent=1, nudge=False,
+    )
+    assert supervisor._reservation_has_live_process(
+        asdict(q.get_reservation(original.key)), asdict(q.get(t.id)),
+    ) is (outbox == "wake_outbox")
+    assert [row["key"] for row in supervisor._active_reservations()] == [original.key]
+    assert supervisor.poll_once() == []
+    assert q.get(queued.id).status == Status.QUEUED
+
+
 def test_real_http_accountability_filters_pool_history_before_limit(q):
     original = failed_native(q)
     history(q, original, 10001)

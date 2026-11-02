@@ -65,6 +65,10 @@ A qualified handleless root retirement is distinct from inherited native
 retirement: its first returned native remains pending release even when the
 workspace was already recorded or failure preceded release. Its empty-native
 absence evidence cannot retire a native that had not yet been recorded.
+Successors carrying that allocation may publish or retain their own first native:
+the history classifier distinguishes qualified empty absence from a retired
+native identity. Pending retirement without a known native cannot authorize
+publication of a presumed distinct replacement.
 Publication and affirmative start refuse a native whose historical retirement
 is still pending, without misclassifying that intent as proven absence.
 The supervisor observes that native without ending or concluding a successor's
@@ -94,6 +98,9 @@ native/cleanup results are deduplicated. Newer completed history cannot hide an
 older pending native or cleanup obligation.
 Capacity also requests `pool_accountable=true`: a failed pool attempt can
 retain native, startup or transport custody before anyone requests release.
+That query includes active pool reservations too: a startup-complete CLI body
+on a suspended task retains its pool slot independently of the legacy
+hibernation/liveness classification, including unresolved waiter wakes.
 The query uses the same transaction-local classifier as placement and applies
 that classification before the result limit; it does not truncate history to
 classify an unresolved identity. These results consume supervisor capacity
@@ -154,6 +161,12 @@ replacement identity without clearing release intent. Capacity still waits for
 that replacement's own completed/fenced startup and retirement. History
 classification for targeted/reused external workspaces does not grant ownership
 to create, recover or dispose them.
+CLI acquisition binds its durable Bridge receipt before normal native
+publication. The receipt owner therefore applies the same replacement check
+before inserting a first receipt and clears a proven inherited marker in that
+same transaction. The newly bound native cannot inherit its predecessor's
+retirement. Exact Bridge authority, task generation, workspace and immutable
+receipt fences still apply; binding or launch alone never performs `STARTED`.
 Release identity checks use the original reservation's immutable pool binding,
 not its successor's current routing. A release cannot overwrite a retained native
 handle, including on failed or settled attempts. Unrelated pending cleanup may

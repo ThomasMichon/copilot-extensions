@@ -472,7 +472,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 native_release_pending=True, strict=True,
             ))
             accountable = self._pool_reservations(
-                state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+                state=",".join(sorted(SpawnState.ACTIVE | SpawnState.RELEASABLE)),
                 pool_accountable=True, strict=True,
             )
             accountable_keys = {row["key"] for row in accountable}
