@@ -7,6 +7,10 @@ The implementation plan is a separate interpretation, not part of these quotes.
 Assistant design responses are summarized separately below; they are not
 additional operator instructions.
 
+The later [2026-11-02 automatic-update control request](automatic-update-control.md#request)
+is retained verbatim with its bounded follow-up plan. It does not replace the
+original maintenance, setup, source or execution-owner requests below.
+
 ## Independent V1-to-V2 repair acceptance
 
 Operator direction, 2026-10-29:
