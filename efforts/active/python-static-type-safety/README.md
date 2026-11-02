@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -784,3 +784,33 @@ composition prerequisites, and review/validation rules.
   packet budget remain unchanged. No provisioning, activation or lifecycle
   behavior changes, so fresh-box installation and external runtime rollout
   are not applicable to this typing-only preparation.
+
+### 2026-11-02 - Decorator contract merged; production result contracts selected
+
+- #9977 merged as `71f84b162317a3083ef9dccfde0663201c8eb5ad`
+  after exact-head Copilot approval with no findings, zero open review
+  comments and all required checks in
+  [run 41442815799](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41442815799).
+  The source worktree is pulled forward; #9975 is complete.
+- #9980 selects the remaining bounded production result-shape and flow
+  annotations. Preserve source resolution, PowerShell argv construction,
+  validated result boundaries and optional-value semantics. Native adapters,
+  source/test debt, whole-project admission and physical-copy qualification
+  remain separate gates. The portfolio remains 13 strict / 55 pending.
+- Seven canonical fragments now use honest local JSON/result shapes,
+  object-to-integer narrowing, optional evidence and variable-length argument
+  tuples. Distinct directory-string/path locals avoid false cross-branch
+  inference. Plugin maintenance explicitly narrows the root already resolved
+  by its required validation branch before constructing its marker path.
+  Selection, validation ordering, outputs and cleanup algorithms are unchanged.
+- Whole-project probes still fail: Linux 197 basic / 415 strict, Win32
+  183 basic / 402 strict. The slice removes 22 basic and 25 strict diagnostics
+  per target without admission, new exclusions, ignores or unchecked stubs.
+  Remaining production diagnostics belong to native platform adapters, the
+  dynamic worker and runtime cleanup boundaries; test debt is still open.
+- Existing source/governance controls pass 127 tests with five explicit native
+  or platform skips. All 114 PowerShell argv/descriptor adapters pass.
+  Synchronization updates exactly 189 physical fragment copies; seven
+  admitted-source hashes and MCP source-only producer hashes are refreshed.
+  Unit nodes, coverage targets, 300-second budget and footprint revision 36
+  stay unchanged.

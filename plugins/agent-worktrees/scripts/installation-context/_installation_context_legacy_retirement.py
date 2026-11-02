@@ -425,7 +425,7 @@ def retire_legacy_compatibility(
                 "operative": False,
             }
 
-        evidence_by_path: dict[Path, tuple[Any, ...]] = {}
+        evidence_by_path: dict[Path, tuple[Any, ...] | None] = {}
         retired_items: list[dict[str, Any]] = []
         for item in items:
             path = Path(item["path"])
