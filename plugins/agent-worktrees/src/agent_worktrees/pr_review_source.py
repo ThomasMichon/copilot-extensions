@@ -67,10 +67,12 @@ class LocalReviewSource:
 
     Construction does not resolve repository authority or adopt a reference
     checkout. The caller's existing workspace/resource pipeline owns that step.
-    No credential acquisition, network fetch, checkout or build is performed.
+    Prepared operations never fetch. Optional preparation uses only a separately
+    bound existing Git owner; checkout/build/resource selection are not performed.
     """
 
-    def __init__(self, root: Path, workspace_id: str, scope: dict, *, checkpoint):
+    def __init__(self, root: Path, workspace_id: str, scope: dict, *, checkpoint,
+                 acquisition=None, remote=None):
         root = Path(root)
         if not root.is_absolute() or root.resolve() != root or not root.is_dir():
             raise ValueError("source requires an existing canonical owner-selected repository")
@@ -82,6 +84,52 @@ class LocalReviewSource:
             raise ValueError("source requires an owner workspace identity, scope and checkpoint")
         self.root, self.workspace_id = root, workspace_id
         self.scope, self.checkpoint = copy.deepcopy(scope), checkpoint
+        if (acquisition is None) != (remote is None) or (
+            acquisition is not None and (not callable(acquisition) or not isinstance(remote, str))
+        ):
+            raise ValueError("acquisition requires an existing owner callable and selected remote")
+        self._acquisition, self._remote = acquisition, remote
+
+    def acquisition_contract(self):
+        if self._acquisition is None:
+            return None
+        return {
+            "schema": "agent-pull-requests.source-acquisition", "version": 1,
+            "range": "exact_head_common", "depth": 1, "storage": "selected_dedicated_shallow",
+            "resource_owner": "existing_workspace_owner",
+        }
+
+    def prepare_and_retain(self, request, *, budget=60, **limits):
+        self.checkpoint()
+        if self._acquisition is None:
+            raise SourceIncomplete("source_acquisition_unavailable")
+        if (
+            not isinstance(request, dict) or set(request) != {"scope", "revision", "changes"}
+            or request.get("scope") != self.scope
+            or not isinstance(request.get("revision"), dict) or not isinstance(request.get("changes"), list)
+            or type(budget) not in (int, float) or not math.isfinite(budget) or budget <= 0
+            or set(limits) - {"max_paths", "max_blob_bytes", "max_total_blob_bytes", "max_output_bytes"}
+            or any(type(value) is not int or value <= 0 for value in limits.values())
+        ):
+            raise ValueError("invalid source preparation selection")
+        request = copy.deepcopy(request)
+        revision = request["revision"]
+        head, common = revision.get("head_sha"), revision.get("common_sha")
+        if (
+            any(not isinstance(oid, str) or _OID.fullmatch(oid) is None for oid in (head, common))
+            or len(head) != len(common) or type(revision.get("iteration")) is not int or revision["iteration"] <= 0
+        ):
+            raise ValueError("source requires exact reviewed range")
+        deadline = time.monotonic() + budget
+        from .git_review_acquisition import validate_selection
+        validate_selection(self.root, head, common, checkpoint=self.checkpoint, deadline=deadline)
+        self._acquisition(self.root, self._remote, head, common,
+                          budget=deadline - time.monotonic(), checkpoint=self.checkpoint)
+        self.checkpoint()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SourceIncomplete("deadline_exhausted")
+        return self.inspect_and_retain(copy.deepcopy(request), budget=remaining, **limits)
 
     @staticmethod
     def contract():

@@ -7,8 +7,7 @@ import copy
 from .review_workspace import _generation, _revision, _scope
 
 
-def attach_source(generation: dict, source_owner, **limits) -> dict:
-    """Return a separate envelope; never mutate metadata generations or acquire source."""
+def _selection(generation):
     generation = copy.deepcopy(generation)
     scope = _scope(generation.get("scope"))
     _generation(generation, scope)
@@ -28,22 +27,74 @@ def attach_source(generation: dict, source_owner, **limits) -> dict:
                for key in ("head_sha", "common_sha", "iteration"))
     ):
         result["errors"] = ["source_evidence_incomplete"]
-        return result
-    operation = getattr(source_owner, "inspect_and_retain", None)
+        return result, None
+    return result, {
+        "scope": copy.deepcopy(scope), "revision": copy.deepcopy(revision),
+        "changes": copy.deepcopy(sections["changes"]["data"]),
+    }
+
+
+ACQUISITION_CONTRACT = {
+    "schema": "agent-pull-requests.source-acquisition", "version": 1,
+    "range": "exact_head_common", "depth": 1, "storage": "selected_dedicated_shallow",
+    "resource_owner": "existing_workspace_owner",
+}
+EXECUTION_CONTRACT = {
+    "schema": "agent-pull-requests.source-execution", "version": 1,
+    "execution": "owned_async", "release": "terminal_drain",
+}
+
+
+def _supported(source_owner, prepare):
     contract = getattr(source_owner, "contract", None)
     capability = contract() if callable(contract) else None
-    if not callable(operation) or not isinstance(capability, dict) or type(capability.get("version")) is not int or capability != {
+    if not isinstance(capability, dict) or type(capability.get("version")) is not int or capability != {
         "schema": "agent-pull-requests.local-source-contract", "version": 1,
         "backend_access": False, "fetch": False, "checkout": False,
         "retention": "immutable_git_refs", "resource_owner": "existing_workspace_owner",
     }:
+        return False
+    acquisition = getattr(source_owner, "acquisition_contract", None)
+    declared = acquisition() if callable(acquisition) else None
+    return not prepare or (
+        isinstance(declared, dict) and type(declared.get("version")) is int
+        and declared == ACQUISITION_CONTRACT
+    )
+
+
+def attach_source(generation: dict, source_owner, *, prepare=False, **limits) -> dict:
+    """Return a separate envelope; acquisition requires its separately bound owner."""
+    result, request = _selection(generation)
+    if request is None:
+        return result
+    operation = getattr(source_owner, "prepare_and_retain" if prepare else "inspect_and_retain", None)
+    if not callable(operation) or not _supported(source_owner, prepare):
         result["errors"] = ["source_owner_unsupported"]
         return result
-    # This is consistency/capability discovery, not authentication of an owner.
-    source = operation({
-        "scope": copy.deepcopy(scope), "revision": copy.deepcopy(revision),
-        "changes": copy.deepcopy(sections["changes"]["data"]),
-    }, **limits)
+    return _finish(result, operation(request, **limits))
+
+
+async def attach_source_async(generation, source_owner, *, prepare=False, **limits):
+    result, request = _selection(generation)
+    if request is None:
+        return result
+    execution = getattr(source_owner, "execution_contract", None)
+    declared = execution() if callable(execution) else None
+    if (
+        not _supported(source_owner, prepare) or declared != EXECUTION_CONTRACT
+        or not isinstance(declared, dict) or type(declared.get("version")) is not int
+        or not callable(getattr(source_owner, "execute", None))
+    ):
+        result["errors"] = ["source_owner_unsupported"]
+        return result
+    source = await source_owner.execute(
+        "prepare_and_retain" if prepare else "inspect_and_retain", request, **limits,
+    )
+    return _finish(result, source)
+
+
+def _finish(result, source):
+    scope, revision = result["scope"], result["revision"]
     if (
         not isinstance(source, dict) or source.get("schema") != "agent-pull-requests.local-source"
         or type(source.get("version")) is not int or source["version"] != 1

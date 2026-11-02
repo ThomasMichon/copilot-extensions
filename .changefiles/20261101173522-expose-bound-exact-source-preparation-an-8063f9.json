@@ -1,0 +1,9 @@
+{
+  "comment": "Expose bound exact source preparation and owned asynchronous source tools",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

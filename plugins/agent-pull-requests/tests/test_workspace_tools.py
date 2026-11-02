@@ -314,6 +314,36 @@ def test_overlapping_service_tool_calls_share_capability_negotiation(environment
     asyncio.run(scenario())
 
 
+def test_owned_async_source_through_actual_tool_and_client_frontdoor(environment, tools, integration):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    _, _, initial, _, _, _ = environment
+    native_host, _, _ = tools
+    owner = AsyncReviewSource(native_host.source_owner)
+    host = WorkspaceTools(integration[1], source_owner=owner)
+
+    async def scenario():
+        loaded = await host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        identity = loaded["result"]["descriptor"]["id"]
+        definitions = await host.definitions()
+        assert any(value["name"] == "pr_workspace_source_read" for value in definitions)
+        assert not any(value["name"] == "pr_workspace_source_prepare" for value in definitions)
+        attachment = await dispatch_tool(host, "pr_workspace_source", {"request": {
+            "number": 42, "generation_id": identity, "budget_seconds": 60,
+        }})
+        assert attachment["state"] == "ready"
+        value = await dispatch_tool(host, "pr_workspace_source_read", {"request": {
+            "number": 42, "generation_id": identity, "budget_seconds": 60,
+            "source_attachment": attachment, "path": "/note.txt", "side": "after",
+        }})
+        assert value["content"] == "after"
+        await owner.drain(timeout=2)
+        assert owner.status()["drained"] is True
+
+    asyncio.run(scenario())
+
+
 def test_read_budget_failure_is_json_not_a_private_git_traceback(environment, tools, monkeypatch, capsys):
     import subprocess
     from agent_worktrees import pr_review_source
