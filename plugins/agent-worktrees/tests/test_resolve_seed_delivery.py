@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -133,6 +134,82 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, s
         config=config, args=args, record=record,
     ))
     return code, plans[-1]
+
+
+def _tool_preparation_result(monkeypatch, *, blocked):
+    from agent_worktrees import copilot_plugin_profile, local_cache_refresh
+
+    def prepare(*args, **kwargs):
+        if blocked:
+            raise RuntimeError("selected tool roster conflict")
+        return {"action": "no-op"}
+    monkeypatch.setattr(copilot_plugin_profile, "prepare_checkout", prepare)
+    monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", lambda *a, **kw:
+                        local_cache_refresh.RefreshResult(
+                            "failed", blocking=1, detail="selected tool roster conflict" if blocked else "optional copy failure",
+                            tool_roster_blocked=blocked))
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("defer", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_base_resolvers_block_tool_roster_but_not_optional_copy_failure(
+    tmp_path, monkeypatch, capfd, surface, defer, blocked,
+):
+    from agent_worktrees import resolve_launch_cli as rlc
+
+    config = _create_config(tmp_path)
+    config = replace(config, repos={config.repo_name:
+                                   replace(config.default_repo, copilot_plugin_profile="tools.json")})
+    _stub_launch_plumbing(monkeypatch, config)
+    _tool_preparation_result(monkeypatch, blocked=blocked)
+    args = _args(base=True, worktree_id=None, dry_run=False, no_mux=True, profile=None,
+                 defer_projections=defer)
+    if surface == "json":
+        code = resolve_cli.cmd_resolve(args)
+        plan = json.loads(capfd.readouterr().out)
+    else:
+        monkeypatch.setattr(rlc.git_ops, "get_dirty_files", lambda *a: [])
+        plans = []
+        monkeypatch.setattr(rlc, "_emit_plan", plans.append)
+        code = rlc._resolve_base_repo(config, args)
+        plan = plans[-1]
+    assert code == (3 if blocked else 0)
+    if blocked:
+        assert plan.get("action") != "exec"
+        assert "tool roster conflict" in plan["error"]
+        assert "cmd" not in plan
+    else:
+        assert plan["action"] == "exec"
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("defer", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_resume_resolvers_block_tool_roster_but_not_optional_copy_failure(
+    tmp_path, monkeypatch, capfd, surface, defer, blocked,
+):
+    from agent_worktrees import worktree_trust
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    config = replace(config, repos={config.repo_name:
+                                   replace(config.default_repo, copilot_plugin_profile="tools.json")})
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), config.repo_name, "test",
+        "windows", tmp_path, codename="already-set")
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(worktree_trust, "ensure_record_trusted", lambda *a: None)
+    _tool_preparation_result(monkeypatch, blocked=blocked)
+    code, plan = _resume_plan(config, record, monkeypatch, capfd, surface=surface,
+                              no_resume=True, no_mux=True, defer_projections=defer)
+    assert code == (3 if blocked else 0)
+    if blocked:
+        assert plan.get("action") != "exec"
+        assert "tool roster conflict" in plan["error"]
+        assert "cmd" not in plan
+    else:
+        assert plan["action"] == "exec"
 
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])

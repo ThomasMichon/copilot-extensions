@@ -107,6 +107,12 @@ not a promise that all plugins fit into fourteen changes. Test admission starts
 alongside source cohorts once fixtures are ready, rather than becoming an
 unbounded final annotation dump.
 
+P4 begins with #9916's canonical Installation Context view and source map.
+Copy inheritance follows separately through the existing vendoring owner, not a
+second adopter registry. Until that correspondence is qualified, every copied
+file retains its independent pending ownership; canonical composition does not
+deduplicate or admit those copies.
+
 ## Static views are qualified source, not escape hatches
 
 The baseline exposed fixed source fragments loaded into one namespace with

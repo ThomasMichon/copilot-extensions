@@ -211,7 +211,10 @@ def _canonical(value: object) -> object:
 
 def _load(path: Path) -> tuple[dict[str, Any] | None, list[str]]:
     try:
-        value = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        value = yaml.load(
+            path.read_text(encoding="utf-8"),
+            Loader=getattr(yaml, "CBaseLoader", yaml.BaseLoader),
+        )
     except (OSError, yaml.YAMLError) as exc:
         return None, [f"cannot load {path}: {exc}"]
     if not isinstance(value, dict):

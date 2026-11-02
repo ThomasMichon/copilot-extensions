@@ -184,11 +184,10 @@ def test_compose_excludes_knowledge_self_harness_plugin(tmp_path: Path):
     assert "knowledge-harness@personal" not in summary["conflicts"]["enabled_plugins"]
 
 
-def test_compose_removes_stale_legacy_self_harness_enable(tmp_path: Path):
-    """A pre-fix, markerless-legacy overlay already carrying the knowledge
-    repo's `*-harness` plugin must be actively cleaned up, not merely never
-    re-added -- retirement-by-marker only clears marker-owned entries, so a
-    markerless legacy overlay would otherwise keep carrying it forever.
+def test_compose_preserves_unowned_legacy_self_harness_enable(tmp_path: Path):
+    """Legacy marketplace compatibility does not prove ownership of an enable.
+
+    Exclude the personal contribution without deleting an unreceipted choice.
     """
     harness = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
@@ -229,9 +228,10 @@ def test_compose_removes_stale_legacy_self_harness_enable(tmp_path: Path):
     summary = kp.compose(harness, knowledge)
     overlay = _read_overlay(harness)
 
-    assert "knowledge-harness@personal" not in overlay.get("enabledPlugins", {})
+    assert overlay["enabledPlugins"]["knowledge-harness@personal"] is True
     assert overlay["enabledPlugins"]["notes@personal"] is True
     assert "knowledge-harness@personal" in summary["excluded_enabled_plugins"]
+    assert "knowledge-harness@personal" not in overlay[kp._OVERLAY_KEY]["enabledPlugins"]
 
 
 def test_repointed_knowledge_retires_old_managed_entries(tmp_path: Path):

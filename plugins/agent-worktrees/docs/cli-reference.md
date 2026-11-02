@@ -1199,7 +1199,7 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 |------------|-------------|
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
-| `unregister` | Deregister a project's own adoption lifecycle (projects.yaml + repos.yaml entry + its binstub) -- never the shared runtime or another project's registration; see below |
+| `unregister` | Deregister project adoption and retire project-owned tool plugin overlay values in its verified checkout family -- never the shared runtime or another project; see below |
 | `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--force-runtime NAME`, repeatable, re-deploys only the named runtime(s); `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand). Exit codes and the run's status file: see below |
 | `install-status` | Show installation and deployment status |
@@ -1298,8 +1298,12 @@ agent-worktrees --project stale-stub unregister
 
 It removes only that project's `projects.yaml` entry, its `repos.yaml`
 entry (or, with `--keep-repo-entry`, downgrades that entry to a catalogued
-`reference` repo instead of removing it), and its own per-project binstub --
-never the shared runtime, never another project's registration. It refuses
+`reference` repo instead of removing it), and its own per-project binstub. It also
+retires unchanged tool plugin values identified by this project's exact receipts
+in the verified anchor/worktree family. Personal composition, unrelated settings,
+operator edits and foreign receipts are preserved; foreign or ambiguous ownership
+is refused, not adopted. It never removes the shared runtime or another project's
+registration. It refuses
 (unless `--force`) when its own tracking still shows live worktrees, tracked
 sessions, or an open PR, so deregistering never silently orphans in-flight
 work. The project's own per-project state directory (`~/.<project>`) is left
@@ -1316,10 +1320,18 @@ request open until closure; do not automatically abandon work or kill sessions.
 The explicit `--force` path still bypasses this local gate, but its warning
 makes clear that removing registration does not settle the outstanding work.
 
+The closure bounce precedes tool overlay retirement. Registration is removed only
+after successful project-owned cleanup; a partial cleanup failure retains the
+registration and root-scoped retry evidence and reports completed checkout effects.
+This is incremental checkout cleanup, not a whole-family atomic transaction.
+The same installation owner guard excludes staging and unregister across the final
+registered-root/Git-family check and each existing workspace lease/write.
+
 These diagnostics reuse the existing local active-record census; they do not
 perform a live process/remote-provider scan or auto-finalize anything. No new
-CLI arguments, JSON protocol, checkout-overlay cleanup or installed-host
-rollout is introduced by the diagnostic change.
+CLI arguments, JSON protocol or installed-host rollout is introduced by those
+diagnostics. The optional project-native tool overlay lifecycle described above
+is a separate, explicitly scoped checkout side effect.
 
 To remove only full project adoption while retaining a related repository's
 editing class, agent preference and repository metadata, use:

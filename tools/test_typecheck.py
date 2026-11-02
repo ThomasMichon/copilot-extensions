@@ -10,6 +10,7 @@ import sys
 import pytest
 
 from tools import typecheck
+from tools import typecheck_source_views as views
 from installer_dependency_policy import DependencyPolicyError
 
 
@@ -495,3 +496,152 @@ def test_actual_mypy_rejects_type_regressions(
     assert lease.released
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
+
+
+def fragment_source(tmp_path: Path) -> tuple[str, ...]:
+    """Use the real loader with a small, deliberately interdependent namespace."""
+    directory = tmp_path / "libs" / "installation-context"
+    directory.mkdir(parents=True)
+    entry = (typecheck.ROOT / views.INSTALLATION_ENTRY).read_text(encoding="utf-8")
+    first = entry.index("_FRAGMENT_FILES = (")
+    last = entry.index("\n)", first) + 2
+    entry = entry[:first] + (
+        '_FRAGMENT_FILES = ("_installation_context_base.py", "_installation_context_files.py")'
+    ) + entry[last:]
+    (directory / "installation_context.py").write_text(entry, encoding="utf-8")
+    (directory / "_installation_context_base.py").write_text(
+        "from __future__ import annotations\n"
+        "def shared(value: int) -> int:\n    return value\n",
+        encoding="utf-8",
+    )
+    (directory / "_installation_context_files.py").write_text(
+        "from __future__ import annotations\nresult: int = shared('wrong')\n"
+        "raise RuntimeError('static checking must not execute this module')\n",
+        encoding="utf-8",
+    )
+    return tuple(path.relative_to(tmp_path).as_posix() for path in sorted(directory.glob("*.py")))
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_source_view_accounts_for_order_bytes_and_physical_lines(
+    tmp_path: Path, newline: bytes,
+) -> None:
+    """Every physical line, including replaced future imports, has a source mapping."""
+    paths = fragment_source(tmp_path)
+    for path in paths:
+        source = tmp_path / path
+        content = source.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        source.write_bytes(content.replace(b"\n", newline))
+    view = views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+    view.verify(tmp_path)
+    assert tuple(path for path, _content in view.inputs) == (
+        views.INSTALLATION_ENTRY,
+        "libs/installation-context/_installation_context_base.py",
+        "libs/installation-context/_installation_context_files.py",
+    )
+    for path, content in view.inputs:
+        mapped = [line.number for line in view.lines if line.path == path]
+        assert mapped == list(range(1, len(content.splitlines()) + 1))
+    diagnostic_line = next(
+        number for number, line in enumerate(view.lines, 1)
+        if line.path.endswith("_files.py") and line.number == 2
+    )
+    assert view.diagnostics(f"{view.output}:{diagnostic_line}: error: example\n", tmp_path) == (
+        "libs/installation-context/_installation_context_files.py:2: error: example\n"
+    )
+
+
+@pytest.mark.parametrize("change", ["source", "order", "view", "extra", "missing", "loader"])
+def test_source_view_refuses_stale_or_incomplete_composition(tmp_path: Path, change: str) -> None:
+    """Omission, reordering and changed code cannot reuse an old qualification."""
+    paths = fragment_source(tmp_path)
+    output = tmp_path / "view" / "installation_context.py"
+    view = views.installation_view(tmp_path, paths, output)
+    entry = tmp_path / views.INSTALLATION_ENTRY
+    fragment = entry.with_name("_installation_context_files.py")
+    if change == "source":
+        fragment.write_bytes(fragment.read_bytes() + b"extra: int = 1\n")
+    elif change == "order":
+        content = entry.read_bytes().replace(
+            b'"_installation_context_base.py", "_installation_context_files.py"',
+            b'"_installation_context_files.py", "_installation_context_base.py"',
+        )
+        entry.write_bytes(content)
+    elif change == "view":
+        output.write_bytes(view.content + b"extra: int = 1\n")
+    elif change == "extra":
+        new = entry.with_name("_installation_context_new.py")
+        new.write_bytes(b"extra: int = 1\n")
+        paths = (*paths, new.relative_to(tmp_path).as_posix())
+    elif change == "missing":
+        paths = tuple(path for path in paths if not path.endswith("_files.py"))
+    else:
+        entry.write_bytes(entry.read_bytes().replace(b"for fragment_name in _FRAGMENT_FILES:", b"for fragment_name in reversed(_FRAGMENT_FILES):"))
+    with pytest.raises(views.SourceViewError):
+        if change in {"extra", "missing", "loader"}:
+            views.installation_view(tmp_path, paths, output)
+        else:
+            view.verify(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from __future__ import annotations; wrong: int = 'text'\n",
+        "# mypy: ignore-errors\nwrong: int = 'text'\n",
+        "# type: ignore\nwrong: int = 'text'\n",
+        "# harmless\r# mypy: ignore-errors\rwrong: int = 'text'\r",
+        "# harmless\r# type: ignore\rwrong: int = 'text'\r",
+        "value: int = 1\nfrom __future__ import annotations\n",
+    ],
+)
+def test_composition_cannot_drop_code_or_spread_file_wide_suppressions(
+    tmp_path: Path, source: str,
+) -> None:
+    paths = fragment_source(tmp_path)
+    fragment = tmp_path / "libs" / "installation-context" / "_installation_context_base.py"
+    fragment.write_text(source, encoding="utf-8")
+    with pytest.raises(views.SourceViewError):
+        views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+
+
+@pytest.mark.parametrize(
+    ("level", "argument", "expected"),
+    [("basic", "'wrong'", 1), ("strict", "'wrong'", 1), ("strict", "3", 0)],
+)
+def test_actual_mypy_sees_shared_fragment_contract_and_maps_its_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    level: typecheck.Level, argument: str, expected: int,
+) -> None:
+    """The actual checker sees cross-fragment definitions without executing either."""
+    paths = fragment_source(tmp_path)
+    fragment = tmp_path / "libs" / "installation-context" / "_installation_context_files.py"
+    fragment.write_bytes(fragment.read_bytes().replace(b"'wrong'", argument.encode("ascii")))
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    assert typecheck.check_project(tmp_path, project(level=level), paths, all_paths=paths) == expected
+    output = capsys.readouterr().out
+    if expected:
+        assert "_installation_context_files.py:2: error:" in output
+        assert "[arg-type]" in output and "[name-defined]" not in output
+    else:
+        assert "Success: no issues found" in output
+    assert lease.released
+    assert not (tmp_path / "source-views-environment" / "sample" / "installation_context.py").exists()

@@ -1809,7 +1809,7 @@ def test_interactive_base_prepares_before_emitting_direct_plan(tmp_path, monkeyp
     monkeypatch.setattr(launch, "_build_env", lambda *a, **kw: {})
     monkeypatch.setattr(launch, "_repo_session_env", lambda *a: {})
     monkeypatch.setattr(launch, "_emit_plan", lambda plan: events.append("plan"))
-    monkeypatch.setattr(lcr, "prepare_for_launch", lambda root: events.append("copy"))
+    monkeypatch.setattr(lcr, "prepare_for_launch", lambda root, **kw: events.append("copy"))
     monkeypatch.setattr(launch.sys.stdin, "isatty", lambda: False)
     assert launch._resolve_base_repo(config, args) == 0
     assert events == (["plan"] if deferred or dry_run else ["copy", "plan"])
