@@ -5423,6 +5423,8 @@ status and refuse completion while a nested child survives.
 The offline source-build controls construct private control and target candidates
 through one installation cache, then change a dependency body to require a new
 wheel without rewriting the earlier completed control.
+Both PowerShell hosts also prove that lifecycle diagnostics arrive before child
+completion, once only, with stdout/result framing and failing exit status intact.
 
 The copied-pane boundary controls are an explicit, non-serving native lane:
 
