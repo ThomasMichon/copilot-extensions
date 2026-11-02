@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, replace
+from typing import Any
 
 from .queue_common import RunWaiterWakeOperation, WakeOperation
 from .queue_execution_custody import (
@@ -127,6 +128,84 @@ def unresolved_wake_send(
         if row is not None:
             return row
     return None
+
+
+def reservation_wake_accountable(conn: sqlite3.Connection, reservation: sqlite3.Row) -> bool:
+    """A wake targets a native/workspace, independently of reservation lineage."""
+    from .ordinary_native_bindings import reservation_native_identity
+
+    native = reservation_native_identity(conn, reservation)
+    for table in TABLES:
+        wakes = conn.execute(
+            f"SELECT w.* FROM {table} w WHERE execution_send_state IN ('pending', 'unknown')"
+            " AND (w.task_id = ? OR w.owner_session_id = ?"
+            " OR substr(w.owner, instr(w.owner, '/') + 1) = ?)",
+            (reservation["task_id"], native, reservation["worktree"]),
+        ).fetchall()
+        for wake in wakes:
+            if _wake_targets_reservation(wake, reservation, native):
+                return True
+    return False
+
+
+def _wake_targets_reservation(wake: Any, reservation: Any, native: str | None) -> bool:
+    from .bridge_remote import normalize_host
+    if native and wake["owner_session_id"]:
+        if native != wake["owner_session_id"]:
+            return False
+    else:
+        worktree = wake["owner"].partition("/")[2]
+        if reservation["worktree"] and worktree:
+            if reservation["worktree"] != worktree:
+                return False
+        elif wake["task_id"] != reservation["task_id"]:
+            return False
+    host = reservation["execution_machine"]
+    wake_host = wake["owner"].partition("/")[0]
+    return not (host and wake_host and normalize_host(host) != normalize_host(wake_host))
+
+
+class ReservationWakeSnapshot:
+    """Index unresolved wakes once; preserve the exact per-native matching rule."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+        self.by_task: dict[str, list[Any]] = {}
+        self.by_native: dict[str, list[Any]] = {}
+        self.by_worktree: dict[str, list[Any]] = {}
+        self.unidentified_task: dict[str, list[Any]] = {}
+        self.unidentified_worktree: dict[str, list[Any]] = {}
+        self.results: dict[tuple[Any, ...], bool] = {}
+        for table in TABLES:
+            for wake in conn.execute(
+                f"SELECT * FROM {table} WHERE execution_send_state IN ('pending', 'unknown')",
+            ):
+                self.by_task.setdefault(wake["task_id"], []).append(wake)
+                worktree = wake["owner"].partition("/")[2]
+                self.by_worktree.setdefault(worktree, []).append(wake)
+                if wake["owner_session_id"]:
+                    self.by_native.setdefault(wake["owner_session_id"], []).append(wake)
+                else:
+                    self.unidentified_task.setdefault(wake["task_id"], []).append(wake)
+                    self.unidentified_worktree.setdefault(worktree, []).append(wake)
+
+    def accountable(self, reservation: Any) -> bool:
+        from .ordinary_native_bindings import reservation_native_identity
+        native = reservation_native_identity(self.conn, reservation)
+        key = (reservation["task_id"], native, reservation["worktree"], reservation["execution_machine"])
+        if key not in self.results:
+            candidates = (
+                self.unidentified_task.get(reservation["task_id"], [])
+                + self.by_native.get(native, [])
+                + self.unidentified_worktree.get(reservation["worktree"], [])
+            ) if native else (
+                self.by_task.get(reservation["task_id"], [])
+                + self.by_worktree.get(reservation["worktree"], [])
+            )
+            self.results[key] = any(
+                _wake_targets_reservation(wake, reservation, native) for wake in candidates
+            )
+        return self.results[key]
 
 
 class QueueExecutionWakesMixin:

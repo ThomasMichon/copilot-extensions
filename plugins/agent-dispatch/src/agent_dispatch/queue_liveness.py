@@ -218,6 +218,9 @@ class LivenessMixin:
             # so this snapshot stays consistent with the held-task read above.
             specs = []
             for row in held:
+                from .queue_pool_placement import pool_assignment
+                if row["owner"] is None and pool_assignment(conn, row["id"]) is not None:
+                    continue
                 machine, _sep, worktree = (row["owner"] or "").partition("/")
                 handle = self._active_headless_handle(conn, row["id"])
                 local_sid = _parse_local_body_handle(handle)

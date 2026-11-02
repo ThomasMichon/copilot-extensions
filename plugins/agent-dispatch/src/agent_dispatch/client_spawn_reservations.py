@@ -35,6 +35,23 @@ class SpawnReservationClientMixin:
             f"/spawn-reservations/{key}/allocation", json={"project": project},
         ))
 
+    def record_spawn_worktree(
+        self, key: str, worktree: str, *, ownership: str = "unknown",
+        creating_host: str | None = None, execution_machine: str | None = None,
+        driver: str | None = None, allocation_project: str | None = None,
+        worktree_path: str | None = None,
+    ) -> dict:
+        """Retain workspace provenance and its independent execution machine."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/worktree",
+            json={
+                "worktree": worktree, "ownership": ownership,
+                "creating_host": creating_host, "driver": driver,
+                "allocation_project": allocation_project, "worktree_path": worktree_path,
+                **({"execution_machine": execution_machine} if execution_machine is not None else {}),
+            },
+        ))
+
     def record_created_agent(
         self, key: str, *, task_generation: int, agent_info: dict,
         worktree_record: dict | None = None, startup_invocation: dict | None = None,
@@ -70,6 +87,8 @@ class SpawnReservationClientMixin:
         repo: str | None = None,
         label: str | None = None,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -102,13 +121,37 @@ class SpawnReservationClientMixin:
             params["label"] = label
         if conclusion_state is not None:
             params["conclusion_state"] = conclusion_state
+        if native_release_pending is not None:
+            params["native_release_pending"] = native_release_pending
+        if pool_accountable:
+            params["pool_accountable"] = True
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
         if task_status is not None:
             params["task_status"] = task_status
         if latest_only:
             params["latest_only"] = latest_only
-        return self._unwrap(self._http.get("/spawn-reservations", params=params))
+        response = self._http.get("/spawn-reservations", params=params)
+        reservations = self._unwrap(response)
+        if native_release_pending is not None:
+            from .client import DispatchError
+            if response.headers.get("X-Dispatch-Reservation-Query") != "native-release-pending/v1":
+                raise DispatchError(426, "coordinator lacks native-release-pending/v1 reservation query")
+            if not isinstance(reservations, list) or any(
+                not isinstance(row, dict) or row.get("native_release_pending") is not native_release_pending
+                for row in reservations
+            ):
+                raise DispatchError(426, "coordinator did not apply native-release-pending/v1 reservation query")
+        if pool_accountable:
+            from .client import DispatchError
+            if response.headers.get("X-Dispatch-Pool-Accountability") != "pool-accountable/v1":
+                raise DispatchError(426, "coordinator lacks pool-accountable/v1 reservation query")
+            if not isinstance(reservations, list) or any(
+                not isinstance(row, dict) or row.get("pool_accountable") is not True
+                for row in reservations
+            ):
+                raise DispatchError(426, "coordinator did not apply pool-accountable/v1 reservation query")
+        return reservations
 
     def get_reservation(self, key: str) -> dict:
         return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))
