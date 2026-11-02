@@ -998,8 +998,9 @@ broader effort and adopter acceptance remain separately owned.)_
 
 _(Agent-recommended realization of the 2026-10-24 operator direction.
 Participant: Composite-source contributor; bounded tracker: #8736.
-Status: Active; plan #8745 and source-publication implementation #8790 merged;
-late-control reconciliation, Main activation and live acceptance remain open.)_
+Status: Active; plan #8745, source publication #8790 and retirement/classification
+support #8838 merged; equivalent build reuse, operational late-control
+reconciliation, Main activation and live acceptance remain open.)_
 
 - [x] Land this amendment through current-head review and required CI: #8745,
       `85c5d7a3fd8790886808c3fa571f947e1f0d64b1`.
@@ -1289,6 +1290,65 @@ The [Phase 9e subplan and journal](source-coherent-release-implementations.md)
 retain the complete source, asset, landing and rollout evidence. All bounded
 Plan/Validation items are resolved; the wider effort remains Active under its
 existing Phase 7/9, control, portfolio and runtime owners.
+### 2026-10-25 - Early original-build retention support prepared
+
+The existing full-tree ZIP encoder/verifier now also supports original build
+inputs before qualification. A separate external build manifest binds the
+original candidate, complete Git tree, Main/controller and unchanged signed
+source index, with no qualification digest. The existing Dev publisher admits
+the two trusted-Main-attested subjects, preserves the shared 64-asset limit
+and independently reads their raw bytes. No second publisher, release identity,
+source-index rewrite or qualified landing receipt is introduced.
+
+The focused archive/publication cohort passed 149 cases in 13.16 seconds;
+the final early-build cohort passed 55 in 8.20 seconds, including prepare-CLI
+admission and fail-closed authority controls. Ruff passed. The required unit
+manifest retains all 1768 existing identities/order and adds these 55 cases
+under the unchanged 300-second/effect/coverage contract. Full observed packet,
+review and hosted actual-Git CLI witness remain publication gates. This is
+source support only; build/landing equivalence, Main activation and actual
+new-contract promotion remain open.
+
+#8899 opened after exact-head hosted CI `40170996003` passed 1829 units and
+the observed packet in 36.157 seconds, coverage recorded once; separate
+fresh-Git witness `40171009922` passed nine cases in 2.17 seconds. Review
+identified a real contract mismatch hidden by synthetic fixtures: schema-v2
+indexes forbid `main_before`. A regression through the actual index validator
+reproduced the failure. Preparation/publication now derive the external
+manifest's Main base from the pinned candidate's single-parent Git header,
+leaving source-index bytes unchanged. Fixtures and the real-Git witness use
+the valid index shape; malformed parent and wrong-generation controls cover
+both boundaries. All 161 coupled cases passed in 13.99 seconds. Corrected-head
+hosted packet, witness and review remain required; the old green head does not
+qualify this fix.
+
+### 2026-10-25 - Trusted retirement support merged; build/landing binding next
+
+#8838 merged as `010000e5c0cd3c557081c25d9e4341ee067b3d80` at
+`05:50:30Z`. Genuine Copilot approval `5641752786` covers exact final head
+`354961ccda41d4fbc6da7cdc1f655d24f99d8a0d`, with both findings resolved.
+Required CI `40166506567` passed 1768 units in 29.79 seconds and completed the
+unit/effect/coverage packet in 32.048 seconds, coverage recorded once. The
+separate manual actual-Git witness `40166637629` passed all seven cases in
+4.81 seconds under its unchanged 100-second bound. Managed completion used the
+configured Maintainer review/CODEOWNER exception after these gates, not a CI
+waiver.
+
+The review-driven controls cover type-preserving non-operator state comparison
+and refusal to downgrade recorded control history when Main removes the manifest.
+The source branch was clean at the actual published head. After terminal PR
+reconciliation, ordinary continuation sync safely aborted on the squash conflict;
+a retained backup and verified merged-range-only rebase advanced it onto pinned
+Dev without discarding unmerged work or using stash.
+
+Re-read this Phase 9d plan and its subplan after merge. They remain Active.
+Next is complete original build-source retention before qualification and an
+explicit external build-versus-landing binding: immutable index bytes keep their
+original signed content-tree meaning, while fresh landing generations prove
+complete input equivalence and current admission. Optional profile intent remains
+with #8367; unsupported profile refresh must refuse, not infer approval from an
+old index. No new Main controller, replacement cycle or live artifact-before-PR
+contract has been activated by this source milestone.
 
 ### 2026-10-25 - Trusted control retirement and transition classification
 
