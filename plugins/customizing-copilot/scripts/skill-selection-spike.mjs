@@ -52,6 +52,23 @@ export function spikeStatus(report) {
             ? report.status : "failed";
     }
     if (report.mode === "model-enumeration") return report.status;
+    if (report.mode === "canonical-agent-witness") {
+        const arm = report.arms.canonicalAgent;
+        const metadata = report.native.modelMetadata;
+        if (["failed", "unavailable"].includes(arm?.status)
+            || report.forwardedModelRequests !== 0
+            || report.native.requestAttempts?.webSocket !== (report.native.refusedWebSocketRequests ?? 0)
+            || report.native.requestAttempts?.http !== report.native.interceptedRequests + (metadata?.forwardAttempts ?? 0)
+            || metadata?.failed > 0 || metadata?.refused > 0
+            || metadata && metadata.succeeded !== metadata.forwardAttempts) return "failed";
+        if (arm?.status !== "completed" || arm.configurationMatched !== true
+            || report.native.catalog.status !== "available"
+            || !arm.requests?.length || arm.requests.some(request =>
+                request.inspection?.canonicalSystemPromptPresent !== true
+                || request.inspection?.modelMatches !== true
+                || request.inspection?.readOnlyToolsetMatches !== true)) return "incomplete";
+        return "completed-with-limitations";
+    }
     const arms = Object.values(report.arms);
     if (arms.some(arm => ["failed", "unavailable"].includes(arm.status))
         || report.native.parentConfigurationUnchanged === false
@@ -71,17 +88,19 @@ export function spikeInputs(args) {
     const firstOption = args.findIndex(value => typeof value === "string" && value.startsWith("--"));
     const paths = firstOption < 0 ? args : args.slice(0, firstOption);
     if (![2, 3].includes(paths.length) || !paths.every(value => typeof value === "string" && isAbsolute(value))) {
-        throw new Error("Usage: node run-skill-selection-spike.mjs <absolute-sdk-directory> <fresh-absolute-fixture-root> [absolute-runtime-executable] [--list-models | --catalog-only --skill-directory absolute-root] [--model id] [--reasoning-effort level] [--context-tier tier]");
+        throw new Error("Usage: node run-skill-selection-spike.mjs <absolute-sdk-directory> <fresh-absolute-fixture-root> [absolute-runtime-executable] [--list-models | --catalog-only --skill-directory absolute-root | --canonical-agent-only [--allow-model-metadata]] [--model id] [--reasoning-effort level] [--context-tier tier]");
     }
     const profile = {}, seen = new Set();
     const skillDirectories = [];
-    let modelsOnly = false, catalogOnly = false;
+    let modelsOnly = false, catalogOnly = false, canonicalAgentOnly = false, allowModelMetadata = false;
     for (let index = paths.length; index < args.length; index++) {
         const option = args[index];
         if (seen.has(option) && option !== "--skill-directory") throw new Error("duplicate spike option");
         seen.add(option);
         if (option === "--list-models") { modelsOnly = true; continue; }
         if (option === "--catalog-only") { catalogOnly = true; continue; }
+        if (option === "--canonical-agent-only") { canonicalAgentOnly = true; continue; }
+        if (option === "--allow-model-metadata") { allowModelMetadata = true; continue; }
         if (!["--model", "--reasoning-effort", "--context-tier", "--skill-directory"].includes(option)) throw new Error("unsupported spike option");
         const value = args[++index];
         if (typeof value !== "string" || !value.trim() || value.startsWith("--")) throw new Error("missing spike option value");
@@ -97,8 +116,17 @@ export function spikeInputs(args) {
     if (!profile.model && Object.keys(profile).length) throw new Error("effort and context tier require an explicit model");
     if (catalogOnly && (modelsOnly || !skillDirectories.length || Object.keys(profile).length)
         || skillDirectories.length && !catalogOnly) throw new Error("catalog-only requires skill roots and excludes other modes and model profiles");
+    if (canonicalAgentOnly && (modelsOnly || catalogOnly || skillDirectories.length
+        || !profile.model || !profile.reasoningEffort || !profile.contextTier)) {
+        throw new Error("canonical-agent-only requires a complete explicit profile and excludes other modes");
+    }
+    if (allowModelMetadata && !canonicalAgentOnly) {
+        throw new Error("model metadata allowance requires canonical-agent-only");
+    }
     const [sdkDirectory, root, runtimePath] = paths;
-    return { sdkDirectory, root, runtimePath, modelsOnly, catalogOnly, skillDirectories, profile };
+    return { sdkDirectory, root, runtimePath, modelsOnly, catalogOnly, skillDirectories, profile,
+        ...(canonicalAgentOnly ? { canonicalAgentOnly: true } : {}),
+        ...(allowModelMetadata ? { allowModelMetadata: true } : {}) };
 }
 
 /** Counts and a frozen-descriptor digest only; never print adopter catalog text or paths. */
@@ -269,18 +297,38 @@ export async function deadline(promise, ms = 15000) {
 }
 
 /** Build a synthetic-only public request interceptor; no inherited forwarding path is called. */
-export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdMs = 5000, onAttempt = () => {}) {
-    let pendingBodies = 0;
+export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdMs = 5000,
+    onAttempt = () => {}, { inspectRequest, allowModelMetadata = false, onModelMetadata = () => {},
+        onWebSocketRefused = () => {} } = {}) {
+    let pendingBodies = 0, metadataForwards = 0;
     return new class extends Base {
         async sendRequest(request, context) {
             onAttempt("http");
+            if (request.method === "GET" && /\/models\/?$/.test(new URL(request.url).pathname)) {
+                onModelMetadata("attempts");
+                if (!allowModelMetadata || requests.length + pendingBodies + metadataForwards >= 16) {
+                    onModelMetadata("refused");
+                    throw new Error("model metadata retrieval is not admitted by this synthetic witness");
+                }
+                metadataForwards++;
+                onModelMetadata("forwardAttempts");
+                try {
+                    const response = await super.sendRequest(request, context);
+                    onModelMetadata(response.ok ? "succeeded" : "failed");
+                    return response;
+                } catch (error) {
+                    onModelMetadata("failed");
+                    throw error;
+                }
+            }
             if (!owned.has(context.sessionId)) throw new Error("unowned model request refused");
-            if (requests.length + pendingBodies >= 16) throw new Error("synthetic request allowance exhausted");
+            if (requests.length + pendingBodies + metadataForwards >= 16) throw new Error("synthetic request allowance exhausted");
             pendingBodies++;
             let body, summary;
             try {
                 body = await request.json();
                 summary = summarizeRequest(body, context);
+                if (inspectRequest) summary.inspection = inspectRequest(body);
                 requests.push({ sessionId: context.sessionId, agentId: context.agentId, summary });
             } finally { pendingBodies--; }
             if (summary.sentinels.cancel) {
@@ -337,6 +385,7 @@ export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdM
         }
         async openWebSocket() {
             onAttempt("webSocket");
+            onWebSocketRefused();
             throw new Error("synthetic-only witness does not forward WebSocket requests");
         }
     }();

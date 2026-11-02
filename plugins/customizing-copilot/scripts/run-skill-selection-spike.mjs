@@ -5,12 +5,17 @@ import { pathToFileURL } from "node:url";
 import { SENTINELS, bytes, spikeInputs, freezeCatalog, collectHistory, syntheticHandler,
     modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline, safeError,
     spikeStatus, armStatus, catalogMatches, historyMatches, catalogSummary } from "./skill-selection-spike.mjs";
+import { selectionAgent, selectionReadTool, selectionSnapshot, selectionPrompt } from "./skill-selection-contract.mjs";
+import { canonicalRequestEvidence } from "./skill-selection-native.mjs";
 
 let sdkDirectory, root, runtimePath, modelsOnly = false, catalogOnly = false;
+let canonicalAgentOnly = false, allowModelMetadata = false;
 let skillDirectories = [], profile = {}, home, workspace;
 let sdk, client, config;
 const requests = [], sessions = [], taskOwners = [], owned = new Set();
 const requestAttempts = { http: 0, webSocket: 0 };
+const modelMetadata = { attempts: 0, forwardAttempts: 0, succeeded: 0, failed: 0, refused: 0 };
+let refusedWebSocketRequests = 0;
 let heldRequestResolve;
 const heldRequest = new Promise(resolve => { heldRequestResolve = resolve; });
 const report = {
@@ -64,8 +69,8 @@ function sessionConfig() { return {
         ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
     }] } : {}),
 }; }
-async function create() {
-    const session = await client.createSession(config);
+async function create(overrides = {}) {
+    const session = await client.createSession({ ...config, ...overrides });
     sessions.push(session); owned.add(session.sessionId);
     return session;
 }
@@ -85,13 +90,18 @@ async function attempt(name, action) {
     catch (error) { report.arms[name] = { status: "unavailable", error: safeError(error) }; }
 }
 try {
-    ({ sdkDirectory, root, runtimePath, modelsOnly, catalogOnly, skillDirectories, profile } = spikeInputs(process.argv.slice(2)));
+    ({ sdkDirectory, root, runtimePath, modelsOnly, catalogOnly, canonicalAgentOnly = false, allowModelMetadata = false,
+        skillDirectories, profile } = spikeInputs(process.argv.slice(2)));
     for (const directory of skillDirectories) {
         if (!(await stat(directory)).isDirectory()) throw new Error("explicit skill root is not a directory");
     }
     home = join(root, "owned-home"); workspace = join(root, "synthetic-workspace");
     config = sessionConfig();
-    report.mode = modelsOnly ? "model-enumeration" : catalogOnly ? "catalog-discovery" : "synthetic-transport";
+    report.mode = modelsOnly ? "model-enumeration" : catalogOnly ? "catalog-discovery"
+        : canonicalAgentOnly ? "canonical-agent-witness" : "synthetic-transport";
+    if (canonicalAgentOnly) report.arms = { canonicalAgent: { status: "not-reached" } };
+    if (canonicalAgentOnly) report.native.modelMetadata = modelMetadata;
+    if (allowModelMetadata) report.vendorModelMetadataAllowed = true;
     report.requestedProfile = profile;
     Object.assign(report, modelsOnly ? { vendorModelEnumeration: true } : { modelFree: true, forwardedModelRequests: 0 });
     await mkdir(root); // Refuse reuse of existing session state.
@@ -107,7 +117,10 @@ try {
         }),
         ...(!modelsOnly ? {
             requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve,
-                5000, kind => { requestAttempts[kind]++; }),
+                5000, kind => { requestAttempts[kind]++; },
+                { inspectRequest: canonicalAgentOnly ? body => canonicalRequestEvidence(body, profile) : undefined,
+                    allowModelMetadata, onModelMetadata: kind => { modelMetadata[kind]++; },
+                    onWebSocketRefused: () => { refusedWebSocketRequests++; } }),
         } : {}),
         useLoggedInUser: true, logLevel: "none",
     });
@@ -133,6 +146,37 @@ try {
         report.native.capabilities = Object.fromEntries(Object.entries(parent.capabilities)
             .filter(([, value]) => typeof value === "boolean"));
         report.status = catalog.length ? "catalog-only" : "incomplete";
+    } else if (canonicalAgentOnly) {
+        await attempt("canonicalAgent", async () => {
+            const agent = selectionAgent(profile);
+            const parent = await create({
+                agent: agent.name, customAgents: [agent], availableTools: [selectionReadTool],
+                tools: [{ name: selectionReadTool, description: "Read-only synthetic source control.",
+                    parameters: { type: "object", properties: {
+                        skill: { type: "string" }, reference: { type: "string" },
+                    }, required: ["skill"], additionalProperties: false },
+                    handler: () => { throw new Error("canonical transport control must not read sources"); } }],
+            });
+            const registry = (await deadline(parent.rpc.agent.list({ includePrompt: true }))).agents;
+            const declared = registry.find(item => item.name === agent.name);
+            const selected = (await deadline(parent.rpc.agent.getCurrent())).agent;
+            const before = await deadline(parent.rpc.model.getCurrent());
+            const matches = model => model.modelId === profile.model
+                && model.reasoningEffort === profile.reasoningEffort && model.contextTier === profile.contextTier;
+            if (!declared?.id || selected?.id !== declared.id || !matches(before)) {
+                throw new Error("canonical agent selection or resolved configuration differs");
+            }
+            const catalog = freezeCatalog((await deadline(parent.rpc.skills.list())).skills);
+            report.native.catalog = { ...catalogSummary(catalog),
+                status: catalogMatches(catalog, fixtureSkills, config.disabledSkills) ? "available" : "incomplete" };
+            const prompt = selectionPrompt(selectionSnapshot(catalog), {
+                intent: "Review the synthetic fixture without executing anything.", purpose: "review",
+                context: { messages: [], truncated: false, omitted: 0 },
+            });
+            const result = await turn(parent, prompt);
+            return { ...result, configurationMatched: matches(before) && matches(result.model),
+                selectedAgentId: declared.id, authoredPromptReadbackAvailable: typeof declared.prompt === "string" };
+        });
     } else {
         const parent = await create();
         report.native.capabilities = Object.fromEntries(Object.entries(parent.capabilities)
@@ -267,6 +311,10 @@ finally {
     }
     catch (error) { report.cleanup.runtimeStopErrors.push(safeError(error)); }
     report.native.interceptedRequests = requests.length;
+    if (canonicalAgentOnly) {
+        report.native.transportScope = "http-only";
+        report.native.refusedWebSocketRequests = refusedWebSocketRequests;
+    }
     if (!modelsOnly) report.native.requestAttempts = { ...requestAttempts };
     if (!modelsOnly) report.native.catalog.providerCalls = { ...providerCalls };
     report.status = spikeStatus(report);

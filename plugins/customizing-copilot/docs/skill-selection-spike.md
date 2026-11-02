@@ -5,6 +5,65 @@ model-quality evaluation or production routing profile. It uses public SDK
 APIs in a separate, caller-owned runtime and synthetic inputs only. Importing
 `scripts/skill-selection-spike.mjs` does not connect or infer.
 
+The import-inert `scripts/skill-selection-native.mjs` also provides a read-only
+joined-host preflight. It checks the canonical specialist's native ID, authored
+prompt, model, reasoning effort and read-tool declaration against the complete
+foreground catalog. An optional bounded primary-context sample returns counts
+and omission metadata only, not source text or a frozen comparison boundary.
+The preflight compares the foreground model/provider, plan and Auto snapshots
+and selected-agent ID before and after acquisition. This does not prove parent
+preservation across extension registration or subsequent task dispatch.
+
+Successful preflight means **declared**, not a qualified selector: resolved
+child model, effort, tier, effective tools and prospective context fit remain
+unknown; comparability, inference and quality evidence remain false. Missing
+native declarations return explicit unavailability; failed acquisition throws
+rather than becoming no-match. The ordinary task and custom-agent contracts do
+not accept a child context tier. Observe attributed native child events before
+counting a comparative result, and never infer that tier from the parent.
+
+Prompt diagnostics distinguish omitted text from a different or empty authored
+prompt using availability, UTF-8 byte counts and SHA-256 digests only. Neither
+the actual nor expected prompt text is returned. An omitted prompt has unknown
+counts, digest and match state rather than a fabricated zero-byte match.
+The observed joined RPC agent view does not by itself establish preservation
+or removal of unrelated agents. These diagnostics do not relax any trial gate.
+
+An omitted optional `AgentInfo.prompt` does not prove that the configured
+specialist prompt was changed or omitted from inference. To observe the latter
+directly without attaching interception to the foreground, use the separate
+owned-runtime mode `--canonical-agent-only --model <id> --reasoning-effort
+<level> --context-tier <tier>`. It requires the complete explicit profile and
+excludes the catalog/model-list modes.
+
+This mode selects the canonical agent in one fresh owned session, verifies its
+resolved model/effort/tier before sending, and intercepts the resulting request
+locally. It reports only whether the exact canonical text occurs in system/
+developer input, the requested model matches, and the sole exposed function is
+the source-read tool. Quoting that text in a user message cannot satisfy the
+check. Optional authored-prompt readback is reported separately. Replies remain
+synthetic, inference forwarding is refused, and shared cleanup applies. This is
+canonical transport/configuration evidence, not model quality or a complete
+requesting-foreground catalog witness.
+
+The native runtime may also request model-list metadata while resolving that
+configuration. These are not session-attributed inference requests and are
+refused by default. `--allow-model-metadata`, available only with this canonical
+mode, explicitly admits native-supplied HTTP `GET` requests ending in `/models`
+through the SDK's default handler. It never constructs an endpoint, forwards
+inference POSTs or admits WebSockets. Metadata attempts, forward attempts and
+HTTP success/failure remain separate from intercepted inference and its known
+zero forwarding; failed or refused metadata cannot produce a passing aggregate.
+The existing total request allowance also bounds metadata forwarding.
+
+Canonical qualification is explicitly **HTTP-only**. The fixture refuses every
+WebSocket before any upstream connection; if the native runtime then falls back
+to HTTP, its failed WebSocket attempt and deliberate refusal are both retained.
+They must balance exactly. The completed HTTP request still has to satisfy all
+canonical/profile/tool checks. This qualifies neither WebSocket input nor an
+unobserved transport; every later comparison must retain the HTTP-only boundary
+and include fallback overhead.
+
 Run the sibling `scripts/run-skill-selection-spike.mjs` with an absolute native
 SDK directory (containing `index.js`) and a **fresh, nonexistent fixture root**:
 
