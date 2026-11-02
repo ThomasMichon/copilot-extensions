@@ -88,6 +88,13 @@ merge into each target. Target decorators permit only `input_gate`; outer
 decorators/tools apply across routing. A routed gate preflight must forward the
 same selector through `args_from`.
 
+Routed Entra credentials validate the bound Azure identity before access and
+after acquisition or cache retrieval. Fresh memory-only or uncached acquisition
+reuses its own final validation rather than immediately repeating the probe;
+shared-cache access retains the separate post-check. A failed identity check or
+cancelled credential access invalidates the injector's token caches before retry.
+There is no identity-probe cache or additional freshness window.
+
 The executable decorator schemas remain in `validate_config` and
 [`decorators`](../src/agent_mcp/decorators):
 
