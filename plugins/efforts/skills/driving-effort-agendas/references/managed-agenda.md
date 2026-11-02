@@ -49,6 +49,14 @@ Reads use a real SQLite transaction, not the imported JSON files.
 newest first. Accepted records and their complete state snapshots are never
 silently pruned. History is not a canonical effort completion ledger.
 
+These records establish what the agenda store accepted, not the sole truth of
+external progress. An unavailable, stale or rewound store does not itself block
+otherwise-authorized work: use the skill's
+[qualified planning recovery](../SKILL.md#unavailable-stale-or-rewound-agendas)
+to reconstruct position and reconcile when practical. That reasoning path does
+not relax the read/write contracts below, authorize resetting counters or make
+stale JSON a second writable authority.
+
 `init` accepts either inline `change.documents` with `cursor` and `boards`
 (a relative board-name-to-document mapping), or `--import-home <manual-home>`
 with `change: {"operation":"init"}`. Imports read the original cursor and all

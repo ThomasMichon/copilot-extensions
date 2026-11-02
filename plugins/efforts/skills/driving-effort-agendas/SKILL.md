@@ -199,6 +199,10 @@ are resolved, or preserve the open stack through a real blocker or handoff.
 Carry the cursor path, active/deferred agenda identities, root/return state,
 decision-packet references, current attempted/revisit times and immediate
 next action in a compact handoff; canonical detail stays in the effort.
+When available, also retain the store identity, owner-reported generation,
+revision and commit time with an independently saved last-known reference.
+These are freshness clues, not new required fields: a timestamp can rewind with
+the database, and no fixed age alone makes an agenda stale.
 On resumption compare the saved agenda/plan references with current sources.
 Journal-only changes need not invalidate execution position. A changed node,
 removed reference or conflicting cursor revision requires reconciliation,
@@ -209,6 +213,27 @@ discard the adopted top frame. Resolve conflicting instructions through their
 actual owner and priority; the cursor never overrides operator steering or
 safety. Optional projections can show this same position without introducing
 another owner of claims or completion.
+
+### Unavailable, stale or rewound agendas
+
+Treat agenda state as qualified planning evidence, not the sole truth of actual
+external progress. If it is unavailable or conflicts with newer evidence, recover
+the assigned root, current node/action and saved return from current context,
+current operator steering, the canonical effort and live facts; consult prior
+sessions/worktree history as needed. State which position is reconstructed and
+what remains uncertain. Do not make repeated store-repair attempts a prerequisite
+for otherwise-authorized work. Do not roll back confirmed progress or replay an
+uncertain real action merely because the database is behind.
+
+When practical, reread and reconcile through supported owner commands, preserving
+provenance and uncertainty in their existing evidence fields. If the supported
+contract cannot represent the reconciliation, preserve it in the canonical
+effort or handoff rather than inventing fields, accepted transitions or historical
+records. Strict mutation validation and version contracts still apply; reasoning
+and proceeding off-agenda do not relax data-write admission. Do not reinitialize
+or cosmetically reset finite budget counts to make reconstructed state fit.
+Permissions, safety, resource/privacy constraints, explicit all-work holds and
+canonical completion gates remain binding independently of agenda availability.
 
 ## Managed command path (preferred for adopted writable homes)
 
