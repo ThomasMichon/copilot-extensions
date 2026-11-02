@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-logger"
-version = "0.3.156-dev1"
+version = "0.3.157-dev1"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -81,6 +81,8 @@ ignore = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "setuptools>=83.0.0",
+    "wheel",
 ]
 
 [tool.pytest.ini_options]

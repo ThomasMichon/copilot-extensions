@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -11,7 +12,9 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import time
 import venv
+import zipfile
 from importlib import metadata
 from pathlib import Path
 
@@ -31,6 +34,95 @@ _COMMANDS = (
 _HARNESS_TIMEOUT_SECONDS = 20
 # Cold native payload copies need fixture headroom, not a larger installer deadline.
 _STAMP_TIMEOUT_SECONDS = 90 if os.name == "nt" else 60
+
+
+def test_offline_uv_records_archive_origin_and_rejects_editable(tmp_path: Path) -> None:
+    env = _isolated_install_env(tmp_path / "home")
+    _offline_uv(tmp_path, env)
+    uv = shutil.which("uv", path=env["PATH"])
+    assert uv is not None
+    runtime = tmp_path / "runtime"
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
+    python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    wheel = tmp_path / "fixture-1.0-py3-none-any.whl"
+    files = {
+        "fixture-1.0.dist-info/METADATA": b"Metadata-Version: 2.1\nName: fixture\nVersion: 1.0\n",
+        "fixture-1.0.dist-info/WHEEL": (
+            b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+        "fixture.py": b"VALUE = 1\n",
+    }
+    with zipfile.ZipFile(wheel, "w") as archive:
+        records = []
+        for name, content in files.items():
+            archive.writestr(name, content)
+            content_hash = base64.urlsafe_b64encode(
+                hashlib.sha256(content).digest(),
+            ).rstrip(b"=").decode()
+            records.append(f"{name},sha256={content_hash},{len(content)}")
+        records.append("fixture-1.0.dist-info/RECORD,,")
+        archive.writestr(
+            "fixture-1.0.dist-info/RECORD", "\n".join(records) + "\n",
+        )
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    url = wheel.as_uri() + "#sha256=" + digest
+    command = [
+        uv, "pip", "install", "--python", str(python), "--reinstall",
+        "--exclude-newer", "2000-01-01T00:00:00Z", "fixture @ " + url,
+    ]
+    options = dict(
+        env=env, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    installed = subprocess.run(command, **options)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    observed = subprocess.run(
+        [
+            str(python), "-I", "-c",
+            "import importlib.metadata; print(importlib.metadata.distribution('fixture')"
+            ".read_text('direct_url.json'))",
+        ],
+        **options,
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    assert json.loads(observed.stdout) == {
+        "url": url, "archive_info": {"hashes": {"sha256": digest}},
+    }
+    for unsupported in ("--no-editable", "--editable"):
+        refused = subprocess.run([*command, unsupported], **options)
+        assert refused.returncode != 0
+    site = (
+        runtime / "Lib" / "site-packages" if os.name == "nt"
+        else runtime / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    )
+    shutil.copytree(tmp_path / "offline-uv" / "setuptools", site, dirs_exist_ok=True)
+    project = tmp_path / "build-project"
+    source = project / "src" / "built_fixture"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    manifest = project / "pyproject.toml"
+    manifest.write_text(
+        '[project]\nname="built-fixture"\nversion="1.0"\ndependencies=[]\n',
+        encoding="utf-8",
+    )
+    destination = tmp_path / "built-wheels"
+    build_command = [
+        uv, "build", "--wheel", "--no-build-isolation", "--no-sources", "--offline",
+        "--python", str(python), "--out-dir", str(destination), str(project),
+    ]
+    built = subprocess.run(build_command, **options)
+    assert built.returncode == 0, built.stdout + built.stderr
+    with zipfile.ZipFile(destination / "built_fixture-1.0-py3-none-any.whl") as archive:
+        assert archive.read("built_fixture/__init__.py") == (source / "__init__.py").read_bytes()
+    calls = tmp_path / "offline-uv" / "installs.jsonl"
+    completed_builds = [json.loads(line) for line in calls.read_text().splitlines()
+                        if json.loads(line)[:1] == ["build"]]
+    assert completed_builds == [build_command[1:]]
+    before_failure = calls.read_bytes()
+    manifest.unlink()
+    failed = subprocess.run(build_command, **options)
+    assert failed.returncode != 0
+    assert calls.read_bytes() == before_failure
 
 
 def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
@@ -107,6 +199,8 @@ if args[:1] == ['build']:
         cwd=project, capture_output=True, text=True, check=True, timeout=60,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
     )
+    with (fixture / 'installs.jsonl').open('a') as log:
+        log.write(json.dumps(args) + '\\n')
     print(result.stdout, end='')
     raise SystemExit(0)
 if args[:1] == ['venv']:
@@ -139,6 +233,7 @@ if args[:1] == ['venv']:
         venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
     raise SystemExit(0)
 assert args[:2] == ['pip', 'install'], args
+assert '--no-editable' not in args and '--editable' not in args, args
 if '--show-settings' in args:
     assert not any(a == '--quiet' or re.fullmatch('-q+', a) for a in args)
     print('''PipInstallSettings {{ settings: PipSettings {{
@@ -392,6 +487,12 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
         path.mkdir(parents=True, exist_ok=True)
     env.update({name: str(path) for name, path in roots.items()})
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
+    if sys.platform == "linux" and env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+        lifecycle = home / "lifecycle-python"
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(lifecycle)
+        interpreter = lifecycle / "bin/python"
+        interpreter.chmod(0o700)
+        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = str(interpreter)
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
     if sys.platform == "linux":
@@ -499,7 +600,7 @@ def _legacy_uninstall_fixture(tmp_path: Path, monkeypatch):
 
 def test_legacy_uninstall_guard_uses_teardown_admission(tmp_path, monkeypatch):
     payload, root, _, guard, local_bin, _ = _legacy_uninstall_fixture(tmp_path, monkeypatch)
-    foreign = local_bin / "session-sync"
+    foreign = local_bin / ("session-sync.ps1" if os.name == "nt" else "session-sync")
     foreign.write_bytes(b"foreign command\n")
     before = (root / "deploy-manifest.json").read_bytes()
     binding = guard["_load"]("_logger_test_binding", "command_binding.py")
@@ -618,6 +719,20 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
     assert (root / "config.yaml").read_bytes() == b"preserved configuration\n"
     assert (root / "session-state" / "sentinel").read_bytes() == b"preserved session data\n"
     assert (root / "cache" / "python" / "sentinel").read_bytes() == b"preserved cache\n"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux lifecycle interpreter custody")
+def test_snapshot_fixture_supervisor_has_native_interpreter_custody(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
+    env = _isolated_install_env(tmp_path / "home")
+    interpreter = Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"])
+    assert interpreter.is_relative_to(tmp_path) and not interpreter.is_symlink()
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1"; _di_lifecycle lease-fields 30 60',
+         "bash", str(_PLUGIN_ROOT / "scripts/daemon_instances.sh")],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0 and result.stdout, result.stdout + result.stderr
 
 
 def _stage_release_payload(tmp_path: Path) -> Path:
@@ -820,6 +935,8 @@ def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None
     )
 
     assert result.returncode == 0, result.stderr
+    snapshot = Path((home / ".agent-logger/payload-dir").read_text().strip())
+    assert (snapshot / "libs/zdd/pyproject.toml").is_file()
     local_bin = home / ".local" / "bin"
     for command in _COMMANDS:
         assert (local_bin / f"{command}.ps1").is_file(), command
@@ -1057,10 +1174,17 @@ def test_provision_publishes_durable_compatibility_wrappers(
 # 2026-10-04): same class as `test_provision_publishes_durable_compatibility_
 # wrappers` above -- two sequential subprocess.run calls (timeout=90,
 # timeout=420) mean a worst case near 510s on Windows (480s on POSIX).
-# Keep fixture headroom above the combined internal ceiling.
-@pytest.mark.timeout(550 if os.name == "nt" else 520)
+# Materialization, offline tools and source removal precede provisioning too;
+# retain 120 seconds of setup headroom above both native child deadlines.
+@pytest.mark.timeout(630 if os.name == "nt" else 600)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
+    started = time.monotonic()
+
+    def completed(phase: str) -> None:
+        print(f"snapshot fixture: {phase}; elapsed={time.monotonic() - started:.2f}s", flush=True)
+
     payload = _stage_release_payload(tmp_path)
+    completed("release payload materialized")
     home = tmp_path / "home"
     version = next(
         line.split('"')[1]
@@ -1069,6 +1193,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     )
     env = _isolated_install_env(home)
     calls = _offline_uv(tmp_path, env)
+    completed("offline tools prepared")
 
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
@@ -1097,17 +1222,29 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         wrapper = home / ".local" / "bin" / "agent-logger"
         invoke = [str(wrapper), "version"]
 
-    stamped = subprocess.run(
-        stamp,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=_STAMP_TIMEOUT_SECONDS,
-        check=False,
-    )
-    assert stamped.returncode == 0, stamped.stderr
+    stamp_output = tmp_path / "stamp.stdout"
+    stamp_errors = tmp_path / "stamp.stderr"
+    stamp_timeout = None
+    with stamp_output.open("w", encoding="utf-8") as stdout, stamp_errors.open(
+        "w", encoding="utf-8",
+    ) as stderr:
+        try:
+            stamped = subprocess.run(
+                stamp, env=env, stdout=stdout, stderr=stderr,
+                timeout=_STAMP_TIMEOUT_SECONDS, check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            stamped = None
+            stamp_timeout = str(error)
+    if stamped is None or stamped.returncode != 0:
+        pytest.fail(
+            f"{stamp_timeout or ''}\n"
+            f"{stamp_output.read_text(encoding='utf-8', errors='replace')}"
+            f"{stamp_errors.read_text(encoding='utf-8', errors='replace')}"
+        )
     assert not calls.exists(), "stamp must defer dependency installation"
     assert not (home / ".agent-logger" / ".venv").exists()
+    completed("native stamp completed")
 
     snapshot = Path(
         (home / ".agent-logger" / "payload-dir").read_text(encoding="utf-8").strip()
@@ -1135,24 +1272,37 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     shutil.rmtree(payload)
     shutil.rmtree(tmp_path / "plugins")
     shutil.rmtree(tmp_path / "libs")
+    completed("original source removed")
 
-    provision = subprocess.run(
-        invoke,
-        env=env,
-        cwd=snapshot,
-        capture_output=True,
-        text=True,
-        timeout=420,
-        check=False,
-    )
-    driver = home / ".copilot-extensions" / "update-driver"
-    diagnostics = "\n".join(
-        f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
-        for path in driver.rglob("*.log") if path.is_file()
-    )
-    assert provision.returncode == 0, provision.stdout + provision.stderr + diagnostics
-    assert f"agent-logger {version}" in provision.stdout
+    output = tmp_path / "first-use.stdout"
+    errors = tmp_path / "first-use.stderr"
+    timeout_error = None
+    with output.open("w", encoding="utf-8") as stdout, errors.open("w", encoding="utf-8") as stderr:
+        try:
+            provision = subprocess.run(
+                invoke,
+                env=env,
+                cwd=snapshot,
+                stdout=stdout,
+                stderr=stderr,
+                timeout=420,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            provision = None
+            timeout_error = str(error)
+    observed_output = output.read_text(encoding="utf-8", errors="replace")
+    observed_errors = errors.read_text(encoding="utf-8", errors="replace")
+    if provision is None or provision.returncode != 0:
+        driver = home / ".copilot-extensions" / "update-driver"
+        diagnostics = "\n".join(
+            f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
+            for path in driver.rglob("*.log") if path.is_file()
+        )
+        pytest.fail(f"{timeout_error or ''}\n{observed_output}{observed_errors}{diagnostics}")
+    assert f"agent-logger {version}" in observed_output
     assert calls.is_file()
+    assert any(json.loads(line)[:1] == ["build"] for line in calls.read_text().splitlines())
     _assert_complete_runtime(home)
     manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"

@@ -226,7 +226,8 @@ def test_logger_never_replaces_queued_source(owning_logger, area, change):
 
 
 @pytest.fixture
-def materialized_logger(owning_logger, area):
+def materialized_logger(owning_logger, area, rename_source):
+    print("Logger fixture: staging source", file=sys.stderr, flush=True)
     payload, installation, project = owning_logger
     candidate = area / "materialized/plugins/agent-logger"
     shutil.copytree(REPOSITORY / "plugins/agent-logger", candidate, ignore=shutil.ignore_patterns(
@@ -239,8 +240,10 @@ def materialized_logger(owning_logger, area):
     finally:
         sys.path[:] = previous
     assert not any(line.startswith("SKIP ") for line in result), result
+    print("Logger fixture: materialization complete", file=sys.stderr, flush=True)
     shutil.rmtree(payload)
-    shutil.copytree(candidate, payload)
+    rename_source(candidate, payload)
+    print("Logger fixture: ready", file=sys.stderr, flush=True)
     return payload, installation, project
 
 
@@ -435,7 +438,7 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
         })
     source = inputs / "update-driver"
     root = area / "cold"
-    env = cold_environment(installation, project, area)
+    env = cold_environment(installation, project, area, python_prerequisite=True)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_LOGGER_HOME"] = str(installation)
     foreign = area / "foreign-project"
@@ -470,6 +473,16 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
     assert 1 <= len(stamps) <= 2 and all(
         item.state == "completed" and item.exit_code == 0 for item in stamps
     ), diagnostic()
+    if sys.platform == "linux":
+        selected_foundation = (root / "foundation/current-version").read_text().strip()
+        configuration = (
+            root / "foundation/versions" / selected_foundation / "pyvenv.cfg"
+        ).read_text(encoding="utf-8")
+        home = next(line.split("=", 1)[1].strip() for line in configuration.splitlines()
+                    if line.startswith("home ="))
+        assert Path(home).resolve().is_relative_to(area.resolve()), (
+            "Product foundation must acquire its private SDK, not borrow the test lifecycle interpreter"
+        )
     assert not registration_effects(adapter)
     assert_no_periodic_worker(installation)
     callers = [subprocess.Popen(command("install"), env=env, cwd=project, stdin=subprocess.DEVNULL,

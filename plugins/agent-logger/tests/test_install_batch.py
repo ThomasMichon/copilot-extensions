@@ -21,6 +21,7 @@ from .test_install_binstub import _isolated_install_env
 PLUGIN = Path(__file__).resolve().parents[1]
 ENGINE = PLUGIN.parents[1] / "libs" / "installer-engine"
 LIBRARIES = {
+    "configuration-layers": "agent-configuration-layers",
     "config-migrate": "agent-config-migrate",
     "agent-procutil": "agent-procutil",
     "single-instance-lease": "agent-single-instance-lease",
@@ -315,7 +316,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     env = _isolated_install_env(tmp_path / "home")
     for expected in (1, 2):
         if expected == 2:
-            first = next(iter(sources.values()))
+            first = sources["agent-config-migrate"]
             (first / "fixture_backend.py").write_text(
                 backend.replace("VALUE = 1", "VALUE = 2"), encoding="utf-8",
             )
