@@ -40,14 +40,20 @@ Writers hold the existing cross-process record lock across acquisition and
 publication, and use unique temporary files with atomic replacement. No
 snapshot is computed before taking that writer lock. Managed source writes
 share the lock and withdraw existing views before changing source bytes.
+Registry locking precedes publication locking, including when a registry-owned
+operation calls the writer reentrantly.
 Removed policy entries disappear on the next managed push.
-Before rebuilding, old views are withdrawn. A failed acquisition leaves an
+Before rebuilding, old views are atomically withdrawn without deleting their
+caller scopes. An interrupted refresh can therefore retry the complete prepared
+inventory. A failed acquisition leaves an
 unavailable tombstone, preserves the caller for a later retry, and reports a
 publication failure rather than retaining obsolete protection. Other callers'
 independently successful publications remain usable. A partially failed source
 write retains unavailable scope records for retry and propagates the original
 failure. Windows readers permit share-delete; the existing atomic writer's
 bounded retries cover transient replacement conflicts while a read finishes.
+Automatically rediscovered callers whose registration was removed are retired;
+an explicitly requested unregistered caller still reports an error.
 
 ## Reader contract
 
@@ -65,6 +71,9 @@ bare repositories and the nearest nested repository/submodule. No Git
 subprocess, object scan, index/config read or RPC is needed. A nested repository
 does not inherit its containing checkout's guard. Direct write tools match the
 repository common-directory identity, including linked target worktrees. Shell
+and direct-write evaluation resolve each distinct target identity only once per
+event, not once per guarded row; no identity result is retained across events.
+Shell
 handling retains the existing command-position/write-target heuristic; this
 change does not introduce a shell parser or extend its syntax coverage.
 

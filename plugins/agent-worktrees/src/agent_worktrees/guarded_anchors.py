@@ -16,12 +16,16 @@ from plugin_activation import resolve_active_plugins
 
 from . import registry_paths, repos
 from .repos_registry_reader import read_registry
-from .repos_registry_transaction import read_bytes, revision
+from .repos_registry_transaction import read_bytes, registry_lock, revision
 from .tracking import _RecordLock, _atomic_write
 
 
 class GuardPublicationError(RuntimeError):
     """Source mutation may have succeeded, but its derived view is withdrawn."""
+
+
+class CallerNotRegistered(GuardPublicationError):
+    """A retained caller was deliberately removed from the selected registry."""
 
 
 def _reader():
@@ -65,7 +69,7 @@ def build_snapshot(caller: str, root: Path, generation: str) -> dict:
             project = name
             break
     if project is None:
-        raise GuardPublicationError("caller has no available selected-registry registration")
+        raise CallerNotRegistered("caller has no available selected-registry registration")
     configuration = cfg.load_config(
         cfg.project_dir(project) / "config.yaml", project=project,
         include_control_plane_related_pr=False, include_knowledge_preferences=False,
@@ -118,8 +122,8 @@ def build_snapshot(caller: str, root: Path, generation: str) -> dict:
     }
 
 
-def _withdraw_views(directory: Path) -> None:
-    for path in directory.glob("*.json"):
+def _withdraw_views(directory: Path, *, paths=None) -> None:
+    for path in directory.glob("*.json") if paths is None else paths:
         try:
             with path.open("rb") as stream:
                 raw = stream.read(1024 * 1024 + 1)
@@ -143,7 +147,8 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
     except (OSError, ValueError, RuntimeError):
         _withdraw_views(directory)
         raise
-    selected = {reader.canonical(caller) for caller in callers}
+    explicit = {reader.canonical(caller) for caller in callers}
+    selected = set(explicit)
     old_paths = []
     for path in directory.glob("*.json") if include_prepared else ():
         old_paths.append(path)
@@ -162,14 +167,17 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
         old_paths = [reader.map_path(caller, root) for caller in selected]
     # Withdraw before acquisition: even an interrupted or failed producer must
     # not leave the old policy looking current after a managed mutation.
-    for path in old_paths:
-        path.unlink(missing_ok=True)
+    _withdraw_views(directory, paths=old_paths)
     generation = uuid.uuid4().hex
     published = 0
     errors = []
     for caller in sorted(selected):
         identity = reader.repository_identity(caller)
         if identity is None or identity["root"] != caller:
+            if caller in explicit:
+                errors.append(f"{caller}: caller checkout identity is unavailable")
+                continue
+            reader.map_path(caller, root).unlink(missing_ok=True)
             continue  # Removed caller checkouts withdraw their obsolete view.
         try:
             _atomic_write(reader.map_path(caller, root), json.dumps({
@@ -183,6 +191,11 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
                 raise GuardPublicationError("guard map exceeds its byte bound")
             _atomic_write(reader.map_path(caller, root), encoded)
             published += 1
+        except CallerNotRegistered as exc:
+            if caller in explicit:
+                errors.append(f"{caller}: {exc}")
+            else:
+                reader.map_path(caller, root).unlink(missing_ok=True)
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             errors.append(f"{caller}: {exc}")
     if errors:
@@ -198,7 +211,9 @@ def refresh(
     root = registry_root if registry_root is not None else registry_paths.registry_root()
     directory = root / "guarded-anchors"
     directory.mkdir(parents=True, exist_ok=True)
-    with _RecordLock(directory / "publication", timeout=10.0, require_sidecar=True):
+    with registry_lock(root / "repos.yaml"), _RecordLock(
+        directory / "publication", timeout=10.0, require_sidecar=True,
+    ):
         return _refresh_locked(root, callers, include_prepared=include_prepared)
 
 
@@ -207,7 +222,9 @@ def managed_write(write, *, caller: str | Path | None = None):
     root = registry_paths.registry_root()
     directory = root / "guarded-anchors"
     directory.mkdir(parents=True, exist_ok=True)
-    with _RecordLock(directory / "publication", timeout=10.0, require_sidecar=True):
+    with registry_lock(root / "repos.yaml"), _RecordLock(
+        directory / "publication", timeout=10.0, require_sidecar=True,
+    ):
         # Readers must stop using old policy before the source mutation commits.
         _withdraw_views(directory)
         result = write()

@@ -163,11 +163,14 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
         return MapRead("unusable", [], str(exc))
 
 
-def matches(path: str, guarded: dict) -> bool:
+def matches(path: str, guarded: dict, *, identity_cache: dict | None = None) -> bool:
     """Do not attribute nested repositories to a containing guarded checkout."""
     identity = guarded.get("identity")
     if identity is None:
         child, root = canonical(path), canonical(guarded["path"])
         return child == root or child.startswith(root + os.sep)
-    target = repository_identity(path)
+    cache = identity_cache if identity_cache is not None else {}
+    if path not in cache:
+        cache[path] = repository_identity(path)
+    target = cache[path]
     return bool(target and target["common_dir"] == identity["common_dir"])

@@ -311,6 +311,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
     if not _WRITE_VERBS.search(cmd):
         return None
     eff_cwd = cwd
+    identity_cache = {}
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
@@ -341,7 +342,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
         if git_write and not has_dash_c and eff_cwd:
             for g in guarded:
                 gp = g.get("path")
-                if gp and _guard_map.matches(eff_cwd, g):
+                if gp and _guard_map.matches(eff_cwd, g, identity_cache=identity_cache):
                     return {**g, "reason": _deny_reason(
                         g, "(a shell command writes into it).")}
         # Follow an in-command ``cd`` to a resolvable path for later segments.
@@ -360,8 +361,9 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | Non
         if not raw:
             return None
         abs_path = _resolve(raw, cwd)
+        identity_cache = {}
         for g in guarded:
-            if g.get("path") and _guard_map.matches(abs_path, g):
+            if g.get("path") and _guard_map.matches(abs_path, g, identity_cache=identity_cache):
                 return {**g, "reason": _deny_reason(
                     g, f"('{tool}' targeting {raw}).")}
         return None

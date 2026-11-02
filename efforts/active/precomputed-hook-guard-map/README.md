@@ -206,3 +206,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   preparation diagnostics into the guard-map owner without widening a baseline.
   The final focused guard-map packet passed 23 cases, including initial resident
   publication and its visible fail-open error path.
+- Addressed all four findings from the first implementation review: atomically
+  retain prepared caller scopes during withdrawal/interruption, consistently
+  acquire registry authority before publication locks, retire automatically
+  rediscovered callers removed from registration, and reuse each target identity
+  only within its current event. The focused packet passed 29 cases, including
+  actual concurrent registry-owned work and interruption/retry recovery.

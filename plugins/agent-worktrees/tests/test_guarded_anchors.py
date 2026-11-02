@@ -208,6 +208,32 @@ def test_nested_repository_does_not_inherit_parent_guard(tmp_path):
         assert bool(result) is denied
 
 
+@pytest.mark.parametrize("tool,args", [
+    ("edit", {"path": "new.txt"}),
+    ("powershell", {"command": "git commit -m first; git commit -m second"}),
+])
+def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path, monkeypatch, tool, args):
+    guard = _load("cross_repo_guard")
+    target = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(target),
+        "identity": guard._guard_map.repository_identity(target),
+    }
+    original = guard._guard_map.repository_identity
+    observed = []
+
+    def observe(path):
+        observed.append(path)
+        return original(path)
+
+    monkeypatch.setattr(guard._guard_map, "repository_identity", observe)
+    roots = [{**row, "name": f"target-{index}"} for index in range(20)]
+    for event in range(2):
+        assert guard.evaluate(tool, args, str(outside), roots) is None
+        assert len(observed) == event + 1
+
+
 def test_map_scope_does_not_borrow_other_installation(tmp_path):
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
@@ -260,7 +286,7 @@ def producer(tmp_path, monkeypatch):
     ))
     return SimpleNamespace(
         module=producer, root=root, callers=callers, target=target,
-        reader=reader, related=related_values, configurations=configurations,
+        reader=reader, related=related_values, configurations=configurations, registry=registry,
     )
 
 
@@ -279,7 +305,7 @@ def test_producer_keeps_directional_callers_and_withdraws_removed_policy(produce
 
 def test_preparation_does_not_recompute_other_prepared_callers(producer, monkeypatch):
     p = producer
-    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
     other_path = p.reader.map_path(p.callers[1], p.root)
     other = other_path.read_bytes()
@@ -304,9 +330,75 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
 
+def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer, monkeypatch):
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    original_write = p.module._atomic_write
+
+    def interrupt_publication(path, content):
+        if json.loads(content).get("inventory_authority") == "complete":
+            raise KeyboardInterrupt("synthetic interrupted acquisition")
+        original_write(path, content)
+
+    monkeypatch.setattr(p.module, "_atomic_write", interrupt_publication)
+    with pytest.raises(KeyboardInterrupt):
+        p.module.refresh(registry_root=p.root)
+    assert all(p.reader.map_path(caller, p.root).is_file() for caller in p.callers)
+    monkeypatch.setattr(p.module, "_atomic_write", original_write)
+    assert p.module.refresh(registry_root=p.root)["published"] == 2
+    assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
+
+
+@pytest.mark.parametrize("operation", ["refresh", "managed_write"])
+def test_publication_lock_order_allows_registry_owned_nested_work(producer, monkeypatch, operation):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    import threading
+
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    original_lock = p.module.registry_lock
+    requested = threading.Event()
+    effects = []
+
+    @contextmanager
+    def observe_registry_lock(path):
+        requested.set()
+        with original_lock(path):
+            yield
+
+    monkeypatch.setattr(p.module, "registry_lock", observe_registry_lock)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with original_lock(p.root / "repos.yaml"):
+            call = p.module.refresh if operation == "refresh" else (
+                lambda: p.module.managed_write(lambda: effects.append("parallel"))
+            )
+            future = workers.submit(call)
+            assert requested.wait(timeout=5)
+            p.module.managed_write(lambda: effects.append("nested"))
+            assert effects == ["nested"]
+        future.result(timeout=5)
+    assert effects == (["nested"] if operation == "refresh" else ["nested", "parallel"])
+
+
+def test_removed_registered_caller_is_retired_but_explicit_request_errors(producer, monkeypatch):
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    p.module.refresh(p.callers)
+    p.module.managed_write(lambda: p.registry.repos.pop("first"))
+    assert p.reader.read_map(p.callers[0], p.root).status == "missing"
+    assert p.reader.read_map(p.callers[1], p.root).status == "ready"
+    assert p.module.refresh()["published"] == 1
+    with pytest.raises(p.module.GuardPublicationError, match="no available selected-registry registration"):
+        p.module.refresh([p.callers[0]])
+    assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
+    assert p.module.refresh()["published"] == 1
+    assert p.reader.read_map(p.callers[0], p.root).status == "missing"
+
+
 def test_initial_resident_preparation_refreshes_views_and_reports_unavailability(producer, monkeypatch, capsys):
     p = producer
-    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers)
     p.related["first"].clear()
     p.module.prepare_resident()
@@ -324,7 +416,7 @@ def test_initial_resident_preparation_refreshes_views_and_reports_unavailability
 
 def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer, monkeypatch):
     p = producer
-    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
 
     def failed_write():
@@ -339,7 +431,7 @@ def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(produc
 
 def test_managed_write_reports_completed_source_before_publication_failure(producer, monkeypatch):
     p = producer
-    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
     effects = []
 
@@ -410,7 +502,7 @@ def test_plugin_related_mutation_refreshes_views_without_preparing_plugin_checko
 
 def test_explicit_refresh_command_and_strict_argument_rejection(producer, monkeypatch, capsys):
     p = producer
-    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     assert p.module.main(["--repo", str(p.callers[0]), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["published"] == 1
     with pytest.raises(SystemExit) as exc:
