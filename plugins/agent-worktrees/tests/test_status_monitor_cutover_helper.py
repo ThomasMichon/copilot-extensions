@@ -40,6 +40,11 @@ def test_installer_wrapper_preserves_unsuccessful_monitor_outcomes(
     assert "rollback kept serving state" not in output
 
 
+@pytest.fixture(autouse=True)
+def legacy_or_posix_cutover_contract(monkeypatch):
+    monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: False)
+
+
 class _Handle:
     def __init__(self, daemon):
         self.daemon = daemon
@@ -50,6 +55,61 @@ class _Handle:
 
     def poll(self) -> int | None:
         return None if self.daemon.alive else 0
+
+
+@pytest.mark.parametrize("boundary_change", ["start-reused", "third-owner"])
+def test_r1a_guarded_rollback_revalidates_owner_at_undrain_boundary(monkeypatch, boundary_change):
+    from pathlib import Path
+    from zdd.cutover import CutoverOrchestrator, CutoverResult
+
+    old = routing.Endpoint("127.0.0.1", 61001, 101, "old", 7, "1010")
+    new = routing.Endpoint("127.0.0.1", 61002, 202, "new", 8, "2020")
+    third = routing.Endpoint("127.0.0.1", 61003, 303, "third", 9, "3030")
+    state = {"active": new, "start": old.process_start_time}
+    undrains, checks = [], []
+
+    class Routing:
+        def read_table(self, root):
+            return {"active": state["active"].to_dict()}
+
+        def publish_active_with_previous_guarded(self, root, **kwargs):
+            assert kwargs["expected_active"] == new
+            state["active"] = old
+            if boundary_change == "start-reused":
+                state["start"] = "9999"
+            else:
+                state["active"] = third
+
+    def health(host, port):
+        checks.append((host, port))
+        return state["start"] == old.process_start_time
+
+    def request(self, action, payload=None, **kwargs):
+        assert action == "undrain"
+        undrains.append((state["active"], state["start"]))
+        return {"draining": False}
+
+    monkeypatch.setattr(smc.ControlClient, "_request", request)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda *a: pytest.fail("minted token"))
+    orch = CutoverOrchestrator(
+        Path("not-opened"), bind="127.0.0.1", version="new",
+        spawn_passive=lambda port: pytest.fail("spawned native fixture"),
+        health_check=health, predecessor_health_check=health,
+        make_client=lambda url: smc.ControlClient(url, token="retained-fixture-token"),
+        pick_free_port=lambda: 61002, routing_mod=Routing(), expected_old=old,
+        refuse_old=lambda active: (
+            None if state["start"] == old.process_start_time else "old identity changed"
+        ),
+    )
+    monkeypatch.setattr(orch, "_await_exit", lambda handle: True)
+    result = CutoverResult(ok=False)
+    orch._rollback(
+        old, SimpleNamespace(terminate=lambda: None), new.port, result,
+        flipped=True, expected_old=old, expected_new=new, drain_started=True,
+    )
+    assert checks, "owner health was not checked before restoration"
+    assert undrains == [], "guarded rollback sent undrain after retained owner changed"
+    assert not result.rolled_back
 
 
 def test_failed_monitor_census_is_not_an_empty_inventory(monkeypatch):

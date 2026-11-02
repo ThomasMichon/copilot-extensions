@@ -1,0 +1,9 @@
+{
+  "comment": "Add an opt-in atomic Windows observation deadline and stream-custody primitive; preserve ordinary POSIX and legacy foreground behavior.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

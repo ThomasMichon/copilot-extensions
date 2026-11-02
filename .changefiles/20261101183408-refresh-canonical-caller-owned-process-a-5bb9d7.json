@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh canonical caller-owned process assets for bounded observation custody",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

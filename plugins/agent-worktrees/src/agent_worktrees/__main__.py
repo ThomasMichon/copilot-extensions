@@ -621,6 +621,7 @@ def _classify_records(
     session_ctx: sessions.SessionContext | None = None,
     *,
     daemon_filters: dict | None = None,
+    cleanup_owner=None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """Classify each worktree's git state, keyed by worktree id.
 
@@ -668,6 +669,8 @@ def _classify_records(
     advisory only: any lease-layer failure (not contention) degrades to
     classifying live, exactly as before this guard existed.
     """
+    if cleanup_owner is not None and git_ops._windows_observation():
+        return _classify_records_live(records, session_ctx, cleanup_owner=cleanup_owner)
     if daemon_filters is not None:
         try:
             project = cfg.project_name()
@@ -804,7 +807,7 @@ def _classify_records_lease_guarded(
         lease.release()
 
 
-def _classify_daemon_compute(kind: str, payload: dict) -> dict:
+def _classify_daemon_compute(kind: str, payload: dict, *, cleanup_owner=None) -> dict:
     """Resident classify daemon's ``compute`` callback (Phase 4d, #2323).
 
     Runs inside the resident status-monitor process. Resolves + classifies
@@ -839,16 +842,29 @@ def _classify_daemon_compute(kind: str, payload: dict) -> dict:
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
+    if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
+        return _serialize_classify_map({
+            rec.worktree_id: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNKNOWN)
+            for rec in records
+        })
     session_ctx = sessions.scan_sessions_fast(records)
     config = cfg.load_config(path=cfg.project_dir(project) / "config.yaml", project=project)
     repo = config.default_repo
-    active_paths = _build_active_paths(records, session_ctx)
-    state_map = {
-        rec.worktree_id: _classify_one_record(
-            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+    def observe():
+        return _classify_records_live(records, session_ctx, repo=repo)
+    from . import push_timeout
+    try:
+        state_map = (
+            cleanup_owner.run_observation(project, repo.anchor, None, observe)
+            if cleanup_owner is not None else observe()
         )
-        for rec in records
-    }
+    except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending):
+        if cleanup_owner is None:
+            raise
+        state_map = {
+            rec.worktree_id: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNKNOWN)
+            for rec in records
+        }
     return _serialize_classify_map(state_map)
 
 
@@ -865,12 +881,23 @@ def _classify_records_live(
     session_ctx: sessions.SessionContext | None = None,
     *,
     repo=None,
+    cleanup_owner=None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """The actual ~5-git-calls-per-worktree batch classification.
 
     Factored out of :func:`_classify_records` so the lease wrapper can call it
     only when it actually won the race; a losing caller never reaches this.
     """
+    if cleanup_owner is not None and git_ops._windows_observation():
+        from .push_timeout import ObservationCleanupPending
+        project = cfg.project_name()
+        if cleanup_owner.observation_blocked(project):
+            raise ObservationCleanupPending("classification cleanup pending")
+        selected_repo = repo if repo is not None else cfg.load_config().default_repo
+        return cleanup_owner.run_observation(
+            project, selected_repo.anchor, None,
+            lambda: _classify_records_live(records, session_ctx, repo=selected_repo),
+        )
     if repo is None:
         repo = cfg.load_config().default_repo
     active_paths = _build_active_paths(records, session_ctx)
@@ -1276,7 +1303,10 @@ def _worktree_to_dict(
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=_turns, repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
-            finalized_checkout_current=finalized_checkout.matches(rec),
+            finalized_checkout_current=(
+                (not git_ops._windows_observation() or state_info.state != git_ops.WorktreeState.UNKNOWN)
+                and finalized_checkout.matches(rec)
+            ),
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
@@ -3121,6 +3151,10 @@ def _monitor_sweep(
                 project = managed_entry.get("project")
                 if (not isinstance(project, str) or not project) and session_projects is not None:
                     project = session_projects.get(path_key)
+                if not project and segment_cache is not None and git_ops._windows_observation():
+                    project = segment_cache.project_for_observation_path(path)
+                    if not project and (segment_cache.observation_busy() or segment_cache.observation_blocked("", path)):
+                        continue
                 if project:
                     cfg.set_active_project(project)
                 else:
@@ -3134,7 +3168,12 @@ def _monitor_sweep(
                 pass
             config_scope = _config_cache.project_scope(config_cache_for_project, project)
             with config_scope:
-                if sess not in ctx_done:
+                cleanup_blocked = (
+                    segment_cache is not None
+                    and git_ops._windows_observation()
+                    and segment_cache.observation_blocked(project or "", path)
+                )
+                if sess not in ctx_done and not cleanup_blocked:
                     try:
                         context_value = _render_status_context(path, plain=False)
                     except Exception:
@@ -3149,9 +3188,22 @@ def _monitor_sweep(
                         )
                 except _StatusMonitorGovernanceDeferred:
                     raise
+                except git_ops.push_timeout.ObservationCleanupError as error:
+                    if segment_cache is None:
+                        raise
+                    segment_cache.retain_unclaimed_cleanup(project or "", path, error)
+                    segment_value = segment_cache.pending_segment()
+                except git_ops.push_timeout.ObservationCleanupPending:
+                    if segment_cache is None:
+                        raise
+                    segment_value = segment_cache.pending_segment()
                 except Exception:
                     pass
-                if mux_bin:
+                cleanup_blocked = (
+                    segment_cache is not None and git_ops._windows_observation()
+                    and segment_cache.observation_blocked(project or "", path)
+                )
+                if mux_bin and not cleanup_blocked:
                     try:
                         _monitor_maybe_trigger_handoff_cutover(path, governance=governance)
                     except _StatusMonitorGovernanceDeferred:
@@ -3218,6 +3270,9 @@ def _monitor_sweep(
             _wait_for_lifecycle_priority(lifecycle_priority)
             with project_lock if project_lock is not None else contextlib.nullcontext():
                 try:
+                    if (segment_cache is not None and git_ops._windows_observation()
+                            and segment_cache.observation_blocked(project)):
+                        continue
                     cfg.set_active_project(project)
                     config_scope = _config_cache.project_scope(config_cache_for_project, project)
                     # One per-project config cache for the listing AND the handoff
@@ -3244,6 +3299,9 @@ def _monitor_sweep(
                                     continue
                             except Exception:
                                 continue
+                            if (segment_cache is not None and git_ops._windows_observation()
+                                    and segment_cache.observation_blocked(project, worktree_path)):
+                                continue
                             _monitor_maybe_process_handoff_record(record, governance=governance)
                 except _StatusMonitorGovernanceDeferred:
                     raise
@@ -3260,9 +3318,19 @@ def _monitor_sweep(
                     if roster_publisher is not None:
                         roster_publisher()
                     else:
-                        _warm_list_cache_for_active_project(interval=interval)
+                        _warm_list_cache_for_active_project(
+                            interval=interval,
+                            **({"cleanup_owner": segment_cache}
+                               if segment_cache is not None and git_ops._windows_observation() else {}),
+                        )
             except _StatusMonitorGovernanceDeferred:
                 raise
+            except git_ops.push_timeout.ObservationCleanupError as exc:
+                if segment_cache is None:
+                    raise
+                segment_cache.retain_unclaimed_cleanup(project, None, exc)
+                if roster_publisher is not None:
+                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
             except Exception as exc:
                 if roster_publisher is not None:
                     print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
@@ -3287,77 +3355,7 @@ def _status_monitor_recheck(governance, checkpoint: str) -> dict | None:
     return result
 
 
-class _StatusSegmentCache:
-    """Share throttled Git classification across monitor and IPC consumers.
-
-    Callers establish the target's active project before ``get`` so record
-    resolution and rendering share one activation.
-    """
-
-    def __init__(self, ttl: float = 60.0):
-        self.ttl = max(15.0, float(ttl))
-        self._entries: dict[str, tuple[float, str]] = {}
-        self._aliases: dict[str, str] = {}
-        self._lock = threading.RLock()
-
-    @staticmethod
-    def _key(path: str) -> str:
-        return os.path.normcase(os.path.realpath(path))
-
-    def get(self, path: str) -> str:
-        # Stage D (cluster-free): via _self_override -- unset on fast path (#4341).
-        from . import status_bar_cli as _sbc
-        input_key = self._key(path)
-        with self._lock:
-            now = time.monotonic()
-            key = self._aliases.get(input_key, input_key)
-            cached = self._entries.get(key)
-            if cached and now - cached[0] < self.ttl:
-                return cached[1]
-
-        record = _self_override("_find_record_for_path", _sbc._find_record_for_path)(path)
-        target = record.worktree_path if record and record.worktree_path else path
-        key = self._key(target)
-        with self._lock:
-            now = time.monotonic()
-            cached = self._entries.get(key)
-            if cached and now - cached[0] < self.ttl:
-                self._aliases[input_key] = key
-                return cached[1]
-        value = _self_override("_render_status_segment", _sbc._render_status_segment)(
-            target, fetch=False, plain=False, no_title=False, persist_title=True
-        )
-        with self._lock:
-            self._aliases[input_key] = key
-            self._entries[key] = (time.monotonic(), value)
-        return value
-
-    def invalidate(self, cwd: str | None) -> None:
-        if not cwd:
-            return
-        target = self._key(cwd)
-        with self._lock:
-            removed: set[str] = set()
-            for key in list(self._entries):
-                try:
-                    common = os.path.commonpath((target, key))
-                except (OSError, ValueError):
-                    continue
-                if common == key or common == target:
-                    self._entries.pop(key, None)
-                    removed.add(key)
-            for alias, key in list(self._aliases.items()):
-                try:
-                    common = os.path.commonpath((target, alias))
-                except (OSError, ValueError):
-                    common = ""
-                if key in removed or common == alias or common == target:
-                    self._aliases.pop(alias, None)
-
-    def invalidate_all(self) -> None:
-        with self._lock:
-            self._entries.clear()
-            self._aliases.clear()
+from .status_segment_cache import _StatusSegmentCache  # noqa: E402
 
 
 _HOOK_WRITE_TOOLS = frozenset(
@@ -4157,7 +4155,6 @@ class _ResidentHookPolicy:
         cwd = _hook_payload_cwd(payload)
         found = None
         try:
-            _activate_project_for_path(cwd, force=True)
             wt_id = tracking.find_worktree_id_by_cwd(cwd)
             path = cfg.tracking_dir() / f"{wt_id}.yaml" if wt_id else None
             if wt_id and path and path.is_file():
@@ -4228,8 +4225,12 @@ def _resident_hook_decision(
     _bind_nudge_decision = _self_override("_bind_nudge_decision", _session_binding_cli._bind_nudge_decision)
 
     cwd = _hook_payload_cwd(payload)
+    if kind == "snapshot" and git_ops._windows_observation():
+        retained = segment_cache.project_for_observation_path(cwd)
+        if segment_cache.observation_blocked(retained or "", cwd) or segment_cache.observation_busy():
+            return {"segment": segment_cache.pending_segment_for_path(cwd)}
     previous_project = cfg.active_project()
-    _activate_project_for_path(cwd, force=True)
+    segment_cache.activate_hook_project(cwd, _activate_project_for_path)
     try:
         if kind == "preToolUse":
             return policy.pre(payload)
@@ -4241,7 +4242,9 @@ def _resident_hook_decision(
                 for target in targets:
                     segment_cache.invalidate(target)
             advisory = policy.post(payload, deadline)
-            binding = _bind_nudge_decision(cwd, deadline=deadline)
+            binding = _bind_nudge_decision(cwd, deadline=deadline) if (
+                cfg.active_project() or not git_ops._windows_observation()
+            ) else {}
             if advisory and binding:
                 a = str(advisory.get("additionalContext") or "")
                 b = str(binding.get("additionalContext") or "")

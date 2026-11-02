@@ -7,9 +7,9 @@ import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from functools import lru_cache
+import math
 import os
 import subprocess
-import math
 import time
 
 from agent_procutil import JobHandle, _build_job_extended_limit_info, _configure_job_api, _kernel32
@@ -316,7 +316,10 @@ def _environment_block(environment):
     return ctypes.create_unicode_buffer("\0".join(entries) + "\0\0")
 
 
-def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=None, **kwargs):
+def spawn(
+    argv: list[str], *, budget=None, command_deadline: float | None = None, on_settled=None,
+    cleanup_deadline: float | None = None, **kwargs,
+):
     """Create the target in its caller-owned Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
@@ -335,6 +338,21 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
     allow_breakaway = kwargs.get("allow_breakaway", False)
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
+    def remaining(deadline):
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
+        return seconds
+
+    if cleanup_deadline is not None:
+        if type(cleanup_deadline) not in (int, float) or not math.isfinite(cleanup_deadline):
+            raise ValueError("cleanup_deadline must be a finite monotonic instant")
+        remaining(cleanup_deadline)
+    if command_deadline is not None and cleanup_deadline is not None and command_deadline > cleanup_deadline:
+        raise ValueError("command_deadline must not exceed the cleanup deadline")
+    launch_deadline = command_deadline if command_deadline is not None else cleanup_deadline
+    if cleanup_deadline is not None and launch_deadline is not None:
+        remaining(launch_deadline)
     job = None
     process = None
     creation_attempted = False
@@ -438,8 +456,8 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
             try:
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
-                if command_deadline is not None and time.monotonic() >= command_deadline:
-                    raise subprocess.TimeoutExpired(argv, 0)
+                if launch_deadline is not None:
+                    remaining(launch_deadline)
                 creation_attempted = True
                 if not kernel.CreateProcessW(
                     None, command, None, None, True,
@@ -449,11 +467,14 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                     creation_attempted = False
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
-                if command_deadline is not None and time.monotonic() >= command_deadline:
-                    raise subprocess.TimeoutExpired(argv, 0)
+                if launch_deadline is not None:
+                    remaining(launch_deadline)
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
+                if cleanup_deadline is not None and info.hProcess:
+                    # Preserve R1a reader custody through post-creation failures.
+                    parent_streams.pop_all()
                 if process is not None:
                     process.close_thread()
                 elif info.hThread:
@@ -466,10 +487,31 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
             # Transfer only parent streams and native custody, never inheritable child handles.
             parent_streams.pop_all()
             return process, job
-    except BaseException as error:
+    except BaseException as operation_error:
         if process is None and info.hProcess:
             process = _Process(argv, info, streams)
         if process is not None:
+            if cleanup_deadline is not None:
+                job_empty_confirmed = False
+                try:
+                    job.terminate_and_wait(remaining(cleanup_deadline))
+                    job_empty_confirmed = True
+                    process.wait(max(0.0, cleanup_deadline - time.monotonic()))
+                    if failed_preparation or process._thread_handle:
+                        raise cleanup_error() from operation_error
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        if stream is not None:
+                            stream.close()
+                    process.close()
+                except BaseException as cleanup:
+                    failure = cleanup_error()
+                    failure.operation_error = operation_error
+                    failure.cleanup_error = cleanup
+                    failure._job_empty_confirmed = job_empty_confirmed
+                    raise failure from operation_error
+                if on_settled is not None:
+                    on_settled()
+                raise
             try:
                 if budget is None:
                     job.terminate_and_wait(2.0)
@@ -488,7 +530,7 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                 raise cleanup_error() from cleanup
             if process._thread_handle or failed_preparation:
                 # Keep the failed native handle, rather than retrying an uncertain close.
-                raise cleanup_error() from error
+                raise cleanup_error() from operation_error
             try:
                 process.close()
             except BaseException as cleanup:

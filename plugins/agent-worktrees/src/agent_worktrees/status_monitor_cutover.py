@@ -24,7 +24,7 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import breadcrumb, routing
 from zdd.cutover import CutoverOrchestrator
 
-from . import locks
+from . import locks, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
 from .handoff_prompt_receipt_control import ACTION as RECEIPT_ACTION, FRAME_BYTES, unique_object
@@ -33,23 +33,9 @@ _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
 _CUTOVER_LOCK_TIMEOUT_S = 300.0
 
-# A single resident sweep pass (core._monitor_sweep) is one atomic,
-# non-interruptible unit of work covering every tracked worktree across every
-# registered project/machine -- "busy: ['sweep']" in a drain's busy_sessions
-# means that pass hasn't finished yet, not that anything is stuck. On a large
-# fleet that one pass can legitimately take well over 30s (observed
-# 44s-2m10s+), and this module's own `activate_after_update()` was overriding
-# CutoverOrchestrator's already-generous built-in drain_timeout default
-# (zdd.cutover.CutoverOrchestrator, 300.0s) down to a needlessly aggressive
-# 30.0s -- making cutover's drain lose the race essentially every time and
-# leave the superseded daemon un-reaped, accumulating orphaned
-# status-monitor processes on every auto-update (#5326). Fix: stop
-# overriding the orchestrator's own default drain_timeout, and align
-# health_timeout with its default too (both were previously hardcoded here
-# to match the orchestrator's defaults anyway, so this is a no-op for
-# health_timeout and a pure increase for drain_timeout). Both remain
-# overridable per-machine via env var so an even larger fleet can be tuned
-# without another code change.
+# A resident sweep is atomic across the fleet; "busy: ['sweep']" need not mean
+# stuck. Keep the orchestrator's 300s drain default: a former 30s override
+# stranded superseded monitors (#5326). Health/drain remain machine-tunable.
 def _env_timeout(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw:
@@ -129,6 +115,7 @@ class _ControlServer(socketserver.ThreadingTCPServer):
 class _ControlHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         current_read = None
+        action = None
         try:
             self.request.settimeout(_READ_TIMEOUT_S)
             raw = self.rfile.readline(256 * 1024)
@@ -171,6 +158,8 @@ class _ControlHandler(socketserver.StreamRequestHandler):
                 return
             if action == RECEIPT_ACTION:
                 request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
+            if action == guarded_recovery.ACTION:
+                request = guarded_recovery.decode_request(raw)
             payload = request.get("payload")
             if not isinstance(payload, dict):
                 payload = {}
@@ -213,7 +202,12 @@ class _ControlHandler(socketserver.StreamRequestHandler):
                            b'"status":"unknown","reason":"response-too-large",'
                            b'"replayed":false,"subject":null,"owner":null}}\n')
             self.wfile.write(encoded)
-        except Exception:
+        except guarded_recovery.RecoveryUnavailable as exc:
+            self.wfile.write(guarded_recovery.encode_result(guarded_recovery.refused(str(exc))))
+        except Exception as exc:
+            if action == guarded_recovery.ACTION:
+                print(f"guarded-undrain receiver failed: {type(exc).__name__}", file=sys.stderr)
+                self.wfile.write(guarded_recovery.encode_result(guarded_recovery.refused("receiver-error")))
             return
         finally:
             if current_read:
@@ -296,6 +290,7 @@ class ControlClient:
         config_dir: Path | None = None,
         timeout: float = 5.0,
         transition_custody: ExitStack | None = None,
+        guarded_predecessor: guarded_recovery.GuardedPredecessor | None = None,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
@@ -307,6 +302,7 @@ class ControlClient:
         self.config_dir = Path(config_dir) if config_dir is not None else None
         self.timeout = timeout
         self.transition_custody = transition_custody
+        self.guarded_predecessor = guarded_predecessor
 
     def _request(
         self, action: str, payload: dict | None = None, *,
@@ -321,18 +317,22 @@ class ControlClient:
         else:
             body = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
         deadline = None if total_timeout is None else time.monotonic() + total_timeout
-        with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
-            sock.settimeout(self.timeout if read_timeout is None else read_timeout)
+
+        def remaining(cap):
+            budget = cap if deadline is None else min(cap, deadline - time.monotonic())
+            if budget <= 0:
+                raise TimeoutError("status-monitor request deadline exceeded")
+            return budget
+
+        with socket.create_connection((self.host, self.port), timeout=remaining(self.timeout)) as sock:
+            sock.settimeout(remaining(self.timeout))
             sock.sendall(body)
+            sock.settimeout(remaining(self.timeout))
             sock.shutdown(socket.SHUT_WR)
             chunks = []
             size = 0
             while True:
-                if deadline is not None:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("status-monitor current-roster read deadline exceeded")
-                    sock.settimeout(min(self.timeout, remaining))
+                sock.settimeout(remaining(self.timeout if read_timeout is None else read_timeout))
                 chunk = sock.recv(65536)
                 if not chunk:
                     break
@@ -347,6 +347,8 @@ class ControlClient:
             from .agenda_contract import decode
 
             response = decode(buf)
+        elif action == guarded_recovery.ACTION:
+            response = guarded_recovery.decode_response(buf)
         else:
             response = json.loads(buf.decode("utf-8"))
         result = response.get("result")
@@ -386,11 +388,20 @@ class ControlClient:
             timeout=timeout, poll=poll, rpc_timeout=self.timeout, force=force,
         )
         with trace.stage("select-successor"):
-            active = (
-                routing.read_active_endpoint(self.config_dir, verify_listener=False)
-                if self.config_dir is not None else None
-            )
-        if active is not None and active.base_url != self.base_url:
+            if self.guarded_predecessor is not None:
+                if self.config_dir is None:
+                    raise guarded_recovery.RecoveryUnavailable("missing-route-context")
+                active = guarded_recovery.active_endpoint(self.config_dir)
+            else:
+                active = (
+                    routing.read_active_endpoint(self.config_dir, verify_listener=False)
+                    if self.config_dir is not None else None
+                )
+        if self.guarded_predecessor is not None:
+            self.guarded_predecessor.require_target(self.base_url)
+            if active != self.guarded_predecessor.route:
+                raise guarded_recovery.RecoveryUnavailable("predecessor-route-changed")
+        elif active is not None and active.base_url != self.base_url:
             with trace.stage("promote-successor"):
                 promoted = ControlClient(
                     active.base_url, token=self.token,
@@ -413,10 +424,30 @@ class ControlClient:
         return result
 
     def undrain(self) -> dict:
+        if self.guarded_predecessor is not None:
+            return self.guarded_predecessor.undrain(self)
         return self._request("undrain")
 
     def shutdown(self) -> dict:
-        return self._request("shutdown")
+        if self.guarded_predecessor is None:
+            return self._request("shutdown")
+        from zdd import process_exit
+
+        predecessor = self.guarded_predecessor
+        predecessor.require_target(self.base_url)
+        deadline = time.monotonic() + min(self.timeout, 30.0)
+        with process_exit.open_process(
+            predecessor.receiver.pid, predecessor.receiver.process_start_time,
+        ) as reference:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise guarded_recovery.RecoveryUnavailable("retirement-deadline-expired")
+            result = self._request("shutdown", read_timeout=remaining, total_timeout=remaining)
+            if not isinstance(result, dict) or result.get("shutdown") is not True:
+                raise guarded_recovery.RecoveryUnavailable("retirement-not-accepted")
+            if not reference.wait(max(0.0, deadline - time.monotonic())):
+                raise guarded_recovery.RecoveryUnavailable("retirement-exit-unconfirmed")
+        return {**result, "retired": True}
 
     def adopt_relay(self) -> dict:
         return self.promote()
@@ -443,13 +474,10 @@ def monitor_log_path(cwd: str) -> Path:
 
 
 def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: bool):
-    """Launch a resident status-monitor generation through ``spawn_daemon``.
-
-    Runs from the monitor's install root (``_daemon_cwd``), breaks away from a
-    kill-on-close Job around the caller (an installer, an updater, a hook) and
-    appends its stdout/stderr to :func:`monitor_log_path`. A Job that forbids
-    breakaway fails the spawn rather than starting a monitor that would die
-    with its caller.
+    """Use ``spawn_daemon`` from the install root (``_daemon_cwd``).
+    Escape the caller's kill-on-close Job and append stdout/stderr to
+    :func:`monitor_log_path`. If breakaway is forbidden, refuse rather than
+    starting a monitor that would die with its caller.
     """
     from agent_procutil import python_cache_args
     from . import status_monitor_runtime as smr
@@ -687,6 +715,7 @@ def activate_after_update(
     if refusal is not None:
         summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
         return summary
+    guarded = guarded_recovery.enabled()
     monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
     restart_arguments = {}
     if runtime_python is not None:
@@ -696,7 +725,10 @@ def activate_after_update(
     lock_live = _monitor_lock_is_live()
     if not lock_live:
         try:
-            routed_live = routed_monitor_identity() is not None
+            routed_live = (
+                guarded_recovery.routed_owner_present(routing_dir()) if guarded
+                else routed_monitor_identity() is not None
+            )
         except (OSError, ValueError, ConnectionError):
             summary.update(
                 action="refused", reason="routed-monitor-unverified",
@@ -716,6 +748,12 @@ def activate_after_update(
         return summary
     active_url = _monitor_control_url_from_route()
     if active_url is None:
+        if guarded:
+            summary.update(
+                action="refused", reason="guarded-recovery-no-control-listener",
+                result={"ok": False, "error": "Live monitor has no verifiable control listener"},
+            )
+            return summary
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor(**restart_arguments)
@@ -732,19 +770,82 @@ def activate_after_update(
         return summary
     py = runtime_python or sys.executable
     make_client = _make_client
+    health_check = _health_check
+    predecessor_health_check = _predecessor_health_check
+    options = {}
+    transition_started = not guarded
+    local_custody = ExitStack()
     if transition_custody is not None:
         def make_client(base_url: str) -> ControlClient:
             client = _make_client(base_url)
             client.transition_custody = transition_custody
             return client
     try:
+        if guarded:
+            try:
+                predecessor = guarded_recovery.negotiate(
+                    routing_dir(), control_token_path(), ControlClient, timeout=_READ_TIMEOUT_S,
+                )
+            except (OSError, ValueError) as exc:
+                summary.update(
+                    action="refused", reason=f"guarded-recovery-unavailable:{exc}",
+                    result={"ok": False, "error": f"Guarded predecessor recovery unavailable: {exc}"},
+                )
+                return summary
+
+            def make_client(base_url: str) -> ControlClient:
+                return ControlClient(
+                    base_url, token=predecessor.token, config_dir=routing_dir(), timeout=65.0,
+                    transition_custody=transition_custody or local_custody,
+                    guarded_predecessor=predecessor,
+                )
+
+            published_successor = None
+
+            def health_check(host, port):
+                return guarded_recovery.successor_healthy(
+                    host, port, make_client, expected=published_successor,
+                )
+
+            def activate_successor(endpoint):
+                nonlocal published_successor
+                if (
+                    guarded_recovery.active_endpoint(routing_dir()) != endpoint
+                    or locks.process_start_time(endpoint.pid) != endpoint.process_start_time
+                ):
+                    raise guarded_recovery.RecoveryUnavailable("successor-publication-changed")
+                client = make_client(endpoint.base_url)
+                health = client.health()
+                if type(health.get("pid")) is not int or health["pid"] != endpoint.pid:
+                    raise guarded_recovery.RecoveryUnavailable("successor-identity-changed")
+                published_successor = endpoint
+                promoted = client.promote()
+                if not isinstance(promoted, dict) or promoted.get("adopted") is not True:
+                    raise guarded_recovery.RecoveryUnavailable("successor-promotion-refused")
+                if (
+                    not health_check(endpoint.client_host, endpoint.port)
+                    or guarded_recovery.active_endpoint(routing_dir()) != endpoint
+                ):
+                    raise guarded_recovery.RecoveryUnavailable("successor-serving-unconfirmed")
+                from .runtime_monitor_demand import retain_transition_demand
+
+                (transition_custody or local_custody).enter_context(
+                    retain_transition_demand(routing_dir().parent, endpoint.pid),
+                )
+
+            predecessor_health_check = lambda host, port: predecessor.predecessor_healthy(host, port, make_client)
+            options = {
+                "expected_old": predecessor.route, "refuse_old": predecessor.refuse_old,
+                "drain_before_publish": True, "on_published": activate_successor,
+            }
+        transition_started = True
         if spawned_handles is not None:
             print("Monitor transition: checking prior recovery", flush=True)
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
         summary["recovery"] = breadcrumb.recover_stale_cutover(
             routing_dir(),
             make_client,
-            health_check=_health_check,
+            health_check=health_check,
         )
         if summary["recovery"].get("refused"):
             reason = breadcrumb.refusal_reason(summary["recovery"])
@@ -769,10 +870,11 @@ def activate_after_update(
             bind=_BIND,
             version=None,
             spawn_passive=spawn,
-            health_check=_health_check,
-            predecessor_health_check=_predecessor_health_check,
+            health_check=health_check,
+            predecessor_health_check=predecessor_health_check,
             make_client=make_client,
             pick_free_port=pick_free_port,
+            **options,
         )
         if spawned_handles is not None:
             print("Monitor transition: entering native cutover", flush=True)
@@ -785,8 +887,11 @@ def activate_after_update(
         summary["result"] = result.to_dict()
     finally:
         try:
-            if cutover_guard is None:
-                lease.release()
+            try:
+                local_custody.close()
+            finally:
+                if cutover_guard is None:
+                    lease.release()
         finally:
             # Legacy callers require the async backstop, even on an unexpected
             # exception escaping stale recovery, orchestration, or the
@@ -799,7 +904,7 @@ def activate_after_update(
             # meant to heal an ambiguous daemon state left behind by that
             # very failure. An owner supplying both the guard and child
             # handles instead settles those processes under retained custody.
-            if cutover_guard is None or spawned_handles is None:
+            if transition_started and (cutover_guard is None or spawned_handles is None):
                 status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 

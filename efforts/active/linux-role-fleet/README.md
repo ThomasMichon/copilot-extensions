@@ -538,6 +538,16 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+### 2026-11-01 UTC - Keyed attribution source plan accepted
+
+#8795 merged the [keyed attribution continuation](telemetry-attribution.md)
+after current-head review, resolution of all three findings and required green
+CI. It preserves truthful producer/subject/collector identity, explicit
+mixed-version writer support, and compatible final-storage privacy/retention
+gates. The sub-plan records exact source acceptance. This parent remains
+Active: implementation admission, #8377, existing installer/formatter owners
+and all runtime, shared-export and privacy acceptance remain open.
+
 ### 2026-10-31 - Checkpoint authorization proposal reviewed
 
 See the [reviewed opt-in proposal and remaining implementation gates](komodo-repair-checkpoint-authorization.md#2026-10-31---checkpoint-authorization-proposal-reviewed).

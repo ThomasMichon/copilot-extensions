@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** plan-only PR, then independent dependency-ordered PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, derived status and resident authority; `visions/plugin-services/README.md`, service-scaled process ownership
 - **Umbrella issue:** #7944
 - **Sub-issues:** #7945
@@ -20,13 +20,54 @@ This closes existing bounded-observation and service-ownership intent; it
 does not extend the vision or authorize implementation. Follow the existing
 performance-measurement, headless-launch and process-containment patterns.
 
+### Current admitted slice
+
+The Windows-first R1a amendment includes local deadline propagation, atomic
+creation-time Job ownership, retained reader/root custody, and the narrowly
+admitted guarded recovery integration. It does not admit R1b lock separation,
+R2 passive-fsmonitor policy, POSIX observation containment, or any F1/P/H2
+redesign. Ordinary POSIX and genuinely absent-predecessor branches retain
+compatibility behavior.
+
+The receiver-bound `guarded-undrain/v1` operation now exists on the existing
+authenticated control transport. Preflight retains one existing token and
+requires the capability before drain/spawn/publication. The receiver checks
+its PID, native start, runtime generation, exact restored route and listening
+port under the monitor state lock followed by the existing routing lock;
+only then may the existing undrain callback reopen admission. A strictly typed
+positive receipt is required. There is no legacy-undrain fallback.
+
+The shared ZDD rollback checks predecessor identity during restoration and
+again before undrain. Those caller checks do not replace the receiver's atomic
+route fence. The two retained counterexamples now pass. Guarded rollback changes
+remain in canonical ZDD source; the current base independently removed physical
+vendor copies. This slice adds no dependency-layout migration or new ZDD API.
+
+Separate opt-in native tests use only disposable, no-breakaway Job-owned
+fixtures. They exercise the real installer helper/orchestrator/client/parser/
+receiver pairing, capability skew, malformed frames, identity/route mismatch,
+third-owner and routing-lock barriers, legitimate restored election generation,
+lost/untyped replies, uncertain publication and unconfirmed successor exit.
+Actual Git alias descendants additionally prove fixed 15-second D with the
+five-second cleanup reserve, a dead Git root with held output pipes, caller
+death during execution and before first native resume, verified empty Jobs,
+closed native root/readers, cwd/env/text output and ordinary binary input.
+
+These are source/native-fixture receipts, not source acceptance, installed
+qualification, a nominal CPU/process benchmark or broader campaign completion.
+Current-head review and required CI still gate #8458; keep #7944/#7945
+and the unadmitted R1b/R2/platform/integration work open. Earlier hold and
+fail-first journal entries below are historical and remain evidence, not the
+current implementation status.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan author | Source trace, bounded proposal, plan PR only | #7944/#7945 and this effort |
 | Integration coordinator | Independent admission of exact implementation hunks | Reviewed proposal and the two tracking issues |
-| R1 implementer (unassigned) | Initial/default deadline and observation-lock separation | Separate managed worktree after admission |
+| R1a implementer | Admitted local deadline and opt-in cleanup only | `buzzing-clasp`; #7944 |
+| R1b implementer (unassigned) | Observation-lock separation after shared-owner admission | Separate managed worktree after admission |
 | R2 implementer (unassigned) | Invocation-local passive fsmonitor suppression | Separate managed worktree after R1 API admission |
 | Existing owners | Roster/feed publication, resident control and receipt storage | Existing issue/effort reservations; no reassignment |
 
@@ -114,8 +155,9 @@ or additional operator authorization.
 - [x] Specify separate R1/R2 contracts, exclusions and test-tier obligations.
 - [x] Address a fresh independent review and land the docs-only plan through
   source review and required CI.
-- [ ] Return exact plan/head/claims to the integration coordinator; obtain
-  independent admission before any functional edit.
+- [x] Return exact plan/head/claims to the integration coordinator; obtain
+  independent admission before any functional edit. R1a only is admitted;
+  R1b and R2 remain gated.
 
 ### R1 — One deadline and unlocked observation
 - [ ] Implement R1a local deadline propagation and contained cleanup from
@@ -156,7 +198,7 @@ or executed evidence.
 
 ## Validation Plan
 
-- [ ] Complete the plan-only checks in [validation.md](validation.md).
+- [x] Complete the plan-only checks in [validation.md](validation.md).
 - [ ] Exercise all R1 unit and real-process cases, including concurrent
   unrelated admission/publication and stale observation rejection.
 - [ ] Exercise all R2 policy tests and supported-native cycles; preserve
@@ -191,6 +233,16 @@ from admitted mutation without introducing another authority or cache.
 Prefer invocation-local `-c core.fsmonitor=false` for passive classifier
 status reads over a new session-lifetime configuration policy.
 
+The blocking POSIX per-probe census finding has an
+[observation-scoped confirmation proposal](posix-confirmation-proposal.md).
+It is a design-only request for narrow shared-owner agreement, not admission
+to alter procutil or a waiver of the Medium finding.
+
+The [caller-custody and Windows-first design](caller-custody-and-platform-slice.md)
+maps the exact cache/background/roster/owner-loss gates. It rejects implementing
+the unproved POSIX anchor-lifetime candidate and proposes an explicitly
+review-gated platform slice, not disabling ordinary POSIX classification.
+
 ## Journal
 
 ### 2026-10-28 - Direct retained acceptance and bounded-admission reconciliation
@@ -222,3 +274,335 @@ status reads over a new session-lifetime configuration policy.
   green CI. Its two Low findings prompted a discoverability-row follow-up
   and repair of a multiline PR-description transport loss. No contract,
   implementation or rollout authority was expanded.
+- Follow-up #8379 merged after the existing #8392 repair, preserved repair
+  bytes, fresh source approval and green required CI. The coordinator
+  admitted only R1a. First targeted units exercise local deadlines, failure
+  semantics and cleanup composition; actual native consumers and broader
+  concurrency/fsmonitor qualification remain open.
+- R1a first source checkpoint: 83 targeted new/existing contracts passed,
+  with 99 unrelated/native cases deselected. Focused Ruff, unchanged module
+  ceilings, install contract, effort structure, docs consistency and whitespace
+  checks passed. New cases cover one deadline, initial/default failures,
+  actual fetch attempts, UNKNOWN versus finalized display, reserved cleanup,
+  cancellation and unchanged legacy binary/input/timeout behavior.
+- The initial Python 3.9 invocation lacked `tomllib`; validation used an
+  already available modern interpreter and the normal isolated test wrapper.
+  Two failing test adapters/schema assertions were corrected and the combined
+  selection rerun green. No native timing/process qualification is inferred.
+- Requested checkpoint precedes actual isolated consumer/shim, held-pipe and
+  native cleanup expansion. R1b, R2, installed proof and root acceptance remain
+  unadmitted/open; no service or production fixture was changed.
+- Source review #8458 identified three High cleanup/capability faults and a
+  blocking Medium per-probe global-census cost. Seven pure regression cases
+  failed before the admitted High fixes; all 90 combined targeted cases then
+  passed, with 99 unrelated/native cases deselected. Full capability preflight,
+  failed-Job custody and cleanup-error propagation are corrected in R1a-owned
+  hunks only. Legacy non-observation paths remain unchanged.
+- The Medium stays blocking. Its observation-scoped API proposal is documentation
+  only and requires coordinator/shared-owner agreement before any implementation.
+  No procutil/shared API, native fixture, service or production deadline changed.
+- Fresh review confirmed all three original High findings resolved, and raised
+  a new High for resident callback loops discarding cleanup custody. The scoped
+  proposal records those separately owned caller gates and the unresolved
+  caller-death/lifetime boundary. Neither that High nor the Medium is waived;
+  no unadmitted callback or shared-library implementation was changed.
+- Bounded follow-up design traced the actual segment cache, snapshot, bundle
+  request/background cache, classify, warm-roster/list and drain continuations.
+  The concrete common carrier is the monitor's existing segment-cache instance,
+  with frame-local custody for the standalone updater. The design names exact
+  typed catches, next-tick settlement, stale-data/fallback gates and lifecycle
+  amendments rather than treating two callback catches as a complete fix.
+- No proved universal POSIX outer-lifetime boundary was established. Do not
+  implement the anchor candidate. The proposed Windows-first amendment retains
+  ordinary POSIX behavior and its open #7944 work; neither alternative nor
+  caller/native-API hunk is implemented or admitted by this design checkpoint.
+
+### 2026-10-24 — Admitted Windows-first source checkpoint
+
+- Implemented the admitted same-instance segment-cache carrier and explicit
+  bundle/classify/request/background/snapshot/served/warm-roster continuations.
+  The standalone updater retains frame custody and its existing native lease.
+  Project/config/title effects remain under their existing locks.
+- Added the narrow canonical `JobHandle.try_terminate_and_confirm_empty` API.
+  False/error retains the actual handle; successful emptiness alone does not
+  release root/readers. The legacy positive-timeout contract is unchanged.
+- Closing rejects new observations, not late cleanup transfer. Invalidation
+  and record removal cannot discard tickets or refresh stale evidence. Lost
+  served-path hints consult retained ownership before activation; unresolved
+  unknown scopes defer while independent known projects continue.
+- Fail-first regressions reproduced capability/handle/fallback, carrier and
+  actual continuation failures. Two additional fail-first served-path cases
+  exposed discovery before custody gating; a POSIX network-timeout case
+  exposed and corrected a compatibility regression. Actual updater/monitor
+  negative controls detect discarded custody or premature release.
+- Latest bounded selection: **124 passed, 99 deselected**; canonical shared
+  Job tests: **22 passed, 1 real-process case deselected**. See
+  [validation.md](validation.md) for commands, receipts and exclusions.
+- No native run, service/installed update, deadline growth, ready marker,
+  merge or issue closure is claimed. Source review must reassess the new High
+  and blocking Medium against this amendment; local units do not resolve
+  either review obligation on their own.
+
+### 2026-10-26 - Guarded recovery and isolated native qualification
+- Admitted the strict receiver operation and bounded existing ZDD integration;
+  retained legacy/POSIX/default-absence behavior and all other scope holds.
+- Real native transport fixtures: 14 passed; full installer/orchestrator
+  ambiguity/rollback fixtures: 6 passed. Actual monitor handler/custody packet:
+  44 passed. Real Git/descendant/pipe/caller-death/cancellation and I/O controls: 6 passed.
+- A broader combined packet exposed eight old monitor-fixture mismatches,
+  including an unintended POSIX cache project lookup. The cache now resolves
+  observation identity only for the Windows opt-in. Baseline cache tests run
+  both platform branches, legacy doubles explicitly select the legacy contract,
+  and the complete affected monitor file passes 184 cases.
+- Canonical procutil/ZDD selection passed 290 cases, with three existing
+  Linux-only skips (directory fsync, flock and fork); no new native case is
+  waived. The final combined source/native packet passed 498 cases in 149.75
+  seconds with no skips. Current-head publication gates remain pending.
+- Module size initially failed at 1,022 monitor CLI lines. Cohesive health
+  contract and retired-surface pruning moved to their owning helpers; the
+  CLI is 998 lines without a baseline increase. Focused Ruff and install
+  contract pass. No service, installed runtime or production session changed.
+
+### 2026-10-26 - Final retained-continuation review corrections
+- Re-read the still-open original review against current source rather than
+  treating prior green tests as acceptance. Six last-round consumer defects
+  remained real: a fallback handoff gate, delayed settled-error association,
+  cached-bundle identity, pre-lease updater discovery, stale snapshot display
+  and obsolete lease contenders.
+- Twelve exact consumer regressions captured 11 failures and one passing
+  required-replacement control before correction. All 92 affected review,
+  custody and updater cases then passed. The integrated packet passed 546
+  cases, zero skipped, in 146.60 seconds (153.70 including runner cleanup).
+- The cache now keeps stored bytes/ages while displaying pending UNKNOWN,
+  rejects wrong bundle identities, and never attaches an already-settled
+  error to a new ticket. The existing fallback handoff pass uses the same
+  carrier gates; no handoff choreography or authority changed.
+- Windows updater discovery follows the native lease. Contention rechecks
+  current owner, session and runtime; redundant/retired contenders exit,
+  while a required replacement still waits for predecessor cleanup. Ordinary
+  Linux/macOS paths retain baseline activation and no new lease.
+- An additional real legacy-client/new-provider control passed in the full
+  15-case native wire file. This complements new-caller/old-provider refusal;
+  it does not permit legacy fallback in guarded recovery. Source review,
+  current-tip integration, required CI and installed qualification stay open.
+
+
+### 2026-10-27 - Second-round guarded lifecycle and continuation corrections
+
+- The next independent review identified seven remaining blockers. Added
+  fail-first coverage before correcting the portable injected Windows fixture,
+  live previous-owner/no-listener refusal, successor activation, actual native
+  predecessor retirement, stored cancellation, repeated updater cancellation,
+  and invalidations deferred by observation custody.
+- Guarded publication now uses the existing `on_published` seam: authenticate the
+  exact elected successor, promote it, verify published/ready/admitting health,
+  and retain transition demand before the existing verify-before-retire gate.
+  Passive preflight health is not serving readiness. No new ZDD API is added.
+- Guarded shutdown captures the existing identity-bound native exit reference
+  before control. A shutdown acknowledgement alone is not retirement; only
+  native exit within the same bounded budget produces a positive receipt.
+- Real isolated cutover now succeeds through installer, orchestrator, client,
+  parser and native exit. Promotion refusal/unready controls restore the old
+  owner without retirement. A cleanup barrier proves acknowledgement cannot
+  clear the breadcrumb or complete cutover while that owner is still alive.
+- The 13-file affected selection passed **548 tests, zero skips**. Canonical
+  procutil/ZDD selection passed **359 tests**, with **15 native POSIX-only
+  skips** on Windows. The injected creation fixture uses explicit OS/CRT shims,
+  not a platform skip. See [validation.md](validation.md).
+- Refreshed one already-admitted procutil source hash in the promotion packet;
+  its 2,407 nodes, 129 production targets, 300-second cap and effect prohibitions
+  are unchanged. The actual fixed packet passed all 2,407 admitted nodes in
+  153.812 seconds with its coverage/effect checks intact at `5c353233e8`.
+  Fresh current-head review and required CI remain gates; no release, installed
+  rollout or broader completion is claimed.
+
+
+### 2026-10-27 - Third-round scope and standalone-library corrections
+
+- The next independent review confirmed the previous seven blockers resolved,
+  then found five additional native-budget, standalone-library, hook-discovery,
+  cache-publication and sibling-layout defects. Two native setup controls and
+  eight initial resident continuation controls failed before their fixes.
+- The actual atomic adapter now receives and enforces the command cutoff before
+  create/resume, while failure cleanup retains the original absolute D. Optional
+  legacy callers keep their previous cleanup allowances.
+- Both actual worktrees-consumer pairings now belong to the worktrees suite;
+  its fixture loads the canonical pure library launch fixture. The library has
+  no reverse consumer dependency. Its real standalone managed lane, with only
+  its own declared dependencies, passed 660 cases; 164 existing platform/native
+  opt-in cases were skipped on this Windows worker.
+- Windows resident hook activation uses retained/registered metadata, including
+  default sibling and explicit worktree roots, instead of Git discovery.
+  Permission policy, mutation invalidation, accounting and known-project bind
+  reminders still run. Ordinary POSIX activation remains unchanged.
+- Short cache publication/eviction sections now share the carrier's existing
+  admission lock. Git computation remains outside that lock. Both barrier
+  orderings and actual SQLite bytes/ages have explicit controls. Segment keys
+  retain their project association, so sibling-layout invalidation preserves A
+  while independent B can still invalidate and refresh.
+- The six-file hook/cache/custody selection passed 295 tests. A wider native
+  selection exposed one old untyped monitor fixture (756 passed); that fixture
+  now selects the unchanged legacy contract with the real carrier, and all 184
+  tests in its file pass. Current-base requalification and fresh review remain
+  outstanding; no production or installed state changed.
+
+### 2026-10-31 - Current-base requalification blocked
+
+- Rebased the complete 17-commit source slice onto current `dev`, retaining the
+  original committed history in a local backup. The qualified candidate is
+  `204f9241cb6edf0120769a6ebe9818a1e13ee7ce`. Conflict resolution preserves the
+  newer named-Job/breakaway implementation, both installer-wrapper and legacy
+  cutover tests, and upstream removal of physical ZDD vendor copies. The guarded
+  changes remain in canonical ZDD source; no deleted vendor is resurrected.
+- The contained 15-file affected/native packet completed with **732 passed and
+  14 failed**, zero skipped. This is a failed candidate, not current-head
+  acceptance. Six failures expose the canonical launch fixture's missing Job
+  name parameter; three warm-roster fixtures omit `observe_records`; the guarded
+  monitor fixture lacks a runtime generation. Three actual native observation
+  cases failed to reach their bounded markers, and the first-install hook's
+  bootstrap stamp exceeded its lifecycle deadline. None is waived or counted as
+  an unavailable-platform pass.
+- Install contract, documentation consistency, effort structure and whitespace
+  checks passed. Module-size qualification failed: canonical procutil
+  `__init__.py` is 1,028 lines against 1,000; the worktrees main module is 6,763
+  against its 6,761 shrink-only ceiling; monitor CLI is 1,017 against 1,000.
+  Two already-admitted procutil source hashes also require final manifest
+  reconciliation. Today's manifest has 3,174 nodes and 176 production targets;
+  the historical 2,407-node receipt does not qualify this candidate.
+- Further shared SDK source edits are excluded from this continuation. Resolving
+  the canonical procutil size/fixture seam requires its existing owner's scoped
+  admission before proceeding; no new API, competing PR or baseline increase
+  was introduced. Required unit execution, meaningful failure repair, fresh
+  source review and required CI remain blocking.
+- #8458 was not pushed or merged. Keep this effort Active, the existing PR and
+  preserved source history under ownership, and R1b/R2/POSIX/installed/broader
+  acceptance open. No runtime, live service or other checkout was changed.
+
+### 2026-10-31 - Owned compatibility fixes qualified; SDK dependency retained
+
+- The paired worktrees fixture now accepts the current named-Job constructor
+  while retaining the canonical injected launch implementation and cleanup.
+  Warm-roster doubles accept `observe_records`; guarded health patches the
+  actual health module's bound generation. These repair six atomic pairings,
+  three roster cases and the guarded dispatch case without suppressing their
+  original assertions or changing SDK source.
+- All six actual native observation cases then passed with unchanged 15/5-second
+  production bounds and unchanged fixture waits. The real cold-hook stamp also
+  passed after selecting an existing supported Python on the child PATH. No
+  timing relaxation, test skip, provisioned host or runtime change was used.
+- Reused the existing live-classification helper instead of its duplicate map,
+  and moved drain counts/busy predicates to the existing retirement module.
+  Both owned worktrees size guards now pass; the SDK cap remains independently
+  gated. Focused Ruff and whitespace pass.
+- The complete same 15-file affected/native selection now passes **746 cases,
+  zero failed/skipped**, 232.08 seconds pytest and 268.56 including containment
+  preparation/cleanup. This supersedes the failed candidate's consumer receipt,
+  not final-current-base required-unit/review/CI qualification.
+- The existing #9578 owner holds the additive aggregate budget SDK correction
+  and any directly required SDK cap extraction. Wait for its admitted source
+  merge before the final source-base/SDK requalification; do not create another
+  SDK implementation or PR. #8458 remains unpublished and this effort Active.
+- The PR-added canonical launch fixture subsequently adopted the named-Job
+  constructor and exact inherited custody metadata. Its standalone 13-case file
+  passes; worktrees again uses that fixture directly instead of a compatibility
+  wrapper. SDK implementation ownership remains with #9578.
+- Integrated only the inspected documentation changes from
+  `6c9f35e5b6af40c88a048aa7dd37d97b7044a8e2`,
+  `fc80ca7d89cb966392e8cd6f53841ea7992ef06b` and
+  `c9f72e6704d20c741fa85eff2176d3bf64757e18`. Their source-only acceptance
+  journals preserve broader production, platform and rollout gates. No sibling
+  code or checkout was changed and no additional PR was opened.
+
+### 2026-10-31 - Exact dependency integration and native cutoff counterexamples
+
+- Integrated the existing #9578 owner's explicitly published SDK candidate
+  `3ca081b23492e48918455a0094dc6c0d07ffd5f0` under a preserved local backup,
+  before its source merge. The only SDK conflict was the private spawn
+  signature: retain `budget`, `cleanup_deadline` and `command_deadline`, and
+  both independently admitted cleanup branches. No additional SDK design was
+  introduced. All module ceilings pass; canonical procutil is 992 lines.
+- Preliminary combined qualification passed 152 actual native/consumer cases
+  and 1,106 standalone cases, with 258 existing platform/opt-in skips.
+  The source owner subsequently superseded that SDK candidate. These receipts
+  are not final source acceptance and will not be reused as final-current-base
+  proof.
+- Two additional injected native-setup regressions expose the SDK-only budget
+  path admitting creation/resume after its execution cutoff. They use only
+  `OwnedExecutionBudget(110, 5)` and a setup clock advancing from 100 to 106;
+  both fail before correction. The explicit observation-deadline controls
+  already refuse both orderings.
+- The existing #9578 SDK owner receives this exact counterexample and owns its
+  bounded correction before source merge. This source continuation adds tests
+  only, not a competing SDK implementation, API, PR or timing relaxation.
+  Final dependency merge, source qualification, review/CI and #8458 merge
+  remain open.
+- The SDK owner corrected both native setup orderings in published
+  `523694bbf2b7869d9a381bb3929e128b6f885c9b`. The reconciled canonical launch file
+  now passes all 15 cases, including both fail-first budget-only controls.
+  Current source retains the SDK command-deadline/callback semantics alongside
+  the explicit R1a cleanup deadline; all module ceilings pass.
+- A local canonical unit attempt at
+  `24bf961599f8664d76efb138465fdd1b52d1c378` correctly refused synthetic Python
+  fixtures placed inside the checkout: 99 passed, one source-read-fence failure.
+  This is an environment-placement refusal, not a qualified packet or a waived
+  product test. Keep the fence intact and obtain exact current-source canonical
+  evidence through the existing required CI unit lane.
+- The SDK owner subsequently supplied scoped Linux/macOS native qualification,
+  including slow guardian settlement and pending-output preservation. That
+  qualifies the SDK delegation lane only, not this effort's unimplemented POSIX
+  observation slice. Its actual source merge and final #8458 qualification remain
+  outstanding; no source or runtime completion is inferred.
+- The complete 16-file owned consumer/native selection, including the SDK
+  resident-pre-tool consumer, passed 808 cases with zero failed/skipped at
+  `24bf961599f8664d76efb138465fdd1b52d1c378` (410.01 seconds pytest, 456.81 managed
+  total). This is current owned-code evidence on SDK523, not qualification of
+  its later successors or a source merge.
+
+### 2026-11-02 - Actual SDK merge and final source qualification
+
+- #9578 actually merged as `1ff5d8c5d7662fdb769653c92a42235e9dc67bd2`.
+  A preserved backup precedes replay of only this PR's 28 owned commits from
+  its SDK523 dependency. No obsolete SDK implementation is reapplied.
+- Reconciliation preserves the merged aggregate budget, known no-target versus
+  uncertain creation, settlement callbacks, preparation-resource custody and
+  native thread/stdio behavior alongside R1a's explicit cleanup deadline and
+  retained readers. Command-only and budget-only calls do not require an
+  explicit cleanup deadline. Lazy native accounting remains self-contained;
+  the combined initializer is 990 lines.
+- Current agenda decoding, agenda feed shutdown and drain counts remain in the
+  monitor. Fixture doubles model those interfaces and actual Job-handle state;
+  existing cutoff, byte/age preservation and positive retirement assertions
+  are not removed. Oversized-input agenda tests use short parameter IDs so
+  Windows can represent their test environment; input bytes remain unchanged.
+- The complete 16-file affected/native worktrees selection passes **834 cases,
+  zero failures or skips**, in 473.72 seconds. The combined canonical
+  launch/budget/standalone/stdio packet passes **46 cases**, and the agenda/
+  control compatibility packet passes **146 cases**.
+- The complete standalone procutil suite passes **1,220 cases with 291 explicit
+  platform/opt-in skips**, in 398.29 seconds. Earlier failures are repaired,
+  not waived: mocked module interfaces retain exception-state access; malformed
+  original Job scopes refuse before helper startup with truthful no-child
+  custody; parent-Job fixture reads wait for closed publication; synthetic cell
+  actors use the existing base interpreter without redundant venv redirectors.
+  The separate real-venv matrix, original deadlines and native pin/retirement
+  checks remain. All 56 shell/cell native controls pass.
+- Canonical lifecycle assets and existing immutable source bindings are
+  regenerated without changing qualification nodes, coverage targets or the
+  300-second ceiling. Ruff, module ceilings, runtime-resolution, install and
+  changefile contracts, vendor synchronization, effort/documentation checks,
+  bridge evidence and actual Main controller compatibility pass.
+- These are source/contained-consumer receipts, not installed or nominal
+  performance acceptance. Existing #8458 publication, fresh current-head
+  review, exact-source required CI and actual merge remain gates. The effort
+  stays Active; R1b/R2/POSIX observation and broader #7944/#7945/#2619/#6086
+  obligations are not completed or reassigned.
+
+The qualified candidate is preserved at `6a38cf557281fa17329a120e8359950f1d8afd2d`.
+Subsequent target movement is reconciled onto
+`312f9fe424c2c2be445cf25e2c2001121eeb1ec5`, retaining all 29 owned commits.
+Only canonical archive and producer-digest conflicts require resolution;
+the qualified SDK/R1a and ZDD implementation bytes remain unchanged. The
+incoming NUL-framed worktree-list behavior passes all 122 Git tests, and the
+incoming retirement-census base plus both deadline contracts passes 48
+controls. Generated assets retain the current default's source qualification
+selection and footprint semantics. Fresh provider review/CI still govern merge.
