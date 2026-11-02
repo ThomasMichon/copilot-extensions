@@ -579,3 +579,21 @@ reviewed admission revision is implemented and qualified.
   The installed core selection is not evidence that the full requested update
   succeeded. Owner-scoped health inspection and repair remain open alongside
   new-session qualification; no retained session is terminated to hide them.
+
+### 2026-11-02 - Review corrections and owner-scoped recovery
+
+- #10100's exact-head review identified invalid caller context reaching durable
+  submission and an older two-argument handoff test double. Shared validation
+  now rejects invalid normal requests before enqueue/worker startup, including
+  detached observation, and rechecks restored request context and final launch.
+  The scoped-source regression uses the real handoff adapter instead of the
+  obsolete double. The affected packet passes 177 cases with three existing
+  platform skips; the real child-directory control passes separately.
+- The scoped updater repaired the Index client without activating a host,
+  replacing its durable engine or reindexing data. Bridge's retained aborted
+  cutover was inspected and reconciled through its own recovery operation;
+  no marker was edited manually and no existing agent session was recreated.
+  The configured service startup subsequently published the selected current
+  daemon, whose routed process identity and readiness were observed after
+  its startup caller had exited. Remaining installer reconciliation and
+  complete working-set verification are still separate obligations.

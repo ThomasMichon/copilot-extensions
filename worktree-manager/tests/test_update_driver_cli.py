@@ -175,6 +175,21 @@ def test_queue_captures_consumed_provider_without_restoring_ambient_transport(qu
     assert engine_client.ENGINE_ARGV_ENV not in driver.os.environ
 
 
+@pytest.mark.parametrize("flags", [[], ["--detach"]], ids=["wait", "detach"])
+@pytest.mark.parametrize("context", ["", "relative", "missing", "file"])
+def test_invalid_context_refuses_before_submission(queued, monkeypatch, tmp_path, capsys, flags, context):
+    seen, _request = queued
+    path = tmp_path / context
+    if context == "file":
+        path.write_text("not a directory")
+    value = context if context in {"", "relative"} else str(path)
+    monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", value)
+
+    assert driver.cmd_update_request(flags) == 1
+    assert seen == {}
+    assert "existing absolute directory" in capsys.readouterr().err
+
+
 def test_source_identity_preserves_explicit_selection(tmp_path, monkeypatch):
     from worktree_manager.runtime_source_config import RuntimeSource
     from worktree_manager import self_install

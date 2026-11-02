@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from contextlib import contextmanager
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -40,16 +40,24 @@ def handoff_environment(args: list[str]) -> dict[str, str]:
     return {}
 
 
+def _update_context_directory(environment: Mapping[str, str]) -> str | None:
+    if "AGENT_WORKTREES_UPDATE_CONTEXT" in environment:
+        directory = Path(environment["AGENT_WORKTREES_UPDATE_CONTEXT"])
+        if not directory.is_absolute() or not directory.is_dir():
+            raise ValueError("update invocation context must be an existing absolute directory")
+        return str(directory)
+    return None
+
+
 def handoff_launch_options(
     environment: dict[str, str], handoff: dict[str, str], *, update: bool = False,
 ) -> dict[str, object]:
     """Keep scoped Windows updates headless without changing interactive passthrough."""
     options: dict[str, object] = {"env": {**environment, **handoff}}
-    if update and "AGENT_WORKTREES_UPDATE_CONTEXT" in environment:
-        directory = Path(environment["AGENT_WORKTREES_UPDATE_CONTEXT"])
-        if not directory.is_absolute() or not directory.is_dir():
-            raise ValueError("update invocation context must be an existing absolute directory")
-        options["cwd"] = str(directory)
+    if update:
+        directory = _update_context_directory(environment)
+        if directory is not None:
+            options["cwd"] = directory
     if handoff and os.name == "nt":
         from agent_procutil import no_window_kwargs
 
@@ -301,6 +309,7 @@ def cmd_update_request(rest: list[str]) -> int:
                 with _request_environment(request.spec.context), _acquisition_environment(
                     options.engine_acquisition_timeout,
                 ):
+                    _update_context_directory(os.environ)
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
                         raise driver.StateError("Manager source changed after submission; submit a new request")
                     custody.assert_owned()
@@ -323,6 +332,8 @@ def cmd_update_request(rest: list[str]) -> int:
                 **({"headless": True} if options.detach else {}),
             )
         project, _args = extract_project(forwarded)
+        context = request_context()
+        _update_context_directory(context)
         cwd = Path.cwd().resolve()
         arguments = list(forwarded)
         budget = options.engine_acquisition_timeout
@@ -333,7 +344,7 @@ def cmd_update_request(rest: list[str]) -> int:
             arguments.extend(["--engine-acquisition-timeout", selected_budget])
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
-            cwd=str(cwd), source=_source_key(), context=tuple(request_context().items()),
+            cwd=str(cwd), source=_source_key(), context=tuple(context.items()),
             repair=not options.auto,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
