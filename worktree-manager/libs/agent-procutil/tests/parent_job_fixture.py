@@ -66,6 +66,7 @@ def main() -> None:
             pending = report.with_suffix(".pending")
             pending.write_text(json.dumps(data), encoding="utf-8")
             os.replace(pending, report)
+            report.with_suffix(".published").touch()
             time.sleep(20)
             raise RuntimeError("parent failed to retire the disposable fixture")
         finally:
@@ -93,7 +94,8 @@ def main() -> None:
     )
     try:
         deadline = time.monotonic() + 8
-        while not report.exists():
+        published = report if mode == "refuse" else report.with_suffix(".published")
+        while not published.exists():
             if worker.poll() is not None:
                 raise RuntimeError(f"helper startup failed: {worker.stderr.read().decode('utf-8')}")
             if time.monotonic() >= deadline:

@@ -1295,7 +1295,7 @@ def test_real_record_head_resolution_hides_yielded_resume_target(owned, monkeypa
         b"[] trailing",
         b"\xff",
         b"[" * 100 + b"0" + b"]" * 100,
-        b" " * (contract.BODY_BYTES + 1),
+        pytest.param(b" " * (contract.BODY_BYTES + 1), id="oversize"),
     ],
 )
 def test_strict_bounded_decode(raw):

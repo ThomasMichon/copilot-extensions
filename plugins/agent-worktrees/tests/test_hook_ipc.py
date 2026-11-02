@@ -2643,7 +2643,7 @@ def test_resident_dispatches_source_bound_session_end(monkeypatch, tmp_path):
 
     monkeypatch.setattr(session_binding_cli, "cmd_deregister_session", end)
     result = main._resident_hook_decision(
-        "sessionEnd", payload, segment_cache=SimpleNamespace(), policy=SimpleNamespace(),
+        "sessionEnd", payload, segment_cache=main._StatusSegmentCache(), policy=SimpleNamespace(),
     )
     assert result == {"ok": True, "lifecycle": "historical"}
     assert len(seen) == 1
@@ -2730,7 +2730,7 @@ def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch):
     result = main._resident_hook_decision(
         "sessionStart",
         {"cwd": str(Path.cwd()), "sessionId": "session-1"},
-        segment_cache=SimpleNamespace(),
+        segment_cache=main._StatusSegmentCache(),
         policy=SimpleNamespace(
             plugin_related_anchors=lambda: ["plugin-anchor"]
         ),

@@ -76,10 +76,10 @@ def test_status_segment_skips_control_plane_pr_overlay(monkeypatch):
         )
 
     monkeypatch.setattr(m.cfg, "load_config", load_config)
-    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *args: "main")
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *args, **kwargs: "main")
     monkeypatch.setattr(m, "_find_record_for_path", lambda path: None)
     monkeypatch.setattr(
-        m.git_ops, "_get_current_branch_safe", lambda path: "main"
+        m.git_ops, "_get_current_branch_safe", lambda path, **kwargs: "main"
     )
     monkeypatch.setattr(
         m.git_ops,
@@ -91,6 +91,25 @@ def test_status_segment_skips_control_plane_pr_overlay(monkeypatch):
 
     assert m._render_status_segment(str(Path.cwd())) == ""
     assert seen == {"include_control_plane_related_pr": False}
+
+
+def test_unknown_observation_cannot_reuse_finalized_assertion(monkeypatch):
+    from agent_worktrees import finalized_checkout
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: True)
+
+    target = str(Path("unknown-finalized").resolve())
+    rec = _wire(monkeypatch, target, state=git_ops.WorktreeState.UNKNOWN, turns=0)
+    rec.status = "finalized"
+
+    def forbidden(*args):
+        raise AssertionError("UNKNOWN must not reobserve or become concrete")
+
+    monkeypatch.setattr(finalized_checkout, "matches", forbidden)
+    monkeypatch.setattr(m, "_apply_tracking_override", forbidden)
+    assert "FINAL" not in m._render_status_segment(target, plain=True, no_title=True)
+    value = m._status_segment_json(target)
+    assert value["state"] == "unknown"
+    assert not value["closure"]["closure"]["final"]
 
 
 def test_unused_with_turns_renders_convo(monkeypatch, capsys):
@@ -324,7 +343,7 @@ def test_status_segment_json_outside_worktree_reports_error(monkeypatch, capfd):
     target = str(Path("wt-gone").resolve())
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
-    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p: "main")
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p, **kwargs: "main")
     monkeypatch.setattr(
         m.git_ops, "classify_worktree",
         lambda *a, **k: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE),
@@ -339,7 +358,7 @@ def test_status_segment_json_untracked_worktree_has_no_closure(monkeypatch, capf
     target = str(Path("wt-untracked").resolve())
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
-    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p: "main")
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p, **kwargs: "main")
     monkeypatch.setattr(
         m.git_ops, "classify_worktree",
         lambda *a, fetch=False, **k: git_ops.WorktreeStateInfo(

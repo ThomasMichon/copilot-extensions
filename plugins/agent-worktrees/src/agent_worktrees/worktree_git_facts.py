@@ -27,6 +27,8 @@ def apply_tracking_override(
     the dirty-count check (ORPHAN can still contain uncommitted changes).
     """
     if record.status in ("finalized", "complete", "completed"):
+        if git_ops._windows_observation() and info.state == git_ops.WorktreeState.UNKNOWN:
+            return info
         if (
             info.state != git_ops.WorktreeState.DIRTY
             and info.dirty == 0
@@ -55,6 +57,10 @@ def compute(
     checkout retains the list contract's COMPLETED state.
     """
     if record.worktree_path and Path(record.worktree_path).exists():
+        deadline_args = (
+            {"observation_deadline": git_ops._observation_deadline()}
+            if git_ops._windows_observation() else {}
+        )
         info = git_ops.classify_worktree(
             record.worktree_path,
             record.branch,
@@ -62,6 +68,7 @@ def compute(
             remote=repo.remote,
             default_branch=repo.default_branch,
             active_paths=active_paths,
+            **deadline_args,
         )
         if record.status == "finalized" and info.state == git_ops.WorktreeState.ACTIVE:
             # An attached concluding shell preserves FINAL, but ACTIVE's early
@@ -70,6 +77,7 @@ def compute(
                 record.worktree_path, record.branch, fetch=False,
                 remote=repo.remote, default_branch=repo.default_branch,
                 active_paths=None,
+                **deadline_args,
             )
             info = dataclasses.replace(content, state=git_ops.WorktreeState.ACTIVE)
         info = tracking_override(record, info)

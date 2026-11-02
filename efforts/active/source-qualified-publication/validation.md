@@ -2,6 +2,23 @@
 
 ## Existing checkpoint current-base validation (2026-10-31)
 
+### Verified source outcome
+
+#8530 merged as `8973eb78f68615705eb99507171874e9850dcadf` at
+`2026-10-31T23:19:32Z`. Copilot review `5725408799` approved exact published
+head `67591d09e57fe7135cdf21963e87f1093d2fcdc0`; all eight review threads
+were resolved. All three live-required checks succeeded for that same head:
+`PR gate (required check)`, `workflow-lockdown-guard`, `source-attribution`.
+The managed merge and subsequent provider read both confirm MERGED;
+#7936 and #7937 remain Open. There was no CI bypass or runtime rollout.
+
+Passing 87-case JUnit SHA-256:
+`8b7c94ecb433a45380de905065a689ad818de10f048a1710ac0eb032c9b063aa`.
+The contained wrapper's complete preparation/execution/cleanup was 60.23s.
+Touched-file Ruff F,E9, install/version contracts, effort structure, headless
+launch, module-size, documentation consistency and whitespace guards pass.
+Source-only acceptance does not resolve the broader Plan/Validation matrix.
+
 ### Fresh-review correction
 
 Current-head review of `145f5f2dae` found two Medium private-model defects.

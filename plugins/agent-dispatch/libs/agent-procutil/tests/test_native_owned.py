@@ -210,7 +210,9 @@ def test_native_owned_refuses_invalid_or_full_scope_chain_before_child_start(tmp
         f"Invoke-NativeOwnedProcess -FilePath {quoted(shell)} "
         f"-Arguments @('-NoProfile','-NonInteractive','-EncodedCommand','{child}') "
         f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'owned.log')}; exit 91 "
-        "} catch { $_.Exception.ToString() }"
+        "} catch { "
+        "if ($_.Exception.Data['CleanupConfirmed'] -cne $true) { throw 'Scope refusal custody unconfirmed' }; "
+        "$_.Exception.ToString() }"
     )
     result = subprocess.run(
         [str(shell), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded(body)],

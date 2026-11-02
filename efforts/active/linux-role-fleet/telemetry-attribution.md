@@ -3,7 +3,7 @@
 Parent: [Linux role fleet](README.md#diagnostic-logging-audit-and-retention-amendment).
 Existing owner: [logging sub-plan](logging-conventions.md), #8377.
 Intent: [Portable Telemetry](../../../visions/telemetry/README.md#self-lookup-without-identity-disclosure).
-**Status: proposal only; no API, configuration or deployment below is delivered.**
+**Status: source plan accepted; implementation, configuration and deployment remain open.**
 
 ## Request and boundary
 
@@ -239,7 +239,7 @@ No forced process restart, owner transfer, rollout or new service is authorized.
 
 ## Plan and validation gates
 
-- [ ] Publish this intent/proposal through current-head review and required CI;
+- [x] Publish this intent/proposal through current-head review and required CI;
   record source acceptance separately from implementation and keep #8377 open.
 - [ ] Coordinator accepts final API/config shape and admits the bounded code
   slice. No implementation begins merely because this proposal merges.
@@ -291,6 +291,17 @@ No forced process restart, owner transfer, rollout or new service is authorized.
 
 ## Journal
 
+- 2026-11-01 UTC - #8795 merged at `2026-11-01T00:26:13Z`, squash
+  `b5fb93490c30087f07a34d79d6c6ff0b697e0f30`, from reviewed head
+  `00aef53b1c6557e98bc1b513529a149fa03a7d39`. Current-head Copilot Comment
+  had no open issues; all three planning findings were addressed and resolved,
+  and required checks passed. The normal Maintainer flow omitted only the
+  extra CODEOWNER vote. Documentation consistency and whitespace checks passed;
+  runtime, clean-room and external-venue execution were inapplicable to this
+  planning-only change. The complete Plan and validation gates were reread:
+  only source intent publication closes. Separate implementation admission,
+  actual writer support, privacy/retention and deployment qualification remain
+  open; no key, collector, exporter or installed runtime changed.
 - 2026-10-31 - Reconciled the planning slice with current source while preserving
   newer fleet plans and the earlier API acceptance journal. Corrected the
   top-level loader baseline, admitted owner-bound process/generation identity,

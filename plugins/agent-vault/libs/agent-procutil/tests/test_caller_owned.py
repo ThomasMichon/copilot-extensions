@@ -620,7 +620,7 @@ def test_pidfd_exit_observation_accepts_high_descriptors():
 @pytest.mark.parametrize("boundary", ["retire", "confirm", "wait"])
 def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary):
     monkeypatch.setattr(protocol, "sys", SimpleNamespace(
-        platform="linux", executable=sys.executable,
+        platform="linux", executable=sys.executable, exc_info=sys.exc_info,
     ))
     monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(stdin=None, stdout=None, stderr=None, returncode=None)

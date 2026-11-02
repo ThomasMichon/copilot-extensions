@@ -558,7 +558,7 @@ def test_cell_work_is_bound_to_original_shell_and_whole_deadline(tmp_path, host,
         "SHELL_CALLER_TEST_HELPERS": str(Path(__file__).parent),
         "CELL_CALLER_TEST_SOURCE": str(ROOT / "plugins/agent-machines/scripts/cell_installer.py"),
         "CELL_CALLER_TEST_PHASE": phase,
-        "CELL_CALLER_TEST_PYTHON": sys.executable,
+        "CELL_CALLER_TEST_PYTHON": getattr(sys, "_base_executable", sys.executable),
     }
     observer = _linux_observer() if os.name != "nt" else nullcontext()
     with observer, ExitStack() as cleanup:

@@ -5,12 +5,25 @@ from __future__ import annotations
 import time
 
 from . import config as cfg
-from . import reclaim, sessions, tracking
+from . import reclaim, sessions, tracking, push_timeout, git_ops
 from .worktrees_current_rows import materialize
 
 
-def publish_active_project(runtime, *, observe_records=None) -> int:
+def publish_active_project(runtime, *, observe_records=None, cleanup_owner=None) -> int:
     project = cfg.project_name()
+    if cleanup_owner is not None and git_ops._windows_observation():
+        try:
+            if cleanup_owner.observation_blocked(project):
+                raise push_timeout.ObservationCleanupPending("project cleanup pending")
+            repo = cfg.load_config(
+                cfg.project_dir(project) / "config.yaml", project=project,
+            ).default_repo
+            return cleanup_owner.run_observation(
+                project, repo.anchor, None, lambda: publish_active_project(runtime, observe_records=observe_records),
+            )
+        except push_timeout.ObservationCleanupPending as error:
+            runtime.publication_failed(project, error)
+            raise
     try:
         return _publish_active_project(runtime, project, observe_records=observe_records)
     except Exception as exc:
