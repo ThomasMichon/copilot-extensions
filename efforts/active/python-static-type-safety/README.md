@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -668,3 +668,39 @@ composition prerequisites, and review/validation rules.
   projects and 56 pending projects; hosted source/packet CI and normal review
   remain required. Annotation-only runtime changes do not require a separate
   provisioning clean room or installed-runtime rollout.
+
+### 2026-11-02 - Bootstrap Killswitch merged; Peer Launch selected
+
+- #9966 merged as `92df5341f95380434d46574a684fce2236df85e7`
+  after exact-head Copilot approval with no findings, zero open review
+  comments and all required checks in
+  [run 41434649941](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41434649941).
+  The source worktree is pulled forward. Twelve projects are strict and 56
+  remain pending; the full effort remains active.
+- #9967 selects all three canonical Peer Launch source/test files.
+  The initial Linux strict probe reports 65 diagnostics, mostly fixture
+  annotations and optional importlib-spec narrowing, plus platform-specific
+  subprocess keyword typing and two dynamically loaded record boundaries.
+  Preserve same-cell governance, validation ordering, headless flags,
+  environment isolation and dependency-free bootstrap. Physical copies and
+  pending consumer projects retain independent qualification obligations.
+- The candidate passes both declared targets and all 26 admitted analysis
+  targets. Its optional subprocess `creationflags` dictionary is explicitly
+  typed; narrow casts retain the existing dynamically loaded validated-record
+  boundaries. Fixture annotations and importlib-spec assertions preserve all
+  existing controls and loader behavior.
+- All 37 canonical, release-adapted environment and Worktrees consumer
+  controls pass. A real native subprocess invoked with the canonical keyword
+  helper also passes. Existing source synchronization updates exactly 12
+  packaged copies. Installation-context primitive synchronization remains
+  independently unchanged and green.
+- Only the three changed release-unit source digests are refreshed; selected
+  nodes, decision targets and packet budget are unchanged. The existing MCP
+  source-only footprint refresher updates its `src` producer hash without
+  changing semantic revision 36 or any teardown contract. Ruff, headless,
+  source-admission, install-contract and vendoring checks pass.
+- This proposes 13 strict projects and 55 pending projects. Hosted
+  source/packet CI and normal review remain required. No installation,
+  provisioning, launch protocol or lifecycle semantics change, so a separate
+  provisioning clean room and live external runtime rollout are not
+  applicable. Actual peer installation or activation is not requested.

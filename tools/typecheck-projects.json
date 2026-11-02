@@ -193,7 +193,7 @@
         "libs/peer-launch"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-plugin-activation",
