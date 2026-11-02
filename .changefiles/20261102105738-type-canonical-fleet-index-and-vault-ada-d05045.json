@@ -1,0 +1,13 @@
+{
+  "comment": "Type canonical Fleet Index and Vault adapter boundaries and test fixtures",
+  "changes": [
+    {
+      "plugin": "libs/fleet-index-adapter",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/fleet-vault-adapter",
+      "type": "patch"
+    }
+  ]
+}

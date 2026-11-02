@@ -17,11 +17,14 @@ This module makes no claim to the controller/connector runtime itself
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from fleet_contracts import ContractError, HealthResult, RouteRequest, RouteResponse, SearchHit
+from fleet_contracts import (
+    ContractError, HealthResult, RouteRequest, RouteResponse, SearchHit, SearchParameters,
+)
 from fleet_contracts.records import MAX_MESSAGE_BYTES, ServiceOffer
 
 DEFAULT_TIMEOUT = 5.0
@@ -39,7 +42,9 @@ class BackendUnavailable(RuntimeError):
     """
 
 
-def _get(base_url: str, path: str, params: dict[str, str | None], timeout: float) -> dict:
+def _get(
+    base_url: str, path: str, params: dict[str, str | None], timeout: float,
+) -> dict[str, Any]:
     """A plain, dependency-free ``GET`` against a locally-resolved, trusted
     fixed backend. ``base_url`` is never client-supplied (see module/README
     docstring), so this is not an SSRF sink despite the generic signature.
@@ -100,7 +105,7 @@ def _route_health(request: RouteRequest, base_url: str, timeout: float) -> Route
 
 
 def _route_search(request: RouteRequest, base_url: str, timeout: float) -> RouteResponse:
-    parameters = request.parameters
+    parameters = cast(SearchParameters | None, request.parameters)
     if parameters is None:
         raise ContractError("index.search requires validated search parameters")
     data = _get(base_url, "/search", {
