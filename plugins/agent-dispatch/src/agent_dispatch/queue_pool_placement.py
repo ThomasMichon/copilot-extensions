@@ -7,7 +7,7 @@ import json
 import sqlite3
 
 from .pool_instances import PoolInstanceDefinition
-from .queue_common import Task, machine_matches, worker_id_for
+from .queue_common import Task, machine_matches
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_pool_accountability import ReservationAccountability, reservation_accountable as reservation_accountable
 
@@ -348,6 +348,8 @@ def require_pool_start(
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
         return False
+    from .bridge_remote import normalize_host
+    worker_machine, separator, worker_worktree = (worker_id or "").partition("/")
     row = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key = ?", (assignment.reservation_key,),
     ).fetchone()
@@ -361,7 +363,8 @@ def require_pool_start(
         or type(expected_generation) is not int
         or expected_generation != task.generation
         or not isinstance(native_id, str) or not native_id
-        or worker_id != worker_id_for(assignment.machine, row["worktree"])
+        or not separator or worker_worktree != row["worktree"]
+        or normalize_host(worker_machine) != normalize_host(assignment.machine)
         or task.owner not in (None, worker_id)
     ):
         raise TaskError("pool start requires the current reservation, worker and native incarnation")

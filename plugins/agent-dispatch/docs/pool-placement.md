@@ -160,6 +160,11 @@ an optional workspace also discards its execution-host constraint.
 Machine exclusions use the same strip/lower host normalization at placement,
 workspace recording, native publication and affirmative start. Other exclusion
 dimensions and capability tokens keep their existing exact matching.
+Affirmative start applies that host normalization only to the machine component
+of the supplied worker identity. The worktree suffix, native identity and claim
+generation remain exact; an already bound owner must still match exactly.
+The accepted worker spelling is retained rather than rewriting the pool or
+workspace provenance.
 Workspace recording and start both recheck that execution machine and current exclusions
 against the retained supplied capabilities and current intrinsic requirements.
 Retained CLI liveness and cleanup use the validated recorded execution machine

@@ -2009,3 +2009,19 @@ at the workspace/publication/start boundaries. The bounded coupled run passes
 verified. Current-head review and actual merge remain open; caller/startup-policy
 integration, unknown-effect exhaustion and every parent/native gate remain
 required. No caller migration or runtime activation is included.
+
+### 2026-11-01 - Affirmative worker host comparison correction prepared
+
+Pool start compares the supplied worker's machine component using the existing
+execution-host normalization, while preserving the exact worktree suffix,
+recorded native, claim generation and already-bound owner. The accepted worker
+spelling is stored unchanged; pool and workspace provenance are not rewritten.
+Six actual mixed-case host starts exercise affirmative transition and exact
+idempotent replay. Six wrong-host, wrong-suffix and malformed-identity controls
+plus an existing-owner control refuse without mutation.
+
+The bounded coupled run passes **1579 controls**, one existing skip, across
+twenty-seven selectors with cleanup verified. The current-head review, required
+checks and actual merge remain open. Caller migration, bounded startup policy,
+unknown-effect exhaustion and the full parent/native acceptance remain separate
+required gates; this correction activates no runtime.

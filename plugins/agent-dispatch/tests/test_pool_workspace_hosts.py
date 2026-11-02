@@ -188,3 +188,66 @@ def test_normalized_machine_exclusion_selects_a_different_free_host(q: TaskQueue
     requested = task(q, excludes=["machine: HOST-A "])
     assert place(q, requested)[1]
     assert q.task_pool_assignment(requested.id).machine == "host-b"
+
+
+@pytest.mark.parametrize("machine", ["host-a", "HOST-A"])
+@pytest.mark.parametrize("worker", ["host-a/worktree", "HOST-A/worktree", " Host-A /worktree"])
+def test_affirmative_start_normalizes_only_worker_machine(
+    q: TaskQueue, machine: str, worker: str,
+) -> None:
+    publish(q, pool(machine=machine))
+    requested = task(q)
+    reservation, _ = place(q, requested)
+    record_native(q, reservation)
+    generation = q.get(requested.id).generation
+    started = q.start(
+        requested.id, worker, owner_session_id="native", expected_generation=generation,
+    )
+    assert started.status == Status.STARTED and started.owner == worker
+    assert started.owner_session_id == "native" and started.generation == generation
+    assignment = q.task_pool_assignment(requested.id)
+    assert assignment.machine == machine
+    assert q.get_reservation(reservation.key).execution_machine == "host-a"
+    replay = q.start(
+        requested.id, worker, owner_session_id="native", expected_generation=generation,
+        expected_owner_session_id="native",
+    )
+    assert replay == started
+    assert q.task_pool_assignment(requested.id) == assignment
+
+
+@pytest.mark.parametrize("worker", [
+    "host-b/worktree", "host-a/WORKTREE", "host-a/ worktree ", "host-a/worktree/other",
+    "host-a", "/worktree",
+])
+def test_normalized_worker_host_cannot_change_exact_workspace_or_machine(
+    q: TaskQueue, worker: str,
+) -> None:
+    publish(q, pool(machine="HOST-A"))
+    requested = task(q)
+    reservation, _ = place(q, requested)
+    record_native(q, reservation)
+    before = q.get(requested.id)
+    recorded = q.get_reservation(reservation.key)
+    with pytest.raises(TaskError, match="current reservation"):
+        q.start(
+            requested.id, worker, owner_session_id="native", expected_generation=before.generation,
+        )
+    assert q.get(requested.id) == before
+    assert q.get_reservation(reservation.key) == recorded
+
+
+def test_normalized_start_preserves_existing_exact_owner_fence(q: TaskQueue) -> None:
+    publish(q, pool())
+    requested = task(q)
+    reservation, _ = place(q, requested)
+    record_native(q, reservation)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET owner = ? WHERE id = ?", ("host-a/worktree", requested.id))
+    before = q.get(requested.id)
+    with pytest.raises(TaskError, match="current reservation"):
+        q.start(
+            requested.id, "HOST-A/worktree", owner_session_id="native",
+            expected_generation=before.generation,
+        )
+    assert q.get(requested.id) == before
