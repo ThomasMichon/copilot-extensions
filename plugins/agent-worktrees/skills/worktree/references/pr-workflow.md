@@ -1034,6 +1034,11 @@ previously recorded head. Checked-out, symbolic, independently changed, or
 concurrently moved refs are retained. Finalization still checks every ref it
 would remove; a merged PR does not waive unpublished history. Its refusal names
 the blocking ref and commit count rather than assuming the checkout is ahead.
+Snapshot maintenance uses Git's local receive path with an exact lease and
+checked-out-branch refusal, including checkouts admitted after inventory.
+Its receiver does not run publication hooks a second time; the actual remote
+publication keeps its normal hooks and policy. No network destination is used
+for this internal ref update.
 
 Ordinary `push-changes` accepts only incremental publication or the bounded
 source-owned replay proof described above; an arbitrary squash or rewrite
