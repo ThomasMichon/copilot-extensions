@@ -21,6 +21,10 @@ records [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976).
 Its explicit assignment consumers use the existing supervision owner; complete
 configured publication, ordinary initial prompts and installed/native adoption
 remain separate acceptance gates.
+The [configured-cohort transport receipt](journal/2026/11.02-configured-cohort-transport.md)
+records [#10050](https://github.com/ThomasMichon/copilot-extensions/pull/10050):
+explicit whole-owner projection and history recovery now reach the existing
+coordinator through a negotiated client, without automatic publication or admission.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -253,6 +257,9 @@ Old reservation-plus-worker-claim clients cannot be treated as atomic placement
 clients. Define mixed-cohort admission and rollback before switching a lane;
 unsupported peers must not silently bypass required capacity/routing semantics.
 Preserve direct interactive claims without inventing a supervised reservation.
+The [configured-cohort legacy reservation fence](../../../plugins/agent-dispatch/docs/pool-claim-start.md#configured-cohort-legacy-reservation-fence)
+implements that admission prerequisite within the existing reservation
+transaction. It does not activate ordinary publication or caller migration.
 
 The [metadata provider boundary](../../../plugins/agent-dispatch/docs/pool-publication.md)
 separates revision/generation-fenced storage and control-authenticated transport
