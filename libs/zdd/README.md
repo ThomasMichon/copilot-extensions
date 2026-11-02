@@ -23,7 +23,8 @@ the separate check when preparation health is not sufficient) without contacting
 the predecessor. Publication itself is irreversible in this mode, including
 failure of the intervening transition record. A postcommit promotion/readiness failure remains an explicit
 failed, committed result; it never disposes of a possibly admitted successor or
-rolls the route back. The resident owns supersession,
+rolls the route back. Failed recovery-record removal is also an explicit failed
+commit, not a successful cleanup. The resident owns supersession,
 accepted-work draining and eventual exit independently of the installer.
 `retirement_pending` reports that separation; it never certifies predecessor
 exit, including an error after irreversible publication. This mode cannot be combined with conditional writer transfer or
@@ -46,6 +47,10 @@ overwriting it or treating it as a synchronous failure. The adopter may complete
 an interrupted `started` publication only when its exact candidate is selected.
 `routing.confirm_active()` confirms that native owner durably while preserving
 the existing fallback and generation; it does not perform another route flip.
+Initial and updated witnesses use the same flushed-file and durable replacement
+boundary as routing. Adopters own guarded cancellation of proven uncommitted
+preparation and settlement of positively exited successors; neither permits
+revoking an irreversible retirement grant or discarding live admitted work.
 Candidate publication binds a freshly verified native birth after health
 preparation and refuses a changed identity at the publication boundary.
 On macOS, native birth identity uses the process start seconds and microseconds;
@@ -132,12 +137,12 @@ Missing/malformed history, a changed epoch, an unknown birth token or a matching
 PID/port publication cannot authorize disposal. PID/port reuse conservatively
 blocks cleanup instead of weakening custody.
 Conservative custody is durably committed while the old route remains visible,
-before publishing a route that can admit work. Linux writes flush the file and
+before publishing a route that can admit work. Linux and macOS writes flush the file and
 parent directory; Windows uses a flushed file plus native write-through
-replacement. Other POSIX platforms, including macOS, retain flushed-file
-atomic replacement without the Linux-only directory barrier; power-loss
-durability and native identity-bound conditional retirement are not validated
-there. A failed final flip may retain an extra protected candidate; it
+replacement. Other POSIX platforms retain flushed-file atomic replacement
+without the directory barrier. Native macOS power-loss behavior remains
+unqualified; simulated directory-barrier regressions are not host qualification.
+A failed final flip may retain an extra protected candidate; it
 must never manufacture a false negative after a crash.
 Replacement visibility and durability are separate outcomes. A post-replace
 directory-flush failure raises `PublicationCommitUncertain`; cutover retains
@@ -225,9 +230,13 @@ handle, without requesting termination rights. Linux reuses canonical pidfd
 capture and validates the birth token while that reference remains live.
 The shared POSIX wait uses native polling, including descriptors above
 `FD_SETSIZE`; invalid-descriptor and native wait errors are not exit evidence.
-Missing native proof or mismatched/exited identity refuses explicitly. Other
-platforms, including macOS, raise `NotImplementedError`; there is no
+macOS checks native birth before and after registering a kqueue `NOTE_EXIT`
+watch, retaining the original process instance across PID reuse. Waiting
+consumes only that watch's native exit evidence. Missing native proof or
+mismatched/exited identity refuses explicitly. Other unsupported
+platforms raise `NotImplementedError`; there is no
 unverified PID-liveness or signaling fallback.
+Darwin regressions are simulated; native macOS execution remains unqualified.
 
 This is only process-exit evidence. The adopter must independently revalidate
 exact installation, receipt, instance, route and governance authority before

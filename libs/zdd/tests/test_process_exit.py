@@ -107,7 +107,7 @@ def test_inactive_observation_flag_requires_explicit_boolean(allow_exited):
 
 
 def test_unsupported_platform_has_no_pid_fallback(monkeypatch):
-    monkeypatch.setattr(process_exit.sys, "platform", "darwin")
+    monkeypatch.setattr(process_exit.sys, "platform", "unsupported")
     monkeypatch.setattr(
         diagnostics, "process_start_time",
         lambda *_: pytest.fail("unsupported platform must not guess process identity"),

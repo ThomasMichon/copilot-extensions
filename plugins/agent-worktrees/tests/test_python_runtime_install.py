@@ -828,6 +828,30 @@ def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path,
     assert capsys.readouterr().err.count("publication is uncertain") == 1
 
 
+@pytest.mark.parametrize("outcome", ["committed", "rolled_back"])
+def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
+    driver, tmp_path, monkeypatch, outcome,
+):
+    from zdd import breadcrumb
+    from agent_worktrees import runtime_monitor_recovery
+
+    record = {"state": "started", "self_retirement": True}
+    reads = []
+    def witness(_root):
+        reads.append(True)
+        assert len(reads) == 1, "settlement reread a witness consumed by owned recovery"
+        return record
+
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", witness)
+    monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", lambda *a: outcome)
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: True)
+    summary = {"action": "cutover", "result": {"publication_uncertain": True}}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is (
+        outcome == "committed"
+    )
+    assert summary["result"]["publication_uncertain"] is False
+
+
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from agent_worktrees import status_monitor_cutover, status_monitor_runtime as smr

@@ -194,6 +194,10 @@ out-of-process changes. Heartbeats do not poll files. A source should retry only
 publication of its committed latest body after notification loss, never repeat
 the canonical mutation. Corrupt/unavailable agenda cache state is explicit on
 agenda reads and feeds without breaking ordinary roster publication.
+An admitted predecessor's cached errors and unready results use its in-memory
+read/generation fence, not the successor's SQLite writer identity. Writer
+acquisition alone therefore cannot erase a cached failure before serving
+handoff; publication and cache refresh keep their independent writer fences.
 Activation/schema failures are resident-wide. Reconciliation failures are
 project-local and remain unavailable until that same project successfully
 reconciles, including across same-generation drain/reactivation. Another

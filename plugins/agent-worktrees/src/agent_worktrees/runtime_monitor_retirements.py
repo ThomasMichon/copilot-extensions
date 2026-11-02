@@ -437,6 +437,17 @@ def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = 
     return pending
 
 
+def retirement_only(root: Path, record: dict | None) -> bool:
+    """An exact granted retiree is not an incumbent for the next installation."""
+    if not isinstance(record, dict) or type(record.get("pid")) is not int:
+        return False
+    start = locks.process_start_time(record["pid"])
+    return start is not None and any(
+        value["state"] == "retiring" and (value["pid"], value["start"]) == (record["pid"], start)
+        for _path, value in _records(root)
+    )
+
+
 def pending_slot(root: Path, slot: str, *, include_cancelled: bool = True) -> bool:
     """Protect retained code by default; new releases may exclude revoked grants."""
     if type(include_cancelled) is not bool:

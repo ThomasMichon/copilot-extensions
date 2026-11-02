@@ -691,3 +691,132 @@ os._exit(29)
     surviving_owner.refresh()
     assert not surviving_owner.pending and surviving_owner.error is None
     assert not retirements._records(root)
+
+
+@pytest.mark.skipif(sys.platform not in {"win32", "linux"}, reason="native passive termination contract")
+@pytest.mark.parametrize("phase", ["initial", "passive", "dead-selected"])
+@pytest.mark.parametrize("owner", ["resident", "next-installer"])
+def test_marked_interrupted_publication_has_native_recovery(tmp_path, phase, owner):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import runtime_monitor_completion as completion
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees import status_monitor_recovery_contract as recovery
+    from zdd import breadcrumb, diagnostics, routing
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    directory = root / "status-monitor-routing"
+    token = "synthetic-native-recovery-token"
+    smc.control_token_path(root).write_text(token, encoding="utf-8")
+    old_pid, old_start = os.getpid(), locks.process_start_time(os.getpid())
+    assert old_start
+    generation = "native-recovery-generation"
+    def control(action, payload):
+        if action == "health":
+            return {
+                "pid": old_pid, "status": "ready", "published": True,
+                "runtime_generation": generation, "capabilities": [recovery.CAPABILITY],
+                "worktrees": {"status": "ready"}, "repositories": {"admitting": True},
+            }
+        assert action == recovery.ACTION
+        return recovery.handle(
+            payload, directory=directory, generation=generation, port=server.port,
+            reopen=lambda: {"draining": False}, close_on_failure=lambda: None, lock_timeout=1,
+        )
+
+    server = smc.ControlServer(control, token=token)
+    server.start()
+    old = routing.publish_active(
+        directory, bind="127.0.0.1", port=server.port, pid=old_pid, process_start_time=old_start,
+    )
+    passive = """
+import json, os, sys, time
+from pathlib import Path
+from agent_worktrees.status_monitor_cutover import ControlServer
+from zdd import diagnostics
+root = Path(sys.argv[1])
+server = ControlServer(lambda action, payload: {
+    "pid": os.getpid(), "status": "ready", "published": False,
+}, token="synthetic-native-recovery-token")
+server.start()
+(root / "candidate.json").write_text(json.dumps({
+    "pid": os.getpid(), "start": diagnostics.process_start_time(os.getpid()), "port": server.port,
+}))
+time.sleep(120)
+"""
+    installer = """
+import json, os, subprocess, sys, time
+from pathlib import Path
+from agent_procutil import no_window_kwargs
+from agent_worktrees import runtime_monitor_retirements as retirements
+from agent_worktrees.status_monitor_cutover import _acquire_cutover_lock
+from zdd import breadcrumb, diagnostics, routing
+from zdd.cutover_lock import CutoverLock
+root, phase = Path(sys.argv[1]), sys.argv[2]
+directory = root / "status-monitor-routing"
+guard = _acquire_cutover_lock(directory)
+with CutoverLock(directory):
+    old = routing.read_active_endpoint(directory, verify_listener=False)
+    retirements.reserve(root, {
+        "pid": old.pid, "start": old.process_start_time, "slot": None, "release_claim": None,
+    })
+    witness = routing.publication_witness(directory, deadline=time.monotonic() + 3)
+    candidate = {}
+    if phase != "initial":
+        subprocess.Popen([sys.executable, "-B", "-c", sys.argv[3], str(root)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs())
+        deadline = time.monotonic() + 15
+        while not (root / "candidate.json").exists():
+            assert time.monotonic() < deadline, "passive did not publish identity"
+            time.sleep(0.05)
+        candidate = json.loads((root / "candidate.json").read_text())
+    breadcrumb.write_breadcrumb(directory, state="started", old=old.to_dict(),
+        new_pid=candidate.get("pid"), new_process_start_time=candidate.get("start"),
+        new_port=candidate.get("port", 41002), publication_witness=witness, self_retirement=True)
+    if phase == "dead-selected":
+        routing.publish_active(directory, bind="127.0.0.1", port=candidate["port"],
+            pid=candidate["pid"], process_start_time=candidate["start"], demote_existing=True)
+        result = diagnostics.terminate_pid_if_identity(candidate["pid"], candidate["start"], exit_timeout=3)
+        assert result.get("identity_verified") is True and result.get("exit_confirmed") is True
+    os._exit(29)
+"""
+    try:
+        ended = subprocess.run(
+            [sys.executable, "-B", "-c", installer, str(root), phase, passive],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=30, **no_window_kwargs(),
+        )
+        assert ended.returncode == 29, ended.stderr
+        witness = breadcrumb.read_breadcrumb(directory)
+        assert witness["state"] == "started" and witness["self_retirement"] is True
+        assert not diagnostics._pid_alive(witness["pid"])
+        if owner == "resident":
+            completion.recover(
+                root, promote=lambda: pytest.fail("failed candidate must not promote"), ready=lambda: False,
+            )
+        else:
+            script = """
+import sys
+from pathlib import Path
+from agent_worktrees.runtime_monitor_abort import recover_abandoned
+from agent_worktrees.status_monitor_cutover import _acquire_cutover_lock
+from zdd.cutover_lock import CutoverLock
+root = Path(sys.argv[1])
+guard = _acquire_cutover_lock(root / "status-monitor-routing")
+with CutoverLock(root / "status-monitor-routing"):
+    assert recover_abandoned(root)
+guard.release()
+"""
+            recovered = subprocess.run(
+                [sys.executable, "-B", "-c", script, str(root)],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=15, **no_window_kwargs(),
+            )
+            assert recovered.returncode == 0, recovered.stderr
+        assert breadcrumb.read_breadcrumb(directory) is None
+        assert not retirements._records(root)
+        active = routing.read_active_endpoint(directory, verify_listener=False)
+        assert (active.pid, active.process_start_time, active.port) == (old.pid, old.process_start_time, old.port)
+        if witness.get("new_pid") is not None:
+            assert not diagnostics._pid_alive(witness["new_pid"])
+    finally:
+        server.close()

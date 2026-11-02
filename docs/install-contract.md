@@ -5013,6 +5013,23 @@ foreign route. It revokes the nongrant, never grants dev-claim release, and
 retains live code. A different or unknown owner remains pending. Read-only
 inventory refresh cannot erase an earlier cleanup failure; only a successful
 cleanup pass clears that pending error.
+Marked interruptions are also recoverable under both the Worktrees and shared
+cutover guards. The original installer consumes a verified terminal result
+directly, rather than rereading a witness already cleared by completion.
+An absent or never-published passive candidate permits exact precommit
+cancellation; passive disposal rechecks publication under native routing
+custody and requires identity-bound exit. A selected candidate's positive exit
+permits restoration only while predecessor grants remain uncommitted.
+Receiver-bound undrain and serving attestation precede durable cancellation.
+The restored precommit witness is persisted before cancellation and preserves
+its original owner, so failed cancellation, final recording or removal stays
+retryable. Unknown native evidence, foreign routes or irreversible grants do
+not authorize rollback.
+A positively exited committed successor instead settles commit-forward,
+withdrawing only its exact dead route while preserving retiring predecessors
+and their accepted work. An exact granted retiree's discovery record is not
+an unrouted incumbent for the next installation; uncommitted and unknown
+identities retain the original refusal. No new recovery worker is introduced.
 Cancellation is fsynced before cleanup and revokes the claim grant while keeping
 execution protection for any still-live code. Completed retirement is an
 idempotent commit outcome, not a missing-record loop.

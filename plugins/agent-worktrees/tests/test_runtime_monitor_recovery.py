@@ -20,6 +20,7 @@ def owned(tmp_path, monkeypatch):
         41002: {"pid": 202, "status": "ready", "published": False},
     }
     monkeypatch.setattr(diagnostics, "process_start_time", identities.get)
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: pid in identities)
     monkeypatch.setattr(recovery.locks, "process_start_time", identities.get)
     old = routing.publish_active(
         route_root, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001",
@@ -202,7 +203,7 @@ def test_original_installer_completes_selected_async_candidate_without_legacy_ro
         assert breadcrumb.read_breadcrumb(directory)["state"] == "committed"
         assert events == ["grant"]
     else:
-        assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+        assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle]) == "committed"
         assert breadcrumb.read_breadcrumb(directory) is None
         assert events == ["grant", "promote"]
     assert handle.poll() is None

@@ -33,9 +33,7 @@ _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
 _CUTOVER_LOCK_TIMEOUT_S = 300.0
 
-# A resident sweep is atomic across the fleet; "busy: ['sweep']" need not mean
-# stuck. Keep the orchestrator's 300s drain default: a former 30s override
-# stranded superseded monitors (#5326). Health/drain remain machine-tunable.
+# Keep the 300s drain default: a 30s override stranded superseded monitors (#5326).
 def _env_timeout(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw:
@@ -678,6 +676,10 @@ def activate_after_update(
         restart_arguments["spawned_handles"] = spawned_handles
     lock_live = _monitor_lock_is_live()
     if asynchronous_retirement:
+        if retirement_predecessor is None and retirements.retirement_only(
+            smr._aw_runtime_home(), locks.read_lock(smr._monitor_lock_path()),
+        ):
+            lock_live = monitor_was_live = False
         routed_live = retirement_predecessor is not None or routing.read_active_endpoint(
             routing_dir(), verify_listener=False,
         ) is not None

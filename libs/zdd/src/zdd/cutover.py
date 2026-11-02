@@ -697,9 +697,10 @@ class CutoverOrchestrator:
                     new_port, health_timeout, poll, self.serving_health_check or health_check,
                 ):
                     raise CutoverError("published successor did not become ready")
+                if not breadcrumb.clear_breadcrumb(self.config_dir):
+                    raise CutoverError("committed recovery record retained; retry cleanup")
                 result.ok = True
                 result.steps.append("successor ready; predecessor retirement is asynchronous")
-                breadcrumb.clear_breadcrumb(self.config_dir)
                 return result
 
             if conditional and conditional.snapshot.activate_successor is not None:
@@ -797,8 +798,6 @@ class CutoverOrchestrator:
                     detail={"note": "no prior active daemon"},
                 )
 
-            # Best-effort: hand the credential relay (9857) to the new daemon
-            # once the old one has released it.
             if conditional and conditional.snapshot.activate_successor is not None:
                 conditional.adopt_successor()
                 result.steps.append("successor resource adoption confirmed")
@@ -811,8 +810,10 @@ class CutoverOrchestrator:
             if conditional:
                 conditional.complete(result)
             else:
+                if not breadcrumb.clear_breadcrumb(self.config_dir):
+                    result.error = "post-commit error (new daemon is live): committed recovery record retained; retry cleanup"
+                    return result
                 result.ok = True
-                breadcrumb.clear_breadcrumb(self.config_dir)
             return result
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback

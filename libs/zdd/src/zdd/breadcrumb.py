@@ -55,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from zdd import routing_persistence
 from zdd.routing import format_authority
 
 log = logging.getLogger("zdd")
@@ -79,9 +80,7 @@ def breadcrumb_path(config_dir: str | os.PathLike[str]) -> Path:
 
 def _atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=False), encoding="utf-8")
-    os.replace(tmp, path)
+    routing_persistence.write(path, data)
 
 
 def _now_iso() -> str:
@@ -141,7 +140,10 @@ def write_breadcrumb(
     requires_writer_reconciliation: bool = False,
     self_retirement: bool = False,
 ) -> dict:
-    """Write/update the cutover breadcrumb atomically. Returns the record.
+    """Durably replace the cutover breadcrumb. Returns the confirmed record.
+
+    Persistence errors propagate; an unconfirmed replacement retains the
+    recoverable witness rather than granting retirement authority.
 
     ``started_at`` is preserved across updates (pass the value from the initial
     ``started`` record); ``updated_at`` is always refreshed.

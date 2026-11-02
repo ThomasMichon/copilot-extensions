@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 from zdd import breadcrumb, diagnostics, routing
 from zdd.cutover_lock import CutoverLock
@@ -16,13 +17,15 @@ from .status_monitor_cutover import ControlClient
 def recover_owned_publication(
     root: Path, record: dict, predecessor: tuple[int, str] | None,
     handles: list[subprocess.Popen],
-) -> bool:
+) -> bool | Literal["committed", "rolled_back"]:
     """Retry attributable publication; never delegate to a blocked next owner."""
     route_root = root / "status-monitor-routing"
     if record.get("pid") != os.getpid() or record.get("state") not in (
-        "publication-uncertain", "started", "spawned", "flipped", "draining", "rolled_back",
+        "publication-uncertain", "started", "spawned", "flipped", "draining", "rolled_back", "committed",
     ):
         return False
+    if record.get("self_retirement") is True:
+        return _recover_async_owned(root, record)
     handle = next((child for child in handles if child.pid == record.get("new_pid")), None)
     if handle is None:
         return False
@@ -50,20 +53,6 @@ def recover_owned_publication(
                 return False
         candidate = ControlClient(f"http://127.0.0.1:{new_port}")
         health = candidate.health() if handle.poll() is None else None
-        if record.get("self_retirement") is True:
-            if active is None or (active.pid, active.process_start_time, active.port) != (
-                handle.pid, start, new_port,
-            ):
-                return False
-            from .runtime_monitor_completion import finish
-            from .status_monitor_recovery_contract import successor_healthy
-
-            return finish(
-                root, record, active, promote=candidate.promote,
-                ready=lambda: successor_healthy(
-                    active.client_host, active.port, lambda _url: candidate, expected=active,
-                ),
-            )
         committed = bool(
             health and health.get("pid") == handle.pid and health.get("status") == "ready"
             and health.get("published") is True
@@ -109,3 +98,32 @@ def recover_owned_publication(
             new_process_start_time=start, started_at=record.get("started_at"),
         )
     return True
+
+
+def _recover_async_owned(root: Path, record: dict) -> bool | Literal["committed", "rolled_back"]:
+    from .runtime_monitor_abort import abort, settle_dead_committed
+    from .runtime_monitor_completion import finish
+    from .runtime_monitor_retirements import _exit_state
+    from .status_monitor_recovery_contract import successor_healthy
+
+    directory = root / "status-monitor-routing"
+    with CutoverLock(directory):
+        if breadcrumb.read_breadcrumb(directory) != record:
+            return False
+        table = routing.read_table(directory, strict=True) or {}
+        routing._validate_endpoint_rows(table)
+        active = routing.Endpoint.from_dict(table["active"]) if table.get("active") else None
+        pid, start, port = record.get("new_pid"), record.get("new_process_start_time"), record.get("new_port")
+        if active is not None and (active.pid, active.process_start_time, active.port) == (pid, start, port):
+            if _exit_state({"pid": pid, "start": start}) is False:
+                candidate = ControlClient(active.base_url, config_dir=directory)
+                completed = finish(
+                    root, record, active, promote=candidate.promote,
+                    ready=lambda: successor_healthy(
+                        active.client_host, active.port, lambda _url: candidate, expected=active,
+                    ),
+                )
+                return "committed" if completed else False
+        if settle_dead_committed(root, record):
+            return "committed"
+        return "rolled_back" if abort(root, record) else False

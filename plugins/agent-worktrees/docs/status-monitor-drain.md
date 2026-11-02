@@ -1,6 +1,9 @@
 # Status-monitor drain flow and diagnostics
 
-This audits the existing installer-to-monitor handover. It does not change
+This audits the legacy synchronous installer-to-monitor handover. The
+incoming-start-first Worktrees installer is described in the
+[install contract](../../../docs/install-contract.md); it does not wait for
+this predecessor drain. This audit does not change
 admission, ownership, timeout, force or rollback policy. Related architecture:
 [version cutover](architecture.md#version-cutover-reap-and-live-launcher-protection).
 Ownership-transfer and serving-convergence follow-ups remain tracked by

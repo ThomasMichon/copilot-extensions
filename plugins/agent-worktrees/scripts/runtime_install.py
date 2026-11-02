@@ -302,7 +302,12 @@ def _monitor_identity(root: Path) -> tuple[int, str] | None:
         raise InstallationRefused(f"Asynchronous predecessor retirement is unavailable: {error}") from error
     if routed is not None:
         return routed[:2]
-    if locks.lock_is_live(locks.read_lock(root / "status-monitor.lock")):
+    lock_record = locks.read_lock(root / "status-monitor.lock")
+    if locks.lock_is_live(lock_record):
+        from agent_worktrees.runtime_monitor_retirements import retirement_only
+
+        if retirement_only(root, lock_record):
+            return None
         raise InstallationRefused("Live unrouted monitor cannot safely retire asynchronously")
     return None
 
@@ -397,7 +402,16 @@ def _settle_monitor(
                     from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
 
                     try:
-                        if recover_owned_publication(root, record, predecessor, handles):
+                        recovered = recover_owned_publication(root, record, predecessor, handles)
+                        if recovered == "committed":
+                            result.update(committed=True, publication_uncertain=False)
+                            summary["result"] = result
+                            return _settle_monitor(root, slot, summary, predecessor, handles)
+                        if recovered == "rolled_back":
+                            result.update(committed=False, publication_uncertain=False, rolled_back=True)
+                            summary["result"] = result
+                            return False
+                        if recovered:
                             continue
                     except (OSError, ValueError, ConnectionError) as error:
                         announce(f"Owned monitor recovery unavailable: {error}")
@@ -719,6 +733,12 @@ def settle_candidate(
                 custody.enter_context(runtime.retention_lease(root, selected, timeout=wait_timeout))
             snapshot = _selector_snapshot(root)
             manifest_snapshot = deployment.read_manifest(root)
+            if monitor_scope:
+                from agent_worktrees.runtime_monitor_abort import recover_abandoned
+                from zdd.cutover_lock import CutoverLock
+
+                with CutoverLock(root / "status-monitor-routing"):
+                    recover_abandoned(root)
             predecessor = _monitor_identity(root) if monitor_scope else None
             serving_slot = None
             if predecessor is not None:

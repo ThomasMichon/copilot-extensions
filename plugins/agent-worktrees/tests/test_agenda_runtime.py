@@ -717,11 +717,16 @@ def test_cached_handoff_read_retains_corrupt_project_error(owned, monkeypatch, r
     monkeypatch.setattr(
         owner.agendas, "_refresh_pending", lambda: pytest.fail("cached read refreshed records")
     )
-    assert owner.agendas.read(request(), refresh=refresh) == failed
-    assert owner.agendas.read(request(project="unpublished"))["error"]["code"] == "unready"
-    assert owner.agendas._rows == rows
-    assert owner.agendas._sequence == sequence
-    assert owner.agendas._pending == pending
+    successor = WorktreesRuntime(owner.store.db_path)
+    successor.activate()
+    try:
+        assert owner.agendas.read(request(), refresh=refresh) == failed
+        assert owner.agendas.read(request(project="unpublished"))["error"]["code"] == "unready"
+        assert owner.agendas._rows == rows
+        assert owner.agendas._sequence == sequence
+        assert owner.agendas._pending == pending
+    finally:
+        successor.shutdown()
 
 
 def test_cached_handoff_reads_and_held_feed_keep_admitted_read_fence(owned, monkeypatch):

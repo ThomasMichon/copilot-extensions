@@ -140,6 +140,9 @@ class AgendaRuntime:
                 self.feed.changed(project)
 
     def _fresh_fence(self, expected, *, read=False) -> None:
+        if read:
+            self._fence(expected=expected, read=True)
+            return
         with closing(
             sqlite3.connect(
                 self.owner.store.db_path.resolve().as_uri() + "?mode=ro",

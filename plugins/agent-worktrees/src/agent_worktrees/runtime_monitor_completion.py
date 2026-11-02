@@ -6,7 +6,8 @@ import logging
 import os
 
 from single_instance_lease import AlreadyRunningError
-from zdd import breadcrumb, routing
+from zdd import breadcrumb, diagnostics, routing
+from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
 from . import locks, status_monitor_cutover as cutover
 from . import runtime_monitor_retirements as retirements
@@ -77,10 +78,13 @@ def recover(root, *, promote, ready) -> None:
         return
     pid, start = os.getpid(), locks.process_start_time(os.getpid())
     if record.get("new_pid") != pid or start is None or record.get("new_process_start_time") != start:
-        return
+        if type(record.get("pid")) is not int or diagnostics._pid_alive(record["pid"]):
+            return
     guard = None
+    sdk_guard = CutoverLock(directory)
     try:
         guard = cutover._acquire_cutover_lock(directory, timeout_s=0)
+        sdk_guard.acquire()
         if breadcrumb.read_breadcrumb(directory) != record:
             return
         table = routing.read_table(directory, strict=True)
@@ -90,12 +94,16 @@ def recover(root, *, promote, ready) -> None:
             (endpoint.pid, endpoint.process_start_time) != (pid, start)
             or endpoint.port != record.get("new_port")
         ):
+            from .runtime_monitor_abort import recover_abandoned
+
+            recover_abandoned(root)
             return
         finish(root, record, endpoint, promote=promote, ready=ready)
-    except AlreadyRunningError:
+    except (AlreadyRunningError, CutoverLockedError):
         return
     except (OSError, ValueError, RuntimeError) as error:
         logging.getLogger(__name__).error("Committed monitor completion remains pending: %s", error)
     finally:
+        sdk_guard.release()
         if guard is not None:
             guard.release()

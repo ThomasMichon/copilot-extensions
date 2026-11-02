@@ -168,6 +168,63 @@ def _validate_identity(pid: int, expected_start_time: str) -> None:
         raise ValueError("process identity requires a positive PID and native birth token")
 
 
+def _open_darwin(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
+    import select
+
+    from .darwin_identity import birth_time
+
+    if not hasattr(select, "kqueue"):
+        raise NotImplementedError("native Darwin process exit references require kqueue")
+    queue = select.kqueue()
+    exited = False
+
+    def wait(timeout: float) -> bool:
+        nonlocal exited
+        if exited:
+            return True
+        events = queue.control(None, 1, timeout)
+        if not events:
+            return False
+        event = events[0]
+        if event.flags & select.KQ_EV_ERROR:
+            raise OSError(event.data, "native Darwin process exit observation failed")
+        if (
+            len(events) != 1 or event.ident != pid or event.filter != select.KQ_FILTER_PROC
+            or not event.fflags & select.KQ_NOTE_EXIT
+        ):
+            raise ValueError("native Darwin process exit evidence is malformed")
+        exited = True
+        return True
+
+    reference = ProcessExitReference(pid, token, wait, queue.close)
+
+    def require_birth_match() -> None:
+        actual = birth_time(pid)
+        if actual is None:
+            raise OSError("native Darwin process birth evidence is unavailable")
+        if actual != token:
+            raise ProcessLookupError("process identity does not match captured reference")
+
+    try:
+        require_birth_match()
+        event = select.kevent(
+            pid, filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        # Bracket registration with exact native birth checks. Otherwise an
+        # old watch's exit could be misattributed to a newer PID incarnation
+        # first observed after registration, especially with allow_exited.
+        queue.control([event], 0, 0)
+        require_birth_match()
+        if reference.wait(0) and not allow_exited:
+            raise ProcessLookupError("captured process exited before identity validation")
+        return reference
+    except BaseException:
+        reference.close()
+        raise
+
+
 def open_process(
     pid: int, expected_start_time: str, *, allow_exited: bool = False,
 ) -> ProcessExitReference:
@@ -187,7 +244,9 @@ def open_process(
         if allow_exited:
             return _open_linux(pid, expected_start_time, allow_exited=True)
         return _open_linux(pid, expected_start_time)
-    raise NotImplementedError("native process exit references require Windows or Linux")
+    if sys.platform == "darwin":
+        return _open_darwin(pid, expected_start_time, allow_exited=allow_exited)
+    raise NotImplementedError("native process exit references require Windows, Linux or Darwin")
 
 
 def _observe_linux(pid: int, token: str) -> bool:

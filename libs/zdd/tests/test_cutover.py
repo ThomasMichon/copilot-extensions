@@ -101,6 +101,40 @@ def _fake_clock():
 # -- happy path: old daemon present, clean drain -----------------------------
 
 
+@pytest.mark.parametrize("self_retirement", [False, True])
+def test_committed_cleanup_failure_retains_witness_and_requires_retry(
+    tmp_path, monkeypatch, native_birth, self_retirement,
+):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    unlink = Path.unlink
+    path = breadcrumb.breadcrumb_path(tmp_path)
+
+    def deny_cleanup(target, *args, **kwargs):
+        if target == path:
+            raise PermissionError("fixture retained witness")
+        return unlink(target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_cleanup)
+    registry = {}
+    options = (
+        {"self_retirement": True, "activate_successor": lambda endpoint: None}
+        if self_retirement else {}
+    )
+    orch, handle = _make(tmp_path, healthy_ports={9290, 9281}, registry=registry, **options)
+    result = orch.run(health_timeout=1, drain_timeout=1)
+
+    assert result.committed and not result.ok and not result.rolled_back
+    assert "retained; retry cleanup" in result.error
+    assert not handle.terminated
+    if not self_retirement:
+        assert "shutdown" in registry["http://127.0.0.1:9281"].calls
+    assert routing.read_table(tmp_path)["active"]["pid"] == handle.pid
+    assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert breadcrumb.clear_breadcrumb(tmp_path)
+
+
 def test_cutover_happy_path(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     # An old active daemon exists on 9281.
