@@ -2733,6 +2733,7 @@ function Materialize-IndexSnapshot {
     param([string]$SnapshotDir)
     $utf8 = New-Object Text.UTF8Encoding($false)
     $libraries = [ordered]@{
+        'agent-configuration-layers' = 'configuration-layers'
         'agent-zdd' = 'zdd'
         'agent-procutil' = 'agent-procutil'
         'agent-dropin-registry' = 'dropin-registry'

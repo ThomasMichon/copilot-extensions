@@ -1978,6 +1978,7 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     helper.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(PATH, helper)
     shutil.copyfile(PATH.with_name("installer_dependency_config.py"), helper.with_name("installer_dependency_config.py"))
+    shutil.copyfile(PATH.with_name("installer_dependency_arguments.py"), helper.with_name("installer_dependency_arguments.py"))
     shutil.copyfile(PATH.with_name("installer_retained_content.py"), helper.with_name("installer_retained_content.py"))
     import subprocess
 
@@ -2414,6 +2415,10 @@ def materialized_broken_helper(root):
     shutil.copyfile(
         PATH.with_name("installer_dependency_config.py"),
         helper.with_name("installer_dependency_config.py"),
+    )
+    shutil.copyfile(
+        PATH.with_name("installer_dependency_arguments.py"),
+        helper.with_name("installer_dependency_arguments.py"),
     )
     shutil.copyfile(
         PATH.with_name("installer_retained_content.py"),

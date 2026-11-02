@@ -91,6 +91,10 @@ def _run(
         policy.with_name("installer_dependency_config.py"),
     )
     shutil.copy2(
+        PLUGIN / "scripts/installer_dependency_arguments.py",
+        policy.with_name("installer_dependency_arguments.py"),
+    )
+    shutil.copy2(
         PLUGIN / "scripts/installer_retained_content.py",
         policy.with_name("installer_retained_content.py"),
     )
