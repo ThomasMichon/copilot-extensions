@@ -227,12 +227,20 @@ def protect_tool_receipts(existing: dict, result: dict, personal: dict,
             conflicts.append(name)
         if not result.get(setting) and setting not in existing:
             result.pop(setting, None)
-    from .knowledge_plugins import split_source
+    from . import knowledge_plugins as kp
 
+    prior_enabled = existing.get(kp._OVERLAY_KEY, {}).get("enabledPlugins", {})
+    existing_enabled = existing.get("enabledPlugins", {})
     for source in tuple(personal["enabledPlugins"]):
-        if split_source(source)[1] in rejected_marketplaces:
+        if kp.split_source(source)[1] in rejected_marketplaces:
             personal["enabledPlugins"].pop(source)
-            result.get("enabledPlugins", {}).pop(source, None)
+            if source in existing_enabled and (
+                source not in prior_enabled
+                or not kp.same_json_value(existing_enabled[source], prior_enabled[source])
+            ):
+                result.setdefault("enabledPlugins", {})[source] = existing_enabled[source]
+            else:
+                result.get("enabledPlugins", {}).pop(source, None)
             enabled_conflicts.append(source)
     if not result.get("enabledPlugins") and "enabledPlugins" not in existing:
         result.pop("enabledPlugins", None)

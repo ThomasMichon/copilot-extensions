@@ -799,3 +799,27 @@ def test_common_directory_probe_preserves_a_bare_anchor_trailing_space(tmp_path)
     root.mkdir()
     _git(root, "init", "--bare")
     assert tool._common(root) == tool._identity(root)
+
+
+def test_rejected_tool_marketplace_preserves_an_unowned_legacy_enable(family):
+    root, _, configuration = family()
+    marketplace = root / "local-marketplace"
+    marketplace.mkdir()
+    _json(root / "profile.json", {"extraKnownMarketplaces": {
+        "local": {"source": {"source": "directory", "path": "./local-marketplace"}}}})
+    tool.prepare_checkout(root, config=configuration)
+    data = _read(root)
+    data["enabledPlugins"] = {"notes@local": True}
+    _json(_overlay(root), data)
+    knowledge = root.parent / "knowledge"
+    _json(knowledge / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": data["extraKnownMarketplaces"],
+        "enabledPlugins": {"notes@local": True},
+    })
+    summary = kp.compose(root, knowledge)
+    result = _read(root)
+    assert result["enabledPlugins"]["notes@local"] is True
+    assert result["extraKnownMarketplaces"] == data["extraKnownMarketplaces"]
+    assert result[tool.KEY] == data[tool.KEY]
+    assert "notes@local" not in result[kp._OVERLAY_KEY]["enabledPlugins"]
+    assert summary["conflicts"] == {"marketplaces": ["local"], "enabled_plugins": ["notes@local"]}
