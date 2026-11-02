@@ -408,6 +408,32 @@ def test_git_message_directory_option_is_not_a_write_target(tmp_path, guarded_ta
     assert bool(result) is guarded_target
 
 
+@pytest.mark.parametrize("options", [
+    "--literal-pathspecs",
+    "--literal-pathspecs -C '{target}'",
+    "-C '{target}' --literal-pathspecs",
+    "-c core.quotePath=false -C '{target}'",
+    "-C '{target}' -c core.quotePath=false",
+])
+@pytest.mark.parametrize("guarded_target", [False, True])
+def test_git_global_options_preserve_write_repository(tmp_path, options, guarded_target):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    target = anchor if guarded_target else outside
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(outside if "{target}" in options else target),
+        "toolArgs": {"command": f"git {options.format(target=target)} rm tracked.txt"},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is guarded_target
+
+
 def test_map_scope_does_not_borrow_other_installation(tmp_path):
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")

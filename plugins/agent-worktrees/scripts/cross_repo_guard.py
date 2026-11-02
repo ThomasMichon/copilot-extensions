@@ -64,6 +64,11 @@ try:
 except (ImportError, OSError, SyntaxError):
     _guard_map = None
 
+try:
+    from anchor_write_guard import _git_invocation
+except (ImportError, OSError, SyntaxError):
+    _git_invocation = None
+
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
     "create", "edit", "str_replace", "str_replace_editor",
@@ -112,15 +117,11 @@ _WRITE_CMD_START = re.compile(
     )\b""",
     re.IGNORECASE | re.VERBOSE,
 )
-_GIT_START = re.compile(r"""^\s*(?:"git"|'git'|git)(?=\s|$)""", re.IGNORECASE)
-_GIT_WRITE_SUB = re.compile(
-    r"(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init)(?=\s|$)",
-    re.IGNORECASE,
-)
-_GIT_DASH_C_TARGET = re.compile(
-    r"""^\s*-C\s+(?:"([^"]*)"|'([^']*)'|([^\s"';&|]+))(?=\s|$)""",
-)
+_GIT_WRITE_SUBCOMMANDS = frozenset({
+    "add", "commit", "apply", "checkout", "switch", "reset", "restore",
+    "clean", "rm", "mv", "stash", "merge", "rebase", "pull", "cherry-pick",
+    "revert", "init",
+})
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # command position (``sudo rm ...``, ``VAR=x git commit``). Wrapper flags that
@@ -160,20 +161,13 @@ def _cd_target(eff_seg: str, base: str) -> str | None:
     return raw if os.path.isabs(raw) else os.path.join(base, raw)
 
 
-def _git_target(eff_seg: str, base: str) -> str | None:
-    start = _GIT_START.match(eff_seg)
-    if start is None:
-        return None
-    remaining = eff_seg[start.end():]
-    target = base
-    while match := _GIT_DASH_C_TARGET.match(remaining):
-        raw = next(value for value in match.groups() if value is not None)
-        if "$" in raw or "%" in raw or raw.startswith("~"):
-            return None
-        if raw:
-            target = raw if os.path.isabs(raw) else os.path.join(target, raw)
-        remaining = remaining[match.end():]
-    return target if _GIT_WRITE_SUB.match(remaining.lstrip()) else None
+def _git_targets(eff_seg: str, base: str, tool: str) -> list[str]:
+    if _git_invocation is None:
+        return []
+    subcommand, _args, targets, overridden = _git_invocation(eff_seg, base, tool)
+    if subcommand not in _GIT_WRITE_SUBCOMMANDS:
+        return []
+    return [path for _kind, path in targets if path] if targets or overridden else [base]
 
 
 def _root_token(root_str: str) -> str:
@@ -320,7 +314,7 @@ def load_guarded_roots(
 
 # --- Core evaluation ----------------------------------------------------------
 
-def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
+def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") -> dict | None:
     """Return a guarded-repo hit for a shell command that WRITES into a guarded
     repo, or None. Fires only on a real write target (redirect target /
     command-position write verb argument / git mutation via ``-C <repo>`` or the
@@ -348,8 +342,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
                 # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
                 if at_write_cmd and re.search(tok, seg_hay):
                     return {**g, "reason": reason}
-        git_cwd = _git_target(eff, eff_cwd)
-        if git_cwd:
+        for git_cwd in _git_targets(eff, eff_cwd, tool):
             for g in guarded:
                 gp = g.get("path")
                 if gp and _guard_map.matches(git_cwd, g, identity_cache=identity_cache):
@@ -381,7 +374,7 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | Non
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd:
             return None
-        return _shell_hit(cmd, cwd, guarded)
+        return _shell_hit(cmd, cwd, guarded, tool=tool)
     return None
 
 

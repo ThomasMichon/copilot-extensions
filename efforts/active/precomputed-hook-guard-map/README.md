@@ -333,3 +333,11 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   directory-message controls pass, and relative path cases exercise repeated
   directory arguments. The full packet passed 112 cases with one native FIFO
   capability skip.
+- Reused the existing anchor guard's pure Git invocation parser instead of
+  maintaining a second partial global-option parser. Cross-repo matching
+  retains its own write/delegation policy and event-local Git identity; it
+  does not load anchor registrations or import the runtime. Ten controls cover
+  literal-pathspec and configuration options before/after `-C`, including
+  implicit cwd and unrelated-repository cases. The map, standalone consumer,
+  deployment and relevance packet passed 180 cases with four native-capability
+  skips. Existing message, linked/nested and identity-cost controls remain green.
