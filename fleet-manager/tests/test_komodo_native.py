@@ -284,6 +284,7 @@ def test_fixed_profile_uses_only_official_pinned_images_and_borrowed_secret_file
 
 @pytest.mark.parametrize("version", [
     "2.39.4", "v2.39.4", "5.1.4", "v5.1.4", "5.1.4+vendor.1", "5.0.0", "5.10.12+vendor-build.001",
+    "2.40.3+ds1-0ubuntu1~24.04.1", "v2.40.3+ds1-0ubuntu1~24.04.1",
 ])
 def test_native_prerequisites_use_actual_selected_daemon_images_and_scrub_ambient_controls(
     native_rig: Any, monkeypatch: Any, version: str,
@@ -357,6 +358,7 @@ def test_native_image_malformed_configuration_refuses_without_effect(
 @pytest.mark.parametrize("version", [
     "1.29.2", "3.0.0", "4.1.0", "6.0.0", "5.1", "5.1.4-rc.1", "5.1.4\n6.0.0", "unavailable",
     "5.01.4", "5.1.04", "5.1.4+.", "5.1.4+vendor..1", "5.1.4+.vendor", "5.1.4+vendor.",
+    "5.1.4-rc.1+ds1-0ubuntu1~24.04.1", "2.40.3+ds1/unsafe",
 ])
 def test_native_prerequisites_refuse_unqualified_compose_before_image_or_effect(
     native_rig: Any, version: str,
