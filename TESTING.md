@@ -5415,6 +5415,15 @@ The process SDK's native interpreter controls launch both file-backed and
 retained-byte output relays twice from a selected Windows venv whose executable
 path exceeds 260 characters, preserving exact output and owned-Job settlement.
 
+Native development and repair fixtures use the SDK's caller-owned runner with
+their existing absolute command limits and eight-MiB per-channel capture bounds.
+Timeouts settle the complete owned Job or process group before returning; output
+does not renew the command limit. Focused controls retain stream bytes and exit
+status and refuse completion while a nested child survives.
+The offline source-build controls construct private control and target candidates
+through one installation cache, then change a dependency body to require a new
+wheel without rewriting the earlier completed control.
+
 The copied-pane boundary controls are an explicit, non-serving native lane:
 
 ```text

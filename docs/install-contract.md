@@ -4689,6 +4689,15 @@ acquisition, offline and total elapsed time on stderr; named phase transitions
 are flushed separately without altering result framing. Those counts describe
 local wheels, not completed runtime generations or the whole update duration.
 
+`numbered_candidate(source_wheel_cache_root=...)` may select the same
+installation owner's ordinary cache for a private control bootstrap and its
+target candidate. Without that argument, caching remains local to the candidate
+root. Source, backend, tool and build-environment bindings still decide reuse;
+construction, retention and publication authority remain with each candidate.
+Worktrees scopes the cold control's payload environment to the same admitted
+authority as its child, restoring the caller's value after settlement. Compatible
+retained controls receive no new command-line argument.
+
 Ordinary source-wheel phases now renew their quiet allowance from actual child
 stdout/stderr and completed file, copy and verification units. The owned
 constructor relays child bytes immediately, including partial lines; its

@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
-from runtime_install_fixture import isolate_account_profile, remove_fixture_worktree
+from runtime_install_fixture import (
+    isolate_account_profile, remove_fixture_worktree, run_native_installer,
+)
 
 
 @pytest.mark.timeout(2400)
@@ -141,30 +143,17 @@ def test_real_native_dev_selects_immutable_source_and_release_restores_original(
 
     def run(argv, label, expected=0):
         log = tmp_path / f"{label}.log"
-        with log.open("w", encoding="utf-8") as stream:
-            try:
-                result = subprocess.run(
-                    argv,
-                    executable=argv[0] if os.name == "nt" else None,
-                    env=environment,
-                    stdout=subprocess.PIPE,
-                    stderr=stream,
-                    text=True,
-                    encoding="utf-8",
-                    errors="backslashreplace",
-                    # Namespace validation and payload staging precede the
-                    # unchanged 480-second context-child budget.
-                    timeout=720 if namespaced else 480,
-                    **no_window_kwargs(),
-                )
-            except subprocess.TimeoutExpired as error:
-                captured = error.stdout or b""
-                if isinstance(captured, bytes):
-                    captured = captured.decode("utf-8", errors="backslashreplace")
-                pytest.fail(
-                    f"{label} did not settle:\n{captured}\n"
-                    + log.read_text(encoding="utf-8", errors="backslashreplace")
-                )
+        try:
+            result = run_native_installer(
+                argv, env=environment, timeout=720 if namespaced else 480,
+            )
+        except subprocess.TimeoutExpired as error:
+            log.write_text(error.stderr or "", encoding="utf-8")
+            pytest.fail(
+                f"{label} did not settle:\n{error.stdout or ''}\n"
+                + log.read_text(encoding="utf-8", errors="backslashreplace")
+            )
+        log.write_text(result.stderr, encoding="utf-8")
         assert result.returncode == expected, result.stdout + log.read_text(
             encoding="utf-8", errors="backslashreplace",
         )

@@ -6,7 +6,29 @@ import os
 import shlex
 import shutil
 import stat
+import subprocess
 from pathlib import Path
+
+
+def run_native_installer(argv: list[str], *, env: dict[str, str], timeout: float):
+    from agent_procutil.owned_process import run_caller_owned
+
+    try:
+        result = run_caller_owned(
+            argv, env=env, timeout=timeout, binary=True,
+            max_stdout_bytes=8 << 20, max_stderr_bytes=8 << 20,
+        )
+    except subprocess.TimeoutExpired as error:
+        for field in ("output", "stderr"):
+            value = getattr(error, field)
+            if isinstance(value, bytes):
+                setattr(error, field, value.decode("utf-8", errors="backslashreplace"))
+        raise
+    return subprocess.CompletedProcess(
+        result.args, result.returncode,
+        (result.stdout or b"").decode("utf-8", errors="backslashreplace"),
+        (result.stderr or b"").decode("utf-8", errors="backslashreplace"),
+    )
 
 
 def remove_fixture_worktree(owner: Path) -> None:

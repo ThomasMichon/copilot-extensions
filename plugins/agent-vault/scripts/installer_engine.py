@@ -670,6 +670,7 @@ def numbered_candidate(
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     application: Path | None = None,
+    source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
@@ -691,6 +692,7 @@ def numbered_candidate(
         local_packages=local_packages,
         wheel_inputs=wheel_inputs,
         application=application,
+        source_wheel_cache_root=source_wheel_cache_root,
         expected_payload_hash=expected_payload_hash,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
     )
@@ -725,6 +727,7 @@ def _candidate(
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     application: Path | None = None,
+    source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
@@ -846,8 +849,9 @@ def _candidate(
                                 candidate=slot, **options,
                             )
 
+                        cache_root = root if source_wheel_cache_root is None else source_wheel_cache_root
                         inputs = retained.enter_context(retained_source_wheels(
-                            inputs, root, uv, base_python,
+                            inputs, cache_root, uv, base_python,
                             run=run_source_build, timeout=child_timeout,
                         ))
                     python = _construct(inputs, slot, uv, base_python, descriptor, child_timeout)

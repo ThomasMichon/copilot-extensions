@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 import tomllib
 from agent_procutil import no_window_kwargs
+from runtime_install_fixture import run_native_installer
 
 
 @pytest.fixture
@@ -47,6 +48,7 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
     authority = tmp_path / "authorized-payload"
     authority.mkdir()
     root = tmp_path / "runtime"
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "previous-payload")
     provenance = {"version": "1.0.0", "source": str(plugin),
                   "deployment_source": json.dumps({"path": plugin.as_posix()})}
     expected_hash = modes.lifecycle.runtime.fingerprint_source(
@@ -77,6 +79,8 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
         assert (kwargs["plugin"] / "pyproject.toml").read_bytes() == (plugin / "pyproject.toml").read_bytes()
         assert kwargs["construction_data"] == provenance
         assert kwargs["expected_payload_hash"] == expected_hash
+        assert kwargs["source_wheel_cache_root"] == root
+        assert os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] == str(authority)
         assert kwargs["construction_data"]["source"] == str(plugin)
         assert json.loads(kwargs["construction_data"]["deployment_source"])["path"] == authority.as_posix()
         yield SimpleNamespace(frozen_plugin=control_root / "frozen")
@@ -135,6 +139,7 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
         base_python=Path(sys.executable), mode=mode, owner=owner if mode == "dev" else None,
         recover_adopted_manager=recover_manager,
     ) == {"runtime_version": mode}
+    assert os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] == "previous-payload"
 
 
 @pytest.mark.parametrize("compatible", [False, True])
@@ -1137,18 +1142,12 @@ def test_real_native_repair_preserves_broken_slot_and_allocates_distinct_generat
     completed = {}
     for index, argv in enumerate(commands):
         log = tmp_path / f"repair-{index}.log"
-        with log.open("w", encoding="utf-8") as stream:
-            try:
-                result = subprocess.run(
-                    argv,
-                    env=environment,
-                    stdout=stream,
-                    stderr=subprocess.STDOUT,
-                    timeout=480,
-                    **no_window_kwargs(),
-                )
-            except subprocess.TimeoutExpired:
-                pytest.fail("Native repair did not settle:\n" + log.read_text(encoding="utf-8"))
+        try:
+            result = run_native_installer(argv, env=environment, timeout=480)
+        except subprocess.TimeoutExpired as error:
+            log.write_text((error.stdout or "") + (error.stderr or ""), encoding="utf-8")
+            pytest.fail("Native repair did not settle:\n" + log.read_text(encoding="utf-8"))
+        log.write_text(result.stdout + result.stderr, encoding="utf-8")
         assert result.returncode == 0, log.read_text(encoding="utf-8")
         selected = (root / "current-version").read_text().strip()
         assert selected.startswith(version + "+repair.") and selected not in completed

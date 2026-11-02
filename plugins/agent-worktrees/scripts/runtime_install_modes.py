@@ -180,6 +180,13 @@ def run(
                     if os.name == "nt" else None
                 )
                 if retained is None:
+                    payload_key = "AGENT_WORKTREES_PAYLOAD_ROOT"
+                    previous_payload = os.environ.get(payload_key)
+                    if previous_payload is None:
+                        custody.callback(os.environ.pop, payload_key, None)
+                    else:
+                        custody.callback(os.environ.__setitem__, payload_key, previous_payload)
+                    os.environ[payload_key] = str(governance.payload)
                     control = custody.enter_context(
                         lifecycle.engine.numbered_candidate(
                             control_root,
@@ -194,6 +201,7 @@ def run(
                             process_retention=True,
                             expected_source_identity=lifecycle.runtime_source.manifest_fields(source_identity),
                             expected_payload_hash=admitted.payload_hash,
+                            source_wheel_cache_root=root,
                             wait_timeout=wait_timeout,
                             child_timeout=child_timeout,
                         )
