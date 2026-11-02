@@ -204,7 +204,7 @@ class OwnerObservationRuntime:
             except c.ObservationError as error:
                 if error.code == "superseded":
                     self.close_admission("superseded")
-                elif isinstance(error, MutationFailure) and error.invalidated:
+                elif isinstance(error, MutationFailure) and (error.invalidated or error.admitted):
                     self._changed(record.key)
                 raise
             self._changed(record.key)
@@ -226,15 +226,20 @@ class OwnerObservationRuntime:
         except PreparationOverflow as error:
             with self._operations:
                 self._admit()
-                delivery_failed(
-                    self.history,
-                    c.Selection(*record.key, record.head_session_id),
-                    record,
-                    expected_cursor,
-                    error,
-                    batch_id=batch_id,
-                    entries=error.entries,
-                )
+                try:
+                    delivery_failed(
+                        self.history,
+                        c.Selection(*record.key, record.head_session_id),
+                        record,
+                        expected_cursor,
+                        error,
+                        batch_id=batch_id,
+                        entries=error.entries,
+                    )
+                except MutationFailure as failure:
+                    if failure.invalidated or failure.admitted:
+                        self._changed(record.key)
+                    raise
                 self._changed(record.key)
             raise c.ObservationError(
                 "admitted owner publication requires reconciliation",
@@ -253,7 +258,7 @@ class OwnerObservationRuntime:
             except c.ObservationError as error:
                 if error.code == "superseded":
                     self.close_admission("superseded")
-                elif isinstance(error, MutationFailure) and error.invalidated:
+                elif isinstance(error, MutationFailure) and (error.invalidated or error.admitted):
                     self._changed(record.key)
                 elif error.code == "cursor-unavailable":
                     self._changed(record.key)
@@ -277,15 +282,20 @@ class OwnerObservationRuntime:
             try:
                 item = observed_entry(previous, record, batch_id, journal)
             except PreparationOverflow as error:
-                delivery_failed(
-                    self.history,
-                    selected,
-                    record,
-                    cursor,
-                    error,
-                    batch_id=batch_id,
-                    entries=error.entries,
-                )
+                try:
+                    delivery_failed(
+                        self.history,
+                        selected,
+                        record,
+                        cursor,
+                        error,
+                        batch_id=batch_id,
+                        entries=error.entries,
+                    )
+                except MutationFailure as failure:
+                    if failure.invalidated or failure.admitted:
+                        self._changed(record.key)
+                    raise
                 self._changed(record.key)
                 raise c.ObservationError(
                     "admitted owner change requires reconciliation",

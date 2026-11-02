@@ -527,6 +527,38 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Durable admission-intent design amendment
+
+- Selected journal-qualified durable admission intents rather than downgrading
+  every unsealed owner interval. Validate admission before the intent commit;
+  materialization and resolution of the matching intent commit atomically.
+- An unresolved admitted operation survives takeover as explicit history
+  uncertainty. Recovery does not replay canonical work, invent events or equate
+  a fresh current capture with complete retained history.
+- The observation contract records this source-level transaction protocol and
+  its pre-intake/first-intent persistence limits. Canonical worktree writes and
+  the auxiliary index remain separate; no crash-atomic cross-store guarantee
+  or installed rollout is implied.
+- Implementation and isolated failure/recovery qualification are in progress.
+  The foundation PR and all original parent/native/Relay gates remain open.
+
+### 2026-11-02 - Durable admission-intent implementation qualification
+
+- Added auxiliary index protocol 1 with journal-qualified intent and gap tables.
+  Initialization, refresh, replacement, publication and admitted overflow retain
+  their exact owner/source/base-cursor and capture evidence across commits.
+- Successful materialization and intent resolution commit together. Failed gap
+  persistence leaves the admitted intent discoverable; takeover preserves
+  retained-history uncertainty without replaying canonical work.
+- The focused owner packet passed 226 cases, including interrupted admission,
+  stage-two SQL/connection failure, failed gap persistence, rollback of update
+  plus resolution, owner takeover fences and fresh-capture/history separation.
+  A known durable gap is partial coverage; original capture completeness remains
+  stored independently. Missing legacy intent coverage is explicitly unknown.
+- Independent protocol review is pending. No new capability is advertised and
+  no producer transport is attached. Agenda-home migration, logger archival and
+  cleanup-policy changes remain a separate design proposal, not implementation.
+
 ### 2026-11-02 - Within-batch identity admission
 
 - Overflow admission checks the complete detached batch for conflicting native

@@ -87,6 +87,26 @@ The owner index may materialize existing records and mutation evidence. It is no
 a replacement claim/effort store. YAML save and index append are not silently
 advertised as one crash-atomic transaction.
 
+### Durable admission intent
+
+After validating mutation admission, commit a small journal-qualified intent in
+the existing observation index before attempting materialization. Commit the
+observation update and resolution of its matching intent in the same transaction.
+Takeover must distinguish resolved materialization from an unresolved admitted
+operation and preserve the latter as explicit retained-history uncertainty.
+Recovery does not rerun the canonical work or manufacture missing events.
+
+Malformed, conflicting, stale and foreign submissions must be rejected before
+creating an intent. Recheck elected-owner and admitted-source fences at the
+materialization boundary; a superseded owner cannot resolve another owner's
+uncertainty. A duplicate-only acknowledgement is not successful recovery.
+
+This adds a durable index admission boundary, not atomicity with canonical
+worktree persistence. Failure before observation intake or before the first
+intent can be committed remains an explicit operation failure, not evidence that
+all canonical transitions were captured. Fresh current facts and retained
+history coverage remain separately qualified.
+
 Detach validated caller-owned capture data before waiting for a writer lock;
 validation, content hashes, fences and publication must use that same capture.
 An acknowledgement containing only already-accepted events cannot clear a

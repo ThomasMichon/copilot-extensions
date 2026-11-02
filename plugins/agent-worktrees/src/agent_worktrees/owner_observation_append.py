@@ -10,7 +10,6 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from . import owner_observation_contract as c
-from .owner_observation_failure import MutationFailure
 
 if TYPE_CHECKING:
     from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
@@ -138,7 +137,7 @@ def comparison_digest(item: dict, budget: list[int]) -> str:
         raise c.ObservationError("owner identity comparison exceeds work bound") from error
 
 
-def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
+def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> bool:
     if (
         conn.execute(
             "SELECT 1 FROM owner_observation_batch WHERE generation=? AND id=?",
@@ -149,7 +148,7 @@ def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
         raise c.ObservationError(
             "oversized content conflicts with an accepted batch identity", "batch-conflict"
         )
-    pending, budget = {}, [COMPARISON_BYTES]
+    pending, budget, novel = {}, [COMPARISON_BYTES], False
     for offset, item in enumerate(entries, 1):
         event_id = event_identity(source, item, batch_id, offset)
         previous = pending.get(event_id)
@@ -169,6 +168,7 @@ def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
             (row["generation"], event_id),
         ).fetchone()
         if prior is None:
+            novel = True
             continue
         try:
             digest = content_digest(item, budget=budget)
@@ -181,6 +181,7 @@ def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
             ) from error
         if digest != prior[0]:
             raise c.ObservationError("source record identity changed content", "event-conflict")
+    return novel
 
 
 def delivery_failed(
@@ -192,25 +193,46 @@ def delivery_failed(
     *,
     batch_id: str,
     entries: list[dict],
+    admission=None,
 ) -> None:
+    from . import owner_observation_intent as intents
+
     c.reference(batch_id, "observation batch identity")
+    token = admission
+    staged = None
     try:
         with owner._lock, closing(owner._connect(write=True)) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             owner._fence(conn)
+            if admission is not None:
+                intents.verify(owner, conn, admission, record)
             row = owner._row(conn, selected)
             if row["source"] != record.source:
                 raise c.ObservationError("record source incarnation changed", "source-replaced")
             if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
                 raise c.ObservationError("owner observation position changed", "stale-cursor")
-            reject_overflow_conflicts(conn, row, owner._source(row), batch_id, entries)
+            novel = reject_overflow_conflicts(conn, row, owner._source(row), batch_id, entries)
+            if not novel:
+                from .owner_observation_publication import same_capture
+
+                if not same_capture(row, record):
+                    raise c.ObservationError(
+                        "duplicate source records cannot replace current facts", "event-conflict"
+                    )
+                raise c.ObservationError("duplicate-only batch exceeds byte bound", "oversized")
             owner._fence(conn)
-            owner._mark_failed(row, error, reason="cursor-unavailable")
+            if admission is None:
+                staged = intents.start(owner, conn, record, row, kind="overflow", batch=batch_id)
+        if admission is None:
+            token = staged
+        with owner._lock:
+            if admission is None:
+                intents.checkpoint(owner, token)
     except (OSError, sqlite3.Error) as failure:
-        raise MutationFailure(
-            f"delivery failure could not establish admission: {type(failure).__name__}: {failure}",
-            invalidated=False,
-        ) from failure
+        raise intents.fail(owner, record, token, failure) from failure
+    failure = intents.fail(owner, record, token, error, reason="cursor-unavailable")
+    if not failure.gap_persisted:
+        raise failure
 
 
 def append(
@@ -284,7 +306,9 @@ def append(
         completeness=record.completeness,
     )
     source = owner._source(candidate)
-    body = owner._body(candidate, c.Selection(*record.key, record.head_session_id))
+    body = owner._body(
+        candidate, c.Selection(*record.key, record.head_session_id), _materializing=True
+    )
     body.update(
         base_cursor=c.position(source, start),
         entries=stored,

@@ -56,6 +56,421 @@ def history(tmp_path):
     store.close()
 
 
+class AdmissionCrash(BaseException):
+    pass
+
+
+def take_over(old, generation="c", writer="d"):
+    new = OwnerObservationHistory(
+        old.path,
+        resident_generation=generation * 32,
+        writer_id=writer * 32,
+        authority_check=lambda: True,
+    )
+    new.activate(expected_generation=old.resident_generation)
+    return new
+
+
+def intent_count(store):
+    with sqlite3.connect(store.path) as conn:
+        return conn.execute("SELECT count(*) FROM owner_observation_intent").fetchone()[0]
+
+
+def force_admitted_failure(store, baseline, capture, reason):
+    if reason == "journal-write-failed":
+        with sqlite3.connect(store.path) as conn:
+            conn.execute(
+                "CREATE TRIGGER fail_materialization BEFORE INSERT ON owner_observation_entry "
+                "BEGIN SELECT RAISE(ABORT,'admitted append failure'); END"
+            )
+    item = event(capture)
+    if reason == "cursor-unavailable":
+        item["payload"] = {"details": ["x" * 3500] * 9}
+    try:
+        with pytest.raises(c.ObservationError) as error:
+            store.publish(
+                capture,
+                [item],
+                batch_id="failed:2",
+                expected_cursor=baseline["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == reason
+    finally:
+        if reason == "journal-write-failed":
+            with sqlite3.connect(store.path) as conn:
+                conn.execute("DROP TRIGGER fail_materialization")
+
+
+@pytest.mark.parametrize("reason", ["cursor-unavailable", "journal-write-failed"])
+@pytest.mark.parametrize("completeness", ["complete", "unknown"])
+def test_known_gap_survives_takeover_fresh_capture_recovery_and_another_restart(
+    history, reason, completeness
+):
+    old, _alive = history
+    one = replace(record(1), completeness=completeness)
+    initial = old.initialize(record())
+    baseline = old.publish(
+        one,
+        [event(one)],
+        batch_id="accepted:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    two = replace(record(2), completeness=completeness)
+    force_admitted_failure(old, baseline, two, reason)
+    assert old.snapshot(selected())[0]["facts"] is None
+    new = take_over(old)
+    try:
+        with pytest.raises(c.ObservationError) as error:
+            new.snapshot(selected())
+        assert error.value.code == "unready"
+        qualified = new.initialize(one)
+        assert qualified["facts"] == one.facts and qualified["completeness"] == "partial"
+        assert qualified["durability"] == "committed"
+        assert new.snapshot(selected())[1]["reason"] == reason
+        assert new.last_record(selected())[0].completeness == completeness
+        duplicate = new.publish(
+            one,
+            [event(one)],
+            batch_id="accepted:1",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+        assert duplicate == qualified
+        repaired = new.publish(
+            two,
+            [event(two)],
+            batch_id="recovery:2",
+            expected_cursor=qualified["cursor"],
+            post_save=True,
+        )
+        assert repaired["facts"] == two.facts and repaired["completeness"] == "partial"
+        assert intent_count(new) == 0
+        newer = take_over(new, "e", "f")
+        try:
+            refreshed = newer.initialize(two)
+            assert refreshed["completeness"] == "partial"
+            assert newer.last_record(selected())[0].completeness == completeness
+            assert (
+                newer.page(selected(), baseline["source_generation"], None)["completeness"]
+                == "partial"
+            )
+            assert newer.snapshot(selected())[1]["reason"] == reason
+            with pytest.raises(c.ObservationError) as retired:
+                old.publish(
+                    two,
+                    [event(two)],
+                    batch_id="late:old",
+                    expected_cursor=baseline["cursor"],
+                    post_save=True,
+                )
+            assert retired.value.code == "superseded"
+        finally:
+            newer.close()
+    finally:
+        new.close()
+
+
+@pytest.mark.parametrize(
+    "operation", ["publish", "refresh", "initialize", "replacement", "overflow"]
+)
+def test_crash_after_admission_commit_reopens_as_source_qualified_uncertainty(history, operation):
+    old, _alive = history
+    before = (
+        None
+        if operation == "initialize"
+        else old.initialize(replace(record(1), completeness="complete"))
+    )
+    capture = replace(
+        record(
+            2 if operation in {"publish", "overflow", "replacement"} else 1,
+            incarnation="record:B" if operation == "replacement" else "record:one",
+        ),
+        completeness="complete",
+    )
+    tokens = []
+
+    def crash(token):
+        tokens.append(token)
+        assert intent_count(old) == 1
+        raise AdmissionCrash()
+
+    old._after_intent = crash
+    with pytest.raises(AdmissionCrash):
+        if operation in {"publish", "overflow"}:
+            item = event(capture)
+            if operation == "overflow":
+                item["payload"] = {"details": ["x" * 3500] * 9}
+            old.publish(
+                capture,
+                [item],
+                batch_id="admitted:2",
+                expected_cursor=before["cursor"],
+                post_save=True,
+            )
+        else:
+            old.initialize(
+                capture,
+                expected_source_generation=None if before is None else before["source_generation"],
+            )
+    assert len(tokens) == 1 and intent_count(old) == 1
+    new = take_over(old)
+    try:
+        if operation == "publish":
+            from agent_worktrees.owner_observation_runtime import OwnerObservationRuntime
+
+            runtime = OwnerObservationRuntime(new, heartbeat=0.01)
+            runtime.activate()
+            ready = runtime.reconcile(capture, batch_id="fresh:reconcile")
+            assert ready["facts"] == capture.facts and ready["completeness"] == "partial"
+            stream = runtime.stream(
+                {
+                    "contract_version": 1,
+                    "project": "project",
+                    "worktree_id": "full-worktree",
+                    "expected_head_session_id": "head",
+                    "after_cursor": None,
+                },
+                lambda: False,
+            )
+            try:
+                assert next(stream)["facts"] == capture.facts
+                assert next(stream)["type"] == "gap"
+            finally:
+                stream.close()
+        else:
+            current = (
+                capture if operation != "overflow" else replace(record(1), completeness="complete")
+            )
+            ready = new.initialize(
+                current,
+                expected_source_generation=None if before is None else before["source_generation"],
+            )
+            assert ready["facts"] == current.facts and ready["completeness"] == "partial"
+        assert new.last_record(selected(capture))[0].completeness == "complete"
+        with pytest.raises(c.ObservationError) as retired:
+            old.initialize(capture)
+        assert retired.value.code == "superseded"
+    finally:
+        new.close()
+
+
+def test_failed_gap_persistence_leaves_durable_intent_and_no_committed_update(history):
+    old, _alive = history
+    initial = old.initialize(replace(record(1), completeness="complete"))
+    with sqlite3.connect(old.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_stage_two BEFORE INSERT ON owner_observation_entry "
+            "BEGIN SELECT RAISE(ABORT,'materialization failed'); END"
+        )
+        conn.execute(
+            "CREATE TRIGGER fail_gap BEFORE INSERT ON owner_observation_gap "
+            "BEGIN SELECT RAISE(ABORT,'gap persistence failed'); END"
+        )
+    with pytest.raises(c.ObservationError, match="gap persistence failed") as error:
+        old.publish(
+            record(2),
+            [event(record(2))],
+            batch_id="failed:2",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+    assert error.value.admitted and error.value.invalidated
+    assert not error.value.gap_persisted and intent_count(old) == 1
+    with sqlite3.connect(old.path) as conn:
+        assert conn.execute("SELECT count(*) FROM owner_observation_entry").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM owner_observation_gap").fetchone()[0] == 0
+        conn.execute("DROP TRIGGER fail_gap")
+        conn.execute("DROP TRIGGER fail_stage_two")
+    new = take_over(old)
+    try:
+        current = new.initialize(replace(record(1), completeness="complete"))
+        assert current["completeness"] == "partial" and current["facts"] == record(1).facts
+        assert new.snapshot(selected())[1]["reason"] == "cursor-unavailable"
+    finally:
+        new.close()
+
+
+def test_update_and_intent_resolution_rollback_together(history):
+    old, _alive = history
+    initial = old.initialize(record(1))
+    with sqlite3.connect(old.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_resolution BEFORE DELETE ON owner_observation_intent "
+            "BEGIN SELECT RAISE(ABORT,'resolution failed'); END"
+        )
+    with pytest.raises(c.ObservationError):
+        old.publish(
+            record(2),
+            [event(record(2))],
+            batch_id="update:2",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+    assert intent_count(old) == 1
+    with sqlite3.connect(old.path) as conn:
+        assert conn.execute("SELECT count(*) FROM owner_observation_entry").fetchone()[0] == 0
+        assert (
+            c.decode(
+                c.utf8(conn.execute("SELECT facts FROM owner_observation_journal").fetchone()[0])
+            )
+            == record(1).facts
+        )
+        conn.execute("DROP TRIGGER fail_resolution")
+    repaired = old.publish(
+        record(2),
+        [event(record(2))],
+        batch_id="update:2",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    assert repaired["facts"] == record(2).facts and repaired["completeness"] == "partial"
+    assert intent_count(old) == 0
+
+
+def test_takeover_between_intent_and_materialization_fences_old_commit_and_resolution(history):
+    old, _alive = history
+    initial = old.initialize(record(1))
+    successors = []
+
+    def elect(token):
+        successors.append(take_over(old))
+
+    old._after_intent = elect
+    with pytest.raises(c.ObservationError) as error:
+        old.publish(
+            record(2),
+            [event(record(2))],
+            batch_id="late:2",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+    assert error.value.code == "superseded"
+    new = successors[0]
+    try:
+        current = new.initialize(record(1))
+        assert current["completeness"] == "partial"
+        with sqlite3.connect(new.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_entry").fetchone()[0] == 0
+        assert intent_count(new) == 0
+    finally:
+        new.close()
+
+
+def test_failed_replacement_range_does_not_contaminate_predecessor_history_after_takeover(history):
+    old, _alive = history
+    one = replace(record(1), completeness="complete")
+    before = old.initialize(one)
+    before = old.publish(
+        one, [event(one)], batch_id="old:1", expected_cursor=before["cursor"], post_save=True
+    )
+    page = old.page(selected(), before["source_generation"], None)
+    old._after_intent = lambda token: (_ for _ in ()).throw(AdmissionCrash())
+    replacement = replace(record(2, incarnation="record:B"), completeness="complete")
+    with pytest.raises(AdmissionCrash):
+        old.initialize(replacement, expected_source_generation=before["source_generation"])
+    new = take_over(old)
+    try:
+        ready = new.initialize(replacement, expected_source_generation=before["source_generation"])
+        assert ready["facts"] == replacement.facts and ready["completeness"] == "partial"
+        archived = new.page(selected(), before["source_generation"], None)
+        assert archived == {**page, "resident_generation": new.resident_generation}
+        assert archived["completeness"] == "complete"
+    finally:
+        new.close()
+
+
+@pytest.mark.parametrize(
+    "rejection", ["cursor", "source", "batch", "event", "metadata", "replacement", "intent-write"]
+)
+def test_rejected_admission_cannot_commit_intent_or_history_gap(history, rejection):
+    old, _alive = history
+    initial = old.initialize(record())
+    current = old.publish(
+        record(1),
+        [event(record(1))],
+        batch_id="accepted:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    capture = record(2, incarnation="record:wrong" if rejection == "source" else "record:one")
+    item = event(capture, identity="save:1" if rejection == "event" else None)
+    if rejection == "metadata":
+        item["actor"]["qualification"] = "invented"
+    if rejection == "intent-write":
+        with sqlite3.connect(old.path) as conn:
+            conn.execute(
+                "CREATE TRIGGER reject_intent BEFORE INSERT ON owner_observation_intent "
+                "BEGIN SELECT RAISE(ABORT,'intent rejected'); END"
+            )
+    with pytest.raises(c.ObservationError):
+        if rejection == "replacement":
+            old.initialize(record(2, incarnation="record:B"), expected_source_generation="e" * 32)
+        else:
+            old.publish(
+                capture,
+                [item],
+                batch_id="bad batch" if rejection == "batch" else "new:2",
+                expected_cursor=initial["cursor"] if rejection == "cursor" else current["cursor"],
+                post_save=True,
+            )
+    assert intent_count(old) == 0 and old.snapshot(selected())[0] == current
+    with sqlite3.connect(old.path) as conn:
+        assert conn.execute("SELECT count(*) FROM owner_observation_gap").fetchone()[0] == 0
+
+
+def test_missing_legacy_intent_coverage_is_unknown_not_invented_complete(history):
+    old, _alive = history
+    capture = replace(record(1), completeness="complete")
+    old.initialize(capture)
+    with sqlite3.connect(old.path) as conn:
+        conn.execute("DROP TABLE owner_observation_intent")
+    new = take_over(old)
+    try:
+        current = new.initialize(capture)
+        assert current["completeness"] == "unknown"
+        assert new.last_record(selected())[0].completeness == "complete"
+        assert new.snapshot(selected())[1]["reason"] == "cursor-unavailable"
+    finally:
+        new.close()
+
+
+def test_admission_signature_preserves_nullable_types_and_source_identity(history):
+    from agent_worktrees.owner_observation_intent import row_signature
+
+    store, _alive = history
+    store.initialize(record())
+    with store._read() as conn:
+        row = store._row(conn, selected(), _pending=False)
+    assert row_signature({**row, "head": None}) != row_signature({**row, "head": "null"})
+    assert row_signature(row) != row_signature({**row, "source": "record:different"})
+
+
+def test_reply_failure_after_atomic_success_does_not_invent_lost_history(history, monkeypatch):
+    store, _alive = history
+    initial = store.initialize(replace(record(1), completeness="complete"))
+    capture = replace(record(2), completeness="complete")
+
+    def failed_reply(*args, **kwargs):
+        raise OSError("private reply read failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "snapshot", failed_reply)
+        with pytest.raises(c.ObservationError, match="transaction committed") as error:
+            store.publish(
+                capture,
+                [event(capture)],
+                batch_id="committed:2",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert error.value.admitted and not error.value.invalidated
+    current, gap = store.snapshot(selected())
+    assert current["facts"] == capture.facts and current["completeness"] == "complete"
+    assert gap is None and intent_count(store) == 0
+
+
 def test_initial_snapshot_is_explicit_retained_range_not_canonical_history(history):
     store, _alive = history
     snapshot = store.initialize(record())

@@ -214,6 +214,134 @@ def runtime(tmp_path):
     owner.shutdown()
 
 
+def test_stage_two_connection_failure_keeps_intent_and_wakes_held_reader(runtime, monkeypatch):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    one = record(1)
+    baseline = owner.publish(
+        one,
+        [event(one)],
+        batch_id="accepted:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    broken = [False]
+    original = owner.history._connect
+
+    def connect(*, write=False):
+        if write and broken[0]:
+            raise OSError("private stage-two connection failure")
+        return original(write=write)
+
+    def after_intent(token):
+        broken[0] = True
+
+    monkeypatch.setattr(owner.history, "_connect", connect)
+    owner.history._after_intent = after_intent
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == baseline
+        with pytest.raises(c.ObservationError, match="remains unresolved") as error:
+            owner.publish(
+                record(2),
+                [event(record(2))],
+                batch_id="failed:2",
+                expected_cursor=baseline["cursor"],
+                post_save=True,
+            )
+        assert error.value.admitted and not error.value.invalidated
+        assert owner.history._failures == {}
+        assert next(stream)["type"] == "gap"
+        failed = next(stream)
+        assert failed["facts"] is None and failed["durability"] == "pending"
+        assert failed["cursor"] == baseline["cursor"]
+        broken[0] = False
+        owner.history._after_intent = None
+        with sqlite3.connect(owner.history.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_intent").fetchone()[0] == 1
+        refresh = owner.initialize(one)
+        assert refresh["facts"] is None
+        with sqlite3.connect(owner.history.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_intent").fetchone()[0] == 1
+        duplicate = owner.publish(
+            one,
+            [event(one)],
+            batch_id="accepted:1",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+        assert duplicate["facts"] is None
+        with sqlite3.connect(owner.history.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_intent").fetchone()[0] == 1
+        recovered = owner.publish(
+            record(2),
+            [event(record(2))],
+            batch_id="recovery:2",
+            expected_cursor=baseline["cursor"],
+            post_save=True,
+        )
+        assert recovered["facts"] == record(2).facts
+        assert recovered["completeness"] == "partial"
+        with sqlite3.connect(owner.history.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_intent").fetchone()[0] == 0
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("operation", ["overflow", "append"])
+def test_gap_write_failure_notifies_with_pending_intent_then_takeover_preserves_uncertainty(
+    runtime, operation
+):
+    from test_owner_observation_history import take_over
+
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(replace(record(1), completeness="complete"))
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER reject_gap BEFORE INSERT ON owner_observation_gap "
+            "BEGIN SELECT RAISE(ABORT,'gap-write failure'); END"
+        )
+        if operation == "append":
+            conn.execute(
+                "CREATE TRIGGER reject_append BEFORE INSERT ON owner_observation_entry "
+                "BEGIN SELECT RAISE(ABORT,'append failure'); END"
+            )
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == initial
+        capture = record(2)
+        item = event(capture)
+        if operation == "overflow":
+            item["payload"] = {"details": ["x" * 3500] * 9}
+        with pytest.raises(c.ObservationError, match="gap persistence failed") as error:
+            owner.publish(
+                capture,
+                [item],
+                batch_id="failed:2",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert error.value.admitted and error.value.invalidated
+        assert next(stream)["type"] == "gap"
+        assert next(stream)["facts"] is None
+        with sqlite3.connect(owner.history.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_intent").fetchone()[0] == 1
+            conn.execute("DROP TRIGGER reject_gap")
+            if operation == "append":
+                conn.execute("DROP TRIGGER reject_append")
+        new = take_over(owner.history)
+        try:
+            current = new.initialize(replace(record(1), completeness="complete"))
+            assert current["completeness"] == "partial"
+            assert current["facts"] == record(1).facts
+            assert new.snapshot(c.Selection("project", "full-worktree", "head"))[1] is not None
+            assert next(stream)["type"] == "going-away"
+        finally:
+            new.close()
+    finally:
+        stream.close()
+
+
 def test_initial_snapshot_then_indexed_delta_and_heartbeat_do_not_poll_records(
     runtime, monkeypatch
 ):
@@ -1841,7 +1969,16 @@ def test_new_resident_requires_current_capture_before_recovering_failed_newer_st
         latest = replacement.reconcile(record(1), batch_id="requalify:current")
         assert latest["facts"] == record(1).facts
         assert latest["source_generation"] == initial["source_generation"]
-        assert latest["completeness"] == "unknown"
+        assert latest["completeness"] == "partial"
+        with sqlite3.connect(owner.history.path) as conn:
+            stored = conn.execute(
+                "SELECT completeness,gap FROM owner_observation_journal WHERE generation=?",
+                (latest["source_generation"],),
+            ).fetchone()
+        assert stored == (record(1).completeness, "journal-write-failed")
+        _current, gap = replacement.history.snapshot(c.Selection("project", "full-worktree", "head"))
+        assert gap is not None and gap["type"] == "gap"
+        assert gap["reason"] == "journal-write-failed"
     finally:
         replacement.shutdown()
 
