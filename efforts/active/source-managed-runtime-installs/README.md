@@ -49,6 +49,7 @@ service-supervision ownership changes.
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
 | Wheel-first transition coordinator | Owns the reviewed proposal followed by local qualification and one final implementation PR | #7028 and #9688; existing source/resource custodians remain; deployment/fleet handoff is separate |
+| Fresh recovery dispatcher implementer | Owns the bounded fresh-bootstrap/selected-source composition and disposable entry qualification | #7028; source handle `greased-latch`; existing application, footprint and execution owners retain their scopes |
 
 ## Coordination
 
@@ -392,6 +393,7 @@ disposable scope while preserving config and durable data.
 
 ### Phase W — Wheel-first independent suite (proposal extension)
 - [x] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction. #9623 lands the intent; implementation and installation/fleet acceptance remain open.
+- [ ] Review, implement and qualify the bounded [fresh recovery dispatcher composition](fresh-recovery-dispatch.md), keeping current dispatch independent of the selected installation source and reusing native source, footprint, application and execution owners.
 - [ ] Reconcile the promotion-mediated backing-checkout and every-app staging/activation contract with the existing #9290 owners; consume their UV-native, pyproject-strict implementation without taking over construction/cache/profile/publisher work.
 - [ ] Deliver the Manager-only fast path and complete locally promoted uv/wheel inputs through existing source/release owners.
 - [ ] Route configured Dev `<repo> update` through that local promotion provider,
