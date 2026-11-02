@@ -11,7 +11,7 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -258,6 +258,10 @@ def _vectors() -> list[dict[str, object]]:
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _make_fifo(path: Path) -> None:
+    cast(Callable[[Path], None], getattr(os, "mkfifo"))(path)
 
 
 def test_private_json_write_syncs_file_and_posix_directory(
@@ -1278,9 +1282,12 @@ esac
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX kernel lock and native adapter qualification")
 @pytest.mark.parametrize("mutation", ("content", "version"))
-def test_agent_machines_refuses_payload_replaced_during_lock_wait(tmp_path, mutation):
+def test_agent_machines_refuses_payload_replaced_during_lock_wait(
+    tmp_path: Path, mutation: str,
+) -> None:
     import fcntl
 
+    flock = cast(Callable[[int, int], None], getattr(fcntl, "flock"))
     exemplar = next(
         item for item in EXEMPLAR_INSTALLERS
         if item[0] == "agent-machines" and item[2] != "powershell"
@@ -1303,7 +1310,7 @@ def test_agent_machines_refuses_payload_replaced_during_lock_wait(tmp_path, muta
     ))
     lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
     with lock_path.open("w") as lock, ThreadPoolExecutor(max_workers=1) as pool:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        flock(lock.fileno(), getattr(fcntl, "LOCK_EX"))
         future = pool.submit(
             _run_exemplar_slot_action, exemplar, "cell-provision", layout, tmp_path,
             environment_overrides={"AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness)},
@@ -1320,7 +1327,7 @@ def test_agent_machines_refuses_payload_replaced_during_lock_wait(tmp_path, muta
                     path = installed / name
                     path.write_text(path.read_text().replace(version, "9.9.9"))
         finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            flock(lock.fileno(), getattr(fcntl, "LOCK_UN"))
         result = future.result(timeout=15)
     assert result.returncode != 0, result.stdout
     assert "changed" in result.stderr.lower()
@@ -1329,9 +1336,10 @@ def test_agent_machines_refuses_payload_replaced_during_lock_wait(tmp_path, muta
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX kernel lock and native PowerShell qualification")
-def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path):
+def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path: Path) -> None:
     import fcntl
 
+    flock = cast(Callable[[int, int], None], getattr(fcntl, "flock"))
     exemplar = next(
         item for item in EXEMPLAR_INSTALLERS
         if item[0] == "agent-machines" and item[2] == "powershell"
@@ -1384,7 +1392,7 @@ def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path):
     lock_exemplar = (exemplar[0], (*exemplar[1][:-1], str(probe)), exemplar[2])
     lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
     with lock_path.open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        flock(lock.fileno(), getattr(fcntl, "LOCK_EX"))
         started = time.monotonic()
         result = _run_exemplar_slot_action(
             lock_exemplar, "cell-provision", layout, tmp_path,
@@ -1407,7 +1415,9 @@ def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path):
     tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
     ids=lambda exemplar: exemplar[2],
 )
-def test_agent_machines_rejects_changed_copy_before_snapshot_publication(exemplar, tmp_path):
+def test_agent_machines_rejects_changed_copy_before_snapshot_publication(
+    exemplar: Runner, tmp_path: Path,
+) -> None:
     _, installed, home = _installed_exemplar(exemplar, tmp_path)
     (installed / "source.py").write_text("original = True\n")
     version = next(
@@ -1435,7 +1445,9 @@ def test_agent_machines_rejects_changed_copy_before_snapshot_publication(exempla
     tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
     ids=lambda exemplar: exemplar[2],
 )
-def test_agent_machines_preserves_source_managed_snapshot_identity(exemplar, tmp_path):
+def test_agent_machines_preserves_source_managed_snapshot_identity(
+    exemplar: Runner, tmp_path: Path,
+) -> None:
     _, installed, _ = _installed_exemplar(exemplar, tmp_path)
     version = next(
         line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
@@ -1444,6 +1456,7 @@ def test_agent_machines_preserves_source_managed_snapshot_identity(exemplar, tmp
     spec = importlib.util.spec_from_file_location(
         "snapshot_source_identity_fixture", installed / "scripts/versioned_runtime_source.py",
     )
+    assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -1815,7 +1828,7 @@ def _run_exemplar_mark_complete(
             encoding="utf-8",
         )
         harness.chmod(0o755)
-        command = ("bash", str(harness))
+        command = ["bash", str(harness)]
     environment = os.environ.copy()
     if environment_overrides:
         environment.update(environment_overrides)
@@ -1873,7 +1886,7 @@ def _run_exemplar_payload_hash(
             ),
             encoding="utf-8",
         )
-        command = (
+        command: tuple[str, ...] = (
             str(POWERSHELL),
             "-NoProfile",
             "-File",
@@ -2343,7 +2356,7 @@ def test_exemplar_producer_hash_failure_does_not_omit_payload_hash(
     else:
         if os.name == "nt":
             pytest.skip("non-regular filesystem payload entries require POSIX")
-        os.mkfifo(installed_plugin / "!payload-pipe")
+        _make_fifo(installed_plugin / "!payload-pipe")
 
     produced = _run_exemplar_mark_complete(
         exemplar,
@@ -4185,7 +4198,7 @@ def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
         target.write_text("outside\n", encoding="utf-8")
         (snapshot_root / "linked-content").symlink_to(target)
     else:
-        os.mkfifo(snapshot_root / "named-pipe")
+        _make_fifo(snapshot_root / "named-pipe")
     _stamp_with_python(layout)
     _provision_slot_with_python(layout)
     _build_receipt(layout, payload_hash="a" * 64)
@@ -4262,7 +4275,7 @@ def test_python_build_receipt_open_rejects_replacement_to_unsafe_object(
     layout = _receipt_layout(tmp_path)
     build_path = _prepare_completion_slot(layout)
     module = _load_python_module()
-    original_open = module.os.open
+    original_open = os.open
     replaced = False
 
     def racing_open(
@@ -4299,7 +4312,7 @@ def test_python_build_receipt_open_rejects_replacement_to_unsafe_object(
                 )
                 build_path.symlink_to(target)
             else:
-                os.mkfifo(build_path)
+                _make_fifo(build_path)
         if dir_fd is None:
             return original_open(path, flags, mode)
         return original_open(path, flags, mode, dir_fd=dir_fd)
@@ -4331,7 +4344,7 @@ def test_python_snapshot_hash_open_rejects_replacement_to_unsafe_object(
     layout = _receipt_layout(tmp_path)
     snapshot_file = Path(layout["snapshot_root"]) / "payload-content.txt"
     module = _load_python_module()
-    original_open = module.os.open
+    original_open = os.open
     replaced = False
 
     def racing_open(
@@ -4356,7 +4369,7 @@ def test_python_snapshot_hash_open_rejects_replacement_to_unsafe_object(
                 target.write_text("outside\n", encoding="utf-8")
                 snapshot_file.symlink_to(target)
             else:
-                os.mkfifo(snapshot_file)
+                _make_fifo(snapshot_file)
         if dir_fd is None:
             return original_open(path, flags, mode)
         return original_open(path, flags, mode, dir_fd=dir_fd)
@@ -4386,7 +4399,7 @@ def test_python_completion_rejects_atomic_regular_replacement_after_validation(
             / ".runtime-slot-ownership.json"
         )
     )
-    original_sha256_file = module._sha256_file
+    original_sha256_file = cast(Callable[[Path], str], module._sha256_file)
     replaced = False
 
     def replace_before_digest(path: Path) -> str:
@@ -4447,8 +4460,8 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
     replacement = marker.with_name(".replacement-completion.json")
     replacement_bytes = b'{"replaced":true}\n'
     replacement.write_bytes(replacement_bytes)
-    original_open = module.os.open
-    original_read = module.os.read
+    original_open = os.open
+    original_read = os.read
     marker_descriptor: int | None = None
     replaced = False
     replacement_error: PermissionError | None = None
@@ -4476,15 +4489,15 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
             try:
                 os.replace(replacement, marker)
             except PermissionError as error:
-                if os.name != "nt" or error.winerror not in (5, 32):
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32):
                     raise
                 replacement_error = error
         return original_read(descriptor, length)
 
     monkeypatch.setattr(module.os, "open", racing_open)
     monkeypatch.setattr(module.os, "read", racing_read)
-    def validate() -> dict[str, Any]:
-        return module.validate_runtime_slot_completion(
+    def validate() -> dict[str, object]:
+        return cast(dict[str, object], module.validate_runtime_slot_completion(
             context=layout["install"],
             expected_marketplace_id=layout["marketplace_id"],
             expected_plugin_id=layout["plugin_id"],
@@ -4494,7 +4507,7 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
             runtime_version="3.4.5",
             durable_home=layout["durable"],
             environment={},
-        )
+        ))
 
     if os.name == "nt":
         assert validate()["receipt"] == published["receipt"]
@@ -4526,7 +4539,7 @@ def test_python_slot_completion_reconfirms_tree_before_publication(
     snapshot_root = Path(layout["snapshot_root"])
     calls = 0
 
-    def racing_digest(root: Path, **kwargs: object) -> str:
+    def racing_digest(root: Path, **kwargs: int) -> str:
         nonlocal calls
         digest = original_digest(root, **kwargs)
         calls += 1
@@ -4541,7 +4554,7 @@ def test_python_slot_completion_reconfirms_tree_before_publication(
                 target.unlink()
             else:
                 target.rename(snapshot_root / "renamed-content.txt")
-        return digest
+        return cast(str, digest)
 
     monkeypatch.setattr(module, "_snapshot_content_sha256", racing_digest)
     with pytest.raises(
@@ -5258,7 +5271,7 @@ def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receip
             try:
                 os.replace(staging, build_path)
             except PermissionError as error:
-                if os.name != "nt" or error.winerror not in (5, 32):
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32):
                     raise
                 stop.wait(0.001)
                 continue
@@ -5963,7 +5976,7 @@ def test_python_reparse_detection_supports_pre_312_pathlib(
         module.os,
         "lstat",
         lambda _path: SimpleNamespace(
-            st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT
+            st_file_attributes=getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
         ),
     )
     assert module._is_link_or_junction(path) is True
@@ -6447,17 +6460,17 @@ def test_powershell_rejects_non_decimal_int64_generation_arguments(
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
-    generations: dict[str, int | str] = {
-        "expected_namespace_generation": 1,
-        "expected_install_generation": 2,
-    }
-    generations[argument] = value
     result = _run(
         next(runner for runner in ALL_RUNNERS if runner[0] == "powershell"),
         "snapshot-stamp",
         layout,
         check=False,
-        **generations,
+        expected_namespace_generation=(
+            value if argument == "expected_namespace_generation" else 1
+        ),
+        expected_install_generation=(
+            value if argument == "expected_install_generation" else 2
+        ),
     )
     assert result.returncode != 0
     assert message in result.stderr.lower()
