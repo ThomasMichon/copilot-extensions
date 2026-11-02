@@ -15,6 +15,11 @@ Realize the Installer vision's
 and [source-backed maintenance](../../../visions/installer/README.md#source-backed-maintenance)
 through Manager's existing canonical installation/update path.
 
+The [automatic-update control refinement](automatic-update-control.md) covers
+the standing Installation & Updates UI and explicit automatic/manual request
+distinction. It can extend the existing launch-time controls without enabling
+the optional recurring controller described here.
+
 Automatic installation is **off by default**. An explicit user choice or an
 explicitly run trusted consuming-harness setup can opt in for the addressed
 user or local installation. A harness that installs Manager can finish its
