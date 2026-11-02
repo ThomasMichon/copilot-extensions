@@ -1283,6 +1283,7 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
 - [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
 
 ### 2026-10-28 - Fresh-default installation and recognizer manifests

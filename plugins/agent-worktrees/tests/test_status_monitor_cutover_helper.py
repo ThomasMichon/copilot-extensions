@@ -208,6 +208,38 @@ def _wait_for(predicate, *, timeout: float = 10.0, interval: float = 0.05, messa
     raise AssertionError(message)
 
 
+def test_installation_promotes_successor_without_draining_busy_predecessor(tmp_path, monkeypatch):
+    old = _FakeDaemon(101, port=0)
+    new = _FakeDaemon(202)
+    old.busy.set()
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=old.port, pid=old.pid)
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(
+        "agent_worktrees.status_monitor_reap_stale.schedule_delayed_daemon_health_reap",
+        lambda: None,
+    )
+
+    def spawn(_python, *, port):
+        new.start(port)
+        return _Handle(new)
+
+    monkeypatch.setattr(smc, "spawn_passive", spawn)
+    try:
+        result = smc.activate_after_update(runtime_python="python", asynchronous_retirement=True)
+        assert result["result"]["ok"] is True
+        assert result["result"]["retirement_pending"] is True
+        assert new.promoted and new.alive
+        assert old.alive and old.busy.is_set()
+        assert not old.draining and not old.shutdown_requested
+        assert routing.read_table(tmp_path)["active"]["pid"] == new.pid
+    finally:
+        old.force_terminate()
+        new.force_terminate()
+
+
 def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agent_worktrees.runtime_monitor_demand.retain_transition_demand",

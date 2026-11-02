@@ -4918,9 +4918,13 @@ The caller-owned monitor seam can return actual passive **and restart**
 process handles without releasing its cutover guard. Supplying both guard and
 handles transfers settlement responsibility to that lifecycle; older callers
 retain their existing asynchronous recovery backstop. Spawn/commit return
-values do not prove service readiness or process exit. Candidate readiness,
-failed-child exit and predecessor retirement are observed under retained
-custody; uncertain durable publication requires a terminal owner-led recovery
+values do not prove service readiness or process exit. The ordinary Worktrees
+installer opts into resident-owned predecessor retirement: it promotes and
+attests the published successor, then finishes without an old drain RPC or a
+predecessor-exit wait. The outgoing resident observes supersession and drains
+and retires independently; `retirement_pending` is not an exit receipt.
+Failed candidate children remain under installer custody, and uncertain durable
+publication requires a terminal owner-led recovery
 witness, never a missing/corrupt breadcrumb interpreted as success. Selector
 publication, monitor transition, and selector settlement share one exception-safe
 owning boundary: failures before either selector write, between writes, or after
@@ -4934,13 +4938,16 @@ the previous selector. For an uncertain publication, the same owning receiver
 can retry recovery under native ZDD transition authority instead of waiting for
 another installer blocked by its own guards. Recovery validates its breadcrumb,
 actual spawned handle, process start identities, and strict routing state.
-It confirms durable publication and actual predecessor drain before
-commit-forward, or restores and verifies the predecessor before retiring a
+It confirms durable publication and successor readiness before
+commit-forward, without contacting or waiting for the predecessor, or restores
+and verifies the predecessor before retiring a
 ready unpublished passive. Unknown evidence, formerly-published unhealthy
 candidates, and storage failures retain custody rather than manufacturing a
 terminal outcome. Promoted monitor demand uses its existing worktree-status
-subscription, renewed under the lifecycle's transition stack through actual
-predecessor retirement. The successor is reattested after that exit. Windows
+subscription, renewed under the lifecycle's transition stack until successor
+readiness is established. Resident process-retention leases protect live
+generations after installation returns; installation does not retain a worker
+or background thread to wait for predecessor exit. Windows
 exit evidence tests the native process signal, not whether a retained exited
 process object can still be opened. These
 pieces do not yet constitute complete adoption: dev/release, distinct-generation

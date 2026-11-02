@@ -389,10 +389,6 @@ def _settle_monitor(
             time.sleep(0.2)
             continue
         if ready:
-            if predecessor is not None and _monitor_identity(root) != predecessor:
-                _wait_for_exit(*predecessor, label="retired predecessor")
-                if not _candidate_serving(root, slot):
-                    raise InstallationRefused("Candidate stopped serving before predecessor retirement completed")
             return True
         live_handles = [handle for handle in handles if handle.poll() is None]
         if live_handles and result.get("rolled_back"):
@@ -701,6 +697,7 @@ def settle_candidate(
                         monitor_was_live=predecessor is not None, cutover_guard=guard,
                         spawned_handles=handles,
                         transition_custody=custody,
+                        asynchronous_retirement=True,
                     )
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "

@@ -90,10 +90,7 @@ def test_same_owner_recovers_uncertain_publication_under_native_authority(owned,
     assert terminal["state"] == ("committed" if published else "rolled_back")
     assert terminal["publication_witness"] == record["publication_witness"]
     assert terminal["new_process_start_time"] == record["new_process_start_time"]
-    assert events == (
-        ["drain-predecessor", "shutdown-predecessor"] if published else
-        ["undrain-predecessor", "terminate-candidate"]
-    )
+    assert events == ([] if published else ["undrain-predecessor", "terminate-candidate"])
 
 
 def test_uncertain_republication_storage_failure_retains_owner_witness(owned, monkeypatch):
@@ -146,14 +143,22 @@ def test_rollback_preserves_route_token_when_native_birth_token_differs(owned, m
     assert restored.process_start_time == "1001"
 
 
-def test_commit_forward_requires_actual_predecessor_drain(owned):
-    root, route_root, record, handle, client, health, events, _identities = owned
+@pytest.mark.parametrize("old_state", ["busy", "exited", "reused"])
+def test_commit_forward_does_not_wait_for_or_contact_the_predecessor(owned, monkeypatch, old_state):
+    root, route_root, record, handle, client, health, events, identities = owned
     health[41002]["published"] = True
     client.drained = False
-    assert not recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
-    assert breadcrumb.read_breadcrumb(route_root) == record
-    assert "shutdown-predecessor" not in events
-    assert handle.poll() is None
-    client.drained = True
+    if old_state == "exited":
+        identities.pop(101)
+    elif old_state == "reused":
+        identities[101] = "different"
+    original = client.health
+
+    def candidate_only(self):
+        assert self.port == 41002, "recovery contacted the predecessor"
+        return original(self)
+
+    monkeypatch.setattr(client, "health", candidate_only)
     assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
-    assert events[-1] == "shutdown-predecessor"
+    assert breadcrumb.read_breadcrumb(route_root)["state"] == "committed"
+    assert events == [] and handle.poll() is None

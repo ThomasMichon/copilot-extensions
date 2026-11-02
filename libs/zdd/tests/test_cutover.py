@@ -53,7 +53,7 @@ class FakeClient:
 
 
 def _make(cfg_dir: Path, *, healthy_ports, registry, spawned=None, port=9290,
-          drain_result=None):
+          drain_result=None, **options):
     """Build an orchestrator with controllable collaborators."""
     handle = FakeHandle()
     if spawned is None:
@@ -81,6 +81,7 @@ def _make(cfg_dir: Path, *, healthy_ports, registry, spawned=None, port=9290,
         pick_free_port=lambda: port,
         sleep=lambda _s: None,
         clock=_fake_clock(),
+        **options,
     )
     return orch, handle
 
@@ -126,6 +127,47 @@ def test_cutover_happy_path(tmp_path: Path, monkeypatch):
 
 
 # -- new daemon never becomes healthy -> rollback ----------------------------
+
+def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry = {}
+    promoted = []
+
+    def activate(endpoint):
+        assert routing.read_table(tmp_path)["active"]["port"] == endpoint.port
+        promoted.append(endpoint.port)
+
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry=registry,
+        self_retirement=True, activate_successor=activate,
+    )
+    result = orch.run(health_timeout=1, drain_timeout=0)
+    assert result.ok and result.committed and not result.rolled_back
+    assert result.retirement_pending and not result.retirement_confirmed
+    assert result.to_dict()["retirement_pending"] is True
+    assert promoted == [9290] and registry == {}
+    assert not handle.terminated
+    assert breadcrumb.read_breadcrumb(tmp_path) is None
+
+
+def test_self_retirement_activation_failure_preserves_the_predecessor(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry = {}
+
+    def activate(_endpoint):
+        raise RuntimeError("successor refused promotion")
+
+    orch, _handle = _make(
+        tmp_path, healthy_ports={9281, 9290}, registry=registry,
+        self_retirement=True, activate_successor=activate,
+    )
+    result = orch.run(health_timeout=1)
+    assert not result.ok and not result.committed
+    assert result.rolled_back
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+    assert registry.get("http://127.0.0.1:9281") is None
 
 
 def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):

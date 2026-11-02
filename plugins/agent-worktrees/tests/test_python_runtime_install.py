@@ -333,6 +333,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
 
     def actual_transition(**arguments):
         assert arguments["cutover_guard"] is guard
+        assert arguments["asynchronous_retirement"] is True
         assert authority == ["enter", "leave", "enter"]
         assert driver.runtime.current_version(root) == "2.0.0"
         assert driver.runtime.gc(root) == []
@@ -425,6 +426,17 @@ def test_failed_passive_exit_is_observed_before_returning(driver, tmp_path, monk
         {"action": "cutover", "result": {"rolled_back": True}}, None, [Handle()],
     ) is False
     assert events == ["poll", "wait", "poll"]
+
+def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
+    monkeypatch.setattr(
+        driver, "_wait_for_exit", lambda *_args, **_kwargs: pytest.fail("installer waited for drain"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {"committed": True, "retirement_pending": True}},
+        (123, "original-birth"), [],
+    )
 
 
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
@@ -664,7 +676,7 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
 
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize("legacy_lock", ["live", "absent", "stale"])
-def test_real_installer_retains_the_serving_slot_until_monitor_drain(
+def test_real_installer_returns_before_resident_owned_monitor_drain(
     driver, tmp_path, native_runtime_source, legacy_lock,
 ):
     from agent_worktrees import classify_daemon, locks
@@ -733,7 +745,7 @@ def test_real_installer_retains_the_serving_slot_until_monitor_drain(
     request_started = tmp_path / "request-started"
     request_release = tmp_path / "request-release"
     monitor_probe = """
-import runpy, sys, threading
+import importlib.util, runpy, sys, threading
 from pathlib import Path
 from agent_worktrees import classify_daemon
 started, release = map(Path, sys.argv[1:])
@@ -752,7 +764,15 @@ def controlled_server(compute, **kwargs):
     return start_server(controlled_compute, **kwargs)
 classify_daemon.start_server = controlled_server
 sys.argv = ["agent_worktrees", "status-monitor", "--interval", "1"]
-runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
+slot = Path(sys.prefix)
+spec = importlib.util.spec_from_file_location(
+    "baseline_retention", slot / ".runtime-bootstrap" / "versioned_runtime.py",
+)
+runtime = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = runtime
+spec.loader.exec_module(runtime)
+with runtime.retention_lease(slot.parent.parent, slot.name):
+    runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
 """
     try:
         with (tmp_path / "monitor.log").open("w", encoding="utf-8") as monitor_log:
@@ -842,26 +862,40 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     message="installer never published the successor route",
                 )
                 identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+                assert transition.wait(timeout=60) == 0, log.read_text(encoding="utf-8", errors="replace")
+                current = locks.read_lock(lock_path)
+                assert current["pid"] == successor.pid
+                new_host, new_port = current["worktree_status_endpoint"].split(":")
+                new_demand = (new_host, int(new_port), current["worktree_status_token"])
+                classify_daemon.wcs_client.subscribe(*new_demand, "retained-cutover-demand")
                 demand_stop.set()
                 demand_thread.join(timeout=5)
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors
-                assert transition.poll() is None, "installer returned before predecessor drain"
+                demand_endpoint = new_demand
+                demand_stop.clear()
+                demand_thread = threading.Thread(target=keep_demand, daemon=True)
+                demand_thread.start()
                 assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
+                assert monitor.poll() is None, "installation waited for predecessor retirement"
                 for version in (old.name, installed["runtime_version"]):
                     with pytest.raises(driver.runtime.RetentionTimeout):
                         with driver.runtime._kernel_lease(
                             root, version, kind="retention", shared=False, timeout=0,
                         ):
-                            pytest.fail("installer released a live cutover generation")
+                            pytest.fail("resident released its live runtime generation")
                 request_release.touch()
-                assert transition.wait(timeout=180) == 0, log.read_text(encoding="utf-8", errors="replace")
             hook_thread.join(timeout=15)
             assert not hook_thread.is_alive()
             assert hook_result.get("delayed") is True
-            assert monitor.returncode is not None, "installer returned before its predecessor was reaped"
-            assert monitor_exit.result() == 0
-            assert not diagnostics._pid_alive(old_pid), "installer returned before actual predecessor exit"
+            from agent_worktrees.status_monitor_cli import _SELF_RETIRE_MAX_GRACE_S
+
+            assert monitor_exit.result(timeout=_SELF_RETIRE_MAX_GRACE_S + 15) == 0
+            assert not diagnostics._pid_alive(old_pid), "predecessor did not independently retire"
+            with driver.runtime._kernel_lease(
+                root, old.name, kind="retention", shared=False, timeout=0,
+            ):
+                pass
             new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
             assert new_lock["pid"] == successor.pid
             assert Path(new_lock["prefix"]).resolve() == candidate.resolve()

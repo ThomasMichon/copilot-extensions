@@ -14,6 +14,16 @@ client does not import daemon diagnostics or singleton supervision. Existing
 root imports, `from zdd import *`, and canonical object identities are preserved;
 this changes import work, not routing, cutover or process-retirement policy.
 
+`CutoverOrchestrator` also supports opt-in `self_retirement=True` with an
+`activate_successor(endpoint)` callback. It health-gates and publishes the
+candidate, invokes the adopter's promotion callback, verifies readiness and
+commits without contacting the predecessor. The resident owns supersession,
+accepted-work draining and eventual exit independently of the installer.
+`retirement_pending` reports that separation; it never certifies predecessor
+exit. This mode cannot be combined with conditional writer transfer or
+pre-publication drain. Existing adopters keep their synchronous cutover
+contract unless they explicitly opt in.
+
 ## What's inside
 
 ### `zdd.lifecycle` -- durable transition history
