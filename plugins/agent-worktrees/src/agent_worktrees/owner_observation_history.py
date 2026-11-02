@@ -91,8 +91,15 @@ class OwnerObservationHistory:
 
     def _authority(self, *, read: bool = False) -> None:
         check = self.read_authority_check if read else self.authority_check
-        if self._retired or check() is not True:
+        if self._retired:
             raise c.ObservationError("owner observation publisher is not elected", "superseded")
+        if check() is not True:
+            code = (
+                "writer-fenced"
+                if not read and self.read_authority_check() is True
+                else "superseded"
+            )
+            raise c.ObservationError("owner observation publisher is not elected", code)
         if self.path.is_symlink():
             raise c.ObservationError("linked owner observation database refused", "unavailable")
 

@@ -83,6 +83,10 @@ def authority(
 ) -> bool:
     elected = owner._read_elected if read else owner._elected
     if elected is not None and not elected():
+        if not read and authority(owner, store, read=True):
+            raise c.ObservationError(
+                "observation writer is not elected; cached reads remain admitted", "writer-fenced",
+            )
         return False
     with owner._lock:
         if owner.store is not store:

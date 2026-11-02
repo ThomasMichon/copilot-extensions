@@ -480,3 +480,65 @@ def test_writer_fence_preserves_admitted_observation_reads_without_new_writes(ow
         assert owner.observation_read(request())["error"]["code"] == "superseded"
     finally:
         stream.close()
+
+
+@pytest.mark.parametrize("operation", ["initialize", "publish"])
+def test_mid_materialization_writer_loss_preserves_unrelated_admitted_readers(
+    owner, monkeypatch, operation,
+):
+    election = {"writer": True, "reader": True}
+    monkeypatch.setattr(owner, "_elected", lambda: election["writer"])
+    monkeypatch.setattr(owner, "_admitted", lambda: election["reader"])
+    enroll(owner)
+    if operation == "initialize":
+        target, unrelated = "new-worktree", "full-worktree"
+    else:
+        target, unrelated = "full-worktree", "other-worktree"
+    owner.observation_read(request(worktree=target))
+    owner.observation_read(request(worktree=unrelated))
+    rows = [row(), row(id=unrelated)] if operation == "publish" else [row()]
+    owner.publish("project", rows, observed_at=2)
+    unaffected = owner.observation_read(request(worktree=unrelated))
+    assert unaffected["type"] == "snapshot"
+    page_payload = {
+        **{key: value for key, value in request(worktree=unrelated).items() if key != "after_cursor"},
+        "source_generation": unaffected["source_generation"],
+        "before_cursor": None, "limit": 64,
+    }
+    page = owner.observation_history(page_payload)
+    stream = owner.stream(wire.FEED_ACTION, request(worktree=unrelated), lambda: False)
+    checkpoints = []
+
+    def lose_writer(token):
+        if token.worktree == target:
+            checkpoints.append(token.kind)
+            election["writer"] = False
+
+    owner.observations.runtime.history._after_intent = lose_writer
+    try:
+        assert next(stream) == unaffected
+        supplied = (
+            [row(), row(id=target, title="new")]
+            if operation == "initialize"
+            else [row(title="new"), row(id=unrelated)]
+        )
+        owner.publish("project", supplied, observed_at=3)
+        assert checkpoints == [operation]
+        assert owner.observation_status()["status"] == "ready"
+        assert owner.observation_read(request(worktree=target))["error"]["code"] == "writer-fenced"
+        current = owner.observation_read(request(worktree=unrelated))
+        assert current["facts"] == unaffected["facts"]
+        assert current["cursor"] == unaffected["cursor"]
+        retained = owner.observation_history(page_payload)
+        assert retained["entries"] == page["entries"] and retained["cursor"] == page["cursor"]
+        assert next(stream)["type"] in {"snapshot", "heartbeat"}
+        with sqlite3.connect(owner.store.db_path) as conn:
+            assert conn.execute(
+                "SELECT count(*) FROM owner_observation_intent WHERE worktree=?", (target,),
+            ).fetchone()[0] == 1
+        election["reader"] = False
+        assert owner.observation_read(request(worktree=unrelated))["error"]["code"] == "superseded"
+        assert next(stream)["reason"] == "superseded"
+    finally:
+        owner.observations.runtime.history._after_intent = None
+        stream.close()

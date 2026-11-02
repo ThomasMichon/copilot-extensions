@@ -110,6 +110,11 @@ and observation publications without closing still-admitted cached reads.
 Snapshot, history and heartbeat delivery retain their generation and source
 fences until read admission ends or the stored owner is replaced. Read
 admission never grants activation or write authority.
+If election is lost after an observation intent was admitted, `writer-fenced`
+refuses that materialization without retiring still-admitted readers. The
+affected selection and its unresolved intent remain explicit; unrelated cached
+selections remain readable. A changed stored owner or revoked read admission
+still supersedes the receiver.
 
 ## Failure and recovery boundaries
 

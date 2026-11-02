@@ -309,6 +309,8 @@ class OwnerObservationAdapter:
                         break
                     except (c.ObservationError, ProjectionError, ProjectionUnavailable) as error:
                         self._selection_failed(key, error)
+                        if isinstance(error, c.ObservationError) and error.code == "writer-fenced":
+                            break
                     finally:
                         self._capture.value = None
                         with self._condition:
