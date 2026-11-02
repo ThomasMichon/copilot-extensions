@@ -2,6 +2,18 @@
 # Executed into installation_context.py's shared module globals.
 from __future__ import annotations
 
+from typing import Protocol
+
+
+class _FailedCandidateRuntime(Protocol):
+    def discard_failed_candidate(
+        self, root: Path, version: str, *, validate: Callable[[Path], None],
+    ) -> bool: ...
+
+
+_PathEvidence = tuple[tuple[int, int], tuple[int, int, int, int], str | None]
+
+
 def _runtime_slot_paths(
     validated: Mapping[str, Any],
     runtime_version: str,
@@ -298,7 +310,7 @@ def validate_runtime_slot_ownership(
 @_validation_scope
 def discard_failed_runtime_slot(
     *,
-    runtime,
+    runtime: _FailedCandidateRuntime,
     context: str | os.PathLike[str],
     expected_marketplace_id: str,
     expected_plugin_id: str,
@@ -547,7 +559,7 @@ def provision_runtime_slot(
         return result
 
 
-def _path_evidence(path: Path) -> tuple[Any, ...] | None:
+def _path_evidence(path: Path) -> _PathEvidence | None:
     """Capture no-follow identity and bytes for a lifecycle CAS."""
     if not os.path.lexists(path):
         return None
@@ -668,6 +680,9 @@ def release_runtime_slot(
             *markers, target, receipt,
         ]
         evidence = [_path_evidence(path) for path in evidence_paths]
+        target_evidence = evidence[-2]
+        if target_evidence is None:
+            _fail("Runtime reservation directory evidence is missing.")
         record, digest = _read_regular_json_object(
             receipt, label="Runtime slot reservation",
             required_keys={
@@ -710,7 +725,7 @@ def release_runtime_slot(
             lock.assert_owned()
         if [_path_evidence(path) for path in evidence_paths[:-2]] != evidence[:-2]:
             _fail("Runtime slot release evidence changed before directory removal.")
-        if _is_link_or_junction(target) or _stat_identity(target.lstat()) != evidence[-2][0]:
+        if _is_link_or_junction(target) or _stat_identity(target.lstat()) != target_evidence[0]:
             _fail("Runtime reservation directory was replaced.")
         target.rmdir()
         return {**result, "released": True, "reason": "runtime-slot-reservation-released"}
