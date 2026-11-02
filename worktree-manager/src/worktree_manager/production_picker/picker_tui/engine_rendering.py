@@ -863,6 +863,11 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
                 index = int(btn.split(":")[1])
                 return f"Enter: {actions[index].label} · Tab region" if index < len(actions) else ""
             return ""
+        if zone == "T":
+            reg = self._reg_pivot()
+            label = reg.label if reg is not None else "entry"
+            return (f"Enter: actions for {label} row · ↑↓ move"
+                    " · Tab region · r reload")
         if zone == "L":
             rec = self._selected_record()
             wid = rec.get("id4") if rec else "?"
@@ -913,7 +918,9 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             # looks like it did nothing. The tick keeps this at ~10 fps.
             dbg = f"· {self.spin()} {self._busy_label}… "
         else:
-            status = self.debug
+            from .registered_scopes import refresh_footer
+
+            status = refresh_footer(self, self.debug)
             if status == "loading" and self._kind() == "registered":
                 state, _rows, _error = self._task_state()
                 status = f"{self._reg_pivot().label}: " + {

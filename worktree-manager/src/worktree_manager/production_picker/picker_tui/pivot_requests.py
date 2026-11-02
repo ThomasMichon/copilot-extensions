@@ -22,6 +22,17 @@ class PivotRequestsMixin:
         for machine in dict.fromkeys(machines):
             self.ensure(machine)
 
+    def read_pending(self, machine):
+        """Distinguish a replacement read from an already-published held channel."""
+        with self._lock:
+            return (
+                machine in self._starting_scopes
+                or machine in self._refresh_pending
+                or machine in self._scope_retirements
+                or machine in self._resetting_scopes
+                or any(scope == machine for scope, _generation in self._pending_requests)
+            )
+
     def _cancel_pending_lists(self):
         with self._lock:
             self._refresh_pending.clear()
@@ -160,10 +171,16 @@ class PivotRequestsMixin:
 
     def _schedule_list(self, machine, *, force=False):
         with self._lock:
-            if self._closed.is_set() or machine in self._inflight:
+            if self._closed.is_set():
                 return
             if machine in self._scope_retirements or machine in self._resetting_scopes:
-                if force:
+                if force or machine not in self._cache:
+                    self._refresh_pending.add(machine)
+                return
+            if machine in self._inflight:
+                if machine not in self._cache and not self._generation_matches(
+                    machine, self._active_requests.get(machine),
+                ):
                     self._refresh_pending.add(machine)
                 return
             if not force and machine in self._cache:
