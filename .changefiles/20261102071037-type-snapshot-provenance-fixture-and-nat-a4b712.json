@@ -1,0 +1,9 @@
+{
+  "comment": "Type snapshot-provenance fixture and native callback contracts",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
