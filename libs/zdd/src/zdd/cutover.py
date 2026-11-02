@@ -377,7 +377,14 @@ class CutoverOrchestrator:
             kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
             if self.self_retirement:
                 kwargs["self_retirement"] = True
-            return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
+            try:
+                return breadcrumb.write_breadcrumb(self.config_dir, _routing_deadline=conditional.routing_deadline() if conditional else None, **kwargs)
+            except routing.RoutingLockTimeout:
+                if not conditional or not result.error or result.ok:
+                    raise
+                result.error += "; recovery witness retained: routing authority unavailable"
+                log.error(result.error)
+                return breadcrumb.read_breadcrumb(self.config_dir) or {}
 
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
         health_check = conditional.healthy if conditional else self.health_check
@@ -403,10 +410,7 @@ class CutoverOrchestrator:
                 result.steps.append(f"refused: {result.error}")
                 log.error(result.error)
                 return result
-        # The CAS expectation is the raw ``active`` row only: a clean shutdown
-        # leaves active absent with the old claim demoted to ``previous``, and
-        # the guarded publish compares against the raw row. Only the guarded
-        # flip uses it, so an unguarded routing stand-in needs no read_table.
+        # CAS uses raw active, not the previous row left by a clean shutdown.
         old_for_cas = None
         selection_table = None
         if conditional is not None:
@@ -456,9 +460,11 @@ class CutoverOrchestrator:
             old.to_dict() if (conditional or self.expected_old is not None or self.self_retirement) and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
-        started_at = write_breadcrumb(
-            state="started", old=old_dict, new_port=new_port,
-        )["started_at"]
+        try:
+            started_at = write_breadcrumb(state="started", old=old_dict, new_port=new_port)["started_at"]
+        except routing.RoutingLockTimeout:
+            result.error = "cutover witness unavailable: routing authority acquisition timed out"
+            return result
         self._emit(
             lifecycle.CUTOVER_BEGIN, lifecycle.BEGIN, port=new_port,
             detail={"old_port": old.port if old is not None else None},
@@ -724,13 +730,8 @@ class CutoverOrchestrator:
                         on_drain=mark_drain_started if self.expected_old is not None else None,
                     )
 
-                # Verify-before-retire GATE: re-confirm the new daemon is still
-                # live right before we retire the old one. If it died between the
-                # flip and here, retiring the old daemon would strand every
-                # client (active -> dead new, previous -> retired old). Raising
-                # *before* the commit point routes into rollback, which restores
-                # and undrains the old daemon -- so a cutover can never retire the
-                # old daemon while the new one is already dead (#5322).
+                # Verify before retirement: an unhealthy successor must not
+                # strand clients by retiring the still-serving predecessor.
                 new_live = False
                 try:
                     new_live = bool(
@@ -817,6 +818,10 @@ class CutoverOrchestrator:
             return result
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback
+            if conditional and isinstance(exc, routing.RoutingLockTimeout):
+                result.error = "conditional cutover routing authority unavailable; recovery witness retained"
+                result.serving_endpoint = None
+                return result
             if isinstance(exc, routing_persistence.PublicationCommitUncertain):
                 if self.self_retirement and not result.committed:
                     try:
@@ -920,14 +925,8 @@ class CutoverOrchestrator:
                     started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
-            # A rollback outcome reflects service AVAILABILITY, not cutover
-            # success. `result.ok` only marks a completed cutover (commit
-            # forward); a normal rollback that *restored the old daemon* leaves
-            # `result.ok` False even though service recovered. So confirm from
-            # the live routing table + a health probe: `ok` when something is
-            # serving again, `fail` only for the alertable case where the
-            # rollback left nothing serving. Best-effort -- a probe failure is
-            # treated as not-serving, never raised.
+            # Availability is separate from cutover success: verify a restored
+            # predecessor too. An unavailable probe is conservatively non-serving.
             serving = result.ok
             if not serving:
                 try:

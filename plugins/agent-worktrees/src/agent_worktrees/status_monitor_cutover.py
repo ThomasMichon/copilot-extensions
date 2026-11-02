@@ -27,24 +27,12 @@ from . import locks, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
 from .status_monitor_control_frames import handle_control_request
+from .status_monitor_health import env_timeout as _env_timeout
 from .handoff_prompt_receipt_control import ACTION as RECEIPT_ACTION, FRAME_BYTES, unique_object
 
 _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
 _CUTOVER_LOCK_TIMEOUT_S = 300.0
-
-# Keep the 300s drain default: a 30s override stranded superseded monitors (#5326).
-def _env_timeout(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw:
-        try:
-            parsed = float(raw)
-            if parsed > 0:
-                return parsed
-        except ValueError:
-            pass
-    return default
-
 
 _DEFAULT_HEALTH_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_HEALTH_TIMEOUT", 60.0)
 _DEFAULT_DRAIN_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_DRAIN_TIMEOUT", 300.0)
@@ -844,8 +832,15 @@ def activate_after_update(
             reason = breadcrumb.refusal_reason(summary["passive_reap"])
             summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
             return summary
+        prepared_health = None
+
         def spawn(port: int):
+            nonlocal prepared_health
             handle = spawn_passive(py, port=port)
+            if asynchronous_retirement:
+                from .status_monitor_health import prepared_check
+
+                prepared_health = prepared_check(handle, routing_dir(), make_client)
             if spawned_handles is not None:
                 spawned_handles.append(handle)
                 print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
@@ -864,7 +859,7 @@ def activate_after_update(
                 raise ValueError("status-monitor successor refused promotion")
 
         def healthy_successor(host: str, port: int) -> bool:
-            return _health_check(host, port, require_async_retirement=True)
+            return prepared_health is not None and prepared_health(host, port)
 
         def serving_successor(host: str, port: int) -> bool:
             return published_successor is not None and guarded_recovery.successor_healthy(

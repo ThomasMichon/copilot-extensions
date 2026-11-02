@@ -22,6 +22,14 @@ def interrupted(tmp_path, monkeypatch):
     alive = set(identities)
     monkeypatch.setattr(diagnostics, "process_start_time", identities.get)
     monkeypatch.setattr(diagnostics, "_pid_alive", alive.__contains__)
+    def observe(pid, start):
+        if pid in identities:
+            return identities[pid] != start
+        if pid in alive:
+            raise PermissionError("native original exit is unavailable")
+        return True
+
+    monkeypatch.setattr(abort.process_exit, "observe_original_exit", observe)
     monkeypatch.setattr(retirements.locks, "process_start_time", identities.get)
     old = routing.publish_active(
         directory, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001",
@@ -399,3 +407,34 @@ def test_reused_installer_pid_does_not_keep_recovery_alive(interrupted, birth):
     with CutoverLock(directory):
         assert abort.recover_abandoned(root) is (birth is not None)
     assert (breadcrumb.read_breadcrumb(directory) is None) is (birth is not None)
+
+
+@pytest.mark.parametrize("reused", [False, True])
+def test_native_passive_identity_refusal_never_restores_or_cancels_custody(
+    interrupted, monkeypatch, reused,
+):
+    root, directory, _old, record, _claim, identities, alive, events = interrupted
+    table = routing.read_table(directory, strict=True)
+    client = abort.cutover.ControlClient
+    health = client.health
+    def changed_after_health(self):
+        body = health(self)
+        if self.port == 41002 and reused:
+            identities[202] = "3003"
+        return body
+
+    def refuse(pid, captured, *, exit_timeout):
+        assert (pid, captured, exit_timeout) == (202, "2002", 1)
+        assert identities[pid] == ("3003" if reused else captured)
+        events.append("native-refusal")
+        return {"killed": False, "identity_verified": False}
+
+    monkeypatch.setattr(client, "health", changed_after_health)
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", refuse)
+    with CutoverLock(directory):
+        assert not abort.recover_abandoned(root)
+    assert events == ["native-refusal"]
+    assert 202 in alive
+    assert routing.read_table(directory, strict=True) == table
+    assert breadcrumb.read_breadcrumb(directory) == record
+    assert retirements._records(root)[0][1]["state"] == "prepared"

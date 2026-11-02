@@ -1,16 +1,24 @@
 """Retirement witnesses use the routing writer's crash-durable boundary."""
 
 import os
+import time
 
 import pytest
 
-from zdd import breadcrumb, routing_persistence
+from zdd import breadcrumb, routing, routing_persistence
+
+
+@pytest.fixture
+def routing_authority(tmp_path):
+    # Acquire native authority before the test simulates another platform.
+    with routing.routing_lock(tmp_path, deadline=time.monotonic() + 2):
+        yield
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
 @pytest.mark.parametrize("state", ["started", "flipped", "committed"])
 def test_witness_flushes_before_replace_and_confirms_directory(
-    tmp_path, monkeypatch, platform, state,
+    tmp_path, monkeypatch, platform, state, routing_authority,
 ):
     path = breadcrumb.breadcrumb_path(tmp_path)
     events = []
@@ -61,7 +69,9 @@ def test_witness_flushes_before_replace_and_confirms_directory(
 
         monkeypatch.setattr(os, "replace", posix_replace)
 
-    record = breadcrumb.write_breadcrumb(tmp_path, state=state, self_retirement=True)
+    record = breadcrumb.write_breadcrumb(
+        tmp_path, state=state, self_retirement=True, _routing_locked=True,
+    )
     assert breadcrumb.read_breadcrumb(tmp_path) == record
     assert events == (
         ["file-flush", "replace"] if platform == "win32" else
@@ -82,9 +92,13 @@ def test_failed_file_flush_preserves_previous_witness(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
-def test_unconfirmed_directory_flush_retains_marked_phase(tmp_path, monkeypatch, platform):
+def test_unconfirmed_directory_flush_retains_marked_phase(
+    tmp_path, monkeypatch, platform, routing_authority,
+):
     path = breadcrumb.breadcrumb_path(tmp_path)
-    breadcrumb.write_breadcrumb(tmp_path, state="started", self_retirement=True)
+    breadcrumb.write_breadcrumb(
+        tmp_path, state="started", self_retirement=True, _routing_locked=True,
+    )
     real_fsync = os.fsync
     real_open = os.open
     real_close = os.close
@@ -104,7 +118,9 @@ def test_unconfirmed_directory_flush_retains_marked_phase(tmp_path, monkeypatch,
     )
     monkeypatch.setattr(os, "close", lambda fd: None if fd == directory_fd else real_close(fd))
     with pytest.raises(routing_persistence.PublicationCommitUncertain):
-        breadcrumb.write_breadcrumb(tmp_path, state="flipped", self_retirement=True)
+        breadcrumb.write_breadcrumb(
+            tmp_path, state="flipped", self_retirement=True, _routing_locked=True,
+        )
     record = breadcrumb.read_breadcrumb(tmp_path)
     assert record["state"] == "flipped" and record["self_retirement"] is True
     assert breadcrumb.recovery_refusal(tmp_path, record) == "asynchronous cutover requires resident completion"

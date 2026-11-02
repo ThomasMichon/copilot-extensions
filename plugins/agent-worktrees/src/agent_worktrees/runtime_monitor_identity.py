@@ -69,10 +69,16 @@ def routed_identity(
     prefix = health.get("runtime_prefix")
     if require_async_retirement:
         from .runtime_monitor_retirements import CAPABILITY
+        from .status_monitor_recovery_contract import CAPABILITY as RECOVERY_CAPABILITY, ReceiverIdentity
 
         capabilities = health.get("capabilities")
         if not isinstance(capabilities, list) or CAPABILITY not in capabilities:
             raise ValueError("Serving monitor does not support safe asynchronous retirement")
+        if RECOVERY_CAPABILITY not in capabilities:
+            raise ValueError("Serving monitor does not support guarded preparation recovery")
+        ReceiverIdentity.parse({
+            "pid": pid, "processStartTime": before, "runtimeGeneration": health.get("runtime_generation"),
+        })
         if not isinstance(prefix, str) or not Path(prefix).is_absolute():
             raise ValueError("Serving monitor runtime prefix is unavailable")
     if isinstance(prefix, str) and Path(prefix).is_absolute():

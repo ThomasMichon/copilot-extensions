@@ -77,15 +77,19 @@ def test_cold_lease_release_requires_dead_successor_identity(
     tmp_path, monkeypatch, alive, recorded, current, released,
 ):
     from agent_worktrees import status_monitor_cutover as cutover
-    from zdd import diagnostics, routing
+    from zdd import process_exit, routing
 
     endpoint = routing.Endpoint(
         generation=2, bind="127.0.0.1", port=12345, pid=202,
         process_start_time=recorded,
     )
     monkeypatch.setattr(routing, "read_table", lambda directory: {"active": endpoint.to_dict()})
-    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: alive)
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: current)
+    def observe(pid, token):
+        if current is None and alive:
+            raise OSError("native birth is unavailable")
+        return not alive or current != token
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", observe)
     state = MonitorHandover(passive=False)
     held = cutover._acquire_cutover_lock(tmp_path, timeout_s=0)
     remaining = held
@@ -100,3 +104,35 @@ def test_cold_lease_release_requires_dead_successor_identity(
     finally:
         if remaining is not None:
             remaining.release()
+
+
+@pytest.mark.parametrize("role,generation,outcome,released", [
+    ("previous", 2, True, True),
+    ("previous", 1, True, False),
+    ("previous", 0, True, False),
+    ("previous", 2, False, False),
+    ("previous", 2, None, False),
+    ("active", 2, True, True),
+])
+def test_withdrawn_newer_dead_successor_releases_only_cold_lease(
+    tmp_path, monkeypatch, role, generation, outcome, released,
+):
+    from types import SimpleNamespace
+    from zdd import process_exit, routing
+
+    endpoint = routing.Endpoint("127.0.0.1", 41002, 202, generation=generation, process_start_time="2002")
+    monkeypatch.setattr(routing, "read_table", lambda directory: {role: endpoint.to_dict()})
+    def observe(pid, token):
+        assert (pid, token) == (202, "2002")
+        if outcome is None:
+            raise PermissionError("native exit unavailable")
+        return outcome
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", observe)
+    events = []
+    lease = SimpleNamespace(release=lambda: events.append("release"))
+    handover = MonitorHandover(passive=False)
+    handover.generation = 1
+    assert (handover.release_cold_lease(lease, tmp_path, 101) is None) is released
+    assert bool(events) is released
+    assert handover.read_admitted() and not handover.retiring

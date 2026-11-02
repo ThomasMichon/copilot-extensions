@@ -4980,7 +4980,13 @@ Both the outgoing and incoming monitors must advertise
 `status-monitor-async-retirement-v1` for this flow. The outgoing peer is
 authenticated before selector mutation; an unsupported or unrouted incumbent
 is an explicit refusal, not unsafe self-exit, a synchronous fallback or a
-package-version guess. Route commitment precedes any promotion
+package-version guess. Both peers also need guarded preparation recovery and
+a valid receiver generation; generation-less source/legacy residents refuse
+before selector mutation rather than leaving an unrecoverable preparation.
+Preparation health binds the responding PID and native birth to the captured
+spawned child before publication. The captured birth is rechecked at the
+publication boundary; another authenticated listener on the port is not that
+child. Route commitment precedes any promotion
 callback that can admit work. A failure after that frontier preserves the
 possibly admitted successor and remains an explicit failed commit-forward result.
 Before changing selectors or releasing installer retention, the owner reserves
@@ -5030,14 +5036,19 @@ withdrawing only its exact dead route while preserving retiring predecessors
 and their accepted work. An exact granted retiree's discovery record is not
 an unrouted incumbent for the next installation; uncommitted and unknown
 identities retain the original refusal. No new recovery worker is introduced.
-The installer witness also records its own native birth. A matching live birth
-keeps custody; positive original exit or PID reuse permits abandoned recovery,
-and unavailable identity remains fenced. Passive launch carries that exact
+The installer witness also records its own native birth. Strict native
+original-exit observation, rather than PID liveness, recognizes an exited
+object with a readable birth or Darwin zombie. Matching live identity keeps
+custody; positive original exit or PID reuse permits abandoned recovery,
+and observation errors remain unknown. Passive launch carries that exact
 attempt to the child, which durably registers its own PID/birth before opening
 an endpoint. Missing-PID cancellation closes startup under the routing lease
 before clearing custody, so a delayed child cannot silently survive the gap
 between spawn and the installer's first PID write. Same-attempt parent writes
-cannot erase an already registered candidate birth.
+cannot erase an already registered candidate birth. Every parent/child phase
+write serializes the whole read/merge/write under the shared routing lock.
+Trusted lexical callers already holding that lock borrow it explicitly;
+conditional callers retain their shorter lock-acquisition deadline.
 On Darwin, passive disposal uses the authenticated `cancel-preparation`
 operation only when the actual endpoint advertises
 `status-monitor-passive-cancel-v1`. The request binds PID, birth, port,
@@ -5051,6 +5062,9 @@ execution protection for any still-live code. Completed retirement is an
 idempotent commit outcome, not a missing-record loop.
 The elected successor remains needed while
 those identities are live or unknown and reconciles them in its existing loop.
+When recovery withdraws a dead successor into `previous`, a predecessor can
+release its cold-start lease from native exit evidence only for a strictly
+newer retained generation. Accepted work and execution references stay held.
 Only positive native exit releases references, even when the old birth token
 remains readable. Outgoing retirement latches actual successor readiness and
 settles all accepted work without grace-forced exit, even if the successor later

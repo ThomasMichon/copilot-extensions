@@ -898,6 +898,7 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
 def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot):
     from agent_worktrees import locks, status_monitor_cutover as cutover
     from agent_worktrees.runtime_monitor_retirements import CAPABILITY
+    from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
     from zdd import routing
 
     root = tmp_path / "runtime"
@@ -910,7 +911,7 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
         lambda *_args: {
             "pid": pid, "status": "ready", "runtime_slot": slot,
             "runtime_prefix": str(root / "versions" / slot) if isinstance(slot, str) else None,
-            "capabilities": [CAPABILITY],
+            "capabilities": [CAPABILITY, RECOVERY], "runtime_generation": "a" * 32,
         },
         token="fixture-token",
     )

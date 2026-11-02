@@ -103,6 +103,7 @@ def abort(root, record) -> bool:
                 directory, state="started", old=record.get("old"), new_port=port,
                 started_at=record.get("started_at"), publication_witness=record.get("publication_witness"),
                 self_retirement=True, pid=record.get("pid"), error="Passive startup cancelled",
+                _routing_locked=True,
             )
     elif type(pid) is not int or pid <= 0 or not isinstance(start, str) or not start:
         raise ValueError("Interrupted candidate native identity is unavailable")

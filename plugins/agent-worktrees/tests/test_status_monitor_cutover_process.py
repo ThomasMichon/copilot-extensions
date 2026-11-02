@@ -227,6 +227,8 @@ def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path
 import runpy, sys, threading
 from pathlib import Path
 from agent_worktrees import classify_daemon, repository_map, status_monitor_cli
+from agent_worktrees import runtime_identity, status_monitor_health
+runtime_identity.PROCESS_GENERATION = status_monitor_cli.PROCESS_GENERATION = status_monitor_health.PROCESS_GENERATION = "a" * 32
 status_monitor_cli._SELF_RETIRE_MAX_GRACE_S = 0.2
 started, release = map(Path, sys.argv[1:3])
 options = sys.argv[3:]

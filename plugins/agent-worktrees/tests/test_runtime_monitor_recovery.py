@@ -21,6 +21,9 @@ def owned(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(diagnostics, "process_start_time", identities.get)
     monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: pid in identities)
+    monkeypatch.setattr(
+        "zdd.process_exit.observe_original_exit", lambda pid, start: identities.get(pid) != start,
+    )
     monkeypatch.setattr(recovery.locks, "process_start_time", identities.get)
     old = routing.publish_active(
         route_root, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001",

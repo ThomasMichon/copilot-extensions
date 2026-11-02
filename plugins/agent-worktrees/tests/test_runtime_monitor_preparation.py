@@ -12,6 +12,7 @@ from agent_worktrees import runtime_monitor_preparation as preparation
 def preparing(tmp_path, monkeypatch):
     directory = tmp_path / "status-monitor-routing"
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda pid, start: False)
     witness = routing.publication_witness(directory, deadline=time.monotonic() + 1)
     record = breadcrumb.write_breadcrumb(
         directory, state="started", new_port=41002, publication_witness=witness, self_retirement=True,

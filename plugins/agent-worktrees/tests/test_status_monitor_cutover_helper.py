@@ -313,6 +313,8 @@ class _FakeDaemon:
         self.promote_calls = 0
         self.token = token
         self.async_retirement = True
+        self.health_pid = pid
+        self.health_start = "1001"
         if port is not None:
             self.start(port)
 
@@ -324,11 +326,13 @@ class _FakeDaemon:
     def _handle(self, action: str, payload: dict) -> dict:
         if action == "health":
             from agent_worktrees.runtime_monitor_retirements import CAPABILITY
+            from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
 
             return {
                 "status": "draining" if self.draining else "ready",
-                "capabilities": [CAPABILITY] if self.async_retirement else [],
-                "pid": self.pid, "published": self.promoted,
+                "capabilities": [CAPABILITY, RECOVERY] if self.async_retirement else [],
+                "runtime_generation": "a" * 32,
+                "pid": self.health_pid, "process_start_time": self.health_start, "published": self.promoted,
                 "worktrees": {"status": "ready" if self.promoted else "unready"},
                 "repositories": {"admitting": self.promoted},
             }
@@ -385,8 +389,9 @@ def _wait_for(predicate, *, timeout: float = 10.0, interval: float = 0.05, messa
 
 
 @pytest.mark.parametrize("guarded_enabled", [False, True])
+@pytest.mark.parametrize("mismatch", [None, "pid", "birth"])
 def test_installation_promotes_successor_without_draining_busy_predecessor(
-    tmp_path, monkeypatch, guarded_enabled,
+    tmp_path, monkeypatch, guarded_enabled, mismatch,
 ):
     monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: guarded_enabled)
     monkeypatch.setattr(
@@ -395,6 +400,10 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
     )
     old = _FakeDaemon(101, port=0)
     new = _FakeDaemon(202)
+    if mismatch == "pid":
+        new.health_pid = 303
+    elif mismatch == "birth":
+        new.health_start = "3003"
     old.busy.set()
     monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
     routing.publish_active(
@@ -422,7 +431,15 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
 
     monkeypatch.setattr(smc, "spawn_passive", spawn)
     try:
-        result = smc.activate_after_update(runtime_python="python", asynchronous_retirement=True)
+        result = smc.activate_after_update(
+            runtime_python="python", asynchronous_retirement=True, health_timeout=0.01 if mismatch else 60,
+        )
+        if mismatch:
+            assert result["result"]["ok"] is False and result["result"]["committed"] is False
+            assert not new.promoted and not new.alive
+            assert routing.read_table(tmp_path / "status-monitor-routing")["active"]["pid"] == old.pid
+            assert old.alive and old.busy.is_set() and not old.draining
+            return
         assert result["result"]["ok"] is True, result
         assert result["result"]["retirement_pending"] is True
         assert new.promoted and new.alive
@@ -528,6 +545,38 @@ def test_async_route_requires_recorded_native_birth_before_health(tmp_path, monk
         identity.routed_identity(tmp_path, require_async_retirement=True)
 
 
+@pytest.mark.parametrize("damage", [None, "generation", "empty-generation", "recovery-capability"])
+def test_async_admission_qualifies_guarded_preparation_recovery(tmp_path, monkeypatch, damage):
+    from agent_worktrees import runtime_monitor_identity as identity
+    from agent_worktrees.runtime_monitor_retirements import CAPABILITY
+    from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
+    from zdd import process_exit
+
+    directory = tmp_path / "status-monitor-routing"
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr("zdd.diagnostics._pid_alive", lambda pid: pid == 101)
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, start: False)
+    routing.publish_active(directory, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001")
+    health = {
+        "status": "ready", "pid": 101, "runtime_prefix": str(tmp_path),
+        "runtime_generation": "a" * 32, "capabilities": [CAPABILITY, RECOVERY],
+    }
+    if damage == "generation":
+        health["runtime_generation"] = None
+    elif damage == "empty-generation":
+        health["runtime_generation"] = ""
+    elif damage == "recovery-capability":
+        health["capabilities"] = [CAPABILITY]
+    monkeypatch.setattr(identity.cutover, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: health))
+    monkeypatch.setattr(identity.cutover, "load_or_create_control_token", lambda root: "synthetic-token")
+    if damage:
+        with pytest.raises(ValueError):
+            identity.routed_identity(tmp_path, require_async_retirement=True)
+    else:
+        assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
+
+
 @pytest.mark.parametrize("changed", ["route", "native"])
 def test_async_predecessor_binds_publication_to_admitted_native_owner(tmp_path, monkeypatch, changed):
     from agent_worktrees import runtime_monitor_identity as identity
@@ -607,6 +656,7 @@ def test_async_predecessor_capability_requires_a_typed_declaration(tmp_path, mon
     endpoint = routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001")
     monkeypatch.setattr(identity.routing, "read_table", lambda *a, **k: {"active": endpoint.to_dict()})
     monkeypatch.setattr(identity.diagnostics, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda pid, start: False)
     monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: "1001")
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda root: "fixture-token")
     monkeypatch.setattr(smc, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {

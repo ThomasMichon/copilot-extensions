@@ -8,12 +8,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from zdd import process_exit
 
 from agent_worktrees import runtime_monitor_retirements as retirements
 
 
 @pytest.fixture
-def retained(tmp_path, monkeypatch):
+def native_original_exit():
+    return process_exit.observe_original_exit
+
+
+@pytest.fixture
+def retained(tmp_path, monkeypatch, native_original_exit):
     helper = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"
     spec = importlib.util.spec_from_file_location("retirement_test_runtime", helper)
     runtime = importlib.util.module_from_spec(spec)
@@ -27,6 +33,18 @@ def retained(tmp_path, monkeypatch):
     (root / "versions" / "dev").mkdir()
     runtime.activate(root, "current", link_free=True)
     identities, alive = {101: "1001"}, {101}
+
+    def native_exit(pid, expected):
+        # These are admitted synthetic native observations, never host PID probes.
+        if pid != 101:
+            raise ValueError("fixture has no native evidence for this PID")
+        if pid not in alive:
+            return True
+        if pid not in identities:
+            raise PermissionError("fixture native identity is unavailable")
+        return identities[pid] != expected
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", native_exit)
     monkeypatch.setattr(retirements.locks, "process_start_time", identities.get)
     monkeypatch.setattr(retirements.diagnostics, "_pid_alive", lambda pid: pid in alive)
     monkeypatch.setattr(retirements, "_runtime", lambda: runtime)
@@ -914,6 +932,14 @@ def test_abandoned_prepublication_intent_is_cancelled_only_under_original_custod
     monkeypatch.setattr(retirements.locks, "process_start_time", lambda pid: "1001")
     monkeypatch.setattr(retirements.diagnostics, "_pid_alive", lambda pid: boundary != "gone")
     monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
+
+    def native_exit(pid, expected):
+        assert (pid, expected) == (101, "1001")
+        if boundary == "unknown":
+            raise PermissionError("fixture native identity is unavailable")
+        return boundary == "gone"
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", native_exit)
     if boundary != "gone":
         routing.publish_active(
             directory, bind="127.0.0.1", port=61001, pid=303 if boundary == "foreign" else 101,
@@ -951,3 +977,98 @@ def test_readonly_retirement_refresh_cannot_forget_failed_cleanup(tmp_path, monk
     assert inventory.pending and inventory.error == "changed dev claim"
     inventory.refresh(cleanup=True)
     assert not inventory.pending and inventory.error is None
+
+
+@pytest.mark.parametrize("error", [
+    PermissionError("native access denied"), OSError("native query unavailable"),
+    ValueError("native evidence malformed"), NotImplementedError("native query unsupported"),
+])
+def test_exit_state_unknown_never_uses_tolerant_pid_or_birth_checks(monkeypatch, error):
+    def unavailable(pid, expected):
+        assert (pid, expected) == (101, "1001")
+        raise error
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", unavailable)
+    monkeypatch.setattr(
+        retirements.locks, "process_start_time",
+        lambda _: pytest.fail("unknown native evidence must not use a tolerant birth probe"),
+    )
+    monkeypatch.setattr(
+        retirements.diagnostics, "_pid_alive",
+        lambda _: pytest.fail("unknown native evidence must not fall back to PID liveness"),
+    )
+    assert retirements._exit_state(_predecessor()) is None
+
+
+def _darwin_observation(monkeypatch, native_original_exit, state):
+    import ctypes
+    import errno
+
+    from zdd import darwin_identity
+
+    class Query:
+        def __call__(self, pid, flavor, argument, pointer, size):
+            assert (pid, flavor, argument) == (101, 3, 0)
+            if state in {"denied", "unknown"}:
+                ctypes.set_errno(errno.EPERM if state == "denied" else 0)
+                return 0
+            info = ctypes.cast(pointer, ctypes.POINTER(darwin_identity._BsdInfo)).contents
+            info.pid = pid + 1 if state == "malformed" else pid
+            info.status = 5 if state == "zombie" else 2
+            info.start_seconds = 1001
+            info.start_microseconds = 22
+            return size
+
+    monkeypatch.setattr(
+        darwin_identity.ctypes, "CDLL", lambda *a, **k: SimpleNamespace(proc_pidinfo=Query()),
+    )
+    monkeypatch.setattr(process_exit, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(process_exit, "observe_original_exit", native_original_exit)
+
+
+@pytest.mark.parametrize("state", ["zombie", "live", "denied", "unknown", "malformed"])
+def test_darwin_native_exit_controls_real_retirement_custody(
+    retained, monkeypatch, native_original_exit, state,
+):
+    root, runtime, identities, alive = retained
+    identities[101] = "1001:22"
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    predecessor = {**_predecessor(slot="dev", claim=claim), "start": "1001:22"}
+    retirements.reserve(root, predecessor, runtime=runtime, committed=True)
+    references = runtime._leases.read_runtime_references(root)
+    _darwin_observation(monkeypatch, native_original_exit, state)
+    assert 101 in alive  # A zombie remains visible to kill(0) and birth-only probes.
+    inventory = retirements.ResidentRetirements(root)
+    inventory.refresh()
+    if state == "zombie":
+        assert not inventory.pending and inventory.error is None
+        assert not retirements._records(root)
+        assert not runtime._leases.read_runtime_references(root)
+        assert runtime.read_dev_claim(root, strict=True) is None
+    else:
+        assert inventory.pending
+        assert bool(inventory.error) is (state != "live")
+        assert runtime._leases.read_runtime_references(root) == references
+        assert runtime.read_dev_claim(root, strict=True) == claim
+
+
+def test_windows_native_access_denial_is_unknown_not_retired(monkeypatch, native_original_exit):
+    def denied(_pid):
+        raise PermissionError("native Windows process query denied")
+
+    monkeypatch.setattr(process_exit, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_exit, "_windows_process", denied)
+    monkeypatch.setattr(process_exit, "observe_original_exit", native_original_exit)
+    monkeypatch.setattr(retirements.locks, "process_start_time", lambda _: None)
+    monkeypatch.setattr(retirements.diagnostics, "_pid_alive", lambda _: False)
+    assert retirements._exit_state(_predecessor()) is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows current-process observation")
+def test_native_windows_live_self_is_not_an_exited_retirement():
+    from zdd import diagnostics
+
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth is not None
+    assert retirements._exit_state({"pid": pid, "start": birth}) is False

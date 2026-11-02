@@ -16,6 +16,11 @@ from agent_worktrees import locks, status_monitor_cutover as control
 from agent_worktrees import status_monitor_runtime, status_monitor_reap_stale
 
 
+@pytest.fixture(autouse=True)
+def legacy_routed_owner_contract(monkeypatch):
+    monkeypatch.setattr(control.guarded_recovery, "enabled", lambda: False)
+
+
 @pytest.mark.parametrize("failure", [None, "pid", "native", "authentication", "route"])
 def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeypatch, failure):
     token = "fixture-token"

@@ -53,10 +53,14 @@ preparation and settlement of positively exited successors; neither permits
 revoking an irreversible retirement grant or discarding live admitted work.
 `owner_process_start_time` captures the original installer's native birth;
 `breadcrumb.owner_exited()` distinguishes proven original exit from a matching
-live process and unknown evidence. Same-attempt recovery preserves that birth
+live process and unknown evidence through strict native observation, including
+readable exited objects and Darwin zombies. Same-attempt recovery preserves that birth
 instead of inferring it from a reused PID. Exact asynchronous child registration
 also preserves its native candidate birth across a parent update that has not
 yet acquired that token.
+Witness writes serialize the complete read/merge/write with the native routing
+lock. Existing lexical owners pass `_routing_locked=True` to avoid nested
+file-lock acquisition; `_routing_deadline` preserves a tighter caller budget.
 Candidate publication binds a freshly verified native birth after health
 preparation and refuses a changed identity at the publication boundary.
 On macOS, native birth identity uses the process start seconds and microseconds;

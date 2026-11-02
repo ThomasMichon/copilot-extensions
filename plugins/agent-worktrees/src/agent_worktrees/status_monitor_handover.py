@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from . import self_retire
-from zdd import diagnostics, routing
+from zdd import process_exit, routing
 from single_instance_lease import AlreadyRunningError
 
 
@@ -32,13 +32,18 @@ class MonitorHandover:
             return None
         table = routing.read_table(directory)
         raw = table.get("active") if isinstance(table, dict) else None
+        if raw is None and isinstance(table, dict):
+            previous = table.get("previous")
+            endpoint = routing.Endpoint.from_dict(previous) if isinstance(previous, dict) else None
+            if self.generation is not None and endpoint is not None and endpoint.generation > self.generation:
+                raw = previous
         endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-        successor_dead = (
-            endpoint is not None and type(endpoint.pid) is int and endpoint.pid > 0
-            and endpoint.pid != pid and not diagnostics.lock_data_is_live({
-                "pid": endpoint.pid, "start_time": endpoint.process_start_time,
-            })
-        )
+        successor_dead = False
+        if endpoint is not None and endpoint.pid != pid and endpoint.process_start_time is not None:
+            try:
+                successor_dead = process_exit.observe_original_exit(endpoint.pid, endpoint.process_start_time)
+            except (OSError, ValueError, RuntimeError, NotImplementedError):
+                pass
         if self.retiring or successor_dead:
             lease.release()
             return None

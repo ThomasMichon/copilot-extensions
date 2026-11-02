@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from zdd import breadcrumb, diagnostics
+from zdd import breadcrumb, diagnostics, process_exit
 
 
 def test_capture_native_current_owner_birth(tmp_path):
@@ -24,6 +24,7 @@ def test_phase_writes_preserve_original_birth_despite_pid_reuse(
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "100")
     initial = breadcrumb.write_breadcrumb(tmp_path, state="started")
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "200")
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, birth: birth != "200")
     for state in ("started", "flipped", "committed"):
         options = {"pid": os.getpid()} if explicit_pid else {}
         record = breadcrumb.write_breadcrumb(
@@ -93,30 +94,33 @@ def test_new_local_attempt_captures_fresh_birth(tmp_path, monkeypatch):
     assert record["owner_process_start_time"] == "200"
 
 
-@pytest.mark.parametrize("recorded,current,alive,expected", [
-    ("100", "100", True, False),
-    ("100", "100", False, True),
-    ("100", "100", None, None),
-    ("100", "200", True, True),
-    ("100:2", "100:3", True, True),
-    ("100", None, False, True),
-    ("100", None, True, None),
-    ("100", "invalid", True, None),
+@pytest.mark.parametrize("recorded,exited,alive,expected", [
+    ("100", False, True, False),
+    ("100", True, True, True),
+    ("100:2", True, True, True),
+    ("100", None, False, None),
+    ("100", "invalid", False, None),
     (None, None, False, True),
-    (None, "200", True, None),
     (None, None, True, None),
-    ("invalid", "200", True, None),
-    (100, "200", True, None),
+    ("invalid", True, False, None),
+    (100, True, False, None),
 ])
 def test_owner_exit_requires_positive_native_evidence(
-    monkeypatch, recorded, current, alive, expected,
+    monkeypatch, recorded, exited, alive, expected,
 ):
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: current)
     monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: alive)
+    calls = []
+
+    def observe(pid, token):
+        calls.append((pid, token))
+        return exited
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", observe)
     record = {"pid": 123}
     if recorded is not None:
         record["owner_process_start_time"] = recorded
     assert breadcrumb.owner_exited(record) is expected
+    assert calls == ([(123, recorded)] if recorded in ("100", "100:2") else [])
 
 
 @pytest.mark.parametrize("record", [None, {}, {"pid": True}, {"pid": -1}, {"pid": "123"}])
@@ -124,25 +128,34 @@ def test_malformed_owner_is_unknown(record):
     assert breadcrumb.owner_exited(record) is None
 
 
-@pytest.mark.parametrize("probe", ["process_start_time", "_pid_alive"])
-def test_owner_probe_failure_retains_uncertain_witness(tmp_path, monkeypatch, probe):
+@pytest.mark.parametrize("error", [OSError, ValueError, NotImplementedError])
+def test_owner_probe_failure_retains_uncertain_witness(tmp_path, monkeypatch, error):
     record = breadcrumb.write_breadcrumb(tmp_path, state="started")
     before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: None)
+    def fail(pid, birth):
+        raise error("fixture native identity unavailable")
 
-    def fail(pid):
-        raise OSError("fixture native identity unavailable")
-
-    monkeypatch.setattr(diagnostics, probe, fail)
+    monkeypatch.setattr(process_exit, "observe_original_exit", fail)
     assert breadcrumb.owner_exited(record) is None
     assert breadcrumb.breadcrumb_path(tmp_path).read_bytes() == before
 
 
-def test_readable_matching_birth_with_failed_liveness_is_unknown(monkeypatch):
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "100")
+def test_darwin_zombie_with_readable_birth_has_exited(monkeypatch):
+    from zdd import darwin_identity
 
-    def fail(pid):
-        raise OSError("fixture native liveness unavailable")
+    monkeypatch.setattr(process_exit.sys, "platform", "darwin")
+    monkeypatch.setattr(darwin_identity, "native_identity", lambda pid: ("100:2", True))
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: True)
+    assert breadcrumb.owner_exited({"pid": 123, "owner_process_start_time": "100:2"}) is True
 
-    monkeypatch.setattr(diagnostics, "_pid_alive", fail)
+
+def test_windows_access_denied_is_not_pid_absence(monkeypatch):
+    monkeypatch.setattr(process_exit.sys, "platform", "win32")
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: False)
+
+    def denied(pid):
+        raise PermissionError("fixture native query denied")
+
+    monkeypatch.setattr(process_exit, "_windows_process", denied)
     assert breadcrumb.owner_exited({"pid": 123, "owner_process_start_time": "100"}) is None

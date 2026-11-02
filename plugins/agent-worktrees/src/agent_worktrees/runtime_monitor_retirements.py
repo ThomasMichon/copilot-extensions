@@ -335,13 +335,12 @@ def commit(root: Path, predecessor: dict, *, runtime: ModuleType | None = None) 
 
 
 def _exit_state(record: dict) -> bool | None:
-    observed = locks.process_start_time(record["pid"])
-    if observed is not None and observed != record["start"]:
-        return True
-    alive = diagnostics._pid_alive(record["pid"])
-    if observed is None and alive:
+    from zdd import process_exit
+
+    try:
+        return process_exit.observe_original_exit(record["pid"], record["start"])
+    except (OSError, ValueError, NotImplementedError):
         return None
-    return not alive
 
 
 def _demand(record: dict, exited: bool | None) -> bool:

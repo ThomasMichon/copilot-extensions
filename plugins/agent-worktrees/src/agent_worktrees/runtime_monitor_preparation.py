@@ -49,6 +49,7 @@ def register(root, port) -> bool:
             directory, state="started", old=record.get("old"), new_port=port, new_pid=pid,
             new_process_start_time=start, pid=record["pid"], started_at=record["started_at"],
             publication_witness=record.get("publication_witness"), self_retirement=True,
+            _routing_locked=True,
         )
     return True
 
