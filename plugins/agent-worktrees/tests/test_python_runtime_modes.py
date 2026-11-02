@@ -708,6 +708,7 @@ def test_dev_rebuild_reconciles_only_settled_native_retirements(
     fixture = retired_mode_runtime
     fixture.reserve(state, exited)
     constructed = []
+    generation = "dev-" + "a" * 64
 
     @contextmanager
     def candidate(root, *, owner, **_kwargs):
@@ -716,10 +717,12 @@ def test_dev_rebuild_reconciles_only_settled_native_retirements(
         assert not fixture.runtime._leases.read_runtime_references(root)
         assert fixture.runtime.read_dev_claim(root)["previous_version"] == "original"
         constructed.append(True)
-        yield SimpleNamespace(payload_hash="new-dev", reused=False)
+        yield SimpleNamespace(
+            slot=root / "versions" / generation, payload_hash="new-dev", reused=False,
+        )
 
     def settle(root, version, **kwargs):
-        assert version == "dev" and kwargs["force_monitor_transition"] is True
+        assert version == generation and kwargs["dev_owner"] == str(fixture.owner)
         assert kwargs["previous"] == "original"
         assert kwargs["cutover_guard"].held
         return {"runtime_version": version}
@@ -732,7 +735,7 @@ def test_dev_rebuild_reconciles_only_settled_native_retirements(
     )
     if exited is True and state != "prepared":
         result = modes.run_owned(fixture.root, fixture.plugin, **arguments)
-        assert result["runtime_version"] == "dev"
+        assert result["runtime_version"] == generation
         assert constructed == [True]
     else:
         message = (
@@ -780,6 +783,37 @@ def test_dev_release_reconciles_exited_resident_before_retry(
     assert not fixture.retirements.pending_slot(fixture.root, "dev")
     assert not fixture.runtime._leases.read_runtime_references(fixture.root)
     assert (fixture.root / "versions" / "dev").is_dir()
+
+
+def test_dev_rebuild_preserves_pending_hashed_release_claim(
+    modes, retired_mode_runtime, tmp_path, monkeypatch,
+):
+    fixture = retired_mode_runtime
+    generation = "dev-" + "a" * 64
+    owner = str(fixture.owner)
+    fixture.runtime.mark_complete(
+        fixture.root, generation, payload_hash="dev", dev_owner=owner,
+    )
+    fixture.runtime.activate(fixture.root, generation, link_free=True, dev_owner=owner)
+    claim = fixture.runtime.read_dev_claim(fixture.root, strict=True)
+    fixture.retirements.reserve(
+        fixture.root, dict(pid=101, start="1001", slot=generation, release_claim=claim),
+        runtime=fixture.runtime, committed=True,
+    )
+    fixture.runtime.activate(fixture.root, "original", link_free=True)
+    monkeypatch.setattr(
+        fixture.runtime, "claim_dev",
+        lambda *_args, **_kwargs: pytest.fail("Pending release claim was overwritten"),
+    )
+    with pytest.raises(RuntimeError, match="previous dev resident is still retiring"):
+        modes.run_owned(
+            fixture.root, fixture.plugin, payload=fixture.plugin, uv=tmp_path / "uv",
+            base_python=Path(sys.executable), mode="dev", owner=fixture.owner,
+            expected_governance={},
+        )
+    assert fixture.runtime.read_dev_claim(fixture.root, strict=True) == claim
+    assert fixture.retirements.pending_claim(fixture.root, claim)
+    assert fixture.runtime._leases.read_runtime_references(fixture.root)
 
 
 @pytest.mark.parametrize("exited", [False, None])

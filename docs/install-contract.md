@@ -5115,7 +5115,7 @@ publication is advertised only after the discovery stamp succeeds. A known
 failed-but-committed activation settles as an error without indefinitely holding
 installation locks for a permanently unready candidate. Dev release similarly retains
 the original claim and defers its exact-snapshot release to that resident;
-changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
+changed claims refuse cleanup, a pending dev-claim release refuses a rebuild, and
 duplicate release cannot bypass the original pending claim.
 Idle retirement rechecks election, accepted work, demand and pending retirement
 inside the acquired cutover custody before closing admission.
@@ -5128,8 +5128,12 @@ rollback reuses its already-held routing authority for discovery renewal; this
 is a private call-chain fact, never an instruction accepted from a wire payload.
 Release also refuses other pending dev-code retirement; cancelled attempts do
 not prevent a newly authorized release retry. Reconstruction independently
-refuses an attributable resident actually executing `dev`, regardless of a
-different selector, and reselected `dev` prevents deferred claim release.
+refuses an attributable resident actually executing mutable `dev`, regardless of a
+different selector. Immutable hashed generations may coexist under their retained
+identities; reselecting the actual retiring generation prevents deferred claim release.
+Hashed dev retirement retains the original claim snapshot too. Restoring a hashed
+rollback target changes only its expected `selected_generation` field; all other
+claim fields must still match before native-exit cleanup can release the claim.
 A retry may durably cancel exact prepared dev release under the held cutover,
 inventory and publication guards only while the original dev claim and route
 still match and no cutover witness exists. Committed grants and foreign claims

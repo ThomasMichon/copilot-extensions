@@ -377,10 +377,15 @@ def run_owned(
                 (plugin / "pyproject.toml").read_text(encoding="utf-8"),
             )["project"]["version"]
             if mode == "dev":
-                from agent_worktrees.runtime_monitor_retirements import pending_slot, reconcile
+                from agent_worktrees.runtime_monitor_retirements import (
+                    pending_claim, pending_slot, reconcile,
+                )
 
                 reconcile(root, runtime=lifecycle.runtime)
-                if pending_slot(root, "dev"):
+                current_claim = lifecycle.runtime.read_dev_claim(root, strict=True)
+                if pending_slot(root, "dev") or (
+                    current_claim is not None and pending_claim(root, current_claim)
+                ):
                     raise lifecycle.InstallationRefused("The previous dev resident is still retiring")
                 serving = lifecycle._monitor_identity(root)
                 if serving is not None:
@@ -525,8 +530,9 @@ def _release(
             }
         if current_claim != claim:
             raise lifecycle.InstallationRefused("Dev claim changed before its settled release")
+        selected_generation = claim.get("selected_generation") or lifecycle.runtime.DEV_VERSION
         if (
-            pending_claim(root, claim) or pending_slot(root, "dev", include_cancelled=False)
+            pending_claim(root, claim) or pending_slot(root, selected_generation, include_cancelled=False)
         ) and not cancel_prepared_release(root, claim, guard=guard, runtime=lifecycle.runtime):
             raise lifecycle.InstallationRefused("Dev claim release is pending resident retirement")
         previous = claim.get("previous_version")

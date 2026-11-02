@@ -658,10 +658,13 @@ def settle_candidate(
                 )
             handles: list[subprocess.Popen] = []
             summary = {"action": "interrupted", "self_retirement": True}
+            retiring_dev = serving_slot == "dev" or (
+                serving_slot is not None and runtime.is_dev_generation(serving_slot)
+            )
             retirement_predecessor = (
                 {
                     "pid": predecessor[0], "start": predecessor[1], "slot": serving_slot,
-                    "release_claim": release_dev_claim if serving_slot == "dev" else None,
+                    "release_claim": release_dev_claim if retiring_dev else None,
                 } if predecessor is not None and not already_serving else None
             )
             try:
@@ -754,7 +757,7 @@ def settle_candidate(
             "helpers_published": helpers is not None,
             "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
             "dev_claim_release_pending": (
-                release_dev_claim is not None and serving_slot == "dev"
+                release_dev_claim is not None and retiring_dev
                 and (summary.get("result") or {}).get("retirement_pending") is True
             ),
             "runtime_python": str(runtime.slot_python(root, version)),
