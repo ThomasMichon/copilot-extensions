@@ -1333,6 +1333,7 @@ install_package() {
   local -a install_args=(--python "${VENV}/bin/python")
   local lib_spec lib_dir lib_package
   for lib_spec in \
+    configuration-layers:agent-configuration-layers \
     config-migrate:agent-config-migrate \
     agent-procutil:agent-procutil \
     single-instance-lease:agent-single-instance-lease \
