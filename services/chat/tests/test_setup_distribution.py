@@ -110,11 +110,7 @@ print(json.dumps({"foreign_imports_preserved":len(names)}))
 """
     assert json.loads(installed_chat.run(
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
-<<<<<<< HEAD
-    )) == {"foreign_imports_preserved": 8}
-=======
     )) == {"foreign_imports_preserved": 9}
->>>>>>> 7b3e68b03c (Add bounded Manager and Worktrees wheel applications)
 
 
 def independent_inputs(tmp_path, installed_chat, chat_library_sdists):

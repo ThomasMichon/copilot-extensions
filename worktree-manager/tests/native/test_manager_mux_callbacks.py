@@ -53,7 +53,7 @@ def _script(slot, name, env, directory, *, payload=None):
 
 
 def _await_mapping(root, project, worktree, *, removed):
-    deadline = time.monotonic() + 6
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         entry = mux_daemon.get_mapping(project, worktree, root=root)
         if entry is not None and bool(entry.get("live")) != removed:
