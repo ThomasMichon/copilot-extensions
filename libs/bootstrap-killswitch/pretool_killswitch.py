@@ -14,6 +14,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, cast
 
 MAX_STATE_BYTES = 16 * 1024
 CONTRACT = {"id": "copilot-extensions.pretool-killswitch", "version": 1,
@@ -32,7 +33,7 @@ def state_file() -> Path:
     return Path.home() / ".copilot-extensions" / "killSwitches" / "pretool-killswitch.json"
 
 
-def read_state(path: Path) -> tuple[dict, str | None]:
+def read_state(path: Path) -> tuple[dict[str, object], str | None]:
     try:
         with path.open("rb") as stream:
             raw = stream.read(MAX_STATE_BYTES + 1)
@@ -122,7 +123,7 @@ def command(args: argparse.Namespace) -> int:
     return 0
 
 
-def register_parser(sub: argparse._SubParsersAction) -> None:
+def register_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = sub.add_parser("pretool-killswitch",
                             help="Pause/resume suite preToolUse workflow guards (default install).")
     verbs = parser.add_subparsers(dest="pretool_killswitch_command")
@@ -140,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     verbs = parser.add_subparsers(dest="command", required=True)
     register_parser(verbs)
     args = parser.parse_args(argv)
-    return args.func(args)
+    handler = cast(Callable[[argparse.Namespace], int], args.func)
+    return handler(args)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from pathlib import Path
 GUARD = Path(__file__).resolve().parents[1] / "bootstrap-killswitch-guard.sh"
 
 
-def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess:
+def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess[str]:
     env = {"PATH": "/usr/bin:/bin", "HOME": str(state_file.parent.parent)}
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(state_file)
     return subprocess.run(
@@ -25,20 +25,20 @@ def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_check_exits_nonzero_when_no_state_file(tmp_path) -> None:
+def test_check_exits_nonzero_when_no_state_file(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     result = _run(["check"], state_file)
     assert result.returncode == 1
 
 
-def test_status_reports_inactive_when_no_state_file(tmp_path) -> None:
+def test_status_reports_inactive_when_no_state_file(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     result = _run(["status"], state_file)
     assert result.returncode == 0
     assert json.loads(result.stdout)["active"] is False
 
 
-def test_on_then_check_reports_active(tmp_path) -> None:
+def test_on_then_check_reports_active(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     on_result = _run(["on", "diagnosing a venv"], state_file)
     assert on_result.returncode == 0
@@ -50,7 +50,7 @@ def test_on_then_check_reports_active(tmp_path) -> None:
     assert check_result.stdout == ""
 
 
-def test_on_then_off_then_check_reports_inactive(tmp_path) -> None:
+def test_on_then_off_then_check_reports_inactive(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     _run(["on", "temporary"], state_file)
     off_result = _run(["off"], state_file)
@@ -61,14 +61,14 @@ def test_on_then_off_then_check_reports_inactive(tmp_path) -> None:
     assert check_result.returncode == 1
 
 
-def test_malformed_state_file_fails_open(tmp_path) -> None:
+def test_malformed_state_file_fails_open(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     state_file.write_text("not json", encoding="utf-8")
     result = _run(["check"], state_file)
     assert result.returncode == 1
 
 
-def test_status_reflects_on_state_fields(tmp_path) -> None:
+def test_status_reflects_on_state_fields(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     _run(["on", "a reason"], state_file)
     result = _run(["status"], state_file)
@@ -79,13 +79,13 @@ def test_status_reflects_on_state_fields(tmp_path) -> None:
     assert data["set_at"]
 
 
-def test_unknown_subcommand_errors(tmp_path) -> None:
+def test_unknown_subcommand_errors(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     result = _run(["bogus"], state_file)
     assert result.returncode == 2
 
 
-def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
+def test_on_detects_live_in_flight_reconcile(tmp_path: Path) -> None:
     """The switch only prevents a NEW reconcile; it warns, rather than
     silently overclaiming success, when one is already running."""
     fake_home = tmp_path / "home"
@@ -111,7 +111,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
     assert "fake-plugin" in result.stdout
 
 
-def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
+def test_on_reports_no_warning_when_no_lock_present(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     env = {"PATH": "/usr/bin:/bin"}
@@ -127,7 +127,7 @@ def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
     assert "WARNING" not in result.stdout
 
 
-def test_on_ignores_stale_lock_with_dead_pid(tmp_path) -> None:
+def test_on_ignores_stale_lock_with_dead_pid(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
     lock_dir = fake_home / ".fake-plugin"
     lock_dir.mkdir(parents=True)
