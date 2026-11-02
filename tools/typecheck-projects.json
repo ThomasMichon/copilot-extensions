@@ -64,7 +64,8 @@
         "libs/config-migrate"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "lib-configuration-layers",

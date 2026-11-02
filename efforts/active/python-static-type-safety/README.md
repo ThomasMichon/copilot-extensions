@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification); #9916 (P4a canonical Installation Context source view). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -98,7 +98,7 @@ rewrite.
 
 ### Phase 2 - Source and platform qualification
 
-- [ ] Land the bounded canonical Installation Context composition/source-map adapter (#9916); keep copies independently pending.
+- [x] Land the bounded canonical Installation Context composition/source-map adapter (#9916); keep copies independently pending.
 - [ ] Make executed source fragments statically visible with source-mapped composition or genuine typed modules; qualify every source line and byte-identical copy without suppressing errors.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
@@ -395,3 +395,38 @@ composition prerequisites, and review/validation rules.
   regression controls; physical source maps also cover LF, CRLF and CR input.
   Final focused validation passes 40 checker controls and 48 release/helper
   controls, plus all eight admitted MyPy analysis targets and Ruff F/E9.
+
+### 2026-11-02 - Canonical source view merged; first complete leaf admission selected
+
+- #9922 merged as `12758f925bf89745e01a8989a274da63b888aa08`
+  after exact-head Copilot approval, resolved feedback and green required
+  [run 41376941592](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41376941592).
+  P3's candidate qualification and P4a's bounded canonical source view are
+  complete. The source worktree is pulled forward; copy correspondence,
+  other fragment families and the full strict portfolio remain open.
+- #9924 is the next P5/L1 slice: all six Config Migrate source/test files,
+  a separately hash-locked YAML/stub environment through the existing
+  preparer, and minimal annotations/narrowing without runtime changes.
+  The pre-change probe reports two basic missing-stub diagnostics and
+  34 strict diagnostics across three files. Direct strict admission is
+  preferred if the actual delta stays small.
+- The complete project now passes strict checks on both declared Linux/Win32
+  analysis targets after typed migrator generics, version-marker narrowing and
+  fixture annotations. The separately generated flat lock preserves all 12
+  base checker entries and adds only PyYAML 6.0.3 and
+  types-PyYAML 6.0.12.20250915; every artifact predates the seven-day cutoff.
+  The existing governed compiler/install owner enforces seasoning. Its export
+  was normalized to the checker's existing SHA-256-only contract.
+- Fresh project preparation, all ten admitted MyPy analysis targets, 69 focused
+  library/checker controls and Ruff F/E9 pass locally. Only the three changed
+  library/test byte digests are refreshed in unit admission; node selection,
+  production decision targets and packet budgets are unchanged. This is a
+  proposed fifth strict project, not a merged or complete campaign.
+- The original migration controls also pass through their release adapters
+  with the manifest controls (91 tests). Exact-source/helper admission,
+  install contract and both physical/pointer consumer inventories pass;
+  the changefile names the library and all five consumers. Full actor-free
+  packet coverage remains the required hosted gate. Native Windows
+  preparation is exercised; hosted Linux preparation remains required.
+  A machine-provisioning clean room is not applicable to annotation-only
+  runtime changes and isolated checker-dependency preparation.
