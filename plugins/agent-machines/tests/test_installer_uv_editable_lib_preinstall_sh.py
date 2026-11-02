@@ -45,6 +45,10 @@ def _run(
         INSTALLER.parent / "installer_dependency_config.py",
         scripts / "installer_dependency_config.py",
     )
+    shutil.copyfile(
+        INSTALLER.parent / "installer_retained_content.py",
+        scripts / "installer_retained_content.py",
+    )
     script = f"""
 set -euo pipefail
 _fail() {{ echo "FAIL:$1" >&2; exit 1; }}

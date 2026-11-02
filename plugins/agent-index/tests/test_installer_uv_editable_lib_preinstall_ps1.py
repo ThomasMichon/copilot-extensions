@@ -86,6 +86,10 @@ def _run(
         PLUGIN / "scripts/installer_dependency_config.py",
         policy.with_name("installer_dependency_config.py"),
     )
+    shutil.copy2(
+        PLUGIN / "scripts/installer_retained_content.py",
+        policy.with_name("installer_retained_content.py"),
+    )
     uv_stub = f"""
 function Invoke-IndexUvPipInstall {{
     & '{sys._base_executable}' -I '{policy}' --uv '{uv}' -- @args

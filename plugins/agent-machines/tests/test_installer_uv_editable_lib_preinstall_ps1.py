@@ -39,6 +39,10 @@ def _run(pwsh: str, plugin_dir: Path, have_uv: bool) -> subprocess.CompletedProc
         INSTALLER.parent / "installer_dependency_config.py",
         scripts / "installer_dependency_config.py",
     )
+    shutil.copyfile(
+        INSTALLER.parent / "installer_retained_content.py",
+        scripts / "installer_retained_content.py",
+    )
     script = f"""
 $ErrorActionPreference = 'Stop'
 function Write-Fail {{ param([string]$Message) }}

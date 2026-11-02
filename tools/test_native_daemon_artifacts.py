@@ -383,6 +383,7 @@ def test_real_pure_wheel_and_source_archive_need_only_selected_python(tmp_path, 
         "RESOLVER_DIR": root / "libs" / "versioned-runtime",
         "DEPENDENCY_POLICY": root / "libs" / "installer-engine" / "installer_dependency_policy.py",
         "DEPENDENCY_CONFIG": root / "libs" / "installer-engine" / "installer_dependency_config.py",
+        "DEPENDENCY_CONTENT": root / "libs" / "installer-engine" / "installer_retained_content.py",
     }.items():
         monkeypatch.setattr(sync, key, value)
     monkeypatch.setattr(sys, "argv", [

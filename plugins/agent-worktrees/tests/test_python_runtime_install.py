@@ -967,7 +967,10 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert (package / "_build_info.py").read_text(encoding="utf-8") == content
 
 
-@pytest.mark.parametrize("missing", [None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py"])
+@pytest.mark.parametrize("missing", [
+    None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
+    "installer_retained_content.py",
+])
 def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monkeypatch, missing):
     import agent_worktrees
     from agent_worktrees import runtime_candidate as installer, update_stage
@@ -1003,7 +1006,10 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monk
     )
     if missing is not None:
         assert result.returncode != 0
-        assert f"No module named '{Path(missing).stem}'" in result.stderr
+        if missing == "installer_retained_content.py":
+            assert missing in result.stderr
+        else:
+            assert f"No module named '{Path(missing).stem}'" in result.stderr
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "--settle-slot" in result.stdout

@@ -90,6 +90,10 @@ def _run(
         PLUGIN / "scripts/installer_dependency_config.py",
         policy.with_name("installer_dependency_config.py"),
     )
+    shutil.copy2(
+        PLUGIN / "scripts/installer_retained_content.py",
+        policy.with_name("installer_retained_content.py"),
+    )
     script = f"""
 set -uo pipefail
 _fail() {{ echo "FAIL:$1"; exit 1; }}

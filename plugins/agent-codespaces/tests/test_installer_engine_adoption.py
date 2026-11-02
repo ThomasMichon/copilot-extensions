@@ -552,7 +552,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         shutil.copyfile(PLUGIN / name, payload / name)
     retained_scripts = (
         "install.sh", "install.ps1", "installer-human-output.ps1", "install.human-output.json",
-        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     )
     for name in retained_scripts:
         shutil.copyfile(PLUGIN / "scripts" / name, payload / "scripts" / name)
@@ -573,7 +573,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
                     "install.sh", "install.ps1",
                     "installer-human-output.ps1", "install.human-output.json",
                     "installer-engine.sh", "installer-engine.ps1",
-                    "installer_dependency_policy.py", "installer_dependency_config.py",
+                    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
                 ):
                     continue
                 if member.is_dir():
@@ -608,7 +608,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     engine.mkdir(parents=True, exist_ok=True)
     for name in (
         "installer-engine.sh", "installer-engine.ps1",
-        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
     roster = repository / ".github" / "plugin" / "marketplace.json"
@@ -650,7 +650,7 @@ def _small_attributed_sources(tmp_path, *, editable, canonical=None):
     engine.mkdir(parents=True)
     for name in (
         "installer-engine.sh", "installer-engine.ps1",
-        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
     library_root = repository / "libs" if canonical else payload / "libs"
@@ -1066,7 +1066,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         "versioned_runtime_native.ps1",
     ):
         assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
         assert (snapshot / "scripts" / name).read_bytes() == (ENGINE / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
     for spec in project["tool"]["uv"]["sources"].values():

@@ -104,12 +104,18 @@ def retained_input_graph(
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
         if not set(files) <= set(transaction.source_hashes):
             raise RuntimeError("Retained UV inputs do not cover the runtime source files")
-        changed = []
-        for path in files:
-            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]:
-                changed.append(path)
-            else:
+        def changed_content(path):
+            return path if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path] else None
+
+        def completed_content(result):
+            if result is None:
                 on_progress()
+
+        changed = [
+            path for path in engine._bounded_content_map(
+                changed_content, files, on_result=completed_content,
+            ) if path is not None
+        ]
         if changed:
             raise RuntimeError(
                 "Retained UV inputs differ from the admitted source content: "

@@ -183,7 +183,7 @@ def _sources(tmp_path, canonical):
     engine.mkdir()
     for name in (
         "installer-engine.ps1", "installer-engine.sh",
-        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
     return payload, sources

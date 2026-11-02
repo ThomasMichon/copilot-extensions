@@ -65,7 +65,7 @@ def _small_stage(tmp_path: Path, plugin: str):
     names = {
         "install.ps1", "install.sh", "source-runtime.ps1", "source-runtime.sh",
         "resolve-runtime.ps1", "resolve-runtime.sh",
-        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     }
     names.update(path.name for path in original.glob("versioned_runtime*.*"))
     if plugin == "agent-logger":

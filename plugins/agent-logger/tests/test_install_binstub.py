@@ -1259,7 +1259,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         "versioned_runtime_source.py",
         "versioned_runtime_publication.py",
         "installer_dependency_policy.py",
-        "installer_dependency_config.py",
+        "installer_dependency_config.py", "installer_retained_content.py",
     ):
         assert (snapshot / "scripts" / component).is_file(), component
     assert '. "$SCRIPT_DIR/installer-engine.sh"' in (
