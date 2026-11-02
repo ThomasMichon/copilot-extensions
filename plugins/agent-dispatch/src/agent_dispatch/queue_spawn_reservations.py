@@ -52,6 +52,7 @@ from .queue_spawn_completion import SpawnCompletionMixin
 from .queue_spawn_release import SpawnReleaseMixin
 from .queue_spawn_workspace import SpawnWorkspaceMixin
 from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment
+from .queue_pool_startup import PoolStartupMixin, advance_pool_startup
 from .queue_spawn_cooling import require_no_cooling, validate_cooling_publication
 from .queue_execution_handoff import require_execution_admission
 from .queue_execution_custody import require_execution_send_reconciliation
@@ -63,12 +64,6 @@ log = logging.getLogger("agent-dispatch.queue")
 def spawn_key(task_id: str, attempt: int) -> str:
     """The canonical reservation key for a (task, attempt) spawn."""
     return f"dispatch-task:{task_id}:{attempt}"
-
-
-
-
-
-
 def _validate_conclusion_claim(
     stored_token: object,
     stored_expires_at: object,
@@ -114,7 +109,7 @@ def _newer_worktree_reservation(
     ).fetchone()
 
 
-class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnReleaseMixin, SpawnWorkspaceMixin):
+class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnReleaseMixin, SpawnWorkspaceMixin, PoolStartupMixin):
     """Spawn-reservation lifecycle methods for :class:`TaskQueue`."""
 
     # -- spawn reservations --------------------------------------------------
@@ -137,11 +132,12 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
 
     def place_pool_task(
         self, task_id: str, *, reserved_by: str, catalog_revision: int, driver: str = "cli",
+        startup_timeout: float = 600,
     ) -> PoolPlacement:
         """Return the reservation and matching assignment captured under one lock."""
         reservation, reserved, assignment = self._reserve_spawn(
             task_id, reserved_by=reserved_by, driver=driver,
-            pool_catalog_revision=catalog_revision,
+            pool_catalog_revision=catalog_revision, pool_startup_timeout=startup_timeout,
         )
         if assignment is None or assignment.reservation_key != reservation.key:
             raise TaskError("pool placement has no matching transactional assignment")
@@ -151,6 +147,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
         allow_suspended_reembodiment: bool = False, driver: str | None = None,
         allocation_revision: int | None = None, pool_catalog_revision: int | None = None,
+        pool_startup_timeout: float = 600,
     ) -> tuple[SpawnReservation, bool, PoolAssignment | None]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
 
@@ -196,6 +193,9 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         carry-forward) is unchanged.
         """
         ts = self._now(now)
+        if pool_catalog_revision is not None:
+            from .queue_pool_startup import validate_startup_timeout
+            validate_startup_timeout(pool_startup_timeout)
         if pool_catalog_revision is not None and (
             type(pool_catalog_revision) is not int or pool_catalog_revision < 0
             or not isinstance(reserved_by, str) or not reserved_by.strip()
@@ -560,6 +560,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 assert pool_catalog_revision is not None and reserved_by is not None
                 record_pool_claim(
                     conn, task, selected_pool, key, pool_catalog_revision, ts=ts,
+                    startup_timeout=pool_startup_timeout,
                 )
                 self._audit(
                     conn, task.id, ts=ts, from_status=Status.QUEUED, to_status=Status.CLAIMED,
@@ -591,6 +592,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         preserve_releasing: bool = False,
         guard: Callable[[sqlite3.Row], None] | None = None,
         require_no_native: bool = False,
+        pool_startup_retry: dict | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -599,6 +601,17 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
+            if pool_startup_retry is not None:
+                from .queue_pool_startup_retry import prepare_mutation
+                if prepare_mutation(
+                    self, conn, row, pool_startup_retry,
+                    completion=startup_complete, ts=self._now(now),
+                ):
+                    conn.commit()
+                    return SpawnReservation._from_row(row)
+            elif startup_complete is not None:
+                from .queue_pool_startup_retry import refuse_legacy_retry
+                refuse_legacy_retry(conn, key)
             if worktree is not None:
                 from .queue_pool_placement import require_pool_workspace
                 task = self._fetch(conn, row["task_id"])
@@ -716,6 +729,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if startup_complete is False or startup_complete is None and (
                 resuming_cold or changed_handle and row["session_handle"] is not None
             ):
+                advance_pool_startup(conn, key, self._now(now))
                 revision += 1
             try:
                 conn.execute(

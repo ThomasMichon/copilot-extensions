@@ -19,6 +19,10 @@ from .client import BridgeClientError
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--live-receipt-only", action="store_true",
+                        help="Inspect an exact keyed live inbox admission without sending or resuming")
+    parser.add_argument("--live-exact", action="store_true",
+                        help="Send only to the exact live CLI session, without alias, queue or ACP fallback")
     parser.add_argument("--native-invocation-file",
                         help="UTF-8 keyed native JSON; '-' reads stdin; returns admission receipt only")
     parser.add_argument("--receipt-only", action="store_true",

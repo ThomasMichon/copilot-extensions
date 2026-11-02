@@ -241,6 +241,8 @@ def register_spawn_routes(
         unavailable_message="pool placement requires configured control authority",
         forbidden_message="pool placement requires control authority",
     )
+    from .coordinator_pool_startup import register as register_pool_startup
+    register_pool_startup(app, queue, bus, pool_control)
 
     @app.get("/pool-placements/contract", dependencies=[Depends(pool_control)])
     def placement_contract() -> dict:

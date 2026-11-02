@@ -58,6 +58,8 @@ delegated-agent facade.
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
 | Message a represented interactive session | `send <live-handle>`; optional `--wait-reply` | `POST /api/v1/live-sessions/{id}/messages` | Immediate admission receipt; SDK acceptance and consumption are distinct; optional bounded post-consumption reply evidence requires HTTP protocol 39 |
 | Observe a busy represented peer | `read <live-handle> --message-id N --json` | `GET .../result` plus `GET .../messages/{id}/receipt` | Bounded activity, pending inbox metadata, recent output, and a cursor-neutral message receipt (HTTP protocol 39) |
+| Admit an exact live CLI prompt | `send <exact-session-id> --live-exact` with the exact expected session, key, sender and stdin prompt | `POST .../messages/keyed-exact/v1`, capability `live_keyed_receipt: 1` | Original live inbox receipt; no alias, ACP, queue or native replacement |
+| Observe an exact keyed live CLI prompt | Same binding with `--live-receipt-only` | `POST .../messages/keyed-receipt/v1`, same capability | Read-only retained receipt; a miss is unproven, not permission to send |
 
 Against older daemons, receipt-only sends retain legacy outcomes without
 receipt evidence. Explicit reply waiting refuses before submitting a message
@@ -80,6 +82,35 @@ but cannot overwrite an idle boundary already observed after consumption.
 Migration retains historical SDK-acceptance evidence without inventing
 consumption or classifying old acknowledged history as newly pending work.
 Newly admitted inputs carry explicit consumption-tracking provenance.
+
+### Exact live CLI inbox admission and observation
+
+These opt-in operations address the **actual original CLI session ID**, not a
+worktree handle or an ACP Bridge/native pair. Both freshly negotiate
+`/health.capabilities.live_keyed_receipt: 1` and use distinct strict version-1
+routes. An older provider or rollback refuses without a general-send fallback.
+They never ensure a daemon, resume a native or retry an unknown request.
+
+```bash
+agent-bridge --json send <exact-session-id> --live-exact \
+  --expected-session-id <same-session-id> --idempotency-key <original-key> \
+  --sender <original-sender> --prompt-file - --no-wait
+```
+
+Admission uses the existing inbox transaction and checks the raw original
+session identity in its insert. A routing alias cannot turn a successor into
+that same native. The input is `prompt`-kind with `steer` delivery; there is no
+hosted pending-prompt queue, force, replacement or alternate transport.
+Idempotent replay returns only the already-admitted original message.
+
+Replace `--live-exact` with `--live-receipt-only` to inspect the original
+session/key/sender/prompt without writing, moving a cursor or following aliases.
+Both routes return `live-keyed-receipt/v1`, version 1, the exact binding and
+`receipt`. A retained receipt carries its original message ID and admission,
+SDK-acceptance or consumption stage. `receipt: null` means unproven, including
+after historical evidence was removed; it never means no effect or authorizes
+another send. A changed retained prompt or sender conflicts.
+Admission, consumption and semantic acceptance remain separate facts.
 
 ### Exact native follow-ups through ordinary send
 

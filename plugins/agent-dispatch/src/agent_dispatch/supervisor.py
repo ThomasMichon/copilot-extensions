@@ -995,7 +995,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             return False
         return True
 
-    def reconcile_reserving(self) -> int:
+    def reconcile_reserving(self, *, now: float | None = None) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
 
         Ordinary created-agent facts preserve the retained Bridge identity for
@@ -1013,6 +1013,12 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            from .supervisor_pool_startup import supervise_pool_startup
+
+            startup = supervise_pool_startup(self, res, task, now=now)
+            if startup is not None:
+                reconciled += int(startup)
                 continue
             if task.get("status") in _TERMINAL:
                 # Absence before a pending launch finishes is not a closed
@@ -1459,6 +1465,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            from .supervisor_pool_retry import reconcile_retry_completion
+            completed_retry = reconcile_retry_completion(self, res, task)
+            if completed_retry is not None:
+                released += int(completed_retry)
                 continue
             from .spawn_releasing_recovery import qualified_handleless_identity, retire_historical_native
             if not res.get("session_handle"):
@@ -3042,6 +3053,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
             status = task.get("status")
+            from .supervisor_pool_startup import supervise_pool_startup
+
+            if supervise_pool_startup(self, res, task, observe_only=True) is not None:
+                continue
             if status in _TERMINAL:
                 continue  # reconcile() settles provably-finished tasks
             if status == Status.SUSPENDED:
@@ -3285,7 +3300,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 log.exception("recovery release failed for reservation %s", res["key"])
         return recovered
 
-    def redrive_unclaimed_spawns(self) -> int:
+    def redrive_unclaimed_spawns(self, *, now: float | None = None) -> int:
         """Prompt live embodied workers that exist but never claimed the task.
 
         A supervisor/bridge restart can leave a reservation in ``spawned`` while
@@ -3303,6 +3318,18 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             key = res.get("key")
             if not key or key in self._redriven_spawn_keys:
                 continue
+            candidate: dict | None = None
+            if res.get("driver") == "cli":
+                try:
+                    candidate = self.client.get(res["task_id"])
+                except DispatchError:
+                    continue
+                from .supervisor_pool_startup import supervise_pool_startup
+
+                startup = supervise_pool_startup(self, res, candidate, now=now)
+                if startup is not None:
+                    redriven += int(startup)
+                    continue
             if res.get("startup_complete") is not True and res.get("driver") != "ordinary-bridge":
                 continue
             if res.get("release_requested"):
@@ -3354,7 +3381,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             if _parse_script_body_handle(res.get("session_handle")) is not None:
                 continue
             try:
-                task = self.client.get(res["task_id"])
+                task = candidate if candidate is not None else self.client.get(res["task_id"])
             except DispatchError:
                 continue
             if task.get("status") != Status.QUEUED or task.get("owner"):

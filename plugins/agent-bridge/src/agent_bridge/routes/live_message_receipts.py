@@ -7,8 +7,30 @@ from fastapi import APIRouter, HTTPException, Request
 from ..db import Database
 from ..live_message_receipts import receipt
 from ..models import LiveMessageReceipt
+from ..live_keyed_receipt import ReceiptBinding, observe
 
 router = APIRouter()
+
+
+@router.post("/{session_id}/messages/keyed-receipt/v1")
+def get_keyed_receipt(session_id: str, body: ReceiptBinding, request: Request) -> dict:
+    return observe(session_id, body, request)
+
+
+@router.post("/{session_id}/messages/keyed-exact/v1")
+async def send_keyed_exact(session_id: str, body: ReceiptBinding, request: Request) -> dict:
+    """Expand the existing inbox owner with a raw, non-alias native fence."""
+    from .live_sessions import post_live_message
+    from ..models import SendMessageRequest
+    if session_id != body.expected_session_id:
+        raise HTTPException(409, detail="exact live send requires its original session")
+    result = await post_live_message(
+        session_id, SendMessageRequest(
+            sender=body.sender, body=body.body, expected_session_id=body.expected_session_id,
+            idempotency_key=body.idempotency_key, exact_session=True, delivery="steer",
+        ), request,
+    )
+    return observe(session_id, body, request) | {"admission": result.model_dump()}
 
 
 @router.get("/{session_id}/messages/{message_id}/receipt", response_model=LiveMessageReceipt)

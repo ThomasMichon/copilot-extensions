@@ -31,6 +31,7 @@ class LiveMessageEnqueue:
     stale_seconds: float
     report_duplicate: bool
     require_idle: bool
+    exact_session: bool = False
 
 
 def _duplicate(
@@ -56,10 +57,10 @@ def _duplicate(
         return None
     row = existing[0]
     retained = row["runtime_custody_json"] is not None or row["handoff_json"] is not None
-    same_target = row["session_id"] == request.session_id if retained else bool(row["same_target"])
+    same_target = row["session_id"] == request.session_id if retained or request.exact_session else bool(row["same_target"])
     same_expected = (
         request.expected_session_id is None or request.expected_session_id == row["session_id"]
-    ) if retained else bool(row["same_expected"])
+    ) if retained or request.exact_session else bool(row["same_expected"])
     if (
         same_target and same_expected
         and row["sender"] == request.sender and row["body"] == request.body
@@ -155,6 +156,7 @@ def _insert(
         "      )"
         "    )"
         f"    AND (? IS NULL OR {_CANON} = ls.session_id)"
+        "    AND (? = 0 OR (ls.session_id=? AND ls.session_id=?))"
         "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
         "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
         "        WHERE pending.session_id=ls.session_id AND pending.consumed_at IS NULL "
@@ -167,6 +169,7 @@ def _insert(
             request.reply_to, request.kind, request.delivery, request.idempotency_key,
             request.now, association, request.session_id, request.session_id, cutoff, cutoff,
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
+            request.exact_session, request.session_id, request.expected_session_id,
             request.require_idle,
             request.delivery == "interrupt" or request.kind.casefold().startswith(("control:", "startup:")),
             association, request.session_id, request.session_id, request.session_id,

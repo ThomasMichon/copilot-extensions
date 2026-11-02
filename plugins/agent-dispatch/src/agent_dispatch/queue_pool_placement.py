@@ -90,13 +90,15 @@ def migrate_pool_placement(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_pool_reservation_identity"
         " ON pool_reservation_bindings(registration_id, machine, env)"
     )
+    from .queue_pool_startup import migrate_pool_startup
+    migrate_pool_startup(conn)
 
 
 def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | None:
     row = conn.execute(
         "SELECT * FROM task_pool_assignments WHERE task_id = ?", (task_id,),
     ).fetchone()
-    return PoolAssignment(**dict(row)) if row is not None else None
+    return PoolAssignment(**{name: row[name] for name in PoolAssignment.__dataclass_fields__}) if row is not None else None
 
 
 def _execution_excluded(
@@ -237,7 +239,7 @@ def require_pool_recovery_retirement(conn: sqlite3.Connection, task: Task) -> No
 
 def record_pool_claim(
     conn: sqlite3.Connection, task: Task, pool: PoolInstanceDefinition,
-    key: str, catalog_revision: int, *, ts: float,
+    key: str, catalog_revision: int, *, ts: float, startup_timeout: float = 600,
 ) -> None:
     """Bind one slot and the allocator's claim before any external spawn effect."""
     changed = conn.execute(
@@ -255,11 +257,15 @@ def record_pool_claim(
         (key, *pool.identity, json.dumps(sorted(pool.filters.permit.get("capabilities", frozenset())))),
     )
     conn.execute(
-        "INSERT INTO task_pool_assignments VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO task_pool_assignments"
+        " (task_id, registration_id, machine, env, reservation_key, task_generation, catalog_revision)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(task_id) DO UPDATE SET reservation_key = excluded.reservation_key,"
         " task_generation = excluded.task_generation, catalog_revision = excluded.catalog_revision",
         (task.id, *pool.identity, key, task.generation + 1, catalog_revision),
     )
+    from .queue_pool_startup import begin_pool_episode
+    begin_pool_episode(conn, task.id, ts, startup_timeout)
 
 
 def require_pool_workspace(

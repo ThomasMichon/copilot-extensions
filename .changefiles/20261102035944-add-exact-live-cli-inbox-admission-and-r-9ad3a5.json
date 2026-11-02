@@ -1,0 +1,9 @@
+{
+  "comment": "Add exact live CLI inbox admission and read-only keyed receipt recovery for accountable same-native callers",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -779,6 +779,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         runtime_admission: RuntimeAdmission | None = None,
         enrolled_inbox: bool = False,
         inbox_refusal: str | None = None,
+        exact_session: bool = False,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -817,6 +818,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         return enqueue_fresh(self, LiveMessageEnqueue(
             session_id, sender, body, now, reply_to, kind, delivery,
             expected_session_id, idempotency_key, stale_seconds, report_duplicate, require_idle,
+            exact_session,
         ), runtime_admission, enrolled_inbox=enrolled_inbox, inbox_refusal=inbox_refusal)
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:

@@ -39,6 +39,7 @@ class SendMessageRequest(BaseModel):
     )
     #: Freshness assertion: atomically refuse a changed target incarnation.
     expected_session_id: str | None = None
+    exact_session: bool = False
     #: Stable producer key: an identical retry returns the original message ID.
     idempotency_key: str | None = None
     plugin_readiness: PluginReadinessRequest | None = None
@@ -48,6 +49,8 @@ class SendMessageRequest(BaseModel):
         result = handler(self)
         if self.plugin_readiness is None:
             result.pop("plugin_readiness", None)
+        if not self.exact_session:
+            result.pop("exact_session", None)
         return result
 
 
