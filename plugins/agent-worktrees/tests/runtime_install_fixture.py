@@ -58,7 +58,7 @@ def isolate_account_profile(
     for directory in directories:
         resolution = directory / "_installation_context_resolution.py"
         source = resolution.read_text(encoding="utf-8")
-        lookup = "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+        lookup = "profile_value = Path(get_account(get_uid()).pw_dir)"
         assert source.count(lookup) == 1
         resolution.write_text(source.replace(
             lookup, f"profile_value = Path({str(home)!r})",

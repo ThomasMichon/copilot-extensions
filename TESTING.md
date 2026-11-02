@@ -1661,6 +1661,8 @@ legacy macOS and all other cells never install it. Canonical test-dependency
 seasoning and the Bash version guard remain unchanged. Copied POSIX
 fixtures redirect the SDK's current `canonical_path_into` account-home seam;
 they leave the source SDK and the runner's actual account profile unchanged.
+The copied Python fixture follows the typed passwd accessors; its existing
+POSIX/Windows regression checks quoted homes and unchanged original SDK bytes.
 The PowerShell transport uses the already-redirected Python SDK resolution.
 
 ```bash

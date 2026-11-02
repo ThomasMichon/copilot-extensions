@@ -155,7 +155,7 @@ def test_account_profile_isolation_changes_only_copied_os_lookups(
 
             ast.parse(isolated)
             assert f"profile_value = Path({str(home)!r})" in isolated
-            assert "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)" not in isolated
+            assert "profile_value = Path(get_account(get_uid()).pw_dir)" not in isolated
         elif path.suffix == ".sh":
             import shlex
 
