@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import os
 from pathlib import Path
+import stat
 import sys
 import time
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from fleet_manager.komodo_repair import KomodoRepairOwner
 from fleet_manager.komodo_repair_selection import KomodoRepairSelection
 from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, render_profile
 from fleet_manager.komodo_selection import KomodoSelection
+from fleet_manager.komodo_storage import KomodoIncumbentStorage
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.planning import PlanError, canonical, decode, digest
@@ -127,6 +129,261 @@ def test_incumbent_observation_retains_originals_without_synthesizing_fresh_cred
     selected["images"]["mongo"]["version"] = "7.0.45"
     with pytest.raises(PlanError, match="cannot render"):
         render_profile(KomodoDeclaration.from_dict(selected), material, owner="a" * 64)
+
+
+def _observed_storage(incumbent):
+    material = incumbent.material
+    roots = {Path(volume["Mountpoint"]) for volume in incumbent.volumes}
+    files = {path for path in material.retained_files if any(root in path.parents for root in roots)}
+    for role in ("core", "periphery"):
+        path = material.keys / (role + ".pub")
+        path.write_bytes(PUBLIC_PEM[role].encode("utf-8"))
+        files.add(path)
+    entries = {}
+    for path in roots | files:
+        info = path.stat()
+        entries[str(path)] = {
+            "device": info.st_dev, "inode": info.st_ino, "uid": 0, "gid": 0,
+            "mode": (stat.S_IFREG | (0o644 if path.suffix == ".pub" else 0o600)
+                     if path in files else stat.S_IFDIR | 0o700),
+            "nlink": 1 if path in files else 2,
+        }
+        if path in files:
+            entries[str(path)]["size"] = info.st_size
+            entries[str(path)]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    snapshot = {"entries": entries, "public": dict(PUBLIC_PEM)}
+    requests = []
+
+    def read(request):
+        requests.append(decode(request))
+        return canonical({
+            "request": digest(decode(request)), "valid_until": int(time.time()) + 60,
+            **snapshot,
+        })
+
+    storage = KomodoIncumbentStorage(
+        "original-daemon", tuple((path, 0, 0) for path in sorted(files)), read)
+    return storage, snapshot, requests
+
+
+def test_original_storage_observation_never_traverses_host_volume_paths(incumbent, monkeypatch):
+    storage, snapshot, requests = _observed_storage(incumbent)
+    roots = {Path(volume["Mountpoint"]) for volume in incumbent.volumes}
+    for method in ("stat", "lstat"):
+        original = getattr(Path, method)
+
+        def guarded(path, *args, _original=original, **kwargs):
+            if any(path == root or root in path.parents for root in roots):
+                raise PermissionError("host caller cannot traverse original volume")
+            return _original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, method, guarded)
+    material = replace(incumbent.material, storage=storage)
+    before = material.evidence()
+    assert before["storage_daemon"] == "original-daemon"
+    assert before["files"][str(material.keys / "core.key")]["uid"] == 0
+    assert identity_digest(material) == digest({name: value.strip() for name, value in PUBLIC_PEM.items()})
+    assert requests and all(request["volumes"] == incumbent.volumes for request in requests)
+    assert b"original-private-key-fixture" not in material.profile()
+    snapshot["entries"][str(material.keys / "core.key")]["inode"] = (
+        max(item["inode"] for item in snapshot["entries"].values()) + 1)
+    assert material.evidence() != before
+    snapshot["entries"][str(material.keys / "core.key")]["mode"] |= 0o040
+    with pytest.raises(PlanError, match="custody"):
+        material.evidence()
+
+
+@pytest.mark.parametrize("change", [
+    "stale", "request", "missing", "extra", "uid", "symlink", "links", "public", "private-mode",
+    "empty-key", "oversize", "alias",
+])
+def test_original_storage_observation_refuses_unproved_or_changed_evidence(incumbent, change):
+    storage, snapshot, _ = _observed_storage(incumbent)
+    key = str(incumbent.material.keys / "core.key")
+    if change == "missing":
+        snapshot["entries"].pop(key)
+    elif change == "extra":
+        snapshot["entries"][key + "-other"] = dict(snapshot["entries"][key])
+    elif change == "uid":
+        snapshot["entries"][key]["uid"] = 42
+    elif change == "symlink":
+        snapshot["entries"][key]["mode"] = stat.S_IFLNK | 0o600
+    elif change == "links":
+        snapshot["entries"][key]["nlink"] = 2
+    elif change == "public":
+        snapshot["public"]["core"] = "not the retained public bytes"
+    elif change == "private-mode":
+        snapshot["entries"][key]["mode"] |= 0o004
+    elif change == "empty-key":
+        snapshot["entries"][key]["size"] = 0
+    elif change == "oversize":
+        snapshot["entries"][key]["size"] = 1024 * 1024 + 1
+    elif change == "alias":
+        other = snapshot["entries"][str(incumbent.material.keys / "periphery.key")]
+        other["device"], other["inode"] = (
+            snapshot["entries"][key]["device"], snapshot["entries"][key]["inode"])
+    else:
+        original = storage.read
+
+        def read(request):
+            value = decode(original(request))
+            value["valid_until" if change == "stale" else "request"] = (
+                int(time.time()) - 1 if change == "stale" else "0" * 64)
+            return canonical(value)
+
+        storage = replace(storage, read=read)
+    with pytest.raises(PlanError, match="storage"):
+        replace(incumbent.material, storage=storage)
+
+
+def test_original_storage_cannot_cover_unselected_file_owners(incumbent):
+    storage, _, _ = _observed_storage(incumbent)
+    with pytest.raises(PlanError, match="original volume owners"):
+        replace(incumbent.material, storage=replace(storage, file_owners=storage.file_owners[:-1]))
+
+
+def test_original_storage_cannot_be_observed_through_another_native_daemon(incumbent, monkeypatch):
+    storage, _, requests = _observed_storage(incumbent)
+    material = replace(incumbent.material, storage=storage)
+    requests.clear()
+    monkeypatch.setattr("fleet_manager.komodo_native.sys", SimpleNamespace(platform="linux"))
+    native = KomodoNative(SimpleNamespace(daemon_id="another-daemon"))
+    with pytest.raises(PlanError, match="another daemon"):
+        native.verify_storage(material, deadline=time.monotonic() + 10)
+    assert not requests
+
+
+def test_original_storage_rejects_unrelated_volume_before_calling_its_owner(incumbent):
+    storage, _, requests = _observed_storage(incumbent)
+    value = decode(incumbent.material.encoded)
+    value["volumes"].append({**value["volumes"][0], "Name": "unrelated-volume"})
+    with pytest.raises(PlanError, match="unrelated storage"):
+        replace(incumbent.material, storage=storage, encoded=canonical(value))
+    assert not requests
+
+
+@pytest.mark.parametrize("source", ["username", "configured-username", "password"])
+def test_original_storage_does_not_replace_overlapping_local_login_rereads(incumbent, source):
+    material = incumbent.material
+    configured = source == "configured-username"
+    original = (incumbent.files["core_config"] if configured else
+                material.admin_password if source == "password" else material.admin_username)
+    if configured:
+        original.write_bytes(b'init_admin_username = "original-admin"\n')
+    local = material.keys / original.name
+    original.rename(local)
+    retained = tuple(local if path == original else path for path in material.retained_files)
+    if local not in retained:
+        retained += (local,)
+    encoded = decode(material.encoded)
+    if configured:
+        encoded["mounts"]["core"][1]["Source"] = str(local)
+    changes = {"admin_username": KomodoConfigUsername(local) if configured else local}
+    if source == "password":
+        changes = {"admin_password": local}
+    material = replace(material, retained_files=retained, encoded=canonical(encoded), **changes)
+    storage, snapshot, _ = _observed_storage(SimpleNamespace(
+        material=material, volumes=incumbent.volumes))
+    armed = False
+
+    def read(request):
+        if armed:
+            content = (b'init_admin_username = "changed-admin"\n' if configured else
+                       b"changed-original-login-material")
+            local.write_bytes(content)
+            snapshot["entries"][str(local)].update(
+                sha256=hashlib.sha256(content).hexdigest(), size=len(content))
+        return storage.read(request)
+
+    material = replace(material, storage=replace(storage, read=read))
+    armed = True
+    with pytest.raises(PlanError, match="login changed during observation"):
+        material.evidence()
+
+
+def test_original_storage_directory_growth_preserves_material_identity(incumbent):
+    storage, snapshot, _ = _observed_storage(incumbent)
+    material = replace(incumbent.material, storage=storage)
+    before = material.evidence()
+    for volume in material.volumes():
+        root = Path(volume["Mountpoint"])
+        (root / "ordinary-subdirectory").mkdir()
+        snapshot["entries"][str(root)]["nlink"] += 1
+    assert material.evidence() == before
+    snapshot["entries"][str(material.keys)]["inode"] = (
+        max(item["inode"] for item in snapshot["entries"].values()) + 1)
+    assert material.evidence() != before
+
+
+def test_original_storage_does_not_bypass_overlapping_bind_source_validation(incumbent):
+    storage, _, _ = _observed_storage(incumbent)
+    value = decode(incumbent.material.encoded)
+    value["mounts"]["periphery"].append({
+        "Type": "bind", "Source": str(incumbent.material.keys),
+        "Destination": "/original-bind-view", "RW": False,
+    })
+    material = replace(incumbent.material, storage=storage, encoded=canonical(value))
+    before = material.evidence()
+    value["mounts"]["periphery"].reverse()
+    assert replace(material, encoded=canonical(value)).evidence() == before
+    material.keys.rename(material.keys.with_name("retained-original-keys"))
+    with pytest.raises(FileNotFoundError):
+        material.evidence()
+
+
+def test_original_storage_does_not_replace_overlapping_bind_file_reads(incumbent):
+    original = incumbent.files["periphery_config"]
+    local = incumbent.material.keys / original.name
+    original.rename(local)
+    value = decode(incumbent.material.encoded)
+    value["mounts"]["periphery"][1]["Source"] = str(local)
+    material = replace(
+        incumbent.material, encoded=canonical(value),
+        retained_files=tuple(local if path == original else path for path in incumbent.material.retained_files))
+    storage, _, _ = _observed_storage(SimpleNamespace(material=material, volumes=incumbent.volumes))
+    material = replace(material, storage=storage)
+    before = material.evidence()
+    local.write_bytes(b"changed-local-bind-configuration")
+    assert material.evidence() != before
+
+
+def test_original_storage_rereads_retained_files_under_overlapping_bind_directories(incumbent):
+    storage, _, _ = _observed_storage(incumbent)
+    value = decode(incumbent.material.encoded)
+    value["mounts"]["periphery"].append({
+        "Type": "bind", "Source": str(incumbent.material.keys),
+        "Destination": "/original-bind-view", "RW": False,
+    })
+    material = replace(incumbent.material, storage=storage, encoded=canonical(value))
+    before = material.evidence()
+    (material.keys / "core.key").write_bytes(b"changed-retained-file-under-local-bind")
+    assert material.evidence() != before
+
+
+@pytest.mark.parametrize("field", ["device", "inode"])
+@pytest.mark.parametrize("source", ["bind-descendant", "login"])
+def test_original_storage_checks_locally_reread_file_identity(incumbent, source, field):
+    material = incumbent.material
+    value = decode(material.encoded)
+    if source == "login":
+        local = material.keys / material.admin_password.name
+        material.admin_password.rename(local)
+        material = replace(
+            material, admin_password=local, retained_files=(*material.retained_files, local))
+    else:
+        local = material.keys / "core.key"
+        value["mounts"]["periphery"].append({
+            "Type": "bind", "Source": str(material.keys),
+            "Destination": "/original-bind-view", "RW": False,
+        })
+    material = replace(material, encoded=canonical(value))
+    storage, snapshot, _ = _observed_storage(SimpleNamespace(
+        material=material, volumes=incumbent.volumes))
+    material = replace(material, storage=storage)
+    snapshot["entries"][str(local)][field] = (
+        max(entry[field] for entry in snapshot["entries"].values()) + 1)
+    with pytest.raises(PlanError, match="local retained file differs from its original storage"):
+        material.evidence()
 
 
 def _socket_mount(material, source):

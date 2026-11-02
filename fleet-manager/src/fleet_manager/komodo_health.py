@@ -11,7 +11,7 @@ import aiohttp
 from .artifact_staging import _bytes
 from .komodo_declaration import KomodoDeclaration
 from .komodo_identity import effective_global_key, public_identity
-from .komodo_incumbent import KomodoMaterial
+from .komodo_incumbent import KomodoIncumbentMaterialization, KomodoMaterial
 from .komodo_profile import ordinary_path
 from .planning import PlanError, decode, digest, identifier
 
@@ -24,6 +24,13 @@ class _Starting(Exception):
 
 def public_keys(material: KomodoMaterial, *, missing_ok: bool = False) -> dict[str, str]:
     result = {}
+    if type(material) is KomodoIncumbentMaterialization and material.storage is not None:
+        observed = material.storage_observation()
+        for name, raw in observed["public"].items():
+            value = raw.strip()
+            public_identity(value)
+            result[name] = value
+        return result
     try:
         ordinary_path(material.keys)
     except OSError:

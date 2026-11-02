@@ -45,6 +45,9 @@ class KomodoSelection:
             raise PlanError("Komodo requires code-resolved selected owner records")
         for value in (self.fleet, self.installation, self.policy_revision):
             identifier(value, "Komodo current owner reference")
+        if (self.declaration.preserving and self.material.storage is not None
+                and self.material.storage.daemon_id != self.tooling.daemon_id):
+            raise PlanError("Komodo observed storage belongs to another daemon")
         integer(self.generation, "Komodo selected generation", minimum=1)
         integer(self.valid_until, "Komodo selected expiry", minimum=1)
         fingerprint(self.release_digest)
