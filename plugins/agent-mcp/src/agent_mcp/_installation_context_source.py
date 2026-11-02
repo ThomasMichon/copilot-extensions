@@ -428,12 +428,12 @@ def normalize_source(
             directory_text = _string_property(descriptor, "path")
             if not directory_text.strip():
                 _fail("A directory source requires a non-empty path or stableId.")
-            directory = Path(directory_text)
-            if not directory.is_absolute():
+            directory_path = Path(directory_text)
+            if not directory_path.is_absolute():
                 if base_directory is None:
                     _fail("A relative directory source requires a declaration base directory.")
-                directory = Path(base_directory) / directory
-            canonical = f"directory:{canonical_path(directory, must_exist=True)}"
+                directory_path = Path(base_directory) / directory_path
+            canonical = f"directory:{canonical_path(directory_path, must_exist=True)}"
         if not (
             canonical.startswith("directory:") or canonical.startswith("directory-id:")
         ):
@@ -772,6 +772,7 @@ def resolve_payload_source(
         if not paths_equal(payload, inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT conflicts with --payload-root.")
 
+    evidence: dict[str, Any] | None
     if source_descriptor is not None:
         if not plugin_id:
             _fail("Explicit source resolution requires --plugin-id.")
