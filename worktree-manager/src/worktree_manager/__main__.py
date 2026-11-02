@@ -14,22 +14,25 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
-if __name__ == "__main__":
-    import sys as _entry_sys
+import sys
+from . import terminal_launch as _terminal_launch
 
-    if _entry_sys.argv[1:2] == ["--resident-picker"]:
+if __name__ == "__main__":
+    if _terminal_launch.answer_query():
+        raise SystemExit(0)
+    _terminal_launch.validate_or_exit()
+    if sys.argv[1:2] == ["--resident-picker"]:
         from .resident_picker import main as _resident_picker_main
 
-        raise SystemExit(_resident_picker_main(_entry_sys.argv[2:]))
-    if _entry_sys.argv[1:2] == ["--resident-result"]:
+        raise SystemExit(_resident_picker_main(sys.argv[2:]))
+    if sys.argv[1:2] == ["--resident-result"]:
         from .resident_picker import finish as _resident_picker_finish
 
-        raise SystemExit(_resident_picker_finish(_entry_sys.argv[2:]))
+        raise SystemExit(_resident_picker_finish(sys.argv[2:]))
 
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1249,6 +1252,7 @@ def _run_launch(req) -> int:
 
 def _execute_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
+    _terminal_launch.validate()
     from . import engine_client, launch_observations, launcher
 
     attempt_id = getattr(req, "attempt_id", None)
@@ -1339,6 +1343,13 @@ def _execute_launch(req) -> int:
         )
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:
+            if (
+                _is_windows() and _terminal_launch.available()
+                and not new_window and not getattr(req, "no_mux", False)
+                and os.environ.get("WORKTREE_NO_MUX") != "1"
+            ):
+                # The shell owns launch/return observations after Python exits.
+                return _run_relocated_mux_launch(req, plan, script)
             return launch_observations.launch(
                 attempt_id, lambda: _run_relocated_mux_launch(req, plan, script),
             )
@@ -1528,12 +1539,15 @@ def _cmd_update_steps(
 
 
 def main(argv: list[str] | None = None) -> int:
+    _terminal_launch.validate_or_exit()
     inherited_warning = accept_inherited_engine_command()
     if inherited_warning:
         print(f"worktree-manager: ignoring invalid provider handoff: "
               f"{inherited_warning}", file=sys.stderr)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
+        if _terminal_launch.answer_query(args):
+            return 0
         print(f"worktree-manager {__version__}")
         return 0
     if args and args[0] in ("--help", "-h"):

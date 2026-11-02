@@ -10,6 +10,46 @@ import pytest
 from agent_procutil import _native_owned as owned
 from agent_procutil import _daemon_instance_shell as shell
 from agent_procutil.owned_process import OwnedCleanupError
+from agent_procutil import _native_query as query
+
+
+def test_native_query_requires_actual_settlement_and_bounded_original_arguments(
+    native_request, monkeypatch,
+):
+    native_request.pop("log")
+    native_request["limit"] = 4096
+
+    def run(argv, **options):
+        assert argv == [native_request["executable"], *native_request["arguments"]]
+        assert options["capture_limits"] == (4096, 4096)
+        assert options["cwd"] == native_request["cwd"]
+        assert options["env"] == native_request["environment"]
+        assert options["timeout"] == 2
+        options["on_settled"]()
+        return SimpleNamespace(returncode=7, stdout="exact output", stderr="exact error")
+
+    monkeypatch.setattr(query, "_run_owned", run)
+    assert query.run(native_request) == {
+        "returncode": 7, "stdout": "exact output", "stderr": "exact error",
+    }
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_native_query_never_promotes_a_failed_capture_to_success(
+    native_request, monkeypatch, settled,
+):
+    native_request.pop("log")
+    native_request["limit"] = 4096
+
+    def run(*args, **options):
+        if settled:
+            options["on_settled"]()
+        raise TimeoutError("fixture deadline")
+
+    monkeypatch.setattr(query, "_run_owned", run)
+    with pytest.raises(owned.NativeOwnedFailure) as failure:
+        query.run(native_request)
+    assert failure.value.cleanup_confirmed is settled
 
 
 @pytest.fixture
