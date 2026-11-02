@@ -4,8 +4,8 @@ The repository is migrating to strict MyPy through the
 [Python Static Type Safety effort](../efforts/active/python-static-type-safety/README.md)
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
-The admitted cohort qualifies the checker code/tests, the complete Config
-Migrate, Dropin Registry, Endpoint Rendezvous, Lazy CLI Dispatch, Remote Login
+The admitted cohort qualifies the checker code/tests, the complete Bootstrap
+Killswitch, Config Migrate, Dropin Registry, Endpoint Rendezvous, Lazy CLI Dispatch, Remote Login
 Shell, Session Liveness Probe and Worktree Identity source/test projects.
 Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
@@ -20,6 +20,7 @@ python tools/typecheck.py --prepare
 python tools/typecheck.py --enforced
 python tools/typecheck.py --changed --base origin/dev
 python tools/typecheck.py lib-worktree-identity
+python tools/typecheck.py lib-bootstrap-killswitch
 python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-dropin-registry
@@ -53,6 +54,15 @@ declared analysis targets. Serialization documents remain explicitly dynamic
 existing runtime validation. There are no new missing-import ignores or
 unchecked first-party stubs. Other projects do not implicitly gain YAML
 dependencies from this environment.
+
+Bootstrap Killswitch checks all three canonical Python source/test files in
+the base environment on both declared targets. State documents expose
+`dict[str, object]` after the existing runtime validation; CLI dispatch uses a
+narrow callable cast for the handler installed by its parser. Test fixtures
+narrow the optional PowerShell executable after the existing availability
+skip. Default-cell scope, fail-open reads, atomic writes and shell behavior are
+unchanged. The three synchronized physical Python copies remain independently
+pending until their source correspondence and consumer projects are qualified.
 
 Dropin Registry uses the base checker environment and checks all six canonical
 source/test files strictly on both declared targets. Its native FIFO test skips
