@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -932,3 +932,36 @@ composition prerequisites, and review/validation rules.
 - The final consumer audit also narrows the slot-release receipt-drift
   parameter to its two declared keys; its four runtime cases pass and the
   complete platform probes report no new literal-key diagnostics.
+
+### 2026-11-02 - Shared fixtures merged; slot-release contracts selected
+
+- #9995 merged as `c7f8fba2e041e1fe7a036e85a05616100d2ab229`
+  after exact-head approval with no findings, zero open review comments and
+  all required checks in
+  [run 41459443498](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41459443498).
+  The source worktree is pulled forward; #9993 is complete.
+- #9996 selects the remaining slot-release helper and monkeypatch contracts.
+  Preserve the existing receipt-only reservation lifecycle, refusal/race
+  assertions and real runner boundaries. Run full platform probes and all
+  slot-release cases. The campaign remains active; library admission and
+  independent copies are still open.
+
+- Slot-release layouts, arguments, runners, test parameters and monkeypatch
+  callbacks now retain concrete contracts. Invalid-input mutation cases still
+  accept their deliberate string/integer alternatives; dynamic SDK results
+  are cast only at the forwarding boundary. No lifecycle assertion changes.
+- Full probes report zero slot-release and production diagnostics on both
+  declared targets. Remaining project test debt is Linux 157 basic / 352
+  strict and Windows 147 basic / 343 strict: 16 strict diagnostics removed
+  per target. The parent project remains pending.
+- Validation: all 77 checker and slot-release tests pass, including actual
+  MyPy positive/negative helper clients and real Python/PowerShell release,
+  refusal, replay and race cases. Changed-file Ruff, all 26 enforced MyPy
+  targets, documentation consistency, install contracts, source-copy sync,
+  vendoring and whitespace checks pass.
+- Documentation impact: below-altitude test-only typing; developer commands,
+  runtime behavior and operating documentation remain accurate. Fresh-box
+  and external-venue tests are not applicable. The ownership-map-required
+  `agent-machines` patch changefile is included; the governed unit packet,
+  source-copy bytes, CI budgets and 13-strict / 55-pending admission counts
+  remain unchanged.

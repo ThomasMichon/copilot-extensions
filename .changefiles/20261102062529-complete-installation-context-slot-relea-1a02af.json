@@ -1,0 +1,9 @@
+{
+  "comment": "Complete Installation Context slot-release test and monkeypatch type contracts.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
