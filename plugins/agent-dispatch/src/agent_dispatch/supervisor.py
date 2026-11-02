@@ -467,12 +467,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING},{SpawnState.COLD}"),
                 strict=True,
             )
-            reservations.extend(
-                reservation for reservation in self._pool_reservations(
-                    state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
-                    strict=True,
-                ) if reservation.get("native_release_pending")
-            )
+            reservations.extend(self._pool_reservations(
+                state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+                native_release_pending=True, strict=True,
+            ))
         except _ReservationsUnavailable as exc:
             # Capacity-critical: unlike every other _pool_reservations caller
             # (which only skips optional work on an empty result), this count
@@ -525,6 +523,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         *,
         state: str,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
         resume_requested: bool | None = None,
         strict: bool = False,
     ) -> list[dict]:
@@ -535,6 +534,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 state=state,
                 repo=self.repo,
                 conclusion_state=conclusion_state,
+                **({"native_release_pending": native_release_pending} if native_release_pending is not None else {}),
                 resume_requested=resume_requested,
                 limit=10000,
             )
@@ -546,6 +546,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 repo=self.repo,
                 label=label,
                 conclusion_state=conclusion_state,
+                **({"native_release_pending": native_release_pending} if native_release_pending is not None else {}),
                 resume_requested=resume_requested,
                 limit=10000,
             ):
@@ -1431,14 +1432,15 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 f"{SpawnState.COLD},{SpawnState.RELEASING}"
             )
         )
-        reservations.extend(
-            reservation for reservation in self._pool_reservations(
-                state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
-            ) if reservation.get("native_release_pending") or (
-                reservation.get("state") in {SpawnState.FAILED, SpawnState.SETTLED}
-                and reservation.get("conclusion_state") == _CONCLUSION_PENDING
-            )
-        )
+        reservations.extend(self._pool_reservations(
+            state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+            native_release_pending=True,
+        ))
+        reservations.extend(self._pool_reservations(
+            state=f"{SpawnState.FAILED},{SpawnState.SETTLED}",
+            conclusion_state=_CONCLUSION_PENDING,
+        ))
+        reservations = list({res["key"]: res for res in reservations}.values())
         for res in reservations:
             if not res.get("release_requested"):
                 continue

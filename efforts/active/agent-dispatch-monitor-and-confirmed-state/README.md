@@ -1848,3 +1848,29 @@ strict projects on Linux/Windows, changed Python lint, installation contracts
 and documentation consistency pass. Broader legacy workspace/mixin typing is
 not claimed as qualified. Current-head review, actual merge, caller/startup
 policy integration and every canonical parent/native gate remain open.
+
+### 2026-11-01 - Handleless root and pending-history correction prepared
+
+Qualified handleless-root retirement now retains its first late native even
+when workspace preparation was already recorded or the attempt failed before
+release. This clears only the root's empty-native retirement marker and
+requires fresh exact retirement of the late native; inherited replacement
+history and original startup closure remain independent.
+
+Capacity and release sweeps apply the pending-native predicate before the
+reservation result limit. Cleanup retains its existing server-side pending
+predicate, with native/cleanup results deduplicated. Regression history places
+an outstanding row behind ten thousand newer completed rows and proves it
+still consumes capacity, receives its exact native probe and remains visible
+to the cleanup owner.
+The existing list operation adds an optional pending-native filter with an
+executing response capability. Updated callers reject a legacy provider that
+silently ignores the filter; capacity-critical incompatibility remains a
+visible exhausted-capacity hold. Unfiltered old callers remain supported.
+
+Contained validation passed **1450 controls**, one existing skip, across
+twenty-three coupled selectors, including actual HTTP/client and mixed-provider
+controls. Focused placement/client typing, four admitted strict projects on
+Linux/Windows, changed Python lint, install and documentation contracts pass.
+Current-head review, actual merge, supervisor caller/startup-policy integration
+and every canonical parent/native gate remain open. No runtime was activated.

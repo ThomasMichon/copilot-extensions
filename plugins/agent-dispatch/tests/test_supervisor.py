@@ -82,6 +82,7 @@ class QueueBackedClient:
         repo=None,
         label=None,
         conclusion_state=None,
+        native_release_pending=None,
         resume_requested=None,
         limit=200,
     ):
@@ -92,6 +93,7 @@ class QueueBackedClient:
             repo=repo,
             label=label,
             conclusion_state=conclusion_state,
+            native_release_pending=native_release_pending,
             resume_requested=resume_requested,
             limit=limit,
         )

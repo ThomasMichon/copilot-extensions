@@ -85,6 +85,38 @@ def test_late_identity_after_handleless_retirement_remains_accountable(
     assert place(q, task(q))[1]
 
 
+@pytest.mark.parametrize("recorded_workspace", [False, True])
+@pytest.mark.parametrize("failed_first", [False, True])
+def test_qualified_handleless_root_retains_first_native_after_retirement(
+    q: TaskQueue, recorded_workspace: bool, failed_first: bool,
+) -> None:
+    publish(q, pool())
+    t = task(q)
+    original, _ = place(q, t)
+    if recorded_workspace:
+        q.record_spawn_worktree(
+            original.key, "worktree", ownership="created", creating_host="host-a",
+            execution_machine="host-a", driver="cli",
+        )
+    if failed_first:
+        q.fail_spawn(original.key)
+    q.request_spawn_release(original.key, finished_startup_revision=1)
+    retired = q.retire_spawn(original.key, exact_absence=True, conclusion_state="skipped")
+    assert retired.session_handle is None
+    late = q.request_spawn_release(original.key, session_handle="late-native", worktree="worktree")
+    assert late.session_handle == "late-native" and late.native_release_pending
+    assert not late.conversation_retired
+    assert q.request_spawn_release(original.key, session_handle="late-native").native_release_pending
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    with pytest.raises(TaskError, match="retained native"):
+        q.request_spawn_release(original.key, session_handle="different-native")
+    q.retire_spawn(original.key, exact_absence=True)
+    replay = q.request_spawn_release(original.key, session_handle="late-native")
+    assert not replay.native_release_pending
+    assert place(q, task(q))[1]
+
+
 @pytest.mark.parametrize("state", ["pending", "unknown"])
 def test_qualified_release_replay_keeps_own_transport_capacity(q: TaskQueue, state: str) -> None:
     publish(q, pool())

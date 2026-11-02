@@ -410,6 +410,7 @@ class QueueClaimQueriesMixin:
         repo: str | None = None,
         label: str | None = None,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
         resume_requested: bool | None = None,
         task_status: str | Sequence[str] | None = None,
         latest_only: bool = False,
@@ -468,6 +469,9 @@ class QueueClaimQueriesMixin:
         if conclusion_state is not None:
             clauses.append("r.conclusion_state = ?")
             params.append(conclusion_state)
+        if native_release_pending is not None:
+            clauses.append("r.native_release_pending = ?")
+            params.append(int(native_release_pending))
         if resume_requested is not None:
             clauses.append("t.resume_requested = ?")
             params.append(1 if resume_requested else 0)

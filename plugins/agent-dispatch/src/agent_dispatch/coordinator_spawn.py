@@ -8,7 +8,7 @@ import sqlite3
 import subprocess
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
@@ -690,11 +690,13 @@ def register_spawn_routes(
 
     @app.get("/spawn-reservations")
     def list_reservations(
+        response: Response,
         task_id: str | None = None,
         state: str | None = None,
         repo: str | None = None,
         label: str | None = None,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -708,6 +710,8 @@ def register_spawn_routes(
             if task_status
             else None
         )
+        if native_release_pending is not None:
+            response.headers["X-Dispatch-Reservation-Query"] = "native-release-pending/v1"
         return [
             _reservation_dict(r)
             for r in queue.list_reservations(
@@ -716,6 +720,7 @@ def register_spawn_routes(
                 repo=repo,
                 label=label,
                 conclusion_state=conclusion_state,
+                native_release_pending=native_release_pending,
                 resume_requested=resume_requested,
                 task_status=task_statuses,
                 latest_only=latest_only,

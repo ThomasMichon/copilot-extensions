@@ -87,6 +87,7 @@ class SpawnReservationClientMixin:
         repo: str | None = None,
         label: str | None = None,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -119,13 +120,26 @@ class SpawnReservationClientMixin:
             params["label"] = label
         if conclusion_state is not None:
             params["conclusion_state"] = conclusion_state
+        if native_release_pending is not None:
+            params["native_release_pending"] = native_release_pending
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
         if task_status is not None:
             params["task_status"] = task_status
         if latest_only:
             params["latest_only"] = latest_only
-        return self._unwrap(self._http.get("/spawn-reservations", params=params))
+        response = self._http.get("/spawn-reservations", params=params)
+        reservations = self._unwrap(response)
+        if native_release_pending is not None:
+            from .client import DispatchError
+            if response.headers.get("X-Dispatch-Reservation-Query") != "native-release-pending/v1":
+                raise DispatchError(426, "coordinator lacks native-release-pending/v1 reservation query")
+            if not isinstance(reservations, list) or any(
+                not isinstance(row, dict) or row.get("native_release_pending") is not native_release_pending
+                for row in reservations
+            ):
+                raise DispatchError(426, "coordinator did not apply native-release-pending/v1 reservation query")
+        return reservations
 
     def get_reservation(self, key: str) -> dict:
         return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))

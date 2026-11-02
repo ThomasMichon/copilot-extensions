@@ -61,6 +61,10 @@ An identical release replay after qualified retirement preserves that evidence
 instead of reasserting pending native retirement. Newly returned workspace/native
 effects remain accountable, and replay never clears the reservation's unresolved
 transport custody.
+A qualified handleless root retirement is distinct from inherited native
+retirement: its first returned native remains pending release even when the
+workspace was already recorded or failure preceded release. Its empty-native
+absence evidence cannot retire a native that had not yet been recorded.
 Publication and affirmative start refuse a native whose historical retirement
 is still pending, without misclassifying that intent as proven absence.
 The supervisor observes that native without ending or concluding a successor's
@@ -82,6 +86,23 @@ turn that observation into another spawn. A retained instance waits for its own
 slot or reports unsatisfiable routing instead of switching to another pool.
 An unaccounted active legacy reservation blocks new placement; the coordinator
 does not guess its pool or silently adopt its effects.
+
+Supervisor capacity and release sweeps apply `native_release_pending` in the
+reservation query before the bounded result limit. Cleanup retries retain their
+separate `conclusion_state=pending` predicate before that limit, and overlapping
+native/cleanup results are deduplicated. Newer completed history cannot hide an
+older pending native or cleanup obligation.
+`GET /spawn-reservations?native_release_pending=true` (or `false`) advertises
+the executing filter contract in
+`X-Dispatch-Reservation-Query: native-release-pending/v1`.
+The updated client requires that response capability and matching result
+markers when requesting the filter. An older provider that ignores the new
+query is rejected visibly, not interpreted as zero pending capacity; the
+capacity-critical supervisor path treats that incompatibility as exhausted
+capacity. Deploy the provider expansion before migrating filtered callers.
+Unfiltered legacy requests and responses are unchanged, including rollback to
+an older caller; rollback of the provider while the new caller remains active
+requires upgrading the provider or retaining the visible capacity hold.
 
 An affirmative `POST /tasks/{id}/start` supplies `worker_id`,
 `owner_session_id`, `expected_generation` and, when already bound, the

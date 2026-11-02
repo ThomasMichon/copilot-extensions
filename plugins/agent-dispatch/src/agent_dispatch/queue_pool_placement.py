@@ -309,13 +309,15 @@ def pool_native_publication(
     if releasing and previous is not None and previous == native:
         return False
     if (
-        releasing and previous is None and row["worktree"] is None
+        releasing and previous is None
         and row["allocation_reservation_key"] in (None, row["key"])
-        and not row["conversation_retired"] and not row["session_handle"]
+        and not row["session_handle"] and not row["agent_info"]
+        and row["release_requested"] and not row["native_release_pending"]
+        and (row["startup_complete"] or row["startup_fenced"])
     ):
-        # A late first response has no retired workspace/native to inherit.
-        # The release owner must retain its identity as pending retirement.
-        return False
+        # Qualified absence for a handleless root cannot retire a first
+        # native that was never recorded. Retain the late return for release.
+        return bool(row["conversation_retired"])
     _, retired = native_bindings(
         conn, row, task, require_owned_workspace=False,
         reject_pending_native=None if releasing else native,
