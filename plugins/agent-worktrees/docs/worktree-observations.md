@@ -115,6 +115,11 @@ refuses that materialization without retiring still-admitted readers. The
 affected selection and its unresolved intent remain explicit; unrelated cached
 selections remain readable. A changed stored owner or revoked read admission
 still supersedes the receiver.
+Each request also captures the provider's in-memory admission epoch. Stale
+requests retire only their own admission, never a receiver activated afterward,
+including reactivation with the same stored owner. Held feeds wait and retry
+transient publication qualification at initial, before-read and after-read
+gates without losing their consumer delivery boundary.
 
 ## Failure and recovery boundaries
 
@@ -141,6 +146,7 @@ grants no additional data-publication or restoration authority.
 ## Validation and related contracts
 
 Focused source coverage lives in `test_owner_observation_provider.py`,
+`test_owner_observation_provider_races.py`,
 `test_owner_observation_provider_control.py`, `test_owner_observation_cli.py`,
 `test_owner_observation_cli_process.py` and `test_owner_observation_payload.py`.
 The shared CLI transport also retains the existing agenda-relay tests. See

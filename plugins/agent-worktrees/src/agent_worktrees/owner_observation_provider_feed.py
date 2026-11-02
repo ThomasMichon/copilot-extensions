@@ -33,21 +33,38 @@ def signature(frame: dict) -> tuple:
     )
 
 
+def settled(
+    adapter: OwnerObservationAdapter, key: tuple[str, str], epoch: object,
+    disconnected: Callable[[], bool],
+) -> bool:
+    with adapter._condition:
+        while (
+            (key in adapter._pending or key[0] in adapter._publishing)
+            and adapter._closed is None
+            and epoch is adapter._epoch
+            and not disconnected()
+        ):
+            adapter._condition.wait(0.1)
+    return not disconnected()
+
+
 def stream(
     adapter: OwnerObservationAdapter,
     payload: dict,
     disconnected: Callable[[], bool],
 ) -> Iterator[dict]:
-    from .owner_observation_adapter import ERRORS, fingerprint
+    from .owner_observation_adapter import ERRORS, PublicationPending, fingerprint
 
     selected = None
+    runtime: OwnerObservationRuntime | None = None
+    epoch = object()
     raw = None
     previous = None
     previous_signature = None
     previous_gap = None
     admitted = False
     try:
-        selected, runtime = adapter.select(payload)
+        selected, runtime, epoch = adapter.select(payload)
         key = selected.project, selected.worktree_id
         with adapter._condition:
             if adapter._streams >= MAX_SUBSCRIBERS:
@@ -57,47 +74,48 @@ def stream(
             adapter._streams += 1
             adapter._held[key] = adapter._held.get(key, 0) + 1
             admitted = True
-        adapter.gate(selected, runtime)
+        while settled(adapter, key, epoch, disconnected):
+            try:
+                adapter.gate(selected, runtime, epoch)
+            except PublicationPending:
+                continue
+            break
+        else:
+            return
         raw = runtime.stream(payload, disconnected)
         for frame in raw:
-            if disconnected():
-                return
-            with adapter._condition:
-                while (
-                    (key in adapter._pending or selected.project in adapter._publishing)
-                    and adapter._closed is None
-                    and not disconnected()
-                ):
-                    adapter._condition.wait(0.1)
-            if disconnected():
-                return
-            before = adapter.gate(selected, runtime)
             kind = frame["type"]
-            if kind == "error":
-                yield frame
-                return
-            if kind == "going-away":
-                yield (
-                    frame if previous is None else runtime._notice(previous, kind, frame["reason"])
-                )
-                return
-            if kind == "heartbeat":
-                if previous is not None:
-                    yield runtime._notice(previous, "heartbeat")
-                continue
-            if previous is None:
-                current, gap = runtime.history.snapshot(selected, payload["after_cursor"])
-            else:
-                current, gap = runtime.history.delta(selected, previous["cursor"])
-            after = adapter.gate(selected, runtime)
-            if fingerprint(before) != fingerprint(after):
-                continue
+            while True:
+                if not settled(adapter, key, epoch, disconnected):
+                    return
+                try:
+                    before = adapter.gate(selected, runtime, epoch)
+                    if kind == "error":
+                        yield frame
+                        return
+                    if kind == "going-away":
+                        yield (
+                            frame if previous is None
+                            else runtime._notice(previous, kind, frame["reason"])
+                        )
+                        return
+                    if previous is None:
+                        current, gap = runtime.history.snapshot(selected, payload["after_cursor"])
+                    else:
+                        current, gap = runtime.history.delta(selected, previous["cursor"])
+                    after = adapter.gate(selected, runtime, epoch)
+                except PublicationPending:
+                    continue
+                if fingerprint(before) == fingerprint(after):
+                    break
             current_signature = signature(current)
             gap_signature = None if gap is None else c.encode(gap)
             changed = current_signature != previous_signature
             changed_gap = gap is not None and gap_signature != previous_gap
             previous_gap = gap_signature
             if not changed and not changed_gap:
+                if kind == "heartbeat" and previous is not None:
+                    yield runtime._notice(previous, "heartbeat")
                 continue
             initial = previous is None
             if changed_gap and not initial:
@@ -112,8 +130,8 @@ def stream(
                 return
     except ERRORS as error:
         code = error.code if isinstance(error, c.ObservationError) else "unavailable"
-        if code == "superseded":
-            adapter.close_admission("superseded")
+        if code == "superseded" and runtime is not None:
+            adapter.retire_request(runtime, epoch)
         yield (
             c.error(code, str(error))
             if previous is None

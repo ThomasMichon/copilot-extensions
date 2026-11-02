@@ -26,6 +26,11 @@ MAX_SELECTED = 128
 ERRORS = (c.ObservationError, ProjectionError, ProjectionUnavailable, OSError, sqlite3.Error)
 
 
+class PublicationPending(c.ObservationError):
+    def __init__(self) -> None:
+        super().__init__("accepted publication is being qualified", "unready")
+
+
 def fingerprint(value: source.AcceptedObservation) -> tuple[str, str | None, str]:
     record = value.record
     return record.source, record.head_session_id, record.record_fence["facts_sha256"]
@@ -39,6 +44,7 @@ class OwnerObservationAdapter:
         self._capture = threading.local()
         self._store: WorktreesProjection | None = None
         self.runtime: OwnerObservationRuntime | None = None
+        self._epoch = object()
         self._closed: str | None = "unready"
         self._error: str | None = None
         self._demand: dict[tuple[str, str], float] = {}
@@ -64,6 +70,10 @@ class OwnerObservationAdapter:
 
     def activate(self) -> None:
         with self._operations:
+            with self._condition:
+                self._epoch = object()
+                self._closed = "unready"
+                self._condition.notify_all()
             store = self.owner.store
             old = self.runtime
             if old is not None and self._store is not store:
@@ -151,7 +161,7 @@ class OwnerObservationAdapter:
 
     def select(
         self, payload: dict, *, history: bool = False
-    ) -> tuple[c.Selection, OwnerObservationRuntime]:
+    ) -> tuple[c.Selection, OwnerObservationRuntime, object]:
         selected, _values = c.request(payload, history=history)
         if cfg._PROJECT_NAME_RE.fullmatch(selected.project) is None:
             raise c.ObservationError("invalid observation project")
@@ -167,20 +177,21 @@ class OwnerObservationAdapter:
             self._demand[key] = self.owner._now()
             unready = key not in self._ready or key in self._errors
             runtime = self.runtime
+            epoch = self._epoch
         self.owner.register_project_demand(selected.project, unready=unready)
-        return selected, runtime
+        return selected, runtime, epoch
 
     def gate(
-        self, selected: c.Selection, runtime: OwnerObservationRuntime
+        self, selected: c.Selection, runtime: OwnerObservationRuntime, epoch: object,
     ) -> source.AcceptedObservation:
         key = selected.project, selected.worktree_id
         with self._condition:
-            if runtime is not self.runtime:
+            if runtime is not self.runtime or epoch is not self._epoch:
                 raise c.ObservationError("observation resident changed", "superseded")
             if self._closed is not None:
                 raise c.ObservationError("observation admission closed", self._closed)
             if selected.project in self._publishing:
-                raise c.ObservationError("accepted publication is being qualified", "unready")
+                raise PublicationPending()
             error, ready = self._errors.get(key), self._ready.get(key)
         if error is not None:
             raise error
@@ -191,6 +202,12 @@ class OwnerObservationAdapter:
             raise c.ObservationError("observation source is not attached", "unready")
         current = source.selected(self.owner, store, *key)
         if fingerprint(current) != fingerprint(ready):
+            with self._condition:
+                if (
+                    selected.project in self._publishing or key in self._pending
+                    or self._ready.get(key) is not ready
+                ):
+                    raise PublicationPending()
             code = (
                 "head-changed"
                 if (current.record.head_session_id != ready.record.head_session_id)
@@ -200,19 +217,24 @@ class OwnerObservationAdapter:
         return ready
 
     def point(self, payload: dict, *, history: bool = False) -> dict:
+        runtime: OwnerObservationRuntime | None = None
+        epoch = object()
         with self._condition:
             self._readers += 1
         try:
-            selected, runtime = self.select(payload, history=history)
-            before = self.gate(selected, runtime)
+            selected, runtime, epoch = self.select(payload, history=history)
+            before = self.gate(selected, runtime, epoch)
             result = runtime.history_page(payload) if history else runtime.read(payload)
-            after = self.gate(selected, runtime)
+            after = self.gate(selected, runtime, epoch)
             if fingerprint(before) != fingerprint(after):
                 raise c.ObservationError("selection changed during point read", "stale-source")
             return result
         except ERRORS as error:
-            if isinstance(error, c.ObservationError) and error.code == "superseded":
-                self.close_admission("superseded")
+            if (
+                isinstance(error, c.ObservationError) and error.code == "superseded"
+                and runtime is not None
+            ):
+                self.retire_request(runtime, epoch)
             return c.error(
                 error.code if isinstance(error, c.ObservationError) else "unavailable", str(error)
             )
@@ -220,6 +242,13 @@ class OwnerObservationAdapter:
             with self._condition:
                 self._readers -= 1
                 self._condition.notify_all()
+
+    def retire_request(self, runtime: OwnerObservationRuntime, epoch: object) -> None:
+        with self._operations:
+            with self._condition:
+                if runtime is not self.runtime or epoch is not self._epoch:
+                    return
+            self.close_admission("superseded")
 
     def projects(self) -> set[str]:
         with self._condition:
