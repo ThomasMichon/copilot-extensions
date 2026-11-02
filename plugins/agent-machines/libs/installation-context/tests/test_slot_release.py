@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -172,7 +173,9 @@ def test_successful_provision_leaves_only_immutable_ownership(runner, tmp_path):
 
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("changed", ["namespace", "install"])
-def test_generation_bound_provision_refuses_receipt_drift(tmp_path, existing, changed):
+def test_generation_bound_provision_refuses_receipt_drift(
+    tmp_path: Path, existing: bool, changed: Literal["namespace", "install"],
+) -> None:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     if existing:
