@@ -5,8 +5,8 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Config
-Migrate, Dropin Registry, Endpoint Rendezvous, Remote Login Shell, Session
-Liveness Probe and Worktree Identity source/test projects.
+Migrate, Dropin Registry, Endpoint Rendezvous, Lazy CLI Dispatch, Remote Login
+Shell, Session Liveness Probe and Worktree Identity source/test projects.
 Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
@@ -24,6 +24,7 @@ python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
+python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
 python tools/typecheck.py lib-worktree-identity-remaining
@@ -64,6 +65,14 @@ canonical source/test project, including native ownership/concurrency fixtures.
 JSON record values remain an explicit dynamic serialization boundary. This
 admission does not claim that existing malformed-record or publication-race
 tracking is resolved, nor that independent in-package variants inherit checking.
+
+Lazy CLI Dispatch checks all three canonical files, including its tests and
+helper, on both declared targets. Its reflective override helpers preserve the
+local callable's parameter and return types through `ParamSpec` and a return
+type variable. Their narrow casts document the existing dynamic boundary:
+an override must honor the callable contract it replaces. Runtime lookup still
+checks callability and keeps the existing selection order; typing does not
+add runtime signature validation or qualify pending callers.
 
 The three initially admitted leaf libraries retain separate source and
 `-remaining` project names so existing local selectors remain valid. Both
