@@ -136,45 +136,26 @@ def test_router_import_does_not_load_installer_cleanup_or_command_rendering():
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("venv", [False, True])
-def test_router_helper_scopes_direct_interpreter_selection(monkeypatch, venv):
-    import agent_procutil
-
-    python = r"C:\selected slot\Scripts\python.exe"
-    base = r"C:\base Python\python.exe" if venv else python
-    extra = {"__PYVENV_LAUNCHER__": python} if venv else {}
-    calls = []
-
-    def direct(selected):
-        calls.append(selected)
-        return base, extra
-
-    before = dict(os.environ)
-    monkeypatch.setattr(agent_procutil, "direct_python", direct)
-    tokens = shlex.split(auth.router_helper(python)[1:])
-    assert calls == [python]
-    assert tokens == (
-        (["__PYVENV_LAUNCHER__=C:/selected slot/Scripts/python.exe"] if venv else [])
-        + [base.replace("\\", "/"), "-I", "-X", "utf8", "-m",
-           "agent_worktrees._git_credential_route"]
+def test_rendered_router_helper_preserves_isolated_bootstrap():
+    argv = shlex.split(auth.router_helper()[1:])
+    index = argv.index("-c") + 1
+    argv[index] = (
+        "import sys; assert sys.flags.no_site and sys.flags.isolated "
+        "and sys.dont_write_bytecode; assert 'site' not in sys.modules; " + argv[index]
     )
-    unchanged = dict(os.environ) == before
-    assert unchanged
-
-
-@pytest.mark.parametrize("error", [OSError, RuntimeError])
-def test_router_helper_retains_selected_interpreter_when_direct_selection_is_unavailable(
-    monkeypatch, error,
-):
-    import agent_procutil
-
-    def unavailable(selected):
-        raise error("optional direct interpreter unavailable")
-
-    monkeypatch.setattr(agent_procutil, "direct_python", unavailable)
-    assert shlex.split(auth.router_helper("selected python")[1:]) == [
-        "selected python", "-I", "-X", "utf8", "-m", "agent_worktrees._git_credential_route",
-    ]
+    result = process.run(
+        [*argv, "get"],
+        env={
+            **os.environ,
+            "CE_UPDATE_AUTH_ROUTES": json.dumps({"example.test/team/repo": {"method": "env"}}),
+            "GH_TOKEN_TEAM": "test-helper-value",
+            "GH_HOST": "example.test",
+        },
+        input="protocol=https\nhost=example.test\npath=team/repo\n\n",
+        timeout=5,
+    )
+    assert result.status == 0, result.stderr
+    assert auth.parse_attributes(result.stdout)[router.SECRET_KEY] == "test-helper-value"
 
 
 def test_auth_process_result_retains_immutable_named_fields_and_defaults():
@@ -691,7 +672,7 @@ def test_native_credential_helper_does_not_wait_for_stdin_eof(monkeypatch):
     child, job = process.spawn_sync_in_kill_on_close_job(
         process.module_argv("agent_worktrees._git_credential_route"),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        require_job=os.name == "nt", allow_breakaway=False, **git_ops.no_window_kwargs(),
+        require_job=os.name == "nt", allow_breakaway=False, **no_window_kwargs(),
     )
     readers = ThreadPoolExecutor(max_workers=2)
     stdout = readers.submit(child.stdout.read, 1024 * 1024 + 1)

@@ -34,20 +34,11 @@ def read_request(stream) -> str:
 def router_helper(python: str = sys.executable) -> str:
     import shlex
 
-    from agent_procutil import direct_python
+    from .update_auth_bootstrap import module_argv
 
-    try:
-        executable, environment = direct_python(python)
-    except (OSError, RuntimeError):
-        executable, environment = python, {}
-    prefix = "".join(
-        key + "=" + shlex.quote(value.replace("\\", "/")) + " "
-        for key, value in environment.items()
-    )
-    return (
-        "!" + prefix + shlex.quote(executable.replace("\\", "/"))
-        + " -I -X utf8 -m agent_worktrees._git_credential_route"
-    )
+    argv = module_argv("agent_worktrees._git_credential_route", python=python)
+    argv[0] = argv[0].replace("\\", "/")
+    return "!" + shlex.join(argv)
 
 
 def parse_attributes(text: str) -> dict[str, str]:

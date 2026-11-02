@@ -1027,6 +1027,8 @@ def _gh_token_for_owner(owner: str) -> str | None:
     """
     if not owner or shutil.which("gh") is None:
         return None
+    from agent_procutil import no_window_kwargs
+
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", owner],
