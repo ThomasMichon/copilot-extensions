@@ -4,12 +4,13 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Retained managed source workspace; reviewed PRs to `dev`
 - **Created:** 2026-11-01
-- **Status:** Active
+- **Status:** Done
+- **Completed:** 2026-11-01
 - **Vision:** `visions/plugins/efforts` - queue-and-stacked-continuations,
   context-qualified-agenda-revisits, autonomous-no-progress-recovery,
   meaningful-context-before-retry and continuity-and-resource-limits
 - **Umbrella issue:** [#9897](https://github.com/ThomasMichon/copilot-extensions/issues/9897)
-- **Related:** completed [agenda CLI source effort](../../2026/11/01%20agenda-cli-live-updates/README.md);
+- **Related:** completed [agenda CLI source effort](../01%20agenda-cli-live-updates/README.md);
   existing broader Companion acceptance #8811
 
 ## Guiding Intent
@@ -169,11 +170,14 @@ contract clarity, not implicit authorization to introduce a new formatting mode.
 
 - [x] Run bounded targeted and real connected tests for the exact acceptance
   matrix; obtain independent critique on the cohesive implementation.
-- [ ] Add required changefiles and drive every implementation PR through
+- [x] Add required changefiles and drive every implementation PR through
   current-head review, required CI and actual merge.
-- [ ] Resolve every Plan and Validation Plan item, close the source issue,
-  archive this effort through reviewed publication and release owned bindings
-  and worktree obligations. Record release/adoption limits without rollout claims.
+- [x] Resolve every source Plan and Validation Plan item and record release/adoption
+  limits without rollout claims.
+- [x] Deferred to `#9897`: land this prepared Done/archive record through normal
+  review, then close the source issue and release owned bindings/worktree
+  obligations. The Source coordinator retains this lifecycle responsibility
+  until those actual effects are confirmed.
 
 ## Validation Plan
 
@@ -200,10 +204,14 @@ contract clarity, not implicit authorization to introduce a new formatting mode.
   preserved continuation at meaningful boundaries without an automatic turn driver.
 - [x] Field-contract guidance agrees with the actual validators and consumers;
   literal Markdown characters are not misrepresented as interpreted formatting.
-- [ ] Public artifacts remain generic, review/CI pass and source completion is
+- [x] Public artifacts remain generic, review/CI pass and source completion is
   distinguished from promotion, installation and active-agent adoption.
 
 ## Proposal
+
+This section preserves the reviewed initial proposal. The implementation and
+operator clarifications are recorded in Request, Scope Approvals and Journal;
+it is not a description of current installed runtime support.
 
 Prefer extension of existing semantic operations and frame/history primitives.
 The bounded evidence pass recommends a separately versioned execution policy,
@@ -229,6 +237,40 @@ These are design recommendations subject to review, not additional operator
 grants, native qualification or claims of implementation.
 
 ## Journal
+
+### 2026-11-01 - Reviewed source completion
+
+- Implementation [#9902](https://github.com/ThomasMichon/copilot-extensions/pull/9902)
+  merged as `364950a5b4ecb21f3b6a5bdb85f50fb312752559` after current-head Copilot
+  review reported no open issues and all required CI passed. The coordinator
+  assessed the final state/history/lineage and no-replay regressions rather than
+  treating a generic tooling approval field as the repository's verdict policy.
+- All source acceptance is resolved: frame-local queues and nested saved returns,
+  immutable attempts/context, productive same-command revisits, autonomous
+  no-progress recovery, complete raw-input history, conservative knowledge/prose,
+  explicit independent caps, legacy refusal/compatibility, provider isolation and
+  negotiated held delivery. Actual joined consumers remain distinct from a
+  mocked publisher or mutation replay.
+- The final coordinator packet passed 316 core/fault/store/guidance/producer
+  cases with explicit provider-dependency and PowerShell-unavailable skips.
+  The connected/literal-widget packet passed six cases without skips; prior
+  complete provider and Manager packets also passed. All bounded runs verified
+  cleanup. The field guide and actual CLI/Textual regressions distinguish enums,
+  arbitrary prose, raw JSON and literal characters from Markdown rendering.
+- The entire canonical Request, Plan and Validation Plan was reread after merge.
+  Ordinary pull-forward aborted safely on already-squashed commits; the canonical
+  post-merge reconciliation verified the exact merged head, retained recovery
+  references and dropped only those seven already-landed commits. The effort
+  binding remained open for this source closeout; no lifecycle implementation
+  repair or unrelated source change was made.
+- This Done/archive record follows normal review. `#9897` retains the named
+  Source coordinator's immediate archive-publication, issue closure and
+  binding/obligation settlement until confirmed, rather than silently treating
+  the implementation PR or worktree status as full lifecycle completion.
+- No installed payload, active agent lane, service or physical environment was
+  changed. Source merge only primes normal promotion under #3336; authorized
+  installation/adoption and broader #8811 native/UI/relay/manual/head acceptance
+  remain with their existing owners, outside this completed source scope.
 
 ### 2026-11-01 - Waiting outcome recommendation correction
 
