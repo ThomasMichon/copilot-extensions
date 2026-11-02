@@ -913,8 +913,8 @@ composition prerequisites, and review/validation rules.
   helper no longer reuses one local for text and bytes. Runtime values and
   assertions remain unchanged.
 - Full declared-platform probes retain zero production diagnostics and reduce
-  the remaining test errors to Linux 159 basic / 370 strict and Windows
-  149 basic / 361 strict (25 basic and 28 strict errors removed per target).
+  the remaining test errors to Linux 158 basic / 368 strict and Windows
+  148 basic / 359 strict (26 basic and 30 strict errors removed per target).
   These remain failing exploratory probes, not library admission.
 - Validation: 96 complete checker and focused receipt/slot-release consumer
   tests pass, including actual MyPy positive/negative fixture-client controls,
@@ -929,3 +929,6 @@ composition prerequisites, and review/validation rules.
   are skipped because production/provisioning behavior
   is unchanged; local real consumer tests cover the affected helpers.
   The governed unit packet and its budget remain unchanged.
+- The final consumer audit also narrows the slot-release receipt-drift
+  parameter to its two declared keys; its four runtime cases pass and the
+  complete platform probes report no new literal-key diagnostics.
