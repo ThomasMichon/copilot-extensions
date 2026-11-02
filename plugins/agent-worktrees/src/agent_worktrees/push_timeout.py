@@ -29,13 +29,6 @@ import threading
 import time
 from typing import Literal, overload
 
-from agent_procutil import (
-    contained_test_mode,
-    detached_kwargs,
-    no_window_kwargs,
-    spawn_sync_in_kill_on_close_job,
-)
-
 #: 180s covers the documented worst-case provisioning ETA (120s) plus buffer
 #: for a contended provisioning mutex.
 DEFAULT_PUSH_TIMEOUT = 180.0
@@ -354,6 +347,8 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     A child inheriting a Manager-owned group also skips ``killpg``: only
     the outer launch owner may terminate that group, never this member.
     """
+    from agent_procutil import contained_test_mode, no_window_kwargs
+
     if proc.poll() is None and not contained_test_mode():
         if platform.system() == "Windows":
             subprocess.run(
@@ -418,6 +413,8 @@ def run_bounded(
         return _run_observation(
             cmd, cwd=cwd, env=env, timeout=timeout, deadline=observation_deadline,
         )
+    from agent_procutil import detached_kwargs, no_window_kwargs, spawn_sync_in_kill_on_close_job
+
     windows = platform.system() == "Windows"
     proc, job = spawn_sync_in_kill_on_close_job(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
