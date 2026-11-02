@@ -91,6 +91,13 @@ This is exactly the **active/passive, routing-table (no-proxy)** model the share
 `zdd` library already implements — do **not** reinvent it per plugin, and do
 **not** surface it as an operator-run command.
 
+The ordinary Worktrees installer uses the shared opt-in self-retirement seam:
+successor publication, promotion and readiness finish installation. The
+outgoing resident observes supersession and drains asynchronously; installation
+does not join that work or wait for predecessor exit. See the
+[`zdd` contract](../../libs/zdd/README.md) for the opt-in boundary. Other
+adopters' synchronous paths below are not evidence of this adoption.
+
 ## Bounded cold takeover
 
 An authorized selected generation must not be held hostage by an incompatible

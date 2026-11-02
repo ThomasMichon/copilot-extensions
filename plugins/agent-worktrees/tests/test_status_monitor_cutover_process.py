@@ -200,6 +200,180 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
                 pass
 
 
+@pytest.mark.timeout(180)
+def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import classify_daemon
+    from agent_worktrees.status_monitor_cli import _SELF_RETIRE_MAX_GRACE_S
+    from zdd import diagnostics, routing
+
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / ".agent-worktrees"
+    started, release = tmp_path / "started", tmp_path / "release"
+    observed = tmp_path / "resident-observed-generation"
+    output = tmp_path / "result.json"
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+               AGENT_WORKTREES_STATUS_MONITOR="1")
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+                "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_STATUS_MONITOR_ROUTING_DIR"):
+        env.pop(key, None)
+    baseline = """
+import json, runpy, sys, threading
+from pathlib import Path
+from agent_worktrees import classify_daemon, self_retire
+started, release, observed = map(Path, sys.argv[1:])
+is_superseded = self_retire.is_superseded
+def observe(*args, **kwargs):
+    result = is_superseded(*args, **kwargs)
+    observed.write_text(json.dumps({"superseded": result, "generation": args[2]}))
+    return result
+self_retire.is_superseded = observe
+original = classify_daemon.start_server
+def start_server(compute, **kwargs):
+    def held(kind, payload):
+        if payload.get("async_install_probe"):
+            started.touch()
+            for _ in range(1200):
+                if release.exists():
+                    return {"completed": True}
+                threading.Event().wait(0.1)
+            raise TimeoutError("probe was not released")
+        return compute(kind, payload)
+    return original(held, **kwargs)
+classify_daemon.start_server = start_server
+sys.argv = ["agent_worktrees", "status-monitor", "--interval", "1"]
+runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
+"""
+    installation = """
+import json, os, sys
+from contextlib import ExitStack
+from pathlib import Path
+from agent_worktrees import status_monitor_cutover as cutover, status_monitor_runtime as runtime
+# Preserve this source packet's import closure for the actual resident child.
+runtime._daemon_environment = lambda: dict(os.environ)
+with ExitStack() as custody:
+    guard = cutover._acquire_cutover_lock(cutover.routing_dir())
+    custody.callback(guard.release)
+    result = cutover.activate_after_update(
+        runtime_python=sys.executable, cutover_guard=guard,
+        spawned_handles=[], transition_custody=custody, asynchronous_retirement=True,
+    )
+    Path(sys.argv[1]).write_text(json.dumps(result), encoding="utf-8")
+"""
+    identities = {}
+    request_result = {}
+    requester = None
+    demand = None
+    demand_thread = None
+    demand_stop = threading.Event()
+    with (tmp_path / "process.log").open("w", encoding="utf-8") as log:
+        old = subprocess.Popen(
+            [sys.executable, "-B", "-c", baseline, str(started), str(release), str(observed)],
+            env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=log, **no_window_kwargs(),
+        )
+        try:
+            record = _wait_for(
+                lambda: (
+                    value if "classify_endpoint" in (
+                        value := locks.read_lock(root / "status-monitor.lock") or {}
+                    ) else None
+                ), message="baseline did not publish its request endpoint",
+            )
+            old_pid = record["pid"]
+            identities[old_pid] = diagnostics.process_start_time(old_pid)
+            _wait_for(observed.exists, message="baseline did not observe its routed generation")
+            demand_host, demand_port = record["worktree_status_endpoint"].split(":")
+            demand = (demand_host, int(demand_port), record["worktree_status_token"])
+            classify_daemon.wcs_client.subscribe(*demand, "async-install-demand")
+
+            def keep_demand():
+                while not demand_stop.wait(1):
+                    try:
+                        classify_daemon.wcs_client.subscribe(*demand, "async-install-demand", timeout=2)
+                    except classify_daemon.wcs_client.DaemonUnavailable:
+                        return
+
+            demand_thread = threading.Thread(target=keep_demand, daemon=True)
+            demand_thread.start()
+            host, port, token = classify_daemon.endpoint_from_rendezvous(record)
+
+            def request():
+                try:
+                    request_result.update(classify_daemon.wcs_client.request(
+                        host, port, token, kind=classify_daemon.KIND, key="async-install-probe",
+                        payload={"async_install_probe": True}, request_deadline_s=120,
+                    ))
+                except classify_daemon.wcs_client.DaemonUnavailable as error:
+                    request_result["error"] = str(error)
+
+            requester = threading.Thread(target=request, daemon=True)
+            requester.start()
+            _wait_for(started.exists, message="baseline did not accept the held request")
+            installed = subprocess.run(
+                [sys.executable, "-B", "-c", installation, str(output)],
+                env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+                stdout=log, stderr=log, timeout=60, **no_window_kwargs(),
+            )
+            assert installed.returncode == 0, (tmp_path / "process.log").read_text()
+            result = _read_json(output)["result"]
+            assert result["ok"] and result["committed"] and result["retirement_pending"]
+            assert requester.is_alive() and old.poll() is None, request_result
+            successor = routing.read_active_endpoint(root / "status-monitor-routing")
+            assert successor is not None and successor.pid != old_pid
+            identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+            health = smc.ControlClient(
+                successor.base_url, token=(root / "status-monitor-control.token").read_text().strip(),
+            ).health()
+            assert health["published"] is True and health["status"] == "ready"
+            current = locks.read_lock(root / "status-monitor.lock")
+            assert current["pid"] == successor.pid
+            new_host, new_port = current["worktree_status_endpoint"].split(":")
+            new_demand = (new_host, int(new_port), current["worktree_status_token"])
+            classify_daemon.wcs_client.subscribe(*new_demand, "async-install-demand")
+            previous_demand, demand = demand, new_demand
+            classify_daemon.wcs_client.release(*previous_demand, "async-install-demand")
+            release.touch()
+            requester.join(timeout=15)
+            assert not requester.is_alive() and request_result.get("completed") is True
+            assert old.wait(timeout=_SELF_RETIRE_MAX_GRACE_S + 15) == 0
+        except (AssertionError, subprocess.TimeoutExpired) as error:
+            log.flush()
+            observation = observed.read_text() if observed.exists() else "unobserved"
+            table = routing.read_table(root / "status-monitor-routing")
+            health = {}
+            for label in ("active", "previous"):
+                endpoint = (table or {}).get(label)
+                if endpoint:
+                    try:
+                        health[label] = smc.ControlClient(
+                            routing.Endpoint.from_dict(endpoint).base_url,
+                            token=(root / "status-monitor-control.token").read_text().strip(),
+                        ).health()
+                    except (OSError, ValueError) as unavailable:
+                        health[label] = str(unavailable)
+            pytest.fail(
+                f"{error}\nretirement={observation}\nhealth={health}\n"
+                f"{(tmp_path / 'process.log').read_text(encoding='utf-8')}"
+            )
+        finally:
+            release.touch()
+            demand_stop.set()
+            if demand_thread is not None:
+                demand_thread.join(timeout=5)
+            if demand is not None:
+                classify_daemon.wcs_client.release(*demand, "async-install-demand")
+            if requester is not None:
+                requester.join(timeout=15)
+            for pid, identity in identities.items():
+                if identity is not None:
+                    diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)
+            if old.poll() is None:
+                old.terminate()
+            old.wait(timeout=10)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only windowless-parent contract")
 def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None:
     pythonw = Path(sys.executable).with_name("pythonw.exe")

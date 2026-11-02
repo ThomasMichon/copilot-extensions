@@ -32,13 +32,6 @@ def recover_owned_publication(
     ):
         return False
     old = routing.Endpoint.from_dict(record.get("old")) if isinstance(record.get("old"), dict) else None
-    if old is not None and predecessor is None:
-        return False
-    if predecessor is not None and (
-        old is None or old.pid != predecessor[0]
-        or locks.process_start_time(old.pid) != predecessor[1]
-    ):
-        return False
     new_port = record.get("new_port")
     if type(new_port) is not int or not 0 < new_port < 65536:
         return False
@@ -49,8 +42,12 @@ def recover_owned_publication(
         if not isinstance(table, dict):
             return False
         active = routing.Endpoint.from_dict(table.get("active")) if isinstance(table.get("active"), dict) else None
-        if active is not None and active.pid not in (handle.pid, old.pid if old is not None else None):
-            return False
+        if active is not None and active.pid != handle.pid:
+            if (
+                predecessor is None or active.pid != predecessor[0]
+                or locks.process_start_time(active.pid) != predecessor[1]
+            ):
+                return False
         candidate = ControlClient(f"http://127.0.0.1:{new_port}")
         health = candidate.health() if handle.poll() is None else None
         committed = bool(
@@ -62,14 +59,6 @@ def recover_owned_publication(
                 route_root, bind="127.0.0.1", port=new_port, pid=handle.pid,
                 process_start_time=start, demote_existing=True,
             )
-            if old is not None:
-                client = ControlClient(old.base_url, config_dir=route_root, timeout=65.0)
-                if client.health().get("pid") != old.pid:
-                    return False
-                drained = client.drain(timeout=300.0, poll=0.2, force=False)
-                if drained.get("drained") is not True:
-                    return False
-                client.shutdown()
         else:
             # A live formerly-published or unhealthy candidate is not a passive
             # failure. Keep custody until its service outcome can be established.
@@ -78,7 +67,10 @@ def recover_owned_publication(
                 or health.get("status") != "ready"
             ):
                 return False
-            if old is None:
+            if (
+                old is None or predecessor is None or old.pid != predecessor[0]
+                or locks.process_start_time(old.pid) != predecessor[1]
+            ):
                 return False
             client = ControlClient(old.base_url)
             if client.health().get("pid") != old.pid:
