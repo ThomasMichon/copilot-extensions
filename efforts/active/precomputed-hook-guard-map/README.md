@@ -200,3 +200,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   a transient open-target conflict; the existing writer retries it rather than
   requiring another rename implementation. The final map/profile-preparation
   packet passed 24 cases.
+- Opened implementation #9938. Its first CI run identified two stale
+  admitted-unit source hashes and module-size growth. Updated only the changed
+  admission inputs, kept registry dispatch concise, and moved initial resident
+  preparation diagnostics into the guard-map owner without widening a baseline.
+  The final focused guard-map packet passed 23 cases, including initial resident
+  publication and its visible fail-open error path.

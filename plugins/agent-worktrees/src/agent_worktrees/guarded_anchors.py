@@ -236,6 +236,13 @@ def prepare(caller: str | Path) -> str:
         return f"[guarded-anchors] preparation failed; publication/withdrawal unconfirmed: {exc}\n"
 
 
+def prepare_resident() -> None:
+    try:
+        refresh()
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"[guarded-anchors] initial preparation failed (fail-open): {exc}", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agent-worktrees refresh-guards")
     parser.add_argument("--repo", type=Path, default=Path.cwd())

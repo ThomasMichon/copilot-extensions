@@ -195,11 +195,9 @@ def read_registry(*, strict: bool = False) -> ReposRegistry:
 
 def write_registry(registry: ReposRegistry) -> None:
     """Write repos.yaml, refusing to overwrite a changed read baseline."""
-    from .repos_registry_transaction import write_checked
-    from .repos_registry_writer import render_registry
-    from .guarded_anchors import managed_write
+    from . import guarded_anchors, repos_registry_transaction as transaction, repos_registry_writer as writer
 
-    managed_write(lambda: write_checked(_repos_yaml_path(), registry, render_registry(registry)))
+    guarded_anchors.managed_write(lambda: transaction.write_checked(_repos_yaml_path(), registry, writer.render_registry(registry)))
 
 
 def _quote(v: str) -> str:

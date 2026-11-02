@@ -304,6 +304,24 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
 
+def test_initial_resident_preparation_refreshes_views_and_reports_unavailability(producer, monkeypatch, capsys):
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
+    p.module.refresh(p.callers)
+    p.related["first"].clear()
+    p.module.prepare_resident()
+    assert p.reader.read_map(p.callers[0], p.root).roots == []
+    assert capsys.readouterr().err == ""
+
+    def failed(*args):
+        raise p.module.GuardPublicationError("synthetic acquisition unavailable")
+
+    monkeypatch.setattr(p.module, "build_snapshot", failed)
+    p.module.prepare_resident()
+    assert "initial preparation failed (fail-open)" in capsys.readouterr().err
+    assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+
+
 def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer, monkeypatch):
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda: p.root)
