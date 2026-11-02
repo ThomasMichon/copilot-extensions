@@ -4976,18 +4976,40 @@ installer opts into resident-owned predecessor retirement: it promotes and
 attests the published successor, then finishes without an old drain RPC or a
 predecessor-exit wait. The outgoing resident observes supersession and drains
 and retires independently; `retirement_pending` is not an exit receipt.
-The incoming monitor must advertise `status-monitor-async-retirement-v1` before
-publication; an unsupported target is an explicit refusal, not a synchronous
-fallback or package-version guess. Route commitment precedes any promotion
+Both the outgoing and incoming monitors must advertise
+`status-monitor-async-retirement-v1` for this flow. The outgoing peer is
+authenticated before selector mutation; an unsupported or unrouted incumbent
+is an explicit refusal, not unsafe self-exit, a synchronous fallback or a
+package-version guess. Route commitment precedes any promotion
 callback that can admit work. A failure after that frontier preserves the
 possibly admitted successor and remains an explicit failed commit-forward result.
-Before releasing installer retention, the owner persists birth-identified
-predecessor records and canonical runtime references, including for a legacy
-resident that holds no runtime lease. The elected successor remains needed while
+Before changing selectors or releasing installer retention, the owner persists
+fsynced birth-identified retirement intent and canonical runtime references,
+including for a compatible resident that holds no runtime lease. Interrupted
+reference publication remains discoverable from that intent. Proven precommit
+rollback cancels only exact custody, without releasing a deferred dev claim.
+Retirement records distinguish prepared, retiring and cancelled intent.
+Preparation retains code and demand but cannot release a claim, even if the old
+process exits before publication. Only parent-proven commitment enables cleanup.
+Cancellation is fsynced before cleanup and revokes the claim grant while keeping
+execution protection for any still-live code. Completed retirement is an
+idempotent commit outcome, not a missing-record loop.
+The elected successor remains needed while
 those identities are live or unknown and reconciles them in its existing loop.
-Only positive native exit releases references. Dev release similarly retains
+Only positive native exit releases references, even when the old birth token
+remains readable. Outgoing retirement requires actual successor readiness and
+settles all accepted work without grace-forced exit. Route-fenced discovery
+renewal prevents a predecessor from rewriting successor metadata; ready
+publication is advertised only after the discovery stamp succeeds. A known
+failed-but-committed activation settles as an error without indefinitely holding
+installation locks for a permanently unready candidate. Dev release similarly retains
 the original claim and defers its exact-snapshot release to that resident;
-changed claims refuse cleanup, and a pending dev retirement refuses a rebuild.
+changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
+duplicate release cannot bypass the original pending claim.
+Release also refuses other pending dev-code retirement; cancelled attempts do
+not prevent a newly authorized release retry. Reconstruction independently
+refuses a selected live dev resident, and reselected `dev` prevents deferred
+claim release.
 There is no installer-owned subscription, new cleanup worker, forced unrouted
 restart or delayed daemon reaper in this path.
 Failed candidate children remain under installer custody, and uncertain durable

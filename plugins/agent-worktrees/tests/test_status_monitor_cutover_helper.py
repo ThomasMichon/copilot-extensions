@@ -396,6 +396,10 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
     routing.publish_active(tmp_path, bind="127.0.0.1", port=old.port, pid=old.pid)
     monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path)
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        smc, "routed_monitor_identity", lambda *args, **kwargs: (101, "1001", None),
+    )
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
     monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
     monkeypatch.setattr(
@@ -421,7 +425,7 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
         new.force_terminate()
 
 
-def test_async_installation_never_uses_legacy_unrouted_termination(tmp_path, monkeypatch):
+def test_async_installation_refuses_unrouted_predecessor_without_termination(tmp_path, monkeypatch):
     from agent_worktrees import status_monitor_runtime as runtime
 
     new = _FakeDaemon(202)
@@ -450,8 +454,10 @@ def test_async_installation_never_uses_legacy_unrouted_termination(tmp_path, mon
             runtime_python="python", asynchronous_retirement=True,
             retirement_predecessor={"pid": 101, "start": "1001", "slot": None, "release_claim": None},
         )
-        assert result["result"]["ok"] and result["result"]["retirement_pending"]
-        assert new.promoted and new.alive
+        assert result["action"] == "refused" and not result["result"]["ok"]
+        assert "unrouted" in result["reason"]
+        assert not new.promoted and new.control is None
+        assert routing.read_table(tmp_path) is None
     finally:
         new.force_terminate()
 
@@ -462,6 +468,10 @@ def test_async_installation_rejects_an_unsupported_target_before_opening_admissi
     routing.publish_active(tmp_path, bind="127.0.0.1", port=old.port, pid=old.pid)
     monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path)
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        smc, "routed_monitor_identity", lambda *args, **kwargs: (101, "1001", None),
+    )
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
     monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
 
@@ -478,10 +488,87 @@ def test_async_installation_rejects_an_unsupported_target_before_opening_admissi
         assert "does not support asynchronous" in result["result"]["error"]
         assert old.alive and not old.draining and not old.shutdown_requested
         assert not new.promoted and not new.alive
+        from agent_worktrees import runtime_monitor_retirements as retirements
+
+        assert not retirements._records(tmp_path)
         assert routing.read_table(tmp_path)["active"]["pid"] == old.pid
     finally:
         old.force_terminate()
         new.force_terminate()
+
+
+@pytest.mark.parametrize("ready", [False, True])
+def test_safe_supersession_requires_ready_successor_even_after_generation_reset(
+    tmp_path, monkeypatch, ready,
+):
+    from agent_worktrees import self_retire, status_monitor_recovery_contract as recovery
+
+    endpoint = routing.Endpoint("127.0.0.1", 61002, 202, "new", 1, "2002")
+    table = {"active": endpoint.to_dict()}
+    monkeypatch.setattr(recovery, "successor_healthy", lambda *args, **kwargs: ready)
+    assert self_retire.is_superseded(
+        tmp_path, 101, 100, read_table=lambda _root: table,
+        is_listening=lambda *args: True, require_ready=True,
+    ) is ready
+
+
+@pytest.mark.parametrize("capabilities", [None, "status-monitor-async-retirement-v1", {}])
+def test_async_target_capability_is_not_inferred_from_malformed_metadata(capabilities):
+    from agent_worktrees.status_monitor_health import check_successor
+    from zdd.cutover import CutoverError
+
+    client = SimpleNamespace(health=lambda: {"status": "ready", "capabilities": capabilities})
+    with pytest.raises(CutoverError, match="does not support asynchronous"):
+        check_successor("127.0.0.1", 61001, lambda _url: client, require_async_retirement=True)
+
+
+@pytest.mark.parametrize("capabilities", [None, "status-monitor-async-retirement-v1", {}])
+def test_async_predecessor_capability_requires_a_typed_declaration(tmp_path, monkeypatch, capabilities):
+    from agent_worktrees import runtime_monitor_identity as identity
+
+    endpoint = routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001")
+    monkeypatch.setattr(identity.routing, "read_table", lambda *a, **k: {"active": endpoint.to_dict()})
+    monkeypatch.setattr(identity.diagnostics, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda root: "fixture-token")
+    monkeypatch.setattr(smc, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {
+        "pid": 101, "status": "ready", "capabilities": capabilities, "runtime_prefix": str(tmp_path),
+    }))
+    with pytest.raises(ValueError, match="does not support safe asynchronous"):
+        identity.routed_identity(tmp_path, require_async_retirement=True)
+
+
+def test_lock_renewal_is_fenced_by_the_native_route_owner(tmp_path, monkeypatch):
+    import os
+    from contextlib import contextmanager
+    from agent_worktrees import runtime_monitor_identity as identity
+
+    state = {"locked": False, "pid": os.getpid() + 1}
+    writes = []
+
+    @contextmanager
+    def held(_root, **kwargs):
+        state["locked"] = True
+        try:
+            yield
+        finally:
+            state["locked"] = False
+
+    def write(path, **kwargs):
+        assert state["locked"]
+        writes.append(path)
+        return True
+
+    monkeypatch.setattr(identity.routing, "routing_lock", held)
+    monkeypatch.setattr(identity.routing, "read_table", lambda *args, **kwargs: {
+        "active": routing.Endpoint("127.0.0.1", 61001, state["pid"], "new", 2, "1001").to_dict(),
+    })
+    monkeypatch.setattr(identity.locks, "process_start_time", lambda _pid: "1001")
+    monkeypatch.setattr(identity.locks, "write_lock", write)
+    path = tmp_path / "status-monitor.lock"
+    assert not identity.publish_lock(path, extra={}) and not writes
+    state["pid"] = os.getpid()
+    assert identity.publish_lock(path, extra={}) and writes == [path]
 
 
 def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):

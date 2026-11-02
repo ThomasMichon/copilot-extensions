@@ -215,6 +215,7 @@ def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path
     second_loop = second_started.with_suffix(".loop-release")
     third_started = tmp_path / "third-started"
     third_loop = third_started.with_suffix(".loop-release")
+    promotion_started, promotion_release = tmp_path / "promotion-started", tmp_path / "promotion-release"
     output = tmp_path / "result.json"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
                AGENT_WORKTREES_STATUS_MONITOR="1")
@@ -224,7 +225,8 @@ def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path
     baseline = """
 import runpy, sys, threading
 from pathlib import Path
-from agent_worktrees import classify_daemon, repository_map
+from agent_worktrees import classify_daemon, repository_map, status_monitor_cli
+status_monitor_cli._SELF_RETIRE_MAX_GRACE_S = 0.2
 started, release = map(Path, sys.argv[1:3])
 options = sys.argv[3:]
 if "--passive" in options:
@@ -267,6 +269,23 @@ def controlled_spawn(argv, env, **kwargs):
         [argv[0], "-c", sys.argv[4], sys.argv[2], sys.argv[3], *options], env, **kwargs,
     )
 cutover.spawn_monitor = controlled_spawn
+if len(sys.argv) > 6:
+    started, release = map(Path, sys.argv[5:7])
+    make_client = cutover._make_client
+    def controlled_client(base_url):
+        client = make_client(base_url)
+        promote = client.promote
+        def held_promotion():
+            import threading
+            started.touch()
+            for _ in range(2400):
+                if release.exists():
+                    return promote()
+                threading.Event().wait(0.1)
+            raise TimeoutError("promotion was not released")
+        client.promote = held_promotion
+        return client
+    cutover._make_client = controlled_client
 with ExitStack() as custody:
     guard = cutover._acquire_cutover_lock(cutover.routing_dir())
     custody.callback(guard.release)
@@ -284,6 +303,7 @@ with ExitStack() as custody:
     demand = None
     demand_thread = None
     demand_stop = threading.Event()
+    first_installer = None
     with (tmp_path / "process.log").open("w", encoding="utf-8") as log:
         old = subprocess.Popen(
             [sys.executable, "-B", "-c", baseline, str(started), str(release)],
@@ -299,6 +319,7 @@ with ExitStack() as custody:
                 ), message="baseline did not publish its request endpoint",
             )
             old_pid = record["pid"]
+            original_endpoint = routing.read_active_endpoint(root / "status-monitor-routing")
             identities[old_pid] = diagnostics.process_start_time(old_pid)
             demand_host, demand_port = record["worktree_status_endpoint"].split(":")
             demand = (demand_host, int(demand_port), record["worktree_status_token"])
@@ -324,19 +345,28 @@ with ExitStack() as custody:
                 except classify_daemon.wcs_client.DaemonUnavailable as error:
                     result["error"] = str(error)
 
+            first_installer = subprocess.Popen(
+                [sys.executable, "-B", "-c", installation, str(output),
+                 str(second_started), str(second_release), baseline,
+                 str(promotion_started), str(promotion_release)],
+                env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+                stdout=log, stderr=log, **no_window_kwargs(),
+            )
+            _wait_for(promotion_started.exists, timeout=60, message="successor promotion did not reach its barrier")
+            time.sleep(4)
+            assert old.poll() is None
+            assert smc.ControlClient(
+                original_endpoint.base_url,
+                token=(root / "status-monitor-control.token").read_text().strip(),
+            ).health()["status"] == "ready"
             requester = threading.Thread(
                 target=request, args=((host, port, token), request_result, "first-accepted"),
                 daemon=True,
             )
             requester.start()
             _wait_for(started.exists, message="baseline did not accept the held request")
-            installed = subprocess.run(
-                [sys.executable, "-B", "-c", installation, str(output),
-                 str(second_started), str(second_release), baseline],
-                env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
-                stdout=log, stderr=log, timeout=60, **no_window_kwargs(),
-            )
-            assert installed.returncode == 0, (tmp_path / "process.log").read_text()
+            promotion_release.touch()
+            assert first_installer.wait(timeout=60) == 0, (tmp_path / "process.log").read_text()
             result = _read_json(output)["result"]
             assert result["ok"] and result["committed"] and result["retirement_pending"]
             assert requester.is_alive() and old.poll() is None, request_result
@@ -417,6 +447,7 @@ with ExitStack() as custody:
                 f"{(tmp_path / 'process.log').read_text(encoding='utf-8')}"
             )
         finally:
+            promotion_release.touch()
             release.touch()
             second_release.touch()
             second_loop.touch()
@@ -430,6 +461,8 @@ with ExitStack() as custody:
                 requester.join(timeout=15)
             if second_requester is not None:
                 second_requester.join(timeout=15)
+            if first_installer is not None:
+                first_installer.wait(timeout=60)
             for pid, identity in identities.items():
                 if identity is not None:
                     diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)

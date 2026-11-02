@@ -124,6 +124,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
     from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
+    from .runtime_monitor_identity import publish_lock
     from . import repository_map, tracking_write
     from . import handoff_prompt_receipt_control as receipt_control
     from . import worktree_status_daemon
@@ -173,11 +174,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     shutdown_requested_since: float | None = None
     admission_closed = False
     published_lock = not passive_mode
+    discovery_published = False
     sweep_active = False
     self_retire_generation = None
     self_retire_confirms = 0
     self_retire_confirmations = 2
-    self_retire_first_detected: float | None = None
     from .runtime_monitor_retirements import ResidentRetirements
 
     retirements = ResidentRetirements(status_monitor_runtime._aw_runtime_home())
@@ -556,6 +557,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(managed_mux_runtime.lock_extra())
         return extra
 
+    def _publish_lock() -> bool:
+        nonlocal discovery_published
+        discovery_published = publish_lock(lock, extra=_lock_extra())
+        return discovery_published
+
     def _hook_busy() -> bool:
         return surface_busy(hook_server, retired_hook_servers)
 
@@ -627,7 +633,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if action == "health":
             health = guarded_recovery.monitor_health(
                 worktrees_runtime, receipts, repositories_runtime, allocations=allocation_linker,
-                shutdown=shutdown_requested.is_set(), draining=admission_closed, published=published_lock,
+                shutdown=shutdown_requested.is_set(), draining=admission_closed,
+                published=published_lock and discovery_published,
             )
             health["predecessorRetirement"] = retirements.health()
             return health
@@ -667,7 +674,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     if core.git_ops._windows_observation():
                         segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
-                        _locks.write_lock(lock, extra=_lock_extra())
+                        if not _publish_lock():
+                            _enter_drain_only_state()
+                            return {"adopted": False, "error": "monitor discovery publication refused"}
             trace.emit("complete", "ok")
             wake_event.set()
             return {"adopted": True}
@@ -712,7 +721,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     if core.git_ops._windows_observation():
                         segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
-                        _locks.write_lock(lock, extra=_lock_extra())
+                        if not _publish_lock():
+                            _enter_drain_only_state()
+                            return {"draining": True, "error": "monitor discovery publication refused"}
             trace.emit("complete", "ok")
             wake_event.set()
             return {"draining": False}
@@ -741,7 +752,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         status_monitor_cutover.publish_route(control_server.port, pid=os.getpid(), version=None)
     published_lock = _start_request_surfaces()
     if published_lock:
-        _locks.write_lock(lock, extra=_lock_extra())
+        _publish_lock()
 
     try:
         repositories_runtime.start(interval)
@@ -756,16 +767,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 worktrees_runtime.health()["worktrees"]["status"] == "ready"
                 and repositories_runtime.health()["repositories"]["admitting"]
             )
-            if active_generation is not None and (not published_lock or not readers_ready):
+            if active_generation is not None and (not published_lock or not readers_ready or not discovery_published):
                 with state_lock:
                     if (
                         not admission_closed and not shutdown_requested.is_set()
-                        and (not published_lock or not readers_ready)
+                        and (not published_lock or not readers_ready or not discovery_published)
                     ):
                         published_lock = True
                         published_lock = _start_request_surfaces()
                         if published_lock:
-                            _locks.write_lock(lock, extra=_lock_extra())
+                            _publish_lock()
             if self_retire_generation is None:
                 self_retire_generation = active_generation
                 if self_retire_generation is None and runtime_superseded():
@@ -793,30 +804,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         status_monitor_cutover.routing_dir(),
                         os.getpid(),
                         self_retire_generation,
+                        require_ready=True,
                     )
                 except Exception:
                     superseded = False
                 if superseded:
                     with state_lock:
                         _enter_drain_only_state()
-                    if self_retire_first_detected is None:
-                        self_retire_first_detected = time.monotonic()
-                else:
-                    self_retire_first_detected = None
-                grace_expired = (
-                    self_retire_first_detected is not None
-                    and time.monotonic() - self_retire_first_detected
-                    >= _SELF_RETIRE_MAX_GRACE_S
-                )
                 if superseded and not _drain_busy_reasons():
                     self_retire_confirms += 1
                     if self_retire_confirms >= self_retire_confirmations:
                         break
                 else:
                     self_retire_confirms = 0
-                if grace_expired and not segment_cache.observation_busy(worktree_status_runtime):
-                    # Grace cannot authorize dropping native custody.
-                    break
             with state_lock:
                 can_sweep = published_lock and not admission_closed
                 if can_sweep:
@@ -827,7 +827,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
-                _locks.write_lock(lock, extra=_lock_extra())
+                _publish_lock()
 
                 sweep_mux_pane_args()
                 with state_lock:

@@ -646,6 +646,40 @@ def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, mo
     )
 
 
+def test_failed_committed_activation_settles_without_waiting_for_readiness(
+    driver, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        driver, "_candidate_serving", lambda *_args: pytest.fail("failed commitment waited for readiness"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {
+            "committed": True, "ok": False, "error": "roster activation failed",
+        }},
+        (123, "1001"), [],
+    )
+
+
+def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner(
+    driver, tmp_path, monkeypatch,
+):
+    from agent_worktrees import locks, status_monitor_cutover as cutover
+
+    monkeypatch.setattr(locks, "read_lock", lambda _path: {"pid": 101})
+    monkeypatch.setattr(locks, "lock_is_live", lambda _record: True)
+
+    def routed(root, *, require_async_retirement=False):
+        assert root == tmp_path and require_async_retirement
+        return (202, "2002", "current")
+
+    monkeypatch.setattr(cutover, "routed_monitor_identity", routed)
+    assert driver._monitor_identity(tmp_path) == (202, "2002")
+    monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *args, **kwargs: None)
+    with pytest.raises(driver.InstallationRefused, match="unrouted"):
+        driver._monitor_identity(tmp_path)
+
+
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
 @pytest.mark.parametrize("monitor_scope,committed", [(False, False), (True, False), (True, True)])
 def test_publication_failure_retains_custody_through_observed_outcome(
@@ -724,7 +758,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
     monkeypatch.setattr(cfg, "install_dir", lambda: root if monitor_scope else tmp_path / "other")
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: Guard())
-    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: (123, "previous-identity"))
+    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: (123, "1001"))
     monkeypatch.setattr(driver, "_monitor_slot", lambda *_args: "0.9.0")
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(driver, "_settle_monitor", settle)
@@ -802,6 +836,7 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
 @pytest.mark.parametrize("slot", ["serving", None, "..", "missing"])
 def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot):
     from agent_worktrees import locks, status_monitor_cutover as cutover
+    from agent_worktrees.runtime_monitor_retirements import CAPABILITY
     from zdd import routing
 
     root = tmp_path / "runtime"
@@ -811,7 +846,11 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
         (root / "status-monitor.lock").write_text(json.dumps({"pid": 0}), encoding="utf-8")
     pid = os.getpid()
     server = cutover.ControlServer(
-        lambda *_args: {"pid": pid, "status": "ready", "runtime_slot": slot},
+        lambda *_args: {
+            "pid": pid, "status": "ready", "runtime_slot": slot,
+            "runtime_prefix": str(root / "versions" / slot) if isinstance(slot, str) else None,
+            "capabilities": [CAPABILITY],
+        },
         token="fixture-token",
     )
     server.start()
@@ -819,12 +858,13 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
         routing.publish_active(
             root / "status-monitor-routing", bind="127.0.0.1", port=server.port, pid=pid,
         )
-        identity = driver._monitor_identity(root)
-        assert identity == (pid, locks.process_start_time(pid))
         if slot == "serving":
+            identity = driver._monitor_identity(root)
+            assert identity == (pid, locks.process_start_time(pid))
             assert driver._monitor_slot(root, identity) == "serving"
         else:
             with pytest.raises(driver.InstallationRefused):
+                identity = driver._monitor_identity(root)
                 driver._monitor_slot(root, identity)
     finally:
         server.close()

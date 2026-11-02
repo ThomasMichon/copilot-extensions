@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from zdd import breadcrumb, routing
 from zdd.cutover import CutoverOrchestrator
 
@@ -180,6 +182,32 @@ def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(
     assert routing.read_table(tmp_path)["active"]["port"] == 9290
     assert registry.get("http://127.0.0.1:9281") is None
     assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
+    assert breadcrumb.read_breadcrumb(tmp_path)["old"]["pid"] == 111
+
+
+@pytest.mark.parametrize("recovery_write_fails", [False, True])
+def test_self_retirement_publication_is_irreversible_before_flipped_record(
+    tmp_path, monkeypatch, recovery_write_fails,
+):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    write = breadcrumb.write_breadcrumb
+
+    def fail_after_publication(*args, **kwargs):
+        if kwargs["state"] == "flipped" or recovery_write_fails and kwargs["state"] == "committed":
+            raise OSError("post-publication record failure")
+        return write(*args, **kwargs)
+
+    monkeypatch.setattr(breadcrumb, "write_breadcrumb", fail_after_publication)
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=lambda endpoint: None,
+    )
+    result = orch.run(health_timeout=1)
+    assert result.committed and not result.ok and not result.rolled_back
+    assert not handle.terminated
+    assert routing.read_table(tmp_path)["active"]["pid"] == handle.pid
+    assert "record failure" in result.error
 
 
 def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):

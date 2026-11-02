@@ -443,51 +443,13 @@ def _monitor_lock_is_live() -> bool:
     return locks.lock_is_live(locks.read_lock(smr._monitor_lock_path()))
 
 
-def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str, str | None] | None:
+def routed_monitor_identity(
+    runtime_home: Path | None = None, *, require_async_retirement: bool = False,
+) -> tuple[int, str, str | None] | None:
     """Authenticate a stable routed owner before installer retention or cutover."""
-    from zdd import diagnostics
+    from .runtime_monitor_identity import routed_identity
 
-    directory = routing_dir() if runtime_home is None else routing_dir(runtime_home)
-    snapshot = routing.read_table(directory, strict=True)
-    endpoints = []
-    for key in ("active", "previous"):
-        raw = (snapshot or {}).get(key)
-        if raw is None:
-            continue
-        endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-        if endpoint is None or type(endpoint.pid) is not int or endpoint.pid <= 0:
-            raise ValueError(f"Routed monitor {key} identity is malformed")
-        endpoints.append((key, endpoint))
-    endpoint = None
-    for key, candidate in endpoints:
-        if diagnostics._pid_alive(candidate.pid):
-            if key != "active":
-                raise ValueError("Live fallback monitor requires owner-led route recovery")
-            endpoint = candidate
-            break
-    if endpoint is None:
-        return None
-    pid = endpoint.pid
-    if type(pid) is not int or pid <= 0:
-        raise ValueError("Routed monitor has no attributable PID")
-    if not diagnostics._pid_alive(pid):
-        return None
-    before = locks.process_start_time(pid)
-    if before is None or (
-        endpoint.process_start_time is not None and endpoint.process_start_time != before
-    ):
-        raise ValueError("Routed monitor process identity is unconfirmed")
-    client_options = {} if runtime_home is None else {"token": load_or_create_control_token(runtime_home)}
-    health = ControlClient(endpoint.base_url, **client_options).health()
-    if (
-        health.get("pid") != pid
-        or health.get("status") not in {"ready", "draining", "unavailable"}
-        or locks.process_start_time(pid) != before
-        or routing.read_table(directory, strict=True) != snapshot
-    ):
-        raise ValueError("Routed monitor identity changed during admission")
-    slot = health.get("runtime_slot")
-    return pid, before, slot if isinstance(slot, str) else None
+    return routed_identity(runtime_home, require_async_retirement=require_async_retirement)
 
 
 def start_application(*, health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S) -> int:
@@ -716,8 +678,9 @@ def activate_after_update(
         restart_arguments["spawned_handles"] = spawned_handles
     lock_live = _monitor_lock_is_live()
     if asynchronous_retirement:
-        retirement_predecessor = retirement_predecessor or retirements.capture(smr._aw_runtime_home())
-        routed_live = retirement_predecessor is not None
+        routed_live = retirement_predecessor is not None or routing.read_active_endpoint(
+            routing_dir(), verify_listener=False,
+        ) is not None
     elif not lock_live:
         try:
             routed_live = (
@@ -777,6 +740,28 @@ def activate_after_update(
             client.transition_custody = transition_custody
             return client
     try:
+        if asynchronous_retirement:
+            try:
+                observed = routed_monitor_identity(
+                    smr._aw_runtime_home(), require_async_retirement=True,
+                )
+                if observed is None and (lock_live or monitor_was_live or retirement_predecessor):
+                    raise ValueError("Live unrouted monitor cannot safely retire asynchronously")
+                if observed is not None:
+                    native = {"pid": observed[0], "start": observed[1], "slot": observed[2]}
+                    if retirement_predecessor is not None and any(
+                        retirement_predecessor.get(key) != value for key, value in native.items()
+                    ):
+                        raise ValueError("Serving predecessor changed before retirement reservation")
+                    retirement_predecessor = {
+                        **native,
+                        "release_claim": (retirement_predecessor or {}).get("release_claim"),
+                    }
+            except (OSError, ValueError, ConnectionError) as error:
+                summary.update(
+                    action="refused", reason=str(error), result={"ok": False, "error": str(error)},
+                )
+                return summary
         if guarded:
             try:
                 predecessor = guarded_recovery.negotiate(
@@ -836,8 +821,9 @@ def activate_after_update(
             }
         transition_started = True
         reserved = asynchronous_retirement and retirements.reserve(
-            smr._aw_runtime_home(), retirement_predecessor,
+            smr._aw_runtime_home(), retirement_predecessor, committed=False,
         )
+        retirement_complete = False
         if spawned_handles is not None:
             print("Monitor transition: checking prior recovery", flush=True)
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
@@ -892,7 +878,17 @@ def activate_after_update(
             force=False,
         )
         if reserved:
-            result.retirement_pending = True
+            if result.committed:
+                try:
+                    if not retirements.commit(smr._aw_runtime_home(), retirement_predecessor):
+                        retirement_complete = True
+                except (OSError, ValueError, RuntimeError) as error:
+                    result.ok = False
+                    result.error = f"Committed retirement publication failed: {error}"
+            elif not result.publication_uncertain:
+                retirements.cancel(smr._aw_runtime_home(), retirement_predecessor)
+        if reserved and (result.committed or result.publication_uncertain):
+            result.retirement_pending = not retirement_complete
         summary["action"] = "cutover"
         summary["result"] = result.to_dict()
     finally:

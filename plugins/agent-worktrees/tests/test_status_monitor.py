@@ -4207,11 +4207,15 @@ def test_installers_invoke_monitor_cutover_after_activation():
 
 
 def _elect_monitor_for_one_iteration(monkeypatch):
-    from agent_worktrees import self_retire, status_monitor_cutover as smc
+    from agent_worktrees import runtime_monitor_identity, self_retire, status_monitor_cutover as smc
 
     retired = iter([False, True, True])
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: next(retired, True))
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args, **kwargs: next(retired, True))
+    monkeypatch.setattr(
+        runtime_monitor_identity, "publish_lock",
+        lambda path, *, extra: m.locks.write_lock(path, extra=extra),
+    )
 
 
 def _repository_map_ready(handle, request):
@@ -4239,8 +4243,9 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     elected = [first_failure != "election"]
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42 if elected[0] else None)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args, **kwargs: False)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -4312,6 +4317,44 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     assert swept == [True]
 
 
+def test_promotion_refuses_failed_discovery_without_advertising_ready_publication(
+    tmp_path, monkeypatch,
+):
+    from agent_worktrees import status_monitor_cutover as smc
+
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: False)
+    monkeypatch.setattr(
+        m, "_monitor_sweep", lambda *a, **k: pytest.fail("failed promotion admitted a sweep"),
+    )
+    replies = []
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            self.handle = handle
+
+        def start(self):
+            replies.append(self.handle("promote", {}))
+            assert self.handle("health", {})["published"] is False
+            self.handle("shutdown", {})
+
+        def current_read_count(self, action="worktrees-read"):
+            return 0
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(smc, "ControlServer", Control)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=1, passive=True)) == 0
+    assert replies == [{"adopted": False, "error": "monitor discovery publication refused"}]
+
+
 def test_status_monitor_recovers_repository_map_after_transient_owner_check(tmp_path, monkeypatch):
     from agent_worktrees import self_retire, status_monitor_cutover as smc
 
@@ -4321,8 +4364,9 @@ def test_status_monitor_recovers_repository_map_after_transient_owner_check(tmp_
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     elected = [42]
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: elected[0])
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args, **kwargs: False)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **kw: None)
     monkeypatch.setattr(
@@ -4384,8 +4428,9 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     elected = [42]
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: elected[0])
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args, **kwargs: False)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
     monkeypatch.setattr(
         m.loop_governance_mod, "LoopGovernance",

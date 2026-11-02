@@ -322,8 +322,9 @@ def test_repair_refuses_changed_governance_before_acquiring_cutover(modes, tmp_p
         )
 
 
-def test_dev_rebuild_refuses_pending_retirement_before_claim_or_construction(
-    modes, tmp_path, monkeypatch,
+@pytest.mark.parametrize("blocked_by", ["pending", "serving"])
+def test_dev_rebuild_refuses_live_code_before_claim_or_construction(
+    modes, tmp_path, monkeypatch, blocked_by,
 ):
     from contextlib import nullcontext
     from agent_worktrees import runtime_monitor_retirements as retirements
@@ -336,6 +337,9 @@ def test_dev_rebuild_refuses_pending_retirement_before_claim_or_construction(
         '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
     )
     claim = lifecycle.runtime.claim_dev(root, "original-owner", previous_version="numbered")
+    (root / "versions" / "dev").mkdir(parents=True, exist_ok=True)
+    lifecycle.runtime.mark_complete(root, "dev", payload_hash="dev-content")
+    lifecycle.runtime.activate(root, "dev", link_free=True)
     released = []
     monkeypatch.setattr(lifecycle, "_load_installed", lambda _slot: None)
     monkeypatch.setattr(
@@ -349,12 +353,17 @@ def test_dev_rebuild_refuses_pending_retirement_before_claim_or_construction(
         cutover, "_acquire_cutover_lock",
         lambda *_args, **_kwargs: SimpleNamespace(release=lambda: released.append(True)),
     )
-    monkeypatch.setattr(retirements, "pending_slot", lambda requested, slot: requested == root and slot == "dev")
+    monkeypatch.setattr(
+        retirements, "pending_slot",
+        lambda requested, slot: blocked_by == "pending" and requested == root and slot == "dev",
+    )
+    monkeypatch.setattr(lifecycle, "_monitor_identity", lambda requested: (101, "1001"))
     monkeypatch.setattr(
         lifecycle.engine, "dev_candidate",
         lambda *_args, **_kwargs: pytest.fail("Retiring dev runtime was reconstructed"),
     )
-    with pytest.raises(lifecycle.InstallationRefused, match="previous dev resident is still retiring"):
+    message = "previous dev resident is still retiring" if blocked_by == "pending" else "must retire before reconstruction"
+    with pytest.raises(lifecycle.InstallationRefused, match=message):
         modes.run_owned(
             root, plugin, payload=plugin, uv=tmp_path / "uv",
             base_python=Path(sys.executable), mode="dev", owner=tmp_path / "new-owner",
@@ -362,6 +371,35 @@ def test_dev_rebuild_refuses_pending_retirement_before_claim_or_construction(
         )
     assert lifecycle.runtime.read_dev_claim(root) == claim
     assert released == [True]
+
+
+@pytest.mark.parametrize("blocked_by", ["claim", "slot"])
+def test_duplicate_dev_release_refuses_while_original_claim_is_retiring(
+    modes, tmp_path, monkeypatch, blocked_by,
+):
+    from contextlib import ExitStack, nullcontext
+    from agent_worktrees import runtime_monitor_retirements as retirements
+
+    root = tmp_path / "runtime"
+    owner = tmp_path / "owner"
+    claim = modes.lifecycle.runtime.claim_dev(root, str(owner), previous_version="original")
+    monkeypatch.setattr(
+        retirements, "pending_claim",
+        lambda requested, original: blocked_by == "claim" and requested == root and original == claim,
+    )
+    def pending_slot(requested, slot, *, include_cancelled=True):
+        assert requested == root and slot == "dev" and not include_cancelled
+        return blocked_by == "slot"
+
+    monkeypatch.setattr(retirements, "pending_slot", pending_slot)
+    governance = SimpleNamespace(held=lambda **kwargs: nullcontext())
+    with ExitStack() as custody:
+        with pytest.raises(modes.lifecycle.InstallationRefused, match="pending resident retirement"):
+            modes._release(
+                root, tmp_path, governance, custody, None, tmp_path,
+                owner=owner, wait_timeout=0.1, child_timeout=0.1,
+            )
+    assert modes.lifecycle.runtime.read_dev_claim(root) == claim
 
 
 def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_path, monkeypatch):
@@ -437,8 +475,9 @@ def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_pat
 
 
 @pytest.mark.parametrize("settlement_failure", [False, True])
-@pytest.mark.parametrize("retirement_pending,retiring_dev", [
-    (False, False), (True, False), (True, True),
+@pytest.mark.parametrize("retirement_pending,retiring_dev,already_released", [
+    (False, False, False), (True, False, False), (True, True, False),
+    (False, True, True),
 ])
 def test_dev_release_keeps_original_claim_until_restoration_settles(
     modes,
@@ -447,6 +486,7 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
     settlement_failure,
     retirement_pending,
     retiring_dev,
+    already_released,
 ):
     from agent_worktrees import status_monitor_cutover as cutover
 
@@ -507,6 +547,8 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         if settlement_failure:
             raise RuntimeError("unsettled cutover")
         lifecycle.runtime.activate(root, version, link_free=True)
+        if already_released:
+            lifecycle.runtime.release_dev(root, str(owner))
         return {
             "runtime_version": version, "retirement_pending": retirement_pending,
             "dev_claim_release_pending": retirement_pending and retiring_dev,

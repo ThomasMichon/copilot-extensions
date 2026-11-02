@@ -296,17 +296,15 @@ def _wait_for_exit(pid: int, identity: str, *, label: str) -> None:
 def _monitor_identity(root: Path) -> tuple[int, str] | None:
     from agent_worktrees import locks, status_monitor_cutover as cutover
 
-    record = locks.read_lock(root / "status-monitor.lock")
-    if not locks.lock_is_live(record):
-        routed = cutover.routed_monitor_identity(root)
-        return routed[:2] if routed is not None else None
-    pid = record.get("pid")
-    if type(pid) is not int or pid <= 0:
-        raise InstallationRefused("Serving monitor has no attributable PID")
-    identity = locks.process_start_time(pid)
-    if identity is None:
-        raise InstallationRefused("Serving monitor process identity cannot be established")
-    return pid, identity
+    try:
+        routed = cutover.routed_monitor_identity(root, require_async_retirement=True)
+    except (OSError, ValueError, ConnectionError) as error:
+        raise InstallationRefused(f"Asynchronous predecessor retirement is unavailable: {error}") from error
+    if routed is not None:
+        return routed[:2]
+    if locks.lock_is_live(locks.read_lock(root / "status-monitor.lock")):
+        raise InstallationRefused("Live unrouted monitor cannot safely retire asynchronously")
+    return None
 
 
 def _candidate_serving(root: Path, slot: Path) -> bool:
@@ -360,6 +358,8 @@ def _settle_monitor(
     committed = committed or (action == "restart" and (
         restart.get("spawned") is True or restart.get("already_current") is True
     ))
+    if committed and result.get("ok") is False and not result.get("publication_uncertain"):
+        return True
     announcements: set[str] = set()
 
     def announce(message: str) -> None:
@@ -740,7 +740,18 @@ def settle_candidate(
                 )
             handles: list[subprocess.Popen] = []
             summary = {"action": "interrupted"}
+            retirement_predecessor = (
+                {
+                    "pid": predecessor[0], "start": predecessor[1], "slot": serving_slot,
+                    "release_claim": release_dev_claim if serving_slot == "dev" else None,
+                } if predecessor is not None and not already_serving else None
+            )
+            retirement_complete = False
             try:
+                if retirement_predecessor is not None:
+                    from agent_worktrees import runtime_monitor_retirements as retirements
+
+                    retirements.reserve(root, retirement_predecessor, runtime=runtime, committed=False)
                 if helpers is not None:
                     helpers.verify()
                 governance.recheck()
@@ -754,13 +765,7 @@ def settle_candidate(
                         spawned_handles=handles,
                         transition_custody=custody,
                         asynchronous_retirement=True,
-                        retirement_predecessor=(
-                            {
-                                "pid": predecessor[0], "start": predecessor[1],
-                                "slot": serving_slot,
-                                "release_claim": release_dev_claim if serving_slot == "dev" else None,
-                            } if predecessor is not None else None
-                        ),
+                        retirement_predecessor=retirement_predecessor,
                     )
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "
@@ -769,6 +774,8 @@ def settle_candidate(
                     committed = _settle_monitor(root, candidate_slot, summary, predecessor, handles)
                 if not committed:
                     raise InstallationRefused("Monitor cutover rolled back; previous selection restored")
+                if retirement_predecessor is not None:
+                    retirement_complete = not retirements.commit(root, retirement_predecessor, runtime=runtime)
                 if summary.get("action") == "cutover" and (summary.get("result") or {}).get("ok") is not True:
                     raise InstallationRefused(
                         f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
@@ -786,12 +793,18 @@ def settle_candidate(
                         if not committed:
                             _restore_selectors(root, version, snapshot)
                             deployment.restore(root, manifest_snapshot, manifest)
+                            if retirement_predecessor is not None:
+                                from agent_worktrees import runtime_monitor_retirements as retirements
+
+                                retirements.cancel(root, retirement_predecessor, runtime=runtime)
                         elif any(content not in (
                             (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
                         ) for content in _selector_snapshot(root).values()):
                             runtime.activate(root, version, link_free=True)
                         if committed:
                             deployment.publish(root, manifest)
+                            if retirement_predecessor is not None:
+                                retirement_complete = not retirements.commit(root, retirement_predecessor, runtime=runtime)
                         break
                     except BaseException as error:
                         if not announced:
@@ -817,9 +830,11 @@ def settle_candidate(
             "runtime_generation": identity["build_info"].get("runtime_generation"),
             "deployment_manifest_published": True,
             "helpers_published": helpers is not None,
-            "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
+            "retirement_pending": (
+                not retirement_complete and (summary.get("result") or {}).get("retirement_pending") is True
+            ),
             "dev_claim_release_pending": (
-                release_dev_claim is not None and serving_slot == "dev"
+                not retirement_complete and release_dev_claim is not None and serving_slot == "dev"
                 and (summary.get("result") or {}).get("retirement_pending") is True
             ),
             "runtime_python": str(runtime.slot_python(root, version)),

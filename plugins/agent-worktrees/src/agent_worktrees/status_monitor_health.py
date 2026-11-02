@@ -26,7 +26,10 @@ def check_successor(
         status = client_factory(f"http://{host}:{port}").health()
         if status.get("status") != "ready":
             return False
-        if require_async_retirement and CAPABILITY not in status.get("capabilities", []):
+        capabilities = status.get("capabilities")
+        if require_async_retirement and (
+            not isinstance(capabilities, list) or CAPABILITY not in capabilities
+        ):
             raise CutoverError("Incoming monitor does not support asynchronous predecessor retirement")
         roster = status.get("worktrees")
         if not isinstance(roster, dict):
@@ -68,5 +71,6 @@ def response(
         "allocationLinker": allocation["allocationLinker"],
         "runtime_generation": PROCESS_GENERATION, "version": PROCESS_VERSION,
         "runtime_slot": slot.name,
+        "runtime_prefix": os.path.realpath(sys.prefix),
         "predecessorRetirement": retirements,
     }

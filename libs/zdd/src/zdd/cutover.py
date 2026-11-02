@@ -463,7 +463,7 @@ class CutoverOrchestrator:
         # undrain the stranded old daemon). started_at is threaded through every
         # later update so the record keeps its original timestamp.
         old_dict = (
-            old.to_dict() if (conditional or self.expected_old is not None) and old is not None else
+            old.to_dict() if (conditional or self.expected_old is not None or self.self_retirement) and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
         started_at = write_breadcrumb(
@@ -564,17 +564,9 @@ class CutoverOrchestrator:
                     on_drain=mark_drain_started,
                 )
 
-            # Flip the route: new active, old demoted to previous. From here a
-            # new CLI resolution lands on the new daemon; long-lived sockets stay
-            # on the old one until their turn completes (migrate at a breakpoint).
-            # Without ``refuse_old`` this is exactly the plain publish it always
-            # was (a caller's routing stand-in may override ``publish_active``,
-            # e.g. to promote its passive first). With it, the publish is
-            # guarded: the current route is re-checked under the routing lock
-            # that writes the new one -- and only a routing object that itself
-            # defines the guarded publish can do that (``getattr_static``, so a
-            # stand-in forwarding unknown names to zdd.routing doesn't count);
-            # otherwise the cutover refuses rather than flip unguarded.
+            # Publication directs new readers at the successor. Guarded adopters
+            # compare the route under its write lease. For self-retirement this
+            # frontier is irreversible even if readiness or recording later fails.
             refused = _NeverRaised
             try:
                 if self.refuse_old is None and conditional is None and not self.drain_before_publish:
@@ -623,6 +615,8 @@ class CutoverOrchestrator:
                             if isinstance(publication, tuple) and len(publication) == 2
                             else publication
                         )
+                if self.self_retirement:
+                    result.committed = True
             except (refused, _UnguardedRouting, routing.RoutingLockTimeout) as exc:
                 result.error = str(exc)
                 result.steps.append(f"refused: {exc}")
@@ -703,7 +697,6 @@ class CutoverOrchestrator:
                 )
                 activate_successor = self.activate_successor
                 assert activate_successor is not None
-                result.committed = True
                 result.retirement_pending = old is not None and old.port != new_port
                 write_breadcrumb(
                     state="committed", old=old_dict, new_port=new_port,
@@ -858,11 +851,18 @@ class CutoverOrchestrator:
                         error=result.error,
                     )
                 elif self.drain_before_publish or self.expected_old is not None or self.self_retirement:
-                    write_breadcrumb(
-                        state="committed", old=old_dict,
-                        new_port=new_port, new_pid=new_pid, started_at=started_at,
-                        error=result.error,
-                    )
+                    try:
+                        write_breadcrumb(
+                            state="committed", old=old_dict,
+                            new_port=new_port, new_pid=new_pid, started_at=started_at,
+                            error=result.error,
+                        )
+                    except (OSError, ValueError, RuntimeError) as persistence_error:
+                        if not self.self_retirement:
+                            raise
+                        result.error += f"; committed recovery record unavailable: {persistence_error}"
+                        result.steps.append(result.error)
+                        log.error(result.error)
                 else:
                     breadcrumb.clear_breadcrumb(self.config_dir)
                 self._emit(

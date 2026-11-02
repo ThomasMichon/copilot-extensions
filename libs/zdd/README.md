@@ -18,7 +18,8 @@ this changes import work, not routing, cutover or process-retirement policy.
 `activate_successor(endpoint)` callback. It health-gates and publishes the
 candidate and commits the durable route before invoking the adopter's promotion
 callback, which may open admission. It then verifies readiness without contacting
-the predecessor. A postcommit promotion/readiness failure remains an explicit
+the predecessor. Publication itself is irreversible in this mode, including
+failure of the intervening transition record. A postcommit promotion/readiness failure remains an explicit
 failed, committed result; it never disposes of a possibly admitted successor or
 rolls the route back. The resident owns supersession,
 accepted-work draining and eventual exit independently of the installer.
@@ -30,6 +31,12 @@ Adopters must qualify the incoming runtime's actual capability before publicatio
 and keep displaced code retained independently of the installing process until
 native exit is positively observed. The library does not supply that retention
 or prove completion of accepted work.
+They must also qualify the outgoing resident's safe retirement protocol before
+changing its selector: supersession waits for a genuinely ready successor, and
+accepted work cannot be discarded on a grace deadline. Unsupported incumbents
+are an explicit refusal, not a silent synchronous downgrade. Recovery records
+include the full predecessor endpoint so uncertain publication can be reconciled
+against its original native identity.
 
 ## What's inside
 

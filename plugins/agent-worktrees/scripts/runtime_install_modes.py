@@ -209,6 +209,8 @@ def run_owned(
 
                 if pending_slot(root, "dev"):
                     raise lifecycle.InstallationRefused("The previous dev resident is still retiring")
+                if previous == lifecycle.runtime.DEV_VERSION and lifecycle._monitor_identity(root) is not None:
+                    raise lifecycle.InstallationRefused("The selected dev resident must retire before reconstruction")
                 if owner is None:
                     raise lifecycle.InstallationRefused(
                         "Dev construction requires an attributable owner"
@@ -322,6 +324,10 @@ def _release(
             raise lifecycle.InstallationRefused("No dev claim is available to restore")
         if owner is None or claim["owner"] != str(owner):
             raise lifecycle.runtime.DevClaimConflict(claim)
+        from agent_worktrees.runtime_monitor_retirements import pending_claim, pending_slot
+
+        if pending_claim(root, claim) or pending_slot(root, "dev", include_cancelled=False):
+            raise lifecycle.InstallationRefused("Dev claim release is pending resident retirement")
         previous = claim.get("previous_version")
         if previous is None or previous == lifecycle.runtime.DEV_VERSION:
             raise lifecycle.InstallationRefused(
@@ -388,7 +394,11 @@ def _release(
         result.update(reused=True, dev_claim_release_pending=True)
         return result
     with governance.held(timeout=wait_timeout):
-        if lifecycle.runtime.read_dev_claim(root, strict=True) != claim:
+        current_claim = lifecycle.runtime.read_dev_claim(root, strict=True)
+        if current_claim is None:
+            result["reused"] = True
+            return result
+        if current_claim != claim:
             raise lifecycle.InstallationRefused("Dev claim changed before its settled release")
         lifecycle.runtime.release_dev(root, str(owner))
     result["reused"] = True
