@@ -556,8 +556,8 @@ def test_actual_mypy_preserves_lazy_helper_callable_signatures(
 
 
 @pytest.mark.parametrize("invalid", [False, True])
-@pytest.mark.parametrize("contract", ["decorator", "cleanup", "receipt-fixtures"])
-def test_actual_mypy_preserves_validation_scope_callable_signature(
+@pytest.mark.parametrize("contract", ["decorator", "cleanup", "receipt-fixtures", "slot-release"])
+def test_actual_mypy_preserves_installation_context_client_contracts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     invalid: bool, contract: str,
 ) -> None:
@@ -612,7 +612,7 @@ def test_actual_mypy_preserves_validation_scope_callable_signature(
                 "cleanup('wrong')\n"
                 "wrong_return: str = cleanup(Runtime())\n"
             )
-    if contract == "receipt-fixtures":
+    if contract in {"receipt-fixtures", "slot-release"}:
         fixture = typecheck.ROOT / "libs" / "installation-context" / "tests" / "test_snapshot_provenance.py"
         (root / fixture.name).write_bytes(fixture.read_bytes())
         source = (
@@ -636,6 +636,27 @@ def test_actual_mypy_preserves_validation_scope_callable_signature(
                 "slot['slotRoot'] = False\n"
                 "layout['unexpected'] = 'wrong'\n"
             )
+        if contract == "slot-release":
+            release = fixture.with_name("test_slot_release.py")
+            (root / release.name).write_bytes(release.read_bytes())
+            source = (
+                "from pathlib import Path\n"
+                "from subprocess import CompletedProcess\n"
+                "from test_slot_release import reservation, run_release\n"
+                "layout, slot, receipt, arguments = reservation(Path('test-root'))\n"
+                "payload: Path = layout['payload']\n"
+                "directory: Path = slot\n"
+                "receipt_path: Path = receipt\n"
+                "result: CompletedProcess[str] = run_release(\n"
+                "    ('python', ('python',), 'long'), arguments)\n"
+            )
+            if invalid:
+                source += (
+                    "reservation('wrong')\n"
+                    "run_release(('python', (), 'long'), {'context': Path('wrong')})\n"
+                    "wrong_payload: str = layout['payload']\n"
+                    "arguments['generation'] = Path('wrong')\n"
+                )
     (root / "sample.py").write_text(source, encoding="utf-8")
     environment = tmp_path / "environment"
     environment.mkdir()

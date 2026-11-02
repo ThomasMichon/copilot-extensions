@@ -5,18 +5,22 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 
 from test_snapshot_provenance import (
-    PARITY_RUNNERS, POWERSHELL, _flag, _load_python_module, _provision_slot_with_python,
+    PARITY_RUNNERS, POWERSHELL, ReceiptLayout, Runner,
+    _flag, _load_python_module, _provision_slot_with_python,
     _receipt_layout, _run_slot, _stamp_with_python, _write_json,
 )
 
 
-def reservation(tmp_path: Path, *, hidden: bool = False):
+def reservation(
+    tmp_path: Path, *, hidden: bool = False,
+) -> tuple[ReceiptLayout, Path, Path, dict[str, str | int]]:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     owned = _provision_slot_with_python(layout)
@@ -32,7 +36,7 @@ def reservation(tmp_path: Path, *, hidden: bool = False):
         slot = target
     receipt = slot / ".runtime-slot-reservation.json"
     _write_json(receipt, record)
-    arguments = dict(
+    arguments: dict[str, str | int] = dict(
         context=str(layout["install"]), durable_home=str(layout["durable"]),
         expected_marketplace_id=layout["marketplace_id"], expected_plugin_id=layout["plugin_id"],
         runtime_version="3.4.5", reservation_root=str(slot), expected_reservation_generation=0,
@@ -42,7 +46,9 @@ def reservation(tmp_path: Path, *, hidden: bool = False):
     return layout, slot, receipt, arguments
 
 
-def run_release(runner, arguments):
+def run_release(
+    runner: Runner, arguments: Mapping[str, str | int],
+) -> subprocess.CompletedProcess[str]:
     _, prefix, style = runner
     command = [*prefix, "slot-release"]
     for key, value in arguments.items():
@@ -76,7 +82,9 @@ def test_missing_directory_evidence_refuses_before_mutation(
 @pytest.mark.installation_context_smoke
 @pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda r: r[0])
 @pytest.mark.parametrize("hidden", [False, True])
-def test_release_and_absent_replay(runner, tmp_path, hidden):
+def test_release_and_absent_replay(
+    runner: Runner, tmp_path: Path, hidden: bool,
+) -> None:
     layout, slot, receipt, arguments = reservation(tmp_path, hidden=hidden)
     before = Path(layout["install"]).read_bytes()
     for released in (True, False):
@@ -103,7 +111,7 @@ CASES = (
 
 
 @pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda r: r[0])
-def test_release_refusals_preserve_targets(runner, tmp_path):
+def test_release_refusals_preserve_targets(runner: Runner, tmp_path: Path) -> None:
     for number, case in enumerate(CASES):
         layout, slot, receipt, arguments = reservation(tmp_path / str(number))
         record = json.loads(receipt.read_bytes())
@@ -125,7 +133,7 @@ def test_release_refusals_preserve_targets(runner, tmp_path):
                 target.symlink_to(moved, target_is_directory=moved.is_dir())
             except OSError:
                 if case == "linked-root" and os.name == "nt" and POWERSHELL:
-                    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+                    quote: Callable[[Path], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
                     created = subprocess.run(
                         [POWERSHELL, "-NoProfile", "-Command",
                          "$ErrorActionPreference='Stop'; New-Item -ItemType Junction "
@@ -141,13 +149,14 @@ def test_release_refusals_preserve_targets(runner, tmp_path):
         elif case in {"current", "lkg"}:
             (Path(layout["plugin_root"]) / ("current-version" if case == "current" else "last-known-good")).write_text("3.4.5\n", encoding="utf-8")
         else:
-            key, value = {
+            mutations: dict[str, tuple[str, str | int]] = {
                 "generation": ("expected_install_generation", 1),
                 "digest": ("expected_reservation_sha256", "0" * 64),
                 "context": ("expected_marketplace_id", "other--0123456789abcdef"),
                 "root": ("reservation_root", str(Path(layout["plugin_root"]))),
                 "receipt-generation": ("expected_reservation_generation", 1),
-            }[case]
+            }
+            key, value = mutations[case]
             arguments[key] = value
         result = run_release(runner, arguments)
         if case == "generation":
@@ -159,7 +168,9 @@ def test_release_refusals_preserve_targets(runner, tmp_path):
 
 
 @pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda r: r[0])
-def test_successful_provision_leaves_only_immutable_ownership(runner, tmp_path):
+def test_successful_provision_leaves_only_immutable_ownership(
+    runner: Runner, tmp_path: Path,
+) -> None:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     result = _run_slot(runner, "slot-provision", layout)
@@ -204,7 +215,9 @@ def test_generation_bound_provision_refuses_receipt_drift(
         assert not slot.exists()
 
 
-def test_generation_bound_provision_creates_and_reuses_matching_ownership(tmp_path):
+def test_generation_bound_provision_creates_and_reuses_matching_ownership(
+    tmp_path: Path,
+) -> None:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     module = _load_python_module()
@@ -229,7 +242,9 @@ def test_generation_bound_provision_creates_and_reuses_matching_ownership(tmp_pa
     {"expected_namespace_generation": True, "expected_install_generation": 2},
     {"expected_namespace_generation": 1, "expected_install_generation": -1},
 ])
-def test_generation_bound_provision_refuses_invalid_expectations(tmp_path, generations):
+def test_generation_bound_provision_refuses_invalid_expectations(
+    tmp_path: Path, generations: dict[str, int],
+) -> None:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     module = _load_python_module()
@@ -243,18 +258,21 @@ def test_generation_bound_provision_refuses_invalid_expectations(tmp_path, gener
     assert not (Path(layout["plugin_root"]) / "versions" / "3.4.5").exists()
 
 
-def test_python_hidden_reservation_is_published_before_ownership_and_rename(tmp_path, monkeypatch):
+def test_python_hidden_reservation_is_published_before_ownership_and_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     module = _load_python_module()
     original = module._write_private_json
-    published = []
+    published: list[str] = []
 
-    def witness(path, value):
+    def witness(path: Path, value: Mapping[str, object]) -> None:
         if path.name == module.RUNTIME_SLOT_RESERVATION_FILE:
             assert not list(path.parent.iterdir())
             assert value["schema"] == module.RUNTIME_SLOT_RESERVATION_SCHEMA
-            assert type(value["generation"]) is int and 0 <= value["generation"] <= (1 << 63) - 1
+            generation = value["generation"]
+            assert type(generation) is int and 0 <= generation <= (1 << 63) - 1
         original(path, value)
         published.append(path.name)
 
@@ -264,13 +282,15 @@ def test_python_hidden_reservation_is_published_before_ownership_and_rename(tmp_
 
 
 @pytest.mark.parametrize("drift", ["receipt", "directory", "context", "marker", "content"])
-def test_release_revalidates_immediately_before_delete(tmp_path, monkeypatch, drift):
+def test_release_revalidates_immediately_before_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str,
+) -> None:
     layout, slot, receipt, arguments = reservation(tmp_path)
     module = _load_python_module()
     original = module._validated_runtime_slot_ownership
 
-    def replace(*args, **kwargs):
-        result = original(*args, **kwargs)
+    def replace(*args: object, **kwargs: object) -> dict[str, object]:
+        result = cast(dict[str, object], original(*args, **kwargs))
         if drift in {"receipt", "context"}:
             target = receipt if drift == "receipt" else Path(layout["install"])
             replacement = target.with_suffix(".new")
@@ -293,7 +313,7 @@ def test_release_revalidates_immediately_before_delete(tmp_path, monkeypatch, dr
     assert slot.exists() and receipt.exists()
 
 
-def test_named_and_opened_file_metadata_use_consistent_api_clocks(tmp_path):
+def test_named_and_opened_file_metadata_use_consistent_api_clocks(tmp_path: Path) -> None:
     module = _load_python_module()
     executable = tmp_path / "python.exe"
     executable.write_bytes(b"synthetic executable")
@@ -303,7 +323,7 @@ def test_named_and_opened_file_metadata_use_consistent_api_clocks(tmp_path):
     assert data == executable.read_bytes()
     assert module._stat_identity(metadata) == module._stat_identity(executable.lstat())
     assert module._snapshot_content_sha256(tmp_path)
-    chunks = []
+    chunks: list[bytes] = []
     content, _ = module._read_regular_file(
         executable, label="Streamed evidence", require_stable_identity=True,
         consume_chunk=chunks.append,
