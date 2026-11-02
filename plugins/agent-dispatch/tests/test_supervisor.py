@@ -83,6 +83,7 @@ class QueueBackedClient:
         label=None,
         conclusion_state=None,
         native_release_pending=None,
+        pool_accountable=False,
         resume_requested=None,
         limit=200,
     ):
@@ -94,10 +95,11 @@ class QueueBackedClient:
             label=label,
             conclusion_state=conclusion_state,
             native_release_pending=native_release_pending,
+            pool_accountable=pool_accountable,
             resume_requested=resume_requested,
             limit=limit,
         )
-        return [asdict(r) for r in rows]
+        return [{**asdict(r), **({"pool_accountable": True} if pool_accountable else {})} for r in rows]
 
     def reserve_spawn(self, task_id, *, reserved_by=None, allow_suspended_reembodiment=False, allocation_revision=None, driver=None):
         res, ok = self._q.reserve_spawn(

@@ -471,6 +471,12 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
                 native_release_pending=True, strict=True,
             ))
+            accountable = self._pool_reservations(
+                state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+                pool_accountable=True, strict=True,
+            )
+            accountable_keys = {row["key"] for row in accountable}
+            reservations = list({row["key"]: row for row in [*reservations, *accountable]}.values())
         except _ReservationsUnavailable as exc:
             # Capacity-critical: unlike every other _pool_reservations caller
             # (which only skips optional work on an empty result), this count
@@ -493,7 +499,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 active.append(reservation)
                 continue
             if self._matches_pool(task) and (
-                reservation.get("native_release_pending")
+                reservation["key"] in accountable_keys
+                or reservation.get("native_release_pending")
                 or self._reservation_has_live_process(reservation, task)
             ):
                 active.append(reservation)
@@ -524,6 +531,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         state: str,
         conclusion_state: str | None = None,
         native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         strict: bool = False,
     ) -> list[dict]:
@@ -535,6 +543,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 repo=self.repo,
                 conclusion_state=conclusion_state,
                 **({"native_release_pending": native_release_pending} if native_release_pending is not None else {}),
+                **({"pool_accountable": True} if pool_accountable else {}),
                 resume_requested=resume_requested,
                 limit=10000,
             )
@@ -547,6 +556,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 label=label,
                 conclusion_state=conclusion_state,
                 **({"native_release_pending": native_release_pending} if native_release_pending is not None else {}),
+                **({"pool_accountable": True} if pool_accountable else {}),
                 resume_requested=resume_requested,
                 limit=10000,
             ):

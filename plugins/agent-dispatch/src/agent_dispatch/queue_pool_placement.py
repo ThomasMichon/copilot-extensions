@@ -9,6 +9,7 @@ import sqlite3
 from .pool_instances import PoolInstanceDefinition
 from .queue_common import Task, machine_matches, worker_id_for
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+from .queue_pool_accountability import ReservationAccountability, reservation_accountable as reservation_accountable
 
 POOL_PLACEMENT_PROTOCOL = "pool_placement/v1"
 POOL_PLACEMENT_VERSION = 1
@@ -126,39 +127,17 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     return pool.filters.permits(attrs)
 
 
-def reservation_accountable(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
-    """Terminal bookkeeping never substitutes for native or transport retirement."""
-    if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
-        return True
-    from .queue_execution_custody import reservation_transport_accountable
-    if reservation_transport_accountable(conn, row):
-        return True
-    from .ordinary_native_bindings import is_native_retired, native_bindings, reservation_native_identity
-    if not (row["startup_complete"] or row["startup_fenced"]):
-        return True
-    native = reservation_native_identity(conn, row)
-    if native:
-        task_row = conn.execute("SELECT * FROM tasks WHERE id = ?", (row["task_id"],)).fetchone()
-        if task_row is None:
-            raise TaskError("pool capacity has an orphaned reservation; reconcile its execution custody")
-        task = Task._from_row(task_row)
-        _, retired = native_bindings(conn, row, task, require_owned_workspace=False)
-        return native not in retired
-    if is_native_retired(row):
-        return False
-    return bool(row["session_handle"])
-
-
 def select_pool(
     conn: sqlite3.Connection, task: Task, definitions: tuple[PoolInstanceDefinition, ...],
 ) -> PoolInstanceDefinition:
     """Recheck retained routing and count accountable reservations, never caller slots."""
+    accounting = ReservationAccountability(conn)
     legacy = conn.execute(
         "SELECT s.* FROM spawn_reservations s"
         " LEFT JOIN pool_reservation_bindings a ON a.reservation_key = s.key"
         " WHERE a.reservation_key IS NULL",
     ).fetchall()
-    if any(reservation_accountable(conn, row) for row in legacy):
+    if any(accounting.accountable(row) for row in legacy):
         raise TaskError("pool placement requires reconciliation of unaccounted legacy capacity")
     retained = pool_assignment(conn, task.id)
     candidates = definitions
@@ -178,7 +157,11 @@ def select_pool(
             " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
             pool.identity,
         ).fetchall()
-        count = sum(reservation_accountable(conn, row) for row in reservations)
+        count = 0
+        for row in reservations:
+            count += accounting.accountable(row)
+            if count >= pool.max_concurrent:
+                break
         if count < pool.max_concurrent:
             return pool
     if retained is not None:
@@ -201,7 +184,8 @@ def require_historical_exclusivity(conn: sqlite3.Connection, task: Task) -> None
         "WHERE s.exclusive_key = ? AND s.task_id <> ? AND s.exclusive_released = 0",
         (task.exclusive_key, task.id),
     ).fetchall()
-    if any(reservation_accountable(conn, holder) for holder in holders):
+    accounting = ReservationAccountability(conn)
+    if any(accounting.accountable(holder) for holder in holders):
         raise TaskError("exclusive key has accountable historical execution; placement is waiting")
 
 
@@ -213,7 +197,8 @@ def require_pool_recovery_retirement(conn: sqlite3.Connection, task: Task) -> No
         " JOIN pool_reservation_bindings p ON p.reservation_key = s.key"
         " WHERE s.task_id = ?", (task.id,),
     ).fetchall()
-    if any(reservation_accountable(conn, row) for row in rows):
+    accounting = ReservationAccountability(conn)
+    if any(accounting.accountable(row) for row in rows):
         raise TaskError("pool recovery requires retirement of accountable original reservations")
 
 

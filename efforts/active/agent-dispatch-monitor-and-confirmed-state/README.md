@@ -1874,3 +1874,31 @@ controls. Focused placement/client typing, four admitted strict projects on
 Linux/Windows, changed Python lint, install and documentation contracts pass.
 Current-head review, actual merge, supervisor caller/startup-policy integration
 and every canonical parent/native gate remain open. No runtime was activated.
+
+### 2026-11-01 - Accountable terminal capacity and batched history correction prepared
+
+Supervisor capacity now includes pool-bound terminal attempts with unresolved
+native, startup or transport custody even before release is requested.
+The existing reservation-list boundary shares placement's classifier and
+applies it before the result limit. Its opt-in executing response capability
+and per-result marker refuse silently ignored queries from older providers.
+Legacy pending-native accounting remains separately included and deduplicated.
+
+Capacity classification batches receipts, sends and native/workspace-targeted
+wakes in one transaction snapshot. A proven native's own qualified retirement
+does not rescan its entire lineage; unresolved identities reuse only exact
+lineage selectors within that unchanged snapshot. Retired membership uses a set
+and instance counting stops once full. No history is truncated to classify an
+unresolved native, and no evidence cache survives mutation or a new operation.
+
+Contained validation passed **1467 controls**, one existing skip, across
+twenty-four coupled selectors. New controls cover failed native/no release
+intent with actual legacy-spawn refusal, old-provider capacity holds, old/new
+HTTP query behavior, outstanding capacity behind ten thousand retired pool
+attempts, and bounded SQL/classification/native-identity operation counts as
+history grows from one hundred to one thousand entries.
+Focused helper/placement/client typing, four admitted strict projects on
+Linux/Windows, changed Python lint and install/documentation contracts pass.
+Broader legacy mixin typing is not qualified. Current-head review, actual
+merge, caller/startup-policy integration and every parent/native gate remain
+open. This is source-only; it does not activate a runtime.

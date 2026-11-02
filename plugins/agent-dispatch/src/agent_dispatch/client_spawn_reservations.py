@@ -88,6 +88,7 @@ class SpawnReservationClientMixin:
         label: str | None = None,
         conclusion_state: str | None = None,
         native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -122,6 +123,8 @@ class SpawnReservationClientMixin:
             params["conclusion_state"] = conclusion_state
         if native_release_pending is not None:
             params["native_release_pending"] = native_release_pending
+        if pool_accountable:
+            params["pool_accountable"] = True
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
         if task_status is not None:
@@ -139,6 +142,15 @@ class SpawnReservationClientMixin:
                 for row in reservations
             ):
                 raise DispatchError(426, "coordinator did not apply native-release-pending/v1 reservation query")
+        if pool_accountable:
+            from .client import DispatchError
+            if response.headers.get("X-Dispatch-Pool-Accountability") != "pool-accountable/v1":
+                raise DispatchError(426, "coordinator lacks pool-accountable/v1 reservation query")
+            if not isinstance(reservations, list) or any(
+                not isinstance(row, dict) or row.get("pool_accountable") is not True
+                for row in reservations
+            ):
+                raise DispatchError(426, "coordinator did not apply pool-accountable/v1 reservation query")
         return reservations
 
     def get_reservation(self, key: str) -> dict:

@@ -697,6 +697,7 @@ def register_spawn_routes(
         label: str | None = None,
         conclusion_state: str | None = None,
         native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -712,8 +713,10 @@ def register_spawn_routes(
         )
         if native_release_pending is not None:
             response.headers["X-Dispatch-Reservation-Query"] = "native-release-pending/v1"
+        if pool_accountable:
+            response.headers["X-Dispatch-Pool-Accountability"] = "pool-accountable/v1"
         return [
-            _reservation_dict(r)
+            {**_reservation_dict(r), **({"pool_accountable": True} if pool_accountable else {})}
             for r in queue.list_reservations(
                 task_id=task_id,
                 state=states,
@@ -721,6 +724,7 @@ def register_spawn_routes(
                 label=label,
                 conclusion_state=conclusion_state,
                 native_release_pending=native_release_pending,
+                pool_accountable=pool_accountable,
                 resume_requested=resume_requested,
                 task_status=task_statuses,
                 latest_only=latest_only,

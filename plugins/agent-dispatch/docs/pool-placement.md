@@ -92,6 +92,23 @@ reservation query before the bounded result limit. Cleanup retries retain their
 separate `conclusion_state=pending` predicate before that limit, and overlapping
 native/cleanup results are deduplicated. Newer completed history cannot hide an
 older pending native or cleanup obligation.
+Capacity also requests `pool_accountable=true`: a failed pool attempt can
+retain native, startup or transport custody before anyone requests release.
+The query uses the same transaction-local classifier as placement and applies
+that classification before the result limit; it does not truncate history to
+classify an unresolved identity. These results consume supervisor capacity
+until qualified retirement, independently of a liveness probe or task status.
+Their union with pending-native results is deduplicated by reservation key;
+unassigned legacy attempts retain their existing handling.
+
+The classifier batches acquisition receipts and unresolved sends/wakes within
+one database snapshot, retaining per-reservation/native transport attribution.
+An identity's own qualified retirement needs no repeated lineage scan.
+Unresolved identities reuse classification only for the exact workspace,
+task, creation, allocation-origin and exclusive selectors within that unchanged
+snapshot; placement stops counting once an instance is full. No cache survives
+a mutation or another query/transaction.
+
 `GET /spawn-reservations?native_release_pending=true` (or `false`) advertises
 the executing filter contract in
 `X-Dispatch-Reservation-Query: native-release-pending/v1`.
@@ -100,6 +117,12 @@ markers when requesting the filter. An older provider that ignores the new
 query is rejected visibly, not interpreted as zero pending capacity; the
 capacity-critical supervisor path treats that incompatibility as exhausted
 capacity. Deploy the provider expansion before migrating filtered callers.
+The separate `pool_accountable=true` expansion advertises
+`X-Dispatch-Pool-Accountability: pool-accountable/v1` and marks every returned
+row `pool_accountable: true`. Its client independently requires both that
+executing-provider response capability and the result markers; absence is a
+visible incompatibility and exhausts capacity rather than silently reverting
+to pending-only accounting. This expansion likewise deploys provider-first.
 Unfiltered legacy requests and responses are unchanged, including rollback to
 an older caller; rollback of the provider while the new caller remains active
 requires upgrading the provider or retaining the visible capacity hold.

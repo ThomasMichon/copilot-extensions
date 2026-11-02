@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from .execution_effect_adapter import ExecutionScope, _token
 from .queue_execution_handoff import _scope_key, require_execution_admission
@@ -159,6 +159,23 @@ def reservation_transport_accountable(conn: sqlite3.Connection, row: sqlite3.Row
         return True
     from .queue_execution_wakes import reservation_wake_accountable
     return reservation_wake_accountable(conn, row)
+
+
+class ReservationTransportSnapshot:
+    """Batch transport ownership without broadening it to a whole lineage."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        from .queue_execution_wakes import ReservationWakeSnapshot
+        self.pending = {
+            row["reservation_key"] for row in conn.execute(
+                "SELECT DISTINCT reservation_key FROM execution_send_custody"
+                " WHERE state IN ('pending', 'unknown')",
+            )
+        }
+        self.wakes = ReservationWakeSnapshot(conn)
+
+    def accountable(self, row: Any) -> bool:
+        return row["key"] in self.pending or self.wakes.accountable(row)
 
 
 def _result(row: sqlite3.Row, identity: ExecutionSendIdentity, replayed: bool) -> ExecutionSend:
