@@ -563,6 +563,8 @@ RetainedInputCleanupError = _configuration.RetainedInputCleanupError
 _report_cleanup_error = _configuration.report_cleanup_error
 _native_retained_path = _configuration.native_retained_path
 _file_uri = _configuration.file_uri
+
+_bounded_content_map = _configuration.bounded_content_map
 _temporary_inputs = _configuration.temporary_inputs
 tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
@@ -775,9 +777,9 @@ def _retain_uv_install(
             check_time()
             shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
                             copy_function=copy)
-        source_hashes = _configuration.verify_retained_sources(
+        source_hashes = _configuration.retained_source_hashes(
             projects, mirror, native_path=_native_retained_path, check_time=check_time,
-            error_type=DependencyPolicyError, on_progress=on_progress,
+            error_type=DependencyPolicyError, content_map=_bounded_content_map, on_progress=on_progress,
         )
         for project in projects:
             check_time()

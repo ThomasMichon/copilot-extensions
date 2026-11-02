@@ -20,7 +20,10 @@ BUILD_INPUTS = (
     "libs/versioned-runtime/standalone_build.py",
 )
 DYNAMIC_INPUTS = {
-    "installer_dependency_policy": ("libs/installer-engine/installer_dependency_config.py",),
+    "installer_dependency_policy": (
+        "libs/installer-engine/installer_dependency_config.py",
+        "libs/installer-engine/installer_retained_content.py",
+    ),
 }
 BUILD_DECISIONS = {
     "libs/versioned-runtime/standalone_build.py",

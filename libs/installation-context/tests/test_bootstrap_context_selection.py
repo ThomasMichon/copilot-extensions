@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -278,7 +279,7 @@ def _run_powershell(
 def test_selected_current_manifest_is_a_read_only_noop(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     # Agent Index is excluded (see BEHAVIOR_PLUGINS): its compatibility hook
     # is an unconditional no-op that always emits "{}", regardless of manifest
@@ -517,7 +518,7 @@ def test_agent_machines_bootstrap_rejects_invalid_runtime_selection(
 def test_selected_missing_manifest_does_not_stamp_legacy_runtime(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     home, context, _version = _stamp_context(tmp_path, plugin)
 
@@ -537,8 +538,11 @@ def test_selected_missing_manifest_does_not_stamp_legacy_runtime(
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 @pytest.mark.parametrize("receipt", ["missing", "malformed", "foreign"])
 def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(
-    tmp_path, runner, receipt, monkeypatch,
-):
+    tmp_path: Path,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
+    receipt: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     context = home / "install.json"
@@ -553,7 +557,7 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(
             POWERSHELL, home, environment, monkeypatch,
         )
 
-    def evidence():
+    def evidence() -> dict[Path, bytes]:
         return {
             path: path.read_bytes() for path in home.rglob("*")
             if path.is_file()
@@ -583,7 +587,7 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(
 def test_selected_drift_does_not_run_legacy_installer(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     home, context, _version = _stamp_context(tmp_path, plugin)
     plugin_root = context.parent
@@ -609,7 +613,7 @@ def test_selected_drift_does_not_run_legacy_installer(
 def test_invalid_context_does_not_fall_back_to_legacy_runtime(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -636,7 +640,7 @@ def test_invalid_context_does_not_fall_back_to_legacy_runtime(
 def test_conflicting_context_plugin_id_fails_closed(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
     conflicting_key: str,
 ) -> None:
     home, context, _version = _stamp_context(tmp_path, plugin)
@@ -670,7 +674,7 @@ def test_context_for_other_plugin_preserves_legacy_reconcile(
     tmp_path: Path,
     context_plugin: str,
     runner_plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     home, context, _version = _stamp_context(tmp_path, context_plugin)
     _prepare_legacy_current(home, runner_plugin)
@@ -693,7 +697,7 @@ def test_context_for_other_plugin_preserves_legacy_reconcile(
 def test_context_plugin_identity_is_case_sensitive(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     receipt_plugin_id = "-".join(
         part.capitalize() for part in plugin.split("-")
@@ -720,7 +724,7 @@ def test_context_plugin_identity_is_case_sensitive(
 def test_context_payload_origin_is_case_sensitive(
     tmp_path: Path,
     plugin: str,
-    runner,
+    runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
     home, context, _version = _stamp_context(tmp_path, plugin)
     receipt = context.read_text(encoding="utf-8")

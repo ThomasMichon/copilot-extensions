@@ -44,7 +44,7 @@ def _package(root: Path, name: str, sources: str = "") -> Path:
     return root
 
 
-def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, monkeypatch):
+def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, monkeypatch, tmp_path):
     import io
 
     failure = subprocess.CalledProcessError(1, ["uv"], output="", stderr="\u2502 build failed")
@@ -111,7 +111,7 @@ def test_candidate_failure_survives_retained_cleanup(
     assert "injected retained cleanup failure" in diagnostic
 
 
-def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys):
+def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys, tmp_path):
     failure = subprocess.TimeoutExpired(
         ["uv"], 1, output="building example\n", stderr="backend stalled\n",
     )

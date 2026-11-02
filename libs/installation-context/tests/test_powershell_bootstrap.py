@@ -15,7 +15,9 @@ pytestmark = pytest.mark.installation_context_smoke
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_sdk_delegates_without_compilation_and_can_reenter(tmp_path, host):
+def test_sdk_delegates_without_compilation_and_can_reenter(
+    tmp_path: Path, host: str | None,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     source = SCRIPT.read_text(encoding="utf-8")
@@ -46,14 +48,16 @@ Write-Output 'compiler-free-reentry'
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path)],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "compiler-free-reentry"
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_sdk_expands_raw_percent_paths_once_not_each_canonicalization(tmp_path, host):
+def test_sdk_expands_raw_percent_paths_once_not_each_canonicalization(
+    tmp_path: Path, host: str | None,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "literal-percent.ps1"
@@ -88,7 +92,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Literal environment tokens were expanded again
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     value = json.loads(result.stdout)
@@ -104,7 +108,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Literal environment tokens were expanded again
     ("resolve", "explicit"), ("resolve", "inherited"), ("resolve", "absent"),
     ("validate", "explicit"), ("validate", "inherited"),
 ])
-def test_sdk_context_accepts_once_expanded_inherited_plugin_root(tmp_path, host, action, pointer):
+def test_sdk_context_accepts_once_expanded_inherited_plugin_root(
+    tmp_path: Path, host: str | None, action: str, pointer: str,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "inherited-root.ps1"
@@ -151,7 +157,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Matching inherited plugin root was rejected' }
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Action", action, "-Pointer", pointer],
         capture_output=True, text=True, encoding="utf-8", timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     value = json.loads(result.stdout)
@@ -160,7 +166,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Matching inherited plugin root was rejected' }
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_sdk_physical_paths_and_missing_suffix_are_not_cached(tmp_path, host):
+def test_sdk_physical_paths_and_missing_suffix_are_not_cached(
+    tmp_path: Path, host: str | None,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "existence.ps1"
@@ -195,7 +203,7 @@ Write-Output 'fresh-path-observation'
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path)],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "fresh-path-observation"
@@ -206,14 +214,16 @@ Write-Output 'fresh-path-observation'
     ("action", "message"),
     [("resolve", "valid only for status"), ("status", "requires -ExpectedPluginId and -ExpectedPayloadRoot")],
 )
-def test_composed_status_requires_explicit_expectations_and_action(host, action, message):
+def test_composed_status_requires_explicit_expectations_and_action(
+    host: str | None, action: str, message: str,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File", str(SCRIPT),
          action, "-WithContextValidation"],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 1
     assert not result.stdout.strip()
@@ -222,7 +232,9 @@ def test_composed_status_requires_explicit_expectations_and_action(host, action,
 
 @pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("action", ["source-id", "status"])
-def test_false_composed_status_switch_preserves_unselected_action(tmp_path, host, action):
+def test_false_composed_status_switch_preserves_unselected_action(
+    tmp_path: Path, host: str | None, action: str,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "false-switch.ps1"
@@ -253,7 +265,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Explicit false switch changed the action' }
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Action", action],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     value = json.loads(result.stdout)
@@ -263,7 +275,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Explicit false switch changed the action' }
 
 @pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("condition", ["absent", "lookup-error"])
-def test_missing_python_and_selection_errors_are_explicit_without_acquisition(tmp_path, host, condition):
+def test_missing_python_and_selection_errors_are_explicit_without_acquisition(
+    tmp_path: Path, host: str | None, condition: str,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "prerequisite.ps1"
@@ -287,7 +301,7 @@ exit $LASTEXITCODE
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Condition", condition],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 1
     assert not result.stdout.strip()
@@ -298,7 +312,9 @@ exit $LASTEXITCODE
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_sdk_encoded_packet_preserves_literal_unicode_and_case_insensitive_binding(tmp_path, host):
+def test_sdk_encoded_packet_preserves_literal_unicode_and_case_insensitive_binding(
+    tmp_path: Path, host: str | None,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "literal.ps1"
@@ -322,7 +338,7 @@ $result | ConvertTo-Json -Compress
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     expected = "opaque:space 'quoted' \"double\" \\slash &|<>()$?; \u03bb\nsecond"
@@ -335,7 +351,9 @@ $result | ConvertTo-Json -Compress
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_sdk_accepts_in_memory_packets_larger_than_native_argv(tmp_path, host):
+def test_sdk_accepts_in_memory_packets_larger_than_native_argv(
+    tmp_path: Path, host: str | None,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "large-request.ps1"
@@ -359,14 +377,16 @@ if ($LASTEXITCODE -ne 0 -or $result.canonical -cne ('opaque:' + $value)) {
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {"canonical_length": 120007}
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_unsupported_python_retains_diagnostic_when_request_pipe_closes(tmp_path, host):
+def test_unsupported_python_retains_diagnostic_when_request_pipe_closes(
+    tmp_path: Path, host: str | None,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     transport = SCRIPT.with_name("shell-caller-owned.ps1")
@@ -395,7 +415,7 @@ exit $LASTEXITCODE
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(copied), "-Root", str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 1
     assert not result.stdout.strip()
@@ -407,7 +427,9 @@ exit $LASTEXITCODE
 
 @pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("failure", [False, True], ids=["stdout", "stderr"])
-def test_sdk_drains_large_captured_output_before_waiting(tmp_path, host, failure):
+def test_sdk_drains_large_captured_output_before_waiting(
+    tmp_path: Path, host: str | None, failure: bool,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "capture.ps1"
@@ -430,7 +452,7 @@ exit $LASTEXITCODE
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Failure", str(failure).lower()],
         capture_output=True, text=True, encoding="utf-8", timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     if failure:
         assert result.returncode == 1
@@ -447,7 +469,9 @@ exit $LASTEXITCODE
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows rooted-path semantics")
 @pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("path_kind", ["absolute", "percent", "root-relative", "drive-relative"])
-def test_sdk_preserves_native_paths_and_os_process_directory(tmp_path, host, path_kind):
+def test_sdk_preserves_native_paths_and_os_process_directory(
+    tmp_path: Path, host: str | None, path_kind: str,
+) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
     harness = tmp_path / "native-paths.ps1"
@@ -500,7 +524,7 @@ if ([Environment]::CurrentDirectory -cne $processDirectory -or
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Kind", path_kind],
         capture_output=True, text=True, encoding="utf-8", timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     value = json.loads(result.stdout)

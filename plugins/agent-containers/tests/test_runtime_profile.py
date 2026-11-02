@@ -258,7 +258,7 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
     for name in (
         "runtime_profile.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
-        "installer_dependency_config.py",
+        "installer_dependency_config.py", "installer_retained_content.py",
         "versioned_runtime_source.py",
         "versioned_runtime_publication.py",
     ):

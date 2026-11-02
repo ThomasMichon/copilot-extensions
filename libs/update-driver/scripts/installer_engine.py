@@ -25,6 +25,7 @@ import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
     DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path,
+    _bounded_content_map as _bounded_content_map,
     _private_retained_root as _private_retained_root, _select_uv_executable,
     _temporary_inputs as _temporary_inputs,
     retain_closed_wheel_install as retain_closed_wheel_install, retain_uv_install as retain_uv_install,
