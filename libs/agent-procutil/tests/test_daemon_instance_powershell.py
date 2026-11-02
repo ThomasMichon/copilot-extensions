@@ -102,6 +102,25 @@ def test_legacy_import_refusal_preserves_the_existing_guard_exit_function():
     assert result.stdout.strip() == "legacy-owner-retained"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the adapter resolves Python only on native Windows")
+def test_store_python_alias_stub_is_refused_with_the_prerequisite_message(tmp_path):
+    stub_dir = tmp_path / "Microsoft" / "WindowsApps"
+    stub_dir.mkdir(parents=True)
+    (stub_dir / "python.exe").write_bytes(b"")
+    result = _run(
+        "$ErrorActionPreference='Stop'; "
+        f"$env:PATH={_literal(stub_dir)}; "
+        f". {_literal(HELPER)}; "
+        "try { Start-DaemonInstanceWorker @{}; throw 'expected prerequisite refusal' } "
+        "catch { if ($_.Exception.Message -notlike '*Python 3.10+ must be available*') { throw } }; "
+        "if ($null -ne [AppDomain]::CurrentDomain.GetData('copilot-daemon-instance-shell-v1')) "
+        "{ throw 'prerequisite refusal activated a helper' }; "
+        "[Console]::Out.WriteLine('stub-refused')"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "stub-refused"
+
+
 def test_native_lifetime_fixture_parses_without_executing_or_compiling():
     fixture = Path(__file__).with_name("fixture_daemon_instance_shell.ps1")
     assert "Add-Type" not in fixture.read_text()

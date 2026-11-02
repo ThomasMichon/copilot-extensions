@@ -83,10 +83,12 @@ function Start-DaemonInstanceWorker {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'The PowerShell daemon instance adapter requires native Windows.'
     }
-    try {
-        $python = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0]
-    } catch [System.Management.Automation.CommandNotFoundException] {
-        throw 'Python 3.10+ must be available as python on PATH. Run the harness Python prerequisite setup, or install the standalone prerequisite.'
+    # The Microsoft Store App Execution Alias stub is not an interpreter: it only
+    # prints an install hint, which would surface as an opaque helper-pipe failure.
+    $python = @(Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })[0]
+    if (-not $python) {
+        throw 'Python 3.10+ must be available as python on PATH (the Microsoft Store alias stub does not count). Run the harness Python prerequisite setup, or install the standalone prerequisite.'
     }
     if (-not [IO.File]::Exists($script:DaemonInstanceRuntime)) {
         throw 'The owning payload daemon instance source archive is unavailable.'

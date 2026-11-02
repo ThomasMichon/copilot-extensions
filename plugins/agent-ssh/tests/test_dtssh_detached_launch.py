@@ -11,8 +11,10 @@ process-launch cmdlets replaced by recording functions.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -50,6 +52,7 @@ function Get-HostProcess {{
 }}
 function Start-Sleep {{ param($Seconds) $script:hostUp = $true }}
 function Wait-DtsshHostIdentity {{ }}
+function Assert-HostLauncherPython {{ }}
 function New-CimInstance {{
     param($ClassName, [switch]$ClientOnly, $Property, $ErrorAction)
     return [pscustomobject]@{{ ClassName = $ClassName; Property = $Property }}
@@ -145,3 +148,34 @@ Start-HostLauncher -Foreground
 """, tmp_path)
 
     assert out[0] == f"start-process:conhost.exe|{tmp_path}"
+
+
+def _python_check(tmp_path: Path, path_dirs: list[Path]) -> subprocess.CompletedProcess:
+    path = ";".join(str(d) for d in path_dirs) if os.name == "nt" else ":".join(str(d) for d in path_dirs)
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$env:PATH = '{path}'\n"
+        + _function("Assert-HostLauncherPython")
+        + "\nAssert-HostLauncherPython\nWrite-Host 'python-ok'\n"
+    )
+    return subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Store alias stub exists only on Windows")
+def test_launch_refuses_a_store_alias_stub_with_the_python_remedy(tmp_path):
+    stub_dir = tmp_path / "Microsoft" / "WindowsApps"
+    stub_dir.mkdir(parents=True)
+    (stub_dir / "python.exe").write_bytes(b"")
+    proc = _python_check(tmp_path, [stub_dir])
+    assert proc.returncode != 0
+    assert "needs Python 3.10+" in proc.stderr
+    assert "python-ok" not in proc.stdout
+
+
+def test_launch_accepts_a_real_python(tmp_path):
+    proc = _python_check(tmp_path, [Path(sys.executable).parent])
+    assert proc.returncode == 0, proc.stderr
+    assert "python-ok" in proc.stdout

@@ -702,9 +702,23 @@ function Start-DetachedHostLauncher {
     return $null
 }
 
+function Assert-HostLauncherPython {
+    # The launcher runs a Python daemon-instance helper. Check up front so a box
+    # without Python fails here with the remedy, not as a host that exits before
+    # writing any log. The Microsoft Store alias stub is not an interpreter.
+    $python = @(Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })[0]
+    if ($python) {
+        & $python.Source -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    throw 'The dtssh host launcher needs Python 3.10+ available as python on PATH (the Microsoft Store alias stub does not count). Install Python for this user, then rerun.'
+}
+
 function Start-HostLauncher {
     param([switch]$Foreground)
     if (Get-HostProcess) { Write-Host "dtssh host already running"; return }
+    Assert-HostLauncherPython
     if (-not (Test-Path $LauncherDst)) { throw "Launcher not installed: $LauncherDst" }
     $args = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $args += @('-Tunnel', $Tunnel) }
