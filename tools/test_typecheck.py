@@ -805,14 +805,25 @@ def test_composition_cannot_drop_code_or_spread_file_wide_suppressions(
     ("level", "argument", "expected"),
     [("basic", "'wrong'", 1), ("strict", "'wrong'", 1), ("strict", "3", 0)],
 )
+@pytest.mark.parametrize("consumer", [False, True])
 def test_actual_mypy_sees_shared_fragment_contract_and_maps_its_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    level: typecheck.Level, argument: str, expected: int,
+    level: typecheck.Level, argument: str, expected: int, consumer: bool,
 ) -> None:
-    """The actual checker sees cross-fragment definitions without executing either."""
+    """Direct targets and imported dependencies retain real, unexecuted contracts."""
     paths = fragment_source(tmp_path)
     fragment = tmp_path / "libs" / "installation-context" / "_installation_context_files.py"
-    fragment.write_bytes(fragment.read_bytes().replace(b"'wrong'", argument.encode("ascii")))
+    fragment.write_bytes(
+        fragment.read_bytes().replace(b"'wrong'", b"3" if consumer else argument.encode("ascii"))
+    )
+    targets = paths
+    if consumer:
+        source = f"from installation_context import shared\nresult: int = shared({argument})\n"
+        if expected:
+            source += "wrong_return: str = shared(3)\n"
+        (tmp_path / "sample.py").write_text(source, encoding="utf-8")
+        targets = ("sample.py",)
+        paths = (*paths, *targets)
     environment = tmp_path / "environment"
     environment.mkdir()
     (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
@@ -832,12 +843,61 @@ def test_actual_mypy_sees_shared_fragment_contract_and_maps_its_failure(
     monkeypatch.setattr(typecheck, "environment_path", environment_path)
     monkeypatch.setattr(typecheck, "environment_python", environment_python)
     monkeypatch.setattr(typecheck, "acquire_environment", acquire)
-    assert typecheck.check_project(tmp_path, project(level=level), paths, all_paths=paths) == expected
+    assert typecheck.check_project(tmp_path, project(level=level), targets, all_paths=paths) == expected
     output = capsys.readouterr().out
+    assert f"{len(targets)} physical files, 1 targets" in output
     if expected:
-        assert "_installation_context_files.py:2: error:" in output
+        location = "sample.py:2" if consumer else "_installation_context_files.py:2"
+        assert f"{location}: error:" in output
         assert "[arg-type]" in output and "[name-defined]" not in output
+        if consumer:
+            assert output.count(": error:") == 2
+            assert "[assignment]" in output
     else:
         assert "Success: no issues found" in output
     assert lease.released
     assert not (tmp_path / "source-views-environment" / "sample" / "installation_context.py").exists()
+
+
+def test_imported_view_refuses_source_drift_and_settles_its_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import-only composition cannot credit changed source or become an owned target."""
+    paths = (*fragment_source(tmp_path), "sample.py")
+    (tmp_path / "sample.py").write_text(
+        "from installation_context import shared\nresult: int = shared(3)\n", encoding="utf-8",
+    )
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert Path(argv[-1][1:]).read_text(encoding="utf-8") == "sample.py\n"
+        fragment = tmp_path / "libs/installation-context/_installation_context_base.py"
+        fragment.write_bytes(fragment.read_bytes() + b"\nextra: int = 1\n")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    with pytest.raises(views.SourceViewError, match="source changed"):
+        typecheck.check_project(tmp_path, project(), ("sample.py",), all_paths=paths)
+    assert lease.released
+    assert not (environment / "typecheck-targets.txt").exists()
+    assert not (environment / "typecheck-mypy.ini").exists()
+    assert not (tmp_path / "source-views-environment/sample/installation_context.py").exists()

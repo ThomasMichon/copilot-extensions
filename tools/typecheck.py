@@ -299,15 +299,16 @@ def check_project(
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
         env["MYPYPATH"] = os.pathsep.join(sorted(imports))
-        if INSTALLATION_ENTRY in files:
+        if INSTALLATION_ENTRY in files or INSTALLATION_ENTRY in all_paths:
             view = installation_view(
                 root, all_paths,
                 path.parent / ("source-views-" + path.name) / project.name / "installation_context.py",
             )
-            members = {name for name, _content in view.inputs}
-            if not members <= set(files):
-                raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
-            files = (*tuple(file for file in files if file not in members), str(view.output))
+            if INSTALLATION_ENTRY in files:
+                members = {name for name, _content in view.inputs}
+                if not members <= set(files):
+                    raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
+                files = (*tuple(file for file in files if file not in members), str(view.output))
             env["MYPYPATH"] = str(view.output.parent) + os.pathsep + env["MYPYPATH"]
         targets = path / "typecheck-targets.txt"
         targets.write_text("\n".join(files) + "\n", encoding="utf-8")
