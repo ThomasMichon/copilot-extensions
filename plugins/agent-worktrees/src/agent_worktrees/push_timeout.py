@@ -205,15 +205,18 @@ class ObservationCleanupError(subprocess.SubprocessError):
     def try_settle(self) -> bool:
         if getattr(self, "_settled", False):
             return True
-        if getattr(self, "cleanup_resources", ()):
-            # An interrupted close may already have released a reusable handle.
-            return False
+        uncertain_resources = getattr(self, "cleanup_resources", ())
         if not getattr(self, "_job_empty_confirmed", False):
             if self.job is None:
+                if uncertain_resources:
+                    return False
                 raise RuntimeError("no owned Job to confirm")
             if not self.job.try_terminate_and_confirm_empty():
                 return False
             self._job_empty_confirmed = True
+        if uncertain_resources:
+            # An interrupted close may already have released a reusable handle.
+            return False
         try:
             if hasattr(self.process, "begin_cleanup"):
                 self.process.begin_cleanup()

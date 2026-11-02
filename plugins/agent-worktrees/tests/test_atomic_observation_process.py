@@ -320,7 +320,8 @@ def test_actual_consumer_propagates_command_cutoff_through_native_setup(launch, 
 
 
 @pytest.mark.parametrize("created", [False, True])
-def test_actual_consumer_retains_uncertain_preparation_close(launch, monkeypatch, created):
+@pytest.mark.parametrize("expired", [False, True])
+def test_actual_consumer_retains_uncertain_preparation_close(launch, monkeypatch, created, expired):
     from agent_procutil import _windows_caller_owned as native
 
     close, closed = native.os.close, []
@@ -329,6 +330,8 @@ def test_actual_consumer_retains_uncertain_preparation_close(launch, monkeypatch
         closed.append(fd)
         close(fd)
         if len(closed) == 1:
+            if expired:
+                launch.clock[0] = 110
             raise KeyboardInterrupt("close outcome uncertain")
 
     launch.kernel.deny_attribute = not created
@@ -345,3 +348,5 @@ def test_actual_consumer_retains_uncertain_preparation_close(launch, monkeypatch
     assert [error.try_settle() for _ in range(3)] == [False, False, False]
     assert closed == before
     assert (error.process.native is not None) is created
+    assert error._job_empty_confirmed
+    assert launch.jobs[0].closed
