@@ -506,10 +506,9 @@ class RepoConfig:
     fully guarded stateless harness), but ``stateless: true`` **implies** it.
     **Default false**. Declared in ``<anchor>/.agent-worktrees/config.yaml``."""
     compose_knowledge_plugins: bool = True
-    """When false, never graft the paired knowledge repo's own
-    marketplaces/plugins into the harness session overlay (retiring any
-    prior composition) -- state (:attr:`requires_external_state_root`) is
-    unaffected. **Default true**; declare in ``~/.<project>/config.yaml``."""
+    """Opt out of personal plugin composition without disabling state pairing."""
+    copilot_plugin_profile: str | None = field(default=None, kw_only=True)
+    """Optional anchor-relative JSON tool settings, independent of personal composition."""
     knowledge_only: bool = False
     """When true, this repo is a **knowledge-only companion**: it exists
     solely to be carved as the paired ``-k`` knowledge worktree of some other
@@ -1513,6 +1512,7 @@ def _build_repo_config(
     and ``worktree_root`` are the machine paths (resolved separately, since
     they never come from the shared in-repo config).
     """
+    from .config_sources import parse_plugin_profile
     launch: dict[str, list[str]] = {}
     for plat_key, cmd_list in (data.get("launch") or {}).items():
         if isinstance(cmd_list, list):
@@ -1597,9 +1597,8 @@ def _build_repo_config(
         requires_external_state_root=bool(
             data.get("requires_external_state_root", False)
         ),
-        compose_knowledge_plugins=bool(
-            data.get("compose_knowledge_plugins", True)
-        ),
+        compose_knowledge_plugins=bool(data.get("compose_knowledge_plugins", True)),
+        copilot_plugin_profile=parse_plugin_profile(data.get("copilot_plugin_profile")),
         knowledge_only=bool(data.get("knowledge_only", False)),
     )
 

@@ -15,13 +15,18 @@ import pytest
 ENTRY = Path(__file__).resolve().parents[2] / "libs/installation-context/installation_context.py"
 
 
+@pytest.fixture(scope="session")
+def sdk_code():
+    return compile(ENTRY.read_bytes(), str(ENTRY), "exec")
+
+
 @pytest.fixture
-def sdk() -> ModuleType:
+def sdk(sdk_code) -> ModuleType:
     spec = importlib.util.spec_from_file_location("powershell_adapter_sdk", ENTRY)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    exec(sdk_code, module.__dict__)
     return module
 
 

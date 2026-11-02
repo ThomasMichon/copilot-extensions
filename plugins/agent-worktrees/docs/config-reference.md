@@ -636,7 +636,69 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `stateless` | bool | `false` | This repo is a stateless harness routing personal state to a bound knowledge repo (see `Config.knowledge_repo`). Implies `requires_external_state_root`. |
 | `requires_external_state_root` | bool | `false` | Personal state (efforts/visions/logs) must be written to a separately-bound knowledge repo; the resolver refuses rather than falling back to this repo. |
 | `compose_knowledge_plugins` | bool | `true` | When false, never graft the paired knowledge repo's marketplaces/plugins into the harness session overlay. |
+| `copilot_plugin_profile` | string/null | absent | Anchor-relative strict JSON tool plugin settings. Supports only `extraKnownMarketplaces` and boolean `enabledPlugins` (including false). Independent of personal composition and launch env/argument profiles. |
 | `knowledge_only` | bool | `false` | This repo is a **knowledge-only companion**: it exists solely to be carved as another project's paired `-k` knowledge worktree, never driven directly. `create` (and the interactive new-worktree flow) refuses a standalone worktree for it; binstub reconcile skips/reclaims its `<repo>` binstub; the Worktree Manager excludes it from implicit-default/ambiguous-selection project listings. The internal pairing carve is unaffected. Set the matching registry `repos add/update --class knowledge` too so `repos list`/the Manager's repo view reflect it. See the `knowledge-only-repos` effort. |
+
+### Project-native plugin settings
+
+Declare `copilot_plugin_profile: .copilot-extensions/tool-plugins.json` in
+repository policy, a per-project override, or an attributed `config.d` repo
+fragment. The profile contains only native Copilot marketplace and plugin
+settings, not a universal plugin roster or an operator's generic knowledge list.
+It remains native per-repository selection metadata, parsed by `config_sources`,
+not one of the four ordinary portable preferences passed to `configuration_layers`.
+The existing repository-base/per-repository override merge selects it, including
+an explicit null opt-out; the path remains anchor-relative rather than relative
+to a machine preference document. Parsing itself acquires no knowledge binding
+or write authority.
+Profile files and local marketplace directories must stay inside the registered
+anchor, without links, junctions, traversal or ambiguous root custody.
+
+Register stages the anchor and existing common-Git worktree family. Normal
+create/preparation stages each checkout, independently of personal binding.
+Native `.github/copilot/settings.local.json` then works with plain settings
+lookup without a running Manager at launch. Personal composition still requires
+the existing binding and pair integrity checks.
+
+The existing workspace lease and atomic settings writer serve both contributors.
+Tool staging acquires the installation owner guard before the workspace lease,
+revalidates the registered root and Git family inside that boundary, and retains
+the guard through the actual write so unregister cannot interleave retirement.
+One family census is reused only within that guarded operation; each written
+target still revalidates its registered root and isolated Git common directory.
+Any family member registered to another project is refused before staging or
+retirement. Registry acquisition is strict; Git custody failures are projected
+as tool-admission failures, not successful empty ownership.
+Separate exact-value tool receipts identify project, anchor and profile; equal
+unmanaged values are not adopted. Equality is JSON-type-sensitive at every
+depth, so numeric edits cannot impersonate booleans. Local marketplace paths
+are normalized once, validated and emitted from that same checked path.
+Modified local choices survive, and conflicts with personal/operator values are
+reported explicitly. Missing live values do not transfer ownership between tool and personal
+receipts; conflicting generated ownership is removed before a personal write,
+and tool ownership conflicts refuse that checkout's write unchanged.
+Malformed JSON and JSONC
+overlays and duplicate JSON object keys are refused, not reformatted. Selected
+tool-roster conflicts fail registration, creation and launch preparation rather
+than reporting full readiness for a partial selection. Base and resume resolvers
+consume that explicit tool-admission failure even when instruction-copy work is
+deferred; ordinary optional instruction-copy warnings remain fail-open.
+Legacy-local equality cannot override a conflicting higher-precedence native
+selection. Personal exclusion never
+retires an unreceipted or another contributor's choice, even when it matches
+legacy personal values. Existing markerless marketplace compatibility remains.
+Setting the profile to null retires only
+tool-owned unchanged values; `compose_knowledge_plugins: false` leaves tools
+active. Mixed contributor documents carry a version-2 personal guard so an
+older version-1 owner refuses them instead of retiring tool values; this does
+not qualify actual native Copilot inference or every older consumer.
+
+Normal unregister first performs its existing outstanding-work/claims bounce.
+Only after closure does it retire project-owned tool receipts in the verified
+anchor/worktree family, leaving personal and unrelated data. Explicit force
+does not settle work. Family cleanup is incremental, not a family-wide atomic
+transaction: failure retains registration and the root-scoped retry evidence,
+and reports already-completed checkout effects for the normal retry.
 
 An adopter's selected `machines.yaml` may declare a paired control plane:
 

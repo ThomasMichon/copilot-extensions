@@ -1,8 +1,6 @@
-"""Compose a paired knowledge repo's Copilot plugins into its harness.
+"""Own the settings lease/writer and compose paired personal plugin settings.
 
-The launch repo owns Copilot's settings lookup, while operator-specific plugin
-settings live in the private knowledge repo.  This module bridges that boundary
-without making launch code depend on the ``harness-knowledge`` skill payload.
+Project tools use a distinct contributor without depending on knowledge binding.
 """
 
 from __future__ import annotations
@@ -55,10 +53,11 @@ class KnowledgePair:
 
 def _load_json_object(path: Path) -> dict[str, Any]:
     """Read an existing overlay strictly to protect unmanaged operator data."""
+    from .copilot_plugin_profile import unique_json_object
     try:
         if not path.is_file():
             return {}
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
         if not isinstance(value, dict):
             raise ValueError("root value is not an object")
         return value
@@ -237,9 +236,11 @@ def _dict_setting(data: dict[str, Any], key: str, path: Path) -> dict[str, Any]:
 
 
 def _managed_marker(
-    existing: dict[str, Any], path: Path
+    existing: dict[str, Any], path: Path, *, tool_family=None,
 ) -> dict[str, Any] | None:
     """Return a validated ownership marker, or ``None`` when none exists."""
+    from . import copilot_plugin_profile as tool
+    tool.validate_marker(existing, path, family=tool_family)
     if _OVERLAY_KEY not in existing:
         return None
     marker = existing.get(_OVERLAY_KEY)
@@ -247,11 +248,7 @@ def _managed_marker(
         raise KnowledgePluginError(
             f"cannot safely manage {path}: '{_OVERLAY_KEY}' is not a JSON object"
         )
-    if marker.get("version") != _OVERLAY_VERSION:
-        raise KnowledgePluginError(
-            f"cannot safely manage {path}: unsupported '{_OVERLAY_KEY}' version "
-            f"{marker.get('version')!r}"
-        )
+    tool.validate_personal_version(marker, path, existing)
     for key in ("marketplaces", "enabledPlugins"):
         if not isinstance(marker.get(key), dict):
             raise KnowledgePluginError(
@@ -267,21 +264,21 @@ def _managed_marker(
     return marker
 
 
-def _previous_managed(
-    existing: dict[str, Any], path: Path
-) -> tuple[dict, dict]:
-    marker = _managed_marker(existing, path)
-    if marker is None:
-        return {}, {}
-    marketplaces = marker.get("marketplaces")
-    enabled = marker.get("enabledPlugins")
-    return dict(marketplaces), dict(enabled)
+def same_json_value(left: Any, right: Any) -> bool:
+    """Compare exact JSON values without equating booleans and numbers."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(same_json_value(left[key], right[key]) for key in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(same_json_value(a, b) for a, b in zip(left, right))
+    return left == right
 
 
 def _retire_previous(current: dict, previous: dict) -> None:
     """Drop a previously managed value only when it remains unmodified."""
     for key, prior_value in previous.items():
-        if key in current and current[key] == prior_value:
+        if key in current and same_json_value(current[key], prior_value):
             del current[key]
 
 
@@ -400,26 +397,28 @@ def _retire_invalid_pair_overlay_locked(
     retired_marketplaces = sorted(
         key
         for key, value in previous_marketplaces.items()
-        if marketplaces.get(key) == value
+        if key in marketplaces and same_json_value(marketplaces[key], value)
     )
     retired_enabled = sorted(
-        key for key, value in previous_enabled.items() if enabled.get(key) == value
+        key for key, value in previous_enabled.items() if key in enabled and same_json_value(enabled[key], value)
     )
     preserved_marketplaces = sorted(
         key
         for key, value in previous_marketplaces.items()
-        if key in marketplaces and marketplaces[key] != value
+        if key in marketplaces and not same_json_value(marketplaces[key], value)
     )
     preserved_enabled = sorted(
         key
         for key, value in previous_enabled.items()
-        if key in enabled and enabled[key] != value
+        if key in enabled and not same_json_value(enabled[key], value)
     )
     _retire_previous(marketplaces, previous_marketplaces)
     _retire_previous(enabled, previous_enabled)
 
     result = dict(existing)
     result.pop(_OVERLAY_KEY, None)
+    from .copilot_plugin_profile import preserve_guard
+    preserve_guard(result)
     if marketplaces:
         result["extraKnownMarketplaces"] = marketplaces
     else:
@@ -482,14 +481,12 @@ def _legacy_local_marketplaces(
         for name, definition in definitions.items()
         if name in existing
         and (
-            existing[name] == _localized_marketplace(definition, knowledge_path)
+            same_json_value(existing[name], _localized_marketplace(definition, knowledge_path))
             or (
                 legacy_knowledge_path is not None
                 and name in legacy_definitions
-                and existing[name]
-                == _localized_marketplace(
-                    legacy_definitions[name], legacy_knowledge_path
-                )
+                and same_json_value(existing[name], _localized_marketplace(
+                    legacy_definitions[name], legacy_knowledge_path))
             )
         )
     }
@@ -538,7 +535,9 @@ def _compose_locked(
     marketplaces = _dict_setting(existing, "extraKnownMarketplaces", output_path)
     enabled = _dict_setting(existing, "enabledPlugins", output_path)
     markerless_legacy = _OVERLAY_KEY not in existing
-    previous_marketplaces, previous_enabled = _previous_managed(existing, output_path)
+    previous = _managed_marker(existing, output_path)
+    previous_marketplaces = dict(previous["marketplaces"]) if previous else {}
+    previous_enabled = dict(previous["enabledPlugins"]) if previous else {}
     _retire_previous(marketplaces, previous_marketplaces)
     _retire_previous(enabled, previous_enabled)
 
@@ -615,9 +614,9 @@ def _compose_locked(
         base_definition = harness_settings.marketplaces.get(name)
         if base_definition is None:
             candidates[name] = definition
-        elif base_definition != definition:
+        elif not same_json_value(base_definition, definition):
             committed_definition = harness_committed_marketplaces.get(name)
-            if committed_definition is not None and committed_definition == base_definition:
+            if committed_definition is not None and same_json_value(committed_definition, base_definition):
                 # The collision is purely with the harness's own *committed*
                 # marketplace declaration -- e.g. the harness's own local
                 # in-repo marketplace, incidentally redeclared elsewhere
@@ -639,7 +638,7 @@ def _compose_locked(
             marketplaces[name] = definition
             managed_marketplaces[name] = definition
             continue
-        if name in marketplaces and marketplaces[name] != definition:
+        if name in marketplaces and not same_json_value(marketplaces[name], definition):
             conflicting_marketplaces.append(name)
             continue
         if name not in marketplaces:
@@ -668,16 +667,14 @@ def _compose_locked(
         if not on:
             continue
         if policy.is_self_referential_harness_plugin(source, local_names):
-            # Never graft it in; also force-remove any stale entry a
-            # pre-fix (markerless-legacy or marker-owned) composition
-            # already wrote -- retirement above only clears entries with a
-            # recorded marker, so a markerless-legacy overlay would
-            # otherwise keep carrying it forever.
-            enabled.pop(source, None)
+            # Exact personal receipts retired above; preserve other contributors.
             excluded_enabled.append(source)
             continue
         _, marketplace = split_source(source)
         if marketplace in conflicting_names:
+            conflicting_enabled.append(source)
+            continue
+        if source in enabled and not same_json_value(enabled[source], on):
             conflicting_enabled.append(source)
             continue
         if marketplace in local_names and not markerless_legacy and source in enabled:
@@ -720,6 +717,9 @@ def _compose_locked(
     if pair_kind:
         marker["pairKind"] = pair_kind
     result[_OVERLAY_KEY] = marker
+    from .copilot_plugin_profile import preserve_guard, protect_tool_receipts
+    protect_tool_receipts(existing, result, marker, conflicting_marketplaces, conflicting_enabled)
+    preserve_guard(result)
 
     changed = _write_overlay(output_path, result)
 
@@ -920,6 +920,8 @@ def _retire_disabled_overlay(harness_path: str | Path, *, knowledge_path: Path |
 
         result = dict(existing)
         result.pop(_OVERLAY_KEY, None)
+        from .copilot_plugin_profile import preserve_guard
+        preserve_guard(result)
         if marketplaces:
             result["extraKnownMarketplaces"] = marketplaces
         else:

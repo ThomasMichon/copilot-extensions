@@ -7,8 +7,10 @@ deletes the SHARED ``~/.agent-worktrees`` registry root used by every
 adopted project on the machine -- the wrong tool for deregistering a single
 project. ``unregister`` removes only this project's own ``projects.yaml``
 entry, its ``repos.yaml`` entry (or downgrades it, with
-``--keep-repo-entry``), and its own per-project binstub -- never the shared
-runtime, never another project's registration.
+``--keep-repo-entry``), and its own per-project binstub. It also retires exact,
+unchanged project-owned tool plugin overlay values in the verified anchor/worktree
+family, preserving personal, unrelated and edited values. Cleanup failure retains
+registration for retry. Never touches the shared runtime or another project.
 """
 
 from __future__ import annotations
@@ -23,14 +25,18 @@ from . import output
 def add_parsers(sub) -> None:
     p = sub.add_parser(
         "unregister",
-        help="Deregister this project (projects.yaml + repos.yaml + binstub) -- never touches shared runtime state",
+        help="Deregister this project and retire owned tool plugin overlays -- never the shared runtime",
         description=(
-            "Remove ONLY this project's registration lifecycle: its "
+            "Remove this project's registration lifecycle: its "
             "projects.yaml entry, its repos.yaml entry (or, with "
             "--keep-repo-entry, retain that entry as reference/no-agent; "
             "use '--keep-repo-entry unchanged' to preserve its current "
             "class and agent preference), and its own "
-            "per-project binstub. Never touches the shared "
+            "per-project binstub. Retire unchanged project-owned tool plugin "
+            "overlay values in its verified anchor/worktree family; preserve "
+            "personal, unrelated and edited settings. Partial cleanup failure "
+            "retains registration for retry, not a whole-family atomic rollback. "
+            "Never touches the shared "
             "~/.agent-worktrees runtime (venv/lib/bin) or shared config "
             "(config.yaml, accounts.yaml), and never touches any OTHER "
             "project's registration. Use this to deregister a stale/broken "
@@ -112,7 +118,7 @@ def _unregister_blockers(project: str) -> list[str]:
 
 
 def cmd_unregister(args: argparse.Namespace) -> int:
-    """Deregister a project's adoption lifecycle -- never the shared runtime."""
+    """Deregister adoption and retire owned tool overlays, never shared runtime."""
     from . import pr_authority
 
     try:
@@ -156,6 +162,14 @@ def _unregister_guarded(args: argparse.Namespace) -> int:
             f"{', '.join(blockers)} (--force)"
         )
         output.warn("Explicit --force does not settle the outstanding work or its claims.")
+
+    from . import copilot_plugin_profile as tool
+    try:
+        for summary in tool.retire_project(project):
+            output.changed(f"Retired project tool settings: {summary['checkout']}")
+    except (OSError, RuntimeError, ValueError) as exc:
+        output.err(str(exc))
+        return 1
 
     try:
         for path in inst.remove_project_binstub(project):

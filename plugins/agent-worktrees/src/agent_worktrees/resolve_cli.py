@@ -695,10 +695,13 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
             return output._json_error(launch_preflight.error, exit_code=3)
-        if not getattr(state.args, "defer_projections", False):
-            local_cache_refresh.prepare_for_launch(
-                work_dir, dry_run=getattr(state.args, "dry_run", False)
+        try:
+            local_cache_refresh.prepare_admitted_launch(
+                work_dir, dry_run=getattr(state.args, "dry_run", False),
+                defer_projections=getattr(state.args, "defer_projections", False), config=config,
             )
+        except local_cache_refresh.ToolRosterAdmissionError as exc:
+            return output._json_error(str(exc), exit_code=3)
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -874,7 +877,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             worktree_trust.prepare_for_launch(
                 record, config, defer_projections=getattr(state.args, "defer_projections", False),
             )
-        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+        except (permissions.FolderTrustError, ExecutionSpaceError, local_cache_refresh.ToolRosterAdmissionError) as exc:
             return output._json_error(str(exc), exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(

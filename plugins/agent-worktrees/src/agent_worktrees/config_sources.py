@@ -198,6 +198,17 @@ def compose_ordinary_preferences(
     return compose(context, layers)
 
 
+def parse_plugin_profile(value: object) -> str | None:
+    """Parse native repository selection metadata, not portable preferences.
+
+    Anchor-relative path custody remains with the tool-overlay preparation owner;
+    this parser never acquires a knowledge binding or treats provenance as a grant.
+    """
+    if value is not None and (not isinstance(value, str) or not value.strip()):
+        raise ValueError("copilot_plugin_profile must be a non-empty relative path or null")
+    return value
+
+
 def ordinary_preference_values(*layers):
     """Defaults < repository/knowledge < machine < exact preferences.
 

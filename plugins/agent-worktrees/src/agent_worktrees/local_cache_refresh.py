@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import subprocess
 import sys
@@ -21,6 +21,10 @@ RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", 
 DEFAULT_TIMEOUT_S = 120.0
 
 
+class ToolRosterAdmissionError(RuntimeError):
+    """The selected project tool settings are not safe to launch."""
+
+
 @dataclass(frozen=True)
 class RefreshResult:
     status: RefreshStatus
@@ -35,6 +39,7 @@ class RefreshResult:
     elapsed_ns: int | None = None
     publication_revision: str = ""
     counts_known: bool = True
+    tool_roster_blocked: bool = field(default=False, kw_only=True)
 
     @property
     def diagnostic(self) -> str:
@@ -137,6 +142,11 @@ def prepare_for_launch(
     if dry_run:
         return RefreshResult("skipped", detail="dry-run launch")
     with step("Preparing instruction projections"):
+        try:
+            prepare_tool_roster(repo_root, config=config)
+        except ToolRosterAdmissionError as exc:
+            result = RefreshResult("failed", blocking=1, detail=str(exc), tool_roster_blocked=True)
+            return _report(result)
         if compose_pair:
             from . import knowledge_plugins
 
@@ -147,6 +157,30 @@ def prepare_for_launch(
                 print(result.diagnostic, file=sys.stderr, flush=True)
                 return _report(result)
         return refresh_local_cache(repo_root, timeout=None)
+
+
+def prepare_tool_roster(repo_root: str | Path, *, config: Config | None = None) -> None:
+    from . import copilot_plugin_profile as tool
+
+    try:
+        tool.prepare_checkout(repo_root, config=config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ToolRosterAdmissionError(f"tool plugin preparation failed: {exc}") from exc
+
+
+def prepare_admitted_launch(
+    repo_root: str | Path, *, dry_run: bool = False, defer_projections: bool = False,
+    compose_pair: bool = False, config: Config | None = None,
+) -> None:
+    """Block tool-roster failures without changing optional guidance-copy policy."""
+    if dry_run:
+        return
+    if defer_projections:
+        prepare_tool_roster(repo_root, config=config)
+        return
+    result = prepare_for_launch(repo_root, compose_pair=compose_pair, config=config)
+    if getattr(result, "tool_roster_blocked", False):
+        raise ToolRosterAdmissionError(result.detail)
 
 
 def refresh_local_cache(

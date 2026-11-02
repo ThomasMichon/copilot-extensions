@@ -58,7 +58,7 @@ def fake_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(
         installation_cli_mod.inst,
         "read_projects_registry",
-        lambda: {"projects": dict(registry["projects"])},
+        lambda *, strict=False: {"projects": dict(registry["projects"])},
     )
 
     def _write(reg, path=None):
@@ -133,6 +133,19 @@ def test_unregister_retention_parser(flags: list[str], expected: bool | str) -> 
     parser = argparse.ArgumentParser()
     unregister_cli_mod.add_parsers(parser.add_subparsers())
     assert parser.parse_args(["unregister", *flags]).keep_repo_entry == expected
+
+
+def test_unregister_help_discloses_tool_checkout_retirement(capsys):
+    parser = argparse.ArgumentParser()
+    unregister_cli_mod.add_parsers(parser.add_subparsers())
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["unregister", "--help"])
+    assert exc.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "project-owned tool plugin overlay values" in help_text
+    assert "verified anchor/worktree family" in help_text
+    assert "preserve personal, unrelated and edited settings" in help_text
+    assert "Partial cleanup failure retains registration for retry" in help_text
 
 
 def test_unregister_removes_projects_yaml_entry_only(fake_runtime, monkeypatch):

@@ -118,6 +118,18 @@ def validate(tmp_path, routing, ci):
     return GUARD.validate_workflow(path)
 
 
+@pytest.mark.parametrize("fallback", [False, True], ids=["accelerated", "fallback"])
+def test_workflow_loader_preserves_scalar_strings_and_rejects_malformed_input(tmp_path, monkeypatch, fallback):
+    if fallback:
+        monkeypatch.delattr(yaml, "CBaseLoader", raising=False)
+    path = tmp_path / "workflow.yml"
+    path.write_text("on: true\ncount: 7\nstamp: 2026-01-01\n", encoding="utf-8")
+    assert GUARD._load(path) == ({"on": "true", "count": "7", "stamp": "2026-01-01"}, [])
+    path.write_text("{", encoding="utf-8")
+    value, errors = GUARD._load(path)
+    assert value is None and errors and "cannot load" in errors[0]
+
+
 def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []

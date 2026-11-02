@@ -266,6 +266,9 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
     for name in ("anchor", "worktree_root", "default_branch", "remote"):
         if name in repo and not isinstance(repo[name], str):
             return f"{location}.{name} must be a string"
+    profile = repo.get("copilot_plugin_profile")
+    if profile is not None and (not isinstance(profile, str) or not profile.strip()):
+        return f"{location}.copilot_plugin_profile must be a non-empty relative path or null"
     for name in ("base_repo", "stateless", "requires_external_state_root"):
         if name in repo and not isinstance(repo[name], bool):
             return f"{location}.{name} must be a boolean"
