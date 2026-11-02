@@ -676,3 +676,34 @@ def test_empty_entry_for_a_fleet_without_a_fragment_keeps_existing_behavior(
 
     assert cfg.fleets["own"].size == 1
     assert "example" in cfg.fleets
+
+
+def _sample_merge(*operator: tuple[str, dict]):
+    fragment = plugin_config.PluginFragment(
+        plugin="example-harness@example", path=Path("/plugin/containers.yaml"),
+        fleets={"sample": {"image": "shipped:v1", "environment": {"SHIPPED": "1"}}},
+    )
+    layers = [({"id": layer_id, "tier": "repository"}, {"fleets": fleets})
+              for layer_id, fleets in operator]
+    effective: dict = {}
+    for _, values in layers:
+        effective.update(values["fleets"])
+    return plugin_config.merge_fragments(
+        {"fleets": effective}, [fragment], provenance={}, layers=[], operator_layers=layers,
+    )
+
+
+def test_whole_fleet_reset_then_rebuild_keeps_only_the_rebuilt_values():
+    data, provenance, _, _ = _sample_merge(
+        ("repository", {"sample": None}), ("machine", {"sample": {"image": "rebuilt:v2"}}),
+    )
+    assert data["fleets"]["sample"] == {"image": "rebuilt:v2"}
+    assert {p: o["id"] for p, o in provenance.items()} == {"/fleets/sample/image": "machine"}
+
+
+def test_terminal_whole_fleet_reset_does_not_restore_shipped_values():
+    data, provenance, _, summaries = _sample_merge(("repository", {"sample": None}))
+    assert "sample" not in data["fleets"]
+    assert provenance == {"/fleets/sample": {"id": "repository", "tier": "repository",
+                                             "removed": True}}
+    assert summaries[0]["removed"] == ["sample"]
