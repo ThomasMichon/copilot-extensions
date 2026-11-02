@@ -5,7 +5,8 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
-Killswitch, Config Migrate, Configuration Layers, Dropin Registry, Endpoint Rendezvous, Installation Context, Lazy CLI Dispatch,
+Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
+Endpoint Rendezvous, Installation Context, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Session Liveness Probe and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -25,6 +26,7 @@ python tools/typecheck.py lib-bootstrap-killswitch
 python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-configuration-layers
+python tools/typecheck.py lib-core-delegation
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py lib-installation-context
@@ -68,6 +70,14 @@ retain explicit `dict[str, Any]` boundaries. Optional reads retain their
 `None` result and callers narrow it before use. Runtime validation, precedence,
 source ownership and Python/Node parity are unchanged. The four synchronized
 standalone payload copies remain independently pending with their consumers.
+
+Core Delegation checks all five canonical source/test files on both declared
+targets. Its protocol-agnostic JSON request/response dictionaries retain
+explicit dynamic values; the existing decoded-object check and nullable
+fall-through remain intact. Socket addresses and the pointer-correct Windows
+API signatures are typed without adding a runtime wrapper or changing native
+calls. Real loopback/rendezvous tests remain separate from static analysis;
+the existing Unix-socket skip still applies on Windows.
 
 Bootstrap Killswitch checks all three canonical Python source/test files in
 the base environment on both declared targets. State documents expose
