@@ -24,9 +24,17 @@ Before invoking that new verb, Manager probes the actual resident through the
 existing provider-owned `worktrees_client.read_health()` API in a separate,
 isolated process using the same resolved interpreter. It does not enter the
 legacy `agent_worktrees.__main__` dispatcher, where an unknown verb may launch.
-The probe requires `worktree-agendas-v1`, ready roster authority and a valid
-resident generation. Missing/offline/malformed/failed probes refuse without
+The probe requires a mutually supported agenda contract, ready roster authority
+and a valid resident generation. It prefers `worktree-agendas-v2` only when the
+same selected CLI declares version-2 support, and otherwise uses the supported
+version-1 legacy lane. The existing probe supplies selected-CLI contract
+declarations without another RPC or process; a recognized older probe/CLI has
+the version-1 baseline, never guessed version-2 support.
+Missing/offline/malformed/failed probes refuse without
 sending any agenda argv; the owning feed CLI rechecks capability afterward.
+Only a negotiated version-2 command appends `--contract-version 2`. Version-1
+commands retain the exact legacy argv above, so an older CLI is not asked to
+parse a new flag merely because its resident upgraded.
 Every reconnect reprobes, and the feed retains the exact argv captured before
 that probe rather than resolving a different provider afterward.
 The probe's internal error envelope retains typed codes: connection and timeout
@@ -58,7 +66,7 @@ agenda changes.
 
 ## Admission and lifetime
 
-Version-1 feed frames are one complete JSON object per newline, at most 35 KiB
+Version-1 and version-2 feed frames are one complete JSON object per newline, at most 35 KiB
 including the delimiter. The first publication is `snapshot`; later `update`
 publications have the same 32-lowercase-hex resident generation and strictly
 increasing integer sequence. Heartbeats and going-away notices retain the current
@@ -71,7 +79,9 @@ The worker retains last-publication evidence separately from the last observed
 store revision/body. `not-published` clears presentation but never erases that
 observed high-water fence. A same-generation, equal-sequence reconnect is admitted
 only when its complete publication is semantically identical; the envelope's
-`snapshot` versus `update` type alone does not make it different. A greater
+`snapshot` versus `update` type, or an explicitly negotiated outer contract
+version carrying the same legacy observation, does not make it different. The
+connection still rejects an unnegotiated version change. A greater
 sequence permits a truthful change, and a new generation may reset sequence,
 but neither can rewrite or regress an already observed revision of the same store.
 These bounded fences are copied away from mutable display data and updated only
@@ -80,14 +90,25 @@ replacing that store fails visibly, matching the provider's refusal of an
 unregistered same-head store change rather than inventing a registration capability
 or silently evicting old evidence.
 
-The observation must carry `efforts.agenda-observation` version 1, the requested
+The observation must carry a supported `efforts.agenda-observation` version, the requested
 worktree/session, a 32-hex store ID, positive revision, UTC commit timestamp, and
 the complete versioned snapshot. Domain data stays display-only; structural wire
 validation is not a replacement for the efforts owner's movement/budget validator.
 The current snapshot uses a text root, text-list stack/exits/queue/notes/rechecks,
 a text-map declared-outcomes field and an integer parked count. Nullable action
 and revisit text remains display-only. Core fields are exact, cursor versions
-1/2 are supported, and observations are capped at 32 KiB.
+1/2 require observation version 1. A negotiated version-2 envelope accepts that
+unchanged legacy body or observation version 2 with execution cursor 4,
+with statuses exactly `working`, `waiting`, `replanning` and `complete`.
+Legacy observation-version-1 `steering` remains accepted, but cursor-4
+`steering` is refused; this does not add a human-prompt policy.
+Cursor 3 remains unsupported. A version-1
+request for a current cursor-4 publication fails explicitly instead of displaying
+an older body or relabeling it. Observations remain capped at 32 KiB.
+The Snapshot field set is unchanged: full new queue/attempt/context data belongs
+to the canonical planning state/read/history, not a second Manager store.
+Display delivery does not prove that a revisit was productive, approve a
+continuation, or grant a resource/permission change.
 Admission also bounds strings to 4 KiB (no NUL), nesting to 16, container members
 to 128 and integers to signed 63-bit magnitude. The preflight has a five-second
 owned-command deadline; startup and each subsequent complete frame have a
@@ -172,6 +193,28 @@ exact committed-body equality, a pushed parked-count change, offline pending
 delivery without mutation replay, recovery publication, immutable original
 acceptance, canonical head-change clearing and birth-qualified child/subscriber
 settlement. It does not extend native/platform or rollout qualification.
+
+Its `context_qualified` selectors use the actual request-v2 core CLI, store and
+provider adapter, with explicit source/discovery binding in the disposable
+interpreter. They assert tail-queue ordering, nested subqueues and saved parent
+attempts, context-qualified same-command revisits, duplicate-context refusal,
+definition/origin retention, deferred resume-only recovery and immutable
+operation history independently of delivery. The committed observation must
+then pass the resident and held CLI and appear unchanged in the real Textual
+widget. A provider adapter returning pending/unsupported at its parser boundary
+is a failing joined witness, not proof of successful delivery or planning
+progress. The old-resident selector separately requires pending delivery without
+publication, default-launch fallback or canonical mutation replay.
+The joined deferred case uses explicit `assign-root` work while the original
+stack is retained: it does not clone, fork or reopen the original item, and
+cross-root reuse is refused before acceptance. It completes that assigned root
+and recovers the exact original frame/pending order/attempt. Additional actual
+v2 cases reconnect to the latest committed body, reject stale publications,
+clear observations on a canonical head change, and keep a correctly selected
+new-head subscription until its first publication. These checks retain the
+same 15-field projection and verify root/deferred/time/ancestor-tail and
+continuation-action visibility without treating delivery as external permission
+or completed physical execution.
 
 Until the new file is tracked by its coordinator, run the wrapper's explicit
 untracked-source option instead of modifying the shared index:

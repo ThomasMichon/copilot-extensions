@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import importlib
 import json
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import time
 from threading import Event
@@ -31,6 +33,12 @@ SOURCE_PATHS = [
     ROOT / "libs/config-migrate/src",
     ROOT / "libs/lazy-cli-dispatch/src",
     ROOT / "libs/repository-policy/src",
+    *[ROOT / "libs" / name / "src" for name in (
+        "configuration-layers", "plugin-resolve", "agent-procutil", "dropin-registry",
+        "plugin-activation", "zdd", "single-instance-lease", "work-coalescing-singleton",
+        "remote-login-shell", "machine-transport", "worktree-identity", "update-telemetry",
+        "update-driver",
+    )],
 ]
 
 _ENTRY = """
@@ -202,6 +210,44 @@ def chain(tmp_path: Path, monkeypatch, request):
     argv = [sys.executable, str(entry), str(configuration)]
     monkeypatch.setattr(engine_client, "engine_base_command", lambda: list(argv))
     monkeypatch.setattr(agenda_transport, "health_argv", lambda base: [*base, "--resident-health"])
+    provider_python = sys.executable
+    if getattr(request, "param", None) == "context-qualified":
+        bootstrap = tmp_path / "provider-binding"
+        bootstrap.mkdir()
+        binding = (
+            "import json,sys\nfrom pathlib import Path\n"
+            "assert sys.flags.isolated == 1\n"
+            f"configuration=json.loads(Path({str(configuration)!r}).read_text(encoding='utf-8'))\n"
+            "sys.path[:0]=configuration['source_paths']\n"
+            "from agent_worktrees import agenda_cli,config,locks,tracking,worktrees_client\n"
+            "from agent_worktrees.status_monitor_cutover import ControlClient\n"
+            "def client():\n"
+            "    return ControlClient(configuration['endpoint'],token=configuration['token'],timeout=2)\n"
+            "def locator(wid,repo=None):\n"
+            "    if wid != configuration['worktree'] or repo not in (None,configuration['project']):\n"
+            "        raise ValueError('fixture tracking selection mismatch')\n"
+            "    return Path(configuration['records'])\n"
+            "config.project_name=lambda:configuration['project']\n"
+            "tracking._owning_tracking_dir=locator\n"
+            "agenda_cli._control_client=client\n"
+            "worktrees_client._control_client=client\n"
+            "with Path(configuration['trace']).open('a',encoding='utf-8') as trace:\n"
+            "    trace.write(json.dumps({'pid':__import__('os').getpid(),"
+            "'birth':locks.process_start_time(__import__('os').getpid()),'argv':sys.argv})+'\\n')\n"
+        )
+        selected = bootstrap / "selected-python"
+        selected.write_text(
+            f"#!{sys.executable} -I\n"
+            "import os,sys\n"
+            "assert sys.flags.isolated == 1\n"
+            "assert sys.argv[1:4] == ['-I','-B','-c']\n"
+            f"binding={binding!r}\n"
+            "code=binding+'\\n'+sys.argv[4]\n"
+            "os.execv(sys.executable,[sys.executable,'-I','-B','-c',code,*sys.argv[5:]])\n",
+            encoding="utf-8",
+        )
+        selected.chmod(0o700)
+        provider_python = str(selected)
 
     board = json.loads((SKILL / "assets/agenda.example.json").read_text())
     cursor = json.loads((SKILL / "assets/cursor.example.json").read_text())
@@ -230,6 +276,7 @@ def chain(tmp_path: Path, monkeypatch, request):
             "owner": owner, "server": server, "argv": argv, "endpoint": endpoint,
             "endpoint_discovery": endpoint_discovery, "actions": actions,
             "settled": settled, "trace": trace, "wake": wake,
+            "provider_python": provider_python, "configuration": configuration,
         }
     finally:
         owner.close_admission("closed")
@@ -398,6 +445,583 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
         assert sum(action == "health" for action, _ in chain["actions"]) >= 7
         assert sum(action == "agenda-publish" for action, _ in chain["actions"]) == 4
 
+    asyncio.run(check())
+
+
+def context_request(change, revision, operation_id):
+    return {
+        "schema": "efforts.agenda-request", "version": 2, "mode": "context-qualified",
+        "expected_revision": revision, "operation_id": operation_id, "change": change,
+    }
+
+
+def context_board():
+    names = (
+        "parent", "sibling-a", "sibling-b", "investigate-a", "investigate-b",
+        "nested", "tail", "authorized-other",
+    )
+    return {
+        "version": 2, "source": {"kind": "task", "ref": "fixture-assignment"}, "revision": 1,
+        "items": {name: {
+            "source_ref": f"fixture/{name}", "scope_ref": "assigned-fixture", "action": f"Run {name}",
+            "exit": [f"{name} result recorded"],
+            "on": {"done": "advance", "blocked": "wait", "no-progress": "replan"},
+            "relevant_subjects": ["dataset"],
+        } for name in names},
+        "order": ["parent", "sibling-a", "sibling-b"],
+    }
+
+
+def context_facts(value, *, evidence_ref="fixture-input"):
+    return {"facts": [{
+        "kind": "input", "subject": "dataset", "value": value, "evidence_ref": evidence_ref,
+    }]}
+
+
+def context_head(state):
+    cursor = state["documents"]["cursor"]
+    frame = cursor["frames"][-1]
+    item = cursor["frame_state"][frame]["pending"][0]
+    return frame, item, cursor["item_state"][item]["current_attempt_id"]
+
+
+def context_cli(
+    chain, tmp_path, command, request=None, *, deliver=False, expected_exit=0, session="head-a",
+):
+    argv = [
+        sys.executable, "-B", str(SKILL / "scripts" / "agenda_cli.py"),
+        command, "--state-home", str(chain["home"]),
+    ]
+    if request is not None:
+        path = tmp_path / f"{request['operation_id']}.json"
+        path.write_text(json.dumps(request), encoding="utf-8")
+        argv += ["--request", str(path), "--session", session, "--actor", "synthetic-test"]
+        if command == "init":
+            argv += ["--mode", "context-qualified"]
+    if deliver:
+        argv += ["--publisher-python", chain["provider_python"], "--publisher-project", "example"]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    assert result.returncode == expected_exit, f"actual core CLI failed: {result.stderr}"
+    if expected_exit:
+        assert result.stderr and not result.stdout
+        return {"exit_code": result.returncode, "diagnostic": result.stderr}
+    return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("chain", ["context-qualified"], indirect=True)
+@pytest.mark.timeout(120)
+def test_context_qualified_core_cli_subqueues_revisits_and_delivery_reach_textual(chain, tmp_path):
+    store, home, owner = chain["store"], chain["home"], chain["owner"]
+    initial = context_request({
+        "operation": "init", "worktree": "selected", "board": context_board(),
+        "baseline_context": context_facts({"content": "initial"}),
+        "resource_caps": {"max_depth": 4, "max_pending_items": 32,
+                          "max_deferred_frames": 4, "max_no_parent_progress": 4},
+    }, 0, "context-init")
+
+    def cli(command, request=None, *, deliver=False):
+        return context_cli(chain, tmp_path, command, request, deliver=deliver)
+
+    def read():
+        return cli("read")
+
+    def evidence(criterion):
+        return [{"criterion": criterion, "kind": "measured",
+                 "ref": "synthetic-result", "inputs": "fixture revision"}]
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail=f"version-2 first snapshot unavailable: {widget(app)}",
+            )
+            data, worker = app._data, app._agenda_worker
+            assert data.agenda["contract_version"] == 2
+            assert data.agenda["availability"] == "not-published"
+            initial_output = await asyncio.to_thread(cli, "init", initial)
+            accepted = deepcopy(initial_output["result"])
+            state = await asyncio.to_thread(read)
+            assert state["snapshot"]["cursor_version"] == 4
+            assert data.agenda["availability"] == "not-published"
+            root_frame, root_item, root_attempt = context_head(state)
+            original_records = deepcopy(state["records"])
+            original_source = deepcopy(state["documents"]["boards"]["root"]["source"])
+            original_root = state["snapshot"]["root"]
+
+            async def publish():
+                output = await asyncio.to_thread(cli, "publish", deliver=True)
+                assert output["delivery"]["state"] == "delivered", (
+                    f"actual core-v2 provider adapter rejected the committed body: {output}"
+                )
+                return output
+
+            async def receive(state):
+                await eventually(
+                    pilot, lambda: data.agenda is not None
+                    and data.agenda["observation"] is not None
+                    and data.agenda["observation"]["revision"] == state["revision"],
+                    detail=f"actual committed revision {state['revision']} did not reach Textual: {widget(app)}",
+                )
+                assert data.agenda["contract_version"] == 2
+                assert data.agenda["observation"] == store.delivery_record(home)[1]
+                assert data.agenda["observation"]["version"] == 2
+                assert data.agenda["observation"]["snapshot"] == state["snapshot"]
+                assert app._data is data and app._agenda_worker is worker
+                for identity, record in original_records.items():
+                    assert state["records"][identity] == record
+                assert state["documents"]["boards"]["root"]["source"] == original_source
+
+            await publish()
+            await receive(state)
+            assert "fixture-assignment / parent" in widget(app)
+
+            async def change(operation):
+                before = await asyncio.to_thread(read)
+                request = context_request(operation, before["revision"], f"context-op-{before['revision']}")
+                output = await asyncio.to_thread(cli, "update", request)
+                current = await asyncio.to_thread(read)
+                assert output["result"]["persisted"] and current["revision"] == before["revision"] + 1
+                assert data.agenda["observation"]["revision"] == before["revision"]
+                await publish()
+                await receive(current)
+                return output["result"], current
+
+            async def outcome(value="done"):
+                current = await asyncio.to_thread(read)
+                frame, item, attempt = context_head(current)
+                return await change({
+                    "operation": "outcome", "frame_id": frame, "item_id": item,
+                    "attempt_id": attempt, "outcome": value,
+                    "evidence": evidence(current["snapshot"]["exit_criteria"][0]),
+                })
+
+            _, state = await change({
+                "operation": "append", "frame_id": root_frame, "items": [{"definition_ref": "tail"}],
+                "assignment_ref": "assigned-tail", "evidence": evidence("retain original tail order"),
+            })
+            pending = list(state["documents"]["cursor"]["frame_state"][root_frame]["pending"])
+            assert len(pending) == 4 and pending[0] == root_item
+            assert state["snapshot"]["queued"] == [
+                f"{root_frame}: Run sibling-a", f"{root_frame}: Run sibling-b",
+                f"{root_frame}: Run tail",
+            ]
+            await outcome("no-progress")
+            expanded, state = await change({
+                "operation": "expand", "frame_id": root_frame, "item_id": root_item,
+                "attempt_id": root_attempt,
+                "items": [{"definition_ref": "investigate-a"}, {"definition_ref": "investigate-b"}],
+                "continuation": {"parent_item_id": root_item, "next_action": "Reassess parent with child evidence"},
+                "evidence": evidence("bounded investigation"),
+            })
+            child_frame, child_item, child_attempt = context_head(state)
+            assert state["documents"]["cursor"]["frame_state"][root_frame]["pending"] == pending
+            nested, state = await change({
+                "operation": "expand", "frame_id": child_frame, "item_id": child_item,
+                "attempt_id": child_attempt, "items": [{"definition_ref": "nested"}],
+                "continuation": {"parent_item_id": child_item, "next_action": "Use nested result"},
+                "evidence": evidence("nested investigation"),
+            })
+            assert len(state["documents"]["cursor"]["frames"]) == 3
+            assert len(state["snapshot"]["stack"]) == 3
+            assert state["snapshot"]["root"] == original_root
+            queued = "\n".join(state["snapshot"]["queued"])
+            for action in ("Run sibling-a", "Run sibling-b", "Run tail", "Run investigate-b"):
+                assert action in queued
+            await outcome()
+            returned, state = await change({
+                "operation": "return", "frame_id": nested["transition"]["frame_id"],
+                "expansion_id": nested["transition"]["expansion_id"], "acceptance_ref": "nested-accepted",
+                "evidence": evidence("nested acceptance"),
+            })
+            assert context_head(state) == (child_frame, child_item, child_attempt)
+            assert returned["transition"]["attempt_id"] == child_attempt
+            assert state["snapshot"]["next_action"] == returned["transition"]["next_action"]
+            await outcome()
+            await outcome()
+            returned, state = await change({
+                "operation": "return", "frame_id": child_frame,
+                "expansion_id": expanded["transition"]["expansion_id"], "acceptance_ref": "child-accepted",
+                "evidence": evidence("child acceptance"),
+            })
+            assert context_head(state) == (root_frame, root_item, root_attempt)
+            assert state["documents"]["cursor"]["frame_state"][root_frame]["pending"] == pending
+            assert returned["transition"]["attempt_id"] == root_attempt
+            assert state["snapshot"]["next_action"] == returned["transition"]["next_action"]
+            assert state["documents"]["cursor"]["item_state"][root_item]["visits"] == 1
+
+            for value in range(1, 6):
+                if value > 1:
+                    await outcome("no-progress")
+                frame, item, previous = context_head(state if value == 1 else await asyncio.to_thread(read))
+                revisited, state = await change({
+                    "operation": "revisit", "frame_id": frame, "item_id": item,
+                    "predecessor_attempt_id": previous,
+                    "context": context_facts({"content": f"corrected-{value}"}),
+                    "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                                 "causal_change": "Changed relevant input enables the same command.",
+                                 "evidence_refs": ["fixture-input"]},
+                    "approach": {"action": "Run parent"},
+                })
+                transition = revisited["transition"]
+                assert transition["decision"] == "revisit-admitted"
+                assert transition["attempt_id"] != previous
+                assert state["records"][transition["attempt_id"]]["body"]["approach"]["action"] == "Run parent"
+            assert state["documents"]["cursor"]["item_state"][root_item]["visits"] == 6
+            await outcome("no-progress")
+            state = await asyncio.to_thread(read)
+            frame, item, previous = context_head(state)
+            refused, state = await change({
+                "operation": "revisit", "frame_id": frame, "item_id": item,
+                "predecessor_attempt_id": previous,
+                "context": context_facts({"content": "corrected-5"}, evidence_ref="renamed-input-reference"),
+                "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                             "causal_change": "New provenance and prose do not change the complete input.",
+                             "evidence_refs": ["renamed-input-reference"]},
+                "approach": {"action": "Run parent"},
+            })
+            assert refused["transition"]["decision"] == "not-admitted"
+            assert refused["transition"]["reason_code"] == "duplicate-context"
+            assert refused["transition"]["attempt_id"] is None
+            assert context_head(state)[2] == previous
+            assert state["documents"]["cursor"]["item_state"][root_item]["visits"] == 6
+            assert state["snapshot"]["status"] == "replanning" and "replanning" in widget(app)
+            _, state = await change({
+                "operation": "refine", "board_ref": "root", "expected_definition_revision": 1,
+                "patches": [{"definition_id": "parent", "label": "Retained parent",
+                             "source_aliases_append": ["fixture/parent-alias"]}],
+                "evidence": evidence("retain original definition and scope"),
+            })
+            definition = state["documents"]["boards"]["root"]["items"]["parent"]
+            assert definition["source_ref"] == "fixture/parent"
+            assert definition["scope_ref"] == "assigned-fixture"
+            assert definition["source_aliases"] == ["fixture/parent-alias"]
+            before_defer = deepcopy(state["documents"]["cursor"])
+            revisit_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+            deferred, state = await change({
+                "operation": "defer", "frame_id": root_frame,
+                "decision_ref": "fixture-decision", "decision_packet_ref": "fixture-proposal",
+                "revisit_at": revisit_at,
+                "evidence": evidence("preserve stack while awaiting acceptance"),
+            })
+            assert state["documents"]["cursor"]["frames"] == []
+            assert state["snapshot"]["root"] == original_root
+            assert len(state["snapshot"]["deferred"]) == 1
+            assert datetime.fromisoformat(
+                state["snapshot"]["next_revisit_at"].replace("Z", "+00:00"),
+            ) == datetime.fromisoformat(revisit_at)
+            assert state["snapshot"]["due_rechecks"] == []
+            before_other_root = await asyncio.to_thread(read)
+            refused_root = context_request({
+                "operation": "assign-root", "items": [{"definition_ref": "parent"}],
+                "assignment_ref": "cannot-relabel-original",
+                "baseline_context": context_facts({"content": "independent-work"}),
+                "evidence": evidence("original item identity must not be replaced"),
+            }, state["revision"], "context-refuse-root-reuse")
+            refusal = await asyncio.to_thread(
+                context_cli, chain, tmp_path, "update", refused_root, expected_exit=2,
+            )
+            assert refusal["exit_code"] == 2
+            assert await asyncio.to_thread(read) == before_other_root
+            assigned, state = await change({
+                "operation": "assign-root", "items": [{"definition_ref": "authorized-other"}],
+                "assignment_ref": "explicit-other-assignment",
+                "baseline_context": context_facts({"content": "independent-work"}),
+                "evidence": evidence("separate assigned root with original deferred stack retained"),
+            })
+            other_frame = assigned["transition"]["frame_id"]
+            assert assigned["transition"]["decision"] == "root-assigned"
+            cursor = state["documents"]["cursor"]
+            assert cursor["frames"] == [other_frame]
+            assert cursor["deferred"][0]["id"] == deferred["transition"]["deferred_id"]
+            assert cursor["frame_state"][root_frame]["pending"] == pending
+            assert cursor["item_state"][root_item]["current_attempt_id"] == previous
+            assert cursor["item_state"][root_item]["attempts"] == before_defer["item_state"][root_item]["attempts"]
+            assert len(state["snapshot"]["deferred"]) == 1
+            assert state["snapshot"]["deferred"][0]["root"] == original_root
+            other_origin = state["records"][cursor["frame_state"][other_frame]["origin_id"]]["body"]
+            root_origin = state["records"][cursor["frame_state"][root_frame]["origin_id"]]["body"]
+            assert other_origin["root_id"] != root_origin["root_id"]
+            assert "authorized-other" in widget(app)
+            await outcome()
+            state = await asyncio.to_thread(read)
+            assert state["documents"]["cursor"]["frames"] == []
+            assert len(state["snapshot"]["deferred"]) == 1
+            assert state["snapshot"]["root"] == original_root
+            restored, state = await change({
+                "operation": "recover", "deferred_id": deferred["transition"]["deferred_id"],
+                "recheck_ref": "fixture-current-recheck", "acceptance_ref": "fixture-current-acceptance",
+                "attempt_policy": "resume-only", "evidence": evidence("retain original attempt"),
+            })
+            assert restored["transition"]["attempt_id"] == previous
+            assert state["documents"]["cursor"]["frames"] == before_defer["frames"]
+            assert state["documents"]["cursor"]["frame_state"][root_frame]["pending"] == pending
+            assert state["documents"]["cursor"]["item_state"][root_item]["attempts"] == (
+                before_defer["item_state"][root_item]["attempts"]
+            )
+
+            with socket.socket() as offline:
+                offline.bind(("127.0.0.1", 0))
+                chain["endpoint_discovery"](f"http://127.0.0.1:{offline.getsockname()[1]}")
+                waiting = context_request({
+                    "operation": "wait", "frame_id": root_frame, "item_id": root_item,
+                    "reason_kind": "permission", "reason_ref": "fixture-permission-pending",
+                    "next_action": "Read current permission", "evidence": evidence("permission scope"),
+                }, state["revision"], "context-wait")
+                wait_output = await asyncio.to_thread(cli, "update", waiting)
+                pending_delivery = await asyncio.to_thread(cli, "publish", deliver=True)
+                assert wait_output["result"]["persisted"] and pending_delivery["delivery"]["state"] == "pending"
+                pending_state = await asyncio.to_thread(read)
+                assert data.agenda["observation"]["revision"] == state["revision"]
+            chain["endpoint_discovery"](chain["endpoint"])
+            before_retry = deepcopy({key: pending_state[key] for key in (
+                "store_id", "revision", "documents", "metadata", "records", "snapshot",
+            )})
+            await publish()
+            await receive(pending_state)
+            after_retry = await asyncio.to_thread(read)
+            assert after_retry["snapshot"]["next_action"] == waiting["change"]["next_action"]
+            assert {key: after_retry[key] for key in before_retry} == before_retry
+            duplicate = await asyncio.to_thread(cli, "init", initial)
+            assert duplicate["result"] == accepted
+            assert await asyncio.to_thread(read) == after_retry
+            history = await asyncio.to_thread(cli, "history")
+            assert len(history["history"]) == after_retry["revision"]
+            assert data.agenda["observation"]["source"]["store_id"] == accepted["store_id"]
+            assert data.agenda["observation"]["source"]["session"] == "head-a"
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="context-qualified witness retained a reader or child after cancellation",
+            )
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("chain", ["context-qualified"], indirect=True)
+def test_context_qualified_old_resident_keeps_delivery_pending_without_mutation_replay(
+    chain, monkeypatch, tmp_path,
+):
+    owner = chain["owner"]
+    health = owner.health
+
+    def old_health():
+        result = health()
+        result["capabilities"] = [
+            capability for capability in result["capabilities"] if capability != "worktree-agendas-v2"
+        ]
+        return result
+
+    monkeypatch.setattr(owner, "health", old_health)
+    initial = context_request({
+        "operation": "init", "worktree": "selected", "board": context_board(),
+        "baseline_context": context_facts({"content": "initial"}),
+        "resource_caps": {"max_depth": 4, "max_pending_items": 32,
+                          "max_deferred_frames": 4, "max_no_parent_progress": 4},
+    }, 0, "context-init")
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail=f"legacy held snapshot unavailable: {widget(app)}",
+            )
+            assert app._data.agenda["contract_version"] == 1
+            assert app._data.agenda["availability"] == "not-published"
+            accepted = await asyncio.to_thread(context_cli, chain, tmp_path, "init", initial)
+            state = await asyncio.to_thread(context_cli, chain, tmp_path, "read")
+            assert accepted["result"]["persisted"] and state["snapshot"]["cursor_version"] == 4
+            for _ in range(2):
+                delivered = await asyncio.to_thread(
+                    context_cli, chain, tmp_path, "publish", deliver=True,
+                )
+                assert delivered["delivery"]["state"] == "pending"
+                assert delivered["delivery"]["error"]["code"] == "unsupported"
+                after = await asyncio.to_thread(context_cli, chain, tmp_path, "read")
+                assert {
+                    key: after[key] for key in after if key != "delivery"
+                } == {key: state[key] for key in state if key != "delivery"}
+            assert app._data.agenda["observation"] is None
+            assert not any(action == "agenda-publish" for action, _ in chain["actions"])
+            assert len(chain["store"].history(chain["home"])) == 1
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="old-provider pending delivery retained a reader or child",
+            )
+    asyncio.run(check())
+
+
+def context_init():
+    return context_request({
+        "operation": "init", "worktree": "selected", "board": context_board(),
+        "baseline_context": context_facts({"content": "initial"}),
+        "resource_caps": {"max_depth": 4, "max_pending_items": 32,
+                          "max_deferred_frames": 4, "max_no_parent_progress": 4},
+    }, 0, "context-init")
+
+
+@pytest.mark.parametrize("chain", ["context-qualified"], indirect=True)
+def test_context_qualified_reconnect_reads_current_body_and_rejects_stale_publication(
+    chain, monkeypatch, tmp_path,
+):
+    from agent_worktrees.status_monitor_cutover import ControlClient
+
+    owner, server, store, home = chain["owner"], chain["server"], chain["store"], chain["home"]
+    context_cli(chain, tmp_path, "init", context_init())
+    assert context_cli(chain, tmp_path, "publish", deliver=True)["delivery"]["state"] == "delivered"
+    original_body = deepcopy(store.delivery_record(home)[1])
+    original_stream = server.stream_handle
+    disconnect = Event()
+    calls = []
+
+    def stream(action, payload, disconnected):
+        if action != "agenda-feed":
+            return original_stream(action, payload, disconnected)
+        calls.append(payload["contract_version"])
+        if len(calls) != 1:
+            return original_stream(action, payload, disconnected)
+
+        def first():
+            inner = original_stream(action, payload, disconnected)
+            try:
+                yield next(inner)
+                assert disconnect.wait(15), "test did not close the first actual v2 stream"
+            finally:
+                inner.close()
+        return first()
+
+    monkeypatch.setattr(server, "stream_handle", stream)
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        try:
+            async with app.run_test() as pilot:
+                await eventually(
+                    pilot, lambda: app._data.agenda is not None,
+                    detail=f"first v2 observation unavailable: {widget(app)}",
+                )
+                data, worker = app._data, app._agenda_worker
+                assert data.agenda["observation"] == original_body
+                state = await asyncio.to_thread(context_cli, chain, tmp_path, "read")
+                frame, _item, _attempt = context_head(state)
+                appended = context_request({
+                    "operation": "append", "frame_id": frame, "items": [{"definition_ref": "tail"}],
+                    "assignment_ref": "tail-during-disconnect",
+                    "evidence": [{"criterion": "retain queue", "kind": "measured",
+                                  "ref": "synthetic", "inputs": "revision 1"}],
+                }, state["revision"], "context-disconnect-append")
+                await asyncio.to_thread(context_cli, chain, tmp_path, "update", appended)
+                delivery = await asyncio.to_thread(context_cli, chain, tmp_path, "publish", deliver=True)
+                assert delivery["delivery"]["state"] == "delivered"
+                current_body = deepcopy(store.delivery_record(home)[1])
+                assert data.agenda["observation"] == original_body
+                disconnect.set()
+                await eventually(
+                    pilot, lambda: data.agenda is not None
+                    and data.agenda["observation"] == current_body,
+                    detail=f"v2 reconnect did not admit a current snapshot: {widget(app)}",
+                )
+                assert data.agenda["type"] == "snapshot" and data.agenda["contract_version"] == 2
+                assert app._data is data and app._agenda_worker is worker
+                assert calls == [2, 2]
+                client = ControlClient(chain["endpoint"], token=server.token)
+                rejected = await asyncio.to_thread(client._request, "agenda-publish", {
+                    "contract_version": 2, "project": "example",
+                    "expected_generation": owner.store.generation, "observation": original_body,
+                })
+                assert rejected["ok"] is False and rejected["error"]["code"] == "stale-revision"
+                assert owner.agendas.read({
+                    "contract_version": 2, "project": "example",
+                    "worktree_id": "selected", "session_id": "head-a",
+                })["observation"] == current_body
+                assert len(store.history(home)) == 2
+                await pilot.press("escape")
+                await eventually(
+                    pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                    detail="v2 reconnect retained an owned reader or child",
+                )
+        finally:
+            disconnect.set()
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("chain", ["context-qualified"], indirect=True)
+def test_context_qualified_new_head_waits_for_its_first_publication_and_fences_late_source(
+    chain, tmp_path,
+):
+    from agent_worktrees.status_monitor_cutover import ControlClient
+
+    owner, store, home = chain["owner"], chain["store"], chain["home"]
+    context_cli(chain, tmp_path, "init", context_init())
+    assert context_cli(chain, tmp_path, "publish", deliver=True)["delivery"]["state"] == "delivered"
+    old_body = deepcopy(store.delivery_record(home)[1])
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail="original v2 head observation unavailable",
+            )
+            record = chain["tracking"].load_record(chain["record_path"])
+            record.sessions.append(chain["tracking"].SessionEntry("head-b", "2026-11-01T08:00:00Z"))
+            record.head_session = "head-b"
+            record.head_revision += 1
+            record.lifecycle_revision += 1
+            chain["tracking"].save_record(record, chain["record_path"])
+            await eventually(
+                pilot, lambda: app._data.agenda is not None
+                and app._data.agenda["availability"] == "head-changed",
+                detail="actual canonical head change did not invalidate v2 publication",
+            )
+            assert app._data.agenda["observation"] is None
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="old v2 head reader did not settle before admitting a new UI",
+            )
+            await pilot.press("escape")
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail="new-head v2 snapshot unavailable",
+            )
+            assert app._data.agenda["session_id"] == "head-b"
+            assert app._data.agenda["availability"] == "not-published"
+            assert app._data.agenda["observation"] is None and owner.agendas.feed.active_count() == 1
+            state = await asyncio.to_thread(context_cli, chain, tmp_path, "read")
+            frame, _item, _attempt = context_head(state)
+            appended = context_request({
+                "operation": "append", "frame_id": frame, "items": [{"definition_ref": "tail"}],
+                "assignment_ref": "new-head-tail",
+                "evidence": [{"criterion": "retain previous queue", "kind": "measured",
+                              "ref": "synthetic", "inputs": "revision 1"}],
+            }, state["revision"], "context-new-head-append")
+            await asyncio.to_thread(
+                context_cli, chain, tmp_path, "update", appended, session="head-b",
+            )
+            delivery = await asyncio.to_thread(context_cli, chain, tmp_path, "publish", deliver=True)
+            assert delivery["delivery"]["state"] == "delivered"
+            current_body = store.delivery_record(home)[1]
+            await eventually(
+                pilot, lambda: app._data.agenda is not None
+                and app._data.agenda["observation"] == current_body,
+                detail="new head did not receive its first actual v2 publication",
+            )
+            assert current_body["source"]["session"] == "head-b"
+            client = ControlClient(chain["endpoint"], token=chain["server"].token)
+            rejected = await asyncio.to_thread(client._request, "agenda-publish", {
+                "contract_version": 2, "project": "example",
+                "expected_generation": owner.store.generation, "observation": old_body,
+            })
+            assert rejected["error"]["code"] == "head-changed"
+            assert app._data.agenda["observation"] == current_body
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="new-head v2 publication retained an owned reader or child",
+            )
     asyncio.run(check())
 
 

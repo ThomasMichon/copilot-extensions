@@ -22,7 +22,7 @@ from .companion_client import cancellable_read_runner
 from .agenda_contract import bounded_json
 from .engine_environment import _engine_environment
 from .engine_posix_process import _OWNER, read_completion_receipt
-from .agenda_contract import AgendaUnavailable, MAX_FRAME_BYTES, _TRANSIENT_ERRORS
+from .agenda_contract import AgendaUnavailable, CONTRACT_VERSIONS, MAX_FRAME_BYTES, _TRANSIENT_ERRORS
 
 STARTUP_TIMEOUT = 5.0
 IDLE_TIMEOUT = 5.0
@@ -32,7 +32,23 @@ import errno,json,sys
 try:
     from agent_worktrees.worktrees_client import read_health
     health = read_health()
-    result = {"ok": True, "health": health}
+    versions = (1,)
+    if (isinstance(health,dict) and isinstance(health.get("worktrees"),dict)
+        and health["worktrees"].get("status") == "ready"
+        and isinstance(health.get("capabilities"),list)
+        and any(cap in health["capabilities"] for cap in ("worktree-agendas-v1","worktree-agendas-v2"))):
+        try:
+            from agent_worktrees import agenda_contract
+        except ImportError:
+            print(json.dumps({"ok":False,"error":{"code":"unsupported",
+                "message":"selected CLI has no agenda command contract"}}),flush=True)
+            sys.exit(0)
+        versions = getattr(agenda_contract,"CONTRACT_VERSIONS",None)
+        if versions is None:
+            if getattr(agenda_contract,"CAPABILITY",None) != "worktree-agendas-v1":
+                raise ValueError("selected CLI has no supported agenda contract declaration")
+            versions = (1,)
+    result = {"ok": True, "health": health, "cli_contract_versions": list(versions)}
     raw = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     if len(raw.encode("utf-8")) > 35 * 1024:
         raise ValueError("resident health exceeds its response bound")
@@ -103,7 +119,7 @@ def health_argv(base: list[str]) -> list[str]:
 def require_capability(
     base: list[str], *, cancelled: Event, cwd: str,
     on_supported: Callable[[], None] | None = None,
-) -> None:
+) -> int:
     argv = health_argv(base)
     try:
         result = cancellable_read_runner(cancelled, cwd=cwd)(argv, STARTUP_TIMEOUT)
@@ -137,15 +153,32 @@ def require_capability(
             f"resident health is unavailable: {error['code']}: {error['message']}",
             retry=error["code"] in _TRANSIENT_ERRORS | {"timeout"}, code=error["code"],
         )
-    if value.get("ok") is not True or set(value) != {"ok", "health"}:
+    if value.get("ok") is not True or set(value) not in (
+        {"ok", "health"}, {"ok", "health", "cli_contract_versions"},
+    ):
         raise AgendaUnavailable("resident health probe returned invalid fields", code="malformed")
+    versions = value.get("cli_contract_versions", [1])
+    if (
+        not isinstance(versions, list) or not versions
+        or any(type(version) is not int or version < 1 for version in versions)
+        or len(set(versions)) != len(versions)
+    ):
+        raise AgendaUnavailable("selected CLI supplied invalid agenda contracts", code="malformed")
     health = value.get("health")
     if (
         not isinstance(health, dict) or not isinstance(health.get("capabilities"), list)
         or any(not isinstance(item, str) for item in health["capabilities"])
-        or "worktree-agendas-v1" not in health["capabilities"]
     ):
-        raise AgendaUnavailable("resident lacks worktree-agendas-v1; agenda command was not invoked")
+        raise AgendaUnavailable("resident health supplied invalid agenda capabilities", code="malformed")
+    if 2 in versions and "worktree-agendas-v2" in health["capabilities"]:
+        version = 2
+    elif 1 in versions and "worktree-agendas-v1" in health["capabilities"]:
+        version = 1
+    else:
+        raise AgendaUnavailable(
+            "resident lacks worktree-agendas-v1/v2; agenda command was not invoked",
+            code="unsupported",
+        )
     state = health.get("worktrees")
     if not isinstance(state, dict) or not isinstance(state.get("status"), str):
         raise AgendaUnavailable("resident health supplied an invalid authority state", code="malformed")
@@ -167,16 +200,21 @@ def require_capability(
             f"resident agenda authority is {status}; no resident was started",
             retry=status in _TRANSIENT_ERRORS, code=status,
         )
+    return version
 
 
 def feed_argv(
     project: str, worktree: str, session: str, *, engine_command: list[str] | None = None,
+    contract_version: int = 1,
 ) -> list[str]:
     base = _resolved_engine() if engine_command is None else engine_command
     validate_agenda_entry(base)
+    if type(contract_version) is not int or contract_version not in CONTRACT_VERSIONS:
+        raise AgendaUnavailable("unsupported agenda contract selection", code="unsupported")
     return [
         *base, "agenda-feed", "--project", project, "--worktree", worktree,
         "--session", session, "--json",
+        *(["--contract-version", "2"] if contract_version == 2 else []),
     ]
 
 
@@ -244,16 +282,19 @@ def _owned_process(argv: list[str], cwd: str):
 def frames(
     project: str, worktree: str, session: str, *, cancelled: Event, cwd: str,
     on_supported: Callable[[], None] | None = None,
+    on_contract: Callable[[int], None] | None = None,
 ):
     """No route, token, filesystem-agenda scan, autostart or plugin imports."""
     if cancelled.is_set():
         return
     base = _resolved_engine()
     validate_agenda_entry(base)
-    require_capability(base, cancelled=cancelled, cwd=cwd, on_supported=on_supported)
+    version = require_capability(base, cancelled=cancelled, cwd=cwd, on_supported=on_supported)
     if cancelled.is_set():
         return
-    argv = feed_argv(project, worktree, session, engine_command=base)
+    if on_contract is not None:
+        on_contract(version)
+    argv = feed_argv(project, worktree, session, engine_command=base, contract_version=version)
     queue: Queue = Queue(maxsize=2)
     stopped = Event()
     errors = bytearray()

@@ -13,18 +13,23 @@ from textual.widgets import Static, TabbedContent
 from worktree_manager import agenda_transport as transport
 from worktree_manager import mux_companion as companion
 from worktree_manager.agenda_contract import AgendaUnavailable, MAX_FRAME_BYTES
-from test_agenda_contract import publication
+from test_agenda_contract import publication, publication_v2
 
 
 _PEER = """
 import json,socket,sys
-if sys.argv[2:] == ['--resident-health']:
-    print(json.dumps({"ok":True,"health":{"capabilities":["worktree-agendas-v1"],
-        "worktrees":{"status":"ready","generation":"a"*32}}}))
+capabilities=json.loads(sys.argv[2])
+if sys.argv[3:] == ['--resident-health']:
+    print(json.dumps({"ok":True,"health":{"capabilities":capabilities,
+        "worktrees":{"status":"ready","generation":"a"*32}},
+        "cli_contract_versions":[1,2] if 'worktree-agendas-v2' in capabilities else [1]}))
     sys.exit(0)
-if sys.argv[2:] != [
+expected=[
     'agenda-feed','--project','example','--worktree','selected','--session','head-a','--json'
-]:
+]
+if 'worktree-agendas-v2' in capabilities:
+    expected += ['--contract-version','2']
+if sys.argv[3:] != expected:
     print('unexpected owned argv', file=sys.stderr, flush=True)
     sys.exit(2)
 with socket.create_connection(('127.0.0.1',int(sys.argv[1])), timeout=5) as peer:
@@ -40,14 +45,17 @@ with socket.create_connection(('127.0.0.1',int(sys.argv[1])), timeout=5) as peer
 
 
 @pytest.fixture
-def synthetic_peer(tmp_path, monkeypatch):
+def synthetic_peer(tmp_path, monkeypatch, request):
     script = tmp_path / "synthetic_agenda_peer.py"
     script.write_text(_PEER, encoding="utf-8")
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(4)
     listener.settimeout(8)
-    command = [sys.executable, str(script), str(listener.getsockname()[1])]
+    caps = ["worktree-agendas-v1"]
+    if getattr(request, "param", 1) == 2:
+        caps.append("worktree-agendas-v2")
+    command = [sys.executable, str(script), str(listener.getsockname()[1]), json.dumps(caps)]
     monkeypatch.setattr(companion.ec, "engine_base_command", lambda: list(command))
     monkeypatch.setattr(transport, "health_argv", lambda base: [*base, "--resident-health"])
     yield listener
@@ -93,6 +101,27 @@ async def until(pilot, predicate):
     assert predicate()
 
 
+@pytest.mark.parametrize("synthetic_peer", [2], indirect=True)
+def test_agenda_field_contract_displays_markdown_and_rich_markup_literally(synthetic_peer, tmp_path):
+    async def check():
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test() as pilot:
+            peer = await asyncio.to_thread(accept, synthetic_peer)
+            with peer:
+                frame = publication_v2()
+                literal = "# Action\n**bold** `code` [bold red]literal[/bold red] [link](https://example.com)"
+                frame["observation"]["snapshot"]["next_action"] = literal
+                frame["observation"]["snapshot"]["exit_criteria"] = ["**literal criterion**"]
+                send(peer, frame)
+                await until(pilot, lambda: literal in widget(app))
+                content = app.query_one("#agenda", Static).content
+                assert isinstance(content, Text)
+                assert literal in content.plain
+                assert json.dumps(["**literal criterion**"]) in content.plain
+
+    asyncio.run(check())
+
+
 def test_committed_push_changes_real_widget_without_reload_or_agenda_scan(synthetic_peer, tmp_path):
     async def check():
         app = companion.MuxCompanionApp(cwd=str(tmp_path))
@@ -116,6 +145,30 @@ def test_committed_push_changes_real_widget_without_reload_or_agenda_scan(synthe
                 assert app._data is data
                 assert app._data.agenda["sequence"] == 1
                 assert "not acceptance" in widget(app)
+                await pilot.press("escape")
+                assert await asyncio.to_thread(peer.recv, 1) == b""
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("synthetic_peer", [2], indirect=True)
+def test_v2_cursor_four_projection_reaches_real_widget_after_negotiation(synthetic_peer, tmp_path):
+    async def check():
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test() as pilot:
+            peer = await asyncio.to_thread(accept, synthetic_peer)
+            with peer:
+                first = publication_v2()
+                send(peer, first)
+                await until(pilot, lambda: app._data.agenda is not None)
+                assert app._data.agenda == first
+                assert "replanning" in widget(app) and "Original root" in widget(app)
+                data, worker = app._data, app._agenda_worker
+                updated = publication_v2(1, kind="update", revision=2)
+                updated["observation"]["snapshot"]["notes"] = ["New context reference: context-3"]
+                send(peer, updated)
+                await until(pilot, lambda: "context-3" in widget(app))
+                assert app._data is data and app._agenda_worker is worker
+                assert app._data.agenda["observation"] == updated["observation"]
                 await pilot.press("escape")
                 assert await asyncio.to_thread(peer.recv, 1) == b""
     asyncio.run(check())
@@ -365,6 +418,49 @@ def test_real_health_probe_code_never_enters_legacy_main(monkeypatch, tmp_path, 
             assert not marker.exists()
             assert app._data.agenda is None
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("declaration,expected", [
+    ("CAPABILITY='worktree-agendas-v1'\n", 1),
+    ("CAPABILITY='worktree-agendas-v1'\nCONTRACT_VERSIONS=(1,2)\n", 2),
+    (None, None),
+])
+def test_actual_probe_requires_selected_cli_support_before_new_flag(
+    monkeypatch, tmp_path, declaration, expected,
+):
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    marker = tmp_path / "default-launch"
+    (package / "__main__.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('launch')\n",
+        encoding="utf-8",
+    )
+    (package / "worktrees_client.py").write_text(
+        "def read_health():\n"
+        "    return {'capabilities':['worktree-agendas-v1','worktree-agendas-v2'],"
+        "'worktrees':{'status':'ready','generation':'a'*32}}\n",
+        encoding="utf-8",
+    )
+    if declaration is not None:
+        (package / "agenda_contract.py").write_text(declaration, encoding="utf-8")
+    monkeypatch.setattr(
+        transport, "_HEALTH_PROBE",
+        f"import sys; sys.path.insert(0, {str(tmp_path)!r})\n" + transport._HEALTH_PROBE,
+    )
+    base = [sys.executable, "-m", "agent_worktrees"]
+    if expected is None:
+        with pytest.raises(AgendaUnavailable) as error:
+            transport.require_capability(base, cancelled=Event(), cwd=str(tmp_path))
+        assert error.value.code == "unsupported"
+    else:
+        version = transport.require_capability(base, cancelled=Event(), cwd=str(tmp_path))
+        assert version == expected
+        argv = transport.feed_argv(
+            "example", "selected", "head-a", engine_command=base, contract_version=version,
+        )
+        assert ("--contract-version" in argv) == (expected == 2)
+    assert not marker.exists()
 
 
 def test_preflight_keeps_the_same_resolved_provider_for_feed(monkeypatch, synthetic_peer, tmp_path):
