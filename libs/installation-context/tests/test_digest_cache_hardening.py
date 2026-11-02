@@ -293,6 +293,45 @@ def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
     assert "digest_safe_file_fd_into verification_digest" in posix
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX descriptor probe")
+def test_darwin_metadata_reads_open_descriptor_not_fdescfs_path(tmp_path: Path) -> None:
+    source = POSIX_SCRIPT.read_text(encoding="utf-8")
+    helper = source.split("stat_file_metadata() {", 1)[1].split(
+        "\nutf8_is_well_formed()", 1,
+    )[0]
+    target = tmp_path / "target"
+    target.write_bytes(b"original")
+    identity = target.stat()
+    probe = tmp_path / "descriptor.sh"
+    probe.write_text(
+        "ensure_kernel_name() { :; }\nKERNEL_NAME=Darwin\n"
+        "stat_file_metadata() {" + helper + "\n"
+        "stat() {\n"
+        + shlex.quote(sys.executable) + " -c "
+        + shlex.quote(
+            "import os,sys; "
+            "s=os.fstat(0) if len(sys.argv)==3 else os.lstat(sys.argv[-1]); "
+            "print(f'{s.st_dev}|{s.st_ino}|{s.st_size}')"
+        ) + ' "$@"\n}\n'
+        'exec 9<"$1"\n'
+        'stat_file_metadata /dev/fd/9 true\n'
+        'mv "$1" "$1.opened"\n'
+        'printf replacement >"$1"\n'
+        'stat_file_metadata /dev/fd/9 true\n'
+        'stat_file_metadata "$1"\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shutil.which("bash") or "bash", str(probe), str(target)],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = f"{identity.st_dev}|{identity.st_ino}|{identity.st_size}"
+    opened, retained, replacement = result.stdout.splitlines()
+    assert opened == retained == expected
+    assert replacement != expected
+
+
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX executable probe")
 def test_posix_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,

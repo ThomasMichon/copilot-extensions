@@ -1586,8 +1586,13 @@ performed. This is an explicit native lane, not additional required PR CI.
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
-`immutable_runtime=true` runs only `tests/test_python_runtime_dev_live.py` through
-the canonical isolated `agent-worktrees` plugin runner. Its four native matrix
+`immutable_runtime=true` runs `tests/test_python_runtime_dev_live.py` through
+the canonical isolated `agent-worktrees` plugin runner, preceded by the focused
+installation-context descriptor-metadata regression. That regression retains an
+open file's identity across path replacement without trusting its fdescfs entry.
+The legacy lifecycle fixture declares its disposable directory marketplace and
+verifies that the original command binding survives removal of the source.
+Its four native matrix
 cells use two explicit jobs with literal Linux (`ubuntu-latest`) and macOS
 (`macos-latest`) runner routes, each with a `legacy`/`namespaced` mode matrix
 and fail-fast disabled. Python and `UV_PYTHON` are 3.11,
@@ -1623,6 +1628,9 @@ The workflow definition's dispatch ref is distinct from the source SHA tested.
 Each matrix cell runs:
 
 ```bash
+python tools/run-plugin-tests.py installation-context \
+  --test-file tests/test_digest_cache_hardening.py -k darwin_metadata \
+  --timeout 120 --plugin-timeout 240
 python tools/run-plugin-tests.py agent-worktrees \
   --test-file tests/test_python_runtime_dev_live.py -k <legacy-or-namespaced> \
   --timeout 2500 --plugin-timeout 2700
@@ -5206,6 +5214,14 @@ only declared driver audit files, the known PowerShell startup cache and Python
 bytecode for existing payload modules are accounted separately. Driver requests
 must finish nonzero without unresolved execution. Same-size/same-mtime source,
 runtime and command mutations remain detected.
+
+The payload-lifecycle controls retain the complete process-helper package,
+including its lazy Job-accounting module. Windows deadline and early-parent-exit
+checks require an empty owned Job before admission releases. The source-only
+test target prepares the update driver and binds its transitive source bodies
+to the test-cache key. Real-installer fixtures materialize the complete
+execution closure once while retaining each preflight refusal and product-byte
+snapshot.
 
 The copied-pane boundary controls are an explicit, non-serving native lane:
 

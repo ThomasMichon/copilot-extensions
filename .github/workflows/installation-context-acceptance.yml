@@ -810,7 +810,9 @@ jobs:
       - name: Qualify isolated native development lifecycle
         env:
           RUNTIME_MODE: ${{ matrix.mode }}
-        run: python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_dev_live.py -k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700
+        run: |
+          python tools/run-plugin-tests.py installation-context --test-file tests/test_digest_cache_hardening.py -k darwin_metadata --timeout 120 --plugin-timeout 240
+          python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_dev_live.py -k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700
 
   immutable-runtime-macos:
     if: ${{ inputs.immutable_runtime }}

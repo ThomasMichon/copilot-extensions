@@ -80,6 +80,20 @@ def test_script_only_target_has_a_stable_runner_only_cache_key(tmp_path, monkeyp
     assert runner._dep_fingerprint("script-only") != before
 
 
+def test_payload_fixture_driver_transitive_body_invalidates_cache(graph, monkeypatch):
+    repo = runner.REPO
+    payload = repo / "libs" / "payload-invocation"
+    payload.mkdir()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: payload)
+    _project(
+        repo / "libs" / "update-driver", "agent-update-driver",
+        'direct = {path = "../direct"}',
+    )
+    before = runner._dep_fingerprint("payload-invocation")
+    graph[2].write_text("VALUE = 2\n", encoding="utf-8")
+    assert runner._dep_fingerprint("payload-invocation") != before
+
+
 def test_explicit_clean_does_not_prepare_a_busy_environment(graph, monkeypatch, capsys):
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)

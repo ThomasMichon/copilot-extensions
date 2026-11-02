@@ -87,7 +87,7 @@ PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_DEPENDENCIES = {
     "repository-policy": ("pyyaml>=6.0.3",),
-    "payload-invocation": ("pyyaml>=6.0.3",),
+    "payload-invocation": ("pyyaml>=6.0.3", "-e", str(REPO / "libs" / "update-driver")),
     "runtime-source": ("pyyaml>=6.0.3",),
 }
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"

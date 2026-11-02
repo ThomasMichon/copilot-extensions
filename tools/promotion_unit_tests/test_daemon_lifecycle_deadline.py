@@ -19,6 +19,8 @@ spec.loader.exec_module(original)
 
 @pytest.fixture(autouse=True)
 def actor_free_registry_owner(monkeypatch, tmp_path):
+    if sys.platform != "win32":
+        return
     from agent_procutil import _daemon_instance_owner as owner
 
     def owned(path):
