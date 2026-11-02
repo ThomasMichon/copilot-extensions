@@ -48,12 +48,13 @@ def test_activation_refuses_another_interpreter(adoption, monkeypatch):
         recovery.main(["--root", str(adoption.root), "--evidence", str(adoption.path)])
 
 
-def test_activation_reuses_ready_slot_and_runs_transactional_cutover(adoption, monkeypatch, capsys):
+@pytest.mark.parametrize("nested", [False, True])
+def test_activation_reuses_ready_slot_and_runs_transactional_cutover(adoption, monkeypatch, capsys, nested):
     from worktree_manager import mux_daemon_cutover, self_install
 
     slot = adoption.root / "versions" / "1.2.3+repair.fixture"
     (slot / ".runtime-bootstrap").mkdir(parents=True)
-    monkeypatch.setattr(sys, "prefix", str(slot))
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if nested else slot))
     monkeypatch.setattr(self_install, "payload_version", lambda payload: "1.2.3")
     monkeypatch.setattr(self_install, "needs_install", lambda version, root: True)
     calls = []

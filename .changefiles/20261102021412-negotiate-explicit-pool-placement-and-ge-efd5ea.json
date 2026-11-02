@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate explicit pool placement and generation-bound worker acceptance without migrating legacy lanes.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

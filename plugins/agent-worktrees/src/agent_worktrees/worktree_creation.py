@@ -37,6 +37,7 @@ from lazy_cli_dispatch import self_override as _self_override
 from . import (
     activity,
     codename_tracking,
+    creation_diagnostics,
     git_ops,
     local_cache_refresh,
     permissions,
@@ -49,6 +50,8 @@ from .launch_progress import step
 from .creation_allocation import AdmittedAllocation, creation_parameters
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
 from .worktree_machine_identity import WorktreeMachineIdentity
+from .receiving_allocation import ReceivingAllocation
+from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
 
 
 class LaunchSeedStagingFailure(RuntimeError):
@@ -153,6 +156,7 @@ def _carve_paired_knowledge(
     plat_short: str,
     machine_identity: WorktreeMachineIdentity | None = None,
     legacy_machine: str | None = None,
+    revalidate_creation: Callable[[], None] | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -184,6 +188,8 @@ def _carve_paired_knowledge(
         return None
     if not (res.requires_external and res.bound and res.path):
         return None
+    if revalidate_creation is not None:
+        revalidate_creation()
 
     from . import repos as repos_mod
 
@@ -320,6 +326,8 @@ def _carve_paired_knowledge(
                 f"{harness_worktree_path!r} branch={f'worktree/{harness_id}'!r}. "
                 "Remove it manually with `git worktree remove` if unwanted."
             ) from exc
+        if revalidate_creation is not None:
+            revalidate_creation()
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )
@@ -402,28 +410,6 @@ def _stamp_and_compose_paired_knowledge(
         return {"action": "error", "error": str(exc)}
 
 
-def _journal_owner_reciprocal_claim(
-    config: cfg.Config,
-    worktree_id: str,
-    owner_ref: str | None,
-    *,
-    owner_locked: bool = False,
-    machine_identity: WorktreeMachineIdentity | None = None,
-) -> bool:
-    """Preserve the compatibility-root owner resolver for reciprocal claims."""
-    if not owner_ref:
-        return False
-    core = _core()
-    from . import claims_cli as _claims_cli
-    from .creation_owner_claim import journal_owner_claim
-
-    resolve_owner = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
-    return journal_owner_claim(
-        config, worktree_id, owner_ref, resolve_owner=resolve_owner,
-        owner_locked=owner_locked, machine_identity=machine_identity,
-    )
-
-
 @step("Synchronizing repository source")
 def _prepare_worktree_source(
     anchor: str | Path,
@@ -485,6 +471,20 @@ def _creation_parent_session(
     return None
 
 
+def _complete_created_pair(
+    config: cfg.Config, record: tracking.WorktreeRecord, *,
+    timestamp: str, suffix: str, no_pair: bool,
+) -> bool:
+    """Use the same deterministic companion identity on creation and recovery."""
+    from .creation_pair_completion import complete_created_pair
+
+    core = _core()
+    return complete_created_pair(
+        config, record, timestamp=timestamp, suffix=suffix, no_pair=no_pair,
+        carve=core._carve_paired_knowledge, stamp=core._stamp_and_compose_paired_knowledge,
+    )
+
+
 def _create_worktree_core(
     config: cfg.Config,
     *,
@@ -514,6 +514,7 @@ def _create_worktree_core(
     creation_intent: Callable[[dict], None] | None = None,
     identity_mode: IdentityMode = "legacy",
     build_launch_plan: bool = True,
+    receiving_allocation: ReceivingAllocation | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -549,9 +550,24 @@ def _create_worktree_core(
         require_repository_hosting(config.default_repo.anchor)
     require_current_execution_space(config)
     validate_mode(identity_mode)
+    if receiving_allocation is not None:
+        if not isinstance(receiving_allocation, ReceivingAllocation):
+            raise ValueError("receiving creation requires an admitted allocation")
+        receiving_allocation.require_current(config)
+        if (
+            owner_ref != receiving_allocation.origin
+            or build_launch_plan or pending_seed
+            or creation_key is None and creation_intent is None
+            or creation_key is not None and creation_key != receiving_allocation.key
+        ):
+            raise ValueError("receiving creation requires its journaled owner and sessionless operation")
     if creation_key is not None:
         from . import creation_replay, creation_requests
 
+        if receiving_allocation is not None:
+            from .receiving_creation_recovery import original_no_pair
+
+            no_pair = original_no_pair(config, creation_key, no_pair)
         options = {
             "profile": profile, "profile_is_explicit": profile_is_explicit,
             "no_mux": no_mux, "kind": kind, "owner": owner, "interface": interface,
@@ -565,6 +581,8 @@ def _create_worktree_core(
             "pending_seed_id": pending_seed_id, "allocation": allocation,
             "identity_mode": identity_mode, "admitted_allocation": admitted_allocation,
             "build_launch_plan": build_launch_plan,
+            **({"receiving_allocation": receiving_allocation}
+               if receiving_allocation is not None else {}),
         }
         return creation_requests.create(
             config, creation_key, creation_requests.allocation_facts(config, **options),
@@ -608,7 +626,6 @@ def _create_worktree_core(
             "creates its own worktree; work there instead."
         )
     plat = cfg.detect_platform()
-    plat_short = "win" if plat == "windows" else plat
 
     if admitted_allocation is not None:
         timestamp, suffix = admitted_allocation.timestamp, admitted_allocation.suffix
@@ -623,7 +640,7 @@ def _create_worktree_core(
         system_slug=_slugify(name or owner or "daemon") if kind == "system" else "",
         admitted=admitted_allocation,
     )
-    if owner_ref:
+    if owner_ref and receiving_allocation is None:
         parsed_owner = tracking.parse_claim_ref(owner_ref)
         if parsed_owner is None or not parsed_owner.is_qualified:
             raise RuntimeError(
@@ -736,7 +753,7 @@ def _create_worktree_core(
         cfg.tracking_dir(config.repo_name) if creation_intent is not None else cfg.tracking_dir()
     )
     tracking_path.mkdir(parents=True, exist_ok=True)
-    with step("Allocating worktree identity", worktree_id=worktree_id), codename_tracking.allocation_lock(
+    with step("Allocating worktree identity", worktree_id=worktree_id, creation_advisory=True), codename_tracking.allocation_lock(
         tracking_path,
     ):
         # Second revalidation (round-13/14 finding, sharpened by a PR
@@ -786,7 +803,7 @@ def _create_worktree_core(
         # durable. Thus finalize cannot hand off/clean a not-yet-created
         # child reference.
         owner_guard = None
-        if owner_ref:
+        if owner_ref and receiving_allocation is None:
             owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(owner_ref, config)
             if owner_err or owner_path is None or not owner_path.exists():
                 raise RuntimeError(owner_err or f"owner ledger is missing: {owner_ref}")
@@ -794,10 +811,29 @@ def _create_worktree_core(
             owner_guard.__enter__()
 
         try:
+            receiving_nonce = secrets.token_hex(8) if receiving_allocation is not None else None
+            if receiving_allocation is not None:
+                receiving_allocation.require_planned_identity(
+                    worktree_id, receiving_nonce, str(worktree_path), branch,
+                )
             if creation_intent is not None:
+                receiving_recovery = {}
+                if receiving_allocation is not None:
+                    from . import creation_replay, receiving_creation_recovery
+
+                    receiving_recovery = {"receiving_recovery": {
+                        "timestamp": timestamp, "suffix": suffix,
+                        "execution_origin": creation_replay.execution_origin(config),
+                        "pairing": (
+                            receiving_creation_recovery.pairing_facts(config)
+                            if kind == "session" and not no_pair else None
+                        ),
+                    }}
                 creation_intent({
                     "id": worktree_id, "path": worktree_path,
                     "branch": branch, "repo": config.repo_name,
+                    **({"creation_nonce": receiving_nonce} if receiving_nonce is not None else {}),
+                    **receiving_recovery,
                 })
             if owner_guard is not None and not core._journal_owner_reciprocal_claim(
                 config, worktree_id, owner_ref, owner_locked=True,
@@ -805,8 +841,11 @@ def _create_worktree_core(
             ):
                 raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
 
-            print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-            with step("Creating Git worktree", worktree_id=worktree_id):
+            creation_diagnostics.emit(
+                "branch_notice", lambda: print(f"Creating worktree on branch {branch}...", file=sys.stderr),
+                worktree_id=worktree_id,
+            )
+            with step("Creating Git worktree", worktree_id=worktree_id, creation_advisory=True):
                 git_ops.create_worktree(
                     repo.anchor,
                     worktree_path,
@@ -858,6 +897,8 @@ def _create_worktree_core(
                 owner_ref=owner_ref or None,
                 bound_agent=bound_agent or None,
                 pending_seed=None,
+                **({"receiving_allocation": receiving_allocation, "creation_nonce": receiving_nonce}
+                   if receiving_allocation is not None else {}),
             )
         finally:
             if owner_guard is not None:
@@ -885,30 +926,18 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if build_launch_plan and permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-        composition_ready = True
-        if kind == "session" and not no_pair:
-            try:
-                with step("Creating paired worktree", worktree_id=worktree_id):
-                    pair_stamp = core._carve_paired_knowledge(
-                        config, harness_id=worktree_id, timestamp=timestamp,
-                        suffix=suffix, plat=plat, plat_short=plat_short,
-                        **({"machine_identity": machine_identity} if machine_identity is not None else {}),
-                    )
-            except (codename_tracking.CodenameAttributionPolicyError, permissions.FolderTrustError):
-                raise
-            except Exception as exc:  # pragma: no cover - existing fail-safe pairing policy
-                print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
-                pair_stamp = None
-                composition_ready = False
-            composition = core._stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
-            composition_ready = composition_ready and (
-                not composition or composition.get("action") != "error"
-            )
-        if not composition_ready:
-            local_cache_refresh.mark_pair_pending(worktree_path)
+        from .copilot_plugin_profile import prepare_checkout
+        prepare_checkout(worktree_path, config=config)
+        composition_ready = _complete_created_pair(
+            config, record, timestamp=timestamp, suffix=suffix, no_pair=no_pair,
+        )
         if build_launch_plan and not defer_projections and composition_ready:
             local_cache_refresh.prepare_for_launch(worktree_path)
         result = {"worktree": core._worktree_to_dict(record)}
+        if receiving_allocation is not None:
+            from .receiving_creation_recovery import note_ready
+
+            note_ready(record, config)
         if not launches_copilot:
             return result
         assert fake_args is not None
@@ -922,12 +951,6 @@ def _create_worktree_core(
             config, fake_args, worktree_path, profile=selection.profile,
             preflight=launch_preflight,
         )
-        if staged_seed is not None:
-            launch_cmd = deferred_command(
-                launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
-            )
-        else:
-            launch_cmd = deferred_command(launch_cmd, record.yaml_path, admission_only=True)
         env = _apply_assignment_env(
             core._build_env(
                 selection.profile, core._repo_session_env(config, worktree_path),
@@ -935,10 +958,17 @@ def _create_worktree_core(
                 config=config,
             ), selection,
         )
+        launch_cmd = deferred_command(
+            launch_cmd, record.yaml_path,
+            seed_id=staged_seed.seed_id if staged_seed is not None else None,
+            admission_only=staged_seed is None, environment=env, mux=not no_mux,
+        )
         result["worktree"] = core._worktree_to_dict(record)
         result["launch"] = {
             "action": "exec", "work_dir": worktree_path, "cmd": launch_cmd, "env": env,
             "worktree_id": worktree_id, "post_exit": True, "no_mux": no_mux,
+            "record_path": str(record.yaml_path),
+            "pane_shell_version": 1,
             "seed_claimed": False, "seed_pending": staged_seed is not None,
             "seed_id": staged_seed.seed_id if staged_seed else None,
             "seed_kind": staged_seed.kind if staged_seed else None,

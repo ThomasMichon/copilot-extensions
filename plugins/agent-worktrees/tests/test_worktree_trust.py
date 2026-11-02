@@ -284,3 +284,23 @@ def test_declared_legacy_alias_remains_local(
     )
     assert worktree_trust.ensure_record_trusted(record, config)
     assert json.loads((home / "config.json").read_text())["trustedFolders"] == [str(checkout.resolve())]
+
+
+def test_missing_local_claim_identity_refuses_before_legacy_lookup(
+    native_checkout, sample_record, tmp_path, monkeypatch,
+):
+    from agent_worktrees import config as cfg, legacy_wsl_record_locality
+
+    checkout, home = native_checkout
+    config = cfg.Config(srcroot=str(tmp_path), machine="local", platform=sample_record.platform,
+                        repos={"sample": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))})
+    record = replace(sample_record, worktree_path=str(checkout), machine_identity=None)
+    monkeypatch.setattr(worktree_trust, "require_record_mutation", lambda *a: None)
+    monkeypatch.setattr(worktree_trust, "require_owner_identity", lambda *a: False)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: record.platform)
+    monkeypatch.setattr(tracking, "parse_claim_ref", lambda *a: None)
+    monkeypatch.setattr(legacy_wsl_record_locality, "resolve_legacy_wsl_owner_ref",
+                        lambda *a: pytest.fail("missing claim identity cannot enter legacy lookup"))
+    with pytest.raises(ExecutionSpaceError, match="valid local claim identity"):
+        worktree_trust.ensure_record_trusted(record, config)
+    assert not home.exists()

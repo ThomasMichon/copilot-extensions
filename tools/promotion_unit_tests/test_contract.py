@@ -2,11 +2,12 @@
 
 import copy
 import hashlib
+import io
 
 import pytest
 
 from promotion_unit_contract import (
-    PROFILE, UnitEvidenceError, admit_manifest, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
+    PROFILE, UnitEvidenceError, admit_manifest, bounded_bytes, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
     requires_units, source_sha, verify_observations, verify_sources,
 )
 
@@ -40,6 +41,21 @@ def test_duplicate_json_fields_cannot_hide_unit_selection():
         decode_json('{"profile":"units","profile":"full"}')
     with pytest.raises(UnitEvidenceError, match="duplicate"):
         decode_json('{"nested":{"nodes":[],"nodes":["hidden"]}}')
+
+
+@pytest.mark.parametrize("size", [3, 200001], ids=["small", "overflow"])
+def test_bounded_reads_do_not_allocate_the_packet_limit(size):
+    class ObservedStream(io.BytesIO):
+        requests = []
+
+        def read(self, size=-1):
+            self.requests.append(size)
+            return super().read(size)
+
+    stream = ObservedStream(b"x" * size)
+    assert bounded_bytes(stream, 200000) == b"x" * min(size, 200001)
+    assert max(stream.requests) <= 64 * 1024
+    assert sum(stream.requests) < 400000
 
 
 def test_unit_source_inventory_cannot_have_case_aliases():

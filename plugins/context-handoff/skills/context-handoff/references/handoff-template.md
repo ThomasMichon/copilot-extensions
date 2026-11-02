@@ -1,7 +1,7 @@
 ## Effort-Backed Session Continuation
 
 For **native context-only rollover**, use the same objective/gate/delta and live
-obligation fields in the current owner's revision-guarded `session_artifacts`
+obligation and authorization-evidence/limit fields in the current owner's revision-guarded `session_artifacts`
 checkpoint, plus **exactly one next action**. Keep ownership and live flows in
 place. Read the verified bound artifact after terminal `new_context`, refresh
 durable guidance, and execute that action. The custom task-completion/transfer
@@ -25,6 +25,8 @@ phase or pull request is progress, not the effort completion gate.>
 - **Completed since the effort journal:** <only material facts not yet durable>
 - **In flight:** <uncommitted edits / active command / pending review>
 - **Blockers or decisions:** <only unresolved material blockers or decisions>
+- **Adopted agenda:** <state/cursor locator, active and deferred branch/packet
+  references, actual attempt/revisit times and original returns; none if not adopted>
 - **Gotchas / failed approaches:** <session-local facts not yet in the Journal>
 - **Required confirmations:** <safety, approval, or administrative gates; "none"
   when none>
@@ -38,6 +40,17 @@ only when genuinely none exist; do not omit the section.>
 - **External state owned by this session:** <open PRs awaiting review/merge,
   held claims/leases/dispatch tasks, peer-agent conversations or delegated
   work still in flight>
+
+### Authorization Evidence & Limits
+- **Canonical reference/original evidence:** <Scope Approvals record or original
+  operator/charter answer; preserve evidence not yet canonical>
+- **Applicable scope:** <operations, destinations/resources/owners, effects and
+  accepted blast radius, exclusions, limits and retry/revision policy>
+- **Validity/current changes:** <pins, limited uses, expiry, holds and later
+  narrowing/revocation with original references>
+- **Unresolved:** <missing decisions/evidence; "none" only when established>
+<Read current authority before effects. A copied record or successful handoff
+does not grant permission. Keep the effort pointer instead of duplicating it.>
 
 ### Completion Gates
 - **Current handoff:** <Complete the deferred handoff task only when this relay
@@ -80,6 +93,10 @@ key decisions, so they aren't re-litigated.>
 2. <Additional slice or phase already authorized by the original request>
 3. <Continue listing known actionable work; do not stop at the latest milestone>
 
+<If an agenda is adopted, carry its state/cursor locator, active/deferred
+branches, decision packets, actual attempt/revisit times and original returns.
+A due time or response is reinspection, not consent or source completion.>
+
 ### Outstanding Background Flows & External State
 <Never silently drop these -- list each as resumable (how the successor picks
 it back up) or as an explicit open item if it cannot be resumed. Write "none"
@@ -89,6 +106,17 @@ only when genuinely none exist; do not omit the section.>
 - **External state owned by this session:** <open PRs awaiting review/merge,
   held claims/leases/dispatch tasks, peer-agent conversations or delegated
   work still in flight>
+
+### Authorization Evidence & Limits
+- **Original evidence:** <operator/charter reference and necessary exact wording;
+  retain applicable evidence directly or reference its canonical record>
+- **Applicable scope:** <operations, destinations/resources/owners, effects and
+  accepted blast radius, exclusions, limits and retry/revision policy>
+- **Validity/current changes:** <pins, limited uses, expiry, holds and later
+  narrowing/revocation with original references>
+- **Unresolved:** <missing decisions/evidence; "none" only when established>
+<Read current authority before effects. A copied record or successful handoff
+does not grant permission; recover missing evidence before affected effects.>
 
 ### Completion Gates
 - **Current handoff:** <Complete the deferred handoff task only when this relay

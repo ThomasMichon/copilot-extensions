@@ -48,8 +48,6 @@ def test_legacy_home_selection_is_absolute_and_side_effect_free(
         if selection in ("missing", "empty")
         else tmp_path / " "
         if selection == "whitespace"
-        else tmp_path / "link" / ".." / "state"
-        if selection.endswith("-parent")
         else tmp_path / "state"
     )
 

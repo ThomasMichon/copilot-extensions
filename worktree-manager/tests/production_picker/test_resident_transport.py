@@ -162,6 +162,7 @@ def test_authentication_and_capability_errors_are_terminal(tmp_path, mode):
         with pytest.raises(FeedUnavailable) as error:
             list(resident_transport.frames(tmp_path, "sample", alive=lambda: True, startup_timeout=2))
     assert error.value.retry is False
+    assert error.value.connected is (mode != "authentication")
 
 
 def test_health_cancellation_closes_without_waiting_for_the_startup_budget(tmp_path):
@@ -191,6 +192,7 @@ def test_live_peer_timeout_is_terminal_and_does_not_extend_the_startup_budget(tm
         with pytest.raises(FeedUnavailable) as error:
             list(resident_transport.frames(tmp_path, "sample", alive=lambda: True, startup_timeout=0.05))
     assert error.value.retry is False
+    assert error.value.connected is False
 
 
 def test_incomplete_snapshot_never_replaces_the_receivers_committed_rows(tmp_path):

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve external lifecycle ownership for trusted container sessions; refuse implicit starts and lifecycle mutations against externally owned instances.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

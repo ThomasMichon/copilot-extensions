@@ -509,7 +509,9 @@ def test_post_spawn_policy_change_blocks_seed_without_terminating_session(
 def test_registration_admits_before_transaction_and_keeps_write_atomic(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    events = []
+    from agent_worktrees import copilot_plugin_profile
+
+    events: list[str] = []
     original = installer.require_project_hosting
 
     def admit(project: str, repo_dir: Path | str | None = None) -> None:
@@ -532,10 +534,19 @@ def test_registration_admits_before_transaction_and_keeps_write_atomic(
         assert registry["projects"]["demo"]["expose_agent"] is True
         events.append("write")
 
+    def reconcile(
+        project: str, repo_dir: Path | str | None,
+        registry: dict[str, dict[str, dict[str, object]]],
+    ) -> None:
+        assert project == "demo" and repo_dir == tmp_path
+        assert registry["projects"]["demo"]["expose_agent"] is True
+        events.append("reconcile")
+
     monkeypatch.setattr(installer, "require_project_hosting", admit)
     monkeypatch.setattr(installer.pr_authority, "guard", guard)
     monkeypatch.setattr(installer, "read_projects_registry", read)
     monkeypatch.setattr(installer, "write_projects_registry", write)
     monkeypatch.setattr(installer.project_state, "namespaced", lambda: False)
+    monkeypatch.setattr(copilot_plugin_profile, "reconcile_project", reconcile)
     installer.register_project("demo", repo_dir=tmp_path, expose_agent=True)
-    assert events == ["admit", "lock", "admit", "read", "write", "unlock"]
+    assert events == ["admit", "lock", "admit", "read", "write", "reconcile", "unlock"]

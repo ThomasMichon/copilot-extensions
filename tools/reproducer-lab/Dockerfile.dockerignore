@@ -1,0 +1,6 @@
+**
+!source/
+!source/**
+!source.json
+source/.git
+source/.git/**

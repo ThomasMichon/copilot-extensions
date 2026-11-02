@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 
 from test_installation_mode_governance import (
+    _GovernanceModule,
+    _ResolveArguments,
     _activation,
     _api_arguments,
     _cell_layout,
@@ -21,8 +23,13 @@ from test_installation_mode_governance import (
 
 
 @pytest.fixture
-def deployment(tmp_path: Path) -> tuple[Any, dict[str, Any], Path, dict[str, Any]]:
+def deployment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_GovernanceModule, _ResolveArguments, Path, dict[str, Any]]:
     module = _load_module()
+    # This fixture describes a standalone host, not the runner's WSL account.
+    monkeypatch.setattr(module, "_is_wsl_guest", lambda: False)
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     layout = _cell_layout(tmp_path)
     profile = tmp_path / "profile"
     profile.mkdir()

@@ -13,8 +13,9 @@ Design invariants honored here:
 * **Control channel** -- reattach handshake (``ATTACH``/``HELLO``), monotonic
   ``seq`` + ``ACK`` cursor with an unacked buffer (so a reattaching front misses
   nothing and re-reads nothing), child liveness, explicit ``TERMINATE``.
-* **Per-OS survival** -- POSIX new-session; Windows own kill-on-close Job after
-  having been spawned with ``CREATE_BREAKAWAY_FROM_JOB`` (see ``osutil``).
+* **Per-OS survival** -- POSIX host-owned session/group, inherited by its child;
+  Windows own kill-on-close Job after having been spawned with
+  ``CREATE_BREAKAWAY_FROM_JOB`` (see ``osutil``).
 
 The host keeps reading + buffering child frames whether or not a front is
 attached: child progress is decoupled from front presence. That is the whole
@@ -25,6 +26,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import socket
 import subprocess
 import sys
@@ -33,6 +36,7 @@ from pathlib import Path
 
 import osutil
 import wire
+from agent_procutil.daemon_instances import daemon_entrypoint
 
 
 class SessionHost:
@@ -55,7 +59,6 @@ class SessionHost:
     # ---- child lifecycle -------------------------------------------------
     def spawn_child(self) -> None:
         creationflags = 0
-        start_new_session = False
         if osutil.IS_WIN:
             # Host was itself spawned with CREATE_BREAKAWAY_FROM_JOB, so it is
             # outside the front's kill-on-close job. Give the host its OWN
@@ -64,7 +67,10 @@ class SessionHost:
             osutil.arm_self_job(kill_on_close=True, breakaway_ok=True)
             creationflags = osutil.CREATE_NO_WINDOW
         else:
-            start_new_session = True
+            # The front detaches the HOST. Keep its workload in that owned
+            # group so admission expiry retires both, even during active work.
+            if os.getpgrp() != os.getpid():
+                raise RuntimeError("Session Host must own its POSIX process group")
 
         self.proc = subprocess.Popen(
             self.child_cmd,
@@ -72,7 +78,6 @@ class SessionHost:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
-            start_new_session=start_new_session,
             bufsize=0,
         )
 
@@ -181,16 +186,18 @@ class SessionHost:
         pid = self.proc.pid
         if osutil.IS_WIN:
             subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=osutil.CREATE_NO_WINDOW)
         else:
-            import os
-            import signal
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                self.proc.terminate()
+            # TERMINATE ends the host too. The caller itself pins this group;
+            # never derive a kill target from a possibly reaped child PID.
+            group = os.getpgrp()
+            if group != os.getpid():
+                raise RuntimeError("Session Host no longer owns its POSIX process group")
+            os.killpg(group, signal.SIGTERM)
 
     # ---- run -------------------------------------------------------------
+    @daemon_entrypoint("session-host-fixture", source=__file__)
     def run(self) -> int:
         self.spawn_child()
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

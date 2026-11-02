@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 PLUGIN = "agent-pull-requests"
-LIBRARIES = ("agent-procutil", "single-instance-lease", "work-coalescing-singleton", "zdd")
+LIBRARIES = ("agent-procutil", "single-instance-lease", "work-coalescing-singleton", "zdd", "update-driver")
 
 
 def _ignore(_directory, names):

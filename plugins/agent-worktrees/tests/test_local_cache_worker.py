@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import local_cache_refresh as lcr, local_cache_worker as worker
+from agent_worktrees import guarded_anchors, local_cache_refresh as lcr, local_cache_worker as worker
 
 
 @pytest.mark.parametrize("kind", ["ordinary", "linked", "relative", "bare"])
@@ -42,7 +42,7 @@ def test_darwin_birth_identity_allows_queue_and_acknowledgement(tmp_path, monkey
     monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: SimpleNamespace(proc_pidinfo=Query()))
     monkeypatch.setattr(worker.locks.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(worker.subprocess, "Popen", lambda *a, **k: SimpleNamespace(pid=os.getpid(), wait=lambda: 0))
-    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root: lcr.RefreshResult("ready", changed=1))
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root, **kwargs: lcr.RefreshResult("ready", changed=1))
     directory = tmp_path / "worker"
     assert worker.queue(tmp_path, directory).status == "queued"
     state = json.loads((directory / "request.json").read_text())
@@ -81,8 +81,9 @@ def test_dispatch_reservation_survives_the_pre_acknowledgement_gap(tmp_path, mon
     try:
         assert entered.wait(5)
         blocked = worker.queue(tmp_path, directory)
-        assert blocked.status == "queued"
+        assert blocked.status == "failed"
         assert "reserved" in blocked.detail
+        assert "not queued" in blocked.detail
     finally:
         release.set()
         thread.join(5)
@@ -101,8 +102,19 @@ def test_dispatch_reservation_survives_the_pre_acknowledgement_gap(tmp_path, mon
 def test_rendering_keeps_no_administrative_lease_open(tmp_path, monkeypatch):
     directory = tmp_path / "worker"
     directory.mkdir()
+    calls = []
 
-    def refresh(root):
+    def prepare(root):
+        gate = worker._gate(directory)
+        gate.acquire()
+        gate.release()
+        assert worker._read(directory / "request.json")["phase"] == "running"
+        calls.append(root)
+        return ""
+
+    monkeypatch.setattr(guarded_anchors, "prepare", prepare)
+
+    def refresh(root, **kwargs):
         gate = worker._gate(directory)
         gate.acquire()
         gate.release()
@@ -118,6 +130,95 @@ def test_rendering_keeps_no_administrative_lease_open(tmp_path, monkeypatch):
     assert state["result"]["restart_required"] is True
     assert state["result"]["model_admission"] == "unknown"
     assert "3 installed" in (directory / "refresh.log").read_text()
+    assert calls == [tmp_path]
+
+
+def test_guard_preparation_failure_keeps_guidance_delivery_visible(tmp_path, monkeypatch):
+    directory = tmp_path / "worker"
+    directory.mkdir()
+    diagnostic = "[guarded-anchors] preparation failed; publication/withdrawal unconfirmed: fixture\n"
+    monkeypatch.setattr(guarded_anchors, "prepare", lambda root: diagnostic)
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root, **kwargs: lcr.RefreshResult("ready", changed=1))
+
+    assert worker.run(tmp_path, directory) == 1
+
+    state = worker._read(directory / "request.json")
+    assert state["result"]["status"] == "partial"
+    assert state["result"]["installed"] == 1
+    assert diagnostic.strip() in (directory / "refresh.log").read_text()
+
+
+def test_overlapping_requests_coalesce_and_share_one_copy_budget(tmp_path, monkeypatch):
+    directory = tmp_path / "worker"
+    directory.mkdir()
+    clock = [0.0]
+    timeouts = []
+    guard_calls = []
+    monkeypatch.setattr(guarded_anchors, "prepare", lambda root: guard_calls.append(root) or "")
+    monkeypatch.setattr(lcr, "DEFAULT_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(worker, "time", SimpleNamespace(
+        monotonic=lambda: clock[0], time=lambda: clock[0],
+    ))
+
+    def refresh(root, *, timeout):
+        timeouts.append(timeout)
+        if len(timeouts) < 3:
+            for _ in range(3):
+                assert worker.queue(root, directory).status == "queued"
+        clock[0] += 0.5
+        return lcr.RefreshResult("ready", removed=1 if len(timeouts) == 1 else 0)
+
+    monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
+    assert worker.run(tmp_path, directory) == 0
+    assert timeouts == [2.0, 1.5, 1.0]
+    assert guard_calls == [tmp_path] * 3
+    state = worker._read(directory / "request.json")
+    assert state["phase"] == "done"
+    assert state["pending_rerun"] is False
+    assert state["result"]["restart_required"] is True
+
+
+def test_pending_copy_at_budget_exhaustion_cannot_report_success(tmp_path, monkeypatch):
+    directory = tmp_path / "worker"
+    directory.mkdir()
+    clock = [0.0]
+    monkeypatch.setattr(lcr, "DEFAULT_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(worker, "time", SimpleNamespace(
+        monotonic=lambda: clock[0], time=lambda: clock[0],
+    ))
+
+    def refresh(root, *, timeout):
+        assert timeout == 2.0
+        assert worker.queue(root, directory).status == "queued"
+        clock[0] = 2.0
+        return lcr.RefreshResult("ready", changed=1)
+
+    monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
+    assert worker.run(tmp_path, directory) == 1
+    state = worker._read(directory / "request.json")
+    assert state["phase"] == "failed"
+    assert state["result"]["status"] == "timeout"
+    assert state["result"]["restart_required"] is True
+    assert "another copy requested" in (directory / "refresh.log").read_text()
+
+
+def test_completion_reservation_never_acknowledges_an_unrecorded_request(tmp_path, monkeypatch):
+    directory = tmp_path / "worker"
+    directory.mkdir()
+    original = worker._save
+    results = []
+
+    def save(path, state):
+        if state["phase"] == "done":
+            results.append(worker.queue(tmp_path, directory))
+        original(path, state)
+
+    monkeypatch.setattr(worker, "_save", save)
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root, **kwargs: lcr.RefreshResult("ready"))
+    assert worker.run(tmp_path, directory) == 0
+    assert len(results) == 1
+    assert results[0].status == "failed"
+    assert "request not queued" in results[0].detail
 
 
 @pytest.mark.parametrize("status,changed,phase,restart", [
@@ -129,7 +230,7 @@ def test_completion_status_preserves_failure_and_admission(
 ):
     directory = tmp_path / "worker"
     directory.mkdir()
-    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root: lcr.RefreshResult(status, changed=changed))
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root, **kwargs: lcr.RefreshResult(status, changed=changed))
     worker.run(tmp_path, directory)
     state = json.loads((directory / "request.json").read_text())
     assert state["phase"] == phase

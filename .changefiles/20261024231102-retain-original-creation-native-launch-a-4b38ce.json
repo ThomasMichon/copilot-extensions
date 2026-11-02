@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original creation native launch and binding observations on the existing workspace row",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

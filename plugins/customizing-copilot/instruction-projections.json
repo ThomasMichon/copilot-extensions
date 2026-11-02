@@ -4,13 +4,12 @@
   "projections": [
     {
       "id": "local-cache-catchall",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/local-cache-catchall.instructions.md",
       "destination": ".github/instructions/customizing-copilot/local-cache-catchall.instructions.md",
       "customizationKind": "instructions",
       "applyTo": "**",
-      "legacyMarkers": [],
-      "skipLocalCache": true
+      "legacyMarkers": []
     }
   ]
 }

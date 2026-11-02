@@ -1,0 +1,9 @@
+{
+  "comment": "Keep local request capture compatible with CLI versions that removed --no-remote",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

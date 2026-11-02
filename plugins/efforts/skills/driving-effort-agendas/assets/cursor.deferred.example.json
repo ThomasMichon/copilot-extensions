@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "worktree": "replace-with-the-assigned-worktree-or-lane-identity",
+  "revision": 2,
+  "status": "working",
+  "max_depth": 3,
+  "max_detours_without_progress": 2,
+  "detours_without_progress": 0,
+  "max_deferred": 8,
+  "frames": [
+    {
+      "agenda": "agenda.json",
+      "agenda_revision": 1,
+      "node": "research",
+      "visits": {"qualify": 1, "apply": 1, "research": 1},
+      "evidence": [],
+      "next_action": "Prepare the capacity decision packet from permitted metadata and measured trends.",
+      "return_to": null
+    }
+  ],
+  "queue": [],
+  "parked": [],
+  "deferred": [
+    {
+      "id": "capacity-effect-approval",
+      "saved_revision": 1,
+      "reason": "The proposed data effect remains outside current approval.",
+      "decision_ref": "assigned-capacity-maintenance: pending scope decision",
+      "decision_packet_ref": "canonical-effort: capacity-proposal",
+      "attempted_at": "2026-10-31T14:48:00-07:00",
+      "revisit_at": "2026-10-31T18:48:00-07:00",
+      "recheck_action": "Read the current decision and scope limits; do not replay the blocked effect.",
+      "max_depth": 3,
+      "max_detours_without_progress": 2,
+      "detours_without_progress": 0,
+      "frames": [
+        {
+          "agenda": "agenda.json",
+          "agenda_revision": 1,
+          "node": "apply",
+          "visits": {"qualify": 1, "apply": 1},
+          "evidence": [],
+          "next_action": "Resume only the actually approved capacity-maintenance action after requalification.",
+          "return_to": null
+        }
+      ]
+    }
+  ]
+}

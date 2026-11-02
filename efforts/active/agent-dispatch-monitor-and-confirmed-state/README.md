@@ -7,9 +7,39 @@
 - **Status:** Active - submission/output/delivery amendment proposed 2026-10-08
 - **Source umbrella:** #3681; continuing coordination is this Active ROOT's
   reviewed Plan/Validation/Journal and eligible OPEN bounded-source issues
-- **Sub-issues:** _none yet_
+- **Sub-issues:** #9709 (bounded assignment/startup documentation and repair design)
 
 ## Guiding Intent
+
+**Continuing direction (2026-10-30):** the
+[assignment/startup amendment](assignment-startup-amendment.md) distinguishes
+pool-owned placement before embodiment from worker acceptance, and adds bounded
+startup, scoped decline routing/closeout and retry-eligibility design. The existing
+queued due-time admission fix merged in
+[#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755);
+The explicit atomic placement and affirmative-start provider source merged in
+[#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859).
+Admitted caller/startup integration, the remaining design and installed/native
+qualification remain open.
+The [explicit caller boundary](../../../plugins/agent-dispatch/docs/pool-claim-start.md)
+adds negotiated allocator requests and opt-in current-worker acceptance;
+its source merged in [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955).
+The [explicit startup-policy source](journal/2026/11.02-bounded-startup-source.md)
+merged in [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976):
+existing supervision consumes bounded claim episodes and original same-native
+retry receipts for explicitly placed assignments. Complete configured
+publication, ordinary supervisor/initial-prompt migration and installed/native
+qualification remain separate gates.
+Existing submission/conversation phases and their custodians remain unchanged.
+
+**Priority clarification (2026-10-31):** drive the
+[five lifecycle outcomes](assignment-startup-amendment.md#prioritized-lifecycle-clarification):
+claim/spawn/affirmative start ordering, explicit rejection and attempt/timeout
+semantics, reserved-slot/work-start deadline consistency, suspended recovery
+with retry/backoff, and finalize-before-`SUBMITTED`. Automatic finalization
+before evaluators remains a design option. An opt-in worktree-owned agenda
+keeps this roster ahead of nonblocking discoveries without changing the
+canonical completion gate or existing source/native ownership.
 
 **Current direction (2026-10-08):** extend the existing lifecycle, result
 storage, evaluator, and steering machinery into a durable task conversation.
@@ -100,6 +130,12 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Request
 
+The 2026-10-30 operator-directed intent is captured as a generic summary in the
+[assignment/startup amendment](assignment-startup-amendment.md#requested-direction).
+Its requested requirements, agent-recommended implementation means and unresolved
+policy choices are separated; it does not settle result-rejection reassignment
+or terminal-worktree policy.
+
 The 2026-10-07/08 direction is captured in
 [operator-direction.md](operator-direction.md), with settled decisions and
 agent-recommended implementation safeguards separated in
@@ -141,6 +177,13 @@ known end-states; a `monitors` system should complement `emitters`/
 
 ## Coordination
 
+The finite #4464 producing-harness guidance contract below continues through
+existing producer/task-command/guidance owners and this ROOT's reviewed
+Plan, actual global Validation and Journal. Preserve backend versus
+Tasks-pane custody and current SUBMITTED/COMPLETED direction. This intake
+does not appoint an implementation owner, adopt a code target as a harness,
+move a task, change routing defaults or release a source/resource claim.
+
 The complete #3681 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -157,7 +200,104 @@ successor. The current planning slice does not adopt responsibility for
 executing every historical open phase. Reconcile #5701/#5668 after merge rather
 than opening competing implementations.
 
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Continuing source-specific Transport/Bridge custody
+
+#### Source #2885
+
+The planning owner retains documentation only; separately approved
+backend owners retain reason/lifecycle/history/output/monitor/delivery
+implementation, and existing Tasks-pane, general Worktree Manager viewer
+and native-session hosting owners retain their boundaries. Preserve
+#2879's specific resource/complete-transfer and #2887's reviewer-policy
+reservations without absorbing or expiring them. This is LONG-TERM intent,
+not immediate implementation authority. #3681 is provenance, not a required
+live claim token. No new blanket ACK or executor appointment is created.
+
 ## Plan
+
+### Continuing slice - Pool-owned assignment/startup and retry eligibility
+
+- [x] Land the #9709 vision/current-versus-target architecture and
+      [repair amendment](assignment-startup-amendment.md) through normal review,
+      without behavioral changes. Merged in
+      [#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
+- [ ] Execute the amendment's implementation/compatibility plan only through
+      separately claimed, reviewed source slices, preserving incumbent startup,
+      idle-worker, pool-capacity and submission owners.
+      Configured-source and coordinator metadata-fence prerequisites merged in
+      #9826 and #9834; cohort-aware original request custody merged in #9837.
+      Fresh configured-owner preparation and original projection-result accounting
+      merged in #9840.
+      Explicit local original-request projection merged in #9843; no automatic
+      publisher or admission caller is enabled.
+      Fresh owner publication, external atomicity, mixed writers and placement remain separate
+      acceptance gates.
+- [x] Land and source-qualify explicit atomic configured-pool placement and
+      affirmative worker start in
+      [#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859).
+      Transactional claim/capacity, current workspace/native and caller
+      conditions, receipt/release retirement, routing and historical accounting
+      have coupled queue/API/source coverage. Admitted caller migration,
+      bounded startup decisions/exhaustion, selected counters/backoffs,
+      suspended recovery and installed qualification remain unchecked above.
+- [x] Land explicit runtime-negotiated placement and current-worker acceptance
+      callers in [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955).
+      The opt-in CLI and rollback-safe explicit start route have coupled
+      transport/parser coverage. Automatic publisher/cohort/supervisor/prompt
+      migration and native qualification
+      remain open; this is not the comprehensive implementation item's exit.
+- [x] Land explicit bounded claim-episode startup, decision/exhaustion/cooldown
+      and original same-native retry source in
+      [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976).
+      Coupled provider, transport and existing-supervisor controls establish
+      this source boundary only; complete configured publication, ordinary
+      initial-prompt/caller migration, suspended recovery, closeout and
+      installed/native qualification remain open.
+- [x] Land [explicit client-backed configured-cohort projection](journal/2026/11.02-configured-cohort-transport.md)
+      and exact-history recovery in
+      [#10050](https://github.com/ThomasMichon/copilot-extensions/pull/10050).
+      This connects the existing owner/custody boundary; it does not activate
+      ordinary publication, membership, allocation or worker-prompt migration.
+- [x] Land the [configured-cohort legacy admission fence](journal/2026/11.02-configured-admission-fence.md)
+      in [#10059](https://github.com/ThomasMichon/copilot-extensions/pull/10059).
+      Fresh queued legacy spawning cannot bypass projected cohort placement;
+      ordinary publication/caller migration and installed qualification remain open.
+- [x] Bind fresh configured-cohort projection to the coordinator's actual
+      registrar and active/drain owner in
+      [#10072](https://github.com/ThomasMichon/copilot-extensions/pull/10072).
+      The [source receipt](journal/2026/11.02-coordinator-source-projection.md)
+      preserves accepted-history recovery, explicit embedding compatibility and
+      the still-open automatic publication/caller/native gates.
+- [x] Land explicit [original publication-target and unaccepted-request custody](journal/2026/11.02-publication-request-custody.md)
+      in [#10080](https://github.com/ThomasMichon/copilot-extensions/pull/10080),
+      including queued-child target binding and accepted-result recovery.
+- [ ] Integrate that custody before enabling the existing reconciliation cadence.
+      Explicit source preparation is not an automatic publisher or a complete
+      caller migration; cross-endpoint queue continuity remains a required gate.
+      The [opt-in cadence source](journal/2026/11.02-publication-cadence.md)
+      now connects the actual coordinator and per-scope master with default-off
+      activation; its review/merge and remaining ordinary integration stay open.
+- [x] Implement and source-test existing queued `not_before` enforcement at fresh
+      reservation admission; preserve active replay and suspended re-embodiment.
+      This bounded admission fix does not complete atomic pool placement,
+      retry-policy selection or installed qualification. Reviewed and merged in
+      [#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755).
+- [x] Select the [startup and retry budgets](assignment-startup-amendment.md#selected-startup-and-retry-policy),
+      including reset of both counters on successful `STARTED`; source
+      implementation and qualification remain separate.
+- [x] Review the [selected pool scope and priority](assignment-startup-amendment.md#selected-pool-scope-and-ordering)
+      and complete-effective-set prerequisite before affected source work;
+      normalized definitions, provider publication and caller migration remain
+      distinct acceptance slices. Merged in
+      [#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773).
+- [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
+      at the stated source, mixed-version and installed/native evidence tiers.
+- [ ] Implement and qualify the prioritized suspended-recovery and
+      finalize-before-submission contracts through existing wake, worker,
+      submission/evaluation and Worktrees owners; preserve every unrelated
+      conversation/confirmation and native-custody gate.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually
@@ -522,7 +662,169 @@ independent owners remain, and no genuine hold still requires the source live. O
 RETAIN #3681. No task/claim/configuration/native/model/process/service/source effect or
 implementation authority is created by this proposal.
 
+### Finite producing-harness versus code-target guidance from #4464
+
+**Agent-recommended tracking amendment.** Preserve the original guidance-only
+realization and current lane-versus-target foundations, not a new resolver
+or a mandatory default redesign.
+
+- [ ] **P4464-1:** Explicitly reason about the PRODUCING harness lane whenever
+  work touches or is authored from multiple repository worktrees. When CWD
+  is not unambiguously that harness, pass `--repo <harness>` together with
+  `--target-repo <code-target>`. Legitimate target-repository CWD does not
+  adopt that repository as another operating harness.
+- [ ] **P4464-2:** Put the cross-CWD warning in the existing owning skill
+  and/or pick-and-claim guidance, retaining supported unambiguous defaults.
+  Root-versus-delegate resolver enrichment is optional; no task movement,
+  new registry/resolver, harness reconfiguration or restoration of historical
+  task enum/API direction is required.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Direct retained Transport/Bridge acceptance
+
+**Agent-recommended additive tracking amendment.** Preserve every incumbent
+Request, status, checked credit, original row and first unresolved gate. The
+direct rows below retain unfinished work at its original finite scope,
+alternatives and evidence tiers. They do not authorize implementation,
+native/installed trials, operational changes, source closure, reassignment
+or claim/resource release. Normal review, actual merge and complete current
+receiving readback precede any separate source-specific disposition.
+
+
+#### Source #2885
+
+- [ ] **P.2885.semantic-reason:** Every suspended task carries lifecycle-authoritative
+  STRUCTURED/QUERYABLE semantic reason/category AND concise human explanation. Preserve all original
+  steer/review, external/yielded wait, clarification, dependency, hold and legacy-unknown
+  distinctions; example enums are examples, not a closed monitor-kind/status mandate.
+
+- [ ] **P.2885.authoritative-source-and-incarnation:** Recipe/emitter or another actual lifecycle
+  owner supplies/updates/resolves the reason with the original task/attempt/owner/incarnation and
+  outstanding question/answer. Safe intent-seeded defaults must not guess categories from ordinary
+  card/progress prose or treat a supplied description as semantic authority.
+
+- [ ] **P.2885.query-age-attention:** Expose the same semantic reason to lightweight task
+  query/API/CLI and Tasks-pane list AND/OR supported notification/operator-attention surface.
+  Present actual current-state duration/age alongside reason and an obvious route to the outstanding
+  question; aggregate churn or opening every card is not discoverability.
+
+- [ ] **P.2885.historical-awaitingfalse-clarification:** Structurally distinguish
+  explicit-instruction/clarification-needed from routine pending review, ordinary steer/approve and
+  external wait, including original BOTH SUSPENDED with awaiting_steer=false shape. A single boolean
+  or parsing status/title/body is not equivalent semantic classification.
+
+- [ ] **P.2885.fresh-elicitation-and-resolution:** Any genuinely ambiguous/unresolved answer
+  surfaces as a FRESH explicit question/elicitation, never guessed/treated as approval. Keep the
+  question/reason/current incarnation correlated; update/clear only through accepted/resolved
+  lifecycle, not transport delivery alone. Re-carding mitigates but does not prove complete reason
+  visibility.
+
+- [ ] **P.2885.hold-not-death-resource-release:** Semantic reason/presentation is separate from
+  monitor/resolution/wake metadata and user Pause/hold. Adding or clearing a reason NEVER expires
+  claims, frees a lane/resource, resumes/requeues without required instruction, authorizes a
+  verdict, or infers death from age. Existing legitimate monitor-resume behavior remains with its
+  original owner.
+
+- [ ] **P.2885.GENERAL-session-viewer-compatibility:** Preserve original LONG-TERM general inline
+  per-session Worktree Manager agent-chat/tool-call/user-elicitation viewer direction, for agent
+  sessions rather than only task results. Pending steer card is a first-class event; reason/event
+  interface must compose with that future view, not freeze today's bespoke card or equate
+  task-output history with a general-session viewer.
+
+- [ ] **P.2885.retained-whole-union:** Retain the complete current #2885 original, BOTH refinements
+  and ALL eight adopted2878 clarification rows plus seven residual-refinement checks, original
+  alternatives/venues/finite scope/history/query/presentation/custody. It remains LONG-TERM
+  planning, not immediate implementation authority. Do NOT absorb2879
+  nudges/resource/complete-transfer or2887 recipe/native/policy scope.
+
+- [ ] **P.2885.r0-check-20:** Give the explicit-instruction-required/clarification-needed state a
+  real structurally queryable semantic distinction from routine pending review, ordinary
+  operator-steer/approve waiting and an external wait. It must work for the historical shape where
+  both cases were SUSPENDED with awaiting_steer=false; a boolean awaiting_steer or parsing card
+  status/title/body is not an equivalent fix.
+
+- [ ] **P.2885.r0-check-21:** Carry a concise human-readable explanation alongside the structured
+  reason, supplied by the recipe/emitter or another lifecycle-authoritative source. Preserve the
+  relation to the actual outstanding question/answer and current task incarnation. A prompt,
+  free-text recommendation or normal card alone is not the shared reason contract.
+
+- [ ] **P.2885.r0-check-22:** Make clarification visibly attention-requiring through the Tasks-pane
+  list and/or a supported notification, with an obvious path to the outstanding question. An
+  operator must not have to open/read every card to discover that a prior answer was ambiguous. Keep
+  the signal distinct from routine review waiting, and make the same semantic reason queryable by
+  lightweight consumers.
+
+- [ ] **P.2885.r0-check-23:** Preserve the short-term follow-up invariant: any genuinely unresolved
+  or ambiguous answer is surfaced as a fresh explicit question/elicitation, not silently guessed,
+  treated as approval, or left implicit. Re-carding is a mitigation, not proof of the broader
+  structural/discoverability outcome. Do not require adopting a private reviewer charter or
+  provider-specific business policy upstream.
+
+- [ ] **P.2885.r0-check-24:** Keep clarification separate from a user hold/Pause and from task
+  death. Presenting a reason must not change ownership, expire a claim, free a lane, resume work
+  without the needed instruction, or authorize a review/verdict action. Update/clear the visible
+  reason through the corresponding accepted/resolved lifecycle, not simply because a transport
+  reports delivery.
+
+- [ ] **P.2885.r0-check-25:** Preserve the operator's accepted longer-term shape: a general inline
+  per-session agent-chat viewer within Worktree Manager, usable for agent sessions rather than only
+  a task-result viewer, with a pending steer card represented as a first-class
+  tool-call/user-elicitation event. Design the reason/event interface to compose into that future
+  view; do not freeze today's bespoke card representation as the only supported model or claim a
+  task-output history alone fulfills the general-session direction.
+
+- [ ] **P.2885.r0-check-26:** Compose existing backend task-output/history/delivery contracts and
+  Tasks-pane presentation ownership, preserving native/hosting authority. #2887 remains the separate
+  reviewer-recipe convergence owner; this generic semantic/UI acceptance is not a transfer of its
+  domain policy or a declaration that its native adoption gates passed.
+
+- [ ] **P.2885.r0-check-27:** Preserve observable distinctions for ordinary pending review, ordinary
+  operator steer, explicit clarification after an ambiguous answer, external-event/yielded waiting,
+  dependency blocking, explicit user hold and legacy unknown reason. Check reason
+  persistence/query/presentation and its resolution/repeated-follow-up behavior with the current
+  accepted schema, rather than requiring an obsolete card-only method.
+
+- [ ] **P.2885.r1-check-8:** Represent why each SUSPENDED task is dormant through structured,
+  queryable semantics and short human-readable explanation. Preserve at least operator-steer,
+  external-event/yielded-wait, clarification and dependency-blocked cases, with explicit
+  unknown/legacy handling rather than guessed categories parsed from prose.
+
+- [ ] **P.2885.r1-check-9:** Have the lifecycle-owning recipe/emitter supply the reason, and define
+  any safe default seeded by run/create intent. Preserve attribution and current task/attempt/owner
+  context; an ordinary description or current card title is not by itself a semantic classification
+  contract.
+
+- [ ] **P.2885.r1-check-10:** Make the reason available to task query/API/CLI and Tasks-pane
+  presentation or another authoritative operator-attention surface. Combine the actual state
+  duration/age with the actual reason so an operator need not open cards/progress logs merely to
+  learn the blocker. Do not confuse aggregate churn reporting with a task's own age.
+
+- [ ] **P.2885.r1-check-11:** Keep monitor/resolution metadata distinct from semantic suspension
+  reason and from a user hold. Preserve current cooldown/external-wait behavior, explicit operator
+  holds, pending input and existing custody; adding presentation must not release/requeue work or
+  infer death from age.
+
+- [ ] **P.2885.r1-check-12:** Accept the full transferred #2878 checklist before retiring its
+  wrapper: structurally distinguish clarification from routine review/steer, visibly request
+  attention, handle ambiguous follow-up as a fresh explicit elicitation, and clear/update the reason
+  only through the appropriate lifecycle.
+
+- [ ] **P.2885.r1-check-13:** Preserve the longer-term general Worktree Manager per-session
+  agent-chat/tool-call viewer intent, including a pending card as a first-class elicitation event.
+  Task-output history alone is not that general viewer. Compose the backend task-output/history
+  owners and UI owners without replacing native/hosting authority or mandating today's card
+  representation forever.
+
+- [ ] **P.2885.r1-check-14:** Cover persistence/readback, repeated suspension/reason updates, legacy
+  unknown reasons, each category, follow-up clarification and subsequent resolution across the
+  supported producer/query/UI surfaces. Intent documents or a narrow suspend fixture do not prove
+  the complete integration or deployed behavior.
+
 ## Validation Plan
+
+- [ ] Complete the [assignment/startup validation matrix](assignment-startup-amendment.md#validation-plan);
+      documentation approval alone does not establish runtime conformance.
 
 - [ ] GLOBAL ROOT GATE: resolve EVERY incumbent ROOT Plan AND own Validation item, ALL
   direct acceptance above and original amendment matrix at their retained evidence tiers
@@ -557,6 +859,199 @@ implementation authority is created by this proposal.
       Provenance-adjacent reality docs once code lands (per envisioning's
       "close the loop" step) — no vision *edit* needed unless Phase 2's
       risk-audit surfaces a genuine blind spot the vision failed to state.
+- [ ] **V4464-1:** Qualify the actual supported neutral/cross-CWD and explicit
+  target examples: producing `--repo` identity stays independent of
+  `--target-repo` code metadata. Generic project examples or a spawn/task-
+  state receipt do not substitute for the exact lane warning.
+- [ ] **V4464-2:** Resolve every direct #4464 Plan clause through its original
+  guidance-only option, existing routing defaults and task/source custody,
+  without adoption, lane/task mutation or a competing resolver. Finite
+  source/consumer evidence is separate from unrelated backend/UI/native or
+  whole-parent acceptance; no generic owner ACK or task operation is added.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Global validation of retained Transport/Bridge acceptance
+
+#### Source #2885
+
+- [ ] **V.2885.semantic-reason:** Qualify the COMPLETE matching original/refined clause at its
+  ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving delivered
+  credit and same source/resource custody: Every suspended task carries lifecycle-authoritative
+  STRUCTURED/QUERYABLE semantic reason/category AND concise human explanation. Preserve all original
+  steer/review, external/yielded wait, clarification, dependency, hold and legacy-unknown
+  distinctions; example enums are examples, not a closed monitor-kind/status mandate.
+
+- [ ] **V.2885.authoritative-source-and-incarnation:** Qualify the COMPLETE matching
+  original/refined clause at its ORIGINAL finite supported producer/query/UI/native tier and
+  alternatives, preserving delivered credit and same source/resource custody: Recipe/emitter or
+  another actual lifecycle owner supplies/updates/resolves the reason with the original
+  task/attempt/owner/incarnation and outstanding question/answer. Safe intent-seeded defaults must
+  not guess categories from ordinary card/progress prose or treat a supplied description as semantic
+  authority.
+
+- [ ] **V.2885.query-age-attention:** Qualify the COMPLETE matching original/refined clause at its
+  ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving delivered
+  credit and same source/resource custody: Expose the same semantic reason to lightweight task
+  query/API/CLI and Tasks-pane list AND/OR supported notification/operator-attention surface.
+  Present actual current-state duration/age alongside reason and an obvious route to the outstanding
+  question; aggregate churn or opening every card is not discoverability.
+
+- [ ] **V.2885.historical-awaitingfalse-clarification:** Qualify the COMPLETE matching
+  original/refined clause at its ORIGINAL finite supported producer/query/UI/native tier and
+  alternatives, preserving delivered credit and same source/resource custody: Structurally
+  distinguish explicit-instruction/clarification-needed from routine pending review, ordinary
+  steer/approve and external wait, including original BOTH SUSPENDED with awaiting_steer=false
+  shape. A single boolean or parsing status/title/body is not equivalent semantic classification.
+
+- [ ] **V.2885.fresh-elicitation-and-resolution:** Qualify the COMPLETE matching original/refined
+  clause at its ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving
+  delivered credit and same source/resource custody: Any genuinely ambiguous/unresolved answer
+  surfaces as a FRESH explicit question/elicitation, never guessed/treated as approval. Keep the
+  question/reason/current incarnation correlated; update/clear only through accepted/resolved
+  lifecycle, not transport delivery alone. Re-carding mitigates but does not prove complete reason
+  visibility.
+
+- [ ] **V.2885.hold-not-death-resource-release:** Qualify the COMPLETE matching original/refined
+  clause at its ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving
+  delivered credit and same source/resource custody: Semantic reason/presentation is separate from
+  monitor/resolution/wake metadata and user Pause/hold. Adding or clearing a reason NEVER expires
+  claims, frees a lane/resource, resumes/requeues without required instruction, authorizes a
+  verdict, or infers death from age. Existing legitimate monitor-resume behavior remains with its
+  original owner.
+
+- [ ] **V.2885.GENERAL-session-viewer-compatibility:** Qualify the COMPLETE matching
+  original/refined clause at its ORIGINAL finite supported producer/query/UI/native tier and
+  alternatives, preserving delivered credit and same source/resource custody: Preserve original
+  LONG-TERM general inline per-session Worktree Manager agent-chat/tool-call/user-elicitation viewer
+  direction, for agent sessions rather than only task results. Pending steer card is a first-class
+  event; reason/event interface must compose with that future view, not freeze today's bespoke card
+  or equate task-output history with a general-session viewer.
+
+- [ ] **V.2885.retained-whole-union:** Qualify the COMPLETE matching original/refined clause at its
+  ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving delivered
+  credit and same source/resource custody: Retain the complete current #2885 original, BOTH
+  refinements and ALL eight adopted2878 clarification rows plus seven residual-refinement checks,
+  original alternatives/venues/finite scope/history/query/presentation/custody. It remains LONG-TERM
+  planning, not immediate implementation authority. Do NOT absorb2879
+  nudges/resource/complete-transfer or2887 recipe/native/policy scope.
+
+- [ ] **V.2885.r0-check-20:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Give the explicit-instruction-required/clarification-needed state a
+  real structurally queryable semantic distinction from routine pending review, ordinary
+  operator-steer/approve waiting and an external wait. It must work for the historical shape where
+  both cases were SUSPENDED with awaiting_steer=false; a boolean awaiting_steer or parsing card
+  status/title/body is not an equivalent fix.
+
+- [ ] **V.2885.r0-check-21:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Carry a concise human-readable explanation alongside the structured
+  reason, supplied by the recipe/emitter or another lifecycle-authoritative source. Preserve the
+  relation to the actual outstanding question/answer and current task incarnation. A prompt,
+  free-text recommendation or normal card alone is not the shared reason contract.
+
+- [ ] **V.2885.r0-check-22:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Make clarification visibly attention-requiring through the
+  Tasks-pane list and/or a supported notification, with an obvious path to the outstanding question.
+  An operator must not have to open/read every card to discover that a prior answer was ambiguous.
+  Keep the signal distinct from routine review waiting, and make the same semantic reason queryable
+  by lightweight consumers.
+
+- [ ] **V.2885.r0-check-23:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve the short-term follow-up invariant: any genuinely
+  unresolved or ambiguous answer is surfaced as a fresh explicit question/elicitation, not silently
+  guessed, treated as approval, or left implicit. Re-carding is a mitigation, not proof of the
+  broader structural/discoverability outcome. Do not require adopting a private reviewer charter or
+  provider-specific business policy upstream.
+
+- [ ] **V.2885.r0-check-24:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Keep clarification separate from a user hold/Pause and from task
+  death. Presenting a reason must not change ownership, expire a claim, free a lane, resume work
+  without the needed instruction, or authorize a review/verdict action. Update/clear the visible
+  reason through the corresponding accepted/resolved lifecycle, not simply because a transport
+  reports delivery.
+
+- [ ] **V.2885.r0-check-25:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve the operator's accepted longer-term shape: a general inline
+  per-session agent-chat viewer within Worktree Manager, usable for agent sessions rather than only
+  a task-result viewer, with a pending steer card represented as a first-class
+  tool-call/user-elicitation event. Design the reason/event interface to compose into that future
+  view; do not freeze today's bespoke card representation as the only supported model or claim a
+  task-output history alone fulfills the general-session direction.
+
+- [ ] **V.2885.r0-check-26:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Compose existing backend task-output/history/delivery contracts and
+  Tasks-pane presentation ownership, preserving native/hosting authority. #2887 remains the separate
+  reviewer-recipe convergence owner; this generic semantic/UI acceptance is not a transfer of its
+  domain policy or a declaration that its native adoption gates passed.
+
+- [ ] **V.2885.r0-check-27:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve observable distinctions for ordinary pending review,
+  ordinary operator steer, explicit clarification after an ambiguous answer, external-event/yielded
+  waiting, dependency blocking, explicit user hold and legacy unknown reason. Check reason
+  persistence/query/presentation and its resolution/repeated-follow-up behavior with the current
+  accepted schema, rather than requiring an obsolete card-only method.
+
+- [ ] **V.2885.r1-check-8:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Represent why each SUSPENDED task is dormant through structured,
+  queryable semantics and short human-readable explanation. Preserve at least operator-steer,
+  external-event/yielded-wait, clarification and dependency-blocked cases, with explicit
+  unknown/legacy handling rather than guessed categories parsed from prose.
+
+- [ ] **V.2885.r1-check-9:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Have the lifecycle-owning recipe/emitter supply the reason, and
+  define any safe default seeded by run/create intent. Preserve attribution and current
+  task/attempt/owner context; an ordinary description or current card title is not by itself a
+  semantic classification contract.
+
+- [ ] **V.2885.r1-check-10:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Make the reason available to task query/API/CLI and Tasks-pane
+  presentation or another authoritative operator-attention surface. Combine the actual state
+  duration/age with the actual reason so an operator need not open cards/progress logs merely to
+  learn the blocker. Do not confuse aggregate churn reporting with a task's own age.
+
+- [ ] **V.2885.r1-check-11:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Keep monitor/resolution metadata distinct from semantic suspension
+  reason and from a user hold. Preserve current cooldown/external-wait behavior, explicit operator
+  holds, pending input and existing custody; adding presentation must not release/requeue work or
+  infer death from age.
+
+- [ ] **V.2885.r1-check-12:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Accept the full transferred #2878 checklist before retiring its
+  wrapper: structurally distinguish clarification from routine review/steer, visibly request
+  attention, handle ambiguous follow-up as a fresh explicit elicitation, and clear/update the reason
+  only through the appropriate lifecycle.
+
+- [ ] **V.2885.r1-check-13:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve the longer-term general Worktree Manager per-session
+  agent-chat/tool-call viewer intent, including a pending card as a first-class elicitation event.
+  Task-output history alone is not that general viewer. Compose the backend task-output/history
+  owners and UI owners without replacing native/hosting authority or mandating today's card
+  representation forever.
+
+- [ ] **V.2885.r1-check-14:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Cover persistence/readback, repeated suspension/reason updates,
+  legacy unknown reasons, each category, follow-up clarification and subsequent resolution across
+  the supported producer/query/UI surfaces. Intent documents or a narrow suspend fixture do not
+  prove the complete integration or deployed behavior.
+
+- [ ] **G2885:** Resolve every directly retained #2885 Plan and Validation clause at its original
+  finite evidence tier, preserving alternatives, completed credit and existing custodians.
+  Administrative tracking is not technical completion or claim release.
 
 ## Proposal
 
@@ -582,6 +1077,42 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+The [November 2 startup-source receipt](journal/2026/11.02-bounded-startup-source.md)
+records #9976's actual merge, bounded source evidence and the next integration gate.
+
+### 2026-10-30 - Assignment/startup design reviewed and merged
+
+- #9710 merged to `dev` as `d1f5b7c02db18f741d19751207f8b1b53fa3382b`
+  after a clean current-head Copilot approval and required checks. The existing
+  source worktree was pulled forward through the managed sync operation.
+- Closed only the documentation/review Plan item. #9709, the remaining
+  implementation/compatibility work, open policy choices, complete validation
+  matrix and parent effort remain open. No runtime or installed acceptance is
+  inferred from the documentation merge.
+
+### 2026-10-30 - Assignment/startup and retry-eligibility proposal
+
+- Added the bounded #9709 design slice and amendment under this existing
+  lifecycle effort, rather than a competing task authority or repair campaign.
+- Separated the intended pre-embodiment `CLAIMED` transaction from current
+  reservation/worker-claim operations. Recorded existing `not_before` selection
+  and claim enforcement, and the reservation-admission gap.
+- Retained numeric retry policy and result-rejection/terminal-worktree choices
+  as open, preserved incumbent owners, and claimed no implementation, root
+  cause, release or running-system qualification.
+
+### 2026-10-28 - Finite producing-lane guidance intake
+
+- Added direct #4464 Plan and actual global Validation with continuing
+  coordination, retaining explicit multi-worktree-CWD lane reasoning,
+  `--repo` producer versus `--target-repo` metadata and the guidance-only
+  realization. Existing task-owned routing/claim/policy foundations remain
+  credit, not proof the exact warning is delivered.
+- Preserve every original row, checked credit, amendment and independent
+  custodian. Normal reviewed actual merge and complete current readback
+  precede a separate source judgment. No source audit, task move, provider
+  operation, peer contact, implementation or resource release occurs here.
 
 ### 2026-10-23 - Direct retained acceptance from #3681
 
@@ -742,3 +1273,901 @@ Card revisions, task-owned output schemas, policy separation, and completed-task
 follow-ups remain explicit implementation deltas. #5701 owns existing
 idempotent-steer work; #5668 owns the attention aggregation interface. No
 runtime changes or delivery fixes are claimed by this documentation update.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### 2026-10-28 - Additive Transport/Bridge tracking contracts
+
+Authored direct finite Plan and actual global Validation with continuing
+
+custody after complete current receiving-document and source-contract
+
+research. Normal review, actual merge and complete current readback remain
+
+separate publication gates; no future delivery or disposition is claimed.
+
+Credited existing monitor/review/result/history/delivery foundations while retaining the complete long-term semantic-reason, age, clarification and GENERAL per-session viewer direction.
+
+### 2026-10-31 - Fresh reservation due-time admission
+
+Claimed the bounded #9709 source slice and enforced the stored queued-task
+deadline under the existing reservation write transaction. Thirteen fake-clock
+and HTTP controls plus the incumbent reservation packet pass (100 cases);
+four new refusal controls failed against the prior source. Active/exclusive
+replay, suspended owned-workspace reuse and retry allocation identity remain
+unchanged. Source review/merge, release and installed qualification remain
+separate; no retry duration, startup cap or pool-placement policy was selected.
+
+The bounded source fix merged in #9755 as
+`921b945df694404e80ca225412c87673b0abc3c1` after current-head Copilot
+approval and required checks. Managed pull-forward reached that exact merge
+with no surviving diff or replayed paragraph. The next stretch is atomic
+pool-owned placement; numerical startup/retry policy still requires a decision.
+The complete parent and amendment validation matrices remain open.
+
+### 2026-10-31 - Startup and cooldown policy selected
+
+Captured the operator's startup/decision budgets, task-wide escalating cooldown
+and successful-`STARTED` reset of both counters in the
+[canonical amendment](assignment-startup-amendment.md#selected-startup-and-retry-policy).
+The existing supervisor owns cadence; scheduling and historical custody remain
+separate. This amendment is reviewed before affected behavior is implemented.
+Atomic placement, decline closeout, remaining independent policies and the
+complete source/mixed-version/installed validation gates stay open.
+
+The selected-policy amendment merged in
+[#9769](https://github.com/ThomasMichon/copilot-extensions/pull/9769) as
+`29aa3cd82fbc1e1f471714e61e8385463cc244ff` after current-head approval
+and required checks. The source worktree pulled forward to that exact merge.
+Implementation resumes with the coordinator-owned atomic placement boundary;
+the policy merge itself does not enable it or qualify running workers.
+
+### 2026-10-31 - Pool instance scope and priority selected
+
+The source trace found that raw registrations lose declaration filters and do
+not include the daemon's final precedence/deduplication/override result.
+Captured the operator's per-machine/environment instance capacity and
+configurable priority in the
+[canonical amendment](assignment-startup-amendment.md#selected-pool-scope-and-ordering),
+with numeric ordering and representation recommendations distinguished from
+the selected policy. Review precedes source implementation. The complete
+effective-set/provider/mixed-cohort boundary and all parent gates remain open;
+there is no live activation or claim that metadata alone enforces placement.
+
+The pool-policy amendment merged in
+[#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773) as
+`3f61379fa11dd93b310470b5354a494144f77d10` after current-head approval
+and required checks. Managed pull-forward reached the exact merge without a
+remaining diff. The first source prerequisite is normalized pool-instance
+definitions with lossless filters and priority; effective-set publication,
+atomic capacity and task placement remain separate implementation gates.
+
+### 2026-10-31 - Normalized pool definitions source slice
+
+Implemented the reviewed first prerequisite: validated version-1 pool-instance
+definitions, independent machine/environment keys, complete effective filters,
+declarative priority and deterministic ordering. The metadata stays outside
+legacy subprocess specs and restart fingerprints; incomplete legacy definitions
+are not promoted from labels. Definition validation is not provider enrollment
+or an executing-runtime capability.
+
+The bounded disconnected registrar packet passes 162 cases, including the new
+definition controls; focused lint/type checks pass. Source review/merge remains
+separate. The coordinator publisher still drops top-level metadata and does not
+publish the final effective set. Its revision-fenced publication, atomic
+capacity/claim transaction and conditional caller migration are the next
+implementation stretch, not inferred completion of this amendment.
+
+The normalized-definition source merged in
+[#9774](https://github.com/ThomasMichon/copilot-extensions/pull/9774) as
+`ce207738304506b0f980bda9b6c341f2734f8ff8` after current-head approval
+and required checks. Managed pull-forward reached that exact merge with no
+surviving diff. This closes only the definition prerequisite; the next stretch
+is the existing owner's complete effective-set publication and provider
+admission, not a live pool migration.
+
+### 2026-10-31 - Internal pool catalog provider boundary
+
+Implemented the [internal provider storage expansion](../../../plugins/agent-dispatch/docs/pool-publication.md):
+machine/environment generation CAS, whole-scope publication revision CAS,
+retained generation/publication history and original definition attribution.
+Registry mutations invalidate accepted snapshots in their existing transaction;
+idempotent writes preserve freshness. Pending, unavailable, registry-stale and
+expired expected scopes block the global view without freeing incumbent work.
+Expiry is an admission observation, not a liveness or retirement verdict.
+
+The final bounded disconnected packet passes 137 cases across catalog,
+registration and reservation controls, including 49 catalog cases. Focused
+lint/type, install-contract and documentation checks pass. The daemon's actual
+singleton is an OS lock, not a shared renewable lease; existing schedule and
+producer-runtime mechanisms cannot be relabeled as supervisor enrollment.
+
+This source prerequisite has no HTTP route, capability advertisement or
+production caller. The controlling owner's complete expected-scope membership,
+fresh effective-source collection, authenticated transport and mixed-cohort
+qualification remain the next stretch before atomic placement. It does not
+claim that a caller-supplied correlation proves completeness or that a source
+merge enables a live pool.
+
+The internal catalog provider source merged in
+[#9781](https://github.com/ThomasMichon/copilot-extensions/pull/9781) as
+`825e9f53ec534bec6f6a4d3317648f19c6750715` after current-head approval
+and successful required checks. Managed pull-forward reached that exact merge
+with no surviving diff. This closes only the storage prerequisite; actual
+complete effective-source collection and its publication authority remain
+the next integration slice before any placement or running adoption.
+
+### 2026-10-31 - Effective pool source collection
+
+The existing declaration/direct/override reconciliation owner now captures an
+immutable all-or-none local worker-definition snapshot after source precedence,
+runtime-equivalent deduplication and override vetoes, before companion mutation.
+It preserves legacy desired-set reconciliation while refusing cached/delayed
+reads, uncertain publication/withdrawal, missing definitions and partial input
+observations as complete pool evidence. Ordinary declarations use the actual
+registrar report; strict override observation retains valid legacy vetoes but
+does not mistake unreadable/malformed input for confirmed absence.
+
+This advances only the local collection prerequisite described in
+[pool publication](../../../plugins/agent-dispatch/docs/pool-publication.md).
+It is not catalog publication authority: local/coordinator revision rechecks,
+actual lock-holder enrollment, authenticated transport, expected-scope
+membership, legacy-source qualification and mixed-cohort admission remain open
+before atomic placement. No pool activation, runtime capability or live
+qualification follows from the source observation.
+
+The bounded packets pass 195 incumbent-supervisor/collection/override controls
+and 158 final-collection/registrar/selected-authority controls. Actual temporary
+registrar corruption retains legacy declarations without complete pool evidence;
+recovery requires a fresh report. Delayed and prewithdrawal observations refuse
+complete collection. Focused lint/type and packaging/documentation checks pass.
+These source controls do not resolve the full assignment/startup matrix.
+
+The final bounded packet passes 203 collection/incumbent-supervisor/override
+controls. Metadata completion now compares the complete current target set,
+not just each ledger entry's confirmation state: settling an older unknown
+write or exhausting the publication budget cannot confirm a changed, removed
+or newly added declaration. Five controls cover those cases and fresh recovery.
+
+The local collection prerequisite actually merged in
+[#9784](https://github.com/ThomasMichon/copilot-extensions/pull/9784) as
+`30bc5824ecd2ea78481a445f53889119de54438b` after current-head approval
+and successful required checks. A bounded, explicitly authorized pull-forward
+preserved the recovery reference after normal sync tried to replay the already
+squashed incremental commits; managed sync then completed cleanly. The
+superseded observed-check diagnostic is tracked separately in
+[#9794](https://github.com/ThomasMichon/copilot-extensions/issues/9794);
+the stricter required-CI merge boundary remains unchanged. Authenticated
+provider transport and actual complete-source publication authority are next;
+this local observer does not complete placement or running qualification.
+
+### 2026-10-31 - Control-authorized pool catalog metadata transport
+
+Implemented provider-first control-only whole-catalog inspection and
+generation/revision-fenced begin/publication routes through the existing
+coordinator owners. The running `/health` response advertises the metadata
+protocol, explicitly without supervisor lock-holder verification, complete
+configured membership or atomic-placement support. Metadata authorization
+does not attest a remote process or an allocator's preferred pool subset.
+
+The bounded HTTP/catalog/registration packet passes 197 cases, including 64
+transport controls; eight incumbent health/authentication controls pass
+separately. Strict write envelopes retain every required fence and reject caller
+clocks, slot counts and completeness flags. Unknown-response replay retains its
+original request and freshness. Invalid arrays and unavailable/expired scopes
+cannot produce a usable partial view; legacy registration semantics remain
+unchanged.
+
+This closes the transport implementation prerequisite only after source review
+and merge. Actual admitted lock-holder publication, local/coordinator coherent
+input rechecks, complete expected-scope membership and mixed-cohort qualification
+remain the next integration stretch. The parent and amendment remain Active;
+there is no publisher enrollment, caller migration, placement or live rollout.
+
+The final HTTP transport packet passes 73 controls. The documentation
+distinguishes inherited API `401` string-detail failures from the structured
+catalog `403`/`503` failures, including the configuration refusal reached only
+after valid ordinary authentication. This preserves the existing app-wide
+authentication boundary rather than overriding it for the new routes.
+
+The metadata transport source actually merged in
+[#9797](https://github.com/ThomasMichon/copilot-extensions/pull/9797) as
+`455d67f5ecbdcbf6517285c8a01e6931d77cd83c` after a current-head clean
+Copilot comment verdict with no Medium/High findings and successful required
+checks. The documented daemon-impact assessment preserves the existing
+activation/drain owner and transactional unknown-write recovery; it does not
+claim a new graceful or live-publication guarantee. Managed `pr-complete`
+retained the pre-completion backup and reached the exact squash merge cleanly.
+The next source boundary is the existing admitted singleton's coherent
+input/revision and publication custody, not a live enrollment or placement trial.
+
+### 2026-10-31 - Singleton-bound pool input and request preparation
+
+The existing singleton now supplies a process-bound acquisition incarnation and
+bounded release guard, rather than using a pid sidecar or schedule identity.
+The reconciliation owner captures exact whole-local-input digests and explicitly
+rechecks declarations/overrides between coordinator registration-revision and
+publisher-position observations. Older futures and changed/unavailable inputs
+cannot authorize a complete request. The new bounded override timeout preserves
+confirmed vetoes and refuses a first unknown observation.
+
+One immutable unresolved begin/publication request retains its original fences
+and full definition custody; late matching results account for that request
+without restoring an expired acquisition. Unavailable publication is not a
+partial set or a renewed old complete snapshot. Local memory retains only the
+unresolved and last-settled request; durable history stays provider-owned.
+
+This is source-only optimistic observed coherence, not an atomic filesystem
+transaction, remote lock-holder verification or complete configured membership.
+No ordinary reconciliation caller, publication sender, activation or placement
+was enabled. The [publication reference](../../../plugins/agent-dispatch/docs/pool-publication.md)
+records the boundary. Final effect-boundary source fencing, expected membership,
+mixed-version qualification and atomic placement remain open under #9709 and
+the original amendment matrix.
+
+Independent review exposed three coupled source defects: an inherited Python
+mutex could block before the child pid check, concurrent tick cleanup could
+remove a capture's timeout, and standalone captures retained completed results.
+The source resets the child mutex before entry, owns capture deadlines in the
+calling context and prunes completed futures without replacing pending custody.
+Real contained fork and deterministic concurrent-cleanup/pruning regressions
+cover these boundaries; they do not claim Windows/macOS runtime qualification.
+
+The preparation source actually merged in
+[#9804](https://github.com/ThomasMichon/copilot-extensions/pull/9804) as
+`67fa9e3a6d48d1be3ff1f3e0f5cddd2f0dffb218` after current-head independent
+approval and successful required checks. The final 260-case packet also covers
+deadline-bound admission, immutable override mappings, stateful/lazy reader
+serialization and old-result supersession across all three discovery sources.
+Addressed review threads retain their history. Managed post-merge reconciliation
+preserved the pre-completion backup and reached the exact squash merge cleanly.
+
+This closes the bounded preparation/custody source prerequisite, not the complete
+publisher, configured cohort or allocation transaction. The next source stretch
+is an explicitly invoked sender and original-request unknown-outcome recovery
+under the same singleton and bounded-future owner. No live enrollment, ordinary
+caller migration, activation, installed qualification or placement trial is
+authorized or claimed by this source merge; the parent remains Active.
+
+The explicit sender prerequisite actually merged in
+[#9817](https://github.com/ThomasMichon/copilot-extensions/pull/9817) as
+`331f251a53e60b2f5d2d79dbc9481d37839e9aac`, after current-head independent
+Copilot approval and successful required checks. The final contained 299-case
+packet covers original request recovery, complete enrollment baselines,
+unavailable/final-read revision comparison, concurrent waiters, admission versus
+shutdown and actual bounded singleton release/self-update with pending I/O.
+Seven review rounds resolved the coupled custody and deadline classes, including
+body-only findings; the five addressed inline threads retain their history.
+Managed post-merge reconciliation preserved its backup and reached the exact
+squash merge with the qualified source/test/doc bytes unchanged.
+
+This closes explicit source-only sending/recovery, not publisher activation.
+Native/source guards own the final admission decision; blocking I/O stays in
+the original tracked future, not the singleton release mutex. Late results can
+settle original custody without restoring admission or renewing freshness.
+The [publication reference](../../../plugins/agent-dispatch/docs/pool-publication.md)
+records these implemented boundaries. The next source stretch derives complete
+configured-cohort membership through its existing owner and qualifies mixed
+cohorts before ordinary caller migration. External source atomicity, installed
+publisher qualification, atomic placement and the original Plan/Validation
+matrix remain open. No pool was activated and this parent remains **Active**.
+
+### 2026-10-31 - Explicit configured-cohort source intent
+
+The next direct source trace distinguished every enrolled publisher and every
+reported registration from the complete configured supervisor roster. The
+existing registrar/configuration owner now reads explicit revisioned cohort
+intent from an optional envelope in its existing pointer registry. Logical
+machine identity remains separate from intended execution machine/environment;
+no runtime or scope is inferred from a label, local host or enrollment.
+Missing/legacy intent is unconfirmed, malformed input is unavailable, and a
+failed read never substitutes an earlier complete membership tuple.
+
+[#9826](https://github.com/ThomasMichon/copilot-extensions/pull/9826) actually
+merged as `be588f7ac886d91e4c1c077426b9c1e4df94165f` after current-head
+independent Copilot approval and all three successful required checks.
+The contained 353-case packet covers whole-cohort refusal, exact-byte revision
+correlation, pointer-writer preservation and existing registrar/template paths.
+Review caught duplicate JSON keys concealing members; the shared strict field
+decoder now refuses those inputs before observation or any pointer rewrite,
+with raw-JSON controls preserving the original bytes. Its resolved review
+thread and post-merge backup remain retained.
+
+This closes the explicit configuration-source prerequisite, not coordinator
+membership admission or executing-runtime qualification. The next source slice
+fences configured membership through the existing coordinator/registration owner
+without wiring ordinary callers. External-file atomicity, mixed-reader/writer
+qualification, scope withdrawal, installed adoption and atomic placement remain
+open. No configuration was migrated, no publisher was enrolled and the running
+descriptor still advertises `configured_scope_membership: false`. This parent
+and its entire original Plan/Validation matrix remain **Active**.
+
+### 2026-10-31 - Configured-cohort coordinator metadata fences
+
+The existing catalog owner now retains the registrar's whole configured
+observation with coordinator CAS and append-only history. Configured intent
+remains distinct from enrolled scopes, reported registrations and actual runtime
+support. Fresh enrollment/publication checks the current cohort revision and
+actual execution-machine/environment membership in its write transaction.
+Missing configured scopes, retained unconfigured scopes and stale definition
+attribution block metadata readiness without erasing custody or history.
+
+[#9834](https://github.com/ThomasMichon/copilot-extensions/pull/9834) actually
+merged as `b0ac1df138352487e62819382c7d5afc5bd5f37e` after independent
+current-head approval and all three required checks passed. The final contained
+310-case packet includes whole-cohort refusal, exact source/configured/coordinator
+revision distinctions, original replay without freshness renewal, transaction
+rollback, concurrent CAS, prior-schema preservation/reopen and strict transport.
+An acknowledgment gap allowed fabricated enrollment attribution on an unfenced
+publish response; all four begin/publish and enrollment/definition-attribution
+combinations now refuse before clearing original pending custody. The resolved
+thread and post-merge backup remain retained.
+
+Explicit complete empty intent can confirm configured coverage, never infer it
+from an absent projection. Additive transport fence support is metadata-only;
+runtime membership, lock-holder verification and placement still advertise false.
+No configuration publisher route, ordinary caller or activation is wired.
+Older positional clock initialization cannot reopen the expanded schema:
+old-writer exclusion and executable rollback require separate qualification
+before any live migration or adoption.
+
+This closes the bounded coordinator metadata projection/fence prerequisite,
+not the amendment. The next source slice carries the cohort fence through
+the existing original-request read, preparation, replay and acknowledgment owner.
+Fresh configuration publication, external-file atomicity, mixed-version writers,
+scope withdrawal, installed/runtime qualification, atomic placement and every
+original Plan/Validation item remain open. The parent stays **Active**.
+
+### 2026-10-31 - Original configured-cohort request custody
+
+[#9837](https://github.com/ThomasMichon/copilot-extensions/pull/9837) actually
+merged as `1039991a258276da1ffd15ab91f1f2b27c93e5fc`, after independent
+current-head Copilot approval and all three required checks passed. The complete
+review reported no active findings and had no inline threads. The final
+contained packet passed 369 controls across cohort custody and the existing
+request, sender, provider, transport, source-collection and singleton boundaries.
+The merged source, tests and docs match the qualified head; normal managed
+source reconciliation retained its pre-completion backup.
+
+The original catalog read now retains the whole configured observation, not
+only enrolled scope positions. Preparation requires the actual execution scope
+in a complete projected cohort. Begin and whole-scope publication emit only
+their original optional coordinator cohort revision, after the running peer
+advertises support. Legacy unfenced requests remain supported without silently
+downgrading a fenced request. Duplicate/invalid members, uncertain or excluded
+scope, changed original observations and settled-revision/attribution rebase
+remain explicit refusals.
+
+Enrollment acknowledgment matches the original begin fence. Publication keeps
+its original scope's enrollment attribution while complete definitions acquire
+the original publication fence; unavailable results retain prior definition
+attribution. Forged acknowledgments leave the same request pending. Accepted
+original recovery still works after cohort removal, uncertainty, advancement or
+acquisition release without another POST or freshness renewal. The actual HTTP
+fixture covers both the running support declaration and strict provider parser.
+
+This closes one source-only request-custody prerequisite, not configured runtime
+membership. The next bounded source stretch prepares a fresh configured-owner
+observation and original projection-request custody through the existing
+registrar/coordinator owners. No automatic publisher, configuration migration,
+ordinary caller, runtime enrollment or placement is enabled. External atomicity,
+old-writer exclusion, supported executable rollback, installed/runtime proof and
+every original Plan/Validation item remain open. The parent stays **Active**.
+
+### 2026-10-31 - Fresh configured-owner projection preparation
+
+[#9840](https://github.com/ThomasMichon/copilot-extensions/pull/9840) actually
+merged as `ea76c2d013cf79b4ec9343b7277b06f26b0c2fbb` after current-head
+Copilot approval and all three required checks passed. The complete approval
+reports no active findings; both prior inline findings are resolved.
+Managed source reconciliation retained the pre-completion backup and reached
+the actual squash merge. The preceding #9837 journal was delivered in this batch.
+
+`PoolCohortPreparation` brackets fresh whole registrar observations with
+coordinator reads and retains one immutable original observation, source and
+coordinator targets, and CAS. Confirmed absence, legacy bytes, explicit empty
+membership and digest-bearing unavailable cohort metadata remain distinct.
+Uncomparable source failures refuse preparation. Unknown outcomes prevent
+replacement or request rebase; exact original history recovery permits
+accounting after newer projections or queue reopen without writes or renewal.
+
+Three substantive review corrections require the original coordinator target,
+verify its actual accepted history before clearing custody, and validate the
+result observation's canonical shape before Python equality. Lookalike results
+from another database and boolean/float configured revisions retain the original
+pending request and prior settled result. Final focused coverage passed 39 cases;
+the preceding coupled packet passed 450 cases across ten files. Changed lint,
+two-module mypy and the install-contract gate passed.
+
+This is partial source-only acceptance, not fresh source publication or
+configured runtime membership. The next bounded source stretch adds an explicit
+original-request projection boundary under the existing registrar/coordinator
+owners, preserving external-file coherence and unknown-result custody.
+No automatic publisher, live configuration setter, ordinary caller, enrollment,
+activation, rollout, placement, old-writer adoption or protected reconciliation
+is enabled. External atomicity, mixed-writer exclusion, executable rollback and
+all original Plan/Validation gates remain open. The parent remains **Active**.
+
+### 2026-10-31 - Explicit local original-request projection
+
+[#9843](https://github.com/ThomasMichon/copilot-extensions/pull/9843) actually
+merged as `6452a04c0356be1e35352600d0a5e76d147ebeb7` after current-head
+Copilot approval and all three required checks passed. The complete approval
+has no active or missed findings and there are no inline threads.
+The preceding #9840 journal was delivered with this substantive source batch.
+
+An explicit local projection now accepts only its exact pending request,
+recovers accepted original history before current-source I/O or another write,
+and otherwise uses the existing registrar pointer-writer lock. Whole original
+source and owner-target rechecks bracket the existing coordinator CAS.
+Changed sources, targets, stale CAS, lock failure and unknown write outcomes
+preserve the original request. Post-write refusal does not undo an accepted
+projection; later recovery accounts for that historical result without
+renewal or current-file attestation.
+
+The final bounded packet passed 89 cases across projection, preparation/custody
+and configured-provider files. One earlier failure was a test's shared clock
+replacement; restricting that fixture to the registrar clock fixed it without
+changing production timing. Ruff, focused mypy, install contract and module
+guards passed. Managed reconciliation preserved its backup and the qualified
+source/test/doc bytes match the actual merge.
+
+This remains source-only optimistic publication, not admission. The next
+bounded investigation qualifies original source/coordinator target identity
+when filesystem aliases or same-path replacement are involved, using existing
+owner identity primitives and contained negative controls before any change.
+No automatic publisher, config setter, ordinary caller, enrollment, activation,
+rollout, placement, unmanaged-writer adoption or protected reconciliation was
+enabled. External atomicity, mixed writers, executable rollback and every
+original Plan/Validation gate remain open; the parent remains **Active**.
+
+### 2026-10-31 - Prioritized lifecycle and agenda contract reviewed
+
+[#9848](https://github.com/ThomasMichon/copilot-extensions/pull/9848) actually
+merged as `0dcd78b31c5779c0c92357989282bc83ca8a0524` after current-head
+Copilot approval, a complete review with no active findings or inline threads,
+and all three required checks. The preceding #9843 journal was delivered.
+The amendment now prioritizes the five claim/start, failure/deadline, suspended
+recovery and submission-closeout outcomes. Finalize-before-submission is required
+for worktree-backed workers; automatic finalize-before-evaluators remains a
+separately qualified option.
+
+The worktree-owned agenda advanced through its declared reviewed-contract edge
+to claim/start implementation. This is design acceptance, not implementation or
+runtime adoption. Existing reservation/claim/start and wake/submission owners
+remain the integration seams. Nonblocking metadata identity hypotheses are
+parked rather than silently promoted into prerequisites. Every original
+Plan/Validation and installed/native gate remains open; the parent is **Active**.
+
+### 2026-11-01 - First atomic claim/start implementation prepared
+
+Prepared the explicit coordinator-owned pool placement transaction and its
+affirmative worker-start boundary. Complete configured catalog selection,
+instance capacity, retained assignment, reservation and `CLAIMED` now commit
+together in source before workspace/startup effects. A placed claim initially
+has no invented worker/native; spawn publication is not acceptance.
+Current worker start checks the recorded execution host, target worktree,
+native identity, assignment generation and existing startup/acquisition fences.
+
+Contained final validation passed **866 controls** across placement, real HTTP/client,
+reservation, queue, lifecycle, supervisor and native-owner wake tests.
+Independent source review found execution-host, target-worktree and sibling
+exclusive-contention gaps; all three were corrected with regression controls.
+Existing reset tests now preserve qualified native-retirement requirements
+instead of expecting reset to discard an accountable native or reservation.
+Ruff and all thirteen install contracts pass; the two new typed placement/catalog
+modules pass a focused type check. A broader legacy mixin/client type probe does
+not pass and is not presented as full type acceptance.
+
+This is pre-publication source evidence, not a merged or installed outcome.
+Admitted supervisor caller migration, startup/decision budgets, task-wide retry,
+suspended recovery and submission closeout remain open under the amendment.
+The parent and the active claim/start work unit remain **Active**.
+
+### 2026-11-01 - Atomic claim/start review revision prepared
+
+The #9859 revision addresses drain admission and in-flight accounting,
+historical pool capacity after failed native execution, positive CLI startup
+driver qualification, supplied-capability/repository exclusions and independent
+execution-machine recording for targeted/reused workspaces. Local review found
+an additional startup-closure gap in force-failed/rearmed retirement histories;
+capacity now independently requires completed or fenced startup, native
+retirement and reconciled transport custody.
+
+Final contained validation passed **915 controls** across thirteen lifecycle,
+workspace, native-owner, catalog and scoped-authority selectors. The exact
+controls preserve non-created ownership, wait through an in-flight drain,
+retain superseded native attempts and reject retirement-only startup release.
+Ruff, focused placement/catalog typing, the enforced admitted type scopes and
+all thirteen install contracts pass. This remains prepared source evidence:
+the current-head PR review/merge gate, admitted supervisor integration, retry
+budgets and all original parent/native qualification remain open.
+
+### 2026-11-01 - Transactional response and replacement-native revision prepared
+
+The next #9859 revision captures the reservation and matching assignment inside
+the existing allocation transaction, including replay. Exact HTTP interleavings
+advance the task to another attempt before response serialization without
+mixing reservation keys or assignment generations. The legacy two-value
+`reserve_spawn` result is preserved.
+
+Native publication and acceptance now use the shared driver-qualified retirement
+history. A distinct replacement clears only a proven handleless inherited marker;
+retired predecessors and retained-native overwrites are refused. Late replacement
+startup during release retains release intent and accountable capacity until its
+own qualified retirement. Intrinsic routing requirements match actual execution
+identities separately from hard capabilities and are rechecked at publication
+and acceptance. External targeted/reused history classification does not grant
+creation or disposal ownership.
+
+Final contained validation passed **941 controls** across the same thirteen
+lifecycle, workspace, native-owner, catalog and scoped-authority selectors.
+Ruff, focused placement/catalog typing, all admitted enforced type scopes,
+thirteen install contracts and documentation consistency pass. This is prepared
+source evidence, not current-head review approval, merge, release or running
+adoption. The claim/start work unit and canonical parent remain **Active**;
+caller migration, selected startup/retry policy and every remaining parent
+qualification gate remain open.
+
+### 2026-11-01 - Historical native release and explicit-target correction prepared
+
+The #9859 correction retains terminal pool reservations as historical records
+while `native_release_pending` accounts for their unresolved original native.
+Requesting a predecessor's release cannot resurrect another active assignment
+or replace its retained native handle. Current publication/acceptance rejects
+that native while retirement is pending, independently of the later
+exact-absence classification. The supervisor observes the historical native
+without ending or concluding a successor's workspace; startup, cleanup, rearm,
+allocation and transport fences remain independent.
+
+An explicit target with unrelated pending cleanup now refuses placement before
+claim/reservation commit; untargeted affinity can still be discarded. Final
+contained validation passed **1181 controls** across sixteen lifecycle,
+workspace, catalog, authority and recovery selectors, including active-successor
+release/replay with and without exclusivity, handle retention across terminal
+states, late handleless replacement, original startup closure, reopen and
+explicit-target refusal. Ruff, focused placement typing, the enforced admitted
+type scopes, module-size ceilings, install contracts and documentation consistency
+pass. This remains prepared source evidence: current-head review/merge,
+supervisor caller migration, retry budgets and all parent/native gates remain open.
+
+### 2026-11-01 - Historical exclusive holder and pre-acceptance host correction prepared
+
+Fresh reservation now fences an accountable historical pool holder of the same
+exclusive key under the existing write lock, including pending native release
+with spare pool capacity. Active replay remains observation-only, and a fresh
+same-task attempt waits for its pending historical retirement. Exact retirement
+permits the sibling to proceed without changing the active-owner index.
+
+The existing retained-CLI location owner prefers validated `execution_machine`,
+so failed startup before affirmative acceptance can still probe the original
+native. Accepted owner/attachment evidence remains the legacy fallback, and
+invalid recorded machine data remains unknown rather than adopting the observer.
+Final contained validation passed **1192 controls** across the same sixteen
+selectors, with eleven added sibling/exact-retirement, pre-acceptance probe and
+legacy/invalid-location controls. Focused placement typing and changed Python
+lint pass. Current-head review, actual merge, caller/startup-policy integration
+and all canonical parent/native gates remain open.
+
+### 2026-11-01 - Recovery retirement and transport-owner correction prepared
+
+Rearm and fresh-conversation authorization inspect all original pool-bound
+reservations before changing retirement markers. Three completed failed
+attempts sharing a native cannot release its capacity or exclusive key without
+qualified retirement. Legacy unassigned recovery keeps its existing contract.
+Capacity attributes unresolved sends to their recorded reservation and wake
+native/workspace; an active successor's send no longer recounts its retired
+predecessor. Unknown native targeting retains ambiguous workspace custody,
+while fresh admission still reconciles the entire execution lineage.
+Unrelated cleanup may discard optional affinity, but cannot discard an explicit
+target or required `worktree:` selector before committing `CLAIMED`.
+
+Final contained validation passed **1388 controls**, with one existing skip,
+across twenty-one placement, startup, recovery and send/wake selectors.
+Focused placement typing, all four admitted strict projects on Linux/Windows,
+changed Python lint, installation and documentation contracts pass. Broader
+legacy mixin typing is not claimed as qualified. Current-head review, actual
+merge, caller/startup-policy integration and every canonical parent/native
+gate remain open.
+
+### 2026-11-01 - Wake host normalization correction prepared
+
+Wake capacity ownership uses the same host normalization as pool workspace
+validation, so a matching pending/unknown native send remains accountable when
+the recorded execution host differs only in casing or surrounding whitespace.
+Eight owner/waiter controls record that host through the actual preparation
+boundary, reach affirmative start, retain transport capacity after native
+retirement and release it only after transport settlement.
+Final contained validation passed **1396 controls**, with one existing skip,
+across the same twenty-one selectors. The correction is source-only; current
+review/merge, caller integration and all canonical parent/native gates remain
+open.
+
+### 2026-11-01 - Release, carried routing and preparation replay correction prepared
+
+An identical release retry after qualified retirement preserves native absence
+instead of restoring pending retirement and recounting capacity/exclusivity.
+Newly returned workspace/native effects still enter accountable release, including
+a late first-native response for an originally unbound root allocation.
+Unresolved sends retain their own reservation's transport capacity independently.
+
+Pool selection now follows final carry-forward, cleanup and driver resolution
+inside the same write lock. It checks the actual workspace before committing
+the claim and slot, including a retained retry with no explicit target/affinity.
+An excluded carried checkout refuses without mutation; a matching required
+worktree may use proven carry-forward. Retained pool identity and priority
+selection remain with the existing allocator.
+
+Prepared workspace replay normalizes execution host comparison at both the
+coordinator's immutable binding and the caller's cached/returned fact checks.
+The originally recorded host spelling remains unchanged; different hosts and
+other workspace identity mismatches still refuse.
+Final contained validation passed **1436 controls**, with one existing skip,
+across twenty-two coupled selectors. Focused placement typing, all four admitted
+strict projects on Linux/Windows, changed Python lint, installation contracts
+and documentation consistency pass. Broader legacy workspace/mixin typing is
+not claimed as qualified. Current-head review, actual merge, caller/startup
+policy integration and every canonical parent/native gate remain open.
+
+### 2026-11-01 - Handleless root and pending-history correction prepared
+
+Qualified handleless-root retirement now retains its first late native even
+when workspace preparation was already recorded or the attempt failed before
+release. This clears only the root's empty-native retirement marker and
+requires fresh exact retirement of the late native; inherited replacement
+history and original startup closure remain independent.
+
+Capacity and release sweeps apply the pending-native predicate before the
+reservation result limit. Cleanup retains its existing server-side pending
+predicate, with native/cleanup results deduplicated. Regression history places
+an outstanding row behind ten thousand newer completed rows and proves it
+still consumes capacity, receives its exact native probe and remains visible
+to the cleanup owner.
+The existing list operation adds an optional pending-native filter with an
+executing response capability. Updated callers reject a legacy provider that
+silently ignores the filter; capacity-critical incompatibility remains a
+visible exhausted-capacity hold. Unfiltered old callers remain supported.
+
+Contained validation passed **1450 controls**, one existing skip, across
+twenty-three coupled selectors, including actual HTTP/client and mixed-provider
+controls. Focused placement/client typing, four admitted strict projects on
+Linux/Windows, changed Python lint, install and documentation contracts pass.
+Current-head review, actual merge, supervisor caller/startup-policy integration
+and every canonical parent/native gate remain open. No runtime was activated.
+
+### 2026-11-01 - Accountable terminal capacity and batched history correction prepared
+
+Supervisor capacity now includes pool-bound terminal attempts with unresolved
+native, startup or transport custody even before release is requested.
+The existing reservation-list boundary shares placement's classifier and
+applies it before the result limit. Its opt-in executing response capability
+and per-result marker refuse silently ignored queries from older providers.
+Legacy pending-native accounting remains separately included and deduplicated.
+
+Capacity classification batches receipts, sends and native/workspace-targeted
+wakes in one transaction snapshot. A proven native's own qualified retirement
+does not rescan its entire lineage; unresolved identities reuse only exact
+lineage selectors within that unchanged snapshot. Retired membership uses a set
+and instance counting stops once full. No history is truncated to classify an
+unresolved native, and no evidence cache survives mutation or a new operation.
+
+Contained validation passed **1467 controls**, one existing skip, across
+twenty-four coupled selectors. New controls cover failed native/no release
+intent with actual legacy-spawn refusal, old-provider capacity holds, old/new
+HTTP query behavior, outstanding capacity behind ten thousand retired pool
+attempts, and bounded SQL/classification/native-identity operation counts as
+history grows from one hundred to one thousand entries.
+Focused helper/placement/client typing, four admitted strict projects on
+Linux/Windows, changed Python lint and install/documentation contracts pass.
+Broader legacy mixin typing is not qualified. Current-head review, actual
+merge, caller/startup-policy integration and every parent/native gate remain
+open. This is source-only; it does not activate a runtime.
+
+### 2026-11-01 - Empty-origin, receipt-first and active-pool correction prepared
+
+The shared native-history owner distinguishes qualified empty allocation
+absence from a retired native identity. A successor on the same logical
+allocation may publish or retain its first native without assigning that
+native its predecessor's retirement. Incomplete startup and unknown pending
+retirement remain blocking. Empty and native retirement evidence are
+precomputed once, including for long histories of unbound inherited markers.
+
+The durable CLI acquisition receipt arrives before normal native publication.
+Its existing binding transaction therefore checks the real validated native
+against the same history before insertion, clearing only a proven inherited
+marker. Exact Bridge authority, generation, workspace, immutable receipt and
+affirmative start checks remain independent. Receipt replay cannot replace a
+bound native or revive its completed retirement.
+
+Supervisor accountability queries include active pool attempts as well as
+terminal ones. A startup-complete suspended CLI task with an unresolved waiter
+wake retains capacity even when the legacy process classifier reports no live
+process. Unassigned legacy handling is unchanged.
+
+Final contained validation passed **1504 controls**, one existing skip, across
+twenty-six coupled selectors. Fifteen new native/receipt controls cover actual
+same-dedup successor publication/release, empty-origin negative cases, real
+receipt-before-publication/start ordering, stale/foreign/retired identity
+refusals and linear retirement work at one hundred/one thousand history entries.
+Four additional owner/waiter pending/unknown controls exercise actual supervisor
+spawn refusal. Focused native/receipt typing, four admitted strict projects on
+Linux/Windows, changed Python lint and install/documentation contracts pass.
+Current-head review, actual merge, caller/startup-policy integration and all
+canonical parent/native gates remain open. No runtime was activated.
+
+### 2026-11-01 - Receipt-backed recovery and successor-history correction prepared
+
+Handleless release recovery now consults the existing reservation GET's exact
+driver-qualified native identity, including a durable acquisition receipt.
+Both ordinary and stranded sweeps, including historical pending releases,
+retain LIVE, UNKNOWN, unfinished-startup and unavailable-provider cases.
+A recorded CLI native uses its retained execution host and exact-GONE
+retirement. The force-fail write transaction independently checks native
+identity, so a stale empty read cannot discard a subsequently bound receipt.
+Unsettled transport remains accountable after native retirement.
+
+The additive `reservation-native-identity/v1` response capability expands the
+existing GET without a new endpoint or prerequisite command. Older callers
+retain their fields; new recovery callers hold visibly against an old or
+rolled-back provider rather than assuming an empty launch.
+
+Ordinary-Bridge-to-CLI resolution refuses before claim/slot publication if
+discarding the retained workspace would discard an explicit target or worktree
+requirement. An optional unassigned driver transition keeps its existing behavior.
+Snapshot-local history reuse spans distinct same-dedup successor tasks only
+when all reservations for each task prove its task predicate redundant with the
+same non-null creation predicate. Mixed/null creation history retains the
+task-specific selector, including exclusive-handle matching.
+
+Contained coupled validation passed **1536 controls**, one existing skip, across
+twenty-six selectors. New controls cover actual receipt bind/release before
+handle publication, ordinary/stranded/historical LIVE/UNKNOWN/GONE recovery,
+startup and transport retention, transactional force refusal, real HTTP identity
+and force behavior, explicit/required driver transition refusal, distinct-task
+history growth at one hundred/one thousand entries in query and high-capacity
+placement, and task-specific extra-history isolation. Focused native/storage/
+accountability/recovery typing and the four admitted Linux/Windows projects
+are separate from unqualified legacy mixin typing debt.
+Current-head review, actual merge, caller/startup-policy integration and every
+canonical parent/native gate remain open. No runtime was activated.
+
+### 2026-11-01 - Terminal receipt cleanup follow-through prepared
+
+A retained acquisition receipt is historical identity evidence after exact
+native retirement, not a request to retire the terminal attempt again.
+Receipt-backed retirement is limited to active attempts; historical
+`native_release_pending` remains independently actionable. Failed and settled
+attempts therefore reach the existing claimed/validated workspace cleanup on
+the next sweep. Two real second-sweep controls prove the cleanup claim,
+completed conclusion, absence of repeated native probes, idempotent later
+sweeps and subsequent same-dedup explicit workspace reuse.
+The coupled contained run passes **1538 controls**, one existing skip, across
+twenty-six selectors. Current-head review, actual merge, caller/startup
+integration and all canonical parent/native gates remain open; this source
+correction activates no runtime.
+
+### 2026-11-01 - Successor location and normalized exclusion correction prepared
+
+A distinct same-dedup successor retains its predecessor's validated execution
+host with the carried workspace. Pool selection intersects that location with
+unchanged task targets, intrinsic requirements and exclusions before the claim
+transaction commits; original host spelling and creation provenance remain
+independent. Optional workspace discard also discards its location constraint.
+Unknown legacy location is not inferred from creation provenance.
+
+The shared placement/workspace exclusion check compares machine selectors with
+the same strip/lower normalization as validated execution hosts. Workspace
+recording, native publication and affirmative start recheck current exclusions;
+other token dimensions retain exact matching.
+
+Twenty-eight actual successor and exclusion controls cover higher-priority
+foreign-host candidates, normalized recorded location through affirmative start,
+conflicting/unavailable/full routing, unknown legacy and unassigned reuse,
+optional workspace discard, mixed-case host exclusions and changed exclusions
+at the workspace/publication/start boundaries. The bounded coupled run passes
+**1566 controls**, one existing skip, across twenty-seven selectors with cleanup
+verified. Current-head review and actual merge remain open; caller/startup-policy
+integration, unknown-effect exhaustion and every parent/native gate remain
+required. No caller migration or runtime activation is included.
+
+### 2026-11-01 - Affirmative worker host comparison correction prepared
+
+Pool start compares the supplied worker's machine component using the existing
+execution-host normalization, while preserving the exact worktree suffix,
+recorded native, claim generation and already-bound owner. The accepted worker
+spelling is stored unchanged; pool and workspace provenance are not rewritten.
+Six actual mixed-case host starts exercise affirmative transition and exact
+idempotent replay. Six wrong-host, wrong-suffix and malformed-identity controls
+plus an existing-owner control refuse without mutation.
+
+The bounded coupled run passes **1579 controls**, one existing skip, across
+twenty-seven selectors with cleanup verified. The current-head review, required
+checks and actual merge remain open. Caller migration, bounded startup policy,
+unknown-effect exhaustion and the full parent/native acceptance remain separate
+required gates; this correction activates no runtime.
+
+### 2026-11-02 - Explicit atomic claim/start provider merged
+
+[#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859) is actually
+squash-merged to `dev` as `da6db5171438f3167d308158b5bd4b85d1b4a8fb`, from final
+source `5c55589ff154feaf4cb8d5139aee0e30499d8a7f`. The provider now supports
+transactional configured-pool selection, reservation/slot acquisition and
+allocator-owned `CLAIMED` before workspace/native startup, with affirmative
+current-worker `STARTED`. Receipt-first binding, exact retirement, retained
+execution host, current routing, historical capacity and replay conditions are
+qualified at the source/API tier. Shared and task-scoped callers preserve
+explicit expected-owner conditions. Empty pool releases cannot age-force-fail
+without qualified absence; unassigned legacy recovery and visible old-provider
+holds remain distinct.
+
+The final bounded coupled matrix passes **1636 controls**, one existing skip,
+across31selectors with cleanup verified. Three current authority/storage/recovery
+owners pass mypy; inherited reservation/lifecycle mixin debt remains explicitly
+unqualified. Install, documentation, lint and changed-module guards pass.
+The actual current bot review is COMMENTED; the Maintainer assessed the repeated
+unsupported owner-token objection against current source and exercised a narrow
+authorized override. Remaining described failures are corrected by current
+source/regressions, not waived; no reviewer approval was fabricated and no
+reviewer-owned thread was author-resolved. The managed direct merge verified
+current head, required CI and provider-authorized completion.
+
+Only the provider source item receives completion credit. The comprehensive
+implementation and validation items remain open. Next is admitted caller/startup
+integration through existing supervision owners: complete effective publication
+and runtime support, retained claim/start episodes, bounded reachable-worker
+decisions and exhaustion, including unknown no-handle/no-receipt effects without
+indefinite CLAIMED or prematurely freed capacity. Selected three-attempt,
+five-minute nudge, thirty-minute decision and1/3/6/12-hour cooldown semantics,
+suspended recovery, declined/submitter closeout and installed/native
+qualification still require implementation and acceptance. Both the parent
+effort and this amendment remain Active; this merge activates no runtime.
+
+### 2026-11-02 - Explicit allocator and worker callers prepared
+
+The explicit allocator client now negotiates the running provider before
+placement and validates the transactional task/reservation/assignment result.
+Unknown outcomes never trigger a legacy reservation, a newer catalog request
+or another spawn. Active replay remains `reserved=false` custody evidence.
+
+An opt-in `start --pool-generation` caller accepts the actual current worker
+and native incarnation without first taking a second execution claim.
+Its additive health advertisement needs only ordinary API-read authority,
+not the allocator's control credential. A versioned start-body field requires
+the actual pool assignment inside the transition transaction; it cannot
+silently accept a legacy interactive claim. Ordinary starts and task-only
+projection remain distinct, and projected workers reject the new fleet option.
+No ordinary supervisor, publisher or seed prompt is automatically switched.
+
+The bounded five-selector caller/placement/replay/CLI matrix passes **475
+controls** with cleanup verified; focused new-caller typing and changed Python
+lint pass. Current-head review and actual merge remain open. The selected
+startup attempts, decision nudges/exhaustion/cooldowns, automatic caller/cohort
+migration and all remaining parent/native gates are still required.
+
+Explicit acceptance uses `/tasks/{id}/pool-start`, backed by the existing start
+handler and transition. A capability observation alone cannot exclude a
+provider rollback before the write: an older ordinary start handler can ignore
+the new field and accept an interactive claim. The distinct route gives that
+older provider no matching operation and refuses before mutation. A two-provider
+transport control switches after the successful health read and proves no
+legacy start or ownership mutation occurs; a direct legacy control confirms
+the ordinary route would otherwise accept that same claim.
+
+### 2026-11-02 - Explicit caller source reviewed and merged
+
+[#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955) is actually
+squash-merged to `dev` as `dfb0c6e648e43abfd91b5deae89c00fa41db99ca`
+from source `c0b65780702348fd1895ffc9b9e76b7fb492f5a9`. The current-head
+review is APPROVED with no active issues; the concrete between-read/write
+rollback defect is corrected, not waived. Required CI and the managed
+submitter-direct merge completed. The parent coordination issue remains open.
+
+The bounded coupled matrix passes 475 controls with verified cleanup, alongside
+focused caller typing, lint, install, documentation and changed-module guards.
+Only the explicit caller-source item receives completion credit. Continue the
+claim/start work with durable reservation-preserving startup episodes,
+reachable-worker decisions, queued exhaustion retaining unknown effects and
+the selected retry/cooldown policy through existing owners. Complete configured
+publication and ordinary lane/prompt integration still need their own
+qualification. Suspended recovery, own-worktree closeout and every remaining
+parent/native gate stay open; this source merge activates no runtime.

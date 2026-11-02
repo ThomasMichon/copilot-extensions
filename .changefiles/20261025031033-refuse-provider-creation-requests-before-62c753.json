@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse provider creation requests before local launch custody preparation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

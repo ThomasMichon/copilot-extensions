@@ -3,7 +3,7 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-26
 
 ## Purpose & Intent
 
@@ -135,6 +135,20 @@ a lightweight browser renderer need not implement a full remote shell or
 become another session host. Input, observation and lifecycle control remain
 separate permissions. No terminal capability is inferred from service routing.
 
+### management-transport-survives-supporting-removal
+
+Where the Gateway or an outbound connector actually carries machine-management
+access, its required process, helper, supervision, routing and authentication
+closure is critical connectivity substrate. Removing or reinstalling other
+suite services preserves both current access and reconnection; a blanket force
+or purge request cannot withdraw that route.
+
+This is role-specific protection, not an exemption for every Gateway route or
+every agent service. Credential relays remain disposable. A design that couples
+their lifetime to direct machine-management access must separate those roles
+or expose a concrete removal blocker instead of silently losing access. See
+[Disposable Supporting Runtimes](../../plugin-services/disposable-runtimes/README.md#connectivity-survives-supporting-suite-removal).
+
 ### nearly-all-configuration-is-live
 
 Adding, replacing or removing a service, changing a valid route or role policy,
@@ -158,6 +172,28 @@ Gateway caller authentication, edge authentication, service-connector identity,
 route permission and fleet administration remain separate grants. Proxy and external-origin
 handling preserve authenticated target identity rather than trusting
 caller-supplied forwarding headers.
+
+### human-sessions-and-machine-enrollment
+
+Ordinary human UX access composes the selected identity provider's normal
+authenticated session with Gateway route and capability authorization.
+Page navigation, assets and application requests do not require the browser to
+hold a separately enrolled signing key unless an explicitly selected stronger
+profile requires it. Trusted identity handling, protected backend reach and
+request-forgery protection remain part of that boundary.
+
+Machine onboarding and service connectors use their own explicit credential,
+enrollment and current-grant contracts. A harness-selected, authenticated user
+continuity source can provide discovery and delegated bootstrap authority before
+the new machine has Gateway credentials or SSH. Any required new-device
+confirmation is attributable to the actual requester and scope; a short code or
+discovered endpoint alone grants nothing.
+
+These are distinct admitted authentication modes, not a silent fallback between
+them. A human-session adapter cannot feed an ordinary cookie or caller-supplied
+identity header into a machine proof verifier. Selecting normal human SSO does
+not weaken an existing machine profile, grant service identity or confer fleet
+administration.
 
 ### thin-hosting-wrappers
 

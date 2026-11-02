@@ -18,7 +18,7 @@ script="$root/scripts/write_session_guidance.py"
 
 MAX_INPUT_BYTES=65536
 GUIDANCE_MAX_BYTES=4096
-CACHE_FORMAT_VERSION=1
+CACHE_FORMAT_VERSION=3
 GUIDANCE_HEADER=$'# AI attribution session guidance\n\n'
 SESSION_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
@@ -91,6 +91,74 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                 if [[ "$version" == "$CACHE_FORMAT_VERSION" && -n "$computed_at" && -n "$guidance" ]] \
                     && age="$(awk -v now="$now" -v c="$computed_at" 'BEGIN { print (now - c) }')" \
                     && awk -v age="$age" -v ttl="$ttl" 'BEGIN { exit !(age <= ttl) }'; then
+                    if printf '%s' "$data" | jq -e '.profile_environment != null' >/dev/null 2>&1; then
+                        # The Python owner supplies the normalized discovery probes.
+                        if ! printf '%s' "$data" | jq -e \
+                            --arg home "$resolved_home" --arg repo "$repo_root" --arg cwd "$(pwd -P)" \
+                            --arg dirs "${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}" \
+                            --arg xdg "${XDG_CONFIG_HOME:-}" --arg appdata "${APPDATA:-}" \
+                            '.profile_environment.version == 1
+                             and .profile_environment.home_environment == $home
+                             and .profile_environment.repo == $repo
+                             and .profile_environment.cwd == $cwd
+                             and .profile_environment.dirs == $dirs
+                             and .profile_environment.xdg == $xdg
+                             and .profile_environment.appdata == $appdata
+                             and (.profile_probes | type) == "array" and (.profile_probes | length) > 0' >/dev/null 2>&1; then
+                            run_python_fallback "$stdin_text"
+                            exit 0
+                        fi
+                        while IFS= read -r -d '' profile_path \
+                            && IFS= read -r -d '' expected \
+                            && IFS= read -r -d '' kind; do
+                            component="$profile_path"
+                            while [[ "$component" != "/" && "$component" != "." ]]; do
+                                if [[ -L "$component" ]]; then
+                                    run_python_fallback "$stdin_text"
+                                    exit 0
+                                fi
+                                case "$component" in
+                                    */*) component="${component%/*}"; component="${component:-/}" ;;
+                                    *) component="." ;;
+                                esac
+                            done
+                            if [[ "$kind" == "excluded" ]]; then
+                                continue
+                            fi
+                            if [[ -z "$expected" ]]; then
+                                if [[ -e "$profile_path" || -L "$profile_path" ]]; then
+                                    run_python_fallback "$stdin_text"
+                                    exit 0
+                                fi
+                                continue
+                            fi
+                            if [[ ! -f "$profile_path" ]] || [[ "$(wc -c < "$profile_path")" -gt 65536 ]]; then
+                                run_python_fallback "$stdin_text"
+                                exit 0
+                            fi
+                            if [[ "$sha256_uses_shasum" -eq 1 ]]; then
+                                actual="$(shasum -a 256 -- "$profile_path" | cut -d ' ' -f 1)"
+                            else
+                                actual="$(sha256sum -- "$profile_path" | cut -d ' ' -f 1)"
+                            fi
+                            if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+                                run_python_fallback "$stdin_text"
+                                exit 0
+                            fi
+                        done < <(printf '%s' "$data" | jq -j \
+                            '.profile_probes[] | .path, "\u0000", (.sha256 // ""), "\u0000", (.kind // ""), "\u0000"')
+                        guidance="$(printf '%s' "$data" | jq -er '.profile_guidance // empty' 2>/dev/null)"
+                        profile_header="$(printf '%s' "$data" | jq -er '.profile_header // empty' 2>/dev/null)"
+                        if [[ -z "$guidance" ]] || [[ "$profile_header" != "# AI attribution session guidance" \
+                            && "$profile_header" != "Disclose AI for ALL contributions." ]]; then
+                            run_python_fallback "$stdin_text"
+                            exit 0
+                        fi
+                        GUIDANCE_HEADER="${profile_header}"$'\n\n'
+                    else
+                        run_python_fallback "$stdin_text"
+                        exit 0
+                    fi
                     content="${GUIDANCE_HEADER}${guidance}"$'\n'
                     content_bytes=${#content}
                     if [[ "$content_bytes" -gt "$GUIDANCE_MAX_BYTES" && -n "$guidance" ]]; then

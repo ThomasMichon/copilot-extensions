@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve configured knowledge-repository machine rosters without requiring project adoption",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

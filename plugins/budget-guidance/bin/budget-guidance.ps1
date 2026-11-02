@@ -6,6 +6,12 @@ $_command = 'budget-guidance'
 $_module = 'budget_guidance'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $_runtimeRoot = Join-Path $env:USERPROFILE '.budget-guidance'
+$_cacheId = [Guid]::NewGuid().ToString('N')
+$_pythonCache = [IO.Path]::GetFullPath((Join-Path $_runtimeRoot "cache\python\unsealed-$_cacheId"))
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_pythonCache.StartsWith('\\?\')) {
+    $_pythonCache = if ($_pythonCache.StartsWith('\\')) { '\\?\UNC\' + $_pythonCache.Substring(2) }
+    else { '\\?\' + $_pythonCache }
+}
 $_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
 function Get-BootTraceTimestamp {
@@ -201,7 +207,7 @@ if ($_py) {
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-    & $_py -m $_module @args
+    & $_py -X "pycache_prefix=$_pythonCache" -m $_module @args
     } finally {
         $ErrorActionPreference = $_previousEap
     }
@@ -299,7 +305,7 @@ if ($_provisionedPy) {
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-    & $_provisionedPy -m $_module @args
+    & $_provisionedPy -X "pycache_prefix=$_pythonCache" -m $_module @args
     } finally {
         $ErrorActionPreference = $_previousEap
     }

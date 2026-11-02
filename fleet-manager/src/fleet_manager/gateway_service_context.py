@@ -20,6 +20,9 @@ from .gateway_contract import GatewayError, public_key
 from .gateway_identity_provider import IdentityProvider, IdentityProviderError, prepare_identity
 from .gateway_manifest import GatewayManifest, ManifestError, ServiceSlot
 from .runtime_identity import IdentityError, IdentityVerifier, _text, _time
+from .machine_identity import MachineBinding, MachineIdentityVerifier, PROFILE as MACHINE_PROFILE
+
+ServiceVerifier = IdentityVerifier | MachineIdentityVerifier
 
 SCHEMA = "fleet-manager.gateway-service-policy"
 MAX_BINDINGS = 128
@@ -203,7 +206,7 @@ def _enrollment(value: object, keys: tuple[ResolvedKey, ...], manifest: GatewayM
 
 def parse_context(raw: bytes, clock: Callable[[], int], *,
                   identity_provider: IdentityProvider | None = None,
-                  ) -> tuple[ServiceContext, IdentityVerifier]:
+                  ) -> tuple[ServiceContext, ServiceVerifier]:
     """Validate a complete bounded candidate, including real keys, off-lock."""
     try:
         decoded = planning.decode(raw)
@@ -211,13 +214,22 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
             "schema", "version", "manifest", "identity", "bindings", "callers",
         }
         if isinstance(decoded, dict) and type(decoded.get("version")) is int \
-                and decoded["version"] == 3:
+                and decoded["version"] in (3, 4):
             names.add("enrollment")
         root = fields(decoded, names)
         require(root["schema"] == SCHEMA and type(root["version"]) is int
-                and root["version"] in (1, 2, 3), "unsupported-schema")
+                and root["version"] in (1, 2, 3, 4), "unsupported-schema")
         manifest = GatewayManifest.load(root["manifest"])
-        if root["version"] == 1:
+        if root["version"] == 4:
+            normalized_identity = fields(
+                root["identity"], {"profile", "audience", "trust_valid_until"})
+            require(normalized_identity["profile"] == MACHINE_PROFILE, "unsupported-profile")
+            trust_valid_until = normalized_identity["trust_valid_until"]
+            require(type(trust_valid_until) is int, "invalid-trust")
+            verifier = MachineIdentityVerifier(
+                audience=normalized_identity["audience"], bindings=(),
+                trust_valid_until=trust_valid_until, clock=clock)
+        elif root["version"] == 1:
             identity = fields(root["identity"], {"issuer", "audience", "jwks", "trust_valid_until"})
             jwks = fields(identity["jwks"], {"keys"})
             signing_keys = items(jwks["keys"], 16, minimum=1)
@@ -273,6 +285,41 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
                          for (provider, reference), value in sorted(mappings.items())],
         }
         trust_epoch = normalized_identity
+        if root["version"] == 4:
+            enrollment = fields(root["enrollment"], {"mappings"})
+            machine_bindings = []
+            seen = set()
+            for value in items(enrollment["mappings"], MAX_ENROLLMENTS):
+                item = fields(value, {"principal", "kind", "resource", "key_source", "expires_at"})
+                principal, source = identifier(item["principal"]), identifier(item["key_source"])
+                resource, kind = identifier(item["resource"]), item["kind"]
+                require(kind in ("caller", "service"), "invalid-enrollment")
+                require(resource in slot_names, "invalid-enrollment")
+                require((principal, kind, resource) not in seen, "ambiguous-enrollment")
+                seen.add((principal, kind, resource))
+                if kind == "caller":
+                    require(any(c.principal == principal and c.key_source == source
+                                and resource in c.slots for c in callers), "invalid-enrollment")
+                else:
+                    require(any(s.name == resource and s.principal == principal
+                                and s.key_source == source for s in manifest.slots),
+                            "invalid-enrollment")
+                key = next((key for key in keys if key.name == source), None)
+                require(key is not None, "unresolved-key-source")
+                assert key is not None
+                machine_bindings.append(MachineBinding(
+                    principal, kind, resource,
+                    planning.canonical(mappings[key.provider, key.reference][1]),
+                    item["expires_at"]))
+            verifier = MachineIdentityVerifier(
+                audience=normalized_identity["audience"], bindings=tuple(machine_bindings),
+                trust_valid_until=trust_valid_until, clock=clock)
+            normalized["enrollment"] = {
+                "mappings": sorted(enrollment["mappings"], key=planning.canonical)}
+            trust_epoch = {
+                "identity": normalized_identity, "enrollment": normalized["enrollment"],
+                "bindings": normalized["bindings"],
+            }
         if root["version"] == 3:
             trust = normalized_identity["trust"]
             assert isinstance(trust, dict)

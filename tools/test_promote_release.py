@@ -91,6 +91,8 @@ def repo(tmp_path: Path) -> Path:
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
     _git(["config", "core.autocrlf", "false"], root)
+    if os.name == "nt":
+        _git(["config", "core.longpaths", "true"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
@@ -150,7 +152,15 @@ def test_tree_filter_uses_candidate_index_without_changing_checkout(
         assert (repo / paths[kind]).read_text(encoding="utf-8") == '{"generation": "old"}\n'
 
 
-def test_promote_creates_wholesale_replace_commit(repo: Path):
+@pytest.mark.parametrize("long_message", [False, True])
+def test_promote_creates_wholesale_replace_commit(repo: Path, monkeypatch, long_message: bool):
+    large_message = " typed \u00e9" * 8000
+    if long_message:
+        formatter = pr.format_promotion_message
+        monkeypatch.setattr(
+            pr, "format_promotion_message",
+            lambda **kwargs: formatter(**kwargs) + "\n" + large_message,
+        )
     _git(["checkout", "-q", "dev"], repo)
     changefile_dir = repo / ".changefiles"
     changefile_dir.mkdir()
@@ -173,6 +183,15 @@ def test_promote_creates_wholesale_replace_commit(repo: Path):
     assert report["pushed"] is False
 
     commit = report["commit"]
+    if long_message:
+        assert large_message.strip() in pr._git(["show", "-s", "--format=%B", commit], cwd=repo)
+        raw_commit = subprocess.run(
+            ["git", "cat-file", "commit", commit], cwd=repo, capture_output=True, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        ).stdout
+        message_bytes = raw_commit.split(b"\n\n", 1)[1]
+        assert b"\r" not in message_bytes
+        assert large_message.encode("utf-8").strip() in message_bytes
     parents = _git(["log", "-1", "--format=%P", commit], repo).split()
     assert parents == [main_before]
 
@@ -188,6 +207,10 @@ def test_promote_creates_wholesale_replace_commit(repo: Path):
     # Tag was created and points at the generated commit.
     tags = _git(["tag", "--points-at", commit], repo)
     assert report["tag"] in tags.splitlines()
+    if long_message:
+        assert large_message.strip() in pr._git(
+            ["for-each-ref", "--format=%(contents)", "refs/tags/" + report["tag"]], cwd=repo,
+        )
 
     # main's real ref was NOT moved (push=False).
     assert _git(["rev-parse", "main"], repo) == main_before
@@ -243,6 +266,24 @@ def test_promote_refuses_when_a_uv_editable_reference_does_not_resolve(repo: Pat
     assert _git(["rev-parse", "main"], repo) == main_before
     worktrees = _git(["worktree", "list"], repo)
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
+
+
+def test_promote_refuses_missing_already_local_dependency(repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "pyproject.toml").write_text(
+        '[project]\nname = "demo-plugin"\nversion = "0.1.0-dev1"\n'
+        '[tool.uv.sources]\nagent-missing = { path = "libs/missing" }\n',
+        encoding="utf-8",
+    )
+    _commit(repo, "declare missing local dependency")
+    _git(["checkout", "-q", "main"], repo)
+    main_before = _git(["rev-parse", "main"], repo)
+
+    with pytest.raises(pr.PromotionError, match="local source"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert _git(["rev-parse", "main"], repo) == main_before
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
 def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
@@ -873,6 +914,8 @@ def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path):
                 "reverted_dev_head": dev_head,
                 "reason": "broke something",
             },
+            "schema": "copilot-extensions.release-pipeline-state",
+            "version": 1,
         }),
         encoding="utf-8",
     )
@@ -931,6 +974,8 @@ def test_promote_allows_a_genuine_forward_advancement_after_a_promotion(repo: Pa
         json.dumps({
             "paused": False,
             "last_promotion": {"dev_head": first_dev_head, "tag": "promote-x"},
+            "schema": "copilot-extensions.release-pipeline-state",
+            "version": 1,
         }),
         encoding="utf-8",
     )
@@ -1077,7 +1122,8 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
 
     commit = report["commit"]
     rendered = _git(["show", f"{commit}:{destination}"], root)
-    assert f"[owner: {plugin}@0.1.1-dev1]" in rendered
+    marker = rendered.partition("<!-- copilot-extension-instruction-projection ")[2].partition(" -->")[0]
+    assert json.loads(marker)["pluginVersion"] == "0.1.1-dev1"
     assert f"[owner: {plugin}@0.1.0-dev1]" not in rendered
 
 

@@ -138,12 +138,6 @@
       "source": "plugins/ai-attribution"
     },
     {
-      "name": "delegation-guidance",
-      "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
-      "version": "0.1.0-dev14",
-      "source": "plugins/delegation-guidance"
-    },
-    {
       "name": "budget-guidance",
       "description": "Provider-neutral current usage-budget posture with strict static readings, deterministic field-level source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
       "version": "0.1.0-dev16",
@@ -151,7 +145,7 @@
     },
     {
       "name": "agent-conduct-guidance",
-      "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. Modules: process-spawn hygiene (spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows), coordinator-first delegation (route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, and completion), and scratch-space hygiene (resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file outside a repository, instead of littering a drive root with undated loose files). Designed to absorb further similarly-scoped conduct guidance as its own module rather than proliferating single-purpose plugins.",
+      "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
       "version": "0.1.0-dev1",
       "source": "plugins/agent-conduct-guidance"
     }

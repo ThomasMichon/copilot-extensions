@@ -1,0 +1,9 @@
+{
+  "comment": "Observe recovery prompt receipts with bounded zero-helper resident sockets and native session-metadata uncertainty restoration.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

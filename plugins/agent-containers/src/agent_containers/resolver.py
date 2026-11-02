@@ -56,6 +56,7 @@ from .lifecycle import (
 )
 from .private_state import enforce_mode, fsync_directory, private_file_lock, strict_posix_modes
 from .ssh_transport import prepare_ssh_config
+from .lifecycle_ownership import lifecycle_blocker, validate_session_owner
 
 if TYPE_CHECKING:
     from agent_bridge.agent_registry import NamespaceAgentInfo
@@ -536,6 +537,7 @@ def resolve_live_exec_target(
             f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
             "refusing dispatch"
         )
+    validate_session_owner(fleet, (inspected.get("Config") or {}).get("Labels") or {})
     discovered_id = getattr(info, "container_id", None)
     inspected_id = inspected.get("Id")
     if not discovered_id or not inspected_id or discovered_id != inspected_id:
@@ -750,9 +752,14 @@ class ContainerResolver:
         if not restricted:
             from .hosting_policy import guarded_launch
 
+            instance_id = getattr(info, "container_id", None)
+            inspection = await asyncio.to_thread(lifecycle.inspect_container, instance_id or name)
+            if not instance_id or inspection.get("Id") != instance_id:
+                raise RuntimeError("container instance changed before namespace SSH preparation")
+            validate_session_owner(fleet, (inspection.get("Config") or {}).get("Labels") or {})
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
-                name,
+                instance_id,
                 user,
             )
             spec["container"] = {
@@ -868,6 +875,10 @@ class ContainerResolver:
         if state is None:
             raise RuntimeError(f"Container '{name}' not found")
         if state == "running":
+            validate_session_owner(fleet, info.labels)
             return
+        reason = lifecycle_blocker(config, info.name, info.labels)
+        if reason:
+            raise RuntimeError(reason)
         log.info("Container '%s' is '%s' -- starting", name, state)
         await asyncio.to_thread(start_container, name)

@@ -68,9 +68,12 @@ def _directory(path: Path) -> tuple[int, int]:
         raise PlanError("staging directory identity could not be inspected") from None
 
 
-def _read_bytes(path: Path, limit: int) -> bytes:
+def _read_bytes(path: Path, limit: int, *, allow_empty: bool = False) -> bytes:
+    if type(allow_empty) is not bool:
+        raise PlanError("staged input requires an explicit empty-file policy")
+    minimum = 0 if allow_empty else 1
     before = _file_stat(path)
-    if not 1 <= before.st_size <= limit:
+    if not minimum <= before.st_size <= limit:
         raise PlanError("staged input exceeds its byte bound or is empty")
     with _reader(path) as incoming:
         opened = os.fstat(incoming.fileno())
@@ -79,7 +82,7 @@ def _read_bytes(path: Path, limit: int) -> bytes:
         data = incoming.read(limit + 1)
         after = os.fstat(incoming.fileno())
         named = _file_stat(path)
-        if not 1 <= len(data) <= limit or len(data) != opened.st_size:
+        if not minimum <= len(data) <= limit or len(data) != opened.st_size:
             raise PlanError("staged input changed during admission (read-size)")
         if _content_stamp(after) != _content_stamp(opened):
             raise PlanError("staged input changed during admission (descriptor-stamp)")
@@ -90,9 +93,9 @@ def _read_bytes(path: Path, limit: int) -> bytes:
     return data
 
 
-def _bytes(path: Path, limit: int) -> bytes:
+def _bytes(path: Path, limit: int, *, allow_empty: bool = False) -> bytes:
     try:
-        return _read_bytes(path, limit)
+        return _read_bytes(path, limit, allow_empty=allow_empty)
     except OSError:
         raise PlanError("staged input could not be read") from None
 

@@ -32,11 +32,13 @@ See ``visions/plugins/agent-dispatch`` -- Concept *the supervisor*, Feature
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import contextlib
 import copy
 import json
 import logging
-import os
+import os as os  # Re-export the existing self-update exit injection seam.
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -48,6 +50,7 @@ from typing import Any
 
 from plugin_activation import read_json_object, write_json_object_atomic
 
+from .action_controls import action_inhibited
 from .companion import (
     CompanionController,
     CompanionError,
@@ -148,8 +151,10 @@ class SupervisorDaemon(BoundedReconciliation):
         self_update_stale_target: Callable[[Path, str], Path | None] | None = None,
         self_update_spawn: Callable[[Any, list[str]], None] | None = None,
         reconcile_call_budget: float = 3.0,
+        pool_publication_enabled: bool = False,
     ):
         self.client = client
+        self.pool_publication_enabled = pool_publication_enabled
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
         #: rendezvous ``endpoint.json``). The coordinator binds an OS-assigned
         #: ephemeral port, so a coordinator restart moves the port; a daemon that
@@ -343,29 +348,6 @@ class SupervisorDaemon(BoundedReconciliation):
     def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
         return self._governance.recheck(checkpoint)
 
-    def _overridden_off(self) -> set[str]:
-        """Registration ids an operator has disabled via the override store.
-
-        Best-effort: read via the injected ``overrides_source`` or, by default, the
-        local ``overrides.json``. Any failure yields an empty set (no override in
-        effect) rather than tearing down units on a bad read -- the override is a
-        *stop* signal, so its absence must fail safe toward "keep running what is
-        declared".
-        """
-        from . import overrides as ov
-
-        try:
-            if self.overrides_source is not None:
-                data = self.overrides_source()
-            else:
-                from .config import overrides_path
-
-                data = ov.load_overrides(overrides_path())
-        except Exception:  # pragma: no cover - override read is environment-dependent
-            log.exception("failed to read operator overrides; treating as none")
-            return set()
-        return ov.overridden_off_ids(data)
-
     def _desired(self) -> dict[str, dict]:
         """Active registrations scoped to this daemon's (machine, env), minus
         operator overrides.
@@ -380,38 +362,11 @@ class SupervisorDaemon(BoundedReconciliation):
         discovery layer and a later re-sync cannot quietly revive the unit (vision
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
-        declared = self._declared()
-        regs = self._store_registrations()
-        regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
-        merged = merge_registration_sources(regs, declared)
-        diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
-        if diagnostics != self._last_merge_diagnostics:
-            for rid in merged.deduplicated:
-                log.info(
-                    "equivalent declaration supersedes direct registration %s; "
-                    "keeping the direct row dormant for reversible migration",
-                    rid,
-                )
-            for conflict in merged.conflicts:
-                log.warning(
-                    "direct/declaration registration conflict: %s; preserving both",
-                    conflict,
-                )
-            self._last_merge_diagnostics = diagnostics
-        desired = merged.registrations
-        overridden = self._overridden_off()
-        for rid in overridden:
-            desired.pop(rid, None)
-            replacement = merged.replacements.get(rid)
-            if replacement:
-                desired.pop(replacement, None)
-        for rid, registration in list(desired.items()):
-            if registration_override_ids(registration) & overridden:
-                desired.pop(rid, None)
+        if self.pool_publication_enabled:
+            self.reconcile_pool_metadata()
+        desired = self._effective_registrations()
         self._resolve_companion_desired(desired)
         self._materialize_managed_runtime_desired(desired)
-        self._deduplicated = merged.deduplicated
-        self._conflicts = merged.conflicts
         return desired
 
     def _companion(self) -> CompanionController:
@@ -1130,7 +1085,9 @@ class SupervisorDaemon(BoundedReconciliation):
         return handled
 
     def _prune_probe_inflight(self) -> None:
-        self._probe_inflight = {f for f in self._probe_inflight if not f.done()}
+        for future in tuple(self._probe_inflight):
+            if future.done():
+                self._probe_inflight.discard(future)
 
     def _poll_managed_health(
         self, rid: str, snapshot: ManagedLaunchSnapshot, deadline: float
@@ -1796,36 +1753,6 @@ class SupervisorDaemon(BoundedReconciliation):
 
     # -- serve loop ----------------------------------------------------------
 
-    def _build_lock(self) -> Any:
-        from .config import run_dir
-        from .single_instance import SingleInstance, lock_path_for
-
-        scope = supervisor_lease_scope(self.machine, self.env)
-        return SingleInstance(lock_path_for(run_dir(), scope))
-
-    def acquire_singleton(self) -> bool:
-        """Win the single-instance election for this (machine, env), or stand down.
-
-        Uses a crash-safe **OS lock file** over a ``supervisor:<machine>:<env>``
-        scope: the kernel releases the lock automatically if the daemon dies, so a
-        restart reacquires cleanly, while a *live* second daemon is refused
-        (returns ``False``) and must NOT run -- the *one supervisor per
-        machine-and-environment* guarantee, without a crash leaving a permanent
-        lock.
-        """
-        if self._lock is None:
-            self._lock = self._build_lock()
-        return bool(self._lock.acquire())
-
-    def release_singleton(self) -> None:
-        """Release this daemon's single-instance lock (best-effort)."""
-        if self._lock is None:
-            return
-        try:
-            self._lock.release()
-        except Exception:  # pragma: no cover -- best-effort
-            log.exception("error releasing supervisor lock")
-
     def _await_runtime_pool_idle(self, timeout: float) -> bool:
         """Wait up to ``timeout`` seconds for in-flight managed runtime work.
 
@@ -1953,6 +1880,10 @@ class SupervisorDaemon(BoundedReconciliation):
             return False
         if target is None:
             return False
+        if action_inhibited(
+            "supervisor-self-update", logger=log, root=root, automatic=True,
+        ):
+            return False
         before_spawn = self._recheck_governance("pre-mutation:self-update")
         if before_spawn is not None and before_spawn.get("status") != "ready":
             log.warning(
@@ -1996,6 +1927,10 @@ class SupervisorDaemon(BoundedReconciliation):
                 "supervisor self-update deferred: prior status publication "
                 "still owns its generation; retaining singleton"
             )
+            return False
+        if action_inhibited(
+            "supervisor-self-update", logger=log, root=root, automatic=True,
+        ):
             return False
         daemon_audit(self, "handoff", "new-slot-selected")
         drained = self.shutdown()
@@ -2051,15 +1986,20 @@ class SupervisorDaemon(BoundedReconciliation):
         except Exception:  # pragma: no cover -- re-resolve is environment-dependent
             log.exception("failed to re-resolve coordinator endpoint; will retry")
             return False
-        old = self.client
-        self.client = new_client
-        close = getattr(old, "close", None)
-        if callable(close):
-            with contextlib.suppress(Exception):
-                close()
+        try:
+            self._replace_pool_metadata_client(new_client)
+        except Exception:
+            log.exception("coordinator reconnect did not complete cleanly")
+            if self.client is not new_client:
+                close = getattr(new_client, "close", None)
+                if callable(close):
+                    with contextlib.suppress(Exception):
+                        close()
+                return False
         log.info("re-resolved coordinator endpoint after a connection failure")
         return True
 
+    @daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
     def serve(
         self,
         *,
@@ -2169,24 +2109,8 @@ class SupervisorDaemon(BoundedReconciliation):
                 except KeyboardInterrupt:
                     break
         finally:
-            drained = self.shutdown()
-            if self._client_factory is not None:
-                close = getattr(self.client, "close", None)
-                if callable(close):
-                    with contextlib.suppress(Exception):
-                        close()
-            if single_instance:
-                self.release_singleton()
-            if self.self_update_triggered and not drained:
-                # The handoff is committed: either native restart owns the next
-                # launch or a successor spawn returned. Avoid interpreter atexit
-                # joining stuck probe threads after every owned unit was asked
-                # to stop. This exit is a restart request, not successor proof.
-                log.warning(
-                    "supervisor self-update: probe worker outlived shutdown "
-                    "grace; forcing exit to finish the committed handoff",
-                )
-                os._exit(SELF_UPDATE_EXIT_CODE)
+            from .supervisor_retirement import finish_serving
+            finish_serving(self, single_instance=single_instance)
         if self.self_update_triggered:
             return SELF_UPDATE_EXIT_CODE
         return 0

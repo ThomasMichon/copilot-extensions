@@ -159,4 +159,4 @@ async def test_running_receiver_advertises_implemented_capability(
     monkeypatch.setattr(health, "config_dir", lambda: None)
     monkeypatch.setattr(health, "slot_descriptor", lambda *args, **kwargs: {})
     result = await health.health(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))
-    assert result["capabilities"] == {HOSTING_CAPABILITY: HOSTING_CAPABILITY_VERSION}
+    assert result["capabilities"][HOSTING_CAPABILITY] == HOSTING_CAPABILITY_VERSION

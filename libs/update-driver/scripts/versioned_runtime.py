@@ -283,16 +283,20 @@ def _write_last_known_good(root: Path, version: str) -> None:
 def slot_python(root: Path, version: str) -> Path | None:
     """The interpreter inside ``versions/<version>``, or ``None`` if not present.
 
-    Checks the POSIX (``bin/python``) then Windows (``Scripts/python.exe``)
-    layout, so it resolves correctly on either OS and under git-bash on Windows.
+    Application slots use ``.venv``; historical direct-slot environments remain
+    supported on either OS and under git-bash on Windows.
     """
     if not version:
         return None
     vdir = version_dir(root, version)
-    for sub in SLOT_PYTHON_SUBPATHS:
-        p = vdir / sub
-        if p.is_file():
-            return p
+    nested = vdir / ".venv"
+    if _is_link(nested):
+        return None
+    for environment in (nested, vdir):
+        for sub in SLOT_PYTHON_SUBPATHS:
+            p = environment / sub
+            if p.is_file():
+                return p
     return None
 
 
@@ -582,20 +586,7 @@ def _slot(root: Path, version: str, *, clean_incomplete: bool = False,
 # --------------------------------------------------------------------------
 
 def _running_pids(root: Path) -> set[int]:
-    """PIDs recorded as live in ``<root>/running-version.json`` (single object or
-    a list), filtered to those still alive."""
-    path = root / RUNNING_VERSION_FILE
-    pids: set[int] = set()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return pids
-    entries = data if isinstance(data, list) else [data]
-    for e in entries:
-        if isinstance(e, dict) and isinstance(e.get("pid"), int):
-            if _pid_alive(e["pid"]):
-                pids.add(e["pid"])
-    return pids
+    return _leases.running_pids(root, filename=RUNNING_VERSION_FILE, alive=_pid_alive)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1018,37 +1009,12 @@ def gc(root: Path, keep: list[str] | None = None,
 
 
 def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str) -> set[str]:
-    protected = set(keep or [])
-    # Missing selectors permit legacy-link fallback; unreadable selectors must
-    # not become permission to delete their unknown target.
-    for name in (CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE):
-        try:
-            selected = (root / name).read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
-            continue
-        if selected:
-            protected.add(selected)
-    cur = current_version(root, link_name)
-    if cur:
-        protected.add(cur)
-    claim = read_dev_claim(root, strict=True)
-    if claim is not None:
-        protected.add(DEV_VERSION)
-        selected = claim.get("selected_generation")
-        if selected:
-            protected.add(selected)
-        previous = claim.get("previous_version")
-        if isinstance(previous, str) and previous:
-            protected.add(previous)
-    if protect_pids:
-        in_use = _versions_with_live_process(root)
-        if in_use:
-            protected |= in_use
-        elif _running_pids(root):
-            non_current = [v for v in list_versions(root) if v != cur]
-            if non_current:
-                protected.add(non_current[-1])
-    return {version.lower() for version in protected}
+    return _leases.gc_protected_versions(
+        root, keep, protect_pids, link_name,
+        selectors=(CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE), current_version=current_version,
+        dev_claim=read_dev_claim, dev_version=DEV_VERSION,
+        live_versions=_versions_with_live_process, running=_running_pids, versions=list_versions,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1304,7 +1270,9 @@ def validate_marker(data, version: str) -> dict | None:
 def read_marker(root: Path, version: str) -> dict | None:
     """Parse completion evidence; absent/malformed is None, storage errors raise."""
     try:
-        data = _load_unique_json(marker_path(root, version))
+        data = _runtime_component("versioned_runtime_construction").read_completion(
+            marker_path(root, version), object_pairs_hook=_unique_object_pairs_hook,
+        )
     except (FileNotFoundError, ValueError):
         return None
     return validate_marker(data, version)
@@ -1325,6 +1293,17 @@ def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> 
     if expect_hash is not None and m.get("payload_hash") != expect_hash:
         return False
     return True
+
+
+class RuntimeEnvironmentError(RuntimeError):
+    """Installed Python content is not an isolated, non-editable deployment."""
+
+
+def require_immutable_environment(slot: Path) -> None:
+    """Inspect installed content using the canonical construction guard."""
+    _runtime_component("versioned_runtime_construction").require_immutable_environment(
+        slot, error_type=RuntimeEnvironmentError, read_json=_load_unique_json,
+    )
 
 
 def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
@@ -1377,6 +1356,7 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                         "use a new version/distinct repair generation or claimed dev slot"
                     )
             vdir.mkdir(parents=True, exist_ok=True)
+            require_immutable_environment(vdir)
             fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=vdir)
             tmp = Path(name)
             try:
@@ -1470,13 +1450,22 @@ def retention_custody(root: Path, version: str, *, payload_hash: str | None = No
         yield vdir, descriptor
 
 
+def retain_runtime_helpers(slot: Path, *, complete: bool, context_source: Path | None = None) -> None:
+    """Retain or verify the canonical immutable bootstrap without restamping it."""
+    _runtime_component("versioned_runtime_construction").retain_helpers(
+        slot, complete=complete, context_source=context_source,
+    )
+
+
 def construction_session(root: Path, version: str, *, payload_hash: str,
-                         link_name: str = CURRENT_LINK, dev_owner: str | None = None) -> int:
+                         link_name: str = CURRENT_LINK, dev_owner: str | None = None,
+                         footprint: Path | None = None, plugin: str | None = None) -> int:
     component = _runtime_component("versioned_runtime_construction")
     runtime = component.RuntimeOperations(
         version_dir=version_dir,
         _load_unique_json=_load_unique_json,
         current_version=current_version,
+        is_complete=is_complete,
         _is_link=_is_link,
         LAST_KNOWN_GOOD_FILE=LAST_KNOWN_GOOD_FILE,
         retention_lease=retention_lease,
@@ -1492,6 +1481,7 @@ def construction_session(root: Path, version: str, *, payload_hash: str,
     )
     return component.construction_session(
         runtime, root, version, payload_hash=payload_hash, link_name=link_name, dev_owner=dev_owner,
+        footprint=footprint, plugin=plugin,
     )
 
 
@@ -1550,10 +1540,11 @@ def _normalize_windows_extended_path(target: str) -> str:
     return target
 
 
-def fingerprint_source(paths) -> str:
+def fingerprint_source(paths, *, on_progress=None) -> str:
     """Fingerprint complete source inputs through the shipped stdlib component."""
     return _runtime_component("versioned_runtime_source").fingerprint_source(
         paths, _normalize_windows_extended_path=_normalize_windows_extended_path,
+        on_progress=on_progress,
     )
 
 
@@ -1737,7 +1728,9 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
         # function's health-repair-required contract entirely.
         with os.fdopen(marker_fd, "rb") as fh:
             marker_fd = None  # fdopen now owns the fd
-            marker_bytes = fh.read()
+            marker_bytes = fh.read(65537)
+        if len(marker_bytes) > 65536:
+            return ADMIT_HEALTH_REPAIR_REQUIRED
     finally:
         if marker_fd is not None:
             os.close(marker_fd)
@@ -1755,6 +1748,10 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
         # The marker is a plain file read through a verified, no-follow
         # handle, but its content failed schema validation -- ambiguous
         # evidence, never treated as "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    try:
+        require_immutable_environment(vdir)
+    except RuntimeEnvironmentError:
         return ADMIT_HEALTH_REPAIR_REQUIRED
     if marker.get("payload_hash") == payload_hash:
         return ADMIT_REUSE
@@ -1797,6 +1794,8 @@ def main(argv: list[str] | None = None) -> int:
     session_parser.add_argument("version")
     session_parser.add_argument("--payload-hash", required=True)
     session_parser.add_argument("--dev-owner", default=None)
+    session_parser.add_argument("--footprint", type=Path)
+    session_parser.add_argument("--plugin")
     shell_parser = sub.add_parser("construction-shell", help="render the canonical pipe adapter")
     shell_parser.add_argument("--shell", choices=("ps1", "sh"), required=True)
     ap = sub.add_parser("activate", help="publish current-version -> <version>")
@@ -1887,6 +1886,7 @@ def main(argv: list[str] | None = None) -> int:
             return construction_session(
                 root, args.version, payload_hash=args.payload_hash, link_name=link_name,
                 dev_owner=args.dev_owner,
+                footprint=args.footprint, plugin=args.plugin,
             )
         elif args.cmd == "construction-shell":
             print(construction_shell_helpers(args.shell))

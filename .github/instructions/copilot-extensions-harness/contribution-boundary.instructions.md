@@ -1,8 +1,11 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev47","renderedBytes":1019,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","template":"instructions/contribution-boundary.instructions.md","templateBytes":439,"templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev47","renderedBytes":1523,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":2} -->
 
-# Contribution boundary fallback
-
-**Fallback policy `[owner: copilot-extensions-harness@0.1.0-dev39]`:** copilot-extensions accepts only general-purpose, organization-neutral capabilities; personal needs belong in the adopter's private control repo and organization-specific work in its internal marketplace. Invoke the `contributing-to-copilot-extensions` skill for the complete contribution ground rules and flow.
+Guidance locator only; no instruction body is delivered here.
+Managed candidate: `.github/instructions/agent-worktrees-generated/copilot-extensions/copilot-extensions-harness/contribution-boundary.local.instructions.md`; reviewed fallback: `.github/copilot/context-fallbacks/copilot-extensions-harness/contribution-boundary.md`.
+Read the named files directly with repository file tools to acquire the source's guidance. These file reads do not require a skill, Python, or the resolver below.
+Only if the source path is unclear, invoke `reviewing-customizations`; use its returned base and an absolute Python interpreter. Substitute the three placeholders:
+["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>",".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","--from-settings","--json"]
+Acquire and follow the source's applicable guidance, including its delivery and full-read rules. This locator does not replace those rules.

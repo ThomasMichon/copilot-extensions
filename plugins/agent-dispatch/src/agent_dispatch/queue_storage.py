@@ -769,6 +769,8 @@ class QueueStorageMixin:
                         },
                     )
                 if accepted is None:
+                    if claim_as and status == Status.QUEUED:
+                        self.require_worker_admission()
                     self._require_agent_backed_repo(canonical_repo)
                     if supersede_exclusive_key:
                         superseded = conn.execute(
@@ -852,6 +854,7 @@ class QueueStorageMixin:
                         note="create",
                     )
                     if claim_as and status == Status.QUEUED:
+                        self.require_worker_admission()
                         require_execution_admission(conn, task_id)
                         lease = self.lease_seconds
                         conn.execute(

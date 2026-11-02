@@ -8,19 +8,19 @@ import subprocess
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
 from agent_procutil import contained_test_mode, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
-from . import installer_run, push_timeout
+from .update_auth_bootstrap import _GROUP
+from .update_auth_bootstrap import module_argv as module_argv, publish_group as publish_group
 
-_GROUP = "CE_UPDATE_AUTH_PROCESS_GROUP"
+if TYPE_CHECKING:
+    from pathlib import Path
 _OUTPUT_LIMIT = 1024 * 1024
 
 
-@dataclass(frozen=True)
-class Result:
+class Result(NamedTuple):
     status: int | None
     stdout: str = ""
     stderr: str = ""
@@ -42,6 +42,7 @@ def run(
     Nested helpers retain the outer POSIX session, so its deadline owns them too.
     Windows always requires a no-breakaway Job before the child can execute.
     """
+    input_bytes = input.encode("utf-8")
     child_env = dict(env)
     inherited = os.name != "nt" and child_env.get(_GROUP) == str(os.getpgrp())
     own_session = os.name != "nt" and not inherited and not contained_test_mode()
@@ -91,18 +92,25 @@ def run(
 
     def feed() -> None:
         try:
-            proc.stdin.write(input.encode("utf-8"))
-            proc.stdin.close()
+            proc.stdin.write(input_bytes)
         except BrokenPipeError:
-            proc.stdin.close()
+            pass
         except OSError as error:
             failures.append(error)
+        finally:
+            try:
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
+            except OSError as error:
+                failures.append(error)
 
     threads = [
         threading.Thread(target=drain, args=(proc.stdout, 0), daemon=True),
         threading.Thread(target=drain, args=(proc.stderr, 1), daemon=True),
-        threading.Thread(target=feed, daemon=True),
     ]
+    if len(input_bytes) > 512:
+        threads.append(threading.Thread(target=feed, daemon=True))
     expires = time.monotonic() + timeout
     previous: dict[int, object] = {}
 
@@ -110,10 +118,14 @@ def run(
         if job is not None:
             job.close()
         elif own_session:
+            from . import installer_run
+
             installer_run._sweep_exited_session(proc) if proc.poll() is not None else (
                 installer_run._kill_session(proc)
             )
         else:
+            from . import push_timeout
+
             push_timeout._kill_tree(proc)
 
     def interrupted(signum, _frame) -> None:
@@ -126,6 +138,9 @@ def run(
                 previous[sig] = signal.signal(sig, interrupted)
         for thread in threads:
             thread.start()
+        if len(input_bytes) <= 512:
+            # This owned pipe is empty; the write fits its minimum buffer.
+            feed()
         expired = False
         try:
             proc.wait(timeout=max(0, expires - time.monotonic()))
@@ -143,7 +158,7 @@ def run(
         if failures:
             text[1] = "authentication subprocess pipe failed"
         return Result(
-            None if failures else proc.returncode,
+            None if failures or expired else proc.returncode,
             *text,
             timed_out=expired,
             truncated=any(truncated),
@@ -155,11 +170,8 @@ def run(
         if job is not None:
             job.close()
         elif own_session and proc.poll() is not None:
+            from . import installer_run
+
             installer_run._sweep_exited_session(proc)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-
-
-def publish_group() -> None:
-    if os.name != "nt" and os.environ.get("CE_UPDATE_AUTH_OWNED_SESSION") == "1":
-        os.environ[_GROUP] = str(os.getpgrp())

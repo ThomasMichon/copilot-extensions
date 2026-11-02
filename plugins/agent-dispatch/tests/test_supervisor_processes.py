@@ -52,6 +52,17 @@ def _prefixed_processes():
         _proc(70141, 1, python, rf'"{python}" -c "pass" agent_dispatch --shared supervise serve'),
         _proc(70143, 1, python, rf'"{python}" -I -X utf8 -m agent_dispatch --local supervise serve'),
     ]
+    base = r"C:\Python311\python.exe"
+    marked = f'"{base}" -X "agent_dispatch_install_dir={INSTALL_DIR}" -m agent_dispatch'
+    processes.extend([
+        _proc(70147, 1, base, marked + " supervise serve"),
+        _proc(70149, 70147, r"C:\Tools\child.exe", "owned-child"),
+        _proc(70151, 1, base, marked.replace(INSTALL_DIR, INSTALL_DIR + "-foreign") + " supervise serve"),
+        _proc(70153, 1, base, marked + " serve"),
+        _proc(70155, 1, base, marked + " supervise list"),
+        _proc(70157, 1, base, marked.replace("agent_dispatch_install_dir=", "unknown=") + " supervise serve"),
+        _proc(70159, 1, base, f'"{base}" -m agent_dispatch supervise serve'),
+    ])
     if os.name == "nt":
         processes.append(_proc(70145, 1, python, subprocess.list2cmdline([
             python, "-m", "agent_dispatch", "--token", 'quoted "value" with spaces',
@@ -61,7 +72,7 @@ def _prefixed_processes():
 
 
 def _prefixed_expected():
-    return {70111, 70113, 70115, 70117, 70119, 70143} | ({70145} if os.name == "nt" else set())
+    return {70111, 70113, 70115, 70117, 70119, 70143, 70147, 70149} | ({70145} if os.name == "nt" else set())
 
 
 def test_target_prefixes_preserve_exact_supervisor_retirement_scope():
@@ -73,7 +84,7 @@ def test_target_prefixes_preserve_exact_supervisor_retirement_scope():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows argv parsing and installer fallback")
-@pytest.mark.parametrize("replacement", [None, 70111, 70119, "missing-identity", "query-failed"])
+@pytest.mark.parametrize("replacement", [None, 70111, 70119, 70147, "missing-identity", "query-failed"])
 def test_native_fallback_matches_prefixed_scope_and_refuses_replaced_processes(tmp_path, replacement):
     plugin = Path(__file__).resolve().parents[1]
     text = (plugin / "scripts/install.ps1").read_text()
@@ -434,3 +445,38 @@ def test_materialized_child_honors_run_dir_override():
         INSTALL_DIR,
         run_dir=custom_run,
     ) == [10]
+
+
+@pytest.mark.parametrize("outcome", ["matching", "reused", "missing"])
+def test_python_retirement_uses_shared_identity_bound_handle(monkeypatch, outcome):
+    from zdd import diagnostics
+    from zdd import diagnostic_exit
+    monkeypatch.setattr(diagnostic_exit, "pid_alive_windows", lambda pid: True)
+    calls = []
+    def terminate(pid, birth, *, exit_timeout):
+        calls.append((pid, birth, exit_timeout))
+        return {"killed": outcome == "matching", "exit_confirmed": outcome == "matching"}
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", terminate)
+    birth = "1234567" if outcome != "missing" else ""
+    assert supervisor_processes.terminate_process(70147, expected_start_time=birth) is (outcome == "matching")
+    assert calls == [(70147, birth, 5)]
+
+
+@pytest.mark.parametrize("observed", ["1234567", "1234577", None])
+def test_inventory_binds_only_the_same_cim_creation_identity(monkeypatch, observed):
+    from zdd import diagnostics
+    payload = json.dumps({"ProcessId": 70147, "ParentProcessId": 1,
+                          "CreationFileTime": "1234560"})
+    monkeypatch.setattr(supervisor_processes.subprocess, "run",
+                        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, payload, ""))
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: observed)
+    records = supervisor_processes.iter_windows_processes()
+    assert records[0].start_time == (observed if observed == "1234567" else "")
+
+
+def test_python_retirement_observes_already_exited_process_without_pid_kill(monkeypatch):
+    from zdd import diagnostics
+    from zdd import diagnostic_exit
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", lambda *args, **kwargs: {"killed": False})
+    monkeypatch.setattr(diagnostic_exit, "pid_alive_windows", lambda pid: False)
+    assert supervisor_processes.terminate_process(70147, expected_start_time="1234567")

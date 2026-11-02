@@ -4,6 +4,14 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Repository PR census
+
+`pr-sweep <owner/repository> [--fleet] [--include MACHINE/ENV]
+[--exclude MACHINE/ENV] [--commands FILE] [--author LOGIN] [--json]`
+reports provider-open PRs and original worktree claim paths. Start with
+`--fleet --list-cells --json` to inspect configuration without probing.
+See [one-shot scope, exact command inputs and partial-result semantics](pr-sweep.md).
+
 ## Native machine-record repair
 
 `doctor --repair-machine-record <exact-id> --from-machine <old>
@@ -20,6 +28,17 @@ Same-machine reference aliases remain unchanged. See
 Except for capabilities, operations read exactly one JSON object from stdin.
 See [the exact ABI and callback contract](resource-producer.md). These claims
 cannot be settled through generic release, at-rest, sweep or abandon commands.
+
+## Source-only destination allocation
+
+`create [--machine EXECUTION_SPACE] [--repo REPOSITORY] [--creation-key KEY]
+[--creation-request-id EXISTING_REQUEST]
+--json` selects a destination while preserving the original CWD creator.
+It launches no agent. Remote results distinguish durable receiving creation
+from asynchronous origin linkage and retain the original retry key on uncertain
+outcomes. An unresolved linked CWD refuses implicit ownership even when its
+repository is unregistered; explicitly selecting `--no-owner` remains a local-only
+standalone choice. See [capabilities, explicit refusals and recovery](worktree-allocation.md#ordinary-destination-selection).
 
 ## CLI mode (no project binstub)
 
@@ -115,9 +134,9 @@ owns enrollment, refusal and cross-runner mechanics.
 The existing `instructions/agent-worktrees/session-guidance.instructions.md`
 file in the exact Copilot session contains a compact **Current machine
 identity** block. `hostname` is the observed OS hostname; `machine` is the
-canonical physical machine from the shared registry map. `environment` identifies
+physical machine from the shared local execution context. `environment` identifies
 the current execution environment, while `execution_machine` retains the compact
-registered execution name (the former `machine` value). `alias` is the friendly
+execution name, optionally customized by the machine map. `alias` is the selected friendly
 display name; `platform` remains available for compatibility. Native and guest
 environments may share one physical name without sharing execution authority.
 Resolution status and source are separate contextual facts, never authorization.
@@ -129,8 +148,14 @@ its project during registration refreshes the identity from that project's
 registry before final guidance is read. Native context rollover reads
 the same file through the existing session-guidance pointer. No machine
 inventory or machine-specific value is checked into instruction projections.
-Without usable registry context, the observed hostname remains visible while
-machine, execution name and alias are explicitly unresolved. An oversized combined guidance
+An absent, empty or unrelated-only map does not make local identity unresolved:
+the existing OS/substrate context supplies the physical and execution names.
+Only the effective explicit configuration binding can customize that selection;
+the detected `Config.machine` scalar is not promoted into an explicit binding.
+Selected registry metadata may add a friendly name, but sibling-only metadata
+does not become local customization. Invalid, ambiguous or conflicting maps
+remain explicitly unresolved with a reason; an unavailable project likewise
+does not claim a configured identity. An oversized combined guidance
 file retains the bounded machine block and reports the omitted guidance.
 The initial hook claims the launch under a per-session OS file lock.
 Lifecycle rewrites check that same launch ownership, read current snapshots,
@@ -142,9 +167,11 @@ authorization or evidence that the model read the file.
 The legacy `machine-context` command labels the physical machine, observed
 hostname, execution identity, environment and friendly name separately.
 `System environment` retains descriptive OS metadata; `SSH alias` identifies
-transport rather than an execution environment. Without registry metadata it
-labels the physical machine unresolved while retaining the configured execution
-identity, observed hostname and actual platform. These presentation changes do
+transport rather than an execution environment. It uses the same local context
+without requiring registry enrollment; absent customization is not a warning.
+Invalid topology or identity selection retains an explicit warning on stderr
+and unresolved physical identity rather than emitting success-shaped metadata.
+These presentation changes do
 not rename records, IDs, paths or execution addresses; `get machine` still
 returns the configured execution identifier.
 
@@ -420,9 +447,11 @@ continue to work unchanged.
 | `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, or `ambiguous`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. `--execute` finalizes every currently eligible delegate through the owning host. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `resolve-handoff-successor` | Sanctioned repair for a terminal (`kind` managed, status finalized/complete/completed) worktree whose real handoff successor session ran to completion but was never `register-session`'d (a crash/race in that step), leaving `pending_handoffs`/`resolved_head_session` permanently wedged. `--token` names the still-`pending` handoff and `--successor` the NOT-yet-tracked session id; refuses unless the successor is a real, non-live, non-detached local session (`sessions.validate_session_id`) whose recorded cwd matches the worktree's `worktree_path` and whose transcript's first turn is itself a handoff-seed prompt with real turns beyond it (the same class-G evidence bar `repairing-worktrees` documents). On success it retroactively registers the successor, links the handoff, and immediately concludes it so the worktree lands back in the terminal shape gc already expects -- the sanctioned alternative to hand-editing tracking YAML |
-| `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable CLI worker. Requires `--policy disposable-cli` and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
+| `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable worker, regardless of CLI/ACP tracking metadata. Requires `--policy disposable-cli` (historical wire spelling) and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final without changing its effective interface. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
 | `session-tail` | Emit one Copilot session's last N message-bearing turns by session id (`--limit N`, JSON), including per-turn `tool_names` and an ending-state signal (`complete` / `assistant_turn_in_progress` / `assistant_offer_pending`) |
+| `session-observations` | Read metadata-only recorded tool statistics and reported subagent lifecycle for one session (`<session-id> --json`); [versioned contract and coverage](session-observations.md) |
+| `session-attention` | Read one root agent's last-reported busy, idle or awaiting-operator pulse (`<session-id> --json`), with explicitly unknown runtime continuity; [versioned contract and limitations](session-attention.md) |
 | `session-binding` | Report one session's live mux binding (`found`, `worktree_id`, `mux_session`, `pane_id`, `pane_pid`, `copilot_pid`, ...) plus its recorded `terminal` identity (`--session-id <sid> --json`). `found` still means "a live mux binding exists"; `terminal` is present for any session whose start was recorded, muxed or not -- see [Terminal identity](#terminal-identity) |
 | `session-lock` | Write/remove a session-state lattice lock beside Copilot's session state (bridge/mux liveness marker) |
 | `execution-leg` | Provider-neutral JSON process boundary for a worktree's externally owned execution identity. `get` reads the generic record (including the legacy `session_backend` compatibility view) and fails closed for opaque schemas. `reserve` atomically fences an `ensure` or `dispose` lifecycle operation as `unknown` under the record/finalize locks and records a bounded owner/token lease plus the prior binding; a live lease rejects competitors, while an expired unchanged lease is reconciled and safely taken over. Token-bound `set` commits it and `release` rolls it back without allowing revisions to move backward; stale tokens fail closed. Unreserved `set`/`clear` retain optimistic `--if-match-revision` fencing. The bare launcher consults `execution-leg get` only to resume an already-established AHP leg; creating a new AHP session now belongs exclusively to Worktree Manager |
@@ -433,6 +462,52 @@ continue to work unchanged.
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
+
+### Cold embodiment startup prompts
+
+Ordinary cold `embody --seed` launches prefer the existing native startup
+boundary for direct Copilot and marked normalized setup commands. The prompt
+is staged privately; the final invocation owner claims it and supplies
+`--interactive <prompt>`, composing with `--resume=<id>` when `--resume-head`
+selects existing history. Option-leading prompts use the equivalent
+`--interactive=<prompt>` form so the CLI cannot parse their contents as options.
+A staged New prompt uses the same path. Typed Resume
+staging on other launch surfaces retains its existing owner.
+
+The immediate JSON response reports `seed_delivery: "native-startup"`,
+`seed_deferred: true`, its `seed_id` and `seed_reason: "native-startup-pending"`.
+It does **not** set `seeded`, `seed_ready` or `seed_submitted` merely because
+the mux accepted the command. Observe the existing seed/execution receipts or
+native conversation for the eventual outcome; this response is not a consumed
+prompt receipt or permission to replay. Superseded or uncertain handoffs refuse
+instead of delivering twice. Explicit replacement compares the sampled seed,
+revision and unclaimed New custody inside the existing record writer's lock;
+concurrent Resume, replacement or claimed handoff remains intact.
+Invalid NUL input refuses before staging/claim.
+Platform command-length failures retain the staged intent through the existing
+definite-spawn-failure restoration path rather than truncating it.
+
+Unrecognized/custom setup commands and `gh copilot` retain terminal fallback;
+this exclusion follows recognized wrappers recursively. Normalized setup must
+have an available standalone backend in its selected launch/session PATH or
+an explicit non-intermediary `copilot_path`; gh-only setup keeps fallback.
+An environment-priming script can change backend discovery after preparation;
+that opaque setup retains fallback rather than running the script as a probe.
+Non-UTF-8 custom PowerShell setup is unsupported for marker qualification and
+logs that selection without preventing its existing terminal launch.
+`--seed-ready-timeout` applies only there. No post-launch terminal fallback is
+attempted after selecting native startup. Already-live sessions, anchor launches,
+handoff cutover and Bridge-owned deferred acquisition retain their existing
+delivery paths. Subsequent Bridge messages still use the SDK inbox and its
+receipts; startup transport does not change their authority.
+
+The existing `launch_seed_stage` writer advertises version 8 for guarded
+creation replacement. Only calls carrying `creation_snapshot` require that
+version; ordinary legacy staging still uses its existing version-7 baseline.
+A guarded caller never sends the new conditional operation to a version-7
+resident. The established dispatch path may use its current canonical writer
+fallback, retaining the same record/admission checks; this is not a second
+mutation owner or an effectful new-form/old-form retry.
 
 ### Parent worktree PR visibility
 
@@ -650,6 +725,11 @@ head is audited as `unknown` with an explicit reconciliation warning. Never
 repeat a push while its outcome is unknown. Inspect the provider and remote first.
 See the worktree skill's PR workflow reference for retention and restore guidance.
 
+`create-pr` and `push-changes` additionally accept explicit
+`--publication-origin ID` and repeated `--publication-label LABEL`.
+`pr-publication-labels` attaches/repairs that metadata without another create
+or push. See [publication-origin labels](pr-publication-labels.md).
+
 Networked actor-specific commands resolve a shared **effective actor profile**:
 configured/base `PRConfig` + live provider permission + a matching GitHub
 `pr.roles` override. Thus a conservative base can become `pr-self-merge` for a
@@ -664,6 +744,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 |------------|-------------|
 | `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only; with no PR recorded yet, the result's `pr_open_skipped` and a `no PR opened` reminder say none exists; a re-run against an already-recorded PR still reports that PR), `--hold` (deprecated alias for `--draft`) |
 | `pr-ready` | Move a draft PR **out of draft** — request review |
+| `pr-abandon` | Explicitly abandon a genuinely superseded numbered PR after confirmation, or cancel one qualified unpublished local attempt with `--creation <pr-id> --expected-revision <revision> --reason <reason> --confirm`. Local cancellation is not provider closure or merge; see [eligibility and runtime contract](pr-creation-cancellation.md). |
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
 | `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state and supported native gate evidence. `--repo <slug> --pr <n> --json` reads an explicit target through the same one-shot observation as `pr-watch snapshot`. Tracked mode prints the effective actor `flow:` and flags pull-forward once merged; `--no-live` stays offline. |
 | `pr-nudge` | Ask this repo's bound automated reviewer (`pr.reviewer`, e.g. GitHub Copilot) to (re-)review the active PR. Nothing to nudge (unconfigured/unsupported) is reported, not an error; a successful request is async -- poll `pr-status`/`pr-watch` for a fresh verdict |
@@ -687,6 +768,23 @@ network-free configuration queries. `get pr-profile` reports the configured
 base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
 `pr-self-merge`); use live `pr-status` for the acting identity's effective
 profile when `pr.roles` or live merge authority can change which verbs apply.
+
+After a recorded PR squash-merges, `pr-complete` verifies its original head
+against reachable upstream commits and replays only later local commits.
+Candidate discovery ignores unchanged diff context, so independent edits near
+the PR's hunks do not hide a valid squash boundary. Each candidate still needs
+an exact whole-tree result from applying the original binary PR diff to its
+parent; a merged label or a patch-ID match alone never authorizes dropping
+commits. Stored publication patch IDs retain their existing format.
+Missing or conflicting proof retains the ordinary rebase/refusal path, and a
+durable pre-completion backup remains required before history changes.
+Each operation creates a new recovery ref named
+`refs/pre-complete-backups/<branch>/<operation-id>`, retaining the complete
+branch name, including slash-separated components. Linked worktrees and repeated
+completions retain independent backups; an existing ref is never replaced.
+The legacy `refs/pre-complete-backup` is left untouched. JSON reports the exact
+`backup_ref`, including after a replay failure; human output prints
+`git switch --detach <backup_ref>` to revisit the retained state.
 
 
 
@@ -1101,7 +1199,7 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 |------------|-------------|
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
-| `unregister` | Deregister a project's own adoption lifecycle (projects.yaml + repos.yaml entry + its binstub) -- never the shared runtime or another project's registration; see below |
+| `unregister` | Deregister project adoption and retire project-owned tool plugin overlay values in its verified checkout family -- never the shared runtime or another project; see below |
 | `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--force-runtime NAME`, repeatable, re-deploys only the named runtime(s); `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand). Exit codes and the run's status file: see below |
 | `install-status` | Show installation and deployment status |
@@ -1200,13 +1298,40 @@ agent-worktrees --project stale-stub unregister
 
 It removes only that project's `projects.yaml` entry, its `repos.yaml`
 entry (or, with `--keep-repo-entry`, downgrades that entry to a catalogued
-`reference` repo instead of removing it), and its own per-project binstub --
-never the shared runtime, never another project's registration. It refuses
+`reference` repo instead of removing it), and its own per-project binstub. It also
+retires unchanged tool plugin values identified by this project's exact receipts
+in the verified anchor/worktree family. Personal composition, unrelated settings,
+operator edits and foreign receipts are preserved; foreign or ambiguous ownership
+is refused, not adopted. It never removes the shared runtime or another project's
+registration. It refuses
 (unless `--force`) when its own tracking still shows live worktrees, tracked
 sessions, or an open PR, so deregistering never silently orphans in-flight
 work. The project's own per-project state directory (`~/.<project>`) is left
 in place; remove it by hand, or with `uninstall --project <name>
 --remove-config --yes`, once it's no longer needed.
+
+A normal refusal is a **claims bounce**, not an instruction to add `--force`.
+It names active worktree records and their locally recorded unsettled resources,
+then directs the agent to inspect `--project <project> claims <worktree-id>`
+with the same selected executable. Help the rightful owners finish the work,
+merge PRs through their required review flow, settle resource obligations,
+and use normal `finalize` before retrying unregister. Keep the unregister
+request open until closure; do not automatically abandon work or kill sessions.
+The explicit `--force` path still bypasses this local gate, but its warning
+makes clear that removing registration does not settle the outstanding work.
+
+The closure bounce precedes tool overlay retirement. Registration is removed only
+after successful project-owned cleanup; a partial cleanup failure retains the
+registration and root-scoped retry evidence and reports completed checkout effects.
+This is incremental checkout cleanup, not a whole-family atomic transaction.
+The same installation owner guard excludes staging and unregister across the final
+registered-root/Git-family check and each existing workspace lease/write.
+
+These diagnostics reuse the existing local active-record census; they do not
+perform a live process/remote-provider scan or auto-finalize anything. No new
+CLI arguments, JSON protocol or installed-host rollout is introduced by those
+diagnostics. The optional project-native tool overlay lifecycle described above
+is a separate, explicitly scoped checkout side effect.
 
 To remove only full project adoption while retaining a related repository's
 editing class, agent preference and repository metadata, use:
@@ -1256,6 +1381,7 @@ to the effort after release.
 |------------|-------------|
 | `services` | Service discovery, staleness checks, passthrough to installers |
 | `repos` | Repos registry -- list, find, add, clone, srcroot, `sync`, `account`/`account-for` (owner→gh-login map), `allow-edits` (break-glass edit grants) |
+| `refresh-guards [--repo PATH] [--json]` | Explicitly publish caller-scoped [guard facts](guarded-anchor-map.md) after out-of-band edits; no service startup or hook-time discovery |
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
@@ -1325,6 +1451,100 @@ files untouched and carry no `files=` token:
 
 Any status other than `refreshed`, `current`, or `none` is printed as a
 warning.
+
+### Component-scoped updates and installation inventory
+
+`update --inventory --json` is the read-only generation-1 installation-updates
+contract of the **executing engine**, independent of its package version. It
+returns `{contract: 1, entries: [...]}` with installed/enabled distinctions,
+payload, selected-runtime and observed-running versions, installation provenance,
+update readiness and actionable limitations. `execution_source` identifies the
+executing engine installation for attribution of its durable requests.
+It does not enqueue work, acquire
+payloads, start services or request credentials. Missing running evidence is
+unknown, not the on-disk package version.
+
+Both inventory and targeted requests bypass suite bootstrap at the public
+project and payload entry points. They require an already provisioned engine;
+an absent or older unsupported engine reports an explicit error instead of
+installing a replacement before validating the request.
+
+`update --target <plugin> [--detach --json]` submits a durable operation for one
+already installed, eligible component. It refreshes the selected marketplace
+catalog, acquires only that plugin payload, and invokes only its owning runtime
+installer where applicable. Module owners retain their ordinary cutover flags;
+an update failure is not retried as a fresh installation. Target scope omits
+Manager self-update/recovery, unrelated payloads/runtimes, anchor sync, pivot
+pruning and suite-wide finishing. Engine targeting requires the scoped installer
+contract on both platform scripts. An older installer reports the suite-upgrade
+prerequisite instead of widening the request.
+
+Force, forced runtimes, venv recreation and module selection cannot combine
+with `--target`. Missing/disabled or policy-gated targets report setup/enablement
+or policy readiness rather than implicitly provisioning dependencies. The
+targeted engine command retains its own durable custody instead of delegating
+through a potentially older Manager; Manager is not a targeting prerequisite.
+The existing source, activation-preservation, credential, publication, runtime
+retention and durable execution/recovery owners remain authoritative.
+Untargeted updates retain their existing full-suite semantics.
+
+Manager's Configuration client uses the generation-1 read response before
+offering a plugin action; older providers that reject the inventory option
+leave that optional action unavailable with an explicit suite-upgrade path.
+Upgraded engines continue accepting old update syntax. No prior syntax is
+retired, and rollback never authorizes replay as a broader suite update.
+
+#### Prepared-source suite input
+
+The executing engine's inventory additionally advertises
+`runtime_sources: {schema: "copilot-extensions.prepared-runtime-sources", version: 1}`
+when it supports a complete prepared-source portfolio. This declaration belongs
+to that exact provider, not to the currently installed marketplace payload.
+Older inventory readers may ignore the additive field. A caller must establish
+this support before sending `update --no-manager --runtime-sources <JSON>`;
+missing, malformed or unsupported declarations require an explicit provider
+upgrade, never a marketplace fallback or an effectful trial/replay.
+
+The JSON packet has exactly `schema`, integer `version: 1` and a nonempty
+`sources` object keyed by plugin identifier. Each record contains an absolute
+prepared `payload` directory and `identity`, the canonical
+`{runtime_source: <complete source document>, runtime_version: <slot>}` selection
+from source preparation. All records must identify the same full source commit
+and tree. Duplicate fields, unknown request fields and relative/missing inputs
+are refused. Keep prepared generations available through queued execution and
+retry; the packet is stored in the existing durable request argv, not read from
+a mutable pointer or inherited environment.
+
+Index runtime planning keeps the enabling repository separate from the neutral
+installer working directory. A source-managed update with no known repository
+does not export that working directory as `AGENT_INDEX_REPO`. For a runtime
+shared by several enabling repositories, preflight uses Index's own activation
+role resolver and prefers a verified host repository over a client repository
+before machine-gate and source-target planning. An explicit `AGENT_INDEX_REPO`
+remains authoritative; unavailable or failed role resolution blocks preflight
+rather than guessing a host. This changes neither the source assembly contract
+nor the Index role configuration.
+
+Marketplace payload acquisition remains independent. After refreshing payloads,
+the normal engine/module/registered planners retain the installed command owner
+and installation root, but consume the matching prepared artifact. Every
+eligible runtime must have exactly one source record; missing, unexpected,
+inactive or now-gated selections block the whole runtime portfolio before any
+installer or local integration runs. Owner validation, exact source pinning,
+selected/completed-slot currentness, native lifecycle, retry and outcome handling
+are retained. Profile-qualified sources additionally use the
+[installed owner's target contract](../../agent-containers/docs/runtime-source-target.md):
+the actual target is separate from the original source pin and is revalidated
+before every attempt. Inventory advertises this support through additive
+`runtime_sources.target_contract: {schema: "copilot-extensions.runtime-source-target", version: 1}`.
+An old engine or missing/conflicting owner planner requires tooling upgrade,
+never profile substitution. Queued source records remain exactly `payload` and
+`identity`. Omitting the option retains ordinary marketplace runtime delivery.
+This suite-only input cannot combine with target/authentication/inspection or
+recovery operations and never delegates to an older Manager. The
+[Manager caller](../../../worktree-manager/README.md#independent-runtime-source-acquisition)
+qualifies this exact provider before preparing and sending the packet; its
+independent self-source policy and rollout authorization are unchanged.
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 

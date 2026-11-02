@@ -8,17 +8,20 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from test_guest_environment_native import _initialized_host
+from test_guest_environment_native import _initialized_host as _initialized_host
+from _powershell_fixture import _copy_sdk, _inject_owner_hook
 
 LIB = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="native POSIX guest adapter boundary")
 
 
-def _snapshot(root: Path) -> dict:
+def _snapshot(root: Path) -> dict[str, tuple[bool, int, bytes | None]]:
     return {
         path.relative_to(root).as_posix(): (
             path.is_dir(), path.stat().st_mtime_ns,
@@ -29,11 +32,17 @@ def _snapshot(root: Path) -> dict:
 
 
 def _library(root: Path, profile: Path) -> Path:
-    library = root / "library"
-    library.mkdir()
-    for source in LIB.iterdir():
-        if source.is_file() and source.suffix in {".py", ".sh", ".ps1", ".awk"}:
-            shutil.copyfile(source, library / source.name)
+    library = _copy_sdk(root / "library")
+    _inject_owner_hook(library, """
+import pwd
+_native_getpwuid = pwd.getpwuid
+def _fixture_getpwuid(uid):
+    record = _native_getpwuid(uid)
+    return pwd.struct_passwd((*record[:5], os.environ['HOME'], record.pw_shell))
+pwd.getpwuid = _fixture_getpwuid
+_is_wsl_guest = lambda: True
+_guest_machine_id = lambda: 'a' * 32
+""")
     (library / "guest-python.py").write_text(
         "import importlib.util,os,pwd,sys\n"
         "from pathlib import Path\n"
@@ -60,26 +69,7 @@ def _library(root: Path, profile: Path) -> Path:
         "guest_machine_id() { GUEST_MACHINE_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }\nACTION=" + main,
         encoding="utf-8",
     )
-    powershell = (library / "installation-context.ps1").read_text(encoding="utf-8")
-    account = """
-if (-not ('CePosixAccount' -as [type])) {
-    Add-Type -TypeDefinition @'
-public static class CePosixAccount {
-    public static string Home() { return @"@PROFILE@"; }
-}
-'@
-}
-""".replace("@PROFILE@", str(profile).replace('"', '""'))
-    marker = "$nativeTypeDefinitions = @()"
-    assert powershell.count(marker) == 1
-    powershell = powershell.replace(marker, account + "\n" + marker, 1)
-    marker = "\ntry {\n    Assert-ExactChoice $Action @("
-    assert powershell.count(marker) == 1
-    powershell = powershell.replace(
-        marker, "\nfunction Test-WslGuest { return $true }\n"
-        "function Get-GuestMachineId { return ('a' * 32) }\n" + marker, 1,
-    )
-    (library / "guest-powershell.ps1").write_text(powershell, encoding="utf-8")
+    shutil.copyfile(library / "installation-context.ps1", library / "guest-powershell.ps1")
     return library
 
 
@@ -100,11 +90,13 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         {"HOME": str(profile), "USERPROFILE": str(profile), "WSL_DISTRO_NAME": distribution},
         monkeypatch,
     )
+    getuid = cast(Callable[[], int], getattr(os, "getuid"))
+    getgid = cast(Callable[[], int], getattr(os, "getgid"))
     lookup = profile / "test-bin" / "getent"
     lookup.write_text(
         "#!/bin/sh\n"
-        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {os.getuid()} ] || exit 1\n'
-        f"printf '%s\\n' {shlex.quote(f'fixture:x:{os.getuid()}:{os.getgid()}:fixture:{profile}:/bin/sh')}\n",
+        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {getuid()} ] || exit 1\n'
+        f"printf '%s\\n' {shlex.quote(f'fixture:x:{getuid()}:{getgid()}:fixture:{profile}:/bin/sh')}\n",
         encoding="utf-8",
     )
     lookup.chmod(0o755)
@@ -129,7 +121,7 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         encoding="utf-8",
     )
 
-    def run(runner: str, action: str, observation: str | None) -> subprocess.CompletedProcess:
+    def run(runner: str, action: str, observation: str | None) -> subprocess.CompletedProcess[str]:
         if runner == "powershell":
             command = (
                 [powershell, "-NoProfile", "-File", str(registration_wrapper)]

@@ -63,6 +63,17 @@ def _report(request, as_json: bool = False) -> None:
         "recovery_authority": getattr(request, "recovery_authority", None),
         "released_at": getattr(request, "released_at", None),
     }
+    flags = getattr(getattr(request, "spec", None), "argv", ())
+    phase = next((
+        flags[index + 1] for index, flag in enumerate(flags[:-1])
+        if flag == "--phase" and flags[index + 1] in update_cli.update_options.UPDATE_PHASES
+    ), None)
+    if phase:
+        data.update(
+            phase=phase,
+            plugins=[flags[index + 1] for index, flag in enumerate(flags[:-1]) if flag == "--plugin"],
+            full_update=False,
+        )
     if as_json:
         print(json.dumps(data))
     else:
@@ -84,6 +95,15 @@ def cmd_update_request(args: argparse.Namespace) -> int:
     import update_driver as driver
 
     update_cli.update_options.validate_auth_flags(args)
+    if getattr(args, "inventory", False):
+        from .installation_updates import print_inventory
+
+        if _flags(args) or any(getattr(args, key, False) for key in (
+            "detach", "wait", "supervised_debug", "request_status", "recovery_status",
+            "recover_after_restart", "recover_for_repair", "auth_report",
+        )):
+            raise ValueError("--inventory is read-only and cannot select an update operation")
+        return print_inventory()
     if getattr(args, "auth_report", False):
         return update_cli.cmd_update(args)
     request = None
@@ -162,6 +182,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
             source=str(cfg.install_dir().resolve()), context=_request_context(),
+            repair=not getattr(args, "auto", False),
         )
         project_args = ["--project", project] if project else []
         argv, environment = driver.runtime_command(

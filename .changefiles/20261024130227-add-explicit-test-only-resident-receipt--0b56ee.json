@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit test-only resident receipt budget fixtures and preparation contract checks without changing production deadlines.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

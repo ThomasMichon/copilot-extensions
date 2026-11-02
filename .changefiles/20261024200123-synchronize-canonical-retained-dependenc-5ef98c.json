@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize canonical retained dependency source-compile policy omitted from the generated installer copies.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

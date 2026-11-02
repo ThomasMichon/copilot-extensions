@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve legacy checkpoint readers with additive acquisition scope encoding",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

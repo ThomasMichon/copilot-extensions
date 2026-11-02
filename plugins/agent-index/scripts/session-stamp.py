@@ -9,10 +9,11 @@ import os
 from pathlib import Path
 import shlex
 import sys
+from contextlib import nullcontext
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.dont_write_bytecode = True
-from stamp_paths import Directory, lock  # noqa: E402
+from stamp_paths import Directory, install_transaction, lock  # noqa: E402
 from stamp_repair import destinations, installed_launcher, repairable  # noqa: E402
 
 
@@ -57,6 +58,14 @@ def prepare_lock(root: Path, *, inherited: bool = False) -> None:
 
 
 def stamp(root: Path, payload: Path, mode: str) -> None:
+    try:
+        with install_transaction(root, timeout=0) if mode == "legacy" else nullcontext():
+            _admitted_stamp(root, payload, mode)
+    except TimeoutError:
+        print("[agent-index] session stamp deferred: install transaction is busy", file=sys.stderr)
+
+
+def _admitted_stamp(root: Path, payload: Path, mode: str) -> None:
     paths = destinations(root) if mode == "legacy" else frozenset()
     with Directory(root, repair_paths=paths) as directory:
         fd = directory.open(".publication.lock", create=True, repair=mode == "legacy")
@@ -129,7 +138,12 @@ def _stamp(root: Directory, payload: Path, mode: str) -> None:
 
 if __name__ == "__main__":
     try:
-        if sys.argv[1] == "publish":
+        if sys.argv[1] == "prepare-install-lock":
+            root = Path(sys.argv[2])
+            with Directory(root, repair_paths=destinations(root)) as directory:
+                fd = directory.open(".install.lock", create=True)
+                os.close(fd)
+        elif sys.argv[1] == "publish":
             parser = argparse.ArgumentParser()
             parser.add_argument("--ownership-receipt", type=Path)
             parser.add_argument("--publication-root", type=Path)

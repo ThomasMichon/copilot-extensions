@@ -372,13 +372,76 @@ def test_native_timeout_is_explicit_and_not_replayed(case, monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("binary", [False, True])
+def test_timeout_reports_both_sanitized_streams_without_command_repr(case, monkeypatch, binary):
+    selected = _select(case)
+    calls = []
+    stdout = "cache phase \u03c0\ncredential fixture-stdout-canary\n" + "detail " * 2000
+    stderr = "payload phase \u03a9\nhttps://example.invalid/private-location\n" + "detail " * 2000
+    if binary:
+        stdout, stderr = stdout.encode(), stderr.encode()
+
+    def timeout(argv, environment, cwd, **kwargs):
+        calls.append(argv)
+        raise subprocess.TimeoutExpired(
+            ["fixture-command-repr-must-not-appear"], 180, output=stdout, stderr=stderr,
+        )
+
+    monkeypatch.setattr(origin_api, "_native_acquisition", timeout)
+    with pytest.raises(RuntimeError) as caught:
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    message = str(caught.value)
+    assert "timed out after 180 seconds" in message
+    assert "cache phase \u03c0" in message and "payload phase \u03a9" in message
+    assert "fixture-stdout-canary" not in message
+    assert "private-location" not in message
+    assert "fixture-command-repr-must-not-appear" not in message
+    assert len(message) < 700 and len(calls) == 1
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
+    reason="explicit nonpromotion Windows registered-origin consumer",
+)
+def test_real_timeout_reaches_registered_origin_formatter(case, monkeypatch, tmp_path):
+    _write_ledger(case)
+    selected = _select(case)
+    before = case.settings.read_bytes(), (case.home / "config.json").read_bytes()
+    started = tmp_path / "started"
+    script = tmp_path / "native_cli.py"
+    script.write_text(
+        "import pathlib,sys,time\n"
+        "print('cache phase \u03c0',flush=True)\n"
+        "print('payload phase \u03a9',file=sys.stderr,flush=True)\n"
+        "print('credential fixture-secret',file=sys.stderr,flush=True)\n"
+        f"pathlib.Path({str(started)!r}).write_text('flushed')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = "8"
+    monkeypatch.setattr(origin_api, "_native_acquisition", case.native)
+    with pytest.raises(RuntimeError) as caught:
+        origin_api.refresh_registered_origin(
+            primitive, selected, environment=case.env,
+            copilot_command=(sys.executable, "-I", "-S", "-X", "utf8", str(script)),
+        )
+    message = str(caught.value)
+    assert started.is_file()
+    assert "cache phase \u03c0" in message and "payload phase \u03a9" in message
+    assert "fixture-secret" not in message and str(script) not in message
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
+    assert before == (case.settings.read_bytes(), (case.home / "config.json").read_bytes())
+    assert not case.payload.exists()
+
+
 def test_owned_windows_job_quiesces_once_on_timeout(case, monkeypatch):
     events = []
+    failure = subprocess.TimeoutExpired(["copilot"], 180)
 
     class Process:
         def wait(self, timeout=None):
             if timeout is not None:
-                raise subprocess.TimeoutExpired(["copilot"], timeout)
+                raise failure
             events.append("wait")
             return 1
 
@@ -390,11 +453,16 @@ def test_owned_windows_job_quiesces_once_on_timeout(case, monkeypatch):
             events.append("close")
 
     monkeypatch.setattr(origin_api, "_WINDOWS", True)
-    monkeypatch.setattr(
-        origin_api, "spawn_sync_in_kill_on_close_job", lambda *args, **kwargs: (Process(), Job()),
-    )
-    with pytest.raises(subprocess.TimeoutExpired):
+    def spawn(*args, **kwargs):
+        kwargs["stdout"].write("cache phase \u03c0".encode())
+        kwargs["stderr"].write("payload phase \u03a9".encode())
+        return Process(), Job()
+
+    monkeypatch.setattr(origin_api, "spawn_sync_in_kill_on_close_job", spawn)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
         case.native(["copilot"], case.env, case.home)
+    assert caught.value is failure
+    assert failure.stdout == "cache phase \u03c0" and failure.stderr == "payload phase \u03a9"
     assert events == ["quiesce", "close", "wait"]
 
 
@@ -475,9 +543,14 @@ def test_unconfirmed_cleanup_retains_scratch_and_custody(case, monkeypatch):
         shutil.rmtree(failure.neutral_directory)
 
 
-def test_windows_sharing_update_retries_within_original_budget(case, monkeypatch):
+@pytest.mark.parametrize("configured,budget", [
+    (None, 180), ("600", 600), ("1.2e3", 1200), ("3600", 3600),
+])
+def test_windows_sharing_update_retries_within_original_budget(case, monkeypatch, configured, budget):
     _write_ledger(case)
     selected = _select(case)
+    if configured is not None:
+        case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = configured
     clock = [0.0]
     timeouts = []
     monkeypatch.setattr(origin_api, "_WINDOWS", True)
@@ -496,8 +569,36 @@ def test_windows_sharing_update_retries_within_original_budget(case, monkeypatch
     monkeypatch.setattr(origin_api, "_native_acquisition", acquire)
     actual = origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
     assert actual["sourceFingerprint"] == case.identity["fingerprint"]
-    assert timeouts == [180, 119]
+    assert timeouts == [budget, budget - 61]
     assert clock[0] == 61
+
+
+@pytest.mark.parametrize("configured", [
+    "", "0", "-1", "nan", "inf", "-inf", "3601", "1e300", "invalid",
+])
+def test_invalid_acquisition_budget_refuses_before_native_acquisition(case, configured):
+    _write_ledger(case)
+    selected = _select(case)
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = configured
+    with pytest.raises(RuntimeError, match="positive finite number no greater than 3600"):
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+
+
+def test_configured_acquisition_timeout_is_not_replayed(case, monkeypatch):
+    _write_ledger(case)
+    selected = _select(case)
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = "600"
+    calls = []
+    monkeypatch.setattr(origin_api, "monotonic", lambda: 0)
+
+    def acquire(argv, environment, cwd, *, timeout):
+        calls.append(timeout)
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    monkeypatch.setattr(origin_api, "_native_acquisition", acquire)
+    with pytest.raises(RuntimeError, match="timed out"):
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    assert calls == [600]
 
 
 @pytest.mark.parametrize("windows,installed,detail", [
@@ -598,9 +699,12 @@ def test_sharing_retry_revalidates_after_backoff(case, monkeypatch, change):
     assert len(calls) == 1
 
 
-def test_sharing_retry_does_not_extend_exhausted_deadline(case, monkeypatch):
+@pytest.mark.parametrize("configured,budget", [(None, 180), ("600", 600)])
+def test_sharing_retry_does_not_extend_exhausted_deadline(case, monkeypatch, configured, budget):
     _write_ledger(case)
     selected = _select(case)
+    if configured is not None:
+        case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = configured
     clock = [0.0]
     calls = []
     monkeypatch.setattr(origin_api, "_WINDOWS", True)
@@ -608,7 +712,7 @@ def test_sharing_retry_does_not_extend_exhausted_deadline(case, monkeypatch):
 
     def acquire(argv, environment, cwd, **kwargs):
         calls.append(argv)
-        clock[0] = 180
+        clock[0] = budget
         return subprocess.CompletedProcess(argv, 1, "", "sharing (os error 32)")
 
     def unexpected_sleep(seconds):
@@ -634,6 +738,7 @@ def test_windows_sharing_recovery_preserves_real_directory_holder(
 ):
     _materialize(case)
     selected = _select(case)
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = "600"
     before = case.settings.read_bytes(), (case.home / "config.json").read_bytes()
     cli = case.home / "native_cli.py"
     cli.write_text(
@@ -656,6 +761,7 @@ def test_windows_sharing_recovery_preserves_real_directory_holder(
     attempts = []
 
     def acquire(*args, **kwargs):
+        assert 180 < kwargs["timeout"] <= 600
         result = case.native(*args, **kwargs)
         attempts.append(result.returncode)
         if len(attempts) == 1:

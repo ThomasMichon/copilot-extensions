@@ -21,7 +21,7 @@ def stage_index_policy_sources(repository: Path, *, materialized: bool) -> Path:
     payload = repository / "plugins/agent-index"
     for relative in (
         "plugin.json", "pyproject.toml",
-        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py",
+        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py", "scripts/installer_retained_content.py",
     ):
         destination = payload / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +77,7 @@ def engine_construction_fixture(tmp_path):
     """Keep acquisition fixtures attached to the canonical construction protocol."""
     for source in (REPO / "libs/versioned-runtime").glob("versioned_runtime*.py"):
         shutil.copy2(source, tmp_path / source.name)
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
         shutil.copy2(PLUGIN / "scripts" / name, tmp_path / name)
     return f"""
 function Get-BootstrapPython {{ '{sys._base_executable}' }}

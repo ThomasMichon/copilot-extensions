@@ -74,12 +74,14 @@ async def test_push_file_mkdirs_and_cps(monkeypatch):
 
     async def fake_spawn(*args, **kw):
         calls["args"] = list(args)
+        calls["env"] = kw.get("env")
         return _P()
 
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.asyncio.create_subprocess_exec",
         fake_spawn,
     )
+    t._source.gh_env = {"GH_TOKEN": "fixture-token"}
     await t.push_file("C:/local/session-host.pyz", "/tmp/agent-bridge/sh.pyz")
     # mkdir -p ran for the parent dir
     assert any("mkdir -p" in c for c in t._manager.commands)
@@ -87,6 +89,7 @@ async def test_push_file_mkdirs_and_cps(monkeypatch):
     assert calls["args"][:3] == ["gh", "codespace", "cp"]
     assert "-e" in calls["args"]
     assert calls["args"][-1] == "remote:/tmp/agent-bridge/sh.pyz"
+    assert calls["env"] == {"GH_TOKEN": "fixture-token"}
 
 
 @pytest.mark.asyncio
@@ -417,6 +420,7 @@ async def test_replacement_resolves_dynamic_metadata_and_persists_concrete_child
         _codespace_lock_sessions=set(), _acquire_codespace_lock=lambda *a: None,
         _release_codespace_lock=lambda *a: None,
         _session_host_unexpected_reap_seconds=60, _session_host_active_reap_seconds=0,
+        _timeouts=SimpleNamespace(session_host_ready=30),
         _db=SimpleNamespace(update_session_target=lambda *a: persisted.append(a)),
         _connect_via_session_host=connect,
     )
@@ -453,6 +457,7 @@ async def test_genuinely_live_recovery_keeps_persisted_workspace_without_dynamic
     monkeypatch.setattr("agent_bridge.session_host.version_mux.plan_host",
                         lambda **kw: SimpleNamespace(disposition=HostDisposition.REATTACH))
     manager = SimpleNamespace(
+        db=SimpleNamespace(execute_read=lambda *a: []),
         _host_index=SimpleNamespace(get=lambda session_id: rec),
         _rec_host_alive=lambda record: True, _rec_child_alive=lambda record: True,
         _session_host_stale_reap_seconds=60, _reattach_one=AsyncMock(return_value=True),
@@ -502,6 +507,7 @@ async def test_failed_workspace_preflight_releases_real_ownership_before_next_la
     monkeypatch.setattr("agent_bridge.session_manager._claim_codespace", claim)
     monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
     monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", lambda *a: ("", None))
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
     monkeypatch.setattr("agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None))
     monkeypatch.setattr("agent_bridge.session_host.codespace_transport.build_codespace_spawner",
                         lambda *a, **kw: SimpleNamespace(transport=transport))

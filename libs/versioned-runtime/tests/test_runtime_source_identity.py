@@ -83,6 +83,25 @@ def test_source_identity_preserves_package_and_full_source_identity(payload: Pat
     assert identity.manifest_fields(source)["runtime_source"] == source.document()
 
 
+@pytest.mark.parametrize("supplied", ["same", "other", "package-only", "empty"])
+def test_cli_honors_call_scoped_transaction_pin(payload, monkeypatch, capsys, supplied):
+    source = identity.read_source_identity(payload, VERSION)
+    expected = json.dumps(identity.manifest_fields(source), sort_keys=True)
+    values = {"same": expected, "other": expected.replace(COMMIT, "d" * 40),
+              "package-only": "{}", "empty": ""}
+    monkeypatch.setenv(identity.SOURCE_PIN_ENV, values[supplied])
+    rc = identity.main([
+        "--payload", str(payload), "--package-version", VERSION,
+        "--expected-source-identity", expected, "--format", "json",
+    ])
+    assert rc == (0 if supplied == "same" else 1)
+    captured = capsys.readouterr()
+    if supplied == "same":
+        assert captured.out.strip() == expected
+    else:
+        assert "update transaction selection" in captured.err
+
+
 @pytest.mark.parametrize("expected", [None, "worktree-manager"])
 def test_manager_source_identity_uses_its_standalone_project(
     tmp_path: Path, expected: str | None,
@@ -119,8 +138,11 @@ def test_source_identity_accepts_original_and_normalized_dev_versions(version: s
 @pytest.mark.parametrize("version", ["0.4.1-dev3", "0.4.1.dev3+base"])
 @pytest.mark.parametrize("commit_size", [40, 64])
 @pytest.mark.parametrize("repair", [False, True])
-def test_source_and_repair_slots_preserve_the_declared_package_version(version, commit_size, repair):
+@pytest.mark.parametrize("profile", [False, True])
+def test_source_and_repair_slots_preserve_the_declared_package_version(version, commit_size, repair, profile):
     qualified = identity.runtime_version(version, "a" * commit_size, ASSEMBLY)
+    if profile:
+        qualified += ".profile." + "c" * 16
     if repair:
         qualified += ".repair." + "b" * 32
     assert identity._runtime().package_version(qualified) == version
@@ -231,8 +253,10 @@ def test_native_source_recovery_matches_explicit_python_selection(
             "[Console]::Out.Write($AgentRtPy)"
         )
         argv = [executable, "-NoProfile", "-Command", command]
+    # The Git Bash bridge includes cold native interpreter discovery on Windows.
+    timeout = 30 if os.name == "nt" and host == "bash" else 15
     result = subprocess.run(
-        argv, capture_output=True, text=True, timeout=15,
+        argv, capture_output=True, text=True, timeout=timeout,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr

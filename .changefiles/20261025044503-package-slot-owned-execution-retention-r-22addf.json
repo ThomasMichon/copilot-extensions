@@ -1,0 +1,9 @@
+{
+  "comment": "Package slot-owned execution retention resources without enabling retained creation",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

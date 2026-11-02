@@ -3,17 +3,72 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypedDict, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    import installation_context as _production
+
+
+class _PayloadModule(Protocol):
+    @property
+    def InstallationContextError(self) -> type[Exception]: ...
+
+    def read_json(self, path: str | os.PathLike[str]) -> Any: ...
+
+    def resolve_payload_source(
+        self,
+        *,
+        payload_root: str | os.PathLike[str] | None = None,
+        plugin_id: str | None = None,
+        copilot_home: str | os.PathLike[str] | None = None,
+        project_root: str | os.PathLike[str] | None = None,
+        source_descriptor: Mapping[str, Any] | None = None,
+        marketplace_key: str | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def resolve_context(
+        self,
+        *,
+        payload_root: str | os.PathLike[str] | None = None,
+        plugin_id: str | None = None,
+        copilot_home: str | os.PathLike[str] | None = None,
+        project_root: str | os.PathLike[str] | None = None,
+        durable_home: str | os.PathLike[str] | None = None,
+        context: str | os.PathLike[str] | None = None,
+        expected_marketplace_id: str | None = None,
+        expected_plugin_id: str | None = None,
+        expected_payload_root: str | os.PathLike[str] | None = None,
+        expected_cell_root: str | os.PathLike[str] | None = None,
+        source_descriptor: Mapping[str, Any] | None = None,
+        marketplace_key: str | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]: ...
+
+
+if TYPE_CHECKING:
+    _production_api: _PayloadModule = _production
+
+
+class _ResolveArguments(TypedDict):
+    payload_root: Path
+    plugin_id: str
+    copilot_home: Path
+    environment: dict[str, str]
+
 
 LIB = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.installation_context_smoke
 
 
 @pytest.fixture
-def context_module():
+def context_module() -> _PayloadModule:
     spec = importlib.util.spec_from_file_location(
         "payload_source_installation_context", LIB / "installation_context.py"
     )
@@ -21,15 +76,15 @@ def context_module():
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    return cast(_PayloadModule, module)
 
 
-def _write_json(path: Path, data: dict) -> None:
+def _write_json(path: Path, data: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _installed(tmp_path: Path, descriptor: dict) -> tuple[Path, Path]:
+def _installed(tmp_path: Path, descriptor: dict[str, str]) -> tuple[Path, Path]:
     copilot = tmp_path / "home" / ".copilot"
     payload = copilot / "installed-plugins" / "example" / "agent-worktrees"
     payload.mkdir(parents=True)
@@ -53,8 +108,8 @@ def _manifest(root: Path, payload: Path) -> None:
     )
 
 
-def _snapshot(root: Path) -> dict:
-    result = {}
+def _snapshot(root: Path) -> dict[str, tuple[bool, int, bytes | None]]:
+    result: dict[str, tuple[bool, int, bytes | None]] = {}
     for path in [root, *root.rglob("*")]:
         metadata = path.stat()
         result[path.relative_to(root).as_posix()] = (
@@ -69,7 +124,11 @@ def _snapshot(root: Path) -> dict:
     ({"source": "git", "url": "https://example.test/plugins.git"}, "git:https://example.test/plugins"),
 ])
 def test_installed_source_without_cell_state(
-    tmp_path, monkeypatch, context_module, descriptor, canonical
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    context_module: _PayloadModule,
+    descriptor: dict[str, str],
+    canonical: str,
 ) -> None:
     copilot, payload = _installed(tmp_path, descriptor)
     durable = tmp_path / "home" / ".copilot-extensions"
@@ -77,13 +136,13 @@ def test_installed_source_without_cell_state(
     _write_json(durable / "marketplaces" / "foreign" / "namespace.json", {"invalid": True})
     before = _snapshot(tmp_path)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("a source-only read consulted installation state")
 
     monkeypatch.setattr(context_module, "_find_existing_source", forbidden)
     original_read = context_module.read_json
 
-    def scoped_read(path):
+    def scoped_read(path: str | os.PathLike[str]) -> Any:
         assert not Path(path).is_relative_to(durable)
         return original_read(path)
 
@@ -105,7 +164,9 @@ def test_installed_source_without_cell_state(
     assert _snapshot(tmp_path) == before
 
 
-def test_directory_source_is_catalog_attributable(tmp_path, context_module) -> None:
+def test_directory_source_is_catalog_attributable(
+    tmp_path: Path, context_module: _PayloadModule,
+) -> None:
     payload = tmp_path / "plugins" / "agent-worktrees"
     payload.mkdir(parents=True)
     _manifest(tmp_path, payload)
@@ -122,7 +183,7 @@ def test_directory_source_is_catalog_attributable(tmp_path, context_module) -> N
 
 
 def test_explicit_management_source_is_not_an_installation_receipt(
-    tmp_path, context_module
+    tmp_path: Path, context_module: _PayloadModule,
 ) -> None:
     payload = tmp_path / "payload"
     payload.mkdir()
@@ -143,14 +204,14 @@ def test_explicit_management_source_is_not_an_installation_receipt(
     "relative-payload", "unsupported-source", "malformed-settings",
 ])
 def test_source_provenance_failures_do_not_fall_back(
-    tmp_path, context_module, failure
+    tmp_path: Path, context_module: _PayloadModule, failure: str,
 ) -> None:
     copilot, payload = _installed(
         tmp_path, {"source": "github", "repo": "example/marketplace"}
     )
     # An enclosing directory catalog must not rescue invalid installed provenance.
     _manifest(tmp_path, payload)
-    arguments = {
+    arguments: _ResolveArguments = {
         "payload_root": payload, "plugin_id": "agent-worktrees",
         "copilot_home": copilot, "environment": {},
     }
@@ -181,19 +242,24 @@ def test_source_provenance_failures_do_not_fall_back(
 
 
 def test_context_keeps_cell_ownership_validation(
-    tmp_path, monkeypatch, context_module
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context_module: _PayloadModule,
 ) -> None:
     copilot, payload = _installed(
         tmp_path, {"source": "github", "repo": "example/marketplace"}
     )
-    arguments = {
+    arguments: _ResolveArguments = {
         "payload_root": payload, "plugin_id": "agent-worktrees",
         "copilot_home": copilot, "environment": {},
     }
     source = context_module.resolve_payload_source(**arguments)
-    calls = []
+    calls: list[tuple[Path, str, str, Mapping[str, Any] | None]] = []
 
-    def existing(durable, fingerprint, marketplace_id, locator):
+    def existing(
+        durable: Path,
+        fingerprint: str,
+        marketplace_id: str,
+        locator: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
         calls.append((durable, fingerprint, marketplace_id, locator))
         return []
 
@@ -209,7 +275,7 @@ def test_context_keeps_cell_ownership_validation(
         "plugins", "agent-worktrees", "install.json",
     )
 
-    def foreign(*args):
+    def foreign(*args: object) -> list[dict[str, object]]:
         return [{"sameId": False, "locatorMatch": False, "marketplaceId": "foreign"}]
 
     monkeypatch.setattr(context_module, "_find_existing_source", foreign)
@@ -217,7 +283,9 @@ def test_context_keeps_cell_ownership_validation(
         context_module.resolve_context(**arguments, durable_home=durable)
 
 
-def test_unknown_payload_never_invents_source(tmp_path, context_module) -> None:
+def test_unknown_payload_never_invents_source(
+    tmp_path: Path, context_module: _PayloadModule,
+) -> None:
     payload = tmp_path / "agent-worktrees"
     payload.mkdir()
     _write_json(payload / "plugin.json", {

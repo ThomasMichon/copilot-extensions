@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .private_protocol import Deadline, PeerIdentity, Refusal, deadline_lock
+from .private_protocol import Deadline, PeerIdentity, PrivateIPCError, Refusal, deadline_lock
 from .private_peer import PeerProcess
 from .private_windows_native import (
     BROKEN_PIPE,
@@ -261,12 +261,20 @@ class WindowsChannel:
     def close(self) -> None:
         """Release owned handles; cleanup failures are fixed typed refusals."""
         with self._lock:
-            pipe, process = self._pipe, self._process
-            self._pipe = self._process = None
+            failed = False
             try:
-                self._api.close(pipe)
+                self._api.close(self._pipe)
+                self._pipe = None
+            except PrivateIPCError:
+                failed = True
             finally:
-                self._api.close(process)
+                try:
+                    self._api.close(self._process)
+                    self._process = None
+                except PrivateIPCError:
+                    failed = True
+            if failed:
+                refuse()
 
 
 def connect(pipe_path: str, expected: PeerIdentity, deadline: Deadline) -> WindowsChannel:

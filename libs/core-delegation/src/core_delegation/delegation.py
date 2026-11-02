@@ -38,6 +38,7 @@ import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Protocol, cast
 
 from endpoint_rendezvous import (
     Endpoint,
@@ -80,12 +81,12 @@ def default_accept(transport: str) -> bool:
     return False
 
 
-def _frame(payload: dict) -> bytes:
+def _frame(payload: dict[str, Any]) -> bytes:
     """Encode a request as a single newline-terminated JSON line."""
     return (json.dumps(payload) + "\n").encode()
 
 
-def _decode(buf: bytes) -> dict | None:
+def _decode(buf: bytes) -> dict[str, Any] | None:
     """Decode a newline-framed JSON response; ``None`` if empty/malformed."""
     if not buf:
         return None
@@ -97,8 +98,9 @@ def _decode(buf: bytes) -> dict | None:
 
 
 def _send_socket(
-    family: int, address, payload: dict, timeout: float | None
-) -> dict | None:
+    family: int, address: str | tuple[str, int],
+    payload: dict[str, Any], timeout: float | None,
+) -> dict[str, Any] | None:
     """Send a framed request over an ``AF_UNIX``/``AF_INET`` stream socket."""
     try:
         s = socket.socket(family, socket.SOCK_STREAM)
@@ -125,13 +127,17 @@ def _send_socket(
             pass
 
 
-def _send_unix(address: str, payload: dict, timeout: float | None) -> dict | None:
+def _send_unix(
+    address: str, payload: dict[str, Any], timeout: float | None,
+) -> dict[str, Any] | None:
     if not hasattr(socket, "AF_UNIX"):
         return None
     return _send_socket(socket.AF_UNIX, address, payload, timeout)
 
 
-def _send_tcp(host: str, port: int, payload: dict, timeout: float | None) -> dict | None:
+def _send_tcp(
+    host: str, port: int, payload: dict[str, Any], timeout: float | None,
+) -> dict[str, Any] | None:
     return _send_socket(socket.AF_INET, (host, port), payload, timeout)
 
 
@@ -144,13 +150,35 @@ _ERROR_PIPE_BUSY = 231
 _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
 
-def _kernel32():
+class _Kernel32(Protocol):
+    def CreateFileW(
+        self, path: str, access: int, sharing: int, security: None,
+        disposition: int, attributes: int, template: None,
+    ) -> int | None: ...
+
+    def GetLastError(self) -> int: ...
+
+    def WaitNamedPipeW(self, path: str, milliseconds: int) -> int: ...
+
+    def WriteFile(
+        self, handle: int, data: bytes, size: int, written: object, overlapped: None,
+    ) -> int: ...
+
+    def ReadFile(
+        self, handle: int, buffer: ctypes.Array[ctypes.c_char], size: int,
+        read: object, overlapped: None,
+    ) -> int: ...
+
+    def CloseHandle(self, handle: int) -> int: ...
+
+
+def _kernel32() -> _Kernel32:
     """kernel32 with the pointer-correct signatures this module needs.
 
     Setting ``restype``/``argtypes`` matters on 64-bit Windows: a HANDLE is a
     pointer, and the default ``c_int`` restype would truncate it.
     """
-    k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    k32 = cast(ctypes.CDLL, getattr(ctypes, "windll").kernel32)
     k32.CreateFileW.restype = ctypes.c_void_p
     k32.CreateFileW.argtypes = [
         ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
@@ -170,10 +198,12 @@ def _kernel32():
     ]
     k32.CloseHandle.restype = ctypes.c_int
     k32.CloseHandle.argtypes = [ctypes.c_void_p]
-    return k32
+    return cast(_Kernel32, k32)
 
 
-def _send_pipe(pipe_path: str, payload: dict, timeout: float | None) -> dict | None:
+def _send_pipe(
+    pipe_path: str, payload: dict[str, Any], timeout: float | None,
+) -> dict[str, Any] | None:
     """Send a framed request over a Windows named pipe; ``None`` on any failure."""
     if not IS_WINDOWS:
         return None
@@ -214,7 +244,9 @@ def _send_pipe(pipe_path: str, payload: dict, timeout: float | None) -> dict | N
             k32.CloseHandle(handle)
 
 
-def _dial(endpoint: Endpoint, payload: dict, timeout: float | None) -> dict | None:
+def _dial(
+    endpoint: Endpoint, payload: dict[str, Any], timeout: float | None,
+) -> dict[str, Any] | None:
     """Ship ``payload`` over the resolved endpoint's transport."""
     if endpoint.transport == "unix":
         return _send_unix(endpoint.address, payload, timeout)
@@ -231,7 +263,7 @@ def _dial(endpoint: Endpoint, payload: dict, timeout: float | None) -> dict | No
 
 def delegate(
     app: str,
-    request: dict,
+    request: dict[str, Any],
     *,
     timeout: float | None = DEFAULT_TIMEOUT,
     token: str | None = None,
@@ -241,7 +273,7 @@ def delegate(
     accept: Callable[[str], bool] | None = None,
     probe: Callable[[Endpoint], bool] | None = connect_probe,
     tag: bool = True,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Delegate ``request`` to ``app``'s wired core; return its response or ``None``.
 
     Discovery uses the ``endpoint-rendezvous`` ladder rooted at ``runtime_dir``

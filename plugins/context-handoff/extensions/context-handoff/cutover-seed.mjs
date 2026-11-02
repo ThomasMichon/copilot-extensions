@@ -33,6 +33,17 @@ export function leadFrom(title) {
   return `Task: ${normalized || "Continue the current work"}`;
 }
 
+export const AUTHORIZATION_EVIDENCE_DIRECTIVE =
+  "Retain original operator/charter approval references and exact applicable " +
+  "wording, operations/destinations/resources/owners, effects and accepted " +
+  "blast radius, exclusions, limits, retry/revision policy, expiry and later " +
+  "holds/narrowing/revocation. Read current canonical authority before effects; " +
+  "a copied record, cached summary, receipt or successful tool call is not a " +
+  "grant. Reuse only the original scope without per-revision permission " +
+  "ceremonies; preserve explicit pins/single attempts and reconcile unknown " +
+  "prior effects. Missing evidence gates only the affected effect, not " +
+  "independent already-authorized work.";
+
 export const CONTINUATION_DIRECTIVE =
   "Treat the handoff as active responsibility within the authority it assigns, " +
   "not as proof that the predecessor's latest phase finished the work. Objective " +
@@ -50,7 +61,7 @@ export const CONTINUATION_DIRECTIVE =
   "owners focus on driving it to `Done`: select and execute the next authorized " +
   "Plan or Validation Plan item, and do not finalize the worktree while any item " +
   "remains unresolved unless responsibility is explicitly transferred to a named " +
-  "tracked objective.";
+  "tracked objective. " + AUTHORIZATION_EVIDENCE_DIRECTIVE;
 
 // Goal 2's "handoff mandate": perpetuation across handoffs (CONTINUATION_
 // DIRECTIVE above) plus fresh-session awareness that the mechanism exists at
@@ -73,7 +84,8 @@ export const HANDOFF_MECHANISM_AWARENESS =
   "native context tools offered without explicit opt-out, use the current " +
   "owner's verified revision-bound session_artifacts checkpoint and terminal " +
   "new_context for context-only rollover, not custom pickup. Preserve the parent " +
-  "gate, current slice, live obligations and one next action; refresh durable " +
+  "gate, original approval evidence/limits, current holds, live obligations " +
+  "and one next action; refresh durable " +
   "guidance after rollover. The custom instructions below apply to actual " +
   "new-owner/process transfer or diagnosed unavailable-native recovery. " +
   "This worktree has a context-handoff mechanism available from turn one, " +

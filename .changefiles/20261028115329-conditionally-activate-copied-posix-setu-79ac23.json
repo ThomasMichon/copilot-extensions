@@ -1,0 +1,9 @@
+{
+  "comment": "Conditionally activate copied POSIX setup with native foreground exec and current-runtime callbacks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

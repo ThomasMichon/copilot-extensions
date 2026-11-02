@@ -669,7 +669,7 @@ def snapshot_source(tmp_path: Path) -> Path:
         shutil.copy2(PLUGIN / name, source / name)
     for ext in ("sh", "ps1"):
         shutil.copy2(PLUGIN / "scripts" / f"install.{ext}", source / "scripts" / f"install.{ext}")
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
         shutil.copy2(ENGINE / name, source / "scripts" / name)
     (source / "server").mkdir()
     shutil.copy2(PLUGIN / "server/pyproject.toml", source / "server/pyproject.toml")

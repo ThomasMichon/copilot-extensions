@@ -121,6 +121,17 @@ def test_exact_original_resume_has_durable_reservation_and_full_status_first_see
     assert "-i" not in argv
     assert native_restart_receipt.read(subject.path)["state"] == "mux-created"
 
+def test_restart_late_join_never_claims_its_own_mux_creation(subject, capfd, monkeypatch):
+    from agent_worktrees import native_restart_receipt
+
+    monkeypatch.setattr(sessions, "mux_new_session", lambda *a: {
+        "ok": True, "created": False, "session": "existing", "new_pane": None,
+    })
+    rc, result = invoke(subject, capfd)
+    assert rc == 4 and result["state"] == "launch-uncertain"
+    assert native_restart_receipt.read(subject.path)["state"] == "launch-uncertain"
+    assert subject.launches == []
+
 
 def test_canonical_original_self_claim_survives_exact_fenced_resume(subject, capfd):
     claim = tracking.ResourceClaim(

@@ -12,6 +12,7 @@ import time
 import pytest
 
 from conftest import _published_seed_environment, _seed_directory
+from conftest import git_only_mux as _git_only_mux
 from agent_worktrees import config as cfg, finalize, tracking
 from test_resource_producer import absence, call
 from test_transitive_finalize_integration import MACHINE, PROJECT, _env, _git, _save_worktree
@@ -22,7 +23,7 @@ def _final_owner_seed(tmp_path_factory):
     with _seed_directory(tmp_path_factory, "resource-producer-finalize") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
-                _env.__wrapped__(seed, patch)
+                _env.__wrapped__(seed, patch, _git_only_mux.__wrapped__(patch))
         return seed
 
 

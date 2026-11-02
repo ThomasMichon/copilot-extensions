@@ -19,7 +19,7 @@ def _pid_is_live(pid: int) -> bool:
         process_query_limited_information = 0x1000
         wait_object_0 = 0
         wait_timeout = 258
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = (
             wintypes.DWORD,
             wintypes.BOOL,
@@ -36,7 +36,8 @@ def _pid_is_live(pid: int) -> bool:
             pid,
         )
         if not handle:
-            return _lock_openprocess_failure_means_live(ctypes.get_last_error())
+            last_error = cast(Callable[[], int], getattr(ctypes, "get_last_error"))
+            return _lock_openprocess_failure_means_live(last_error())
         try:
             wait_result = kernel32.WaitForSingleObject(handle, 0)
             if wait_result == wait_object_0:
@@ -428,12 +429,12 @@ def normalize_source(
             directory_text = _string_property(descriptor, "path")
             if not directory_text.strip():
                 _fail("A directory source requires a non-empty path or stableId.")
-            directory = Path(directory_text)
-            if not directory.is_absolute():
+            directory_path = Path(directory_text)
+            if not directory_path.is_absolute():
                 if base_directory is None:
                     _fail("A relative directory source requires a declaration base directory.")
-                directory = Path(base_directory) / directory
-            canonical = f"directory:{canonical_path(directory, must_exist=True)}"
+                directory_path = Path(base_directory) / directory_path
+            canonical = f"directory:{canonical_path(directory_path, must_exist=True)}"
         if not (
             canonical.startswith("directory:") or canonical.startswith("directory-id:")
         ):
@@ -521,6 +522,8 @@ def _get_declarations(
         descriptor = _property(declaration, "source")
         if not isinstance(descriptor, Mapping):
             _fail(f"Marketplace '{key}' has no source in '{path}'.")
+        if _POWERSHELL_PATHS.get():
+            descriptor = _powershell_source_descriptor(descriptor)
         declarations.append(
             {
                 "source": normalize_source(descriptor, base),
@@ -770,6 +773,7 @@ def resolve_payload_source(
         if not paths_equal(payload, inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT conflicts with --payload-root.")
 
+    evidence: dict[str, Any] | None
     if source_descriptor is not None:
         if not plugin_id:
             _fail("Explicit source resolution requires --plugin-id.")

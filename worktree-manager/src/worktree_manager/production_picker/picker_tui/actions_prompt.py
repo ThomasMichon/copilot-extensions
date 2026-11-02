@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .. import context
 from ...launch_confirmation import confirm_before_effect
-from ...seed_history import HistoryCursor, SeedHistory
+from ...seed_history import SeedHistory
 from .seed_prompt_field import compose_seed_prompt
 
 
@@ -36,7 +36,7 @@ class ActionsPromptMixin:
 
         def work():
             store = SeedHistory(project)
-            return store, HistoryCursor(store.entries())
+            return store, store.cursor()
 
         def done(result):
             if (

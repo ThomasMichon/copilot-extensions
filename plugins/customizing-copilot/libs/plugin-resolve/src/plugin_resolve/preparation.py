@@ -19,13 +19,13 @@ from .marketplace import marketplace_manifest_path
 from .payload import (
     publication_metadata, catalog_metadata, dependencies, plugin_manifest, report_diagnostic,
 )
-from .reflection import _plan_item, identity
+from .reflection import _plan_item, identity, selection_spec
 from .registration import (
     _installation_home, _operator_settings, _settings_document,
     atomic_json, checkout_lock, register_prepared, strict_json,
 )
 from .settings import RepoPluginSettings, local_marketplace_path
-from .inventory import inventory_paths, installed_item
+from .inventory import inventory_paths, installed_item, inventory_item
 from .execution import execution_environment, execution_executable, windows_batch_command
 from .target import bind_target
 
@@ -260,7 +260,9 @@ def prepare(
     host_sources = {item["source"] for item in request["plugins"]}
     marketplaces = {**request.get("marketplaces", {}), **native_settings.marketplaces}
     host_selection = []
+    omitted = set()
     for item in request["plugins"]:
+        spec = selection_spec(item)
         _name, marketplace = identity(item["source"])
         origin = native_settings.marketplaces.get(marketplace)
         selected = None
@@ -274,15 +276,19 @@ def prepare(
             kind = origin.get("source", {}).get("source")
             if kind not in REMOTE_MARKETPLACE_SOURCE_KINDS | LOCAL_MARKETPLACE_SOURCE_KINDS:
                 raise ValueError(f"Unsupported target marketplace source: {marketplace}")
+            required = (
+                native_settings.enabled.get(item["source"], False) if local_mode == "reference"
+                else item["source"] in native_settings.enabled
+            ) or bool(item.get("resolve_on_target"))
             selected = _plan_item(
                 item, (repo, native_settings), marketplaces,
                 allow_external=True, existing_root=staging,
-                required=(
-                    native_settings.enabled.get(item["source"], False) if local_mode == "reference"
-                    else item["source"] in native_settings.enabled
-                ) or bool(item.get("resolve_on_target")),
+                required=required and not spec.get("allow_missing", False),
                 local_mode="reference" if kind in LOCAL_MARKETPLACE_SOURCE_KINDS else local_mode,
             )
+            if selected is None and spec.get("allow_missing") and kind in LOCAL_MARKETPLACE_SOURCE_KINDS:
+                omitted.add(item["source"])
+                continue
             if selected is not None and kind in LOCAL_MARKETPLACE_SOURCE_KINDS:
                 selected["native_local"] = True
         if selected is None and "target_relative" in item:
@@ -391,12 +397,12 @@ def prepare(
             continue
         _name, marketplace = identity(source)
         if inventory is not None and "marketplace" in item:
-            registered = _settings_document(inventory[0] / "settings.json", jsonc_header=True).get(
-                "extraKnownMarketplaces", {},
-            ).get(marketplace)
-            payload = inventory[0] / "installed-plugins" / marketplace / _name
-            if registered == item["marketplace"] and payload.is_dir():
-                item = {**item, **installed_item(source, *inventory)}
+            available = inventory_item(
+                source, *inventory, definition=item["marketplace"],
+                environment=environment, execution_cwd=execution_cwd,
+            )
+            if available is not None:
+                item = {**item, **available}
         if item.get("resolve_on_target"):
             if marketplace not in native_settings.marketplaces:
                 if inventory is None:
@@ -486,8 +492,15 @@ def prepare(
         diagnostics=requirements, initial_owned_plugins=ownership.get("enabledPlugins", {}),
         check_cancelled=check_cancelled,
         inventory=inventory,
+        environment=environment,
         prepared_context=prepared_context,
+        omitted_sources=omitted,
     )
+    for source in sorted(omitted):
+        diagnostic = {"source": source, "status": "missing-local-allowed"}
+        if diagnostics is not None:
+            diagnostics.append(diagnostic)
+        report_diagnostic(diagnostic)
     if diagnostics is not None:
         diagnostics.extend(requirements)
     else:

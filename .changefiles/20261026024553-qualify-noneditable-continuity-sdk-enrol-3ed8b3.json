@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify noneditable continuity SDK enrollment and restart with checkout reads refused",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

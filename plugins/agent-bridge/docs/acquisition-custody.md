@@ -85,12 +85,36 @@ Session insertion, shutdown stop and recovery-enable writes preserve the
 durable association's automatic-recovery exclusion. Hydration excludes
 associated history even if an older recovery flag was enabled. Startup and
 direct Host reattachment refuse that association before adopting another client.
+Ordinary Host status and graceful detach also retain that custody: an idle
+associated Host is not marked reapable. A captured native owner short-circuits
+the check; otherwise it reads the original session association. Only ordinary
+unassociated idle Hosts retain automatic reaping eligibility.
+The idle-TTL sweep also excludes retained custody, rechecking under the turn
+lock, after lifecycle scheduling and immediately before automatic Host retirement.
+The sweep skips a lifecycle-busy candidate after taking the turn lock, avoiding
+inversion with reattachment's lifecycle-locked resume-prompt submission.
+Its internal guard does not change explicit operator stop/reap behavior.
+New explicitly selected original local Hosts disable the existing unexpected
+and active-disconnect timeout bounds at the actual launcher. Retained quiet
+custody cannot expire after a graceful `detach(False)`; unselected configured
+Hosts retain their ordinary timeouts and no existing Host is adopted or changed.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates
 that actual owner, then admits the original handoff immediately before its
 `Popen`. A closure or owner change after the one-shot commit leaves it
 outstanding, never eligible for another launch.
+
+The concrete acquisition adapter retains its original request and journal.
+`LocalLaunchOwner` owns the shared live Session/target/Host/child/ACP reference
+checks, one-shot native invocation and configuration fences. After acceptance,
+`LocalHostTransport` retains those actual references and the complete original
+handoff document for the existing turn protocol; `AcquisitionHostTransport`
+remains its compatibility name. The separately selected
+[original keyed-creation adapter](creation-custody.md) uses the same live effect
+checks with its own same-row handoff and concrete owner, not an acquisition
+request or another attempt ledger. Neither adapter enrolls a cohort by default
+or makes retained observations into effect authority.
 
 The newly launched local Host receives a stripped, original-acquisition context,
 not a transferable grant. Its actual child owner rechecks the original
@@ -112,6 +136,18 @@ new/load twice. Native acceptance is reported on the exact SDK reply, before
 subsequent preference application; each configuration effect rechecks its owner
 outside the preference fallback handler. A missing reply or configuration
 failure does not authorize the resume ladder or a new conversation.
+
+The actual Session retains its original launch owner before spawning. That
+owner records the raw `Popen`, state-file path and nonce before readiness,
+then the actual Host/child and existing HostIndex record before returning from
+the spawn worker. It retains the socket, streams and client before ACP startup.
+Readiness, initialization, native-reply and configuration failures do not run
+ordinary launch rollback: no TERMINATE, stream close or Host retirement is
+authorized by an unknown result, cancellation or a closed epoch. Failed startup
+keeps the original objects and journal outstanding without claiming success or
+granting replay. Ordinary unselected failed launches retain their cleanup.
+An unknown readiness result may have only the original raw process/state-file
+observations; it does not fabricate a ready Host or enroll reattachment.
 
 After successful startup, only that original accepted local owner can select
 its Host transport into the [existing original-turn protocol](native-turn-custody.md).
@@ -148,6 +184,8 @@ The isolated wire flow runs the actual local Host, child and ACP SDK with a
 synthetic peer that independently reads original launch/turn rows before
 replying. Create/load and lost-reply cases must each produce one Host and one
 corresponding native request, with no replay and no consumption claim.
+Live peers that withhold new/load replies remain alive after the bounded RPC
+timeout, under the same owner/client/connection and indexed Host.
 
 This is not a native performance budget or platform qualification. The separately
 authorized qualification owner must measure ordinary versus selected cold/warm

@@ -264,10 +264,15 @@ def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path, published
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
-@pytest.mark.parametrize(("bind", "stopped"), [
-    ("127.0.0.1", False), ("::1", False), ("127.0.0.2", False), ("127.0.0.1", True),
+@pytest.mark.parametrize(("bind", "stopped", "json_output"), [
+    ("127.0.0.1", False, False), ("::1", False, False),
+    ("127.0.0.2", False, False), ("127.0.0.1", True, False),
+    ("127.0.0.1", False, True),
 ])
-def test_serving_reconcile_native_daemon_lifecycle_never_activates(tmp_path, bind, stopped):
+@pytest.mark.parametrize("entrypoint", ["module", "console"])
+def test_serving_reconcile_native_daemon_lifecycle_never_activates(
+    tmp_path, bind, stopped, json_output, entrypoint,
+):
     if bind != "127.0.0.1":
         try:
             family = socket.AF_INET6 if ":" in bind else socket.AF_INET
@@ -304,8 +309,18 @@ def test_serving_reconcile_native_daemon_lifecycle_never_activates(tmp_path, bin
             stdout=client_out, stderr=client_err,
         )
         cleanup.callback(_stop_fixture, client, client_job)
+        if entrypoint == "console":
+            executable = Path(sys.executable).parent / (
+                "agent-bridge.exe" if sys.platform == "win32" else "agent-bridge"
+            )
+            assert executable.is_file(), "native fixture requires the installed console entrypoint"
+            daemon_command = [str(executable), "start"]
+        else:
+            daemon_command = [sys.executable, "-u", "-m", "agent_bridge", "start"]
+        if json_output:
+            daemon_command.insert(-1, "--json")
         daemon, job = _spawn_fixture(
-            [sys.executable, "-u", "-m", "agent_bridge", "start"],
+            daemon_command,
             cwd=root, env=_environment(root), stdout=log, stderr=log,
         )
         cleanup.callback(_stop_fixture, daemon, job)

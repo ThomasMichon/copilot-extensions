@@ -13,7 +13,6 @@ import ctypes
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -21,13 +20,14 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
-from agent_procutil import windowless_daemon_kwargs
+from agent_procutil import spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec
 
 from . import context
 from .. import agent_plugin_runtime
 from .. import engine_client
 from ..manager_config import automatic_maintenance_enabled
-from ..mux_daemon_process import scrub_session_credentials
+from ..mux_daemon_process import scrub_session_credentials, selected_root
 
 _PICKER_HEARTBEAT_INTERVAL = 10.0
 _PICKER_STALE_AFTER = 30.0
@@ -96,16 +96,15 @@ def _spawn_status_monitor(base: list[str]) -> bool:
     env = scrub_session_credentials(engine_client._engine_environment())
     for key in ("COPILOT_AGENT_SESSION_ID", "WORKTREE_PROJECT", engine_client.ENGINE_ARGV_ENV):
         env.pop(key, None)
-    kwargs: dict = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "cwd": str(_engine_runtime_home()),
-        "env": env,
-    }
-    kwargs.update(windowless_daemon_kwargs(breakaway=True))
+    root = selected_root(_engine_runtime_home())
     try:
-        subprocess.Popen([*base, "status-monitor"], **kwargs)  # noqa: S603
+        spawn_daemon(
+            [*base, "status-monitor"], cwd=root, env=env,
+            log_path=root / "picker-status-monitor.log", console_children=True,
+            instance=DaemonInstanceSpec(
+                "agent-worktrees-status-monitor", root, Path(__file__).resolve(),
+            ),
+        )
         return True
     except Exception:
         return False

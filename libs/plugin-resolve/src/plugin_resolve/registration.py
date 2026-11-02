@@ -173,7 +173,9 @@ def register_prepared(
     diagnostics: list[dict], initial_owned_plugins: dict[str, bool],
     check_cancelled=lambda: None,
     inventory: tuple[Path, Path] | None = None,
+    environment=None,
     prepared_context: dict | None = None,
+    omitted_sources: frozenset[str] | set[str] = frozenset(),
 ) -> dict:
     """Merge only unclaimed or unchanged owned keys; return effective directories.
 
@@ -245,13 +247,18 @@ def register_prepared(
             if "inventory_origin" in details:
                 inventory_sources[source] = details["inventory_origin"]
             if "inventory" in details:
-                from .inventory import installed_item
+                from .inventory import inventory_item
 
-                verified = installed_item(source, *inventory)
-                if verified.get("inventory") != details["inventory"]:
+                verified = inventory_item(
+                    source, *inventory, definition=details.get("marketplace"),
+                    environment=environment, execution_cwd=repo,
+                )
+                if verified is None or verified.get("inventory") != details["inventory"]:
                     raise ValueError(f"Installed inventory changed during preparation: {source}")
                 authority = operator.marketplaces.get(marketplace)
-                if authority is not None and verified["inventory"]["registration"] != authority:
+                if authority is not None and (
+                    verified.get("marketplace") or verified["inventory"]["registration"]
+                ) != authority:
                     raise ValueError(f"Installed inventory does not match target-native origin: {source}")
                 if (
                     source in receipt.get("inventorySources", {})
@@ -391,6 +398,15 @@ def register_prepared(
                 marketplaces.pop(marketplace, None)
                 owned_marketplaces.pop(marketplace, None)
                 reference_marketplaces.pop(marketplace, None)
+        for source in omitted_sources:
+            _name, marketplace = split_source(source)
+            if marketplace in owned_marketplaces and marketplace in operator.marketplaces:
+                marketplaces.pop(marketplace, None)
+                owned_marketplaces.pop(marketplace, None)
+                reference_marketplaces.pop(marketplace, None)
+                origins.pop(marketplace, None)
+                origin_active.pop(marketplace, None)
+            inventory_sources.pop(source, None)
         effective = RepoPluginSettings(
             enabled={**operator.enabled, **plugins},
             marketplaces={**operator.marketplaces, **marketplaces},
@@ -429,12 +445,19 @@ def register_prepared(
                         resolved[source] = str(candidate.resolve())
                         continue
                 if inventory is not None and (authority is None or kind in REMOTE_MARKETPLACE_SOURCE_KINDS):
-                    from .inventory import installed_item
+                    from .inventory import inventory_item
 
-                    verified = installed_item(source, *inventory)
-                    if "inventory" not in verified:
+                    verified = inventory_item(
+                        source, *inventory, definition=authority,
+                        environment=environment, execution_cwd=repo,
+                    )
+                    if verified is None or "inventory" not in verified:
                         raise ValueError(f"Registered local inventory catalog was not prepared: {source}")
-                    if authority is not None and verified["inventory"]["registration"] != authority:
+                    if "inventory" in details and verified["inventory"] != details["inventory"]:
+                        raise ValueError(f"Installed inventory changed during preparation: {source}")
+                    if authority is not None and (
+                        verified.get("marketplace") or verified["inventory"]["registration"]
+                    ) != authority:
                         raise ValueError(f"Installed inventory does not match target-native origin: {source}")
                     resolved[source] = verified["inventory"]["payload"]
                 continue
@@ -454,19 +477,47 @@ def register_prepared(
                         source, candidate, repo, state_dir, operator, effective, publications,
                     )
                     resolved[source] = str(candidate)
-        missing = [source for source in effective.enabled_sources() if source not in resolved]
+        for source in omitted_sources:
+            from .reflection import _plan_item
+
+            _name, marketplace = split_source(source)
+            if local_marketplace_path(marketplace, operator, repo_dir=repo) is None:
+                raise ValueError(f"Omitted plugin lost its target-local authority: {source}")
+            candidate = _plan_item(
+                {"source": source, "allow_missing": True}, (repo, operator), operator.marketplaces,
+                allow_external=True, required=False, local_mode="reference",
+            )
+            if candidate is not None or source in resolved:
+                raise ValueError(f"Omitted plugin changed during preparation: {source}")
+        missing = [source for source in effective.enabled_sources()
+                   if source not in resolved and source not in omitted_sources]
         if missing:
             raise ValueError(f"Enabled plugins do not resolve: {', '.join(missing)}")
+        reverse = {projected: logical for logical, projected in identities.items()}
         for source, directory_path in resolved.items():
             _name, marketplace = split_source(source)
-            for dependency in dependencies(plugin_manifest(Path(directory_path)), marketplace):
+            manifest = plugin_manifest(Path(directory_path))
+            required = dependencies(manifest, marketplace)
+            if omitted_sources:
+                logical = publications.get(source, {}).get("logical_source", reverse.get(source, source))
+                logical_marketplace = split_source(logical)[1]
+                omitted_dependencies = set(
+                    required if logical_marketplace == marketplace
+                    else dependencies(manifest, logical_marketplace)
+                ).intersection(omitted_sources)
+                if omitted_dependencies:
+                    raise ValueError(
+                        f"Required dependency was omitted: {logical} requires {', '.join(sorted(omitted_dependencies))}"
+                    )
+            for dependency in required:
+                if dependency in omitted_sources:
+                    raise ValueError(f"Required dependency was omitted: {source} requires {dependency}")
                 if not effective.enabled.get(dependency) or dependency not in resolved:
                     diagnostics.append({
                         "source": source, "dependency": dependency,
                         "status": "disabled" if effective.enabled.get(dependency) is False
                         else "outside-selection",
                     })
-        reverse = {projected: logical for logical, projected in identities.items()}
         logical_result = {}
         expected_plugins = []
         for source, directory_path in resolved.items():

@@ -62,11 +62,11 @@ def test_serve_keeps_all_home_consumers_bound_after_chdir(tmp_path, selection):
             launch / relative if selection == "absolute-parent" else relative
         )
     elif selection == "socket-parent":
-        env["AGENT_MCP_HOME"] = str(tmp_path / "durable" / "state")
+        env["AGENT_MCP_HOME"] = str(launch / "state")
     else:
         env["AGENT_MCP_HOME"] = str(tmp_path / "absolute-state")
     expected = (
-        tmp_path / "durable" / "state"
+        launch / "state"
         if parent_case
         else launch / "state"
         if selection == "relative"
@@ -82,10 +82,11 @@ def test_serve_keeps_all_home_consumers_bound_after_chdir(tmp_path, selection):
         if raw_home
         else profile / ".agent-mcp"
     )
+    bound_home = Path(os.path.abspath(bound_home))
     socket_arg = (
         str(Path("link") / ".." / "state" / "serve.sock") if selection == "socket-parent" else ""
     )
-    bound_socket = launch / socket_arg if socket_arg else bound_home / "serve.sock"
+    bound_socket = Path(os.path.abspath(launch / socket_arg)) if socket_arg else bound_home / "serve.sock"
     script = textwrap.dedent("""
         import argparse
         import json
@@ -177,5 +178,5 @@ def test_serve_keeps_all_home_consumers_bound_after_chdir(tmp_path, selection):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "home binding verified"
     assert sorted(path.name for path in launch.iterdir()) == (
-        ["link"] if parent_case else ["state"] if selection == "relative" else []
+        ["link", "state"] if parent_case else ["state"] if selection == "relative" else []
     )

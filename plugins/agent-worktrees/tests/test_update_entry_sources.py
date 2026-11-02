@@ -15,6 +15,23 @@ from test_update_entry import update_entry_case as shared_update_entry_case
 update_entry_case = shared_update_entry_case
 
 
+@pytest.mark.parametrize("name", ["WORKTREE_MANAGER_BOOTSTRAP_REPO", "WORKTREE_MANAGER_BOOTSTRAP_REF"])
+@pytest.mark.parametrize("value", ["", "-invalid", "invalid\nsource"])
+def test_invalid_transport_never_downloads_or_resolves(
+    update_entry_case, native_bash, monkeypatch, name, value,
+):
+    tmp, _home, _resolver = update_entry_case
+    monkeypatch.setenv(name, value)
+    result = subprocess.run(
+        [native_bash, str(PLUGIN / "bin/agent-worktrees"), "update"],
+        capture_output=True, timeout=15,
+    )
+    assert result.returncode == 126
+    assert not (tmp / "curl.args").exists()
+    assert not (tmp / "bootstrap.args").exists()
+    assert not (tmp / "resolved").exists()
+
+
 @pytest.mark.parametrize("runtime", ["missing", "corrupt"])
 @pytest.mark.parametrize("configured", [False, True])
 def test_update_entry_missing_manager_payload_still_triggers(
@@ -39,7 +56,10 @@ def test_update_entry_missing_manager_payload_still_triggers(
         capture_output=True, timeout=15,
     )
     assert result.returncode == 23, result.stderr.decode()
-    assert _arguments(tmp / "bootstrap.args")[:3] == ["--repair-update", repo, ref]
+    assert _arguments(tmp / "bootstrap.args") == ["--bootstrap-update", "update"]
+    assert _arguments(tmp / "curl.args")[1] == (
+        "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.sh"
+    )
     assert not (tmp / "resolved").exists()
     assert not (tmp / "python.args").exists()
     assert not (tmp / "manager-called").exists()
@@ -60,7 +80,7 @@ def _fake_git(tmp: Path) -> None:
         '    [ "$GIT_FAIL" != missing-bootstrap ] || exit 0\n'
         '    mkdir -p "$2/worktree-manager"\n'
         '    cp "$DOWNLOAD_SCRIPT" "$2/worktree-manager/bootstrap.sh"; exit $?\n'
-        '  fi\ndone\nexit 99\n'
+        '  fi\n  [ "$part" != diff ] || exit 0\ndone\nexit 99\n'
     )
     git.chmod(0o755)
 
@@ -83,6 +103,8 @@ def test_update_entry_generic_git_uses_exact_source(
     root.mkdir()
     data = f"[source]\nrepo = {json.dumps(repo)}\nref = {json.dumps(ref)}\n"
     (root / "config.toml").write_text(data)
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", repo)
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", ref)
     _fake_git(tmp)
     monkeypatch.setenv("GIT_ARGS", str(tmp / "git.args"))
     monkeypatch.setenv("GIT_FAIL", "")
@@ -109,7 +131,7 @@ def test_update_entry_generic_git_uses_exact_source(
         "-C", checkout, "-c", "core.hooksPath=", "checkout", "--quiet", "--detach", "FETCH_HEAD",
     ]
     assert _arguments(tmp / "bootstrap.args") == [
-        "--repair-update", expected_repo, ref, "update", "--project", "sample",
+        "--bootstrap-update", "update", "--project", "sample",
         "--force", "--skip-modules", "module with spaces",
     ]
     assert (root / "config.toml").read_text() == data
@@ -132,6 +154,8 @@ def test_update_entry_generic_git_failure_is_not_success(
     (root / "config.toml").write_text(
         '[source]\nrepo = "ssh://git@example.test/team/fork.git"\nref = "canary"\n',
     )
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "ssh://git@example.test/team/fork.git")
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", "canary")
     _fake_git(tmp)
     monkeypatch.setenv("GIT_ARGS", str(tmp / "git.args"))
     monkeypatch.setenv("GIT_FAIL", phase)
@@ -152,6 +176,7 @@ def test_update_entry_missing_git_has_no_canonical_fallback(
     root = home / ".worktree-manager"
     root.mkdir()
     (root / "config.toml").write_text('[source]\nrepo = "ssh://example.test/fork.git"\n')
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "ssh://example.test/fork.git")
     tools = tmp / "tools"
     (tools / "git").unlink()
     for name in ("dirname", "awk", "date", "mktemp", "rm", "rmdir"):
@@ -176,6 +201,8 @@ def test_update_entry_raw_failure_retries_only_same_configured_git_source(
     root.mkdir()
     repo, ref = "https://github.com/example/private.git", "canary"
     (root / "config.toml").write_text(f'[source]\nrepo = "{repo}"\nref = "{ref}"\n')
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", repo)
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", ref)
     _fake_git(tmp)
     monkeypatch.setenv("GIT_ARGS", str(tmp / "git.args"))
     monkeypatch.setenv("GIT_FAIL", "")
@@ -189,19 +216,26 @@ def test_update_entry_raw_failure_retries_only_same_configured_git_source(
         line.decode().split("\0")[:-1] for line in (tmp / "git.args").read_bytes().splitlines()
     ]
     assert calls[1][-2:] == [repo, ref]
-    assert _arguments(tmp / "bootstrap.args")[:3] == ["--repair-update", repo, ref]
+    assert _arguments(tmp / "bootstrap.args") == ["--bootstrap-update", "update"]
     assert b"same configured Git source" in result.stderr
     assert not list(tmp.glob("agent-update-*"))
 
 
-def test_update_entry_supported_bootstrap_preserves_exact_git_ref(
-    update_entry_case, native_bash, monkeypatch,
+@pytest.mark.parametrize("override", [False, True])
+def test_update_entry_supported_bootstrap_preserves_independent_exact_git_ref(
+    update_entry_case, native_bash, monkeypatch, override,
 ):
     tmp, home, _resolver = update_entry_case
     root = home / ".worktree-manager"
     root.mkdir()
     repo, ref = "ssh://git@example.test/team/selected.git", "b" * 40
-    (root / "config.toml").write_text(f'[source]\nrepo = "{repo}"\nref = "{ref}"\n')
+    (root / "config.toml").write_text(
+        '[runtime_source]\nchannel = "dev"\nallow_dev = true\n'
+        f'[source]\nrepo = "{repo}"\nref = "{ref}"\n',
+    )
+    if override:
+        monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "ssh://git@example.test/tools/bootstrap.git")
+        monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", "transport-branch")
     _fake_git(tmp)
     monkeypatch.setenv("GIT_ARGS", str(tmp / "git.args"))
     monkeypatch.setenv("GIT_FAIL", "")
@@ -222,18 +256,24 @@ def test_update_entry_supported_bootstrap_preserves_exact_git_ref(
         line.decode().split("\0")[:-1] for line in (tmp / "git.args").read_bytes().splitlines()
     ]
     fetches = [args for args in calls if "fetch" in args]
-    assert len(fetches) == 2
-    assert all(args[-3:] == ["--", repo, ref] for args in fetches)
+    assert len(fetches) == (2 if override else 1)
+    if override:
+        assert fetches[0][-3:] == ["--", "ssh://git@example.test/tools/bootstrap.git", "transport-branch"]
+        assert not (tmp / "curl.args").exists()
+    else:
+        assert _arguments(tmp / "curl.args")[1] == (
+            "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.sh"
+        )
+    assert fetches[-1][-3:] == ["--", repo, ref]
     assert _arguments(tmp / "fresh.args")[-4:] == [
         "--repair-update", "--", "update", "--force",
     ]
-    assert not (tmp / "curl.args").exists()
     assert not (tmp / "python.args").exists()
     assert not list(tmp.glob("agent-update-*"))
 
 
 def test_update_entry_publication_defaults_match_supported_bootstrap():
-    tree = ast.parse((REPO / "worktree-manager/src/worktree_manager/source_config.py").read_text())
+    tree = ast.parse((REPO / "worktree-manager/src/worktree_manager/source_config.py").read_text(encoding="utf-8"))
     defaults = {
         target.id: ast.literal_eval(node.value)
         for node in tree.body if isinstance(node, ast.Assign)
@@ -247,11 +287,11 @@ def test_update_entry_publication_defaults_match_supported_bootstrap():
         ("worktree-manager/bootstrap.sh", ("REPO", "REF")),
         ("worktree-manager/bootstrap.ps1", ("$Repo", "$Ref")),
     ):
-        text = (REPO / relative).read_text()
+        text = (REPO / relative).read_text(encoding="utf-8")
         for name, key in zip(names, ("DEFAULT_REPO", "DEFAULT_REF"), strict=True):
             pattern = rf"(?m)^\s*{re.escape(name)}\s*=\s*'([^']+)'"
             assert re.search(pattern, text).group(1) == defaults[key]
     for suffix in ("sh", "ps1"):
-        text = (PLUGIN / "bin" / f"agent-worktrees-update-entry.{suffix}").read_text()
+        text = (PLUGIN / "bin" / f"agent-worktrees-update-entry.{suffix}").read_text(encoding="utf-8")
         assert "current-version" not in text
         assert "source_config.py" not in text

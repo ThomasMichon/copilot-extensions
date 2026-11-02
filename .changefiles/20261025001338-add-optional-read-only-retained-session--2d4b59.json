@@ -1,0 +1,9 @@
+{
+  "comment": "Add optional read-only retained-session tool statistics and reported subagent lifecycle observations",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

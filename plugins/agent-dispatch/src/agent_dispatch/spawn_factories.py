@@ -200,6 +200,26 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
         task_id = str(task.get("id") or "")
         if not task_id:
             return False
+        if reservation.get("driver") == "ordinary-bridge":
+            from .bridge_command_delivery import native_prompt
+
+            captured = reservation.get("ordinary_redrive")
+            if not isinstance(captured, dict) or captured != session or (
+                type(captured.get("version")) is not int or captured["version"] != 2
+                or captured.get("task_id") != task_id
+                or captured.get("task_generation") != task.get("generation")
+                or captured.get("reservation_key") != reservation.get("key")
+                or captured.get("worktree_id") != worktree
+                or captured.get("machine") != machine
+            ):
+                raise ValueError("retained native redrive lacks its current reservation snapshot")
+            invocation = captured["invocation"]
+            return native_prompt(
+                captured["session_id"], captured["native_session_id"], invocation["prompt"],
+                machine=machine, idempotency_key=invocation["idempotency_key"],
+                launch_prefix=bridge._agent_bridge_launch_prefix,
+                run_ssh=bridge.run_ssh_command,
+            )
         worker_id = f"redrive-{uuid.uuid4().hex[:8]}"
         prompt = embody.autopilot_worker_prompt(
             task_id, worker_id=worker_id, route=route, concise=True

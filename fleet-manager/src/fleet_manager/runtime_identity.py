@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -130,7 +130,9 @@ def _public_key(value):
         raise IdentityError("invalid-key")
     _, error, key_type = _jose()
     try:
-        return key_type.import_key(value)
+        key = key_type.import_key(value)
+        key.get_op_key("verify")
+        return key
     except (error, ValueError, TypeError):
         raise IdentityError("invalid-key") from None
 
@@ -143,7 +145,54 @@ def _verify(value, key):
         raise IdentityError("invalid-signature") from None
 
 
-class IdentityVerifier:
+class ProofFence:
+    """Single serving owner's nonce epoch, monotonic clock and bounded replay set."""
+
+    def __init__(self, *, trust_valid_until: int, clock: Callable[[], int],
+                 replay_capacity: int = MAX_REPLAYS) -> None:
+        if (not _time(trust_valid_until) or not callable(clock)
+                or type(replay_capacity) is not int
+                or not 1 <= replay_capacity <= MAX_REPLAYS):
+            raise IdentityError("invalid-trust")
+        self._trust_valid_until = trust_valid_until
+        self._clock = clock
+        self._capacity = replay_capacity
+        self._nonce = secrets.token_urlsafe(32)
+        self._replays: dict[tuple[str, str], int] = {}
+        self._last_time = 0
+        self._lock = threading.Lock()
+
+    @property
+    def nonce(self) -> str:
+        """Server challenge value; expose only on the adopted protected transport."""
+        return self._nonce
+
+    def _now_locked(self) -> int:
+        now = self._clock()
+        if not _time(now):
+            raise IdentityError("invalid-clock")
+        if now < self._last_time:
+            raise IdentityError("clock-rollback")
+        self._last_time = now
+        if now >= self._trust_valid_until:
+            raise IdentityError("authority-unavailable")
+        return now
+
+    def _consume_locked(self, proof_key: str, jti: str, issued_at: int, now: int) -> None:
+        if not now - PROOF_AGE - CLOCK_SKEW <= issued_at <= now + CLOCK_SKEW:
+            raise IdentityError("invalid-proof")
+        self._replays = {
+            key: expiry for key, expiry in self._replays.items() if expiry >= now
+        }
+        replay_id = (proof_key, jti)
+        if replay_id in self._replays:
+            raise IdentityError("proof-replayed")
+        if len(self._replays) >= self._capacity:
+            raise IdentityError("resource-limit")
+        self._replays[replay_id] = issued_at + PROOF_AGE + CLOCK_SKEW
+
+
+class IdentityVerifier(ProofFence):
     """One serving owner's bounded proof fence and explicit trusted key snapshot.
 
     Construct only at the trusted transport boundary. A new instance gets a new
@@ -182,29 +231,8 @@ class IdentityVerifier:
         self._issuer = issuer
         self._audience = audience
         self._keys = keys
-        self._trust_valid_until = trust_valid_until
-        self._clock = clock
-        self._capacity = replay_capacity
-        self._nonce = secrets.token_urlsafe(32)
-        self._replays = {}
-        self._last_time = 0
-        self._lock = threading.Lock()
-
-    @property
-    def nonce(self):
-        """Server challenge value; expose only on the adopted protected transport."""
-        return self._nonce
-
-    def _now_locked(self):
-        now = self._clock()
-        if not _time(now):
-            raise IdentityError("invalid-clock")
-        if now < self._last_time:
-            raise IdentityError("clock-rollback")
-        self._last_time = now
-        if now >= self._trust_valid_until:
-            raise IdentityError("authority-unavailable")
-        return now
+        super().__init__(trust_valid_until=trust_valid_until, clock=clock,
+                         replay_capacity=replay_capacity)
 
     def _audience_matches(self, audience: object) -> bool:
         return audience == self._audience
@@ -283,7 +311,6 @@ class IdentityVerifier:
         if (not _text(proof_claims["ath"], 43)
                 or not hmac.compare_digest(proof_claims["ath"], token_hash)):
             raise IdentityError("invalid-token-binding")
-        replay_id = (binding.proof_key, proof_claims["jti"])
         with self._lock:
             now = self._now_locked()
             if now >= binding.expires_at:
@@ -291,15 +318,7 @@ class IdentityVerifier:
             if (claims["iat"] > now + CLOCK_SKEW
                     or claims.get("nbf", 0) > now + CLOCK_SKEW):
                 raise IdentityError("invalid-credential")
-            if not now - PROOF_AGE - CLOCK_SKEW <= proof_claims["iat"] <= now + CLOCK_SKEW:
-                raise IdentityError("invalid-proof")
-            self._replays = {
-                key: expiry for key, expiry in self._replays.items() if expiry >= now
-            }
-            if replay_id in self._replays:
-                raise IdentityError("proof-replayed")
-            if len(self._replays) >= self._capacity:
-                raise IdentityError("resource-limit")
-            self._replays[replay_id] = proof_claims["iat"] + PROOF_AGE + CLOCK_SKEW
+            self._consume_locked(binding.proof_key, proof_claims["jti"],
+                                 proof_claims["iat"], now)
         return self._identity(
             claims, binding, now, hashlib.sha256(proof.encode("ascii")).hexdigest(), kind)

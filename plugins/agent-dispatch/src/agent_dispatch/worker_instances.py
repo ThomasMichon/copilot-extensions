@@ -132,7 +132,9 @@ def _atomic(path: Path, value: dict) -> None:
                 staging.unlink()
 
 
-def validate_configuration(name: str, document: object, repo_root: str = "") -> tuple[dict, tuple]:
+def validate_configuration(
+    name: str, document: object, repo_root: str = "", *, snapshot=None,
+) -> tuple[dict, tuple]:
     if not isinstance(document, dict):
         raise RegistrarError("declaration: expected a JSON object")
     if document.get("name") not in (None, name):
@@ -150,7 +152,7 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
         raise RegistrarError("this template requires repo_root for worker identity and dependency resolution")
     data = {**document, "name": name, "owner": OWNER}
     declarations = rd.expand_declaration_document(
-        data, directory=root or active_dir(), repo_root=root,
+        data, directory=root or active_dir(), repo_root=root, snapshot=snapshot,
     )
     if not declarations:
         raise RegistrarError("configuration expands to no declarations")
@@ -217,11 +219,12 @@ def _validate_evaluator_dependency(declaration, resources) -> None:
 
 def _validate_dependencies(
     declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
+    snapshot=None,
 ) -> None:
     from .registrations import RegistrationKind
     from .repository_resources import RepositoryResourceSnapshot
 
-    resources = RepositoryResourceSnapshot(execution=False)
+    resources = snapshot or RepositoryResourceSnapshot(execution=False)
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
             raise RegistrarError("missing fleet dependency: ssh transport")
@@ -344,14 +347,19 @@ def _check_pointer() -> None:
 
 def save_instance(
     source_id: str, revision: str, fields: dict, *,
-    activate: bool = False, consent: str | None = None,
+    activate: bool = False, consent: str | None = None, operator_inputs: bool = False,
 ) -> dict:
     """Persist a draft, optionally publish it; never start a service or task."""
     if activate and consent != ACTIVATION_CONSENT:
         raise RegistrarError(f"activation requires explicit --consent {ACTIVATION_CONSENT}")
-    allowed = {"name", "declaration", "repo_root"}
-    if set(fields) - allowed:
-        raise RegistrarError(f"unknown configuration fields: {sorted(set(fields) - allowed)}")
+    allowed = {"name", "repo_root"} if operator_inputs else {"name", "declaration", "repo_root"}
+    parameters = {
+        key: value for key, value in fields.items()
+        if operator_inputs and isinstance(key, str) and key.startswith("param_")
+    }
+    unknown = set(fields) - allowed - set(parameters)
+    if unknown:
+        raise RegistrarError(f"unknown configuration fields: {sorted(unknown)}")
     name = _name(fields.get("name"))
     document = fields.get("declaration")
     if isinstance(document, str):
@@ -364,7 +372,28 @@ def save_instance(
         raise RegistrarError("repo_root must be text")
     source = source_id.removeprefix("template:")
     provider = None
-    if source_id.startswith("template:provider:"):
+    safe_values = None
+    operator_baseline = None
+    if operator_inputs:
+        from .worker_operator_inputs import materialize, selected_source, source_fields, values_for, verify_record
+
+        if source_id.startswith("instance:"):
+            if source_id != f"instance:{name}":
+                raise RegistrarError("instance identity changed")
+            _regular(instance_dir(), directory=True)
+            record = _read(instance_dir() / f"{name}.json")
+            selected, current_values = verify_record(record)
+            operator_baseline = digest(record["operator_inputs"])
+            parameters = {**{f"param_{key}": value for key, value in current_values.items()}, **parameters}
+            if "repo_root" not in fields:
+                repo_root = record["configuration"]["repo_root"]
+        else:
+            selected = selected_source(source_id, revision)
+        safe_values = values_for(source_fields(selected), parameters)
+        document = materialize(selected, safe_values, name, repo_root)
+        if "builtin" not in selected:
+            provider = selected
+    elif source_id.startswith("template:provider:"):
         from .worker_template_materialization import materialize_template, selected_template
 
         provider = selected_template(source_id, revision)
@@ -383,6 +412,9 @@ def save_instance(
     _validate_dependencies(declarations, repo_root)
     configuration = {"declaration": data, "repo_root": repo_root}
     wanted_revision = digest(configuration)
+    request = {"id": source_id, "revision": revision}
+    if operator_inputs:
+        request["operator_inputs"] = digest(fields)
     for root in (rd.registrar_dir(), instance_dir(), active_dir()):
         _regular(root, directory=True)
     _check_pointer()
@@ -395,7 +427,7 @@ def save_instance(
         existing = _read(path) if path.exists() else None
         retry = bool(
             existing and existing["revision"] == wanted_revision
-            and existing.get("last_request") == {"id": source_id, "revision": revision}
+            and existing.get("last_request") == request
         )
         if not retry:
             if source_id.startswith("template:") and existing:
@@ -404,10 +436,16 @@ def save_instance(
                 existing is None or existing["revision"] != revision
             ):
                 raise RegistrarError("stale or missing instance; refresh before editing")
+        if operator_inputs and source_id.startswith("instance:"):
+            # Binding invalidation can leave execution bytes unchanged.
+            verify_record(existing)
+            if not retry and digest(existing["operator_inputs"]) != operator_baseline:
+                raise RegistrarError("operator inputs changed; refresh before editing")
         _check_collisions(name, declarations, existing)
         if provider is not None:
             # Recheck source closure/activation after validation and collision reads.
-            selected_template(source_id, revision)
+            from .worker_template_materialization import selected_template
+            selected_template(provider["row"]["id"], provider["row"]["revision"])
         record = {
             "id": f"instance:{name}", "name": name, "configuration": configuration,
             "revision": wanted_revision,
@@ -419,10 +457,16 @@ def save_instance(
                     "declaration": str(provider["path"]),
                 } if provider is not None else {"provider": "agent-dispatch"}),
             },
-            "last_request": {"id": source_id, "revision": revision},
+            "last_request": request,
             "saved_at": existing["saved_at"] if retry else time.time(),
         }
-        if not retry:
+        if operator_inputs:
+            from .worker_operator_inputs import CONTRACT, VERSION
+            record["operator_inputs"] = {
+                "contract": CONTRACT, "version": VERSION, "values": safe_values,
+                "configuration_revision": wanted_revision,
+            }
+        if not retry or (not operator_inputs and existing and "operator_inputs" in existing):
             _atomic(path, record)
         receipt = {
             "id": record["id"], "revision": wanted_revision, "persisted": True,

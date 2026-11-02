@@ -29,6 +29,8 @@ helper reports failure and the caller raises a loud, actionable error.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import logging
 import os
 import re
@@ -193,6 +195,7 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     # No breakaway: this engine is owned by the indexer that stops it.
     return spawn_daemon(
         cmd,
+        instance=DaemonInstanceSpec("agent-index-engine", root, Path(__file__).resolve()),
         cwd=root,
         log_path=root / "logs" / f"engine-{model}.log",
         env=env,

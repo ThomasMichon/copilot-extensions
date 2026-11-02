@@ -16,7 +16,9 @@ the engine then falls back to its built-in default axes.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import replace
+import socket
 from typing import TYPE_CHECKING
 
 from machine_transport import (
@@ -24,6 +26,8 @@ from machine_transport import (
     split_machine_environment,
     entry_physical_host,
     resolve_machine_selection,
+    resolve_local_execution_context,
+    LocalExecutionContext,
 )
 
 from .. import project_config as cfg
@@ -118,6 +122,31 @@ def local_entry(entries, config_machine, hostname, execution_platform):
     return None
 
 
+def local_context(
+    config: cfg.ProjectConfig, entries: Mapping[str, cfg.MachineEntry],
+    hostname: str, execution_platform: str,
+) -> LocalExecutionContext | None:
+    """Use observed local authority only with attributable binding provenance."""
+    if not getattr(config, "machine_binding_known", False):
+        return None
+    observed = socket.gethostname()
+    current = resolve_local_execution_context(
+        entries, hostname=observed, environment=execution_platform,
+        configured_machine=config.configured_machine,
+    )
+    if (
+        config.configured_machine is None and current.customization_key is None
+        and current.machine.casefold() == observed.casefold()
+        and hostname.casefold() != observed.casefold()
+    ):
+        short = resolve_local_execution_context(
+            entries, hostname=hostname, environment=execution_platform,
+        )
+        if short.customization_key is not None or short.machine.casefold() != hostname.casefold():
+            return replace(short, hostname=observed)
+    return current
+
+
 def host_cols():
     """Profiles HOST columns: ``[(label, machine_key, env_label), ...]``.
 
@@ -150,18 +179,22 @@ def local_host():
     with the grid. Falls back to ``data_local.LOCAL`` (hostname-based) when the
     local machine is not represented in the roster.
     """
-    import socket
-
     from . import data_local
 
     host_key = socket.gethostname().split(".")[0].lower()
     plat = local_execution_platform()
+    config = None
     try:
         config = cfg.load_config()
         config_machine = (config.machine or "").lower()
     except Exception:
         config_machine = ""
     entries = _entries()
+    current = local_context(config, entries, host_key, plat) if config is not None else None
+    if current is not None:
+        entry = entries.get(current.customization_key)
+        key = entry.key if entry is not None and entry.copilot else current.execution_machine
+        return key, _ENV_LABEL[plat]
     m = local_entry(entries, config_machine, host_key, plat)
     if m is not None and m.copilot:
         for env in m.ssh_environments:

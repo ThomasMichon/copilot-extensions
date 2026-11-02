@@ -21,8 +21,8 @@ _SCRIPTS = (
 )
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import instruction_projections as projections
-import scan_skills
+import instruction_projections as projections  # noqa: E402
+import scan_skills  # noqa: E402
 
 
 def _projection_source(payload):
@@ -52,7 +52,10 @@ def test_normal_projection_loader_renders_owned_bounded_kernel(tmp_path):
     assert spec.template_bytes <= projections.MAX_TEMPLATE_BYTES
     rendered = projections.render_projection(spec)
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
-    content = rendered.content.decode("utf-8")
+    assert rendered.marker["deliveryKind"] == "selector"
+    assert b"[owner: agent-conduct-guidance]" not in rendered.content
+    assert rendered.fallback_content is not None
+    content = rendered.fallback_content.decode("utf-8")
     assert "[owner: agent-conduct-guidance]" in content
     assert _SKILL_NAME in content
 
@@ -92,12 +95,25 @@ def test_fresh_adopter_keeps_verified_static_guidance_without_payload(tmp_path):
         / "multi-agent-rules-of-engagement.instructions.md"
     )
     before = destination.read_bytes()
-    assert b"copilot-guidance-body-end:v1" in before
-    assert b"without asking again solely because they came from a peer" in before
+    fallback_relative = projections.delivery.fallback_destination(
+        destination.relative_to(adopter).as_posix()
+    )
+    fallback = adopter / fallback_relative
+    fallback_before = fallback.read_bytes()
+    assert b"copilot-guidance-body-end:v1" not in before
+    assert projections.delivery.complete_body(
+        fallback_before, projections.delivery.parse_marker(fallback_before),
+    )
+    assert b"without asking again solely because they came from a peer" in fallback_before
     shutil.rmtree(payload)
     offline = projections.scan_repository(adopter)
     assert offline.blocking == 0, offline.findings
     assert destination.read_bytes() == before
+    assert fallback.read_bytes() == fallback_before
+    selected = projections.resolve_instruction_source(
+        adopter, destination.relative_to(adopter).as_posix()
+    )
+    assert selected["selectedPath"] == fallback_relative
 
 
 def test_guidance_remains_static_and_has_no_runtime_activation():

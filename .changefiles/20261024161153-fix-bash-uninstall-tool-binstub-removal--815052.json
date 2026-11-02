@@ -1,0 +1,9 @@
+{
+  "comment": "Fix Bash uninstall tool-binstub removal at script scope",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

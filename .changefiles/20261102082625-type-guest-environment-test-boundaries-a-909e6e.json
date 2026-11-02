@@ -1,0 +1,9 @@
+{
+  "comment": "Type guest-environment test boundaries and native fixture contracts without changing runtime behavior.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve witnessed logical projection generations across physical-only store maintenance",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,18 +3,43 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol, cast
 
 REPO = Path(__file__).resolve().parents[3]
 TOOL = REPO / "tools" / "sync-installation-context.py"
 
 
-def _load_tool():
+class _VendoringTool(Protocol):
+    REPO: Path
+    CANONICAL_DIR: Path
+    ADOPTERS: tuple[str, ...]
+    LEGACY_ENTRYPOINT_ADOPTERS: tuple[str, ...]
+    PAYLOAD_PYTHON_ADOPTERS: tuple[str, ...]
+    STANDALONE_PYTHON_ADOPTERS: tuple[tuple[str, str], ...]
+    STANDALONE_ASSETS: tuple[tuple[str, str], ...]
+    lifecycle_archive: Callable[[Path], bytes]
+
+    @property
+    def FILES(self) -> tuple[str, ...]: ...
+
+    @property
+    def LEGACY_ENTRYPOINT_FILES(self) -> tuple[str, ...]: ...
+
+    def verify(self) -> list[str]: ...
+
+    def sync(self) -> list[str]: ...
+
+    def unregistered_adopters(self) -> list[str]: ...
+
+
+def _load_tool() -> _VendoringTool:
     spec = importlib.util.spec_from_file_location("sync_installation_context", TOOL)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    return cast(_VendoringTool, module)
 
 
 def test_real_repo_vendored_copies_are_in_sync() -> None:
@@ -42,11 +67,13 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     module.CANONICAL_DIR = canonical
     module.ADOPTERS = ("plugin-a", "plugin-b")
     module.LEGACY_ENTRYPOINT_ADOPTERS = ("plugin-a",)
+    module.PAYLOAD_PYTHON_ADOPTERS = ()
     module.STANDALONE_PYTHON_ADOPTERS = ()
     module.STANDALONE_ASSETS = ()
+    module.lifecycle_archive = lambda repo: b"source-only fixture archive"
     assert module.verify()
     written = module.sync()
-    assert len(written) == len(module.FILES) * 2 + len(module.LEGACY_ENTRYPOINT_FILES)
+    assert len(written) == len(module.FILES) * 2 + len(module.LEGACY_ENTRYPOINT_FILES) + 1
     assert module.verify() == []
     if os.name != "nt":
         destination = plugins / "plugin-a" / "scripts" / "installation-context" / module.FILES[0]
@@ -75,8 +102,10 @@ def test_verify_flags_a_plugin_that_vendors_without_being_registered(
     module.CANONICAL_DIR = canonical
     module.ADOPTERS = ("plugin-a",)
     module.LEGACY_ENTRYPOINT_ADOPTERS = ()
+    module.PAYLOAD_PYTHON_ADOPTERS = ()
     module.STANDALONE_PYTHON_ADOPTERS = ()
     module.STANDALONE_ASSETS = ()
+    module.lifecycle_archive = lambda repo: b"source-only fixture archive"
     module.sync()
     assert module.verify() == []
 
@@ -98,6 +127,7 @@ def test_foundation_vendors_only_the_declared_canonical_json_asset(tmp_path: Pat
     module.CANONICAL_DIR.mkdir()
     module.ADOPTERS = ()
     module.LEGACY_ENTRYPOINT_ADOPTERS = ()
+    module.PAYLOAD_PYTHON_ADOPTERS = ()
     module.STANDALONE_PYTHON_ADOPTERS = ()
     canonical = module.CANONICAL_DIR / "json-query.awk"
     canonical.write_text("# canonical JSON parser\n", encoding="utf-8")
@@ -110,3 +140,26 @@ def test_foundation_vendors_only_the_declared_canonical_json_asset(tmp_path: Pat
     assert len(module.verify()) == 1
     assert module.sync() == [destination.relative_to(tmp_path).as_posix()]
     assert destination.read_bytes() == canonical.read_bytes()
+
+
+def test_python_payload_adopter_has_no_lifecycle_assets(tmp_path: Path) -> None:
+    module = _load_tool()
+    module.REPO = tmp_path
+    module.CANONICAL_DIR = tmp_path / "canonical"
+    module.CANONICAL_DIR.mkdir()
+    module.ADOPTERS = ()
+    module.LEGACY_ENTRYPOINT_ADOPTERS = ()
+    module.PAYLOAD_PYTHON_ADOPTERS = ("payload-only",)
+    module.STANDALONE_PYTHON_ADOPTERS = ()
+    module.STANDALONE_ASSETS = ()
+    for name in module.FILES:
+        (module.CANONICAL_DIR / name).write_text(name, encoding="utf-8")
+    written = module.sync()
+    destination = tmp_path / "plugins" / "payload-only" / "scripts" / "installation-context"
+    assert {path.name for path in destination.iterdir()} == {
+        name for name in module.FILES
+        if name.endswith(".py") and name != "_installation_context_worker.py"
+    }
+    assert len(written) == len(list(destination.iterdir()))
+    assert module.verify() == []
+    assert module.unregistered_adopters() == []

@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..acquisition_launch_owner import AcquisitionLaunchOwner
+    from ..local_launch_owner import LocalLaunchOwner
     from .spawner import SpawnedHost
 
 
@@ -26,22 +26,28 @@ class LocalSpawner:
     async def spawn(
         self, child_argv: list[str], *, cwd: str | None = None,
         env: dict[str, str] | None = None, session_id: str = "",
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> SpawnedHost:
         from .. import __version__
         from . import spawner as core
 
         nonce = core.new_nonce()
-        handle = await asyncio.to_thread(
-            core.launch_session_host, child_argv, cwd=cwd, env=env, nonce=nonce,
-            session_id=session_id, host_version=__version__,
-            ready_timeout=self._ready_timeout,
-            unexpected_reap_seconds=self._unexpected_reap_seconds,
-            active_reap_seconds=self._active_reap_seconds,
-            **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
-        )
-        return core.SpawnedHost(
-            local_port=handle.port, host_pid=handle.host_pid, child_pid=handle.child_pid,
-            protocol_version=handle.protocol_version, boundary=self.boundary,
-            nonce=nonce, state_file=handle.state_file, proc=handle.proc, _refresh=None,
-        )
+        def launch() -> SpawnedHost:
+            handle = core.launch_session_host(
+                child_argv, cwd=cwd, env=env, nonce=nonce,
+                session_id=session_id, host_version=__version__,
+                ready_timeout=self._ready_timeout,
+                unexpected_reap_seconds=self._unexpected_reap_seconds,
+                active_reap_seconds=self._active_reap_seconds,
+                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
+            )
+            spawned = core.SpawnedHost(
+                local_port=handle.port, host_pid=handle.host_pid, child_pid=handle.child_pid,
+                protocol_version=handle.protocol_version, boundary=self.boundary,
+                nonce=nonce, state_file=handle.state_file, proc=handle.proc, _refresh=None,
+            )
+            if acquisition_launch is not None:
+                acquisition_launch.retain_host(spawned)
+            return spawned
+
+        return await asyncio.to_thread(launch)

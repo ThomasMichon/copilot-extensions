@@ -20,7 +20,6 @@ shrank (replaced) is mirrored again from its start.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 import re
@@ -240,7 +239,9 @@ class TranscriptMirror:
             return {"ok": False, "detail": "not a CodeSpace name"}
         result = await self._push_dirty(codespace)
         if (self._root / f"{codespace}.prune").exists():
-            await asyncio.to_thread(self.prune_if_clean, codespace)
+            from .owner_beacon import owner_native_call
+
+            await owner_native_call(self.prune_if_clean, codespace)
         return result
 
     async def _push_dirty(self, codespace: str) -> dict[str, Any]:
@@ -263,7 +264,9 @@ class TranscriptMirror:
                     lease.release()
 
             handed_off = True
-            return await asyncio.to_thread(push_only)
+            from .owner_beacon import owner_native_call
+
+            return await owner_native_call(push_only)
         finally:
             if not handed_off:
                 lease.release()
@@ -318,8 +321,8 @@ class TranscriptMirror:
         Owners (a replacement starting while an old one shuts down) never mirror
         the same CodeSpace at once; a pass that finds it held skips. Once the
         append-and-push runs in its worker thread, that thread owns the lock and
-        releases it when it finishes: cancelling this coroutine (Owner shutdown)
-        can't stop that thread, so the lock has to outlive the cancellation.
+        releases it when it finishes. Cancellation waits for that native outcome
+        before releasing the Owner's mirror slot; it never replays an unknown push.
         """
         if not _CODESPACE.match(codespace or ""):
             return {"ok": False, "detail": "not a CodeSpace name"}
@@ -349,7 +352,9 @@ class TranscriptMirror:
                     lease.release()
 
             handed_off = True
-            return await asyncio.to_thread(append_and_push)
+            from .owner_beacon import owner_native_call
+
+            return await owner_native_call(append_and_push)
         finally:
             if not handed_off:
                 lease.release()

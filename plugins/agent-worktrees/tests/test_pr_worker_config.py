@@ -14,6 +14,7 @@ from agent_procutil import no_window_kwargs
 
 
 POLICY = {
+    "publication_origin": {"id": "control-plane", "labels": ["source:control-plane"]},
     "provider": "azure-devops",
     "repository": "project/repo",
     "api_base": "https://dev.azure.com/example",
@@ -69,6 +70,24 @@ def export(host, destination, workspace, base="origin/main", repository="project
     ])
 
 
+def test_explicit_origin_export_needs_no_target_policy_graft(host, tmp_path, capsys):
+    data = json.loads(host.read_text("utf-8"))
+    del data["repos"]["target"]["pr"]["publication_checks"]
+    del data["repos"]["target"]["pr"]["publication_origin"]
+    host.write_text(json.dumps(data), "utf-8")
+    destination = tmp_path / "origin-worker.json"
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "checks", "project/repo", "export-config", "--config", str(host),
+        "--workspace", "/worker/repo", "--base", "origin/main", "--output", str(destination),
+        "--publication-origin", "control-plane", "--publication-label", "source:control-plane", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"]
+    worker = json.loads(destination.read_text("utf-8"))["repos"]["pr-worker"]["pr"]
+    assert worker["publication_origin"] == POLICY["publication_origin"]
+    assert worker["publication_checks"] is None
+    assert "publication_origin_active" not in worker
+
+
 @pytest.mark.parametrize("workspace", ["/worker/repo", "C:\\worker\\repo"])
 def test_export_uses_effective_policy_without_host_paths_or_credentials(host, tmp_path, workspace, capsys):
     output = tmp_path / "worker.json"
@@ -92,6 +111,8 @@ def test_export_uses_effective_policy_without_host_paths_or_credentials(host, tm
     assert repo["pr"]["dismiss_stale_reviews"] is False
     assert repo["pr"]["hold_labels"] == POLICY["hold_labels"]
     assert repo["pr"]["wip_title_prefixes"] == POLICY["wip_title_prefixes"]
+    assert repo["pr"]["publication_origin"] == POLICY["publication_origin"]
+    assert "publication_origin_active" not in repo["pr"]
     text = output.read_text("utf-8")
     assert "do-not-export" not in text and str(host.parent) not in text
     assert "machine" not in raw and "token_command" not in repo["pr"]
@@ -215,6 +236,7 @@ def test_export_does_not_replace_existing_file(host, tmp_path, capsys):
 def test_missing_publication_policy_does_not_export_a_default(host, tmp_path, capsys):
     data = json.loads(host.read_text("utf-8"))
     del data["repos"]["target"]["pr"]["publication_checks"]
+    del data["repos"]["target"]["pr"]["publication_origin"]
     host.write_text(json.dumps(data), "utf-8")
     output = tmp_path / "worker.json"
     assert export(host, output, "/worker/repo") == 2

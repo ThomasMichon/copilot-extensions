@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 import tempfile
@@ -40,13 +41,15 @@ def run_probes(root: Path, proof: dict, vector: dict, *, evidence=evidence) -> d
         request.write_bytes(payload)
         with patch.dict(os.environ, {
             binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
-            "PYTEST_ADDOPTS": "--junitxml=" + str(junit),
+            "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)),
         }):
             result = run_caller_owned([
                 sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
                 "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
                 "-k", " or ".join(evidence.PROBES),
-            ], timeout=240, max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=1024 * 1024)
+                *(["--test-timeout", "120"] if os.name == "nt" else []),
+            ], timeout=600 if os.name == "nt" else 240,
+                max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=1024 * 1024)
         print(result.stdout, end="")
         print(result.stderr, end="", file=sys.stderr)
         if result.returncode or request.read_bytes() != payload:

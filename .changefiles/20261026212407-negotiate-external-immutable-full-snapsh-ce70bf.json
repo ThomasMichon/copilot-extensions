@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate external immutable full-snapshot pages through the existing resumable crawl journal.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

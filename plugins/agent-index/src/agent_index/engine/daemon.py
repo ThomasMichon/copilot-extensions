@@ -18,6 +18,8 @@ fine over ``external`` mode -- that decoupling is the whole point.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+
 import os
 import importlib.util
 import subprocess
@@ -26,6 +28,7 @@ import time
 from pathlib import Path
 
 from agent_procutil import (
+    python_cache_args,
     spawn_daemon,
     windowless_python,
     windowless_python_env,
@@ -35,11 +38,11 @@ from .generation import current_engine_generation
 
 
 def engine_home() -> Path:
-    """Durable engine root (holds the heavy venv), outside the versioned runtime."""
+    """Lexical absolute durable engine root, never a dereferenced filesystem alias."""
     _default = "~/.agent-index/engine"  # marketplace-isolation: allow legacy-compatibility
-    return Path(
+    return Path(os.path.abspath(Path(
         os.environ.get("AGENT_INDEX_ENGINE_HOME", _default)
-    ).expanduser()
+    ).expanduser()))
 
 
 def engine_venv_python(home: Path | None = None) -> Path:
@@ -171,8 +174,9 @@ _LOG_LEVEL_BOOTSTRAP = (
 
 
 def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
-    if cmd[1:3] == ["-m", "agent_index_engine.app"]:
-        return [cmd[0], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[3:]]
+    offset = 3 if len(cmd) > 2 and cmd[1] == "-X" and cmd[2].startswith("pycache_prefix=") else 1
+    if cmd[offset:offset + 2] == ["-m", "agent_index_engine.app"]:
+        return [*cmd[:offset], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[offset + 2:]]
     return list(cmd)
 
 
@@ -191,10 +195,12 @@ def _spawn(
     root = Path(os.path.abspath(home))
     root.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    env["AGENT_INDEX_ENGINE_HOME"] = str(root)
     env.update(windowless_python_env(python))
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
     return spawn_daemon(
         _with_log_level_bootstrap(cmd),
+        instance=DaemonInstanceSpec("agent-index-engine", root, Path(__file__).resolve()),
         cwd=root,
         log_path=engine_log_path(root),
         env=env,
@@ -218,6 +224,7 @@ def engine_command(home: Path | None = None) -> list[str]:
     py = engine_venv_python(home)
     return [
         windowless_python(str(py)),
+        *python_cache_args(os.path.abspath(home or engine_home()), runtime=py),
         "-m",
         "agent_index_engine.app",
         "--host",
@@ -348,5 +355,9 @@ def run_foreground() -> int:
         )
     if os.name != "nt":
         os.execv(str(py), cmd)  # replace this process; never returns  # noqa: S606
-    proc = subprocess.Popen(cmd)  # noqa: S603
+    proc = spawn_instance(
+        cmd, instance=DaemonInstanceSpec(
+            "agent-index-engine", engine_home(), Path(__file__).resolve(),
+        ),
+    )
     return proc.wait()

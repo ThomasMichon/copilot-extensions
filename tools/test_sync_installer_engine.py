@@ -64,6 +64,104 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
+@pytest.mark.parametrize("plugin", (
+    "agent-mcp", "agent-machines", "agent-containers", "budget-guidance", "agent-worktrees",
+))
+def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str) -> None:
+    contract = sync_installer_engine.ier
+    consumer = REPO / "plugins" / plugin
+    assert consumer in contract.native_adopter_dirs(REPO)
+    for name in contract.STANDALONE_NATIVE_FILES:
+        assert (consumer / "scripts" / name).read_bytes() == (
+            REPO / "libs" / "installer-engine" / name
+        ).read_bytes()
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    script = tmp_path / "manifest.ps1"
+    helper = REPO / "libs/installer-engine/installer-engine.ps1"
+    def quote(path):
+        return "'" + str(path).replace("'", "''") + "'"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f". {quote(helper)}\n"
+        "function Write-Ok { param($Message) }\n"
+        "$arguments = @{\n"
+        "Service='agent-logger'; Plugin='agent-logger'; VersionOverride='1.2.3'\n"
+        f"InstallPath={quote(tmp_path)}; PluginPath={quote(tmp_path)}; VenvPath={quote(tmp_path / 'slot')}\n"
+        "GetSourceKind={ param($Path) 'local' }\n"
+        "GetGitInfo={ param($Path) @{commit='abc'; branch='dev'; dirty=$false} }\n"
+        "AdditionalFields=@{preserved='value'}\n"
+        "}\n"
+        "$manifest = Write-DeployManifest @arguments -PassThru\n"
+        f"if (Test-Path -LiteralPath {quote(tmp_path / 'deploy-manifest.json')}) "
+        "{ throw 'Builder published unbound manifest' }\n"
+        "Write-DeployManifest @arguments\n"
+        "$manifest | ConvertTo-Json -Depth 6\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    built = json.loads(result.stdout)
+    published = json.loads((tmp_path / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    for manifest in (built, published):
+        assert manifest["source"]["version"] == "1.2.3"
+        assert manifest["source"]["commit"] == "abc"
+        assert manifest["preserved"] == "value"
+        assert manifest["venv"] == (tmp_path / "slot").as_posix()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX manifest renderer")
+def test_posix_deploy_manifest_can_build_without_publishing(tmp_path: Path) -> None:
+    shell = shutil.which("bash")
+    if shell is None:
+        pytest.skip("Bash unavailable")
+    root = tmp_path / "runtime"
+    root.mkdir()
+    script = tmp_path / "manifest.sh"
+    script.write_text(
+        """set -euo pipefail
+. "$1"
+unset _RUNTIME_PUBLICATION_EVIDENCE
+_ok() { :; }
+_fail() { printf '%s\\n' "$*" >&2; }
+_source_kind() { printf marketplace; }
+_git_info() { printf 'abc dev false\\n'; }
+_payload_hash() { printf fixture-hash; }
+date() { printf '2026-01-01T00:00:00Z\\n'; }
+hostname() { printf example; }
+uname() { printf Linux; }
+built="$(render_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3)"
+if [[ -n "$(find "$2" -mindepth 1 -print -quit)" ]]; then
+    printf 'Renderer wrote into the runtime root\\n' >&2
+    exit 1
+fi
+printf '%s\\n' "$built"
+write_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shell, str(script), str(REPO / "libs/installer-engine/installer-engine.sh"),
+         str(root), str(tmp_path), str(root / "slot")],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    built = json.loads(result.stdout)
+    published = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
+    assert built == published
+    assert built["source"]["version"] == "1.2.3"
+    assert built["preserved"] == "value"
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
 def test_installer_action_identity_uses_existing_progress_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
@@ -373,6 +471,11 @@ def test_materialized_human_declaration_binds_rewritten_entrypoint(
         assert log == []
         assert (scripts / "install.ps1").read_bytes() == before
     for ext in ("ps1", "sh"):
+        emitted = (scripts / f"install.{ext}").read_bytes()
+        if ext == "sh":
+            assert b"\r\n" not in emitted
+        else:
+            assert b"\n" not in emitted.replace(b"\r\n", b"")
         assert contract.is_local_ref(
             contract.find_engine_ref(scripts / f"install.{ext}", ext), destination,
         )
@@ -380,6 +483,15 @@ def test_materialized_human_declaration_binds_rewritten_entrypoint(
     for asset in (*contract.FILES, *contract.support_files(canonical)):
         assert (scripts / asset).read_bytes() == (canonical / asset).read_bytes()
     assert _human_admission()(scripts / "install.ps1")
+    declaration = scripts / "install.human-output.json"
+    expected = declaration.read_bytes()
+    assert b"\r\n" not in expected
+    declaration.write_bytes(expected.replace(b"\n", b"\r\n"))
+    materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination,
+        canonical_root=source_root, dest_root=tmp_path,
+    )
+    assert declaration.read_bytes() == expected
     snapshot = {path.name: path.read_bytes() for path in scripts.iterdir()}
     assert materialize_installer_engine.materialize_ref_into(
         source_consumer_dir=destination, dest_consumer_dir=destination,
@@ -409,6 +521,11 @@ def test_whole_payload_human_contract(
     source_root = Path("source")
     destination = Path("payload")
     _copy_real_installer_engine(source_root)
+    manager = source_root / "worktree-manager"
+    manager.mkdir()
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname = "worktree-manager"\nversion = "0.0.0"\n', encoding="utf-8",
+    )
     for name in names:
         source = REPO / "plugins" / name
         consumer = _real_human_consumer(source_root, name, layout)
@@ -497,6 +614,7 @@ def fake_repo(tmp_path, monkeypatch):
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
     (canonical_dir / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
+    (canonical_dir / "installer_engine_process.py").write_text("canonical process\n", encoding="utf-8")
     monkeypatch.setattr(sync_installer_engine, "REPO", tmp_path)
     monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", canonical_dir)
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ("agent-registered",))
@@ -512,6 +630,7 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
 
 def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo, monkeypatch):
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine.ier, "STANDALONE_NATIVE_ADOPTERS", ())
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"function Resolve-EvaluatorBootstrapPython {}\n")
     for plugin in (*sync_installer_engine.BOOTSTRAP_ADOPTERS, "agent-unrelated"):
@@ -570,7 +689,7 @@ def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monke
     assert sync_installer_engine.verify() == []
 
 
-@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces"])
+@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-bridge"])
 def test_first_use_input_freezer_uses_canonical_projection_owner(plugin):
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
@@ -594,6 +713,16 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
     consumer = fake_repo / "libs" / "update-driver"
     consumer.mkdir()
+    for name in (
+        "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+        "installer_engine_uninstall_windows.py",
+        "installer_engine_footprint.py",
+        "installer_engine_uninstall_controllers.py",
+        "installer_engine_commands.py", "installer_engine_stop.py",
+    ):
+        (sync_installer_engine.CANONICAL_DIR / name).write_text(
+            "canonical uninstall\n", encoding="utf-8",
+        )
     assert len(sync_installer_engine.verify()) == len(contract.STANDALONE_NATIVE_FILES)
     assert len(sync_installer_engine.sync()) == len(contract.STANDALONE_NATIVE_FILES)
     assert sync_installer_engine.verify() == []

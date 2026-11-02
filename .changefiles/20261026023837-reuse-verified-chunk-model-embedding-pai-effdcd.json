@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse verified chunk/model embedding pairs across metadata changes and retry missing-pair backfills safely",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

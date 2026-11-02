@@ -41,12 +41,14 @@ the same way ``agent-fleet-index-adapter`` proved out ``index-v1``.
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from fleet_contracts import (
     ContractError,
+    CredentialParameters,
     CredentialResult,
     HealthResult,
     RouteRequest,
@@ -74,7 +76,7 @@ class BackendUnavailable(RuntimeError):
     """
 
 
-def _get(base_url: str, path: str, timeout: float) -> dict:
+def _get(base_url: str, path: str, timeout: float) -> dict[str, Any]:
     """A plain, dependency-free ``GET`` against a locally-resolved, trusted
     fixed backend. ``base_url`` is never client-supplied (see module/README
     docstring), so this is not an SSRF sink despite the generic signature.
@@ -94,7 +96,9 @@ def _get(base_url: str, path: str, timeout: float) -> dict:
     return _parse_json_object(payload, path)
 
 
-def _post(base_url: str, path: str, body: dict, timeout: float) -> dict:
+def _post(
+    base_url: str, path: str, body: dict[str, object], timeout: float,
+) -> dict[str, Any]:
     """A plain, dependency-free ``POST`` of a small JSON body against the
     same locally-resolved, trusted fixed backend as :func:`_get`, with the
     same bounded-read guarantee."""
@@ -125,7 +129,7 @@ def _post(base_url: str, path: str, body: dict, timeout: float) -> dict:
     return _parse_json_object(payload, path)
 
 
-def _parse_json_object(payload: bytes, path: str) -> dict:
+def _parse_json_object(payload: bytes, path: str) -> dict[str, Any]:
     try:
         data = json.loads(payload)
     except ValueError as exc:
@@ -143,7 +147,7 @@ def _route_health(request: RouteRequest, base_url: str, timeout: float) -> Route
     return RouteResponse.for_request(request, health=HealthResult(available, detail))
 
 
-def _credential_result_from_backend(data: dict) -> CredentialResult:
+def _credential_result_from_backend(data: dict[str, Any]) -> CredentialResult:
     """Build a bounded :class:`CredentialResult` from the vault backend's
     response. Any out-of-bounds or wrongly-typed field becomes
     :class:`BackendUnavailable` -- the backend's fault, never silently
@@ -168,7 +172,7 @@ def _credential_result_from_backend(data: dict) -> CredentialResult:
 
 
 def _route_credential_get(request: RouteRequest, base_url: str, timeout: float) -> RouteResponse:
-    parameters = request.parameters
+    parameters = cast(CredentialParameters | None, request.parameters)
     if parameters is None:
         raise ContractError("credential.get requires validated credential parameters")
     fields = {

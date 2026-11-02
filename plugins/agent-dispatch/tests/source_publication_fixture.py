@@ -1,6 +1,7 @@
 """Contained source publication using the actual installer runtime functions."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -19,6 +20,29 @@ REPO = PLUGIN.parents[1]
 SCRIPTS = PLUGIN / "scripts"
 PACKAGE = "1.2.3-dev4"
 HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def mandatory_admission_files() -> tuple[str, ...]:
+    """Read the canonical bundle declaration without executing tooling."""
+    archive_tree = ast.parse((REPO / "tools" / "daemon_lifecycle_assets.py").read_text(encoding="utf-8"))
+    archive = next(
+        ast.literal_eval(node.value)
+        for node in archive_tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "ARCHIVE_NAME" for target in node.targets)
+    )
+    tree = ast.parse((REPO / "tools" / "sync-installation-context.py").read_text(encoding="utf-8"))
+    declaration = next(
+        node.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "FILES" for target in node.targets)
+    )
+    assert isinstance(declaration, ast.Tuple)
+    return tuple(
+        archive if isinstance(member, ast.Name) and member.id == "ARCHIVE_NAME"
+        else ast.literal_eval(member)
+        for member in declaration.elts
+    )
 
 
 def run_publication_bash(argv: list[str], tmp_path: Path) -> subprocess.CompletedProcess:
@@ -70,6 +94,7 @@ def function(ext: str, name: str) -> str:
 def script(ext: str) -> str:
     if ext == "ps1":
         names = (
+            "Assert-DispatchActions",
             "Install-Runtime", "Get-PayloadHash", "Get-BootstrapPython",
             "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
             "New-PluginBuildSnapshot", "Enter-PluginSnapshotLock", "Publish-FileAtomically",
@@ -92,6 +117,7 @@ $VenvDir = Join-Path $InstallDir '.venv'
 $LinkDir = $VenvDir
 $VersionedRuntime = $true
 $Force = $false
+$PreserveSupervisors = $env:FIXTURE_PRESERVE_SUPERVISORS -eq '1'
 $script:ActivationSuperseded = $false
 $script:GlobalActivationLockTimeoutSeconds = 5
 $script:InstallerDependencyPolicy = Join-Path $ScriptDir 'installer_dependency_policy.py'
@@ -116,6 +142,7 @@ function Set-CopilotPersistentEnvironmentVariable { throw 'Forbidden host enviro
 Initialize-SourceRuntime
 try {
     if ($Action -eq 'stamp') { Invoke-Stamp }
+    elseif ($Action -eq 'prepare') { Install-Runtime -PrepareOnly }
     elseif ($Action -in @('install', 'provision', 'update')) { Install-Runtime }
     else { throw 'Unsupported fixture lifecycle action' }
 } finally {
@@ -124,6 +151,7 @@ try {
 """
     else:
         names = (
+            "_runtime_admission_preflight",
             "_ensure_runtime", "_payload_hash", "_versioned_slot_clean", "_versioned_mark_complete",
             "_versioned_activate", "_versioned_current", "_activation_superseded_now",
             "_version_lt", "_write_manifest", "deploy_binstub", "do_stamp",
@@ -144,6 +172,7 @@ BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
 VERSIONED_RUNTIME=1
 ACTIVATION_SUPERSEDED=0
 FORCE=0
+PRESERVE_SUPERVISORS="${{FIXTURE_PRESERVE_SUPERVISORS:-0}}"
 AGENT_DISPATCH_SUPERVISE_MACHINE=fixture
 _ok() {{ :; }}; _skip() {{ :; }}; _warn() {{ :; }}; _step() {{ :; }}
 _fail() {{ printf '%s\\n' "$*" >&2; }}
@@ -158,9 +187,11 @@ _ensure_uv_index() {{ :; }}
 _supervisor_audit() {{ :; }}
 _register_pivot() {{ :; }}
 _versioned_gc() {{ :; }}
+ACTION="${{1:-provision}}"
 _initialize_source_runtime
 case "${{1:-provision}}" in
     stamp) do_stamp ;;
+    prepare) _ensure_runtime 1 ;;
     install|provision|update) _ensure_runtime ;;
     *) exit 2 ;;
 esac
@@ -255,6 +286,7 @@ def environment(tmp_path: Path) -> dict[str, str]:
         system = Path(env["SYSTEMROOT"])
         paths.extend((str(system / "System32"), str(system)))
     else:
+        env["WSL_DISTRO_NAME"] = "Fixture Distro"
         test_bin = Path(env["HOME"]) / "test-bin"
         test_bin.mkdir(exist_ok=True)
         getent = test_bin / "getent"
@@ -269,6 +301,23 @@ def environment(tmp_path: Path) -> dict[str, str]:
     env["PATH"] = os.pathsep.join(dict.fromkeys(paths))
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
     return env
+
+
+def bind_posix_account_home(scripts: Path) -> None:
+    """Bind only the copied SDK's POSIX account-home lookup before freezing."""
+    relative = Path("installation-context") / "_installation_context_resolution.py"
+    helper = scripts / relative
+    text = helper.read_text(encoding="utf-8")
+    canonical = (SCRIPTS / relative).read_text(encoding="utf-8")
+    assert text == canonical, "fixture home binding requires the unchanged canonical SDK fragment"
+    original = (
+        "            import pwd\n\n"
+        "            profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+    )
+    assert canonical.count(original) == 1, "canonical POSIX account-home lookup changed"
+    helper.write_bytes(text.replace(
+        original, '            profile_value = Path(environment["HOME"])',
+    ).encode("utf-8"))
 
 
 def stage(tmp_path: Path, *, broken_b: bool = False):
@@ -292,6 +341,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
         for relative in (
+            "action_controls.py",
             "source-runtime.sh", "source-runtime.ps1", "base-python.ps1", "versioned_runtime_native.ps1",
             "versioned_runtime.py", "versioned_runtime_leases.py",
             "versioned_runtime_construction.py", "versioned_runtime_source.py",
@@ -303,23 +353,24 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
         shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
         if os.name != "nt":
-            helper = scripts / "installation-context/installation-context.ps1"
-            text = helper.read_text(encoding="utf-8")
-            original = "$passwdHome = [CePosixAccount]::Home()"
-            assert text.count(original) == 1
-            helper.write_text(text.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
+            bind_posix_account_home(scripts)
         for ext in ("sh", "ps1"):
             (scripts / f"install.{ext}").write_bytes(script(ext).encode("utf-8"))
         package = payload / "src" / "agent_dispatch"
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
+        for module in ("action_policy.py", "action_controls.py", "install_paths.py"):
+            shutil.copy2(PLUGIN / "src" / "agent_dispatch" / module, package / module)
         (package / "embody.py").write_text("", encoding="utf-8")
         (package / "__main__.py").write_text(
             'import sys\nfrom pathlib import Path\nif __name__ == "__main__":\n'
             '    print("agent-dispatch " + Path(sys.prefix).name)\n', encoding="utf-8",
         )
         (payload / "plugin.json").write_text(
-            json.dumps({"name": "agent-dispatch", "version": PACKAGE}), encoding="utf-8",
+            json.dumps({
+                "name": "agent-dispatch", "version": PACKAGE,
+                "repository": "https://github.com/ThomasMichon/copilot-extensions",
+            }), encoding="utf-8",
         )
         (payload / "pyproject.toml").write_text(
             f'[project]\nname = "agent-dispatch"\nversion = "{PACKAGE}"\n',
@@ -346,6 +397,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
         installed = Path(query.stdout.strip()) / "agent_dispatch"
         shutil.copytree(package, installed)
         full_identity = json.dumps(api.manifest_fields(identity), sort_keys=True)
+        api._runtime().retain_runtime_helpers(slot, complete=False)
         api._runtime().mark_complete(
             root, identity.runtime_version,
             payload_hash=hashlib.sha256(full_identity.encode()).hexdigest(),
@@ -376,7 +428,9 @@ def activate(env: dict[str, str], root: Path, version: str) -> None:
     )
 
 
-def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run(
+    ext: str, entry: Path, args: list[str], env: dict[str, str], *, cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     from agent_dispatch.procutil import run_background_capture
 
     executable = (
@@ -393,14 +447,18 @@ def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subproce
         f"py={shutil.which('py', path=env.get('PATH'))}",
         file=sys.stderr, flush=True,
     )
-    result = run_background_capture(
-        [executable, *prefix, str(entry), *args], env=env, timeout=90,
-        max_output=65536,
-    )
+    result = None
+    try:
+        result = run_background_capture(
+            [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
+            max_output=512 * 1024,
+        )
+    finally:
+        print(
+            f"publication fixture: end code={result.returncode if result is not None else 'unavailable'}, "
+            f"elapsed={time.monotonic() - started:.3f}s\n"
+            + (result.stderr if result is not None else ""),
+            file=sys.stderr, flush=True,
+        )
     assert result is not None, "publication fixture exceeded 90s or could not start"
-    print(
-        f"publication fixture: end code={result.returncode}, elapsed={time.monotonic() - started:.3f}s\n"
-        + result.stderr,
-        file=sys.stderr, flush=True,
-    )
     return result

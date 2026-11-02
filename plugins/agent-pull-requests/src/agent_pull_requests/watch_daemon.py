@@ -118,6 +118,7 @@ class WatchDaemon:
         self._observation_errors: dict[str, str] = {}
         self._persist_lock = threading.RLock()
         self._pollers: dict[WatchKey, threading.Thread] = {}
+        self._native_pollers: set[threading.Thread] = set()
         self._pollers_lock = threading.Lock()
         self._shutdown_event = threading.Event()
         self._lifecycle_shutdown_event = threading.Event()
@@ -133,7 +134,13 @@ class WatchDaemon:
             self._registry, self._notify, self._persist, self._persist_lock, self._shutdown_event,
         )
         if persist and active:
-            self._reattach_from_disk()
+            try:
+                self._reattach_from_disk()
+            except BaseException:
+                from .watch_retirement import WatchRetirement
+
+                with WatchRetirement(close_owner=self.close):
+                    raise
 
     def _reattach_from_disk(self) -> None:
         """Reload every subscriber a prior generation persisted, and
@@ -514,12 +521,15 @@ class WatchDaemon:
 
     def _stop_workers(self, deadline: float, *, bounded: bool) -> None:
         with self._pollers_lock:
-            pollers = list(self._pollers.values())
+            pollers = list(self._native_pollers)
         for thread in pollers:
             if thread.ident is not None:
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
-        live = [thread.name for thread in pollers if thread.is_alive()]
+        native = threading.enumerate()
+        live = [thread.name for thread in pollers if thread in native]
         live.extend(self._deliveries.close(deadline, bounded=bounded))
+        with self._pollers_lock:
+            self._native_pollers.difference_update(thread for thread in pollers if thread not in native)
         if live:
             raise TimeoutError(f"PR watch workers did not stop: {', '.join(live)}")
 
@@ -536,6 +546,8 @@ class WatchDaemon:
                 target=self._poll_loop, args=(key,), name=f"pr-watch:{key}", daemon=True,
             )
             self._pollers[key] = thread
+            self._native_pollers.intersection_update(threading.enumerate())
+            self._native_pollers.add(thread)
             thread.start()
 
     def _poll_loop(self, key: WatchKey) -> None:

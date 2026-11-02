@@ -348,8 +348,18 @@ class _SessionMonitoringMixin:
             idle_for = now - s.updated_at
             if idle_for < ttl:
                 continue
+            if not self._host_reapable(s):
+                continue
             try:
-                await self.stop_session(sid, reap_host=True)
+                async with s._turn_start_lock:
+                    # Reattachment can own lifecycle while awaiting prompt admission.
+                    if (
+                        self._sessions.get(sid) is not s or s.subscriber_count > 0
+                        or s._lifecycle_lock.locked()
+                        or now - s.updated_at < ttl or not self._host_reapable(s)
+                    ):
+                        continue
+                    await self.stop_session(sid, reap_host=True, _automatic_reap=True)
             except SessionBusyError:
                 continue
             except Exception:

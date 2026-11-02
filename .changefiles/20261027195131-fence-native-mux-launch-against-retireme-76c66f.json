@@ -1,0 +1,9 @@
+{
+  "comment": "Expand native launch and retirement to a per-worktree lifecycle lease while retaining the legacy repository barrier",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

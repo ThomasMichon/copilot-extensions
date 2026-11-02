@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
 from worktree_manager import update_driver_cli as driver
+
+# Include interpreter, observer, worker startup and participant handoff.
+_NATIVE_QUEUE_TIMEOUT = 30
 
 
 @pytest.fixture
@@ -42,6 +46,20 @@ def test_detach_json_is_an_observer_option_not_an_installer_argument():
     options, forwarded = driver.parse_options(["--detach", "--json", "--force"])
     assert options.detach and options.json
     assert forwarded == ["--force"]
+
+
+@pytest.mark.parametrize("flags,repair", [
+    ([], True), (["--auto"], False), (["--auto", "--force"], False),
+    (["--force"], True), (["--force-runtime", "agent-bridge"], True),
+    (["--recreate-venv"], True), (["--repair-engine", "/fresh/source"], True),
+])
+def test_operator_repair_classification_is_persisted(queued, flags, repair):
+    seen, _request = queued
+    assert driver.cmd_update_request(flags) == 6
+    assert seen["spec"].repair is repair
+    assert seen["spec"].argv == tuple(flags)
+    if not flags:
+        assert "--force" not in seen["runner"].argv
 
 
 @pytest.mark.parametrize("flags", [
@@ -84,7 +102,13 @@ def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, m
     ["--auth-report", "--detach"],
     ["--auth-report", "--supervised-debug"],
     ["--token", "synthetic-unknown-secret"],
+    ["--aut"],
+    ["--automatic"],
+    ["--request-status", "one", "--auto"],
     ["--auth-source", "https://example.invalid/tools.git"],
+    ["--request-status", "one", "--engine-acquisition-timeout", "600"],
+    ["--recovery-status", "--engine-acquisition-timeout", "600"],
+    ["--auth-report", "--engine-acquisition-timeout", "600"],
 ])
 def test_invalid_observer_combinations_refuse(flags):
     with pytest.raises(SystemExit) as error:
@@ -100,6 +124,30 @@ def test_request_context_never_persists_credentials(monkeypatch):
     assert "GH_TOKEN" not in context
     assert "GITHUB_TOKEN" not in context
     assert context["AGENT_WORKTREES_UPDATE_CONTEXT"] == "example-context"
+
+
+def test_cold_bootstrap_context_requires_no_uninstalled_manager_dependencies():
+    import os
+    import subprocess
+    import sys
+
+    program = """
+import json,os,sys
+sys.path.insert(0,sys.argv[1])
+from worktree_manager.update_driver_cli import request_context
+assert 'worktree_manager.engine_client' not in sys.modules
+os.environ['WORKTREE_MANAGER_ENGINE_ARGV']=json.dumps(['selected-engine'])
+assert json.loads(request_context()['WORKTREE_MANAGER_ENGINE_ARGV'])==['selected-engine']
+assert 'worktree_manager.engine_client' not in sys.modules
+assert 'worktree_identity' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", program,
+         str(Path(__file__).resolve().parents[1] / "src")],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_queue_captures_consumed_provider_without_restoring_ambient_transport(queued, monkeypatch):
@@ -197,6 +245,36 @@ def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
     assert "worker" in seen
 
 
+def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(queued, monkeypatch, tmp_path):
+    import update_driver
+    from worktree_manager import runtime_identity, self_install
+
+    seen, _request = queued
+    slot = tmp_path / "root" / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+
+    @contextmanager
+    def no_custody():
+        yield None
+
+    monkeypatch.setattr(
+        self_install, "_runtime_installer", lambda: SimpleNamespace(_installation_custody=no_custody),
+    )
+    monkeypatch.setattr(runtime_identity, "running_application_slot", lambda: slot)
+    monkeypatch.setattr(self_install, "default_root", lambda: slot.parent.parent)
+    monkeypatch.setattr(
+        self_install, "running_payload_dir",
+        lambda: pytest.fail("app-only installation cannot select a source workspace"),
+    )
+    monkeypatch.setattr(update_driver, "drain", lambda: seen.update(drained=True))
+    assert driver.self_install_request(lambda: pytest.fail("observer executed install")) == 6
+    assert seen["spec"].cwd == str(slot) and seen["runner"].cwd == str(slot)
+    assert seen["spec"].project == str(slot.parent.parent)
+    assert dict(seen["spec"].context)["WORKTREE_MANAGER_ROOT"] == str(slot.parent.parent)
+    assert seen["runner"].argv[-2:] == ("self-install", "--apply")
+    assert seen["drained"]
+
+
 def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypatch):
     seen, _request = queued
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "/registered/native/payload")
@@ -207,6 +285,43 @@ def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypa
         "/registered/native/payload"
     )
     assert seen["runner"].argv[-len(arguments) - 1:] == ("update", *arguments)
+
+
+def test_engine_acquisition_budget_is_captured_by_the_durable_request(queued, monkeypatch):
+    seen, _request = queued
+    key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
+    monkeypatch.setenv(key, "600")
+    assert driver.cmd_update_request([]) == 6
+    assert key not in dict(seen["spec"].context)
+    assert key not in seen["runner"].context_keys
+    assert seen["spec"].argv == ("--engine-acquisition-timeout", "600.0")
+    options, forwarded = driver.parse_options(list(seen["spec"].argv))
+    assert forwarded == []
+    monkeypatch.setenv(key, "180")
+    with driver._request_environment(seen["spec"].context), driver._acquisition_environment(
+        options.engine_acquisition_timeout,
+    ):
+        assert driver.os.environ[key] == "600.0"
+    assert driver.os.environ[key] == "180"
+    with driver._acquisition_environment(None):
+        assert key not in driver.os.environ
+    assert driver.os.environ[key] == "180"
+
+
+def test_manager_budget_is_consumed_before_engine_argument_forwarding():
+    options, forwarded = driver.parse_options([
+        "--repair-engine", "/fresh/source", "--engine-acquisition-timeout", "600",
+        "--no-anchor-sync",
+    ])
+    assert options.engine_acquisition_timeout == "600"
+    assert forwarded == ["--repair-engine", "/fresh/source", "--no-anchor-sync"]
+
+
+def test_invalid_engine_acquisition_budget_is_not_enqueued(queued, monkeypatch):
+    seen, _request = queued
+    monkeypatch.setenv("WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC", "inf")
+    assert driver.cmd_update_request([]) == 1
+    assert "spec" not in seen
 
 
 def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypatch, tmp_path):
@@ -319,6 +434,7 @@ def test_public_manager_route_uses_request_boundary(monkeypatch):
     assert seen == [["--wait"]]
 
 
+@pytest.mark.timeout(2 * _NATIVE_QUEUE_TIMEOUT)
 def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monkeypatch, short_home):
     import json
     import sys
@@ -336,7 +452,9 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
     command = [sys.executable, str(fixture), "submit", "--wait"]
     with ThreadPoolExecutor(max_workers=2) as callers:
-        futures = [callers.submit(run_owned, command, timeout=20) for _ in range(2)]
+        futures = [
+            callers.submit(run_owned, command, timeout=_NATIVE_QUEUE_TIMEOUT) for _ in range(2)
+        ]
         results = [future.result() for future in futures]
     assert [result.returncode for result in results] == [6, 6]
     assert all("Update request " in result.stderr for result in results)
@@ -352,7 +470,47 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     assert all(request.state == "completed" and request.exit_code == 6 for request in requests)
 
 
+@pytest.mark.parametrize("automatic,held", [(False, True), (True, True), (True, False)])
+@pytest.mark.timeout(_NATIVE_QUEUE_TIMEOUT)
+def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
+    tmp_path, monkeypatch, short_home, automatic, held,
+):
+    import json
+    import sys
+    from agent_procutil.owned_process import run_owned
+    import update_driver
+
+    events = tmp_path / "events.jsonl"
+    hold = tmp_path / "hold.json"
+    hold.write_text(json.dumps({"active": held}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(short_home))
+    monkeypatch.setenv("USERPROFILE", str(short_home))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(hold))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", "1")
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    result = run_owned(
+        [sys.executable, str(fixture), "submit", "--wait", *(["--auto"] if automatic else [])],
+        timeout=_NATIVE_QUEUE_TIMEOUT,
+    )
+    skipped = automatic and held
+    assert result.returncode == (3 if skipped else 6), result.stderr
+    request, = update_driver.status()
+    assert request.spec.repair is not automatic
+    assert ("--auto" in request.runner.argv) is automatic
+    assert "--force" not in request.runner.argv
+    assert request.state == "completed" and request.exit_code == result.returncode
+    assert events.exists() is not skipped
+    if skipped:
+        assert request.started_at is None and not request.log_path.exists()
+        assert "automatic-update KillSwitch active; nothing ran" in result.stderr
+    else:
+        records = [json.loads(line) for line in events.read_text().splitlines()]
+        assert any(record["phase"] == "engine" for record in records)
+
+
 @pytest.mark.parametrize("fresh_repair", [False, True], ids=["ordinary", "fresh-repair"])
+@pytest.mark.timeout(2 * _NATIVE_QUEUE_TIMEOUT)
 def test_actual_queued_manager_keeps_consumed_provider(
     tmp_path, monkeypatch, short_home, fresh_repair,
 ):
@@ -372,7 +530,8 @@ def test_actual_queued_manager_keeps_consumed_provider(
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
     forwarded = ["--repair-engine", str(tmp_path / "fresh source")] if fresh_repair else []
     result = run_owned(
-        [sys.executable, str(fixture), "submit", "--wait", *forwarded], timeout=20,
+        [sys.executable, str(fixture), "submit", "--wait", *forwarded],
+        timeout=_NATIVE_QUEUE_TIMEOUT,
     )
     assert result.returncode == 6, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
@@ -381,6 +540,7 @@ def test_actual_queued_manager_keeps_consumed_provider(
     assert records[0]["arguments"] == forwarded
 
 
+@pytest.mark.timeout(7 * _NATIVE_QUEUE_TIMEOUT)
 def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     tmp_path, monkeypatch, short_home,
 ):
@@ -397,24 +557,71 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
     accepted = ["synthetic-accepted-provider"]
+    budget_key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
     monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(accepted))
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
-    for override in ("synthetic-first-provider", "synthetic-second-provider", None):
-        if override is None:
-            monkeypatch.delenv(engine_client.ENGINE_CMD_ENV)
-        else:
-            monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, override)
-        result = run_owned([sys.executable, str(fixture), "submit-only"], timeout=20)
+    for override, budget in (
+        ("synthetic-first-provider", "600"), ("synthetic-second-provider", "1200"), (None, None),
+    ):
+        for key, value in ((engine_client.ENGINE_CMD_ENV, override), (budget_key, budget)):
+            if value is None:
+                monkeypatch.delenv(key)
+            else:
+                monkeypatch.setenv(key, value)
+        result = run_owned(
+            [sys.executable, str(fixture), "submit-only"], timeout=_NATIVE_QUEUE_TIMEOUT,
+        )
         assert result.returncode == 0, result.stderr
     root = home / ".copilot-extensions" / "update-driver"
-    assert len(update_driver.status(root=root)) == 3
+    requests = update_driver.status(root=root)
+    assert len(requests) == 3
     monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, "wrong-worker-provider")
-    result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
+    monkeypatch.setenv(budget_key, "180")
+    result = run_owned(
+        [sys.executable, "-m", "update_driver", "worker"],
+        timeout=len(requests) * _NATIVE_QUEUE_TIMEOUT,
+    )
     assert result.returncode == 0, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
-    assert [record["provider"] for record in records if record["phase"] == "start"] == [
+    starts = [record for record in records if record["phase"] == "start"]
+    assert [record["provider"] for record in starts] == [
         ["synthetic-first-provider"], ["synthetic-second-provider"], accepted,
     ]
+    assert [record["acquisition_budget"] for record in starts] == ["600.0", "1200.0", None]
+
+
+@pytest.mark.timeout(4 * _NATIVE_QUEUE_TIMEOUT)
+def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
+    tmp_path, monkeypatch, short_home,
+):
+    import json
+    import sys
+    import update_driver
+    from agent_procutil.owned_process import run_owned
+
+    events = tmp_path / "events.jsonl"
+    key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
+    monkeypatch.setenv("HOME", str(short_home))
+    monkeypatch.setenv("USERPROFILE", str(short_home))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", "1")
+    monkeypatch.setenv(key, "600")
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    result = run_owned(
+        [sys.executable, str(fixture), "submit", "--wait"],
+        timeout=3 * _NATIVE_QUEUE_TIMEOUT,
+    )
+    assert result.returncode == 6, result.stderr
+    records = [json.loads(line) for line in events.read_text().splitlines()]
+    manager = next(record for record in records if record["phase"] == "start")
+    engine = next(record for record in records if record["phase"] == "engine")
+    assert manager["acquisition_budget"] == "600.0"
+    assert manager["arguments"] == []
+    assert engine["no_manager"] is True and key not in engine["context_keys"]
+    assert manager["pid"] != engine["pid"]
+    requests = update_driver.status(root=short_home / ".copilot-extensions" / "update-driver")
+    assert len(requests) == 1 and requests[0].state == "completed"
+    assert requests[0].exit_code == 6
 
 
 def test_recovery_inspection_and_settlement_never_start_an_updater(queued, monkeypatch, capsys):
@@ -474,5 +681,37 @@ def test_engine_handoff_is_explicit_only_for_mutating_update_commands(args, carr
     assert ("UPDATE_DRIVER_WITNESS" in seen["env"]) == carries_witness
     if carries_witness and engine_client.os.name == "nt":
         assert seen["creationflags"] & engine_client.subprocess.CREATE_NO_WINDOW
+        assert seen["stdout"] is driver.sys.stdout
+        assert seen["stderr"] is driver.sys.stderr
     elif not carries_witness:
         assert "creationflags" not in seen
+        assert "stdout" not in seen and "stderr" not in seen
+
+
+@pytest.mark.skipif(driver.os.name != "nt", reason="native Windows no-window stream inheritance")
+def test_scoped_engine_passthrough_retains_both_channels_and_native_exit():
+    import subprocess
+    import sys
+    from agent_procutil import no_window_kwargs
+
+    child = (
+        "import sys;"
+        "[(print('engine-out-'+str(i),flush=True),"
+        "print('engine-err-'+str(i),file=sys.stderr,flush=True)) for i in range(3)];"
+        "sys.exit(23)"
+    )
+    parent = """
+import sys, update_driver
+from worktree_manager import engine_client
+update_driver.participant_environment = lambda: {"UPDATE_DRIVER_WITNESS": "fixture"}
+engine_client.set_engine_command([sys.executable, "-I", "-B", "-c", sys.argv[1]])
+sys.exit(engine_client.run_engine_passthrough(None, ["update", "--no-manager"], timeout=15))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", parent, child],
+        capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [f"engine-out-{i}" for i in range(3)]
+    assert result.stderr.splitlines() == [f"engine-err-{i}" for i in range(3)]

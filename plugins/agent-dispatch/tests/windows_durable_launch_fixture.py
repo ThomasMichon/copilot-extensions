@@ -84,6 +84,15 @@ def wait_file(path, seconds=40):
 
 
 def service(root, launcher_pid=None):
+    from agent_procutil.daemon_instances import admit_daemon_instance
+
+    with admit_daemon_instance("dispatch-launch-fixture") as guard:
+        assert guard is not None
+        publish(root / "admitted.json", identity(os.getpid()))
+        _service(root, launcher_pid)
+
+
+def _service(root, launcher_pid=None):
     import agent_procutil as pu
 
     # No queue, listener, credentials, service installation, or live backend.
@@ -222,14 +231,19 @@ def powershell_scripts(root, installer):
         encoding="utf-8",
     )
     (root / "fake launcher.ps1").write_text(
-        "param([string]$EnvFile)\n"
+        "# agent-dispatch-supervisor-launch-v1\n"
+        "param([string]$EnvFile,[switch]$DescribeLaunch)\n"
         "$ErrorActionPreference = 'Stop'\n"
+        "if (-not $DescribeLaunch) { throw 'Expected launch description' }\n"
         "if ($EnvFile -ne 'argument with spaces') { throw 'Lost launcher arguments' }\n"
         f"if ([IO.Directory]::GetCurrentDirectory() -ne {quote(root)}) "
         "{ throw 'Wrong launcher cwd' }\n"
-        f"& {quote(sys.executable)} {quote(Path(__file__).resolve())} "
-        f"service {quote(root)} $PID\n"
-        "exit $LASTEXITCODE\n",
+        "$value=@{version=1;"
+        f"executable={quote(sys.executable)};"
+        f"arguments=@({quote(Path(__file__).resolve())},'service',{quote(root)});"
+        f"log_path={quote(root / 'supervise-launcher.log')}"
+        "}|ConvertTo-Json -Compress\n"
+        "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value))\n",
         encoding="utf-8",
     )
 

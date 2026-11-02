@@ -98,7 +98,8 @@ def require_marketplace(root: Path | None = None) -> None:
     if selection.channel != "marketplace":
         raise ValueError(
             f"Runtime source {selection.channel!r} is configured, but source-backed "
-            "suite execution is not yet available. No update was run. "
+            "execution is unavailable through this targeted/bootstrap/repair entry point. "
+            "No update was run. "
             "Use runtime-source resolve to inspect acquisition, or runtime-source reset "
             "to explicitly restore marketplace runtime delivery."
         )

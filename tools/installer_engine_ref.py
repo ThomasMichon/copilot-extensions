@@ -25,22 +25,47 @@ import uv_editable_ref as uer
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
-SUPPORT_FILES = ("installer_dependency_policy.py", "installer_dependency_config.py")
+SUPPORT_FILES = (
+    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+    "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+    "installer_engine_uninstall_windows.py",
+    "installer_engine_footprint.py",
+    "installer_engine_uninstall_controllers.py",
+    "installer_engine_commands.py", "installer_engine_stop.py",
+    "installer_engine_process.py",
+)
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
-    "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_engine.py", "installer_engine_health.py", "runtime_launcher.py", "installer_driver.py",
+    "install_source.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",
+    "installer_native_feed.py",
+    "installer_feed_policy.py",
+    "installer_packaging_seed.py",
+    "installer_source_build.py",
+    "installer_source_wheel_cache.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
-    "agent-codespaces", "agent-logger",
+    "agent-codespaces", "agent-logger", "agent-bridge",
+    "agent-dispatch", "agent-mcp", "agent-index",
 )
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
-STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)
-STANDALONE_NATIVE_FILES = ("installer-engine.ps1", "installer-engine.sh")
+STANDALONE_NATIVE_ADOPTERS = (
+    "libs/update-driver", "plugins/agent-mcp", "plugins/agent-machines",
+    "plugins/agent-containers", "plugins/budget-guidance", "plugins/agent-worktrees",
+)
+STANDALONE_NATIVE_FILES = (
+    "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
+    "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+    "installer_engine_uninstall_windows.py",
+    "installer_engine_footprint.py",
+    "installer_engine_uninstall_controllers.py",
+    "installer_engine_commands.py", "installer_engine_stop.py",
+)
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
@@ -304,5 +329,8 @@ def rewrite_to_local(script_path: Path, ext: str) -> bool:
     if count != 1:
         return False
     if rewritten != text:
-        script_path.write_text(rewritten, encoding="utf-8")
+        with script_path.open(
+            "w", encoding="utf-8", newline="\r\n" if ext == "ps1" else "\n",
+        ) as stream:
+            stream.write(rewritten)
     return True

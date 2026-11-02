@@ -223,7 +223,7 @@ available. It does not relabel compatibility snapshots as fresh.
 Raw legacy account reset acquisition/reconciliation still requires a safe
 credential-free host projection; the public status/quota methods do not expose
 the raw account reset. Do not read internal authentication objects to obtain it.
-Same-period cycle-average pacing, static launch cues, and optional routing advice
+Same-period cycle-average pacing, static launch cues, and optional monthly economy advice
 have their own implemented contracts, not proof of raw-reset acquisition.
 Unsupported hosts must report unavailable rather
 than starting a new global-default client to fabricate requesting-account

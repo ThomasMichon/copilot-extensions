@@ -7,6 +7,7 @@ import enum
 import functools
 import json
 import os
+import re
 import socket
 import subprocess
 import time
@@ -152,6 +153,7 @@ class _PluginActivation(str, enum.Enum):
 class _RegisteredPluginTarget:
     context: Path | None
     activation: _PluginActivation
+    repository_contexts: tuple[Path, ...] = ()
 
     @property
     def required(self) -> bool:
@@ -160,6 +162,8 @@ class _RegisteredPluginTarget:
 
 def _update_registered_plugins(
     targets: dict[str, _RegisteredPluginTarget] | None = None,
+    *,
+    allow_project_fallback: bool = True,
 ) -> bool:
     """Acquire required payloads first; stop before advisory work on failure."""
     from . import reconcile
@@ -187,7 +191,7 @@ def _update_registered_plugins(
         if refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
             browse_contexts.append(context)
 
-    if not browse_contexts:
+    if not browse_contexts and allow_project_fallback:
         try:
             fallback_context = _core_helper(
                 "_project_update_context", _project_update_context
@@ -304,8 +308,9 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         activation: _PluginActivation,
     ) -> None:
         existing = targets.get(name)
+        contexts = (context,) if context is not None and activation is _PluginActivation.ACTIVE else ()
         if existing is None:
-            targets[name] = _RegisteredPluginTarget(context, activation)
+            targets[name] = _RegisteredPluginTarget(context, activation, contexts)
             return
         preferred_context = existing.context if existing.context is not None else context
         precedence = {
@@ -321,6 +326,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         targets[name] = _RegisteredPluginTarget(
             preferred_context,
             selected_activation,
+            tuple(dict.fromkeys((*existing.repository_contexts, *contexts))),
         )
 
     activation_unknown = False
@@ -488,6 +494,8 @@ def _reconcile_registered_runtimes(
                     platform_name,
                     force=forced,
                     gate_context=targets[name].context,
+                    **({"repository_contexts": targets[name].repository_contexts}
+                       if name == "agent-index" else {}),
                 ),
             )
         )
@@ -514,6 +522,7 @@ def _reconcile_one_runtime(
     *,
     force: bool,
     gate_context: Path | None = None,
+    repository_contexts: tuple[Path, ...] = (),
 ) -> str:
     """Reconcile a single registered plugin's runtime; returns a status string.
 
@@ -524,7 +533,8 @@ def _reconcile_one_runtime(
     """
     started = time.monotonic()
     status = _reconcile_one_runtime_status(
-        name, platform_name, force=force, gate_context=gate_context
+        name, platform_name, force=force, gate_context=gate_context,
+        **({"repository_contexts": repository_contexts} if repository_contexts else {}),
     )
     update_events.record("runtime_reconcile", f"{name}@copilot-extensions", status,
                          changed=status.startswith("OK"), started=started)
@@ -537,9 +547,11 @@ def _reconcile_one_runtime_status(
     *,
     force: bool,
     gate_context: Path | None = None,
+    repository_contexts: tuple[Path, ...] = (),
 ) -> str:
     return _execute_runtime_step(update_runtime_plan.plan_registered(
         name, platform_name, force=force, gate_context=gate_context,
+        repository_contexts=repository_contexts,
     ))
 
 
@@ -549,18 +561,52 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     if step.status:
         return step.status
     output.header(f"Updating Runtime: {step.name}")
+    receipt = functools.partial(
+        reconcile.runtime_deployed_version, step.name, root=step.runtime_root,
+    )
+    if step.source is not None:
+        assert step.runtime_root is not None
+        assert step.project_root is not None
+        receipt = functools.partial(
+            step.source.deployed_version, step.runtime_root, step.payload,
+            target=step.source_target,
+        )
+
+    def execute(argv: tuple[str, ...]) -> str:
+        try:
+            command = list(argv)
+            if step.source is not None:
+                assert step.runtime_root is not None
+                assert step.project_root is not None
+                step.source.validate(step.name, step.payload, step.environment)
+                from .update_runtime_target import check_target
+
+                check_target(
+                    step.source_target, step.source, step.name, step.payload,
+                    step.runtime_root, step.environment,
+                )
+                command = step.source.lifecycle_argv(
+                    step.payload, step.name, step.runtime_root, step.project_root, argv,
+                )
+        except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
+            return f"prepared source execution refused: {error}"
+        try:
+            return run(command).status
+        except (OSError, ValueError) as error:
+            if step.source is None:
+                raise
+            return f"source deployment receipt invalid: {error}"
+
     run = functools.partial(
         _run_human_installer, label=step.name, receipt_owned=True,
-        cwd=step.payload, env=step.environment, deadline_s=step.deadline_s,
+        cwd=step.artifact, env=step.environment, deadline_s=step.deadline_s,
         target_version=step.target_version,
-        receipt=functools.partial(
-            reconcile.runtime_deployed_version, step.name, root=step.runtime_root,
-        ),
+        receipt=receipt,
     )
-    status = run(list(step.argv)).status
+    status = execute(step.argv)
     if step.fallback_argv and status.startswith("installer exited"):
         output.info(f"Module '{step.name}' update failed (not installed?), trying install...")
-        status = run(list(step.fallback_argv)).status
+        status = execute(step.fallback_argv)
         return "OK (installed)" if status == "OK" else status.replace(
             "installer exited", "install exited", 1,
         )
@@ -571,6 +617,7 @@ def _run_engine_installer(
     argv: list[str], plugin_dir: Path, timeout: int, env: Mapping[str, str],
     runtime_root: Path | None = None,
     target_version: str | None = None,
+    source_step: update_runtime_plan.RuntimeUpdateStep | None = None,
 ) -> int:
     """Run agent-worktrees' own runtime installer and record its result.
 
@@ -580,17 +627,22 @@ def _run_engine_installer(
     """
     from . import reconcile
 
-    run = _run_human_installer(
-        argv, label="agent-worktrees", receipt_owned=True,
-        cwd=plugin_dir, env=env, deadline_s=timeout,
-        target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
-        receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
-    )
-    rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
-    if run.status.startswith("timed out"):
+    if source_step is not None:
+        status = _execute_runtime_step(source_step)
+        failed_exit = re.fullmatch(r"installer exited (-?\d+)", status)
+        rc = 0 if status == "OK" else (int(failed_exit[1]) if failed_exit else 1)
+    else:
+        run = _run_human_installer(
+            argv, label="agent-worktrees", receipt_owned=True,
+            cwd=_invocation_update_context() or plugin_dir, env=env, deadline_s=timeout,
+            target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
+            receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
+        )
+        rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
+    if status.startswith("timed out"):
         output.err("agent-worktrees installer timed out")
-    elif run.status != "OK":
-        output.err(f"agent-worktrees installer failed: {run.status}")
+    elif status != "OK":
+        output.err(f"agent-worktrees installer failed: {status}")
     update_events.record("engine_runtime", "agent-worktrees@copilot-extensions", status,
                          changed=status.startswith("OK"))
     return rc

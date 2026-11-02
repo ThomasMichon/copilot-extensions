@@ -1,0 +1,9 @@
+{
+  "comment": "Publish caller-scoped guarded-anchor maps at managed mutation and preparation boundaries; keep hook evaluation file-only and fail-open when facts are unavailable.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

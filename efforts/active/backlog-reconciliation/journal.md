@@ -3,6 +3,17 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-28 - Transport and Bridge finite receiving proposal](<journal/2026/10.28 transport-bridge-receiving-proposal.md>)
+- [2026-10-28 - Next ten finite command and assurance relationships](<journal/2026/10.28 next-ten-receiving-proposal.md>)
+- [2026-10-28 - Real qualification venue and Picker presentation inflow](<journal/2026/10.28 real-venue-picker-inflow.md>)
+- [2026-10-28 - Seven further receiving contracts proposed](<journal/2026/10.28 last-seven-receiving-proposal.md>)
+- [2026-10-28 - First ten oldest receiving relationships proposed](<journal/2026/10.28 first-ten-receiving-proposal.md>)
+- [2026-10-28 - Eight receiving-contract consolidations and bounded owner inflow](<journal/2026/10.28 receiving-contract-dispositions.md>)
+- [2026-10-28 - Cross-wave direct receiving-contract selection](<journal/2026/10.28 cross-wave-intake-selection.md>)
+- [2026-10-28 - Fourth-wave eligible-census coverage and scoped sequencing proposal](<journal/2026/10.28 fourth-wave-stabilization-findings.md>)
+- [2026-10-28 - First 200 vision-linked proposals and sixteen current-source audits](<journal/2026/10.28 first-wave-stabilization-findings.md>)
+- [2026-10-27 - Reviewed stabilization-roadmap method and first 200 metadata gates](<journal/2026/10.27 vision-linked-stabilization-roadmap.md>)
+- [2026-10-24 - Manager observation, adoption and selected actions: eight complete consolidations](<journal/2026/10.24 manager-observation-adoption-actions-103.md>)
 - [2026-10-24 - Registry/account authority: one complete diagnostic consolidation](<journal/2026/10.24 registry-account-authority-family-102.md>)
 - [2026-10-24 - Lifecycle/materialization: one complete conditional-question consolidation](<journal/2026/10.24 lifecycle-materialization-family-101.md>)
 - [2026-10-24 - Ordinary guidance and independent custody: four complete consolidations](<journal/2026/10.24 ordinary-guidance-family-100.md>)

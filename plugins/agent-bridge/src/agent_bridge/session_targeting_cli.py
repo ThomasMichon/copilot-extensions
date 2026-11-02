@@ -106,13 +106,25 @@ def _send(args: argparse.Namespace) -> None:
 
     validate_options(args)
     core = _core()
+    if getattr(args, "live_exact_notify", False):
+        from .live_exact_notify import send
+        send(args)
+        return
+    if getattr(args, "live_receipt_only", False) or getattr(args, "live_exact", False):
+        from .live_keyed_receipt import send
+        send(args)
+        return
     if getattr(args, "native_invocation_file", None) is not None:
         from .native_keyed_client import send, validate_options
         from .hosting_admission_cli import configure_client as configure_hosting
         validate_options(args)
-        client = core._get_client()
+        client = core._get_client(ensure=False) if getattr(args, "receipt_only", False) else core._get_client()
         configure_hosting(client, args)
         send(args, client)
+        return
+    if getattr(args, "receipt_only", False):
+        from .native_send_receipt import send as observe_receipt
+        observe_receipt(args)
         return
     if getattr(args, "new", False):
         print(
@@ -123,11 +135,6 @@ def _send(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(2)
-
-    if getattr(args, "receipt_only", False) and not getattr(args, "native_invocation_file", None):
-        raise SendRefused("refused_invalid", reason="native_invocation_required",
-                          retryable=False, target=args.target,
-                          error="--receipt-only requires --native-invocation-file")
     client = core._get_client()
     configure_client(client, args)
     from .hosting_admission_cli import configure_client as configure_hosting
@@ -342,6 +349,10 @@ def _submit_and_stream(
             result = submit_native_bound_prompt(
                 client, session_id, prompt, caller_id=caller_id,
                 expected_native_session_id=expected_native,
+                **(
+                    {"idempotency_key": args.idempotency_key}
+                    if getattr(args, "idempotency_key", None) is not None else {}
+                ),
             )
         else:
             result = client.submit_prompt(
@@ -739,7 +750,7 @@ def _cmd_create_cli(
                 repository, anchors=roots,
                 **({"match_registered_remote": True} if prefix == "ssh" else {}),
             ) if repository else []:
-                argv += selection_cli_args({"source": plugin.source, "enable": plugin.enable})
+                argv += selection_cli_args(plugin.selection())
             for root in roots:
                 argv += ["--plugin-root", str(root)]
     if detach:

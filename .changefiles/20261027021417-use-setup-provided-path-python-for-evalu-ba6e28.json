@@ -1,0 +1,13 @@
+{
+  "comment": "Use setup-provided PATH Python for evaluator bootstrap without native compilation or interpreter attestation; report missing prerequisites explicitly.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Event
@@ -46,7 +47,12 @@ from textual.widgets import (
 
 from . import engine_client as ec
 from . import companion_client as cc
+from . import companion_observations as co
+from . import companion_attention as ca
+from .companion_topology import topology_view
 from . import handoff_client as hc
+from .companion_agenda import agenda_text, subscribe
+from .companion_timeline_widget import CompanionTimelinePanel
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -111,6 +117,12 @@ class _CompanionData:
     bundle: dict = field(default_factory=dict)
     bundle_error: str | None = None
     sessions_error: str | None = None
+    session_observation: dict | None = None
+    observation_error: str | None = "not-loaded"
+    attention: dict | None = None
+    attention_error: str | None = "not-loaded"
+    agenda: dict | None = None
+    agenda_error: str | None = "not-loaded"
 
 
 def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
@@ -322,10 +334,14 @@ class MuxCompanionApp(App):
         padding: 1 2;
     }
 
-    #lineage-label, #claims-evidence {
+    #lineage-label, #claims-evidence, #attention {
         padding: 0 2;
         color: #b2b2b2;
         text-style: bold;
+    }
+
+    #attention {
+        height: auto;
     }
 
     #lineage {
@@ -342,7 +358,7 @@ class MuxCompanionApp(App):
         padding: 0;
     }
 
-    #summary {
+    #summary, #topology, #agenda {
         height: auto;
         padding: 1 2;
     }
@@ -357,15 +373,16 @@ class MuxCompanionApp(App):
         align: center middle;
     }
 
-    #exit-btn, #cutover-btn, #refresh-btn {
-        width: 24;
+    #exit-btn, #cutover-btn, #refresh-btn, #view-btn {
+        width: 1fr;
+        min-width: 12;
         background: #454545;
         color: white;
         border: none;
         margin: 0 1;
     }
 
-    #exit-btn:focus, #cutover-btn:focus, #refresh-btn:focus {
+    #exit-btn:focus, #cutover-btn:focus, #refresh-btn:focus, #view-btn:focus {
         background: #d78700;
         color: black;
         text-style: bold;
@@ -379,24 +396,52 @@ class MuxCompanionApp(App):
 
     BINDINGS = [("r", "refresh", "Refresh"), ("escape", "quit", "Exit")]
 
-    def __init__(self, cwd: str | None = None) -> None:
+    def __init__(
+        self, cwd: str | None = None, *, cli_pane: str | None = None,
+        project: str | None = None, worktree_id: str | None = None,
+        session_incarnation: str | None = None,
+    ) -> None:
         super().__init__()
         self._cwd = cwd
+        self._cli_pane = cli_pane
+        self._observer_identity = (project, worktree_id, session_incarnation)
+        self._checking_cli = False
+        self._navigating = False
         self._data = _CompanionData()
         self._loading = True
         self._read_cancel = Event()
+        self._navigation_cancel = Event()
+        self._observation_cancel = Event()
+        self._observation_owner: _CompanionData | None = None
+        self._attention_cancel = Event()
+        self._attention_busy = False
+        self._attention_next = 0.0
+        self._agenda_cancel = Event()
+        self._agenda_worker = None
+        self._agenda_generation = 0
+        self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
+        self._timeline_panel = CompanionTimelinePanel(id="timeline")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Static(Text("Loading current worktree..."), id="status")
+        yield Static(ca.attention_text(None, "loading"), id="attention")
         with TabbedContent(initial="summary-tab", id="views"):
             with TabPane("Summary", id="summary-tab"):
                 with VerticalScroll():
                     yield Static(id="summary")
+            with TabPane("Timeline", id="timeline-tab"):
+                yield self._timeline_panel
             with TabPane("Claims", id="claims-tab"):
                 yield Static(id="claims-evidence")
                 yield DataTable(id="claims")
+            with TabPane("Agenda", id="agenda-tab"):
+                with VerticalScroll():
+                    yield Static(agenda_text(None, "loading"), id="agenda")
+            with TabPane("Graph", id="topology-tab"):
+                with VerticalScroll():
+                    yield Static(id="topology")
             with TabPane("Recovery", id="recovery-tab"):
                 yield Static(
                     "Session lineage (\u25cf marks the current head):",
@@ -406,24 +451,84 @@ class MuxCompanionApp(App):
                 yield Button("Cut over", id="cutover-btn", disabled=True)
         with Horizontal(id="footer-row"):
             yield Button("Refresh", id="refresh-btn")
+            yield Button(
+                "Return to CLI" if self._cli_pane else "Show Summary pane",
+                id="view-btn",
+            )
             yield Button("Exit", id="exit-btn")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._timeline_panel.set_demand_visible(False)
         self._reload()
+        self.set_interval(5, self._poll_attention)
+        if self._cli_pane and all(self._observer_identity):
+            self._poll_cli()
+            self.set_interval(1, self._poll_cli)
+
+    def _poll_cli(self) -> None:
+        if not self._checking_cli:
+            self._checking_cli = True
+            self._observe_cli()
+
+    @work(group="cli-lifecycle")
+    async def _observe_cli(self) -> None:
+        from .companion_lifecycle import cli_alive
+
+        project, worktree_id, incarnation = self._observer_identity
+        try:
+            alive = await asyncio.to_thread(
+                cli_alive, project, worktree_id, self._cli_pane,
+                session_incarnation=incarnation,
+            )
+            if alive is False:
+                self.action_quit()
+        finally:
+            self._checking_cli = False
 
     def on_unmount(self) -> None:
+        self._cancel_owned_reads()
+
+    def action_quit(self) -> None:
+        self._cancel_owned_reads()
+        self.exit()
+
+    def _cancel_owned_reads(self) -> None:
         self._read_cancel.set()
+        self._navigation_cancel.set()
+        self._observation_cancel.set()
+        self._attention_cancel.set()
+        self._agenda_cancel.set()
+        self._agenda_generation += 1
+        self._data.agenda = None
+        self._data.agenda_error = "subscription closed"
 
     @work(exclusive=True)
     async def _reload(self) -> None:
+        self._read_cancel.set()
+        self._agenda_cancel.set()
+        self._agenda_generation += 1
+        generation = self._agenda_generation
+        self._data.agenda = None
+        self._data.agenda_error = "loading; previous selection invalidated"
+        self._update_agenda()
+        if self._agenda_worker is not None:
+            await self._agenda_worker.wait()
+            self._agenda_worker = None
+        self._observation_cancel.set()
+        self._attention_cancel.set()
+        self._attention_busy = False
+        self._attention_next = 0.0
+        self._data.attention = None
+        self._data.attention_error = "loading"
+        self._update_attention()
         self._loading = True
         self.query_one("#refresh-btn", Button).disabled = True
         self.query_one("#cutover-btn", Button).disabled = True
         cancelled = Event()
         self._read_cancel = cancelled
         try:
-            self._data = await asyncio.to_thread(
+            data = await asyncio.to_thread(
                 _load_current_worktree, self._cwd,
                 runner=cc.cancellable_read_runner(
                     cancelled, cwd=self._cwd or os.getcwd(),
@@ -431,14 +536,197 @@ class MuxCompanionApp(App):
             )
         finally:
             cancelled.set()
+        if generation != self._agenda_generation:
+            return
+        self._data = data
         self._loading = False
         self._refresh_view(reload=False)
         self.query_one("#refresh-btn", Button).disabled = False
+        self._poll_attention(force=True)
+        self._start_agenda()
+        if self.query_one("#views", TabbedContent).active == "topology-tab":
+            self._load_observations()
+
+    def _start_agenda(self) -> None:
+        data = self._data
+        heads = [
+            row.get("id") for row in data.sessions
+            if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]
+        ]
+        worktree = data.worktree.get("id")
+        project = data.worktree.get("repo")
+        if not isinstance(project, str) or not project:
+            observer_project, observer_worktree, _ = self._observer_identity
+            project = observer_project if observer_worktree == worktree else None
+        if (
+            data.error or data.sessions_error or len(heads) != 1
+            or not isinstance(worktree, str) or not worktree
+            or not isinstance(project, str) or not project
+        ):
+            data.agenda_error = "selected project/worktree or exactly one head is unavailable"
+            self._update_agenda()
+            return
+        cancelled = Event()
+        self._agenda_cancel = cancelled
+        data.agenda_error = "awaiting provider snapshot (worktree-agendas-v1)"
+        self._update_agenda()
+        self._agenda_worker = self._subscribe_agenda(
+            data, self._agenda_generation, cancelled, project, worktree, heads[0],
+        )
+
+    def _update_agenda(self) -> None:
+        self.query_one("#agenda", Static).update(agenda_text(
+            self._data.agenda, self._data.agenda_error,
+        ))
+
+    def _receive_agenda(self, data, generation, cancelled, frame, error) -> None:
+        if (
+            cancelled.is_set() or self._data is not data
+            or generation != self._agenda_generation
+        ):
+            return
+        data.agenda, data.agenda_error = frame, error
+        self._update_agenda()
+
+    @work(thread=True, group="agenda-subscription")
+    def _subscribe_agenda(
+        self, data: _CompanionData, generation: int, cancelled: Event,
+        project: str, worktree: str, session: str,
+    ) -> None:
+        subscribe(
+            project, worktree, session, cancelled=cancelled,
+            cwd=self._cwd or os.getcwd(),
+            publish=lambda frame, error: self.call_from_thread(
+                self._receive_agenda, data, generation, cancelled, frame, error,
+            ),
+        )
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if self._timeline_panel.is_mounted:
+            self._timeline_panel.set_demand_visible(event.pane.id == "timeline-tab")
+        if event.pane.id == "topology-tab" and not self._loading:
+            if self._observation_owner is not self._data:
+                self._load_observations()
+
+    @work(exclusive=True, group="session-observations")
+    async def _load_observations(self) -> None:
+        data = self._data
+        self._observation_owner = data
+        heads = [row.get("id") for row in data.sessions
+                 if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]]
+        if len(heads) != 1:
+            data.observation_error = "head-session-unavailable"
+            self._update_topology()
+            return
+        cancelled = Event()
+        self._observation_cancel = cancelled
+        data.observation_error = "loading"
+        self._update_topology()
+        try:
+            result = await asyncio.to_thread(
+                co.read_session_observations, None, heads[0],
+                runner=cc.cancellable_read_runner(cancelled, cwd=self._cwd or os.getcwd()),
+            )
+            if not cancelled.is_set() and self._data is data:
+                data.session_observation = result["observation"]
+                data.observation_error = result["error"]
+                self._update_topology()
+        finally:
+            cancelled.set()
+
+    def _update_topology(self) -> None:
+        data = self._data
+        self.query_one("#topology", Static).update(topology_view(
+            data.worktree, data.bundle, data.session_observation,
+            data.bundle_error or data.observation_error,
+        ))
+
+    def _poll_attention(self, *, force=False) -> None:
+        if self._loading or self._attention_busy or (
+            not force and (time.monotonic() < self._attention_next
+                           or self._data.attention_error == "head-changed-refresh-required")
+        ):
+            return
+        self._attention_busy = True
+        self._load_attention(force=force)
+
+    @work(exclusive=True, group="session-attention")
+    async def _load_attention(self, *, force=False) -> None:
+        data, cancelled = self._data, Event()
+        self._attention_cancel = cancelled
+        self._attention_busy = True
+        try:
+            if self._cli_pane and not force:
+                from .companion_lifecycle import observer_visible
+
+                project, worktree_id, incarnation = self._observer_identity
+                visible = await asyncio.to_thread(
+                    observer_visible, project, worktree_id, self._observer_pane, incarnation,
+                )
+                if visible is not True:
+                    return
+            heads = [row.get("id") for row in data.sessions
+                     if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]]
+            if len(heads) != 1 or not data.worktree.get("id"):
+                result = {"attention": None, "error": "head-session-unavailable"}
+            else:
+                result = await asyncio.to_thread(
+                    ca.read_session_attention, None, data.worktree["id"], heads[0],
+                    runner=cc.cancellable_read_runner(cancelled, cwd=self._cwd or os.getcwd()),
+                )
+            if not cancelled.is_set() and self._data is data:
+                data.attention, data.attention_error = result["attention"], result["error"]
+                self._attention_next = time.monotonic() + (30 if result["error"] else 5)
+                self._update_attention()
+        finally:
+            cancelled.set()
+            if self._attention_cancel is cancelled:
+                self._attention_busy = False
+
+    def _update_attention(self) -> None:
+        data = self._data
+        self.query_one("#attention", Static).update(ca.attention_text(
+            data.attention, data.attention_error,
+        ))
+        button = self.query_one("#view-btn", Button)
+        label = "Return to CLI" if self._cli_pane else "Show Summary pane"
+        if self._cli_pane and data.attention and data.attention["availability"] == "observed":
+            if data.attention["rest"] == "awaiting-operator":
+                label = "CLI (last: input)"
+            elif data.attention["rest"] == "idle":
+                label = "CLI (last: idle)"
+        button.label = label
 
     def action_refresh(self) -> None:
         if not self._loading:
             self._action_message = None
             self._reload()
+
+    @work(exclusive=True, group="navigation")
+    async def _navigate(self) -> None:
+        from .companion_pane import PaneError, switch
+
+        self._navigating = True
+        self.query_one("#view-btn", Button).disabled = True
+        try:
+            await asyncio.to_thread(
+                switch, "return" if self._cli_pane else "show", self._cwd,
+                cli_pane=self._cli_pane,
+                cancelled=self._navigation_cancel,
+                session_incarnation=self._observer_identity[2],
+                runner=cc.cancellable_read_runner(
+                    self._navigation_cancel, cwd=self._cwd or os.getcwd(),
+                ),
+            )
+        except (PaneError, ec.EngineError) as exc:
+            self._action_message = Text(f"View switch failed: {exc}", style="bold red")
+            self._refresh_view(reload=False)
+        else:
+            if not self._cli_pane:
+                self.exit()
+        finally:
+            self._navigating = False
+            self.query_one("#view-btn", Button).disabled = False
 
     def _refresh_view(self, *, reload: bool = True) -> None:
         """(Re)paint the whole view from ``self._data`` -- optionally
@@ -456,6 +744,8 @@ class MuxCompanionApp(App):
         self.sub_title = f"{repo} \u00b7 {branch}"
         self.query_one("#status", Static).update(self._status_text())
         self.query_one("#summary", Static).update(_summary_text(self._data))
+        self._update_attention()
+        self._update_topology()
         evidence, resources = _claims_view(self._data)
         self.query_one("#claims-evidence", Static).update(evidence)
         claims_table = self.query_one("#claims", DataTable)
@@ -550,17 +840,52 @@ class MuxCompanionApp(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "exit-btn":
-            self.exit()
+            self.action_quit()
         elif event.button.id == "refresh-btn":
             self.action_refresh()
         elif event.button.id == "cutover-btn":
             self._cut_over()
+        elif event.button.id == "view-btn" and not self._navigating:
+            self._navigate()
 
 
-def run() -> int:
-    MuxCompanionApp().run()
+def run(
+    cwd: str | None = None, cli_pane: str | None = None, *,
+    project: str | None = None, worktree_id: str | None = None,
+    session_incarnation: str | None = None,
+) -> int:
+    try:
+        MuxCompanionApp(
+            cwd, cli_pane=cli_pane, project=project, worktree_id=worktree_id,
+            session_incarnation=session_incarnation,
+        ).run()
+    finally:
+        if cli_pane:
+            from .companion_pane import PaneError, switch
+
+            try:
+                runner = cc.cancellable_read_runner(Event(), cwd=cwd or os.getcwd())
+                switch(
+                    "return", cwd, cli_pane=cli_pane,
+                    runner=lambda command, timeout: runner(command, min(timeout, 2)),
+                    session_incarnation=session_incarnation,
+                )
+            except (PaneError, ec.EngineError):
+                pass
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cwd")
+    parser.add_argument("--cli-pane")
+    parser.add_argument("--project")
+    parser.add_argument("--worktree-id")
+    parser.add_argument("--session-incarnation")
+    args = parser.parse_args()
+    raise SystemExit(run(
+        args.cwd, args.cli_pane, project=args.project, worktree_id=args.worktree_id,
+        session_incarnation=args.session_incarnation,
+    ))

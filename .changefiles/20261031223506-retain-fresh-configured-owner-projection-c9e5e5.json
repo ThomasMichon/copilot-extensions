@@ -1,0 +1,9 @@
+{
+  "comment": "Retain fresh configured-owner projection requests and recover exact original cohort results",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

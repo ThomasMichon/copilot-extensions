@@ -28,6 +28,10 @@ def portfolio(monkeypatch, tmp_path):
         (directory / "plugin.json").write_text(json.dumps({
             "name": directory.name, "version": "2", "runtimeScope": "universal",
         }))
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text(
+            "# AGENT_WORKTREES_TARGETED_UPDATE\nexit 0\n",
+        )
     targets = {"agent-example": update_runtime._RegisteredPluginTarget(
         context=tmp_path, activation=update_runtime._PluginActivation.ACTIVE,
     )}
@@ -50,6 +54,214 @@ def portfolio(monkeypatch, tmp_path):
     monkeypatch.setattr(update_cli, "_run_engine_installer",
                         lambda *a, **kw: calls.append(["engine-installer"]) or 0)
     return engine, peer, calls
+
+
+@pytest.fixture
+def phase_portfolio(portfolio, monkeypatch):
+    from agent_worktrees import update_acquisition, update_integration
+
+    engine, peer, calls = portfolio
+    planned = []
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda name, directory: (
+            planned.append(name) or {"PLAN_TARGET": name}, directory,
+        ),
+    )
+    monkeypatch.setattr(
+        update_acquisition, "acquire",
+        lambda name, *a, **kw: calls.append(["payload", name]) or "OK",
+    )
+    monkeypatch.setattr(
+        core, "_update_registered_plugins",
+        lambda targets, **kw: calls.append(["payloads", *sorted(targets)]) or True,
+    )
+    monkeypatch.setattr(
+        update_runtime, "_run_human_installer",
+        lambda *a, **kw: calls.append(["runtime", kw["cwd"].name]) or SimpleNamespace(status="OK"),
+    )
+    monkeypatch.setattr(update_integration, "finish",
+                        lambda *a: calls.append(["integration"]) or True)
+    monkeypatch.setattr(core, "_fast_forward_project_anchors", lambda: calls.append(["anchors"]))
+    monkeypatch.setattr(core, "_prune_stale_pivots_after_update", lambda: calls.append(["prune"]))
+    return engine, peer, calls, planned
+
+
+def _phase_args(phase, plugins=None):
+    return argparse.Namespace(
+        phase=phase, plugin=plugins, force=False, force_runtime=None,
+        skip_modules=None, no_anchor_sync=False, no_prune_pivots=False,
+    )
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+@pytest.mark.parametrize("phase", ["preflight", "runtimes"])
+def test_selected_runtime_does_not_plan_or_execute_unrelated_work(
+    phase_portfolio, monkeypatch, kind, phase,
+):
+    engine, peer, calls, planned = phase_portfolio
+    if kind == "module":
+        (engine / "modules.json").write_text(json.dumps({"modules": [{"name": peer.name}]}))
+    target = update_runtime._RegisteredPluginTarget(
+        context=engine.parent, activation=update_runtime._PluginActivation.ACTIVE,
+    )
+    discoveries = []
+    monkeypatch.setattr(
+        core, "_registered_plugin_targets",
+        lambda: discoveries.append(True) or {peer.name: target, "agent-unrelated": target},
+    )
+    assert update_cli._update_in_plugin_steps(_phase_args(phase, [peer.name])) == 0
+    assert discoveries == [True]
+    assert planned == [peer.name]
+    assert calls == ([] if phase == "preflight" else [["runtime", peer.name]])
+
+
+@pytest.mark.parametrize("phase", ["anchors", "prune"])
+def test_repository_phase_does_not_discover_plugins_or_runtimes(phase_portfolio, monkeypatch, phase):
+    _engine, _peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(core, "_registered_plugin_targets",
+                        lambda: pytest.fail("unselected plugin discovery"))
+    monkeypatch.setattr(core, "_find_installed_plugin_dir",
+                        lambda: pytest.fail("unselected payload discovery"))
+    assert update_cli._update_in_plugin_steps(_phase_args(phase)) == 0
+    assert calls == [[phase]]
+    assert planned == []
+
+
+@pytest.mark.parametrize("engine_only", [False, True])
+def test_payload_phase_only_acquires_selected_payload(phase_portfolio, monkeypatch, engine_only):
+    _engine, peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(core, "_find_installed_plugin_dir",
+                        lambda: pytest.fail("payload-only phase entered preflight"))
+    name = "agent-worktrees" if engine_only else peer.name
+    assert update_cli._update_in_plugin_steps(_phase_args("payloads", [name])) == 0
+    assert calls == ([["payload", name]] if engine_only else [["payloads", name]])
+    assert planned == []
+
+
+def test_integration_phase_uses_engine_scope_without_plugin_sweep(phase_portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, _peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(core, "_registered_plugin_targets",
+                        lambda: pytest.fail("integration enumerated plugins"))
+    monkeypatch.setattr(update_runtime_plan, "plan_modules",
+                        lambda *a, **kw: pytest.fail("integration planned modules"))
+    monkeypatch.setattr(update_runtime_plan, "plan_engine",
+                        lambda *a, **kw: pytest.fail("integration planned an installer"))
+    assert update_cli._update_in_plugin_steps(_phase_args("integration")) == 0
+    assert calls == [["integration"]]
+    assert planned == ["agent-worktrees"]
+
+
+def test_integration_phase_refuses_invalid_selected_scope(phase_portfolio, monkeypatch):
+    _engine, _peer, calls, _planned = phase_portfolio
+
+    def refuse(*args):
+        raise ValueError("selected installation context is invalid")
+
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", refuse)
+    assert update_cli._update_in_plugin_steps(_phase_args("integration")) == 1
+    assert calls == []
+
+
+@pytest.mark.parametrize("phase", ["payloads", "preflight", "runtimes"])
+def test_unknown_selected_plugin_refuses_before_any_effect(phase_portfolio, phase):
+    _engine, _peer, calls, planned = phase_portfolio
+    assert update_cli._update_in_plugin_steps(_phase_args(phase, ["agent-typo"])) == 1
+    assert calls == planned == []
+
+
+def test_selected_runtime_blocker_does_not_run_other_phases(phase_portfolio):
+    _engine, peer, calls, _planned = phase_portfolio
+    (peer / "scripts" / "install.sh").unlink()
+    assert update_cli._update_in_plugin_steps(_phase_args("runtimes", [peer.name])) == 1
+    assert calls == []
+
+
+def test_selected_peer_requires_readable_module_ownership(phase_portfolio):
+    engine, peer, calls, _planned = phase_portfolio
+    (engine / "modules.json").write_text("{")
+    assert update_cli._update_in_plugin_steps(_phase_args("runtimes", [peer.name])) == 1
+    assert calls == []
+
+
+def test_engine_only_phase_does_not_read_unrelated_module_manifest(phase_portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    engine, _peer, calls, planned = phase_portfolio
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text("AGENT_WORKTREES_TARGETED_UPDATE")
+    monkeypatch.setattr(update_runtime_plan, "plan_modules",
+                        lambda *a, **kw: pytest.fail("engine-only phase read module manifest"))
+    assert update_cli._update_in_plugin_steps(_phase_args("preflight", ["agent-worktrees"])) == 0
+    assert calls == []
+    assert planned == ["agent-worktrees"]
+
+
+@pytest.mark.parametrize("phase", ["preflight", "runtimes"])
+@pytest.mark.parametrize("supported", [False, True])
+def test_engine_phase_refuses_unscoped_installer_and_suppresses_recovery(
+    phase_portfolio, monkeypatch, phase, supported,
+):
+    engine, _peer, calls, _planned = phase_portfolio
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text(
+            "AGENT_WORKTREES_TARGETED_UPDATE" if supported else "old installer",
+        )
+    environments = []
+    monkeypatch.setattr(
+        update_cli, "_run_engine_installer",
+        lambda argv, payload, deadline, environment, **kw:
+        environments.append(dict(environment)) or 0,
+    )
+    args = _phase_args(phase, ["agent-worktrees"])
+    args.force = True
+    assert update_cli._update_in_plugin_steps(args) == (0 if supported else 1)
+    assert calls == []
+    assert len(environments) == int(supported and phase == "runtimes")
+    for environment in environments:
+        assert environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"
+        assert environment["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] == "1"
+
+
+@pytest.mark.parametrize("filtered", [False, True])
+def test_failed_payload_refresh_does_not_escape_explicit_filter(
+    phase_portfolio, monkeypatch, filtered,
+):
+    from agent_worktrees import update_auth_context as auth
+
+    engine, peer, calls, _planned = phase_portfolio
+    selected_context = engine.parent / "selected-context"
+    unrelated_context = engine.parent / "unrelated-context"
+    target = update_runtime._RegisteredPluginTarget(
+        selected_context, update_runtime._PluginActivation.ACTIVE,
+    )
+    monkeypatch.setattr(core, "_registered_plugin_targets", lambda: {peer.name: target})
+    monkeypatch.setattr(core, "_update_registered_plugins", update_runtime._update_registered_plugins)
+    monkeypatch.setattr(core, "_project_update_context", lambda: unrelated_context)
+    prepared, refreshed = [], []
+    monkeypatch.setattr(auth, "prepare_marketplace", lambda context, **kw: prepared.append(context))
+    monkeypatch.setattr(core, "_refresh_marketplace",
+                        lambda marketplace, **kw: refreshed.append(kw["cwd"]) or False)
+    monkeypatch.setattr(core, "_update_one_plugin_payload", lambda *a, **kw: "acquisition failed")
+    assert update_cli._update_in_plugin_steps(
+        _phase_args("payloads", [peer.name] if filtered else None),
+    ) == 1
+    expected = [selected_context] if filtered else [selected_context, unrelated_context]
+    assert prepared == refreshed == expected
+    assert calls == ([] if filtered else [["payload", "agent-worktrees"]])
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+def test_selected_runtime_failure_is_not_success_or_integration(phase_portfolio, monkeypatch, kind):
+    engine, peer, calls, _planned = phase_portfolio
+    if kind == "module":
+        (engine / "modules.json").write_text(json.dumps({"modules": [{"name": peer.name}]}))
+    monkeypatch.setattr(update_runtime, "_run_human_installer",
+                        lambda *a, **kw: SimpleNamespace(status="install exited 7"))
+    assert update_cli._update_in_plugin_steps(_phase_args("runtimes", [peer.name])) == 1
+    assert calls == []
 
 
 @pytest.mark.parametrize("kind", ["registered", "module"])
@@ -99,6 +311,128 @@ def test_plan_execution_uses_collected_command_and_environment(portfolio, monkey
     assert captured[0][1]["env"] == {"PLAN_TARGET": peer.name}
     assert captured[0][1]["cwd"] == peer
     assert captured[0][1]["target_version"] == "2"
+
+
+@pytest.mark.parametrize("name,explicit_repo", [
+    ("agent-index", False), ("agent-index", True), ("agent-bridge", False),
+])
+def test_index_activation_retains_logical_repo_without_changing_artifact(
+    portfolio, monkeypatch, name, explicit_repo,
+):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, payload, _calls = portfolio
+    project = payload.parent / "consumer"
+    project.mkdir()
+    explicit = payload.parent / "explicit-repo"
+    environment = {"AGENT_INDEX_REPO": str(explicit)} if explicit_repo else {}
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *args: (environment, payload.parent / "runtime"),
+    )
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep(name, "module_update", payload), None, project,
+    )
+    assert not step.blocked
+    assert step.artifact == payload and step.project_root == project
+    expected = str(explicit) if explicit_repo else str(project) if name == "agent-index" else None
+    assert step.environment.get("AGENT_INDEX_REPO") == expected
+
+
+def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan, update_runtime_target
+
+    _engine, payload, _calls = portfolio
+    source = SimpleNamespace(
+        payload=payload, identity="prepared-source", version="2",
+        validate=lambda *args: None,
+    )
+    monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep("agent-index", "runtime_reconcile", payload),
+        source,
+    )
+    assert not step.blocked
+    assert step.project_root is None and "AGENT_INDEX_REPO" not in step.environment
+    assert step.environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] == str(Path.cwd().resolve())
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_index_update_selects_real_host_repository(tmp_path, monkeypatch, kind, prepared):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import update_runtime_plan, update_runtime_target
+
+    payload = Path(__file__).resolve().parents[2] / "agent-index"
+    repos = {}
+    for role, machine in (("client", "remote-fixture"), ("host", "local-fixture")):
+        repo = tmp_path / role
+        repo.mkdir()
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True,
+                       timeout=10, **no_window_kwargs())
+        (repo / ".agent-index").mkdir()
+        (repo / ".agent-index" / "config.yaml").write_text(
+            f"indexer:\n  machine: {machine}\n  ssh: {machine}\n", encoding="utf-8",
+        )
+        repos[role] = repo
+    monkeypatch.setattr(core, "_invocation_update_context", lambda: repos["client"])
+    monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(repos={
+        role: SimpleNamespace(anchor=str(repos[role]))
+        for role in ("client", "host")
+    }))
+    monkeypatch.setattr(config, "detect_machine", lambda *args: "local-fixture")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda *args: ["agent-index"])
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
+    monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: ["agent-index"])
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda *args: payload)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment",
+                        lambda *args: (dict(os.environ, AGENT_INDEX_MACHINE="local-fixture"),
+                                       tmp_path / "runtime"))
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kwargs: "old")
+    gate_contexts = []
+    monkeypatch.setattr(
+        update_runtime, "_machine_gate_blocks",
+        lambda name, scope, project: gate_contexts.append(project) or project == repos["client"],
+    )
+    target_environments = []
+    monkeypatch.setattr(
+        update_runtime_target, "plan_target",
+        lambda *args: target_environments.append(dict(args[-1])) or None,
+    )
+    target = update_runtime._registered_plugin_targets()["agent-index"]
+    assert set(target.repository_contexts) == set(repos.values())
+    plan = (update_runtime_plan.plan_module if kind == "module"
+            else update_runtime_plan.plan_registered)
+    args = ("agent-index", payload, "windows" if os.name == "nt" else "linux") if (
+        kind == "module"
+    ) else ("agent-index", "windows" if os.name == "nt" else "linux")
+    step = plan(*args, force=True, gate_context=target.context,
+                repository_contexts=target.repository_contexts,
+                **({"source": SimpleNamespace(
+                    payload=payload, identity="prepared-source", version="new",
+                    validate=lambda *args: None, deployed_version=lambda *args, **kwargs: "old",
+                )} if prepared else {}))
+    assert not step.blocked, step.status
+    assert step.project_root == repos["host"]
+    assert step.environment["AGENT_INDEX_REPO"] == str(repos["host"])
+    assert step.artifact == payload
+    assert gate_contexts and set(gate_contexts) == {repos["host"]}
+    if prepared:
+        assert target_environments[0]["AGENT_INDEX_REPO"] == str(repos["host"])
+
+
+def test_index_multi_repository_role_failure_blocks_preflight(portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, payload, calls = portfolio
+    project = payload.parent / "consumer"
+    other = payload.parent / "other"
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep("agent-index", "module_update", payload),
+        None, project, repository_contexts=(project, other),
+    )
+    assert step.blocked and "role resolver is unavailable" in step.status
+    assert not calls and not step.argv
 
 
 def test_collected_environment_is_an_immutable_snapshot(portfolio, monkeypatch):
@@ -215,3 +549,63 @@ def test_native_update_preflight_prevents_real_installer_side_effect(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Required runtime preflight failed" in result.stdout + result.stderr
     assert "PREFLIGHT_BLOCKED_WITHOUT_ACTIVATION" in result.stdout
+
+
+@pytest.mark.parametrize("kind", ["module", "registered"])
+@pytest.mark.parametrize("change", ["none", "missing", "extra", "changed-artifact"])
+def test_whole_update_keeps_prepared_sources_and_original_owners(
+    portfolio, monkeypatch, tmp_path, kind, change,
+):
+    from agent_worktrees import update_integration
+    from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
+    from test_update_runtime_sources import packet
+
+    engine, peer, calls = portfolio
+    if kind == "module":
+        (engine / "modules.json").write_text(json.dumps({"modules": [{"name": peer.name}]}))
+    artifacts = tmp_path / "prepared"
+    artifacts.mkdir()
+    data = packet(artifacts, (engine.name, peer.name))
+    if change == "missing":
+        del data["sources"][peer.name]
+    if change == "extra":
+        data["sources"].update(packet(artifacts, ("inactive",))["sources"])
+    for name in data["sources"]:
+        artifact = artifacts / name
+        (artifact / "scripts").mkdir()
+        (artifact / "scripts/install.sh").write_text("exit 0\n")
+        (artifact / "plugin.json").write_bytes((engine / "plugin.json").read_bytes())
+    validated, executed = [], []
+
+    def validate(source, name, owner, environment):
+        validated.append((name, owner, source.payload))
+        if change == "changed-artifact" and name == peer.name:
+            raise ValueError("prepared payload bytes changed")
+
+    monkeypatch.setattr(PreparedRuntimeSource, "validate", validate)
+    monkeypatch.setattr(PreparedRuntimeSource, "deployed_version", lambda *a, **kw: None)
+    monkeypatch.setattr(update_cli, "_run_engine_installer", lambda *a, **kw: (
+        executed.append(kw["source_step"]) or 0
+    ))
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda step: (
+        executed.append(step) or "OK"
+    ))
+    monkeypatch.setattr(update_integration, "finish", lambda *a: True)
+    args = argparse.Namespace(
+        no_manager=True, runtime_sources=json.dumps(data), skip_modules=None,
+        no_anchor_sync=True, no_prune_pivots=True,
+    )
+    assert update_cli._update_in_plugin_steps(args) == (0 if change == "none" else 1)
+    assert len(executed) == (2 if change == "none" else 0)
+    if change == "none":
+        assert validated == [
+            (engine.name, engine, artifacts / engine.name),
+            (peer.name, peer, artifacts / peer.name),
+        ]
+        for step in executed:
+            assert step.payload == (engine if step.name == engine.name else peer)
+            assert step.artifact == artifacts / step.name
+            assert step.environment[PIN_ENV] == step.source.identity
+            assert step.environment["COPILOT_PLUGIN_STAGED_FROM"] == str(step.payload)
+            assert step.runtime_root == tmp_path / step.name
+    assert calls == [["copilot", "plugin", "update", "agent-worktrees@copilot-extensions"]]

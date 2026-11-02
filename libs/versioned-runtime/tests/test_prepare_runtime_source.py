@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 import pytest
 
@@ -19,6 +20,52 @@ sys.path.insert(0, str(TOOLS))
 import prepare_runtime_source as source_runtime
 
 PLUGIN = "agent-fixture"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows transient rename locks")
+@pytest.mark.parametrize("failures", [1, 3, 4])
+def test_prepared_publication_retries_only_bounded_transient_locks(tmp_path, monkeypatch, failures):
+    payload, destination = tmp_path / "payload", tmp_path / "published"
+    payload.mkdir()
+    (payload / "selected.txt").write_text("selected")
+    actual = Path.rename
+    attempts, sleeps = [], []
+
+    def locked(path, target):
+        attempts.append((path, target))
+        if len(attempts) <= failures:
+            raise PermissionError("synthetic transient sharing lock")
+        return actual(path, target)
+
+    monkeypatch.setattr(Path, "rename", locked)
+    monkeypatch.setattr(source_runtime.time, "sleep", sleeps.append)
+    if failures < 4:
+        source_runtime._rename_prepared(payload, destination, deadline=time.monotonic() + 10)
+        assert (destination / "selected.txt").read_text() == "selected"
+        assert len(attempts) == failures + 1
+    else:
+        with pytest.raises(PermissionError):
+            source_runtime._rename_prepared(payload, destination, deadline=time.monotonic() + 10)
+        assert not destination.exists() and (payload / "selected.txt").is_file()
+        assert len(attempts) == 4
+    assert len(sleeps) == min(failures, 3)
+
+
+def test_prepared_publication_never_retries_permanent_or_expired_errors(tmp_path, monkeypatch):
+    attempts = []
+
+    def refuse(path, target):
+        attempts.append(path)
+        raise FileExistsError("foreign destination")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    monkeypatch.setattr(source_runtime.time, "sleep", lambda *args: pytest.fail("permanent error retried"))
+    with pytest.raises(FileExistsError):
+        source_runtime._rename_prepared(tmp_path / "input", tmp_path / "output", deadline=time.monotonic() + 10)
+    assert len(attempts) == 1
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime._rename_prepared(tmp_path / "input", tmp_path / "output", deadline=time.monotonic() - 1)
+    assert len(attempts) == 1
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -91,6 +138,69 @@ def test_prepare_is_noneditable_relocatable_and_reuses_exact_bytes(
     assert (first.payload / "pyproject.toml").read_bytes() == (
         root / "plugins" / PLUGIN / "pyproject.toml"
     ).read_bytes()
+
+
+@pytest.mark.parametrize("archive_mask", ["0000", "0002", "0077"])
+def test_prepare_retains_safe_executable_modes_independent_of_git_config(
+    repository, tmp_path, monkeypatch, archive_mask,
+):
+    root, _commit = repository
+    script = root / "plugins" / PLUGIN / "scripts" / "install.sh"
+    script.chmod(0o755)
+    _git(root, "update-index", "--chmod=+x", "--", str(script.relative_to(root)))
+    commit = _merged_commit(root)
+    _git(root, "config", "tar.umask", archive_mask)
+    extract = source_runtime._extract_archive
+    archived_modes = {}
+
+    def observe_archive(archive, destination, **options):
+        with tarfile.open(archive, "r:") as incoming:
+            archived_modes.update(
+                (member.name, member.mode) for member in incoming if member.isfile()
+            )
+        return extract(archive, destination, **options)
+
+    monkeypatch.setattr(source_runtime, "_extract_archive", observe_archive)
+    prepared = source_runtime.prepare(root, commit, PLUGIN, tmp_path / "prepared")
+    assert archived_modes[f"plugins/{PLUGIN}/scripts/install.sh"] == 0o755
+    assert archived_modes[f"plugins/{PLUGIN}/pyproject.toml"] == 0o644
+    assert (prepared.payload / "scripts/install.sh").read_bytes() == script.read_bytes()
+    if os.name != "nt":
+        assert (prepared.payload / "scripts/install.sh").stat().st_mode & 0o777 == 0o755
+
+
+@pytest.mark.parametrize("deadline", [True, 0, float("nan"), float("inf")])
+def test_preparation_deadline_refuses_before_git_or_output(
+    repository, tmp_path, monkeypatch, deadline,
+):
+    monkeypatch.setattr(
+        source_runtime, "_git", lambda *args, **options: pytest.fail("invalid deadline ran Git"),
+    )
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime.prepare(*repository, PLUGIN, tmp_path / "prepared", deadline=deadline)
+    assert not (tmp_path / "prepared").exists()
+
+
+def test_preparation_git_child_preserves_original_deadline(repository, monkeypatch):
+    actual = source_runtime.subprocess.run
+    timeouts = []
+
+    def run(command, **options):
+        timeouts.append(options["timeout"])
+        return actual(command, **options)
+
+    monkeypatch.setattr(source_runtime.subprocess, "run", run)
+    assert source_runtime._git(repository[0], "rev-parse", "HEAD", deadline=time.monotonic() + 5) == repository[1]
+    assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
+
+
+def test_deadline_is_checked_between_archive_copy_chunks(monkeypatch):
+    clock = iter((1.0, 3.0))
+    monkeypatch.setattr(source_runtime.time, "monotonic", lambda: next(clock))
+    copied = io.BytesIO()
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime._copy(io.BytesIO(b"x" * ((1 << 20) + 1)), copied, deadline=2.0)
+    assert len(copied.getvalue()) == 1 << 20
 
 
 def test_same_package_version_new_commit_gets_another_generation(

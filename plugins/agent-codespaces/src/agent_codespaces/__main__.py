@@ -299,6 +299,10 @@ def main(argv: list[str] | None = None) -> int:
              "agent-bridge dispatch path; dispatch-scoped, not globally enabled.",
     )
     from .plugin_preparation import disabled_plugin
+    from plugin_resolve.reflection import selection_json
+    ssh_parser.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     ssh_parser.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
     )
@@ -730,6 +734,11 @@ def main(argv: list[str] | None = None) -> int:
              "install/update uses this to gate service provisioning (does not "
              "start the daemon)",
     )
+    owner_p.add_argument(
+        "--stop", action="store_true",
+        help="request cooperative shutdown of the verified running owner and "
+             "wait for its normal channel cleanup (never kills a process)",
+    )
 
     # --- status ---
     sub.add_parser("status", help="Show service status")
@@ -860,6 +869,9 @@ def main(argv: list[str] | None = None) -> int:
     ns_resolve_p.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
     )
+    ns_resolve_p.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     ns_target_p = sub.add_parser(
         "namespace-target-repo",
         help="Print the workspace repo a codespace hosts (empty if unknown).",
@@ -873,6 +885,9 @@ def main(argv: list[str] | None = None) -> int:
     plugin_plan_p = sub.add_parser("plugin-plan", help="Print the selected plugin preparation plan as JSON")
     plugin_plan_p.add_argument("name")
     plugin_plan_p.add_argument("--repo")
+    plugin_plan_p.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json, default=[],
+    )
     plugin_plan_p.add_argument(
         "--plugin-root", dest="plugin_roots", action="append", default=[], metavar="PATH",
         help="Controller checkout to prefer for payload lookup (repeatable, highest priority first).",
@@ -892,7 +907,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- dev-release / dev-status (mutable-dev-slot, #3376 Phase 2) ---
     # `dev-claim`/`slot`/`activate` stay installer-time only (they need this
-    # worktree's own checkout to build the editable slot); a *release* must
+    # worktree's source to build an immutable generation); a *release* must
     # work even when the operator is no longer standing in a source checkout
     # (e.g. reacting to an `agent-worktrees finalize` warning) -- see
     # docs/patterns/mutable-dev-slot.md "Runtime accessibility". Both verbs
@@ -1048,6 +1063,7 @@ def main(argv: list[str] | None = None) -> int:
             from .plugin_preparation import plugin_plan
             print(json.dumps(plugin_plan(
                 args.repo or _lookup_codespace_repo(args.name), load_merged_config(),
+                sources=args.stage_plugins,
                 repo_roots=args.plugin_roots,
             )))
             return 0

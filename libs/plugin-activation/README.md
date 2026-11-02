@@ -96,6 +96,44 @@ live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
 
+Successful registered-project Git identity checks have an input-bound file memo
+under that registry's `cache/project-identities.json`. Ordinary `.git` directory
+and bare-anchor layouts reuse the check across processes only while the canonical
+root/directory identities, ancestor name-binding write metadata, normalized expected remote, selected Git executable
+metadata, plus `HEAD`, `config` and `config.worktree` presence, content, inode
+and write metadata agree.
+Inputs are checked before and after a fresh successful probe before publication.
+Write metadata remains in the key even when bytes return to their prior value,
+so file and directory A-to-B-to-A changes during probing cannot publish a false
+positive for A. Canonical ancestor directory versions also bind the root name,
+so moving/restoring an entire root or its parent cannot hide behind unchanged
+metadata on the restored repository object. These are bounded ancestor metadata
+reads, not a tree scan; ancestor ownership does not add a new admission rule.
+Optional legacy-container directories are bound even when empty;
+legacy `remotes/origin` or `branches/origin` definitions retain real Git probes
+instead of reusing a result with an untracked URL source.
+Access-time changes from reading files do not invalidate otherwise equal inputs.
+Windows uses native handle-bound file IDs and `FILE_BASIC_INFO.ChangeTime`, not
+Python stat creation time, to detect in-place rewrites even when mtime is restored.
+Unavailable/uncertain native change stamps retain fresh Git probes. Native handles
+are closed on both successful and refused observations; no extra process is launched.
+
+This memo does not persist activation, settings, topology or policy decisions:
+registries, activation settings and marketplace/provider evidence are still read
+on each resolution. Gitfiles, common-directory indirection, symlinks/reparse
+points, config includes and `core.worktree` retain fresh Git probes rather than
+claiming a complete dependency footprint. Memo eligibility additionally requires
+current-principal ownership of the repository directories on every read. POSIX
+uses effective UID and current stat ownership; Windows reuses the existing
+`agent-procutil` current-token owner checker when available. Without that optional
+checker or with uncertain/foreign ownership, resolution keeps real Git checks;
+it never installs a dependency to make a memo hit. Missing, invalid or unreadable memos
+also use fresh probes; cache publication failure is reported and never replaces
+fresh discovery with a success-shaped empty result. Publication uses the existing
+atomic state writer, and unchanged snapshots are not rewritten. Session-start
+consumers naturally warm the same memo without an additional CLI scan; this is
+not a full session-lifetime activation snapshot.
+
 `resolve_active_plugins(concurrent_roots=True)` optionally overlaps up to four
 independent local-root reads within each activation scope. The default remains
 serial. Results and findings are merged in the original source order; excluded

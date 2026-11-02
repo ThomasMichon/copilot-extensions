@@ -133,6 +133,7 @@ _EXTRA_CONSUMER_DIRS = uer._EXTRA_CONSUMER_DIRS
 _IGNORE_PARTS = {
     ".git",
     ".pytest_cache",
+    ".test-runs",
     ".ruff_cache",
     ".venv",
     "__pycache__",
@@ -285,6 +286,8 @@ def _find_symlink(tree: Path) -> str | None:
     if not tree.is_dir():
         return None
     for entry in sorted(tree.rglob("*")):
+        if ".test-runs" in entry.relative_to(tree).parts:
+            continue
         if entry.is_symlink():
             return str(entry.relative_to(tree))
     return None
@@ -330,7 +333,7 @@ def _remove_path(p: Path) -> None:
 
 
 def _safe_replace_tree(src: Path, dst: Path, *, label: str) -> None:
-    """Replace ``dst`` with a copy of ``src``, refusing any symlink under
+    """Replace ``dst`` with a scratch-filtered copy of ``src``, refusing any symlink under
     ``src`` (``shutil.copytree``'s default ``symlinks=False`` follows and
     dereferences a symlink, which would otherwise let a malicious or
     accidental symlink under a canonical lib's ``src/``/``tests/`` leak
@@ -356,7 +359,7 @@ def _safe_replace_tree(src: Path, dst: Path, *, label: str) -> None:
         )
     _remove_path(dst)
     if src.is_dir():
-        shutil.copytree(src, dst)
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".test-runs"))
 
 
 def _copy_src(src_lib: Path, dst_lib: Path) -> None:

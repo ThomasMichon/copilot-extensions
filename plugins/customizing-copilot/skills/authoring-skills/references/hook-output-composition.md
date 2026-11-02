@@ -37,9 +37,26 @@ is implementation work toward preserving every start-hook value. Do not treat a
 merged change, one development build, or one successful launch as the supported
 contract.
 
+## Circumstantial intervention is event-specific
+
+Startup composition and event-time intervention are different contracts.
+Instruction-injection hooks are circumstance-based skills; a startup file or
+once-per-session acknowledgement cannot replace occurrence detection. See the
+[portable hook contract](circumstantial-hooks.md) for fact exposure, scoped
+acknowledgement, error/retry behavior and deadline/cleanup ownership.
+
+A first-call bounce may carry `additionalContext` where that exact event/host
+supports it, or another supported agent-readable response field plus an explicit
+retry instruction. Do not claim `preToolUse` `additionalContext` is delivered on all
+hosts. An advisory intervention need not block. Acknowledgement is not permission
+or proof that a condition was resolved, and a known rule still needs evaluation
+for a new circumstance. Stderr alone is not proof the agent received remediation.
+Retain existing event/field composition and required policy decisions.
+
 ## Current reliable pattern
 
-Critical ambient guidance uses two plugin-owned pieces:
+Critical ambient session guidance uses two plugin-owned pieces; this does not
+replace circumstantial event-time evaluation or delivery:
 
 1. A checked-in static instruction projection tells the agent where the exact
    session's dynamic guidance file will appear and treats a missing file as a

@@ -143,7 +143,7 @@ The accepted dispositions are:
 | `ignore` | Default for undeclared/unhandled keys; restore is allowlist-based. |
 | `exclude` | Accepted as capture guard data; no capture implementation yet. |
 | `prune` | Accepted by the schema; `agent-machines prune` is a placeholder today. |
-| `prerequisite-check` | Accepted by the schema; no live prerequisite checker today. |
+| `prerequisite-check` | Accepted as manage-schema data; no generic manage checker. Typed `gh-account` resources provide bounded read-only account prerequisites through the resource pipeline. |
 
 ## Reconcile pipeline
 

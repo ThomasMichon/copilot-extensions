@@ -54,10 +54,22 @@ emit_session_start_json() {
 trap 'emit_session_start_json' EXIT
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then exit 0; fi
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
+case "$py" in
+  /*|[A-Za-z]:/*|[A-Za-z]:\\*|\\\\*) ;;
+  *) py="$PWD/$py" ;;
+esac
 name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0
 InstallDir="$HOME/.$name"
 assert_bootstrap_publication() {
+  local action_rc=0
+  "$py" -I -B "$ScriptDir/action_controls.py" \
+      --root "$InstallDir" --action automatic-runtime-reconcile --automatic >/dev/null || action_rc=$?
+  if [[ "$action_rc" != 0 ]]; then
+    printf '[%s] Automatic runtime reconciliation skipped; retry on a later session start after resolving the reported action policy.\n' "$name" >&2
+    [[ "$action_rc" != 3 ]] || exit 3
+    exit 126
+  fi
   local helper="$ScriptDir/installation-context/plugin-publication-probe.sh"
   if [[ -f "$helper" ]]; then
     bash "$helper" "$PluginDir" "$name" "$InstallDir" && return 0
@@ -82,7 +94,12 @@ if [ ! -f "$Manifest" ]; then
   done
   if [ -n "$installer" ]; then
     assert_bootstrap_publication
-    bash "$installer" stamp >/dev/null 2>&1 || true
+    stamp_rc=0
+    bash "$installer" stamp >/dev/null || stamp_rc=$?
+    if [[ "$stamp_rc" != 0 ]]; then
+      printf '[%s] Automatic stamp did not complete (exit %s); no background retry attempted.\n' "$name" "$stamp_rc" >&2
+      exit "$stamp_rc"
+    fi
   fi
   exit 0
 fi
@@ -93,19 +110,50 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
-# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
-# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
-# marker+slot is authoritative). Treat a marker whose slot python exists as
-# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+# --- selected completed runtime readiness (reference: agent-bridge) ---
 provisioned=0
-[ -e "$InstallDir/.venv" ] && provisioned=1
-if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
-  cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
-  # ...and only when it names the CURRENT payload version (the marker is authoritative
-  # for the active slot; a stale marker must not suppress reconcile).
-  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+if [ "$deployed" = "$current" ]; then
+  expected_slot="$("$py" -I -B - "$ScriptDir" "$PluginDir" "$Manifest" "$current" "$name" <<'EXPECTED_SLOT'
+import json
+import pathlib
+import sys
+
+sys.path.insert(0, sys.argv[1])
+payload, manifest = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+current, name = sys.argv[4:]
+deployment = json.loads(manifest.read_text(encoding="utf-8-sig"))
+from versioned_runtime_readiness import deployment_runtime_version
+print(deployment_runtime_version(payload, current, name, deployment))
+EXPECTED_SLOT
+)" || expected_slot=""
+  # Legacy installations have no selector. A link must not hide a broken or
+  # different selection in the marker-only layout.
+  if [ "$expected_slot" = "$current" ] &&
+     [ ! -e "$InstallDir/current-version" ] && [ ! -L "$InstallDir/current-version" ] &&
+     [ ! -e "$PluginDir/runtime-source.json" ] && [ ! -L "$PluginDir/runtime-source.json" ] &&
+     { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; }; then
+    provisioned=1
+  elif [ -f "$InstallDir/current-version" ] && [ -f "$ScriptDir/resolve-runtime.sh" ]; then
+    selected="$(tr -d ' \t\r\n' < "$InstallDir/current-version")"
+    if [ -n "$expected_slot" ] && [ "$selected" = "$expected_slot" ]; then
+      # Subshell scopes resolver variables and read-only suppresses durable
+      # traces. A healthy fallback must never stand in for this exact selection.
+      resolved="$(
+        AGENT_RT_ROOT="$InstallDir"
+        AGENT_RT_RESOLVE_TRACE_MODE=read-only
+        . "$ScriptDir/resolve-runtime.sh"
+        printf '%s' "$AGENT_RT_PY"
+      )"
+      if [ -n "$resolved" ] &&
+         { [ "$resolved" = "$InstallDir/versions/$selected/bin/python" ] ||
+           [ "$resolved" = "$InstallDir/versions/$selected/Scripts/python.exe" ]; }; then
+        provisioned=1
+      fi
+    fi
+  fi
 fi
-if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
+if [ "$provisioned" = 1 ]; then exit 0; fi
+# --- end selected completed runtime readiness ---
 
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")
@@ -135,12 +183,19 @@ if [ -f "$lockFile" ]; then
     if [ "$lockMtime" -gt 0 ] && [ $((nowSecs - lockMtime)) -lt "$staleSeconds" ]; then
       exit 0
     fi
+    assert_bootstrap_publication
     kill "$lockPid" 2>/dev/null || true
   fi
 fi
 
 echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
 cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
-nohup bash "${target[@]}" >/dev/null 2>&1 &
+assert_bootstrap_publication
+nohup bash -c '
+  "$1" -I -B "$2" --root "$3" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+  shift 3
+  exec bash "$@"
+' agent-dispatch-reconcile "$py" "$ScriptDir/action_controls.py" "$InstallDir" \
+    "${target[@]}" >"$InstallDir/reconcile.log" 2>&1 &
 echo $! > "$lockFile" 2>/dev/null || true
 exit 0

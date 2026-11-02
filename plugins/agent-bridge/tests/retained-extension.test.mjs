@@ -9,7 +9,7 @@ import * as retained from "../extensions/agent-bridge/retained-delivery.mjs";
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const source = readFileSync(new URL("../extensions/agent-bridge/extension.mjs", import.meta.url), "utf8");
 
-async function load(selected, version = 50) {
+async function load(selected, version = 50, { exact = false, nativeId = "native-a" } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [];
   let consumer;
   const session = {
@@ -18,7 +18,7 @@ async function load(selected, version = 50) {
     send: async (options) => { sends.push(options); return "sdk-message-a"; },
     getEvents: async () => [],
     rpc: { metadata: { snapshot: async () => ({
-      sessionId: "native-a", workingDirectory: process.cwd(),
+      sessionId: nativeId, workingDirectory: process.cwd(),
     }) } },
   };
   const binding = { installation: "synthetic-installation", epoch: 1 };
@@ -42,7 +42,10 @@ async function load(selected, version = 50) {
     else if (route.endsWith("/begin")) result = { begin: true };
     else if (route.endsWith("/outcome")) result = { stage: body.outcome };
     else if (route.includes("/messages?")) result = {
-      messages: [{ id: 1, body: "legacy body", sender: "peer", kind: "prompt", delivery: "steer" }],
+      messages: [{
+        id: 1, body: "legacy body", sender: "peer", kind: "prompt", delivery: "steer",
+        ...(exact ? { exact_session: true, original_session_id: "native-a" } : {}),
+      }],
     };
     else if (route.endsWith("/controls")) result = { messages: [] };
     return { ok: true, status: 200, json: async () => result };
@@ -79,15 +82,23 @@ async function load(selected, version = 50) {
       registrationMetadata: (meta) => meta,
     },
   };
-  const module = new vm.SourceTextModule(source, { context });
-  await module.link((name) => {
-    const exports = dependencies[name];
-    assert.ok(exports, `unexpected dependency ${name}`);
-    return new vm.SyntheticModule(Object.keys(exports), function () {
-      for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
-    }, { context });
-  });
-  await module.evaluate();
+  context.__dependencies = dependencies;
+  // Stable VM scripts avoid the Node 22 experimental-module SIGSEGV. Only
+  // the extension's explicit named imports are linked; its body is unchanged.
+  const linked = source.replace(
+    /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm,
+    (_statement, names, name) => {
+      const exports = dependencies[name];
+      assert.ok(exports, `unexpected dependency ${name}`);
+      for (const binding of names.split(",").map((part) => part.trim()).filter(Boolean)) {
+        assert.match(binding, /^[A-Za-z_$][\w$]*$/);
+        assert.ok(Object.hasOwn(exports, binding), `missing dependency export ${name}:${binding}`);
+      }
+      return `const {${names}} = __dependencies[${JSON.stringify(name)}];`;
+    },
+  );
+  assert.doesNotMatch(linked, /^import\s/m, "unsupported extension import syntax");
+  await new vm.Script(`(async () => {\n${linked}\n})()`).runInContext(context);
   await settle();
   const poll = timers.find((timer) => timer.ms === 2_000);
   assert.ok(poll);
@@ -96,9 +107,7 @@ async function load(selected, version = 50) {
   return { calls, sends, logs, handlers, poll };
 }
 
-test("actual extension default still uses legacy inbox, ACK and controls", {
-  skip: !vm.SourceTextModule,
-}, async () => {
+test("actual extension default still uses legacy inbox, ACK and controls", async () => {
   const f = await load(undefined);
   assert.equal(f.sends.length, 1);
   assert.ok(f.calls.some((call) => call.route.endsWith("/messages/ack")));
@@ -106,9 +115,17 @@ test("actual extension default still uses legacy inbox, ACK and controls", {
   assert.equal(f.calls.some((call) => call.route.includes("/retained-inbox")), false);
 });
 
-test("actual selected extension exclusively wires retained delivery off the event handler", {
-  skip: !vm.SourceTextModule,
-}, async () => {
+test("actual extension observes exact native metadata before SDK send", async () => {
+  const current = await load(undefined, 51, { exact: true });
+  assert.equal(current.sends.length, 1);
+  assert.ok(current.calls.some((call) => call.route.endsWith("/messages/ack")));
+  const changed = await load(undefined, 51, { exact: true, nativeId: "successor" });
+  assert.equal(changed.sends.length, 0);
+  assert.equal(changed.calls.some((call) => call.route.endsWith("/messages/ack")), false);
+  assert.ok(changed.logs.some((line) => line.includes("native context changed")));
+});
+
+test("actual selected extension exclusively wires retained delivery off the event handler", async () => {
   const f = await load("1");
   assert.equal(f.sends.length, 1);
   assert.match(f.sends[0].prompt, /retained-handoff="handoff-a"/);
@@ -121,9 +138,7 @@ test("actual selected extension exclusively wires retained delivery off the even
   assert.equal(f.calls.length, count);
 });
 
-test("actual selected extension holds on old protocol instead of silently downgrading", {
-  skip: !vm.SourceTextModule,
-}, async () => {
+test("actual selected extension holds on old protocol instead of silently downgrading", async () => {
   const f = await load("1", 49);
   assert.equal(f.sends.length, 0);
   assert.equal(f.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);

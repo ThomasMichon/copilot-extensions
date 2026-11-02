@@ -70,6 +70,8 @@ class CodeSpaceTransport:
 
     async def _ensure(self) -> None:
         if not self._connected:
+            if isinstance(self._source, CodespaceConfigSource) and self._source.gh_env is None:
+                await asyncio.to_thread(self._read_state)
             await self._manager.ensure_connected(self._name, self._source, [])
             self._connected = True
 
@@ -205,8 +207,14 @@ class CodeSpaceTransport:
             token = run(["auth", "token", "--hostname", "github.com", "--user", login], env)
             if token.returncode != 0 or not token.stdout.strip():
                 continue
-            state = query({**env, "GH_TOKEN": token.stdout.strip()})
+            account_env = {**env, "GH_TOKEN": token.stdout.strip()}
+            state = query(account_env)
             if state is not None:
+                self._source = CodespaceConfigSource(
+                    self._name,
+                    config_dir=getattr(self._source, "_config_dir", None),
+                    gh_env=account_env,
+                )
                 return state
         raise RuntimeError("No authenticated GitHub account could verify CodeSpace availability")
 
@@ -226,6 +234,7 @@ class CodeSpaceTransport:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=_creation_flags(),
+            env=getattr(self._source, "gh_env", None),
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=180.0)
         if proc.returncode != 0:

@@ -1,0 +1,9 @@
+{
+  "comment": "Require explicit exclusive selection for resident pre-tool policy; preserve command defaults and refuse duplicate evaluation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

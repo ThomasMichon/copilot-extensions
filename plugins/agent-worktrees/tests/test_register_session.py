@@ -687,6 +687,13 @@ class TestRegisterSessionStdin:
             },
         )
         monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tmp_tracking_dir)
+        monkeypatch.setattr(cfg, "detect_platform", lambda: config.platform)
+        monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(
+            "agent_worktrees.config_authority.load_project_authority_config",
+            lambda *_a, **_k: config,
+        )
         monkeypatch.setattr(m, "_activate_project_for_path", lambda *_a, **_k: "test")
         m.cfg.set_active_project(config.repo_name)
         payload = json.dumps({

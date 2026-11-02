@@ -1,0 +1,9 @@
+{
+  "comment": "Type installation lock recovery test contracts",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

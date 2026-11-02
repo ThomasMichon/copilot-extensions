@@ -8,6 +8,8 @@ mechanics. Plugin-local guides and skills own their current commands.
 
 - [Architecture](architecture.md), [configuration](configuration.md), and
   [install contract](install-contract.md).
+- [Harness and knowledge repositories](harness-and-knowledge.md): private-state
+  binding, configuration tiers and source ownership.
 - [Harness runbook](harness-runbook.md) and [architecture patterns](patterns/README.md).
 - [Contributing](../CONTRIBUTING.md), [development guide](../AGENTS.md),
   [testing](../TESTING.md), and [pipelines](pipelines.md).
@@ -43,7 +45,7 @@ mechanics. Plugin-local guides and skills own their current commands.
 | WSL | [Windows/WSL setup guidance](../plugins/wsl-setup/README.md) |
 | Knowledge binding | [Optional private-state binding](../plugins/harness-knowledge/README.md) |
 | Attribution | [Publication guidance](../plugins/ai-attribution/README.md) |
-| Conduct | [Modular guidance](../plugins/agent-conduct-guidance/README.md), [deprecated delegation alias](../plugins/delegation-guidance/README.md) |
+| Conduct | [Modular guidance](../plugins/agent-conduct-guidance/README.md) |
 
 ## Customization and toolkit contribution
 

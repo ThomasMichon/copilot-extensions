@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve surviving Worktrees rows during replacement-loader setup until authoritative source completion.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

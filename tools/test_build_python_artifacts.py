@@ -132,6 +132,10 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     file; a test that specifically exercises the REAL
     `_current_token_identity` (its own `whoami`-parsing logic) restores
     it via `_REAL_CURRENT_TOKEN_IDENTITY`, same pattern."""
+    from packaging.markers import default_environment
+
+    # Packaging caches process facts; populate them before native subprocess mocks.
+    default_environment()
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "provenance-key-dir")
     # Resolver admission has its own native/controlled-index suite; this
     # module's subprocess fixtures isolate artifact publication and provenance.
@@ -1452,8 +1456,7 @@ def test_query_marker_environment_uses_isolated_mode(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     bpa._query_marker_environment(tmp_path / "python")
 
-    assert seen_cmds[0][1] == "-I"
-    assert seen_cmds[0][2] == "-c"
+    assert seen_cmds[0][1:4] == ["-I", "-S", "-c"]
 
 
 def test_resolve_toolchain_lock_reuses_existing_venv(
@@ -2005,7 +2008,7 @@ def test_provenance_key_hardens_acl_on_windows(
     grant_cmd = seen_cmds[0]
     assert grant_cmd[0] == _ICACLS_PATH
     assert "/inheritance:r" in grant_cmd
-    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
 
 
 def test_provenance_key_concurrent_callers_converge_on_one_key(
@@ -3556,11 +3559,11 @@ def test_build_wheel_strips_index_credentials_with_toolchain(
             out_dir = Path(cmd[cmd.index("-o") + 1])
             (out_dir / "plugin-1.0.0-py3-none-any.whl").write_bytes(b"")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        if len(cmd) > 3 and cmd[3] == btl._MARKER_ENV_QUERY_SCRIPT:
+        if len(cmd) > 3 and cmd[-1] == btl._MARKER_ENV_QUERY_SCRIPT:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
             )
-        if len(cmd) > 3 and cmd[3] == btl._BUILD_REQUIRES_CHECK_SCRIPT:
+        if len(cmd) > 3 and cmd[-1] == btl._BUILD_REQUIRES_CHECK_SCRIPT:
             # `requires = []` -- trivially satisfied, no need to exercise
             # the real comparison logic for this credential-stripping test.
             return subprocess.CompletedProcess(
@@ -3622,13 +3625,18 @@ def test_restrict_file_to_owner_is_noop_on_posix(
     assert calls == []
 
 
+@pytest.mark.parametrize("directory", [False, True])
 def test_restrict_file_to_owner_invokes_icacls_on_windows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, directory: bool,
 ):
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
     monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
+    if directory:
+        target.mkdir()
+    else:
+        target.touch()
     seen_cmds: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3654,8 +3662,9 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     assert grant_cmd[0] == _ICACLS_PATH
     assert grant_cmd[1] == str(target)
     assert "/inheritance:r" in grant_cmd
-    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
-    assert f"*{gft._SYSTEM_ACCOUNT_SID}:(OI)(CI)F" in grant_cmd
+    flags = "(OI)(CI)F" if directory else "F"
+    assert f"*{_FAKE_TOKEN_SID}:{flags}" in grant_cmd
+    assert f"*{gft._SYSTEM_ACCOUNT_SID}:{flags}" in grant_cmd
     assert remove_cmd[:3] == [_ICACLS_PATH, str(target), "/remove:g"]
     # Regression: a directory (e.g. the staging venv dir)
     # inherits `OWNER RIGHTS` by default on this repo's own machines --
@@ -3687,7 +3696,7 @@ def test_restrict_file_to_owner_ignores_forged_environment_variables(
     btl._restrict_file_to_owner(target)
 
     grant_cmd = seen_cmds[0]
-    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
     assert not any("attacker" in str(arg).lower() for arg in grant_cmd)
 
 
@@ -4186,7 +4195,7 @@ def _write_build_system_requires(source_dir: Path, requires: list[str]) -> None:
     )
 
 
-def _run_build_requires_check_inline(payload_json: str) -> str:
+def _run_build_requires_check_inline(payload_json: str, *, file_input: bool = False) -> str:
     """Executes `_BUILD_REQUIRES_CHECK_SCRIPT` directly in THIS test
     process via `exec`, feeding it ``payload_json`` on a fake stdin and
     capturing what it prints -- the same real script
@@ -4196,11 +4205,19 @@ def _run_build_requires_check_inline(payload_json: str) -> str:
     without needing an actual toolchain venv."""
     import contextlib
     import io
+    import tempfile
 
     original_stdin = sys.stdin
+    original_argv = sys.argv
     buf = io.StringIO()
-    sys.stdin = io.StringIO(payload_json)
+    sys.stdin = io.StringIO("" if file_input else payload_json)
+    temporary = tempfile.TemporaryDirectory() if file_input else None
     try:
+        sys.argv = ["-c"]
+        if temporary is not None:
+            path = Path(temporary.name) / "requirements.json"
+            path.write_text(payload_json, encoding="utf-8")
+            sys.argv.extend(["--payload-file", str(path)])
         with contextlib.redirect_stdout(buf):
             try:
                 exec(
@@ -4215,7 +4232,43 @@ def _run_build_requires_check_inline(payload_json: str) -> str:
                 pass
     finally:
         sys.stdin = original_stdin
+        sys.argv = original_argv
+        if temporary is not None:
+            temporary.cleanup()
     return buf.getvalue()
+
+
+@pytest.mark.parametrize("file_input", [False, True])
+def test_build_requires_checker_accepts_subprocess_stdin_and_owned_file(file_input):
+    result = _run_build_requires_check_inline(json.dumps({
+        "requires": ["setuptools>=60"], "locked_packages": {"setuptools": "84.1.0"},
+        "marker_environment": {"python_version": "3.12", "sys_platform": "win32"},
+    }), file_input=file_input)
+    assert json.loads(result) == {"ok": True}
+
+
+def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path):
+    source = tmp_path / "source"
+    _write_build_system_requires(source, [])
+    packages = {f"dependency-{index:04d}-" + "x" * 93: "1.0" for index in range(300)}
+    assert len(json.dumps(packages).encode("utf-16-le")) // 2 > 32767
+    toolchain = bpa.ToolchainLock(Path(sys.executable), packages)
+    payload_paths = []
+
+    def run(argv):
+        assert len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 < 32767
+        if "--payload-file" in argv:
+            path = Path(argv[-1])
+            payload_paths.append(path)
+            assert json.loads(path.read_text())["locked_packages"] == packages
+        return _REAL_SUBPROCESS_RUN(
+            argv, capture_output=True, text=True, check=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+
+    btl._assert_toolchain_satisfies_build_requires(source, toolchain, run=run)
+    assert len(payload_paths) == 1
+    assert not payload_paths[0].exists()
 
 
 def _dispatch_toolchain_subprocess(
@@ -4231,8 +4284,7 @@ def _dispatch_toolchain_subprocess(
     the actual comparison logic rather than a reimplementation of it)."""
     assert cmd[0] == str(toolchain.venv_python)
     assert cmd[1] == "-I"
-    assert cmd[2] == "-c"
-    script = cmd[3]
+    script = cmd[cmd.index("-c") + 1]
     if script == btl._MARKER_ENV_QUERY_SCRIPT:
         return subprocess.CompletedProcess(
             cmd, 0,
@@ -4551,7 +4603,7 @@ def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_l
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        if cmd[3] == btl._MARKER_ENV_QUERY_SCRIPT:
+        if cmd[-1] == btl._MARKER_ENV_QUERY_SCRIPT:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
             )

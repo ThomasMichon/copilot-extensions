@@ -17,6 +17,7 @@ from .caller_session import normalize_caller_session_id
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .events import EventLog
 from .models import SessionStatus
+from .owned_workspace import acquire_start, prepare_session
 from .session_manager import (
     _ACTIVE_STATES,
     _AcpLaunchTiming,
@@ -45,7 +46,7 @@ from .privileged_plugins import relay_agent, start_client
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
-    from .acquisition_launch_owner import AcquisitionLaunchOwner
+    from .local_launch_owner import LocalLaunchOwner
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
 
@@ -90,7 +91,7 @@ class _SessionStartMixin:
         retain_container_lock_on_failure: bool = False,
         creation_session_id: str | None = None,
         creation_before_launch: Callable[[], Awaitable[None]] | None = None,
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -196,6 +197,9 @@ class _SessionStartMixin:
         if caller_owner_ref is not None and target.caller_owner_ref is None:
             target = replace(target, caller_owner_ref=caller_owner_ref)
         session_id = creation_session_id or str(uuid.uuid4())[:12]
+        from .owned_workspace import arm
+
+        target = arm(target, session_id)
         if session_id in self._sessions:
             raise ValueError("creation session already exists; reconcile its original start")
         prepared_local_launch = None
@@ -358,6 +362,7 @@ class _SessionStartMixin:
                 agent_proc.alive,
             )
 
+        owned_start = await acquire_start(session)
         try:
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
@@ -679,6 +684,7 @@ class _SessionStartMixin:
                 # ThomasMichon/copilot-extensions#566), so this is their only
                 # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
+                await prepare_session(session, self._db)
                 core = _core()
                 agent_proc = await core.spawn(
                     target,
@@ -797,7 +803,7 @@ class _SessionStartMixin:
             # session binding* names "a spawned successor, a headless launch").
             # LOCAL worktrees only -- a remote worktree's ground layer lives on
             # its own machine. Best-effort / fail-open: never breaks a launch.
-            if target.type == "local" and target.worktree_id and acp_sid:
+            if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
                 with contextlib.suppress(Exception):
                     worktree_lineage.register_session(
@@ -884,6 +890,9 @@ class _SessionStartMixin:
             self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
+        finally:
+            if owned_start is not None:
+                owned_start.release()
 
         session.touch()
         return session

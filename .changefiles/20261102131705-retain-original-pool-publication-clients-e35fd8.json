@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original pool publication clients through reconnect and supersede only confirmed unaccepted requests",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

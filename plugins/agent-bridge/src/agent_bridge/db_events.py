@@ -12,6 +12,7 @@ from .runtime_custody import RuntimeAdmission, admission_document
 
 if TYPE_CHECKING:
     from .native_keyed_admission import KeyedNativePrompt
+    from .native_send_admission import NativeSendPrompt
     from .turn_custody import NativeTurnConsumer
 
 
@@ -89,7 +90,7 @@ class _EventsMixin:
         self, session_id: str, turn_index: int, prompt: str, now: float,
         *, delivery_id: str | None = None,
         pending_prompt_id: int | None = None,
-        native_admission: KeyedNativePrompt | None = None,
+        native_admission: KeyedNativePrompt | NativeSendPrompt | None = None,
         runtime_admission: RuntimeAdmission | None = None,
         native_consumer: NativeTurnConsumer | None = None,
     ) -> dict | None:

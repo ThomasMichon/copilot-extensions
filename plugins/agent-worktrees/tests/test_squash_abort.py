@@ -449,79 +449,69 @@ def test_long_title_is_not_truncated_in_squash_message(tmp_path: Path, monkeypat
     assert subject == long_title
 
 
-def test_configured_validate_hook_scrubs_python_runtime_env(tmp_path: Path, monkeypatch):
-    """#4552: a configured ``validate_hook`` subprocess must not inherit a
-    leaked Python-runtime-selection var from this plugin's own runtime."""
+@pytest.mark.parametrize("mode", ["hook", "paths", "legacy"])
+def test_managed_push_never_runs_source_validation(tmp_path: Path, monkeypatch, mode):
+    """Real managed publication retains Git/claims but runs ZERO validators."""
     import dataclasses
     import subprocess
 
     from agent_worktrees import config as cfg
-    from agent_worktrees import env_scrub, finalize
-
-    _repo, wt_id, config = _make_pushable_repo(tmp_path, 1, monkeypatch)
-    config.repos[wt_id] = dataclasses.replace(
-        config.repos[wt_id],
-        validate_hook={cfg.detect_platform(): ["python", "-c", "pass"]},
-    )
-    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
-    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
-    for name in env_scrub._PYTHON_RUNTIME_ENV:
-        monkeypatch.setenv(name, r"C:\fake\stale\value")
-    captured = {}
-    real_run = subprocess.run
-
-    def fake_run(cmd, **kw):
-        if cmd[:1] == ["python"]:
-            captured["env"] = kw.get("env")
-            captured["spawn"] = kw
-            return subprocess.CompletedProcess(cmd, 0, "", "")
-        return real_run(cmd, **kw)
-
-    monkeypatch.setattr("subprocess.run", fake_run)
-
-    ok = finalize.push_changes(wt_id, config, title="Test change")
-
-    assert ok is True
-    assert captured, "validate_hook subprocess.run was never called"
-    assert all(captured["spawn"][key] == value for key, value in finalize.no_window_kwargs().items())
-    for name in env_scrub._PYTHON_RUNTIME_ENV:
-        assert name not in captured["env"]
-
-
-def test_legacy_validate_core_ps1_scrubs_python_runtime_env(tmp_path: Path, monkeypatch):
-    """#4552: the legacy ``tools/worktree/validate-core.ps1`` fallback
-    subprocess (no ``validate_hook``/``validate_paths`` configured) must not
-    inherit a leaked Python-runtime-selection var either."""
-    import subprocess
-
-    from agent_worktrees import env_scrub, finalize
+    from agent_worktrees import anchor_hygiene, finalize, hooks, tracking, validate
 
     repo, wt_id, config = _make_pushable_repo(tmp_path, 1, monkeypatch)
-    script = repo / "tools" / "worktree" / "validate-core.ps1"
-    script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text("# legacy validator\n", encoding="utf-8")
-    _git(repo, "add", "tools")
-    _git(repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "add legacy validator")
-    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
-    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
-    for name in env_scrub._PYTHON_RUNTIME_ENV:
-        monkeypatch.setenv(name, r"C:\fake\stale\value")
-    captured = {}
+    config.repos[wt_id] = dataclasses.replace(
+        config.repos[wt_id],
+        validate_hook={cfg.detect_platform(): ["python", "-c", "raise SystemExit(91)"]} if mode == "hook" else {},
+        validate_paths=["f.txt"] if mode == "paths" else [],
+    )
+    if mode == "legacy":
+        script = repo / "tools" / "worktree" / "validate-core.ps1"
+        script.parent.mkdir(parents=True)
+        script.write_text("exit 91\n", encoding="utf-8")
+        _git(repo, "add", "tools")
+        _git(repo, "-c", "core.hooksPath=/dev/null", "commit", "--amend", "--no-edit", "-q")
+    remote = tmp_path / "remote.git"
+    _git(repo, "init", "--bare", str(remote))
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "origin", "base")
+    hooks.install_hooks(repo)
+    monkeypatch.setenv("AGENT_WORKTREES_HOOKS", "1")
+    record = tracking.create_new_record(
+        wt_id, f"worktree/{wt_id}", str(repo), "repo", "test", "linux",
+        cfg.tracking_dir(),
+    )
+    record.resources.append(tracking.ResourceClaim(kind="workdir", ref="retained", state="at-rest"))
+    tracking.save_record(record)
+    calls = []
     real_run = subprocess.run
 
-    def fake_run(cmd, **kw):
-        if cmd[:1] == ["pwsh.exe"]:
-            captured["env"] = kw.get("env")
-            captured["spawn"] = kw
-            return subprocess.CompletedProcess(cmd, 0, "", "")
+    def counted_run(cmd, **kw):
+        if isinstance(cmd, list) and cmd and Path(str(cmd[0])).name in {"python", "python3", "pwsh.exe"}:
+            calls.append(cmd)
+            pytest.fail("validation/runtime startup on managed publication")
         return real_run(cmd, **kw)
 
-    monkeypatch.setattr("subprocess.run", fake_run)
-
+    monkeypatch.setattr("subprocess.run", counted_run)
+    monkeypatch.setattr(validate, "validate_files", lambda *a, **kw: pytest.fail("source validation on push"))
+    monkeypatch.setattr(anchor_hygiene, "check_anchor", lambda *a, **kw: pytest.fail("anchor inventory on push"))
     ok = finalize.push_changes(wt_id, config, title="Test change")
-
     assert ok is True
-    assert captured, "legacy validate-core.ps1 subprocess.run was never called"
-    assert all(captured["spawn"][key] == value for key, value in finalize.no_window_kwargs().items())
-    for name in env_scrub._PYTHON_RUNTIME_ENV:
-        assert name not in captured["env"]
+    assert calls == []
+    local_head = git_ops.git("rev-parse", "HEAD", cwd=str(repo)).stdout.strip()
+    assert (remote / "refs" / "heads" / "base").read_text(encoding="ascii").strip() == local_head
+    saved = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+    assert saved.status == "pushed"
+    assert [(claim.ref, claim.state) for claim in saved.resources] == [("retained", "at-rest")]
+
+
+def test_publication_still_refuses_dirty_source_workspace(tmp_path: Path, monkeypatch):
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 1, monkeypatch)
+    (repo / "f.txt").write_text("uncommitted source work\n", encoding="utf-8")
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        finalize.git_ops, "push", lambda *a, **kw: pytest.fail("dirty source was published"),
+    )
+    assert finalize.push_changes(wt_id, config, title="Test change") is False
+    assert (repo / "f.txt").read_text(encoding="utf-8") == "uncommitted source work\n"

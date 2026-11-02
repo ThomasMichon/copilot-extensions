@@ -1,0 +1,9 @@
+{
+  "comment": "Show optional last-reported root attention with cancellable visible-only polling and head fencing",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

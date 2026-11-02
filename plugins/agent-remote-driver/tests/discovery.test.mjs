@@ -49,6 +49,25 @@ test("discoveryDir falls back to homedir()/.copilot/remote-driver/sessions", () 
   assert.match(dir, /sessions$/);
 });
 
+test("native descriptor selector remains cell-local and does not consume repository preference data", () => {
+  const first = join(process.cwd(), "synthetic-cell-one");
+  const second = join(process.cwd(), "synthetic-cell-two");
+  const repositoryData = {
+    AGENT_CONFIGURATION_CONTEXT: JSON.stringify({
+      context: { binding: "unresolved", repository_id: "same-display-name" },
+    }),
+  };
+  assert.equal(
+    descriptorPath("session", { ...repositoryData, AGENT_REMOTE_DRIVER_CONFIG_DIR: first }),
+    join(first, "sessions", "session.json"),
+  );
+  assert.equal(
+    descriptorPath("session", { ...repositoryData, AGENT_REMOTE_DRIVER_CONFIG_DIR: second }),
+    join(second, "sessions", "session.json"),
+  );
+  assert.equal(discoveryDir({ AGENT_REMOTE_DRIVER_CONFIG_DIR: "" }), discoveryDir({}));
+});
+
 test("descriptorPath nests the session id under discoveryDir", () => {
   const p = descriptorPath("abc-123", { AGENT_REMOTE_DRIVER_CONFIG_DIR: "/tmp/xyz" });
   assert.match(p, /abc-123\.json$/);

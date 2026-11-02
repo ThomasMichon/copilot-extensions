@@ -1,0 +1,9 @@
+{
+  "comment": "Copy managed pane assets into launch-owned storage and preserve exact mux invocation context",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

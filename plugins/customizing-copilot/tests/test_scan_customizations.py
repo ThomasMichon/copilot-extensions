@@ -26,3 +26,15 @@ SPEC.loader.exec_module(MODULE)
 for name, value in vars(MODULE).items():
     if name.startswith("test_"):
         globals()[name] = value
+
+
+def test_real_queue_assignment_discovery_requires_the_adopted_queue_flow():
+    plugins = Path(__file__).resolve().parents[2]
+    skill = plugins / "agent-dispatch/skills/pick-and-claim/SKILL.md"
+    parsed = MODULE.scan.split_frontmatter(skill.read_text(encoding="utf-8"))
+    assert parsed is not None
+    frontmatter, _ = parsed
+    assert MODULE.scan.extract_triggers(frontmatter) == [
+        "self-dispatch through agent-dispatch", "pick and claim a queue task",
+        "resume queue self-dispatch",
+    ]

@@ -46,11 +46,9 @@ def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
     its real identity in ``kind``/``spec`` instead, and is summarized through
     those fields plus its effective filters.
     """
-    ef = decl.effective_filters()
-    filters = {
-        "permit": {dim: sorted(vals) for dim, vals in ef.permit.items()},
-        "reject": {dim: sorted(vals) for dim, vals in ef.reject.items()},
-    }
+    from .pool_instances import filters_to_dict
+
+    filters = filters_to_dict(decl.effective_filters())
     if decl.kind != RegistrationKind.SUPERVISED_LANE:
         return {
             "name": decl.name,
@@ -75,6 +73,7 @@ def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
         "repos": decl.repos,
         "concurrency": decl.concurrency,
         "max_active_processes": decl.concurrency,
+        "priority": decl.priority,
         "body": body,
         "filters": filters,
     }

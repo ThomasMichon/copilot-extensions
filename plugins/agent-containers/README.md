@@ -1,5 +1,8 @@
 # agent-containers
 
+See the [configuration reference](docs/configuration.md) for native files,
+fields, precedence, migration and protected admission boundaries.
+
 Local Docker dev-container **fleet manager**, **lease broker**, and
 optional agent-bridge **`container:` namespace provider**.
 
@@ -13,6 +16,42 @@ SSH session requests into the existing restricted `docker exec` boundary. No
 container port, key, or SSH daemon is added. The CLI and binstub are owned by
 this plugin and work standalone; without agent-bridge only bridge addressing
 (`container:<name>`) is unavailable.
+
+## Legacy runtime removal
+
+Use `scripts/init.ps1 -Action uninstall -InstallDir <root>` or
+`scripts/init.sh uninstall --install-dir <root>` only for the selected legacy
+runtime. The finite removal action shares install's `.install.lock`, retains
+canonical command/generation/selector custody through removal, and removes the
+owned deploy manifest last. It never purges the root, coordination leases,
+`containers.yaml`, `leases.json`, auth/private data, logs, custom files or
+`AGENT_CONTAINERS_STATE_DIR`. Managed/cell/foreign roots, raw `..`, reparse
+ancestors, unproven runtime ownership and live processes refuse explicitly.
+An older installer-engine without the finite entry-name API refuses; there is
+no purge fallback.
+
+The adapter passes its trusted `scripts/uninstall-profile.json` to canonical
+`installer_engine_uninstall.py`; it does not own a second custody or cleanup
+orchestrator. The helper and native engine must be materialized in this payload's
+own `scripts/`; no ambient or sibling installation is searched.
+Structural `--check` grants no deletion authority. The canonical
+owner repeats ownership, inventory, live-consumer and read-only transport-guard
+checks under all custody immediately before `--remove-runtime` deletion.
+Unexpected outer-owner death is not qualified by that batch custody alone:
+noninherited .NET whole-transaction locks and PID receipts require a native
+lifetime/handle bridge. POSIX kernel-lock release is close-only, preserving any
+inherited finite guardian's open-file-description custody.
+
+SSH files alone are not a retained transport closure: Windows reconnect configs
+depend on the loopback broker's interpreter, imports and Docker children.
+Until that complete dependency closure has independent custody, any nonempty
+`ssh` directory under the addressed root or `AGENT_CONTAINERS_HOME` refuses
+uninstall before runtime removal. Preparation locks, live brokers and dormant
+reconnect configurations are all preserved without stopping a transport.
+Diagnostics distinguish a responsive broker endpoint from stale proxy records
+and unattributed reconnect artifacts. Stale artifacts are not called busy, but
+are not complete idle/dependency-closure proof either. Refusal is a safety
+negative control, never positive proof of a retained active transport closure.
 
 ## Usage path
 
@@ -47,7 +86,7 @@ stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
 
 On Windows, initial installation `status` and selected-context `validate`
 reads use the payload's canonical SDK in a fresh isolated, no-site Python
-process only after the [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+process only after the [PATH Python bootstrap selector](../../docs/install-contract.md#path-python-evaluator-bootstrap)
 admits a registered signed CPython base. PATH and the addressed runtime do not
 establish admission. Unavailable optional support selects native PowerShell
 before evaluation; selected interpreter/SDK failures are terminal. The file
@@ -68,7 +107,12 @@ the gate. If its source pointer or retained gate is unavailable, it refuses
 rather than running that cell as legacy. A healthy known-legacy runtime can
 still use its co-deployed readiness resolver; cold provisioning and
 explicit-context fallback refuse.
-On POSIX systems without `flock`, stale PID-link recovery serializes reapers
+The POSIX installer's whole-action gate uses native `flock` or an existing
+Python's `fcntl.flock` on the same persistent install-lock descriptor, including
+legacy removal. Missing both refuses without provisioning. Old install PID or
+reaper receipts are retained and require explicit settlement, never automatic
+reclamation by the new gate.
+First-use provisioning's separate stale PID-link recovery serializes reapers
 and only cleans up its own mutex. An unknown/abandoned reaper mutex is not
 deleted: after 30 one-second retries the command refuses with exit 126 and an
 explicit repair diagnostic. Live provisioning owners retain their separate wait.
@@ -125,6 +169,9 @@ restricted posture and lifecycle hold without changing task ownership.
 Its `instance_pinned_exec` capability is backed by the expected physical-ID
 and birth-binding fences in the returned execution command; ordinary
 name-based wrappers do not advertise that guarantee.
+The separate internal [original creation prerequisites](docs/creation-custody.md)
+retain an explicit new birth and original association, with an exact-slot
+retention primitive; they do not enable retained launches or upgrade existing bindings.
 Use Bridge's protocol-36 `create <agent> --creation-key <key>
 --provider-instance` to establish a replay-safe native session without
 inventing a worktree or sending a first prompt. A missing binding or replaced
@@ -192,6 +239,45 @@ placement and supervisor renewal are not yet integrated.
 
 ## Concepts
 
+### Externally managed trusted members
+
+An external deployment manager may own a trusted fleet's lifecycle while
+agent-containers supplies sessions against its already running members:
+
+```yaml
+fleets:
+  pilot:
+    lifecycle_owner: external
+    security_profile: trusted
+    exec_user: vscode
+    workspace_folder: /workspaces/project
+```
+
+The manager supplies `agent-containers.fleet=pilot`,
+`agent-containers.security-profile=trusted` and
+`agent-containers.lifecycle-owner=external` on each member. Configuration and
+the live owner label must agree before trusted session use. Existing physical
+instance, repository, lease, authentication and session checks still apply.
+This mode does not enroll a manager, select a remote Docker endpoint, issue
+credentials or establish remote-generation/auth-renewal parity.
+
+`up` (including recreation), fleet start/down/removal, member start/stop/
+unpause/removal and implicit start refuse external ownership. Missing or
+stopped members require the selected deployment manager; no direct-Docker
+fallback is offered. A live external owner label independently prevents
+lifecycle mutation after configuration is changed or removed. Lifecycle
+commands inspect ownership immediately before their effect and address the
+observed full container ID, not a replacement sharing the same name.
+Unlabeled members inherit external ownership by the configured fleet-name
+prefix, including nonnumeric suffixes. An explicit managed fleet label still
+distinguishes overlapping prefixes; an external fleet's numeric slot remains
+protected even when labeled as another fleet.
+
+The default `lifecycle_owner: agent-containers` preserves managed fleets.
+Restricted fleets cannot select external lifecycle ownership. This is an
+ownership contract, not a new security boundary or permission to bypass a
+manager through a raw Docker command.
+
 ### Optional restricted SSH runtime
 
 New installations use the **base** dependency profile: trusted OpenSSH and direct
@@ -229,6 +315,10 @@ and reuses an already-completed matching slot. Even `--force` never rewrites a
 completed slot. A failed requested profile does **not** fall back silently: the
 old active runtime remains selected and the saved intent is retried next time.
 The deploy manifest records package version separately from runtime slot/profile.
+Prepared-source suite updates preserve that distinction through the
+[owned source-target planning contract](docs/runtime-source-target.md).
+The payload ships the canonical lifecycle helper through `installerLifecycle`;
+this does not change its existing dispatcher or publication policy.
 Profile changes start no service, SSH listener, Docker container or fleet.
 Helper packages are installed non-editably into that slot; health checks reject
 code resolved from a mutable source checkout outside it.
@@ -239,6 +329,27 @@ copies without pip/setuptools seeding; unrestricted pip fallback is unsupported.
 The staged profile coordinator runs in Python isolated mode and loads its
 runtime helper from the same payload directory explicitly, so safe-path
 settings and ambient Python modules cannot redirect that import.
+
+Newly constructed slots also publish a versioned `executionContract` inside the
+slot's own `runtime-profile.json`. The installer-owned
+[`runtime_profile.select_execution`](scripts/runtime_profile.py) is a read-only
+internal selection API: it uses the canonical completed-runtime selector, checks
+the slot/profile identity and completion hash, and returns that exact immutable
+interpreter with its declaration. It does not provision, activate, acquire a
+retention lease, start a provider, or inspect a guest. A later mutable payload
+shim is **not** that selected execution; final execution and continuing retention
+must use the actual runtime owners.
+
+Declaration schema `copilot-extensions.agent-containers.provider-execution`,
+version `1`, contains a strict boolean `retainedCreation`. Both dependency
+profiles currently publish `false`: Paramiko, readiness and instance-pinned
+execution do not implement Bridge creation custody. Missing, malformed,
+duplicate-key or unsupported declarations refuse this selection API without
+effects. Previously completed profiles without the declaration remain reusable
+for ordinary installation byte-for-byte; they are never retroactively stamped
+as supporting a new contract. Re-select after a runtime change or rollback.
+This is provider-first metadata, not an enabled retained-creation caller,
+provider/guest admission, launch-lifetime retention or native qualification.
 
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo
@@ -268,7 +379,9 @@ unchanged.
   `agent-containers` binstub implements `namespace-list`,
   `namespace-resolve`, `namespace-ensure-ready`, `namespace-recreate`, and
   `relay-profile`; bridge shells out to those commands rather than requiring
-  this package in the bridge venv. `namespace-recreate` is the destructive,
+  this package in the bridge venv. Inventory uses one `docker ps` query without
+  a separate version preflight; missing CLI, daemon and query failures remain
+  errors, not successful empty inventories. `namespace-recreate` is the destructive,
   target-scoped parity seam: it removes only the identity-checked Docker
   instance of one trusted configured member, recreates the same deterministic
   name, and reports the new instance identity without exposing launch data.
@@ -1043,6 +1156,24 @@ Docker is required for fleet operations (`fleet`, `up`, `borrow`, `exec`, etc.),
 not for stamping the binstub.
 
 ## Runtime state
+
+Runtime-home and broker-endpoint paths are normalized lexically against the
+selecting process's cwd before instance reservation or admission. Broker child
+arguments remain absolute when its cwd changes to HOME. This does not resolve
+filesystem links: redirected runtime roots still fail custody checks.
+Keeper children inherit the home belonging to their selected store, even if
+the launcher's cwd or ambient home override changes afterward.
+
+The localhost SSH broker stops intake and settles accepted connections, its
+native Docker CLI children, and every control/stream worker before releasing
+daemon admission, including interrupted or failed startup. Windows children
+use a strict, retained Job that confirms descendant retirement even after the
+CLI leader exits. POSIX children retain the broker's existing process group
+and test/lease containment: cleanup reaps the exact direct child and waits for
+both pipe pumps. It does not adopt or signal a guessed descendant group; an
+inherited pipe held by a descendant keeps admission live until that pipe closes.
+Cleanup retries interrupted retirement rather than declaring unfinished work
+complete. Endpoint removal still preserves another process's replacement.
 
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
   lock file and kept backward-compatible across runtime versions;

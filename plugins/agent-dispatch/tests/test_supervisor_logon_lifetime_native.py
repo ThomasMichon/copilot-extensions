@@ -80,14 +80,13 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
         root.mkdir()
         launcher = root / "fixture launcher.ps1"
         launcher.write_text(
-            "$ErrorActionPreference='Stop'\n"
-            + publisher
-            + "Write-FixtureRecord (Join-Path $PSScriptRoot 'resident.json') "
-            "@{pid=$PID;birth=([Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc())}\n"
-            "for($i=1;$i -le 2;$i++){"
-            "Write-FixtureRecord (Join-Path $PSScriptRoot \"heartbeat-$i.json\") @{iteration=$i};"
-            "Start-Sleep -Milliseconds 100}\n"
-            "Start-Sleep -Seconds 90\n",
+            "# agent-dispatch-supervisor-launch-v1\n"
+            "param([switch]$DescribeLaunch)\n"
+            "if (-not $DescribeLaunch) { throw 'Expected description' }\n"
+            f"$value=@{{version=1;executable='{sys.executable}';"
+            f"arguments=@('-I','-B','{SCRIPT}','resident','{root}');"
+            f"log_path='{root / 'supervise-launcher.log'}'}}|ConvertTo-Json -Compress\n"
+            "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value))\n",
             encoding="utf-8",
         )
         leaf = root / "fixture caller.ps1"
@@ -116,7 +115,8 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
             caller = subprocess.Popen(
                 [sys.executable, "-I", "-B", str(SCRIPT), "outer", str(root)],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                env=dict(os.environ, PYTHONPATH=str(REPO / "libs" / "agent-procutil" / "src")),
+                env=dict(os.environ, PYTHONPATH=str(REPO / "libs" / "agent-procutil" / "src"),
+                         COPILOT_EXTENSIONS_DAEMON_REGISTRY=str(root / "instances")),
                 **pu.no_window_kwargs(),
             )
             try:
@@ -173,6 +173,17 @@ def _run_fixture(mode: str, root: Path) -> None:
                 job.close()
                 if process.poll() is None:
                     process.wait(timeout=5)
+    elif mode == "resident":
+        from agent_procutil.daemon_instances import admit_daemon_instance
+        sys.path.insert(0, str(SCRIPT.parent))
+        import windows_durable_launch_fixture as fixture
+
+        with admit_daemon_instance("dispatch-logon-fixture"):
+            fixture.publish(root / "resident.json", fixture.identity(os.getpid()))
+            for iteration in (1, 2):
+                fixture.publish(root / f"heartbeat-{iteration}.json", {"iteration": iteration})
+                time.sleep(.1)
+            time.sleep(90)
     else:
         raise ValueError(mode)
 

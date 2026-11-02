@@ -49,7 +49,7 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
     assert base and selected
     sdk = tmp_path / "sdk"
     sdk.mkdir()
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
         shutil.copyfile(support.PATH.with_name(name), sdk / name)
     if frontend.startswith("python"):
         for name in ("installer_engine.py", "installer_engine_process.py"):

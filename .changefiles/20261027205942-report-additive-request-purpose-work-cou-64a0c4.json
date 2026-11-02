@@ -1,0 +1,9 @@
+{
+  "comment": "Report additive request-purpose work counts for shared HTTP and GitHub acquisition",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

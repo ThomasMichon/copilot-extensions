@@ -710,6 +710,61 @@ def test_cancellation_racing_successful_close_lock_acquisition_releases_only_mut
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("ending", ["cancel", "timeout"])
+@pytest.mark.parametrize("repeated", [False, True])
+def test_close_joins_exact_pending_acquisition_despite_repeated_cancellation(setup, ending, repeated):
+    store, make, _ = setup
+
+    async def scenario():
+        service = make()
+        await service.start()
+        original_lock = service._closing
+        entered, cancelling, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        class DeferredAcquisition(asyncio.Lock):
+            async def acquire(self):
+                entered.set()
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    cancelling.set()
+                    await release.wait()
+                return await super().acquire()
+
+        lock = service._closing = DeferredAcquisition()
+        close = asyncio.create_task(service.close(timeout=0.01 if ending == "timeout" else 3))
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            if ending == "cancel":
+                close.cancel()
+            await asyncio.wait_for(cancelling.wait(), 3)
+            if repeated:
+                for _ in range(3):
+                    close.cancel()
+                    await asyncio.sleep(0)
+                    assert not close.done()
+            assert service.status()["writer_held"]
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            release.set()
+            with pytest.raises(
+                asyncio.CancelledError if ending == "cancel" or repeated else TimeoutError,
+            ):
+                await close
+            assert not lock.locked()
+            assert service.status()["writer_held"]
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+        finally:
+            release.set()
+            await asyncio.gather(close, return_exceptions=True)
+            service._closing = original_lock
+            await service.close(timeout=3)
+        assert service.status()["closed"] and not service.status()["writer_held"]
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("adopting", [False, True])
 def test_second_foreground_invocation_cannot_drain_existing_owner(setup, monkeypatch, adopting):
     store, make, _ = setup

@@ -98,27 +98,66 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
+    $deployment = Get-Content $Manifest -Raw | ConvertFrom-Json
+    $deployed = "" + $deployment.source.version
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
-    # "Provisioned" no longer implies a `.venv`: the marker runtime model (#581)
-    # publishes the active slot via a `current-version` marker with NO junction on
-    # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
-    # Treat a marker whose slot python exists as provisioned too -- otherwise a
-    # current runtime needlessly background-rebuilds every session.
-    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
-    if (-not $provisioned) {
-        $cvMarker = Join-Path $InstallDir 'current-version'
-        if (Test-Path $cvMarker) {
-            $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
-            # ...and only when it names the CURRENT payload version: the marker is
-            # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
-            # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+    $provisioned = $false
+    $expectedSlot = $current
+    $sourceReceipt = Join-Path $PluginDir 'runtime-source.json'
+    if ((Test-Path -LiteralPath $sourceReceipt) -or $deployment.runtime_source) {
+        $expectedSlot = ''
+        $native = Join-Path $PSScriptRoot 'versioned_runtime_native.ps1'
+        if ([IO.File]::Exists($native)) {
+            . $native
+            foreach ($candidate in @(Get-Command python3, python, py -All -CommandType Application |
+                    Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
+                $arguments = @()
+                if ($candidate.Name -match '^py(\.exe)?$') { $arguments += '-3' }
+                $arguments += @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_readiness.py'),
+                    '--payload', $PluginDir, '--package-version', $current, '--plugin', $name,
+                    '--deployment-manifest', $Manifest)
+                try {
+                    $detail = ''
+                    $value = Invoke-Hidden -FilePath $candidate.Source -ArgList $arguments -ErrorOutput ([ref]$detail)
+                    if ($LASTEXITCODE -eq 0 -and $value) {
+                        $expectedSlot = $value.Trim()
+                        break
+                    }
+                } catch { }
+            }
+        }
+    } elseif ($deployment.runtime_version) {
+        $expectedSlot = $deployment.runtime_version
+        $separator = if ($current.Contains('+')) { '.' } else { '+' }
+        $repairPattern = '^' + [regex]::Escape($current + $separator) + 'repair\.[0-9a-f]{32}$'
+        if ($expectedSlot -ne $current -and $expectedSlot -cnotmatch $repairPattern) { $expectedSlot = '' }
+    }
+    $cvMarker = Join-Path $InstallDir 'current-version'
+    if ($deployed -eq $current -and $expectedSlot) {
+        if (-not (Test-Path -LiteralPath $cvMarker) -and
+            -not (Test-Path -LiteralPath $sourceReceipt) -and $expectedSlot -eq $current -and
+            (Test-Path -LiteralPath (Join-Path $InstallDir '.venv'))) {
+            $provisioned = $true
+        } elseif ([IO.File]::Exists($cvMarker)) {
+            $cv = [IO.File]::ReadAllText($cvMarker).Trim()
+            $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
+            if ($cv -ceq $expectedSlot -and [IO.File]::Exists($resolver)) {
+                $previousRoot = $env:AGENT_RT_ROOT
+                try {
+                    $env:AGENT_RT_ROOT = $InstallDir
+                    . $resolver -TraceMode read-only
+                    $provisioned = $AgentRtPy -and (
+                        $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\Scripts\python.exe") -or
+                        $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\bin\python"))
+                } finally {
+                    $env:AGENT_RT_ROOT = $previousRoot
+                }
+            }
         }
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }

@@ -5,33 +5,71 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import time
+from collections.abc import Mapping
+from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypedDict, cast
 
 import pytest
 
+if TYPE_CHECKING:
+    import installation_context as _production
+
+
+class _LockArguments(TypedDict):
+    kind: str
+    marketplace_id: str
+
+
+class _TimedLockArguments(_LockArguments):
+    timeout_seconds: float
+
+
+class _HandoffModule(Protocol):
+    @property
+    def _DirectoryLock(self) -> type[_production._DirectoryLock]: ...
+
+    @property
+    def InstallationContextError(self) -> type[_production.InstallationContextError]: ...
+
+    @property
+    def _FileIdentityChanged(self) -> type[_production._FileIdentityChanged]: ...
+
+    def read_json(self, path: str | PathLike[str]) -> Any: ...
+
+    def _lock_owner_state(self, owner: Mapping[str, Any]) -> str: ...
+
+
+if TYPE_CHECKING:
+    _module_contract: _HandoffModule = _production
+
 
 @pytest.fixture
-def module(monkeypatch):
+def module(monkeypatch: pytest.MonkeyPatch) -> _HandoffModule:
     path = Path(__file__).resolve().parents[1] / "installation_context.py"
     spec = importlib.util.spec_from_file_location("handoff_installation_context", path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
-    return module
+    assert module.os is os and module.time is time
+    return cast(_HandoffModule, module)
 
 
 @pytest.mark.parametrize("replacement", [False, True])
 def test_changing_file_observation_is_distinct_from_invalid_evidence(
-    module, tmp_path, monkeypatch, replacement,
-):
+    module: _HandoffModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    replacement: bool,
+) -> None:
     path = tmp_path / "owner.json"
     path.write_text('{"owner":1}', encoding="utf-8")
-    original_read = module.os.read
-    original_close = module.os.close
+    original_read = os.read
+    original_close = os.close
     changed = False
-    observed_descriptor = None
+    observed_descriptor: int | None = None
 
-    def read(descriptor, size):
+    def read(descriptor: int, size: int) -> bytes:
         nonlocal changed, observed_descriptor
         content = original_read(descriptor, size)
         observed_descriptor = descriptor
@@ -41,7 +79,7 @@ def test_changing_file_observation_is_distinct_from_invalid_evidence(
                 path.write_text('{"owner":22}', encoding="utf-8")
         return content
 
-    def close(descriptor):
+    def close(descriptor: int) -> None:
         nonlocal changed
         original_close(descriptor)
         if replacement and descriptor == observed_descriptor and not changed:
@@ -50,21 +88,25 @@ def test_changing_file_observation_is_distinct_from_invalid_evidence(
             alternate.write_text('{"owner":22}', encoding="utf-8")
             os.replace(alternate, path)
 
-    monkeypatch.setattr(module.os, "read", read)
-    monkeypatch.setattr(module.os, "close", close)
+    monkeypatch.setattr(os, "read", read)
+    monkeypatch.setattr(os, "close", close)
     with pytest.raises(module._FileIdentityChanged, match="changed while it was being read"):
         module.read_json(path)
 
 
-def test_lock_contender_retries_a_witnessed_owner_handoff(module, tmp_path, monkeypatch):
+def test_lock_contender_retries_a_witnessed_owner_handoff(
+    module: _HandoffModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path = tmp_path / "lock"
-    arguments = {"kind": "genesis", "marketplace_id": "example", "timeout_seconds": 2}
+    arguments: _TimedLockArguments = {
+        "kind": "genesis", "marketplace_id": "example", "timeout_seconds": 2,
+    }
     first, second, third = [module._DirectoryLock(path, **arguments) for _ in range(3)]
     first.acquire()
     read_json = module.read_json
     step = 0
 
-    def changing_owner(requested):
+    def changing_owner(requested: str | PathLike[str]) -> Any:
         nonlocal step
         if requested != first.owner_path or step < 0:
             return read_json(requested)
@@ -93,27 +135,27 @@ def test_lock_contender_retries_a_witnessed_owner_handoff(module, tmp_path, monk
 
 
 def test_changing_owner_retries_remain_bounded_without_releasing_the_owner(
-    module, tmp_path, monkeypatch,
-):
-    arguments = {"kind": "genesis", "marketplace_id": "example"}
+    module: _HandoffModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments: _LockArguments = {"kind": "genesis", "marketplace_id": "example"}
     owner = module._DirectoryLock(tmp_path / "lock", **arguments)
     contender = module._DirectoryLock(tmp_path / "lock", **arguments, timeout_seconds=.04)
     owner.acquire()
     before = owner.owner_path.read_bytes()
-    moment = 0
+    moment: float = 0
 
-    def now():
+    def now() -> float:
         nonlocal moment
         moment += .01
         return moment
 
-    def changing(_path):
+    def changing(_path: str | PathLike[str]) -> NoReturn:
         raise module._FileIdentityChanged("owner changed")
 
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(module.time, "monotonic", now)
-            patch.setattr(module.time, "sleep", lambda _delay: None)
+            patch.setattr(time, "monotonic", now)
+            patch.setattr(time, "sleep", lambda _delay: None)
             patch.setattr(module, "read_json", changing)
             with pytest.raises(module.InstallationContextError, match="remained busy"):
                 contender.acquire()
@@ -124,8 +166,13 @@ def test_changing_owner_retries_remain_bounded_without_releasing_the_owner(
 
 
 @pytest.mark.parametrize("replacement", [False, True])
-def test_stale_observation_after_clean_release_retries(module, tmp_path, monkeypatch, replacement):
-    arguments = {"kind": "genesis", "marketplace_id": "example", "timeout_seconds": 2}
+def test_stale_observation_after_clean_release_retries(
+    module: _HandoffModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    replacement: bool,
+) -> None:
+    arguments: _TimedLockArguments = {
+        "kind": "genesis", "marketplace_id": "example", "timeout_seconds": 2,
+    }
     first, second, third = [
         module._DirectoryLock(tmp_path / "lock", **arguments) for _ in range(3)
     ]
@@ -133,7 +180,7 @@ def test_stale_observation_after_clean_release_retries(module, tmp_path, monkeyp
     owner_state = module._lock_owner_state
     changed = False
 
-    def released_owner(owner):
+    def released_owner(owner: Mapping[str, Any]) -> str:
         nonlocal changed
         if not changed:
             changed = True
@@ -158,9 +205,12 @@ def test_stale_observation_after_clean_release_retries(module, tmp_path, monkeyp
 
 @pytest.mark.parametrize("failure", ["malformed", "permission"])
 def test_lock_contender_still_refuses_stable_invalid_or_unreadable_owner(
-    module, tmp_path, monkeypatch, failure,
-):
-    arguments = {"kind": "genesis", "marketplace_id": "example", "timeout_seconds": 1}
+    module: _HandoffModule, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    arguments: _TimedLockArguments = {
+        "kind": "genesis", "marketplace_id": "example", "timeout_seconds": 1,
+    }
     owner = module._DirectoryLock(tmp_path / "lock", **arguments)
     contender = module._DirectoryLock(tmp_path / "lock", **arguments)
     owner.acquire()
@@ -168,16 +218,16 @@ def test_lock_contender_still_refuses_stable_invalid_or_unreadable_owner(
     try:
         with monkeypatch.context() as patch:
             if failure == "malformed":
-                def read_json(_path):
+                def read_json(_path: str | PathLike[str]) -> NoReturn:
                     raise module.InstallationContextError("malformed owner")
 
                 patch.setattr(module, "read_json", read_json)
                 message = "malformed owner"
             else:
-                def read(*_args):
+                def read(*_args: int) -> NoReturn:
                     raise PermissionError("owner access denied")
 
-                patch.setattr(module.os, "read", read)
+                patch.setattr(os, "read", read)
                 message = "owner access denied"
             with pytest.raises(module.InstallationContextError, match=message) as caught:
                 contender.acquire()

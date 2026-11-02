@@ -1,0 +1,9 @@
+{
+  "comment": "Select declared instruction copies without content or reviewed-fallback admission; align selectors and effective runtime settings.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

@@ -19,7 +19,21 @@ def _core():
     return core
 
 
+def cmd_publication_labels(args):
+    from .pr_publication_labels_cli import cmd_publication_labels as repair
+    return repair(args)
+
+
+def _warn_publication_labels(result):
+    status = result.get("publication_labels")
+    if status and not status.get("ok"):
+        output.warn(f"Publication retained, but origin labels need repair: {status.get('error')}. "
+                    "Run pr-publication-labels without another push.")
+
+
 def add_parsers(sub) -> None:
+    from . import pr_publication_labels_cli
+    pr_publication_labels_cli.add_parser(sub)
     p = sub.add_parser("post-exit", help="Post-exit worktree checks (idempotent)")
     p.add_argument("worktree_id", nargs="?", default=None)
 
@@ -67,6 +81,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--config", default=None)
 
     p = sub.add_parser("push-changes", help="Push worktree changes to remote default branch")
+    pr_publication_labels_cli.add_options(p)
     p.add_argument("--rewrite-pr", action="store_true",
                    help="Intentionally publish rewritten owned PR history using its recorded exact head lease")
     p.add_argument(
@@ -106,6 +121,7 @@ def add_parsers(sub) -> None:
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Title for the squashed commit / PR slug")
+    pr_publication_labels_cli.add_options(p)
     p.add_argument("--branch", default=None, help="Override the generated feature branch name")
     p.add_argument(
         "--topic",
@@ -475,6 +491,8 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 rewrite_pr=getattr(args, "rewrite_pr", False),
                 break_glass_reason=recovery_reason,
                 confirm_break_glass=confirmation,
+                publication_origin=getattr(args, "publication_origin", None),
+                publication_labels=tuple(getattr(args, "publication_label", ())),
             )
         except pr_break_glass.ConfirmationRequired as exc:
             if use_json:
@@ -483,6 +501,8 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 output.err(str(exc))
                 print(json.dumps(exc.preview, sort_keys=True, indent=2))
             return 2
+        except ValueError as exc:
+            return output._json_error(str(exc)) if use_json else (output.err(str(exc)) or 1)
 
         reminder = context_cli._pr_reminder_for(
             config,
@@ -503,6 +523,9 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 "success": success,
                 "status": final_status,
             }
+            from .pr_publication_labels import last_result
+            if success and last_result.get() is not None:
+                out["publication_labels"] = last_result.get()
             if reminder is not None:
                 out["reminder"] = reminder.as_dict()
             output._json_output(out)
@@ -617,6 +640,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 draft=getattr(args, "draft", False) or getattr(args, "hold", False),
                 attribution=(False if getattr(args, "no_attribution", False) else None),
                 new=getattr(args, "new", False),
+                publication_origin=getattr(args, "publication_origin", None),
+                publication_labels=tuple(getattr(args, "publication_label", ())),
             )
             if result.get("error"):
                 return output._json_error(result["error"]) if use_json else (
@@ -626,6 +651,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 output._json_output(result)
             else:
                 verb = "Reused existing" if result.get("reused") else "Opened"
+                _warn_publication_labels(result)
                 output.ok(
                     f"{verb} PR #{result.get('number')} via foreign-repo "
                     f"create: {result.get('url', '')}"
@@ -678,6 +704,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 attribution=(False if getattr(args, "no_attribution", False) else None),
                 dry_run=args.dry_run,
                 confirm_fork=getattr(args, "confirm_fork", False),
+                publication_origin=getattr(args, "publication_origin", None),
+                publication_labels=tuple(getattr(args, "publication_label", ())),
             )
         except (codename_tracking.CodenameAttributionPolicyError, TimeoutError, ValueError) as e:
             msg = str(e)
@@ -720,6 +748,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         if use_json:
             output._json_output(result)
         elif result.get("success"):
+            _warn_publication_labels(result)
             branch = result.get("branch", "")
             remote = result.get("remote", "")
             provider = result.get("provider", "")

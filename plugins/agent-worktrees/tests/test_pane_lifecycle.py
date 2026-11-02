@@ -53,7 +53,7 @@ def test_pane_create_logs_before_spawn_and_foregrounds(monkeypatch, tmp_path: Pa
         return _RunResult(stdout="%7\n")
 
     monkeypatch.setattr(pane_lifecycle.activity, "log_event", _log_event)
-    monkeypatch.setattr(pane_lifecycle.subprocess, "run", _run)
+    monkeypatch.setattr(pane_lifecycle.mux_creation, "run", lambda argv: _run(argv))
 
     result = pane_lifecycle.pane_create(
         "abc",

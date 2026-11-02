@@ -7,13 +7,20 @@ the outbound `ServiceConnector` SDK for services that embed it; there is no
 connector executable or installer API.
 
 The build context is the repository root. `Dockerfile.dockerignore` admits only
-package metadata/direct Python sources and the canonical
+package metadata/direct Python sources, the complete declared `agent-procutil`
+module/resource closure (including the finite process owner), and the canonical
 `libs/versioned-runtime` build inputs. `setup.py` selects `standalone_build.py`,
 which adds the maintained runtime resource closure to the wheel. No Git
 directory, tests, test environment, host HOME or synthetic keys enter the image.
 The multi-stage Python 3.13 slim build uses uv 0.11.7 with a seven-day cutoff
 for both isolated wheel build dependencies and extra/transitive dependencies.
 The runtime contains the noneditable wheel environment, not uv or its sources.
+The distribution tests compare the actual procutil Python family with the
+pinned source roster and require every declared module/resource to survive
+both Docker's copy rules and its closed allowlist. This source check is not
+limited to names: it builds the procutil wheel from those filtered inputs and
+compares every declared module/resource with the exact source bytes. It is
+not evidence that either target architecture's image was built or run.
 
 ## Runtime contract
 

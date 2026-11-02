@@ -3,10 +3,10 @@
 Engine contracts cover coherent canonical dev and self-contained release layouts,
 including a real canonical-to-materialized transition from either test input.
 
-The labelled orchestration seam preserves the complete nine-source order,
-eleven-call SRE history and fatal short-circuit. Separate per-source integration
-replays those captured calls through real policy admission and retention. This
-is not an all-nine-sources/all-real-in-one-subprocess timing guarantee.
+The labelled orchestration seam preserves the complete batched source order,
+three-attempt SRE history and fatal short-circuit. Separate per-source integration
+replays each source selected from that captured batch through real admission
+and retention. This is not an all-sources/all-real timing guarantee.
 Seasoning/configuration, private-copy/origin and immutable-byte assertions live
 in the real-admission items; complete order, retry history, final success and
 fatal short-circuit assertions remain in the orchestration items.
@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_procutil.owned_process import run_caller_owned
+
 from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
@@ -52,6 +54,7 @@ PACKAGES = (
     "agent-session-liveness-probe",
     "agent-single-instance-lease",
     "agent-remote-login-shell",
+    "agent-update-driver",
     "agent-codespaces",
 )
 REAL_ADMISSION_CASES = (
@@ -70,6 +73,7 @@ VARIABLES = (
     "SESSION_LIVENESS_PROBE_DIR",
     "SINGLE_INSTANCE_LEASE_DIR",
     "REMOTE_LOGIN_SHELL_DIR",
+    "UPDATE_DRIVER_DIR",
     "PLUGIN_DIR",
 )
 PS_VARIABLES = (
@@ -81,9 +85,10 @@ PS_VARIABLES = (
     "SessionLivenessProbeDir",
     "SingleInstanceLeaseDir",
     "RemoteLoginShellDir",
+    "UpdateDriverDir",
     "PluginDir",
 )
-pytestmark = pytest.mark.timeout(installer_functional_timeout(60))
+pytestmark = [pytest.mark.timeout(installer_functional_timeout(60)), pytest.mark.installer_only]
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -134,14 +139,15 @@ def _function(ext: str, name: str) -> str:
     return match.group(0) + "\n"
 
 
-def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
+def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=None):
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
     command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
     try:
-        return subprocess.run(
-            command, env=env, cwd=tmp_path, capture_output=True, text=True,
-            timeout=installer_functional_timeout(45), check=False,
+        return run_caller_owned(
+            command, env=env, cwd=tmp_path,
+            timeout=installer_functional_timeout(45) if timeout is None else timeout,
+            max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
         )
     except subprocess.TimeoutExpired as exc:
         log = tmp_path / "uv.jsonl"
@@ -181,6 +187,8 @@ def phase(name):
     with Path(os.environ["TEST_UV_LOG"]).with_suffix(".phases.jsonl").open("a") as stream:
         stream.write(json.dumps({"phase": name, "time": time.monotonic(), "operation": args[:2]}) + "\\n")
 phase("entered")
+if args[:2] == ["pip", "install"]:
+    assert "--no-editable" not in args and "--editable" not in args
 if "--show-settings" in args:
     print(__TEST_UV_SETTINGS__)
     raise SystemExit(0)
@@ -188,7 +196,7 @@ def unseasoned(arguments):
     result = []
     items = iter(arguments)
     for argument in items:
-        if argument in ("--exclude-newer", "--config-file"):
+        if argument in ("--exclude-newer", "--config-file", "--link-mode"):
             next(items)
         elif argument == "--config-setting":
             assert next(items) == "editable_mode=compat"
@@ -198,6 +206,7 @@ def unseasoned(arguments):
 expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
 if expected_sources and args[:2] == ["pip", "install"]:
     native_path = native_retained_path
+    assert "--no-editable" not in args and "--editable" not in args
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
@@ -210,34 +219,36 @@ if expected_sources and args[:2] == ["pip", "install"]:
     if os.name != "nt":
         assert private_root.stat().st_uid == os.getuid()
         assert private_root.stat().st_mode & 0o077 == 0
-    assert args.count("--editable") + args.count("--reinstall-package") == 1
-    index = args.index("--editable") + 1 if "--editable" in args else args.index("--reinstall-package") + 2
-    source = Path(args[index]).resolve()
-    native_source = Path(native_path(source))
-    assert native_source.is_dir() and (native_source / "pyproject.toml").is_file()
-    retained = tomllib.loads((native_source / "pyproject.toml").read_text())
-    project = retained["project"]
-    original = Path(expected_sources[project["name"]])
-    native_original = Path(native_path(original))
-    original_metadata = tomllib.loads((native_original / "pyproject.toml").read_text())
-    assert source != original.resolve()
-    assert source.is_relative_to(private_root)
-    assert project == original_metadata["project"]
-    setuptools = retained["tool"]["setuptools"]
-    if "--editable" in args:
-        where = setuptools["packages"]["find"]["where"]
-        assert len(where) == 1
-        assert (source / where[0]).resolve().samefile(original / "src")
-        assert setuptools["package-dir"] == {"": where[0]}
-    else:
-        assert project["name"] == args[args.index("--reinstall-package") + 1]
-        assert setuptools == original_metadata["tool"]["setuptools"]
-    for member in native_original.rglob("*.py"):
-        assert (native_source / member.relative_to(native_original)).read_bytes() == member.read_bytes()
-    args[index] = str(original)
+    verified_sources = []
+    for index, argument in enumerate(args):
+        source = Path(argument)
+        native_source = Path(native_path(source))
+        if not native_source.is_dir() or not (native_source / "pyproject.toml").is_file():
+            continue
+        metadata = tomllib.loads((native_source / "pyproject.toml").read_text())
+        project = metadata["project"]
+        verified_sources.append(project["name"])
+        for entries in metadata.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            assert all(entry.get("editable") is not True
+                       for entry in (entries if isinstance(entries, list) else [entries]))
+        original = Path(expected_sources[project["name"]])
+        native_original = Path(native_path(original))
+        assert source.resolve() != original.resolve()
+        assert any(parent.samefile(private_root) for parent in source.resolve().parents)
+        original_metadata = tomllib.loads((native_original / "pyproject.toml").read_text())
+        assert project == original_metadata["project"]
+        assert metadata.get("tool", {}).get("setuptools") == original_metadata.get("tool", {}).get("setuptools")
+        for member in native_original.rglob("*.py"):
+            assert (native_source / member.relative_to(native_original)).read_bytes() == member.read_bytes()
+        args[index] = str(original)
+    assert verified_sources
     if os.environ.get("TEST_UV_RETRY_SOURCE"):
-        assert os.environ["TEST_UV_RETRY_SOURCE"] in expected_sources
-        assert project["name"] == os.environ["TEST_UV_RETRY_SOURCE"]
+        assert verified_sources == [os.environ["TEST_UV_RETRY_SOURCE"]]
+    assert private_root.parent.parent.samefile(Path(os.environ["TEMP"])), (
+        str(private_root.parent.parent), os.environ["TEMP"], os.environ.get("TMPDIR"),
+    )
+    assert not any(private_root.resolve().is_relative_to(Path(value).resolve())
+                   for value in expected_sources.values())
     phase("source-verified")
 log = Path(os.environ["TEST_UV_LOG"])
 history = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -324,10 +335,12 @@ raise SystemExit(2)
 
 def _without_policy_arguments(arguments):
     assert "--exclude-newer" in arguments and "--reinstall" in arguments
+    assert "--no-editable" not in arguments and "--editable" not in arguments
+    assert arguments[arguments.index("--link-mode") + 1] == "copy"
     result = []
     items = iter(arguments)
     for argument in items:
-        if argument in ("--exclude-newer", "--config-file"):
+        if argument in ("--exclude-newer", "--config-file", "--link-mode"):
             next(items)
         elif argument == "--config-setting":
             assert next(items) == "editable_mode=compat"
@@ -350,7 +363,7 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
         "function Write-ServiceWarn { param($Msg) [Console]::Error.WriteLine($Msg) }\n"
         "function Write-ServiceErr { param($Msg) [Console]::Error.WriteLine($Msg) }\n"
         "function Write-ServiceOk { param($Msg) }\n"
-        "function Write-Step { param($Msg) }\n"
+        "function Write-Step { param($Msg) }\nfunction Write-ServiceChanged { param($Msg) }\n"
         "function Write-Warn { param($Msg) Write-ServiceWarn $Msg }\n"
         "function Write-Ok { param($Msg) }\nfunction Start-Sleep { param($Seconds) }\n"
         f". '{engine / 'installer-engine.ps1'}'\n"
@@ -414,6 +427,7 @@ def test_codespaces_activation_requires_installed_module_launch(
         (shadow / "__main__.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
         env["PYTHONPATH"] = str(tmp_path)
     elif state == "invalid-interpreter":
+        python = python.with_name("invalid-python.exe" if os.name == "nt" else "invalid-python")
         python.write_text("not an interpreter\n", encoding="utf-8")
 
     if state == "namespace":
@@ -607,10 +621,27 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         import uv_editable_ref as uer
     finally:
         sys.path.pop(0)
-    repository = tmp_path / "repo"
+    repository = tmp_path / "publisher-repo"
+    # Preserve the real metadata closure without copying every library's tests
+    # and source corpus into an ordering fixture before immediately trimming it.
+    for manifest in (REPO / "libs").glob("*/pyproject.toml"):
+        library = repository / "libs" / manifest.parent.name
+        (library / "src").mkdir(parents=True)
+        shutil.copyfile(manifest, library / "pyproject.toml")
+        (library / "src" / "fixture_source.py").write_text(
+            "value = 'retained-source-contract'\n", encoding="utf-8",
+        )
     payload = repository / "plugins" / PLUGIN.name
-    shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
-    logs = mm.materialize_uv_editable_refs(repository, canonical_root=REPO)
+    (payload / "scripts").mkdir(parents=True)
+    for name in ("plugin.json", "pyproject.toml", "README.md"):
+        shutil.copyfile(PLUGIN / name, payload / name)
+    retained_scripts = (
+        "install.sh", "install.ps1", "installer-human-output.ps1", "install.human-output.json",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+    )
+    for name in retained_scripts:
+        shutil.copyfile(PLUGIN / "scripts" / name, payload / "scripts" / name)
+    logs = mm.materialize_uv_editable_refs(repository, canonical_root=repository)
     skipped = [line for line in logs if line.startswith("SKIP")]
     assert not skipped, "\n".join(skipped)
     # Ordering/retry tests need the real attributed metadata graph, not the
@@ -627,7 +658,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
                     "install.sh", "install.ps1",
                     "installer-human-output.ps1", "install.human-output.json",
                     "installer-engine.sh", "installer-engine.ps1",
-                    "installer_dependency_policy.py", "installer_dependency_config.py",
+                    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
                 ):
                     continue
                 if member.is_dir():
@@ -649,7 +680,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         )
         skipped = [line for line in logs if line.startswith("SKIP")]
         assert not skipped, "\n".join(skipped)
-    shutil.copytree(payload / "libs", repository / "libs")
+    shutil.copytree(payload / "libs", repository / "libs", dirs_exist_ok=True)
     pyproject = payload / "pyproject.toml"
     project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     # Reconstruct dev references from the verified materialized graph, not
@@ -670,7 +701,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     engine.mkdir(parents=True, exist_ok=True)
     for name in (
         "installer-engine.sh", "installer-engine.ps1",
-        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
     roster = repository / ".github" / "plugin" / "marketplace.json"
@@ -728,11 +759,10 @@ def _validate_admission_record(record, expected):
         if record["arguments"] == arguments
     ]
     assert len(matches) == 1, "unknown or incorrect installed source arguments"
-    package = matches[0]
-    source = Path(record["arguments"][-2])
-    project = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    assert project == expected["projects"][package], "changed originating project identity"
-    return package
+    for package, source in expected["sources"].items():
+        project = tomllib.loads((Path(source) / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        assert project == expected["projects"][package], "changed originating project identity"
+    return matches[0]
 
 
 def _assert_admission_history(records, calls, expected):
@@ -740,6 +770,57 @@ def _assert_admission_history(records, calls, expected):
     for record, call in zip(records, calls):
         _validate_admission_record(record, expected)
         assert call == ["pip", "install", *record["arguments"]], "admission/UV history differs"
+
+
+def _small_attributed_sources(tmp_path, *, editable, canonical=None):
+    canonical = editable if canonical is None else canonical
+    repository = tmp_path / "publisher"
+    payload = repository / "plugins" / "agent-codespaces"
+    engine = repository / "libs" / "installer-engine" if canonical else payload / "scripts"
+    engine.mkdir(parents=True)
+    for name in (
+        "installer-engine.sh", "installer-engine.ps1",
+        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+    ):
+        shutil.copyfile(ENGINE / name, engine / name)
+    library_root = repository / "libs" if canonical else payload / "libs"
+    sources = [library_root / name.removeprefix("agent-") for name in PACKAGES[:-1]] + [payload]
+    for name, source in zip(PACKAGES, sources):
+        source.mkdir(parents=True, exist_ok=True)
+        dependencies = list(PACKAGES[:-1]) if source == payload else []
+        build = (
+            '[build-system]\nrequires=["setuptools>=83.0.0"]\nbuild-backend="setuptools.build_meta"\n'
+            if editable else
+            '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]\n'
+        )
+        text = (
+            build +
+            f'[project]\nname="{name}"\nversion="1.0"\ndependencies={json.dumps(dependencies)}\n'
+        )
+        if editable:
+            text += '[tool.setuptools.packages.find]\nwhere=["src"]\n'
+            (source / "src").mkdir()
+            (source / "src" / "fixture_source.py").write_text("VALUE = 1\n", encoding="utf-8")
+        if source == payload:
+            text += "[tool.uv.sources]\n" + "".join(
+                f'{package}={{path={json.dumps(os.path.relpath(path, source).replace(os.sep, "/"))},'
+                f'editable={str(canonical).lower()}}}\n'
+                for package, path in zip(PACKAGES[:-1], sources[:-1])
+            )
+        (source / "pyproject.toml").write_text(text, encoding="utf-8")
+        (source / "fixture_backend.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "agent-codespaces", "version": "1.0",
+        "repository": "https://github.com/ThomasMichon/copilot-extensions",
+    }), encoding="utf-8")
+    if canonical:
+        roster = repository / ".github" / "plugin" / "marketplace.json"
+        roster.parent.mkdir(parents=True)
+        roster.write_text(json.dumps({
+            "name": "copilot-extensions",
+            "plugins": [{"name": "agent-codespaces", "version": "1.0", "source": "plugins/agent-codespaces"}],
+        }), encoding="utf-8")
+    return engine, sources
 
 
 def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library_sources):
@@ -764,13 +845,14 @@ def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library
         "policy": str(engine / "installer_dependency_policy.py"),
         "trusted_source_roots": sorted(str(root) for root in roots),
         "arguments": {
-            package: [
+            "closure": [
                 "--python", str(python),
-                *(["--editable"] if editable else ["--reinstall-package", package]),
-                str(source), "--quiet",
+                *(argument for package, source in zip(PACKAGES, sources)
+                  for argument in ("--reinstall-package", package, str(source))),
+                "--quiet",
             ]
-            for package, source in zip(PACKAGES, sources)
         },
+        "sources": dict(zip(PACKAGES, map(str, sources))),
         "projects": {
             package: tomllib.loads((source / "pyproject.toml").read_text())["project"]
             for package, source in zip(PACKAGES, sources)
@@ -845,9 +927,13 @@ raise SystemExit(main())
         script += _function(ext, "_install_package_into")
         script += f"\nUV_CMD='{uv}'\n"
         script += "".join(f"{var}='{path}'\n" for var, path in zip(VARIABLES, sources))
-        script += f"_install_package_into '{python}'" + (" --editable\n" if editable else "\n")
+        script += f"_install_package_into '{python}'\n"
     else:
-        script = _prelude(ext, engine) + _function(ext, "Install-PackageInto")
+        script = (
+            "Set-StrictMode -Version Latest\n"
+            + _prelude(ext, engine) + _function(ext, "Install-PackageInto")
+            + "$script:SourceRuntimeIdentity = $null\n"
+        )
         script += r"""
 # Orchestration-only transport spy. First call captures real CLI kwargs;
 # immutable-context replays avoid a second Python process per simulated call.
@@ -900,9 +986,8 @@ function Invoke-NativeCapture {
         )
         script += "".join(f"${var}='{path}'\n" for var, path in zip(PS_VARIABLES, sources))
         script += f"if (-not (Install-PackageInto -Python '{python}'"
-        script += " -Editable" if editable else ""
         script += ")) { exit 1 }\n"
-    result = _run(ext, script, tmp_path, env)
+    result = _run(ext, script, tmp_path, env, timeout=90)
     log = tmp_path / "uv.jsonl"
     assert log.exists(), result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
@@ -941,27 +1026,104 @@ def test_codespaces_library_install_order_retry_and_errors(
     result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, mode)
     python = Path(sys._base_executable)
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
+    expected = ["pip", "install", "--python", str(python)]
+    for package, source in zip(PACKAGES, sources):
+        expected.extend(["--reinstall-package", package, str(source)])
+    expected.append("--quiet")
+    assert [_without_policy_arguments(args) for args in calls] == (
+        [expected] * (1 if mode == "fatal" else 3)
+    )
     if mode == "fatal":
-        assert len(calls) == 1
         assert "permanent failure" in result.stderr
-        assert PACKAGES[0] in result.stderr
-        mode_args = ["--editable"] if editable else ["--reinstall-package", PACKAGES[0]]
-        assert calls[0] == [
-            "pip", "install", "--python", str(python), *mode_args, str(sources[0]), "--quiet",
-        ]
+        assert "agent-codespaces closure install failed" in result.stderr
         if ext == "ps1":
             assert "(exit 23)" in result.stderr
-        return
-    assert len(calls) == len(PACKAGES) + 2
-    offset = 0
-    for index, (package, source) in enumerate(zip(PACKAGES, sources)):
-        args = calls[offset]
-        assert args[:4] == ["pip", "install", "--python", str(python)]
-        attempts = 3 if index == 0 else 1
-        assert calls[offset : offset + attempts] == [args] * attempts
-        assert args[-2:] == [str(source), "--quiet"]
-        assert args[4:-2] == (["--editable"] if editable else ["--reinstall-package", package])
-        offset += attempts
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.parametrize("editable", [False, True])
+def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(tmp_path, editable):
+    if PWSH is None:
+        pytest.skip("pwsh unavailable")
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("native UV unavailable")
+    engine, sources = _small_attributed_sources(tmp_path, editable=editable, canonical=True)
+    backend = """
+import pathlib, tomllib, zipfile
+VALUE = 1
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    project = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]
+    name = project["name"].replace("-", "_")
+    filename = name + "-1.0-py3-none-any.whl"
+    prefix = name + "-1.0.dist-info/"
+    metadata = "Metadata-Version: 2.3\\nName: " + project["name"] + "\\nVersion: 1.0\\n"
+    metadata += "".join("Requires-Dist: " + item + "\\n" for item in project["dependencies"])
+    with zipfile.ZipFile(pathlib.Path(wheel_directory) / filename, "w") as wheel:
+        wheel.writestr(prefix + "METADATA", metadata + "\\n")
+        wheel.writestr(prefix + "WHEEL", "Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")
+        wheel.writestr(prefix + "RECORD", "")
+        wheel.writestr(name + "/__init__.py", "VALUE = " + str(VALUE) + "\\n")
+    return filename
+"""
+    for source in sources:
+        if editable:
+            manifest = source / "pyproject.toml"
+            manifest.write_text(manifest.read_text(encoding="utf-8").replace(
+                'requires=["setuptools>=83.0.0"]\nbuild-backend="setuptools.build_meta"',
+                'requires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]',
+            ), encoding="utf-8")
+        (source / "fixture_backend.py").write_text(backend, encoding="utf-8")
+    original_manifests = {source: (source / "pyproject.toml").read_bytes() for source in sources}
+    env = _env(tmp_path)
+    env.update(UV_OFFLINE="1", UV_NO_INDEX="1", UV_PYTHON_DOWNLOADS="never",
+               UV_CACHE_DIR=str(tmp_path / "cache"))
+    slot = tmp_path / "venv"
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    subprocess.run(
+        [sys._base_executable, "-I", "-m", "venv", "--copies", "--without-pip", str(slot)],
+        env=env, check=True, capture_output=True, timeout=30, creationflags=flags,
+    )
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    script = _prelude("ps1", engine) + _function("ps1", "Install-PackageInto")
+    script += (
+        "Set-Item Function:Invoke-FixtureUvInstall -Value ${function:Invoke-UvPipInstallResilient}\n"
+        "$script:InstallCalls = 0\n"
+        "function Invoke-UvPipInstallResilient { param($UvCommand, $Arguments)\n"
+        "  $script:InstallCalls++\n"
+        "  Invoke-FixtureUvInstall -UvCommand $UvCommand -Arguments $Arguments\n}\n"
+        f"$UvCommand='{uv}'\nfunction Remove-ConsoleTrampolines {{ param($VenvDir) }}\n"
+    )
+    script += "".join(f"${var}='{path}'\n" for var, path in zip(PS_VARIABLES, sources))
+    script += (
+        f"if (-not (Install-PackageInto -Python '{python}')) {{ exit 1 }}\n"
+        "if ($script:InstallCalls -ne 1) { throw 'Closure used multiple retained installs' }\n"
+    )
+    for expected in (1, 2):
+        if expected == 2:
+            (sources[0] / "fixture_backend.py").write_text(
+                backend.replace("VALUE = 1", "VALUE = 2"), encoding="utf-8",
+            )
+        result = _run("ps1", script, tmp_path, env, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        probe = tmp_path / "probe.py"
+        probe.write_text(
+            "import importlib, json\nfrom importlib.metadata import distributions\n"
+            f"assert {{d.metadata['Name']:d.version for d in distributions()}} == "
+            f"{dict.fromkeys(PACKAGES, '1.0')!r}\n"
+            f"assert importlib.import_module('agent_ssh_manager').VALUE == {expected}\n"
+            "for distribution in distributions():\n"
+            "    direct_url = distribution.read_text('direct_url.json')\n"
+            "    assert direct_url is not None\n"
+            "    assert json.loads(direct_url)['dir_info'].get('editable') is not True\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [str(python), "-I", str(probe)], env=env, check=True, capture_output=True,
+            timeout=15, creationflags=flags,
+        )
+    assert {source: (source / "pyproject.toml").read_bytes() for source in sources} == original_manifests
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
@@ -974,16 +1136,16 @@ def test_codespaces_library_install_order_retry_and_errors(
 def test_codespaces_real_admission_replays_captured_source(
     tmp_path, ext, editable, package, mode, orchestration_runs,
 ):
-    """Real engine/policy/retention, bounded to one captured source per item."""
+    """Real engine/policy/retention, bounded to one source from the captured batch."""
     result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, "sre")
     assert result.returncode == 0, result.stdout + result.stderr
     _assert_admission_history(records, calls, expected)
-    matches = [
-        record for record in records
-        if _validate_admission_record(record, expected) == package
-    ]
+    matches = [record for record in records if _validate_admission_record(record, expected) == "closure"]
     assert matches and all(record == matches[0] for record in matches)
-    record = matches[0]
+    record = dict(matches[0])
+    arguments = record["arguments"]
+    offset = arguments.index(package)
+    record["arguments"] = [*arguments[:2], "--reinstall-package", *arguments[offset:offset + 2], "--quiet"]
     policy = runpy.run_path(expected["policy"], run_name="real_admission_context")
     assert sorted(str(path) for path in policy["_anchor_roots"]()) == record["trusted_source_roots"]
     env = _env(tmp_path)
@@ -991,9 +1153,6 @@ def test_codespaces_real_admission_replays_captured_source(
     env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
         name: str(source) for name, source in zip(PACKAGES, sources)
     })
-    env["TEST_UV_EXPECTED_TEMP_PARENT"] = str(
-        engine.parent if os.name == "nt" and editable else Path(env["TEMP"])
-    )
     if mode != "ok":
         env["TEST_UV_RETRY_SOURCE"] = package
     original_files = {
@@ -1293,6 +1452,48 @@ def test_codespaces_engine_wiring_refuses_invalid_references(
     with pytest.raises(AssertionError, match=rf"install\.{ext}"):
         _assert_codespaces_engine_wiring(codespaces_engine_scripts)
 
+def test_codespaces_stamp_reuses_native_directory_copy():
+    materialize = _function("ps1", "Materialize-SnapshotDependencies")
+    assert "Copy-InstallSnapshotItem -Source $source -Destination $destination" in materialize
+    assert "Copy-Item -LiteralPath $source -Destination $destination -Recurse" not in materialize
+    assert "$PayloadCopied -and $payloadLibrary" in materialize
+    stamp = _function("ps1", "Invoke-Stamp")
+    assert "Copy-InstallSnapshotItem -Source $_.FullName" in stamp
+    assert "Materialize-SnapshotDependencies -SnapshotDir $snapTmp -PayloadCopied" in stamp
+    assert "Remove-Item $snapTmp -Recurse -Force -ErrorAction Stop" in stamp
+    assert "New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop" in stamp
+
+
+def test_codespaces_stamp_cleanup_failure_precedes_copy_and_publication(tmp_path):
+    if PWSH is None:
+        pytest.skip("pwsh unavailable")
+    fixture = tmp_path / "fixture 'quoted'"
+    install_dir = str(fixture / "runtime").replace("'", "''")
+    local_bin = str(fixture / "bin").replace("'", "''")
+    script = _prelude("ps1") + _function("ps1", "Invoke-Stamp") + f"""
+$InstallDir='{install_dir}'
+$LocalBin='{local_bin}'
+""" + """
+$SrcVersion='1.2.3'
+$script:SourceRuntimeIdentity=$null
+function Write-ServiceErr { throw 'unexpected version refusal' }
+function Assert-SourceRuntime {}
+function Test-Path { return $true }
+function Remove-Item {
+    [CmdletBinding()]
+    param($Path,[switch]$Recurse,[switch]$Force)
+    Write-Error 'synthetic stage cleanup blocked'
+}
+function New-Item { throw 'unexpected staging admission' }
+function Copy-InstallSnapshotItem { throw 'unexpected payload copy' }
+function Deploy-SelfProvisioningBinstub { throw 'unexpected publication' }
+try { Invoke-Stamp; throw 'missing cleanup refusal' } catch {
+    if ($_.Exception.Message -notmatch 'synthetic stage cleanup blocked') { throw }
+}
+"""
+    result = _run("ps1", script, tmp_path, _env(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+
 
 @pytest.fixture(scope="module", params=[False, True])
 def codespaces_stamped_snapshot(tmp_path_factory, request):
@@ -1365,23 +1566,23 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     env["TEST_UV_MODE"] = "fatal"
     guard_installer_payload(payload)
     root = tmp_path / "home" / ".agent-codespaces"
-    stamp = subprocess.run(
-        [
-            PWSH,
-            "-NoProfile",
-            "-File",
-            str(payload / "scripts" / "install.ps1"),
-            "stamp",
-            "-InstallDir",
-            str(root),
-        ],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=installer_functional_timeout(45),
-        check=False,
-    )
+    try:
+        stamp = run_caller_owned(
+            [
+                PWSH, "-NoProfile", "-File", str(payload / "scripts" / "install.ps1"),
+                "stamp", "-InstallDir", str(root),
+            ],
+            env=env,
+            cwd=tmp_path,
+            timeout=installer_functional_timeout(45),
+            max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(
+            f"stamp fixture timeout (materialized={materialized}); "
+            f"stdout: {error.stdout!r}; stderr: {error.stderr!r}"
+        )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
     snapshot = Path((root / "payload-dir").read_text().strip())
     provenance = json.loads((snapshot / "snapshot-provenance.json").read_text(encoding="utf-8"))
@@ -1411,7 +1612,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         "versioned_runtime_native.ps1",
     ):
         assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
         assert (snapshot / "scripts" / name).read_bytes() == (ENGINE / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
     for spec in project["tool"]["uv"]["sources"].values():
@@ -1431,9 +1632,11 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     return tmp_path, root, snapshot, fake_bin, env
 
 
+# Include real source staging plus independently bounded stamp and consumer calls.
+@pytest.mark.timeout(180)
 def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snapshot):
     tmp_path, root, snapshot, fake_bin, env = codespaces_stamped_snapshot
-    status = subprocess.run(
+    status = run_caller_owned(
         [
             PWSH,
             "-NoProfile",
@@ -1445,16 +1648,15 @@ def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snaps
         ],
         env=env,
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
         timeout=30,
-        check=False,
+        max_stdout_bytes=1024 * 1024,
+        max_stderr_bytes=1024 * 1024,
     )
     # A stamped payload deliberately has no runtime yet.
     assert status.returncode != 0
     assert "Venv missing" in status.stdout
     if os.name != "nt":
-        status_sh = subprocess.run(
+        status_sh = run_caller_owned(
             [
                 "bash",
                 str(snapshot / "scripts" / "install.sh"),
@@ -1464,18 +1666,18 @@ def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snaps
             ],
             env=env,
             cwd=tmp_path,
-            capture_output=True,
-            text=True,
             timeout=30,
-            check=False,
+            max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
         )
         assert status_sh.returncode == 0, status_sh.stdout + status_sh.stderr
     assert_installer_isolated(fake_bin)
 
 
+@pytest.mark.timeout(180)
 def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
     tmp_path, root, _snapshot, fake_bin, env = codespaces_stamped_snapshot
-    first_use = subprocess.run(
+    first_use = run_caller_owned(
         [
             PWSH,
             "-NoProfile",
@@ -1485,10 +1687,9 @@ def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
         ],
         env=env,
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
         timeout=installer_functional_timeout(45),
-        check=False,
+        max_stdout_bytes=1024 * 1024,
+        max_stderr_bytes=1024 * 1024,
     )
     assert first_use.returncode != 0
     assert "permanent failure" in first_use.stdout + first_use.stderr, (
@@ -1517,6 +1718,7 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
         driver = tmp_path / "signed-python.py"
         driver.write_text(
             "import sys\nfrom pathlib import Path\n"
+            "assert '--without-pip' in sys.argv\n"
             "root = Path(sys.argv[-1])\n"
             "(root / 'Scripts').mkdir(parents=True)\n"
             "(root / 'Scripts' / 'python.exe').touch()\n"
@@ -1532,12 +1734,14 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
     else:
         signed = tmp_path / "signed-python"
         signed.write_text(
-            '#!/bin/sh\nmkdir -p "$4/Scripts"\ntouch "$4/Scripts/python.exe" "$4/pyvenv.cfg"\n'
+            '#!/bin/sh\nset -eu\n[ "$4" = "--without-pip" ]\n'
+            'for argument in "$@"; do slot="$argument"; done\n'
+            'mkdir -p "$slot/Scripts"\ntouch "$slot/Scripts/python.exe" "$slot/pyvenv.cfg"\n'
             f"exit {signed_rc}\n",
             encoding="utf-8",
         )
         signed.chmod(0o755)
-    # Signed invocation is: -m venv --copies <slot>.
+    # Signed invocation is: -m venv --copies --without-pip <slot>.
     script = (
         _prelude("ps1")
         + _function("ps1", "Deploy-Venv")
@@ -1793,7 +1997,7 @@ function Invoke-UvVenvResilient {{
 }}
 function Install-PackageInto {{
     param($Python, [switch]$Editable)
-    if (-not $Editable) {{ throw 'Development source was not selected editable' }}
+    if ($Editable) {{ throw 'Development source must not be editable' }}
     $site = & $Python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))'
     Set-Content (Join-Path $site 'agent_codespaces.py') ''
     Set-Content (Join-Path (Split-Path (Split-Path $Python)) 'partial-dependency') 'written'
@@ -1802,6 +2006,7 @@ function Install-PackageInto {{
 New-Item -ItemType Directory (Join-Path $InstallDir 'versions/1.0.0') -Force | Out-Null
 & '{base}' -I '{helper}' --root $InstallDir mark-complete 1.0.0 | Out-Null
 & '{base}' -I '{helper}' --root $InstallDir activate 1.0.0 --no-link | Out-Null
+Write-Host 'fixture-phase:initial-development'
 if (-not (Invoke-Dev)) {{ throw 'Initial development build failed' }}
 $before = (Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim()
 if ($before -notlike 'dev-*') {{ throw 'Initial development build did not activate its generation' }}
@@ -1810,6 +2015,7 @@ $completion = [IO.File]::ReadAllText((Join-Path $good '.install-complete.json'))
 $prefix = [IO.File]::ReadAllText((Join-Path $good 'pyvenv.cfg'))
 $script:DependencyFailure=$true
 $failed=$false
+Write-Host 'fixture-phase:dependency-failure'
 try {{ if (-not (Invoke-Dev)) {{ $failed=$true }} }} catch {{
     if ($_ -notmatch 'construction aborted') {{ throw }}
     $failed=$true
@@ -1821,11 +2027,13 @@ if ([IO.File]::ReadAllText((Join-Path $good '.install-complete.json')) -cne $com
 if ([IO.File]::ReadAllText((Join-Path $good 'pyvenv.cfg')) -cne $prefix) {{ throw 'Working environment changed' }}
 if (@(Get-ChildItem (Join-Path $InstallDir 'versions') -Directory).Count -ne 2) {{ throw 'Failed development candidate remained' }}
 $script:DependencyFailure=$false
+Write-Host 'fixture-phase:development-retry'
 if (-not (Invoke-Dev)) {{ throw 'Development retry failed' }}
 $after = (Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim()
 if ($after -eq $before) {{ throw 'Retry rewrote its predecessor' }}
 $claim = Get-Content (Join-Path $InstallDir 'dev-claim.json') -Raw | ConvertFrom-Json
 if ($claim.previous_version -ne '1.0.0' -or $claim.selected_generation -ne $after) {{ throw 'Development ownership or rollback drifted' }}
+Write-Host 'fixture-phase:release-restore'
 & '{base}' -I '{root / "versioned_runtime.py"}' --root $InstallDir dev-release --owner fixture-owner --restore | Out-Null
 if ($LASTEXITCODE -ne 0) {{ throw 'Deployed release failed' }}
 if ((Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim() -ne '1.0.0') {{ throw 'Original release was not restored' }}
@@ -1857,7 +2065,7 @@ _ensure_uv_index() {{ :; }}
 deploy_binstub() {{ :; }}
 invoke_uv_venv_resilient() {{ '{base}' -I -m venv --without-pip "$2"; }}
 _install_package_into() {{
-    [[ "$2" == --editable ]] || return 91
+    [[ "$#" == 1 ]] || return 91
     site="$("$1" -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" || return 1
     printf '\\n' > "$site/agent_codespaces.py"
     printf written > "$(dirname "$(dirname "$1")")/partial-dependency"
@@ -1866,6 +2074,7 @@ _install_package_into() {{
 mkdir -p "$INSTALL_DIR/versions/1.0.0"
 '{base}' -I '{helper}' --root "$INSTALL_DIR" mark-complete 1.0.0 >/dev/null
 '{base}' -I '{helper}' --root "$INSTALL_DIR" activate 1.0.0 --no-link >/dev/null
+printf '%s\\n' fixture-phase:initial-development
 do_dev || exit 90
 before="$(cat "$INSTALL_DIR/current-version")"
 [[ "$before" == dev-* ]] || {{ echo 'Initial development build did not activate its generation' >&2; exit 103; }}
@@ -1873,6 +2082,7 @@ good="$INSTALL_DIR/versions/$before"
 completion="$(cat "$good/.install-complete.json")"
 prefix="$(cat "$good/pyvenv.cfg")"
 dependency_failure=1
+printf '%s\\n' fixture-phase:dependency-failure
 if do_dev; then echo 'Selected dependency failure was swallowed' >&2; exit 92; fi
 [[ "$(cat "$INSTALL_DIR/current-version")" == "$before" ]] || exit 93
 [[ "$(cat "$INSTALL_DIR/last-known-good")" == "$before" ]] || exit 94
@@ -1880,10 +2090,12 @@ if do_dev; then echo 'Selected dependency failure was swallowed' >&2; exit 92; f
 [[ "$(cat "$good/pyvenv.cfg")" == "$prefix" ]] || exit 96
 [[ "$(find "$INSTALL_DIR/versions" -mindepth 1 -maxdepth 1 -type d | wc -l)" == 2 ]] || exit 97
 dependency_failure=0
+printf '%s\\n' fixture-phase:development-retry
 do_dev || exit 98
 after="$(cat "$INSTALL_DIR/current-version")"
 [[ "$after" != "$before" ]] || exit 99
 '{base}' -I -c 'import json,sys; c=json.load(open(sys.argv[1])); assert c["previous_version"]=="1.0.0" and c["selected_generation"]==sys.argv[2]' "$INSTALL_DIR/dev-claim.json" "$after"
+printf '%s\\n' fixture-phase:release-restore
 '{base}' -I "$INSTALL_DIR/versioned_runtime.py" --root "$INSTALL_DIR" dev-release --owner fixture-owner --restore >/dev/null || exit 100
 [[ "$(cat "$INSTALL_DIR/current-version")" == 1.0.0 ]] || exit 101
 [[ ! -e "$INSTALL_DIR/dev-claim.json" ]] || exit 102

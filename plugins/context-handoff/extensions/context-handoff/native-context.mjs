@@ -220,7 +220,8 @@ export function nativePressurePrompt(usage, level, observation) {
     `continuity is selected (${observation.reason}; offered tools ${observation.availability}). ` +
     "Use get_context_remaining and the context-handoff skill's native checkpoint flow. " +
     "Preserve the parent objective/completion gate, current slice, unresolved requests, " +
-    "decisions, live background/external obligations, and exactly one next action in " +
+    "decisions, original approval evidence/limits and current holds/revocations, " +
+    "live background/external obligations, and exactly one next action in " +
     "session_artifacts under the current owner's expected revision. Verify the checkpoint " +
     "and host-required snapshot binding before terminal new_context; do not call a raw clear. " +
     "After rollover read the bound checkpoint and refresh durable guidance. " +

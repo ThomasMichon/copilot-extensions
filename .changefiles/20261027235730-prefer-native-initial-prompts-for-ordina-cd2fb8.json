@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer native initial prompts for ordinary cold embodiment through the existing final-invocation seed owner; retain terminal fallback and truthful deferred outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

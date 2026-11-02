@@ -78,6 +78,62 @@ platform/concurrency acceptance. The separate #6598 construction change has its
 own native macOS lane and must not be treated as evidence for this campaign
 before its exact relevant checks pass.
 
+## Installation latency audit
+
+Dependency footprint is not the installation-time acceptance criterion.
+A 2026-10-25 read-only audit of twenty retained update histories from one
+Windows adopter found successful runs taking roughly 28-53 minutes.
+Runtime reconciliation alone took 13-34 minutes in several runs; individual
+Codespaces package-install spans took 96-198 seconds. Two later Worktrees
+attempts reached their roughly ten-minute engine-build deadline. Payload
+refresh also consumed minutes, and a newer failure occurred before any
+runtime installer ran, after a marketplace-cache sharing violation and timeout.
+These are distinct bottlenecks; increasing an installer timeout does not fix
+them.
+
+A disposable, host-isolated comparison used the same signed CPython base,
+stdlib `EnvBuilder`, copied interpreters and canonical child ownership:
+
+| Construction | Observed wall time | Inner-phase evidence |
+|--------------|--------------------|----------------------|
+| Unseeded copied venv | 2.760 seconds | Interpreter copy: 0.126 s; script setup: 0.731 s; stdlib post-setup: 0 s |
+| Seeded copied venv | Timed out at 45.059 seconds | Interpreter copy finished in 0.043 s; the process remained in `ensurepip` |
+
+The seeded control was terminated with all owned descendants settled.
+This isolates unnecessary seeding as a real cost; it is not a total-update
+speedup measurement or evidence about service-specific post-copy hooks.
+The post-package Bridge spans included 4.4-8.7 seconds of warm-up and
+38.3-60.9 seconds of cutover/drain. Dispatch's coordinator handoff took
+20.6-33.5 seconds, followed by separate supervisor retirement/registration.
+Those costs are not simply file copying; this slice removes no health,
+drain or re-adoption checks.
+Several UV-owned installers still paid that cost, while Codespaces separately
+ran nine retained compiler/install transactions for its nine local roots.
+The targeted source changes opt those known UV callers out of seeding and
+batch the Codespaces closure without changing dependency, signature, health
+or service authority. Whole-update cold/warm timing and installed-state
+qualification remain required after authorized rollout.
+
+### Logger transaction consolidation
+
+Logger's existing construction used ten governed UV invocations: separate
+setuptools and PyYAML bootstrap installs, seven helper installs, and the plugin
+install. The follow-on source change uses two: the same prerequisites together,
+then all eight explicit local roots in one retained non-editable transaction.
+Every root retains its named reinstall selection; no dependency is removed.
+Reuse, source attribution, signature admission, build isolation, seasoning,
+retry and activation gates remain in their existing owners.
+
+The disposable Windows native fixture verifies both canonical editable
+references and materialized payloads, two calls per construction, all ten
+installed distributions including prerequisites, and a same-version helper edit
+on the warm run. Its private loopback PEP 691 index supplies explicit old upload
+times and hashes; ambient UV/PIP settings are removed, not allowed to redirect
+the test to a different feed. A separate offline full-provision case exercises
+the actual Logger package, helper closure, runtime health and publication flow.
+These are correctness/work-count observations, not a whole-update timing result.
+Cold and unchanged full-update qualification remains open with authorized rollout.
+
 ## Unresolved custody, not completion by renaming
 
 | Remaining requirement | Existing objective and boundary |

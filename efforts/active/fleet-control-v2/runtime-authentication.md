@@ -54,6 +54,29 @@ remote Gateway.
 
 ## Identity, authority and owner separation
 
+### Separate human-session and bootstrap proposals
+
+The [continuity/onboarding amendment](../gateway-ssh-fleet-onboarding/continuity-bootstrap.md)
+distinguishes ordinary human UX sessions, machine bootstrap and normal admitted
+machine/service requests. The `jwt-pop-v1` recommendation above remains the
+selected machine proof contract, not a universal requirement that a browser
+retain an independently enrolled signing key.
+
+A future explicitly selected human-session adapter verifies its provider/
+session and identity provenance at the Gateway or admitted edge, then consumes
+the same current resource policy. It must preserve CSRF protection and closed
+backend paths; a caller cookie or forwarded username is not a machine proof.
+No existing profile is reinterpreted, weakened or silently replaced.
+
+Similarly, authenticated continuity access is useful bootstrap evidence only
+where it supplies real delegated enrollment authority or an authenticated
+confirmation path. The existing enrollment owner commits that decision before
+ordinary machine authorization; a discovered endpoint, public configuration or
+short display code cannot self-enroll. Required peer approval and separate
+recovery policy remain enforced. Receiving adapters must expose support before
+new consumers select these semantics; this is a proposal, not an added API or
+implemented verifier.
+
 | Identity / owner | Can be granted | Does not acquire merely by connecting |
 | --- | --- | --- |
 | Operator or automation client | Selected current views, named commands and status | Fleet administration, host capacity or credential-provider access |

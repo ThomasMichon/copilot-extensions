@@ -131,6 +131,8 @@ def test_compute_and_apply_writes_all_three_files(isolated: Path):
     assert entry["version"] == "1.5.6-dev1"
     # agent-worktrees also bumps the catalog metadata.version.
     assert mkt["metadata"]["version"] == "1.5.6-dev1"
+    for path in (acc.MARKETPLACE, isolated / "plugins/agent-worktrees/plugin.json"):
+        assert b"\r\n" not in path.read_bytes(), "generated JSON must satisfy the repository LF policy"
 
 
 def test_apply_does_not_bump_metadata_for_other_plugins(isolated: Path):
@@ -405,6 +407,7 @@ def test_apply_rewrites_literal_version_fallbacks(isolated: Path):
     text = init.read_text(encoding="utf-8")
     assert '__version__ = "0.4.0-dev8"' in text
     assert 'OTHER = "0.4.0-dev7"' in text  # only monitored fallbacks
+    assert b"\r\n" not in init.read_bytes(), "generated Python must satisfy the repository LF policy"
 
 
 @pytest.mark.parametrize("current, base, expected", [

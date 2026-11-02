@@ -29,12 +29,16 @@ import logging
 import os
 import shutil
 import subprocess
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from agent_index.sources.base import FileEntry
+from agent_index.indexing.change_hints import ChangeHints
+from agent_index.sources.base import FileEntry, nonsecret_target
+from agent_index.sources.delta import SnapshotPage, SourceDelta
+from agent_index.sources.git_records import commit_records, decode_git_path, nul_git_paths
 from agent_index.sources.credentials import (
     SourceCredentialError,
     TokenProvider,
@@ -154,6 +158,8 @@ class GitRepoConnector:
     working tree; see the module docstring for the configuration and fallback.
     """
 
+    hint_poll_refresh = True
+
     def __init__(
         self,
         source: str = "git",
@@ -164,7 +170,17 @@ class GitRepoConnector:
         fetch: bool | None = None,
         token: str | None = None,
         token_provider: TokenProvider | None = None,
+        hint_account: str | None = None,
+        hint_credentials_available: bool = True,
     ):
+        if hint_account is not None and (
+            not isinstance(hint_account, str) or not hint_account.strip()
+        ):
+            raise ValueError("Git hint account must be an explicit nonempty identity")
+        if type(hint_credentials_available) is not bool:
+            raise ValueError("Git hint credential availability must be explicit")
+        self._hint_account = hint_account
+        self._hint_credentials_available = hint_credentials_available
         self._requested_source = source
         self.repo_path = Path(repo_path or os.environ.get("AGENT_INDEX_GIT_REPO") or os.getcwd())
         self.repo_path = self.repo_path.expanduser().resolve()
@@ -240,6 +256,32 @@ class GitRepoConnector:
         """Unique source name for the repository's tracked files."""
         return self._file_source
 
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        """Effective local target/ref/remote without credentials or transient tokens."""
+        remote = self._git_quiet(["remote", "get-url", self._remote]).strip()
+        identity = (
+            str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only",
+            "git-objects:canonical-v1",
+        )
+        return identity if self._hint_account is None else (*identity, self._hint_account)
+
+    @property
+    def hint_scope(self) -> tuple[str, str]:
+        if self._hint_account is None:
+            raise ValueError("Git hints require an explicit configured account binding")
+        if not self._hint_credentials_available:
+            raise ValueError("Git hints require resolved configured account credentials")
+        return self.source_name, self._hint_account
+
+    def discover_hints(
+        self, hints: ChangeHints, last_commit: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        from agent_index.sources.git_hints import acquire_hints
+
+        return acquire_hints(self, hints, last_commit, cancel_check=cancel_check)
+
     # -- revision resolution -------------------------------------------------
 
     def _resolve(self) -> None:
@@ -260,7 +302,7 @@ class GitRepoConnector:
                 self._git_quiet(["remote", "set-head", self._remote, "-a"])
             ref = self._resolve_ref()
             if ref is not None:
-                commit = self._git(["rev-parse", ref]).strip()
+                commit = self._git(["rev-parse", f"{ref}^{{commit}}"]).strip()
                 if commit:
                     self._index_ref = ref
                     self._index_commit = commit
@@ -401,11 +443,47 @@ class GitRepoConnector:
 
     def _index_rev(self) -> str:
         """The revision to read trees/blobs/log from (ref name or 'HEAD')."""
-        if self._token_provider is not None and self._index_commit is not None:
+        if not self._use_worktree and self._index_commit is not None:
             return self._index_commit
         return self._index_ref if (self._index_ref and not self._use_worktree) else "HEAD"
 
     # -- discovery -----------------------------------------------------------
+
+    @property
+    def delta_available(self) -> bool:
+        """Only immutable revision reads can prove complete range coverage."""
+        self._resolve()
+        if self._use_worktree:
+            logger.info("git_repo: working-tree source uses legacy reconciliation")
+        return not self._use_worktree
+
+    def discover_delta(
+        self,
+        last_commit: str | None,
+        cancel_check: Callable[[], None] | None = None,
+        *,
+        refresh_paths: tuple[str, ...] = (),
+        refresh_commits: tuple[str, ...] = (),
+    ) -> SourceDelta:
+        from agent_index.sources.git_delta import discover_git_delta
+
+        return discover_git_delta(
+            self, last_commit, cancel_check,
+            refresh_paths=refresh_paths, refresh_commits=refresh_commits,
+        )
+
+    @property
+    def discover_snapshot_page(self) -> Callable[..., SnapshotPage] | None:
+        self._resolve()
+        return None if self._use_worktree else self._discover_snapshot_page
+
+    def _discover_snapshot_page(
+        self, snapshot: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SnapshotPage:
+        from agent_index.sources.git_snapshot import discover_git_snapshot
+
+        return discover_git_snapshot(self, snapshot, cursor, cancel_check=cancel_check)
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
@@ -451,25 +529,28 @@ class GitRepoConnector:
 
     def _tracked_paths(self) -> list[str]:
         if self._use_worktree:
-            output = self._git(["ls-files", "-z"])
+            output = self._git_bytes(["ls-files", "-z"])
         else:
-            output = self._git(["ls-tree", "-r", "--name-only", "-z", self._index_rev()])
-        return [path for path in output.split("\0") if path]
+            output = self._git_bytes(["ls-tree", "-r", "--name-only", "-z", self._index_rev()])
+        return nul_git_paths(output)
 
     def _changed_paths(self, last_commit: str) -> list[str]:
-        output = self._git(["diff", "--name-status", f"{last_commit}..{self._index_rev()}", "--"])
+        output = self._git_bytes([
+            "diff", "--name-status", "--no-renames", "-z", f"{last_commit}..{self._index_rev()}", "--",
+        ])
+        records = output.split(b"\0")
+        if records[-1] != b"" or len(records) % 2 != 1:
+            raise ValueError("Incomplete Git changed-path records")
         paths: list[str] = []
-        for line in output.splitlines():
-            if not line.strip():
+        for offset in range(0, len(records) - 1, 2):
+            status, raw_path = records[offset:offset + 2]
+            if status not in {b"A", b"M", b"D", b"T"} or not raw_path:
+                raise ValueError("Invalid Git changed-path record")
+            if status == b"D":
                 continue
-            parts = line.split("\t")
-            status = parts[0]
-            if status.startswith("D"):
-                continue
-            if status.startswith(("R", "C")) and len(parts) >= 3:
-                paths.append(parts[2])
-            elif len(parts) >= 2:
-                paths.append(parts[1])
+            path = decode_git_path(raw_path)
+            if path is not None:
+                paths.append(path)
         return paths
 
     def _discover_files(
@@ -492,7 +573,12 @@ class GitRepoConnector:
         if not self._is_indexable_path(path):
             return None
         raw = self._read_blob(path)
-        if raw is None or len(raw) > _MAX_FILE_BYTES:
+        if raw is None:
+            return None
+        return self._file_entry(path, head, raw)
+
+    def _file_entry(self, path: str, head: str | None, raw: bytes) -> FileEntry | None:
+        if len(raw) > _MAX_FILE_BYTES:
             return None
         if b"\0" in raw:
             return None
@@ -535,28 +621,35 @@ class GitRepoConnector:
         last_commit: str | None,
         *,
         cancel_check: Callable[[], None] | None,
+        strict: bool = False,
+        target_commit: str | None = None,
+        max_count: int | None = None,
+        skip: int | None = None,
     ) -> list[FileEntry]:
         args = [
             "log",
+            "-z",
+            "--no-show-signature",
             "--date=iso-strict",
-            "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e",
+            "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b",
         ]
+        if max_count is not None:
+            args.append(f"--max-count={max_count}")
+        if skip is not None:
+            args.extend(["--topo-order", f"--skip={skip}"])
+        revision = target_commit or self._index_rev()
         if last_commit:
-            args.append(f"{last_commit}..{self._index_rev()}")
+            args.append(f"{last_commit}..{revision}")
         else:
-            args.append(self._index_rev())
+            args.append(revision)
         output = self._git(args)
         entries: list[FileEntry] = []
-        for record in output.split("\x1e"):
+        for fields in commit_records(output):
             if cancel_check:
                 cancel_check()
-            record = record.strip("\n")
-            if not record:
-                continue
-            fields = record.split("\x1f", 5)
-            if len(fields) < 6:
-                continue
             sha, author_name, author_email, authored_at, subject, body = fields
+            if strict and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is None:
+                raise ValueError("Invalid Git commit identity")
             content = (
                 f"Commit: {sha}\n"
                 f"Author: {author_name} <{author_email}>\n"
@@ -590,7 +683,7 @@ class GitRepoConnector:
 
     def _git_command(self, args: list[str]) -> list[str]:
         prefix = [f"--git-dir={self.repo_path}"] if self._bare_repository else []
-        return [_GIT, *prefix, *args]
+        return [_GIT, "--no-replace-objects", *prefix, *args]
 
     @staticmethod
     def _authenticated_environment() -> dict[str, str]:
@@ -680,3 +773,8 @@ class GitRepoConnector:
             return _INDEXABLE_FILENAMES[name]
         suffix = Path(path).suffix.lower()
         return _LANGUAGES.get(suffix, "unknown")
+
+
+setattr(GitRepoConnector.discover_hints, "change_hints_versions", (1,))
+setattr(GitRepoConnector.discover_delta, "poll_refresh_versions", (1,))
+setattr(GitRepoConnector._discover_snapshot_page, "snapshot_page_versions", (1,))

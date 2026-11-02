@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+from .runtime_identity import running_slot
+
 KIND = "picker-session-v1"
 CONTEXT_KEYS = (
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
@@ -22,6 +24,7 @@ _TRANSPORT_KEYS = {
     "PYTHONUTF8", "AGENT_WORKTREES_LAUNCH_ID", "AGENT_WORKTREES_BINSTUB_STARTED",
     "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__",
     "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_RESIDENT_BOOTSTRAP",
+    "CE_TERMINAL_LAUNCH",
     "PYTEST_CURRENT_TEST",  # pytest changes its phase marker inside one invocation
 }
 
@@ -39,7 +42,10 @@ def _private_key(key: str) -> bool:
 
 
 def worker_environment(environment: dict[str, str]) -> dict[str, str]:
-    return {key: value for key, value in environment.items() if not _private_key(key)}
+    return {
+        key: value for key, value in environment.items()
+        if not _private_key(key) and key.upper() != "CE_TERMINAL_LAUNCH"
+    }
 
 
 def invocation_context(
@@ -76,11 +82,11 @@ def mux_arguments(environment: dict[str, str], *, windows: bool = os.name == "nt
 
 
 def runtime_command(module: str, *arguments: str) -> list[str]:
-    prefix = Path(sys.prefix).resolve()
+    slot = running_slot()
     command = [sys.executable, "-I", "-B", "-X", "utf8"]
-    if prefix.parent.name == "versions":
-        bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
-        if not bootstrap.is_file() or not (prefix / ".install-complete.json").is_file():
+    if slot is not None:
+        bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+        if not bootstrap.is_file() or not (slot / ".install-complete.json").is_file():
             raise RuntimeError("warm Picker requires a constructed Manager runtime")
         command += ["-S", str(bootstrap)]
     return [*command, "-m", module, *arguments]

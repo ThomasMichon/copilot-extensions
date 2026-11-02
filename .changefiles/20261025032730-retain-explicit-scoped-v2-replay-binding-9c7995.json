@@ -1,0 +1,9 @@
+{
+  "comment": "Retain explicit scoped v2 replay bindings in durable waiter intent without converting legacy rows.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

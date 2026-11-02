@@ -6,13 +6,15 @@ start the same resident daemon, so both go through :func:`spawn_service`.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import os
 import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
+from agent_procutil import python_cache_args, spawn_daemon, windowless_python, windowless_python_env
 
 from . import config
 from .cache import CACHE_DIR_ENV
@@ -32,8 +34,10 @@ _PATH_OVERRIDES = (
 
 
 def service_root() -> Path:
-    """The vault runtime root a detached service runs from, created if absent."""
-    root = config.home_dir().resolve()
+    """Create the lexical runtime selection without hiding redirected custody."""
+    root = Path(os.path.abspath(config.home_dir()))
+    if root.resolve() != root:
+        raise OSError("vault runtime root is redirected")
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -70,10 +74,11 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
             )
     return spawn_daemon(
         [
-            windowless_python(python), "-c", _SERVICE_BOOTSTRAP,
+            windowless_python(python), *python_cache_args(root), "-c", _SERVICE_BOOTSTRAP,
             str(Path(__file__).resolve().parent.parent), *args,
         ],
         cwd=root,
+        instance=DaemonInstanceSpec("agent-vault", root, Path(__file__).resolve()),
         log_path=root / SERVICE_STDIO_LOG,
         env_overrides=overrides,
         contained_fallback=True,

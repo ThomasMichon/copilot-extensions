@@ -2,6 +2,14 @@
 # Executed into installation_context.py's shared module globals.
 from __future__ import annotations
 
+from typing import Protocol
+
+
+class _PasswdAccount(Protocol):
+    @property
+    def pw_dir(self) -> str: ...
+
+
 def _find_existing_source(
     durable_home: Path,
     fingerprint: str,
@@ -188,7 +196,7 @@ def _required_string(value: Mapping[str, Any], name: str, label: str) -> str:
 
 
 def _required_integer(value: Mapping[str, Any], name: str, label: str) -> int:
-    result = _exact_property(value, name)
+    result: object = _exact_property(value, name)
     if isinstance(result, bool) or not isinstance(result, int):
         _fail(f"{label}.{name} must be an integer.")
     if result < 1 or result > MAX_RECEIPT_GENERATION:
@@ -234,7 +242,7 @@ def _maintenance_candidates(
 
 
 def _optional_integer(value: Mapping[str, Any], name: str, label: str) -> int | None:
-    result = _exact_property(value, name)
+    result: object = _exact_property(value, name)
     if result is _MISSING:
         return None
     if isinstance(result, bool) or not isinstance(result, int):
@@ -280,7 +288,9 @@ def _current_environment(
         try:
             import pwd
 
-            profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)
+            get_uid = cast(Callable[[], int], getattr(os, "getuid"))
+            get_account = cast(Callable[[int], _PasswdAccount], getattr(pwd, "getpwuid"))
+            profile_value = Path(get_account(get_uid()).pw_dir)
         except (ImportError, KeyError, OSError) as error:
             _fail(f"Cannot determine the passwd-database account home: {error}")
     if not _path_is_fully_qualified(profile_value):

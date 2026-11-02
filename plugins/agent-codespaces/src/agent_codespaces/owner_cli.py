@@ -136,6 +136,21 @@ def cmd_owner(args: argparse.Namespace) -> int:
     whether to provision the per-machine Owner service (config-gated cutover;
     disabled -> inert).
     """
+    if getattr(args, "stop", False):
+        import json
+
+        from .owner_control import request_owner_stop
+
+        if (getattr(args, "status", False) or getattr(args, "once", False)
+                or getattr(args, "force", False) or getattr(args, "interval", None) is not None
+                or getattr(args, "idle_shutdown_after", None) is not None):
+            raise RuntimeError("owner --stop cannot be combined with owner startup/config options")
+        try:
+            print(json.dumps(request_owner_stop()))
+        except (OSError, ValueError) as error:
+            raise RuntimeError(str(error)) from error
+        return 0
+
     import asyncio
 
     from .config import load_merged_config

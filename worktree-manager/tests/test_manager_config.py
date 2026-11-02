@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
+import sys
+
 import pytest
 
+from agent_procutil.owned_process import run_owned
 from worktree_manager import manager_config, source_config
 
 
@@ -117,6 +122,42 @@ def test_maintenance_unreadable_config_blocks(tmp_path, monkeypatch, caplog):
     source_config.config_path(tmp_path).mkdir()
     assert manager_config.automatic_maintenance_enabled() is False
     assert "could not read" in caplog.text
+
+
+@pytest.mark.parametrize(("body", "expected", "diagnostic"), [
+    (None, 0, ""),
+    ("[maintenance]\nautomatic = true\n", 0, ""),
+    ("[maintenance]\nautomatic = false\n", 1, "Automatic maintenance disabled"),
+    ("[maintenance]\nautomatic = 'false'\n", 2, "Automatic maintenance blocked"),
+])
+def test_launch_maintenance_probe_preserves_payload_bytes(
+    tmp_path, monkeypatch, body, expected, diagnostic,
+):
+    source = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload"
+    package = payload / "src" / "worktree_manager"
+    package.mkdir(parents=True)
+    (payload / "bin").mkdir()
+    for name in ("__init__.py", "manager_config.py", "source_config.py"):
+        shutil.copyfile(source / "src" / "worktree_manager" / name, package / name)
+    probe = payload / "bin" / "check-automatic-maintenance.py"
+    shutil.copyfile(source / "bin" / probe.name, probe)
+    root = tmp_path / "manager"
+    root.mkdir()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    if body is not None:
+        (root / "config.toml").write_text(body, encoding="utf-8")
+    before = {p.relative_to(payload): p.read_bytes()
+              for p in payload.rglob("*") if p.is_file()}
+    for _ in range(2):
+        # Ignore the test runner's bytecode environment; the real probe owns it.
+        result = run_owned([sys.executable, "-E", str(probe)], timeout=30)
+        assert result.returncode == expected, result.stdout + result.stderr
+        assert result.stdout == ""
+        assert diagnostic in result.stderr
+        assert not list(payload.rglob("__pycache__"))
+        assert {p.relative_to(payload): p.read_bytes()
+                for p in payload.rglob("*") if p.is_file()} == before
 
 
 def test_ahp_config_loads_general_provider_settings(tmp_path):

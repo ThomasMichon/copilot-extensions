@@ -210,11 +210,14 @@ async def test_real_sdk_metadata_and_receiver_registration(
     execution.mkdir(exist_ok=True)
     settings = allocated / ".github" / "copilot"
     declared = json.loads((settings / "settings.json").read_text())
-    declared["enabledPlugins"] = {"sample@local": True}
+    declared["enabledPlugins"] = {"sample@local": True, "retired@local": True}
     atomic_json(settings / "settings.json", declared)
     monkeypatch.setattr(
         "agent_bridge.related_plugins.related_plugins_for_repo",
-        lambda repo, anchors: [PluginRef("sample@local")],
+        lambda repo, anchors: [
+            PluginRef("sample@local", allow_missing=True),
+            PluginRef("retired@local", allow_missing=True),
+        ],
     )
     monkeypatch.setattr(venue_plugins, "resolve_controller_cwd", AsyncMock(side_effect=AssertionError(
         "receiver must not reinterpret sender ownership in its own registry",
@@ -250,6 +253,7 @@ async def test_real_sdk_metadata_and_receiver_registration(
         assert env["HOME"] == str(profile) and env["USERPROFILE"] == str(profile)
         assert argv[-2:] == ["--agent", "reviewer"]
         assert str(child_payload) in argv
+        assert resolved.prepared_plugins["logical_payloads"]["sample@local"] == str(child_payload)
         assert (settings / "settings.local.json").is_file()
         downstream_client = await verified_preferences() if preference_source == "target-settings" else None
         session = SimpleNamespace(

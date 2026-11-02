@@ -46,7 +46,12 @@ class PickerConfigurationMixin:
             # Reload the originating scope, never the newly selected section.
             runtime.repoll(scope)
 
-        self._run_configuration_command(action.label, work, reload)
+        from worktree_manager.installation_updates import PIVOT_NAME, request_result_screen
+
+        if reg.name == PIVOT_NAME and action.key == "update":
+            self._run_command_result(action.label, work, reload, request_result_screen(action.label))
+        else:
+            self._run_configuration_command(action.label, work, reload)
 
     def _run_configuration_command(self, label, work, reload):
         from .configuration_form import ConfigurationResultScreen

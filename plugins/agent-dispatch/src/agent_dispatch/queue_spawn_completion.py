@@ -58,6 +58,8 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         startup_revision: int | None = None,
         now: float | None = None,
         authority_expected: tuple | None = None,
+        ordinary_redrive: dict | None = None,
+        pool_startup_retry: dict | None = None,
     ) -> SpawnReservation:
         """Publish a body identity, optionally closing the launch caller.
 
@@ -73,8 +75,33 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             raise TaskError("startup completion requires the current startup revision")
         if startup_complete and not (isinstance(session_handle, str) and session_handle.strip()):
             raise TaskError("startup completion requires an exact session handle")
+        if ordinary_redrive is not None:
+            from .ordinary_native_redrive import record_redrive
+
+            if startup_complete is None or authority_expected is not None:
+                raise TaskError("retained native redrive requires an explicit startup operation")
+            return record_redrive(
+                self, key, ordinary_redrive=ordinary_redrive,
+                startup_complete=startup_complete, startup_revision=startup_revision,
+                session_handle=session_handle, worktree=worktree, now=now,
+            )
+        if pool_startup_retry is not None and (
+            ordinary_redrive is not None or authority_expected is not None
+            or worktree != pool_startup_retry.get("worktree")
+            or session_handle != pool_startup_retry.get("native_id")
+        ):
+            raise TaskError("pool retry requires its own exact publication operation")
 
         def authority_guard(row: sqlite3.Row) -> None:
+            if startup_complete is True and not row["startup_complete"] and row["agent_info"]:
+                import json
+
+                marker = json.loads(row["agent_info"]).get("retained_redrive")
+                if marker is not None and not (
+                    isinstance(marker, dict) and type(marker.get("startup_revision")) is int
+                    and 1 <= marker["startup_revision"] < row["startup_revision"]
+                ):
+                    raise TaskError("retained native redrive completion requires its exact operation")
             if row["state"] == SpawnState.RELEASING and (
                 row["startup_fenced"]
                 or row["startup_complete"] and session_handle != row["session_handle"]
@@ -92,8 +119,10 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             key,
             to_state=SpawnState.SPAWNED,
             allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD})
-            | (frozenset({SpawnState.RELEASING}) if startup_complete is True else frozenset()),
-            preserve_releasing=startup_complete is True,
+            | (frozenset({SpawnState.RELEASING}) if startup_complete is True or (
+                pool_startup_retry is not None and pool_startup_retry.get("action") == "complete"
+            ) else frozenset()),
+            preserve_releasing=startup_complete is True or pool_startup_retry is not None,
             session_handle=session_handle,
             startup_complete=startup_complete,
             expected_startup_revision=startup_revision,
@@ -101,4 +130,5 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             exclusive_released=False,
             now=now,
             guard=authority_guard,
+            pool_startup_retry=pool_startup_retry,
         )

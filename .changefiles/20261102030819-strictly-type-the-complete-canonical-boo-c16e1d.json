@@ -1,0 +1,21 @@
+{
+  "comment": "Strictly type the complete canonical Bootstrap Killswitch Python source/test project and synchronize its existing Python consumers.",
+  "changes": [
+    {
+      "plugin": "lib-bootstrap-killswitch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

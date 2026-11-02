@@ -8,9 +8,10 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,123 @@ def test_driver_governance_uses_current_scripts(driver):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     assert Path(governance.__file__).resolve().parent == scripts
     assert governance.SCRIPTS == scripts
+
+
+def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
+    tmp_path, monkeypatch,
+):
+    import agent_worktrees
+    from agent_worktrees import runtime_candidate as candidate, update_stage
+
+    slot = tmp_path / "runtime" / "versions" / "1.2.3"
+    environment = slot / ".venv"
+    package = environment / "Lib" / "site-packages" / "agent_worktrees"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    source_scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in candidate._LIFECYCLE_FILES:
+        shutil.copyfile(source_scripts / name, scripts / name)
+    shutil.copytree(
+        source_scripts / "installation-context", scripts / "installation-context",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    (slot / ".runtime-bootstrap").mkdir()
+    build_info = package / "_build_info.py"
+    build_info.write_bytes(b"immutable wheel member\n")
+    frozen = tmp_path / "frozen-source"
+    frozen.mkdir()
+    (frozen / "__init__.py").write_text("source identity input\n", encoding="utf-8")
+    monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(sys, "prefix", str(environment))
+    monkeypatch.setattr(candidate, "distribution_version", lambda _name: "1.2.3")
+    candidate.prepare_runtime_candidate({
+        "version": "1.2.3", "frozen_plugin": str(frozen),
+        "deployment_source": json.dumps({"mode": "source"}),
+    })
+    record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
+    assert record["runtime_version"] == "1.2.3"
+    assert json.loads(record["deployment_source"])["payload_fingerprint"] == (
+        update_stage.fingerprint(frozen)
+    )
+    assert build_info.read_bytes() == b"immutable wheel member\n"
+    assert (slot / ".runtime-bootstrap" / "runtime-generation").read_text().strip() == (
+        record["runtime_generation"]
+    )
+    assert not (environment / ".runtime-bootstrap").exists()
+
+
+@pytest.mark.parametrize("legacy_paths", [
+    False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH")),
+])
+def test_application_preparation_retains_its_source_without_a_payload(
+    tmp_path, monkeypatch, legacy_paths,
+):
+    import agent_worktrees
+    from agent_worktrees import runtime_candidate as candidate
+
+    slot = tmp_path / "runtime" / "versions" / ("1.2.3+" + "a" * 140 if legacy_paths else "1.2.3")
+    package = slot / ".venv" / "Lib" / "site-packages" / "agent_worktrees"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    source_scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in candidate._LIFECYCLE_FILES:
+        shutil.copyfile(source_scripts / name, scripts / name)
+    shutil.copytree(source_scripts / "installation-context", scripts / "installation-context")
+    (slot / ".runtime-bootstrap").mkdir()
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    source = {"plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40}
+    (slot / "runtime-source.json").write_text(json.dumps(source), encoding="utf-8")
+    immutable = package / "_build_info.py"
+    immutable.write_bytes(b"immutable wheel\n")
+    monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(candidate, "distribution_version", lambda _name: "1.2.3")
+    if legacy_paths:
+        scan = os.scandir
+
+        def legacy_scandir(path):
+            value = os.fspath(path)
+            if len(value) >= 260 and not value.startswith("\\\\?\\"):
+                raise FileNotFoundError(3, "legacy Windows path limit", value)
+            return scan(path)
+
+        monkeypatch.setattr(os, "scandir", legacy_scandir)
+        assert len(str(scripts / "installation-context")) > 260
+    candidate.prepare_runtime_candidate()
+    record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
+    assert record["commit"] == source["source_commit"]
+    assert json.loads(record["deployment_source"]) == source
+    assert immutable.read_bytes() == b"immutable wheel\n"
+    assert not (slot / "payload").exists()
+    copied = slot / ".runtime-bootstrap" / "installation-context"
+    for member in (source_scripts / "installation-context").glob("*.py"):
+        assert (copied / member.name).read_bytes() == member.read_bytes()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows installation ownership")
+@pytest.mark.parametrize("entry", ["install", "settle_candidate"])
+def test_direct_installation_refuses_before_governance_or_construction(
+    driver, tmp_path, monkeypatch, entry,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
+    monkeypatch.setattr(driver.install_driver, "bootstrap", lambda payload: None)
+    monkeypatch.setattr(
+        driver, "Governance", lambda *args: pytest.fail("installation entered without driver custody"),
+    )
+    root = tmp_path / "absent"
+    arguments = (
+        ((root, driver.SCRIPTS.parent), {
+            "payload": driver.SCRIPTS.parent, "uv": tmp_path / "uv", "base_python": Path(sys.executable),
+        }) if entry == "install" else
+        ((root, "1.2.3"), {
+            "payload": driver.SCRIPTS.parent, "payload_hash": "a" * 64, "expected_governance": {},
+        })
+    )
+    with pytest.raises(RuntimeError, match="live driver custody"):
+        getattr(driver, entry)(*arguments[0], **arguments[1])
+    assert not root.exists()
 
 
 @pytest.mark.parametrize(("section", "field"), [
@@ -88,6 +206,12 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
         spec.loader.exec_module(engine)
         frozen = engine.freeze_inputs(plugin, owned / "repository")
     root = owned / "repository"
+    marketplace = root / ".github" / "plugin" / "marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({
+        "name": "runtime-fixture",
+        "plugins": [{"name": "agent-worktrees", "source": frozen.plugin.relative_to(root).as_posix()}],
+    }), encoding="utf-8")
     hooks = owned / "empty-hooks"
     hooks.mkdir()
     git = shutil.which("git")
@@ -96,7 +220,8 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
     options = [
         git, "-C", str(root), "-c", f"core.hooksPath={hooks}",
-        "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false",
+        "-c", "core.autocrlf=false", "-c", "core.longpaths=true",
+        "-c", "commit.gpgsign=false",
         "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
     ]
 
@@ -132,8 +257,9 @@ def _slot(driver, root, version):
 
 
 @pytest.mark.parametrize("tampered", [False, True])
+@pytest.mark.parametrize("deployment", ["source", "closed-wheels", "repair"])
 def test_source_deployment_uses_exact_verified_snapshot_before_construction(
-    driver, tmp_path, monkeypatch, tampered,
+    driver, tmp_path, monkeypatch, tampered, deployment,
 ):
     from types import SimpleNamespace
 
@@ -171,9 +297,20 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
     class ConstructionReached(Exception):
         pass
 
+    wheels = None
+
     def construct(requested, version, **kwargs):
         assert not tampered
-        assert requested == root and version == identity.runtime_version
+        expected = identity.runtime_version
+        if wheels is not None:
+            expected += ".profile." + wheels.receipt()["lock_id"][7:23]
+            assert kwargs["wheel_inputs"] is wheels
+            assert kwargs["local_packages"] == ("agent-worktrees",)
+        if deployment == "repair":
+            assert version.startswith(expected + ".repair.") and version != expected
+        else:
+            assert version == expected
+        assert requested == root
         snapshot = root / "snapshots" / identity.runtime_version
         assert kwargs["plugin"] == snapshot
         assert source.read_source_identity(snapshot, "1.0.0") == identity
@@ -184,20 +321,171 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
     monkeypatch.setattr(driver, "_source_provenance", attribute)
     monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
     error = source.SourceIdentityError if tampered else ConstructionReached
-    with pytest.raises(error):
-        driver.install(
-            root, plugin, payload=plugin, uv=tmp_path / "unused",
-            base_python=Path(sys.executable),
-        )
+    with ExitStack() as custody:
+        options = {}
+        if deployment != "source":
+            from installer_wheel_snapshot import retain_wheel_inputs
+
+            archive = tmp_path / "agent_worktrees-1.0.0-py3-none-any.whl"
+            archive.write_bytes(b"retained upstream-inspected wheel fixture")
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            retained = custody.enter_context(retain_wheel_inputs(
+                {archive.name: archive}, {archive.name: digest},
+                max_wheels=2, max_archive_bytes=1024, max_total_bytes=1024,
+                max_snapshot_bytes=4096, deadline=time.monotonic() + 30,
+            ))
+            profile = {
+                "component": "agent-worktrees", "mode": "source",
+                "release": {
+                    "identity": "source:" + identity.source_commit,
+                    "sha256": "sha256:" + identity.assembly_hash,
+                },
+            }
+            wheels = driver.engine.WheelInstallInputs(
+                retained, json.dumps(profile, sort_keys=True, separators=(",", ":")),
+                (("agent-worktrees", "1.0.0", archive.name, digest),),
+            )
+            options = {"wheel_inputs": wheels, "repair": deployment == "repair"}
+        with pytest.raises(error):
+            driver.install(
+                root, plugin, payload=plugin, uv=tmp_path / "unused",
+                base_python=Path(sys.executable), **options,
+            )
     if tampered:
         assert not root.exists()
 
 
-@pytest.mark.parametrize("rollback,interrupted", [
-    (False, False), (True, False), (False, True), (True, True),
+@pytest.mark.parametrize("mode", ["ordinary", "repair", "dev"])
+def test_install_source_cli_retains_inputs_through_native_owner_return(
+    driver, tmp_path, monkeypatch, mode,
+):
+    from types import SimpleNamespace
+    import install_source
+
+    snapshot = tmp_path / "snapshot"
+    plugin = tmp_path / "plugin"
+    identity = SimpleNamespace(package_version="1.0.0")
+    selected = SimpleNamespace(payload=plugin, identity=identity)
+    wheels = object()
+    held = []
+
+    @contextmanager
+    def inputs(path, component):
+        assert path == snapshot and component == "agent-worktrees" and mode != "dev"
+        held.append(True)
+        try:
+            yield selected, wheels
+        finally:
+            held.pop()
+
+    def install(root, selected_plugin, **options):
+        assert held == [True] and selected_plugin == plugin
+        assert options["wheel_inputs"] is wheels and options["repair"] == (mode == "repair")
+        return {"runtime_version": "selected-generation"}
+
+    monkeypatch.setattr(install_source, "project_inputs", inputs)
+    monkeypatch.setattr(driver.runtime_source, "read_source_identity", lambda *a, **kw: identity)
+    monkeypatch.setattr(driver, "install", install)
+    result = tmp_path / "result.json"
+    arguments = [
+        "--root", str(tmp_path / "root"), "--plugin", str(plugin),
+        "--payload", str(plugin), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(result),
+        "--install-source", str(snapshot), "--mode", mode,
+    ]
+    if mode == "dev":
+        with pytest.raises(SystemExit) as refusal:
+            driver.main(arguments)
+        assert refusal.value.code == 2 and not result.exists()
+    else:
+        assert driver.main(arguments) == 0
+        assert json.loads(result.read_text()) == {"runtime_version": "selected-generation"}
+    assert not held
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+def test_native_frontend_refuses_source_inputs_for_status_before_touching_installation(
+    tmp_path, shell,
+):
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"{shell} is unavailable")
+    root = tmp_path / "untouched-installation"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script), "status",
+         "-InstallDir", str(root), "-InstallSource", str(tmp_path / "absent-source")],
+        capture_output=True, text=True, timeout=20, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode != 0 and "independent repair" in result.stderr
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("source_backed", [False, True])
+@pytest.mark.parametrize("recover_manager", [False, True])
+def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody(
+    driver, tmp_path, monkeypatch, source_backed, recover_manager,
+):
+    from types import SimpleNamespace
+
+    root, plugin, owner = (tmp_path / name for name in ("runtime", "payload", "owner"))
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname="agent-worktrees"\nversion="1.0.0"\n')
+    source = driver.runtime_source
+    identity = source.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, "c" * 64,
+        source.runtime_version("1.0.0", "a" * 40, "c" * 64),
+    ) if source_backed else None
+    calls = []
+
+    @contextmanager
+    def held(**kwargs):
+        calls.append("held")
+        try:
+            yield
+        finally:
+            calls.append("released")
+
+    monkeypatch.setattr(driver, "Governance", lambda *a: SimpleNamespace(
+        root=root, payload=owner, held=held,
+    ))
+    monkeypatch.setattr(source, "read_source_identity", lambda *a, **k: identity)
+    monkeypatch.setattr(source, "publish_source_snapshot", lambda *a: plugin)
+    monkeypatch.setattr(driver, "_source_provenance", lambda *a: {})
+    monkeypatch.setattr(driver, "_selected", lambda *a: None)
+
+    def construct(*args, **kwargs):
+        raise driver.engine.HealthRepairRequired("controlled installed-health failure")
+
+    def repair(requested, selected, **kwargs):
+        assert calls == ["held", "released"]
+        assert requested == root and selected == plugin
+        assert kwargs["payload"] == owner and kwargs["mode"] == "repair"
+        assert kwargs["expected_source_identity"] == source.manifest_fields(identity)
+        assert kwargs["recover_adopted_manager"] is recover_manager
+        return {"runtime_version": "distinct-repair"}
+
+    monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
+    monkeypatch.setitem(sys.modules, "runtime_install_modes", SimpleNamespace(run=repair))
+    arguments = dict(
+        payload=owner, uv=tmp_path / "uv", base_python=Path(sys.executable),
+        recover_adopted_manager=recover_manager,
+    )
+    if source_backed:
+        assert driver.install(root, plugin, **arguments) == {"runtime_version": "distinct-repair"}
+    else:
+        with pytest.raises(driver.engine.HealthRepairRequired):
+            driver.install(root, plugin, **arguments)
+
+
+@pytest.mark.parametrize("rollback,interrupted,activation_failed,special", [
+    (False, False, False, None), (True, False, False, None), (False, True, False, None),
+    (True, True, False, None), (False, False, True, None),
+    (False, False, False, "deferred"), (True, False, False, "committed-rollback"),
 ])
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
-    driver, tmp_path, monkeypatch, rollback, interrupted,
+    driver, tmp_path, monkeypatch, rollback, interrupted, activation_failed, special,
 ):
     from agent_worktrees import config as cfg, status_monitor_cutover as cutover
 
@@ -221,6 +509,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
 
         def signature(self):
             return {}
@@ -248,6 +537,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
 
     def actual_transition(**arguments):
         assert arguments["cutover_guard"] is guard
+        assert arguments["asynchronous_retirement"] is True
         assert authority == ["enter", "leave", "enter"]
         assert driver.runtime.current_version(root) == "2.0.0"
         assert driver.runtime.gc(root) == []
@@ -259,7 +549,16 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             pass
         if interrupted:
             raise RuntimeError("cutover interrupted")
-        return {"action": "cutover", "result": {"committed": not rollback, "rolled_back": rollback}}
+        if special == "committed-rollback":
+            from zdd import breadcrumb
+
+            breadcrumb.write_breadcrumb(root / "status-monitor-routing", state="committed", self_retirement=True)
+            return {"action": "cutover", "result": {"ok": False, "publication_uncertain": True}}
+        return {"action": "cutover", "result": {
+            "ok": not rollback and not activation_failed,
+            "committed": not rollback, "rolled_back": rollback,
+            "error": "promotion response failed" if activation_failed else None,
+        }}
 
     guard = Guard()
 
@@ -290,22 +589,50 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(
         driver.engine, "_retained_inputs", lambda inputs, *_args, **_kwargs: nullcontext(inputs),
     )
+    monkeypatch.setattr(
+        driver.engine, "retained_source_wheels", lambda inputs, *_args, **_kwargs: nullcontext(inputs),
+    )
     monkeypatch.setattr(driver.engine, "_prepare_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver.engine, "_verify_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
+    def adopt(requested, slot):
+        pytest.fail("normal construction must not adopt a Task")
+
+    monkeypatch.setattr(driver.install_driver, "adopt_broker", adopt)
     monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: guard)
     monkeypatch.setattr(cutover, "activate_after_update", actual_transition)
-    monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
+    if special == "deferred":
+        from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
+
+        def deferred(*args):
+            raise PublicationOutcomePending("retained unknown publication")
+
+        monkeypatch.setattr(driver, "_settle_monitor", deferred)
+    elif special == "committed-rollback":
+        from agent_worktrees import runtime_monitor_recovery
+        from zdd import breadcrumb
+
+        def rolled_back(*args):
+            breadcrumb.clear_breadcrumb(root / "status-monitor-routing")
+            return "rolled_back"
+
+        monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", rolled_back)
+    else:
+        monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
     monkeypatch.setattr(driver.subprocess, "Popen", Process)
-    if rollback or interrupted:
+    if rollback or interrupted or activation_failed or special == "deferred":
         with pytest.raises(subprocess.CalledProcessError):
             driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         expected = "1.0.0" if rollback else "2.0.0"
         assert driver.runtime.current_version(root) == expected
         assert driver.runtime.read_last_known_good(root) == expected
+        if special == "deferred":
+            from agent_worktrees import runtime_deployment
+
+            assert runtime_deployment.read_manifest(root) is None
     else:
         result = driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         assert result["runtime_version"] == "2.0.0"
@@ -334,6 +661,59 @@ def test_failed_passive_exit_is_observed_before_returning(driver, tmp_path, monk
     ) is False
     assert events == ["poll", "wait", "poll"]
 
+def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
+    monkeypatch.setattr(
+        driver.time, "sleep", lambda *_args: pytest.fail("installer waited for drain"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {"committed": True, "retirement_pending": True}},
+        (123, "original-birth"), [],
+    )
+
+
+def test_failed_committed_activation_settles_without_waiting_for_readiness(
+    driver, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        driver, "_candidate_serving", lambda *_args: pytest.fail("failed commitment waited for readiness"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {
+            "committed": True, "ok": False, "error": "roster activation failed",
+        }},
+        (123, "1001"), [],
+    )
+
+
+def test_committed_successor_death_never_rolls_back_retirement_custody(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: False)
+    summary = {"action": "cutover", "result": {"committed": True, "ok": True}}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
+    assert summary["result"]["committed"] and not summary["result"]["ok"]
+    assert "stopped serving" in summary["result"]["error"]
+
+
+def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner(
+    driver, tmp_path, monkeypatch,
+):
+    from agent_worktrees import locks, status_monitor_cutover as cutover
+
+    monkeypatch.setattr(locks, "read_lock", lambda _path: {"pid": 101})
+    monkeypatch.setattr(locks, "lock_is_live", lambda _record: True)
+
+    def routed(root, *, require_async_retirement=False):
+        assert root == tmp_path and require_async_retirement
+        return (202, "2002", "current")
+
+    monkeypatch.setattr(cutover, "routed_monitor_identity", routed)
+    assert driver._monitor_identity(tmp_path) == (202, "2002")
+    monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *args, **kwargs: None)
+    with pytest.raises(driver.InstallationRefused, match="unrouted"):
+        driver._monitor_identity(tmp_path)
+
 
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
 @pytest.mark.parametrize("monitor_scope,committed", [(False, False), (True, False), (True, True)])
@@ -356,6 +736,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
 
         def signature(self):
             return {}
@@ -412,7 +793,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
     monkeypatch.setattr(cfg, "install_dir", lambda: root if monitor_scope else tmp_path / "other")
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: Guard())
-    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: (123, "previous-identity"))
+    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: (123, "1001"))
     monkeypatch.setattr(driver, "_monitor_slot", lambda *_args: "0.9.0")
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(driver, "_settle_monitor", settle)
@@ -451,7 +832,11 @@ def test_reported_commit_or_restart_cannot_hide_actual_child_failure(
             return 1
 
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
-    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is False
+    committed = summary["action"] == "cutover"
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is committed
+    if committed:
+        assert summary["result"]["ok"] is False
+        assert "stopped serving" in summary["result"]["error"]
 
 
 def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path, monkeypatch, capsys):
@@ -468,6 +853,62 @@ def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path,
     ) is False
     assert waits == [1, 1]
     assert capsys.readouterr().err.count("publication is uncertain") == 1
+
+
+@pytest.mark.parametrize("outcome", ["committed", "rolled_back"])
+def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
+    driver, tmp_path, monkeypatch, outcome,
+):
+    from zdd import breadcrumb
+    from agent_worktrees import runtime_monitor_recovery
+
+    record = {"state": "started", "self_retirement": True}
+    reads = []
+    def witness(_root):
+        reads.append(True)
+        assert len(reads) == 1, "settlement reread a witness consumed by owned recovery"
+        return record
+
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", witness)
+    monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", lambda *a: outcome)
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: True)
+    summary = {"action": "cutover", "result": {"publication_uncertain": True, "ok": False, "error": "uncertain"}}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is (
+        outcome == "committed"
+    )
+    assert summary["result"]["publication_uncertain"] is False
+    if outcome == "committed":
+        assert summary["result"]["ok"] is True and summary["result"]["error"] is None
+
+
+@pytest.mark.parametrize("ready", [True, False])
+@pytest.mark.parametrize("grant_error", [False, True])
+def test_interrupted_marked_committed_witness_is_never_rolled_back(
+    driver, tmp_path, monkeypatch, ready, grant_error,
+):
+    from zdd import breadcrumb
+    from agent_worktrees import runtime_monitor_recovery
+
+    record = {"state": "committed", "self_retirement": True}
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda path: record)
+    calls = []
+    def recover(*args):
+        calls.append(True)
+        if grant_error:
+            raise RuntimeError("retirement grant changed")
+        return "committed"
+
+    monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", recover)
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *args: ready)
+    monkeypatch.setattr(driver.time, "sleep", lambda delay: pytest.fail("committed recovery must not retry under installer guards"))
+    summary = {"action": "interrupted"}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
+    assert calls == [True]
+    assert summary["result"]["committed"] is True
+    assert summary["result"]["ok"] is (ready and not grant_error)
+    if grant_error:
+        assert "retirement grant changed" in summary["result"]["error"]
+        assert breadcrumb.read_breadcrumb(tmp_path) is record
 
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):
@@ -488,18 +929,30 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
 
 @pytest.mark.parametrize("legacy_lock", ["absent", "stale"])
 @pytest.mark.parametrize("slot", ["serving", None, "..", "missing"])
-def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot):
+@pytest.mark.parametrize("nested", [False, True])
+def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot, nested):
     from agent_worktrees import locks, status_monitor_cutover as cutover
+    from agent_worktrees.runtime_monitor_retirements import CAPABILITY
+    from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
     from zdd import routing
 
     root = tmp_path / "runtime"
     (root / "versions" / "serving").mkdir(parents=True)
+    if nested:
+        (root / "versions" / "serving" / ".venv").mkdir()
     (root / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
     if legacy_lock == "stale":
         (root / "status-monitor.lock").write_text(json.dumps({"pid": 0}), encoding="utf-8")
     pid = os.getpid()
+    prefix = root / "versions" / slot if isinstance(slot, str) else None
+    if nested and prefix is not None:
+        prefix = prefix / ".venv"
     server = cutover.ControlServer(
-        lambda *_args: {"pid": pid, "status": "ready", "runtime_slot": slot},
+        lambda *_args: {
+            "pid": pid, "status": "ready", "runtime_slot": slot,
+            "runtime_prefix": str(prefix) if prefix is not None else None,
+            "capabilities": [CAPABILITY, RECOVERY], "runtime_generation": "a" * 32,
+        },
         token="fixture-token",
     )
     server.start()
@@ -507,12 +960,13 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
         routing.publish_active(
             root / "status-monitor-routing", bind="127.0.0.1", port=server.port, pid=pid,
         )
-        identity = driver._monitor_identity(root)
-        assert identity == (pid, locks.process_start_time(pid))
         if slot == "serving":
+            identity = driver._monitor_identity(root)
+            assert identity == (pid, locks.process_start_time(pid))
             assert driver._monitor_slot(root, identity) == "serving"
         else:
             with pytest.raises(driver.InstallationRefused):
+                identity = driver._monitor_identity(root)
                 driver._monitor_slot(root, identity)
     finally:
         server.close()
@@ -571,7 +1025,7 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
 
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize("legacy_lock", ["live", "absent", "stale"])
-def test_real_installer_retains_the_serving_slot_until_monitor_drain(
+def test_real_installer_returns_before_resident_owned_monitor_drain(
     driver, tmp_path, native_runtime_source, legacy_lock,
 ):
     from agent_worktrees import classify_daemon, locks
@@ -749,26 +1203,34 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     message="installer never published the successor route",
                 )
                 identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+                assert transition.wait(timeout=60) == 0, log.read_text(encoding="utf-8", errors="replace")
                 demand_stop.set()
                 demand_thread.join(timeout=5)
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors
-                assert transition.poll() is None, "installer returned before predecessor drain"
                 assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
-                for version in (old.name, installed["runtime_version"]):
-                    with pytest.raises(driver.runtime.RetentionTimeout):
-                        with driver.runtime._kernel_lease(
-                            root, version, kind="retention", shared=False, timeout=0,
-                        ):
-                            pytest.fail("installer released a live cutover generation")
+                assert monitor.poll() is None, "installation waited for predecessor retirement"
+                with driver.runtime._kernel_lease(
+                    root, old.name, kind="retention", shared=False, timeout=0,
+                ):
+                    pass
+                assert old.name in {
+                    version for versions in driver.runtime._leases.read_runtime_references(root).values()
+                    for version in versions
+                }
+                assert driver.runtime.gc(root, min_age_days=0) == []
                 request_release.touch()
-                assert transition.wait(timeout=180) == 0, log.read_text(encoding="utf-8", errors="replace")
             hook_thread.join(timeout=15)
             assert not hook_thread.is_alive()
             assert hook_result.get("delayed") is True
-            assert monitor.returncode is not None, "installer returned before its predecessor was reaped"
-            assert monitor_exit.result() == 0
-            assert not diagnostics._pid_alive(old_pid), "installer returned before actual predecessor exit"
+            from agent_worktrees.status_monitor_cli import _SELF_RETIRE_MAX_GRACE_S
+
+            assert monitor_exit.result(timeout=_SELF_RETIRE_MAX_GRACE_S + 15) == 0
+            assert not diagnostics._pid_alive(old_pid), "predecessor did not independently retire"
+            with driver.runtime._kernel_lease(
+                root, old.name, kind="retention", shared=False, timeout=0,
+            ):
+                pass
             new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
             assert new_lock["pid"] == successor.pid
             assert Path(new_lock["prefix"]).resolve() == candidate.resolve()
@@ -848,7 +1310,12 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     from agent_worktrees import update_stage
 
     monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-fingerprint")
+    cached_info = tmp_path / "cached-build-info.py"
+    cached_info.write_text("unchanged cached build provenance\n", encoding="utf-8")
+    os.link(cached_info, package / "_build_info.py")
     installer.prepare_runtime_candidate(provenance)
+    assert cached_info.read_text(encoding="utf-8") == "unchanged cached build provenance\n"
+    assert not os.path.samefile(cached_info, package / "_build_info.py")
     content = (package / "_build_info.py").read_text(encoding="utf-8")
     info = ast.literal_eval(ast.parse(content).body[-1].value)
     assert all(info[key] == value for key, value in provenance.items()
@@ -869,7 +1336,10 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert (package / "_build_info.py").read_text(encoding="utf-8") == content
 
 
-@pytest.mark.parametrize("missing", [None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py"])
+@pytest.mark.parametrize("missing", [
+    None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
+    "installer_retained_content.py",
+])
 def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monkeypatch, missing):
     import agent_worktrees
     from agent_worktrees import runtime_candidate as installer, update_stage
@@ -905,7 +1375,10 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monk
     )
     if missing is not None:
         assert result.returncode != 0
-        assert f"No module named '{Path(missing).stem}'" in result.stderr
+        if missing == "installer_retained_content.py":
+            assert missing in result.stderr
+        else:
+            assert f"No module named '{Path(missing).stem}'" in result.stderr
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "--settle-slot" in result.stdout
@@ -967,6 +1440,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
 
     def run(command, label, timeout):
         log = tmp_path / f"{label}.log"
+        started = time.monotonic()
         with log.open("w", encoding="utf-8") as stream:
             try:
                 completed = subprocess.run(
@@ -978,6 +1452,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
                     f"Lifecycle did not settle ({label}): {command}\n"
                     + log.read_text(encoding="utf-8", errors="replace")
                 )
+        elapsed = time.monotonic() - started
         changed = [
             str(path) for path, digest in source_hashes.items()
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest
@@ -985,12 +1460,25 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
         assert not changed, f"{label} modified source inputs: {changed}"
         assert driver.engine._source_files(driver.engine._package_roots(plugin)) == source_files
         assert completed.returncode == 0, log.read_text(encoding="utf-8", errors="replace")
+        diagnostics = log.read_text(encoding="utf-8", errors="replace")
+        print(f"{label}: {elapsed:.3f}s", flush=True)
+        for line in diagnostics.splitlines():
+            if line.startswith("Source wheel assembly:"):
+                print(line, flush=True)
+        return diagnostics
 
-    run(argv, "construct", 300)
+    construction = run(argv, "construct", 300)
     installed = json.loads(result.read_text(encoding="utf-8"))
     assert installed["reused"] is False
     assert (root / "current-version").read_text().strip() == installed["runtime_version"]
     python = Path(installed["runtime_python"])
+    origins = json.loads((python.parent.parent / ".runtime-input-origins.json").read_text())
+    assert "agent-worktrees:non-static-setuptools-contract" in construction
+    assert "retaining isolated source builds" in construction
+    assert "source_wheels" not in origins
+    assert set(origins["packages"]) == {
+        driver.engine._package_name(package) for package in driver.engine._package_roots(plugin)
+    }
     info_probe = [
         str(python), "-I", "-B", "-c",
         "import json; from agent_worktrees._build_info import BUILD_INFO; print(json.dumps(BUILD_INFO))",
@@ -1004,6 +1492,23 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
     assert info["commit"] == expected_commit
     if os.name == "nt":
         assert not list(python.parent.glob("agent-*.exe"))
+    fresh_version = installed["package_version"] + ".repair." + "c" * 32
+    fresh = [
+        sys.executable, "-I", "-B", "-c",
+        "import os,sys;from pathlib import Path;"
+        "plugin,root,uv,version=Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),sys.argv[4];"
+        "sys.path.insert(0,str(plugin/'scripts'));"
+        "os.environ['AGENT_WORKTREES_PAYLOAD_ROOT']=str(plugin);"
+        "import installer_engine as engine;"
+        "\nwith engine.numbered_candidate(root,version,plugin=plugin,uv=uv,"
+        "base_python=Path(sys.executable),health_module='agent_worktrees') as candidate:"
+        "\n assert not candidate.reused"
+        "\n assert engine.runtime.is_complete(root,version,expect_hash=candidate.payload_hash)",
+        str(plugin), str(root), uv, fresh_version,
+    ]
+    diagnostics = run(fresh, "fresh-venv-from-retained-source", 180)
+    assert "agent-worktrees:non-static-setuptools-contract" in diagnostics
+    assert (root / "current-version").read_text().strip() == installed["runtime_version"]
     argv[-1] = str(tmp_path / "uv-must-not-run")
     run(argv, "reuse-without-uv", 180)
     reused = json.loads(result.read_text(encoding="utf-8"))

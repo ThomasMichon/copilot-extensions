@@ -208,9 +208,27 @@ test("outstanding background flows/external state is a standing schema class, no
   // The force-tier auto-draft path (no agent composition) must still surface
   // an explicit open item rather than omit the section.
   assert.match(extension, /Outstanding Background Flows & External State/);
-  assert.match(extension, /Not captured -- this handoff was auto-drafted by the force tier/);
+  const formatter = readFileSync(
+    join(plugin, "extensions", "context-handoff", "handoff-markdown.mjs"), "utf8",
+  );
+  assert.match(formatter, /Not captured -- this handoff was auto-drafted by the force tier/);
   // generate_handoff_prompt's returned instructions require the section too.
   assert.match(extension, /section: never silently drop/);
+});
+
+test("both handoff shapes and native guidance preserve approval evidence without issuing grants", () => {
+  const template = readFileSync(
+    join(plugin, "skills", "context-handoff", "references", "handoff-template.md"), "utf8",
+  );
+  assert.equal((template.match(/### Authorization Evidence & Limits/g) || []).length, 2);
+  assert.match(template.replace(/\s+/g, " "), /later narrowing\/revocation/);
+  assert.match(template, /does not grant permission/);
+  const skill = readFileSync(join(plugin, "skills", "context-handoff", "SKILL.md"), "utf8");
+  assert.match(skill, /references\/authorization-continuity\.md/);
+  assert.match(skill, /approval\s+evidence\/limits and current holds\/revocations/);
+  assert.match(CONTINUATION_DIRECTIVE, /original operator\/charter approval references/);
+  assert.match(CONTINUATION_DIRECTIVE, /cached summary.*not a grant/);
+  assert.match(CONTINUATION_DIRECTIVE, /reconcile unknown prior effects/);
 });
 
 test("skill states the mechanism is known from turn one, independent of handoff origin", () => {

@@ -17,18 +17,21 @@ from .client_categories import CategoryClientMixin
 from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 -- public re-exports
 from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
+from .client_pool_placement import PoolPlacementClientMixin
+from .client_pool_startup import PoolStartupClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_schedules import ScheduleClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_steering import SteeringClientMixin
 from .client_suspend import SuspendClientMixin
+from .client_task_recovery import TaskRecoveryClientMixin
 from .client_transport import make_http_client
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -218,10 +221,17 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
             params["repo"] = repo
         return self._unwrap(self._http.get("/tasks/mine", params=params))
 
-    def start(self, task_id: str, worker_id: str, *, owner_session_id: str | None = None) -> dict:
-        body = {"worker_id": worker_id}
+    def start(
+        self, task_id: str, worker_id: str, *, owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+    ) -> dict:
+        body: dict[str, object] = {"worker_id": worker_id}
         if owner_session_id:
             body["owner_session_id"] = owner_session_id
+        if expected_generation is not None:
+            body["expected_generation"] = expected_generation
+            body["expected_owner_session_id"] = expected_owner_session_id
         return self._unwrap(
             self._http.post(f"/tasks/{task_id}/start", json=body)
         )
@@ -663,6 +673,7 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
         session_info: dict | None = None,
         startup_complete: bool | None = None,
         startup_revision: int | None = None,
+        ordinary_redrive: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -670,6 +681,7 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
                 json={"session_handle": session_handle, "worktree": worktree,
                       **({"startup_complete": startup_complete} if startup_complete is not None else {}),
                       **({"startup_revision": startup_revision} if startup_revision is not None else {}),
+                      **({"ordinary_redrive": ordinary_redrive} if ordinary_redrive is not None else {}),
                       **({"session_info": session_info} if session_info is not None else {})},
             )
         )
@@ -746,32 +758,6 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
     def routing_assignment_events(self, assignment_id: str) -> list[dict]:
         return self._unwrap(
             self._http.get(f"/routing-assignments/{assignment_id}/events")
-        )
-
-    def record_spawn_worktree(
-        self,
-        key: str,
-        worktree: str,
-        *,
-        ownership: str = "unknown",
-        creating_host: str | None = None,
-        driver: str | None = None,
-        allocation_project: str | None = None,
-        worktree_path: str | None = None,
-    ) -> dict:
-        """Record the reserved worktree before launching the worker session."""
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/worktree",
-                json={
-                    "worktree": worktree,
-                    "ownership": ownership,
-                    "creating_host": creating_host,
-                    "driver": driver,
-                    "allocation_project": allocation_project,
-                    "worktree_path": worktree_path,
-                },
-            )
         )
 
     def request_spawn_release(

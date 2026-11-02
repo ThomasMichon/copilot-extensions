@@ -41,6 +41,10 @@ def add_copilot_subparser(sub) -> None:
     )
     copilot_parser.add_argument("name", help="CodeSpace name")
     copilot_parser.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    from plugin_resolve.reflection import selection_json
+    copilot_parser.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     from .plugin_preparation import disabled_plugin
     copilot_parser.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,

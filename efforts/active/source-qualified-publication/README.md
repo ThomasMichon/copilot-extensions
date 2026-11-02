@@ -12,6 +12,17 @@
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
 
+### Private F3 checkpoint (source merged 2026-10-31)
+
+An isolated new-file-only reducer and focused `test_source_publications.py`
+checkpoint merged in #8530 after current-head approval and required CI,
+disconnected from production.
+The model boundary is documented in [implementation.md](implementation.md)
+and the bounded command evidence in [validation.md](validation.md).
+This is not source/loader integration, owner receipt support, issue closure,
+native qualification or whole-effort completion. All remaining phase and
+nominal/installed acceptance gates retain their existing status.
+
 ## Guiding Intent
 
 Refresh and successful maintenance must converge on the selected producer's
@@ -52,6 +63,14 @@ new service, alternate authority, or operator-specific integration.
 - No shared deployment, installation, force reset, or destructive live test.
 - The proposal is discoverable through its three issue claims. Avoid a
   concurrent rewrite of the shared effort index in this isolated plan PR.
+- **Direct retained outcomes:** Preserve the complete #7937/#7946
+  original/refined/inherited contract in the
+  [per-origin Plan and Validation](retained-publication-outcomes.md), with
+  the complete existing [validation matrix](validation.md).
+  Existing planning-only/source/resource and excluded entry/import hunk
+  custody remains. No F2 implementer is appointed. This paper intake changes
+  no Blocked status and does not waive the literal no-close-on-plan-only
+  condition; #7937/#7946 remain open.
 
 ## Context
 
@@ -125,8 +144,13 @@ or additional execution authorization.
 - [ ] Record source, release and any separately authorized rollout states
   independently. No live rollout is part of this plan-only turn.
 
-## Validation Plan
+### Direct retained per-origin acceptance
+- [ ] Complete every unfinished #7937/#7946
+  [direct Plan row](retained-publication-outcomes.md#plan), preserving exact
+  accepted F1 source credit, original nominal/consumer duties, compatibility,
+  alternatives, evidence tiers and unchanged source/resource custody.
 
+## Validation Plan
 - [ ] Locked revision 10 → point unlocked 11 → 20 unchanged feed ticks never
   regresses the row; exercise actual screen/loader/Inbox path.
 - [ ] Local and remote same-ID fixtures remain isolated; remote Refresh makes
@@ -144,6 +168,14 @@ or additional execution authorization.
 - [ ] Complete [validation.md](validation.md), including compatibility and
   command-boundary lanes, before asserting implementation success.
 
+- [ ] Complete the matching
+  [direct per-origin Validation rows](retained-publication-outcomes.md#validation-plan)
+  against their full Plan scope and complete existing validation matrix.
+  Actual compatibility/rollback/restart/native cases already exist; do not
+  replace them with a timestamp-only summary or duplicate source work.
+  Source hold release is not nominal or installed qualification, and the
+  plan-only closure restriction remains unchanged.
+
 ## Proposal
 
 **Reviewed in #8021; F1 execution admitted separately.** Keep one owner and one
@@ -158,6 +190,62 @@ and exact shared-file owners. Its source review merged in #8139;
 it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
+
+### 2026-10-31 — Private reducer source slice merged; broader gates retained
+- #8530 actually merged at `2026-10-31T23:19:32Z` as
+  `8973eb78f68615705eb99507171874e9850dcadf`, from accepted head
+  `67591d09e57fe7135cdf21963e87f1093d2fcdc0`.
+- Current-head Copilot review `5725408799` approved the private checkpoint;
+  all eight threads were resolved. `PR gate (required check)`,
+  `workflow-lockdown-guard` and `source-attribution` succeeded for that exact
+  head. The native managed merge used only the configured review-rule
+  exception, not a CI bypass.
+- The 87-case pure reducer/F1 packet, four fail-first regressions, order and
+  heartbeat work controls and source guards are recorded in [validation.md](validation.md).
+  #7936 and #7937 were independently verified still Open after merge.
+- The ordinary post-merge sync refused a squash replay conflict and safely
+  aborted. Native `pr-complete` then reconciled past the provider-verified
+  squash with its retained backup; no unpublished source was discarded.
+- Only the private reducer source slice is complete. F2 receipts, production
+  F3 source/loader/Inbox wiring, F4 maintenance, F5 integrated/native/GUI/
+  installed qualification and nominal performance remain open under the
+  existing owners and retained acceptance matrix. This effort remains
+  Blocked, not Done; no rollout or finalization occurred.
+
+### 2026-10-31 — Existing private checkpoint reconciled for source review
+- Fresh review of `145f5f2dae` identified two Medium private-model defects:
+  unseen-ID absence receipts remained pending, and row-local availability
+  bypassed the partition's revision/freshness admission. Four new cases fail
+  against unchanged source; the surgical correction passes the complete
+  87-case reducer/F1 packet. No production or shared parser files changed.
+- Source-only checkpoint acceptance now permits driving existing #8530 through
+  its normal current-head review, required CI and managed merge gates.
+  This does not admit production F3 wiring, F2 receipts, F4 maintenance,
+  installed/native qualification or overall effort completion.
+- Preserved unpublished `9e84151644` before the supported current-base
+  reconciliation. Rebased head `9ccc1381f2` retains identical reducer/test
+  bytes, including the quadratic order-scan correction.
+- Fresh contained execution of the reducer and actual F1 observation packet
+  passes all 83 tests; Ruff, install/version contracts, effort structure and
+  whitespace checks pass. Exact bounded evidence is in [validation.md](validation.md).
+- Publication, fresh current-head verdict, required CI and verified source
+  merge remain outstanding at this checkpoint. Existing broader gates stay open.
+
+### 2026-10-28 - Direct retained publication outcomes, no token retirement
+
+The complete #7937/#7946 current contracts are retained through the named
+Plan/Validation annex and unchanged Participants/Coordination. The bounded
+read-only study checked actual source-qualified compatibility, receipt and
+nominal cases against the current ROOT and full validation document.
+Those cases already exist; this is not another implementation proposal.
+
+The exact #8217 F1 source episode and its source approval hold remain credited
+complete/released at their accepted tier. Nominal performance, F2-F5,
+GUI/native/installed and original resource/hunk duties remain unfinished.
+The explicit prohibition on closing the original issues on a plan-only merge
+is retained: neither source tracker closes from this paper intake, no
+administrative exception is inferred, and this effort remains Blocked/open.
+No new timing job, functional edit, runtime, native or claim operation occurred.
 
 ### 2026-10-24 — F1 source slice merged; remaining campaign retained
 - #8217 actually merged at 06:02:01Z as

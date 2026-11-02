@@ -1,0 +1,13 @@
+{
+  "comment": "Compose owned SSH Bridge workspaces through the origin's ordinary destination allocator without waiting for claim linkage",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -21,6 +21,14 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## In-session Mux Companion
 
+The resident mux runtime retains its daemon-instance admission until its
+listening/reaper threads and every accepted wire handler have actually retired.
+Its existing bounded `shutdown()` and control ACK remain independent of that
+settlement: a runtime-owned retirement worker holds custody after the caller
+returns, including for in-process embedding and partial startup failures.
+This does not change routing, generation selection, the single-active lease,
+or production lifetime policy.
+
 `worktree-manager companion` opens the current worktree's Textual companion.
 Summary is the initial tab, showing its reported purpose and disposition.
 Claims shows the actual engine resource ledger, including the inbound owner,
@@ -28,11 +36,111 @@ resource references, states and notes. Each observation retains its own
 confirmation marker and timestamp; unavailable data is not an empty ledger.
 Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 
+Timeline is an alternate view backed by a bounded timeline contract, virtual
+line renderer and caller-owned observation controller. Its compaction policy
+compares qualified pre-context counts without rounding; target-only capacity
+or unqualified measurements remain unknown. Owner feeds are not yet attached
+to this view: missing history stays explicit rather than being reconstructed
+from current Summary facts. Opening Timeline admits no new provider commands
+and leaves Summary as the initial view.
+Within the timeline canvas, arrow/PageUp/PageDown scrolling selects a visible
+event and Enter expands it; mouse selection is highlighted. Home browses the
+oldest loaded event and requests bounded older history. End/Follow returns
+selection to the live bottom. These controls do not change application focus
+or Escape behavior.
+Timeline adapters receive independent request-local stop events. Teardown waits
+for their bounded cleanup, including a naturally completed read already being
+finalized, without canceling adapter tasks or discarding their handles. Cleanup
+errors remain explicit after selection retirement.
+The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
+retains the provider, joined-app, native-client and installed-adoption gates.
+
+Agenda is an optional, display-only tab subscribed through the selected engine's
+`agenda-feed` CLI (`worktree-agendas-v1`). It starts only after the current
+worktree, project and exactly one head session are resolved. Complete pushed
+frames update the widget without agenda-file reads or an agenda polling timer.
+Refresh invalidates and retires the prior subscription before replacing it;
+head changes clear the displayed agenda and require Refresh. Unsupported,
+unpublished, unavailable and malformed data remain explicit, never an empty
+successful agenda. After a supported connection fails, at most three reconnects
+use bounded backoff and each requires a new atomic snapshot. Publication is
+not acceptance, execution permission or an action.
+
+The provider must expand first: this consumer does not install, provision or
+start a resident to obtain agenda support. Before sending any new agenda verb,
+an owned process calls the existing `worktrees_client.read_health()` in the
+resolved provider interpreter, without entering its legacy main/launch dispatcher.
+Missing capability/readiness or an unadmitted wrapper shape refuses the feed.
+Independently updating Manager against
+an older engine leaves Agenda unavailable without disabling other tabs.
+See [`docs/live-agenda.md`](docs/live-agenda.md) for ownership, wire admission,
+test commands and the separate provider-integration/rollout gates.
+
+Graph shows bounded recorded disposition history and directed resource
+references, with reported subagents kept distinct from resource ownership.
+Opening Graph reads the selected head session's optional, versioned
+`session-observations` provider off the UI loop; initial Summary does not wait
+for retained-history scans. Statistics count recorded starts/completions in the
+retained file, not unique calls or lifetime totals. Missing, partial, stale and
+unsupported evidence remain visible. Reported completion is not agent retirement.
+Refresh reloads the graph; leaving the app cancels its owned reads.
+
+The optional attention strip shows the selected head CLI's **last-reported**
+busy, idle or awaiting-operator state and transition timestamp. Continuity
+remains unknown: this is not proof of a currently pending question or of no
+pending input. The Return to CLI button may read **CLI (last: input)** or
+**CLI (last: idle)**; it only navigates and never answers or approves anything.
+The selected engine's versioned `session-attention` contract is optional;
+unsupported, malformed or absent evidence leaves attention unknown without
+disabling Summary, Claims, Graph or Recovery. Intent/question/transcript text
+is neither read nor displayed.
+
+Attention has its own cancellable worker and single-flight reads. A five-second
+timer revalidates only the displayed worktree's head, then reads that head's
+bounded pulse through at most two engine calls (five-second timeout each).
+Failure/unknown evidence backs off for at least 30 seconds. A changed head
+clears the nudge and pauses reads until Refresh; refresh/reopen invalidates
+the prior selection, and late results cannot replace it. No history scan,
+fleet scan, persistent cache or new service is added. In a same-window
+observer, periodic engine reads require native evidence that its exact pane
+and original incarnation are visible with an attached client; hidden/unknown
+visibility pauses them. Native visibility uses one exact-pane query with a
+two-second bound. It reads `session_attached` rather than treating a nonempty
+client listing as proof: PSMux can synthesize such a listing while detached.
+Opening or explicitly refreshing permits one foreground snapshot even if
+visibility cannot be established. The popup polls only for its own lifetime.
+Leaving either view cancels owned engine reads. Production cold/warm latency
+and rendered/native-client attention acceptance are not inferred from these
+polling/timeout limits.
+
 Recovery retains session lineage and the explicit, human-gated Cut over action
 for an already-prepared handoff. Selecting a tab never triggers cutover.
-These are tabs inside the Companion, not mux CLI/Summary view switches.
-Alternate mux panes, topology/statistics and two-line clickable mux chrome
-remain separately tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
+The existing Ctrl+K popup also offers **Show Summary pane**. It opens or
+reuses an observer in the CLI's existing mux window and zooms it; **Return
+to CLI** restores the original CLI pane without restarting its process.
+The popup itself and its key remain unchanged. The explicit shell entry is
+`worktree-manager companion-pane --action show|return [--cwd PATH]`.
+
+Pane actions require an installed Manager runtime and an unambiguous,
+launcher-registered CLI pane. They verify the native session incarnation,
+pane directory and window before switching; older sessions without that
+identity refuse rather than guessing pane zero. Reattachment preserves a
+recorded same-owner CLI while native evidence is unavailable, and removes it
+only when native inventory confirms its loss. Snapshot-fenced registration
+cannot overwrite a concurrently created CLI identity.
+Replacing a conflicting recorded native incarnation also requires current
+native session evidence; a delayed reconnect cannot displace its successor.
+The observer uses the constructed runtime's bootstrap, not source or `uv`.
+Concurrent callers serialize lookup and creation for that native CLI
+incarnation. While open, the observer checks only its registered CLI's native
+presence once per second off the UI loop and exits when that owner is
+confirmed ended; unavailable evidence never means death. It cannot keep an
+otherwise-ended CLI session alive indefinitely or adopt a successor pane.
+An already-bound observer continues checking its pinned native owner if
+registry or CLI metadata disappears.
+
+Native two-line clickable mux chrome and installed attention qualification
+remain tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
 
 ## Set up the harness
 
@@ -44,10 +152,28 @@ Managed authoring launch honors the target repository's
 [`expose_agent` hosting veto](../plugins/agent-worktrees/docs/repository-agent-policy.md).
 The Manager uses the engine's read-only policy API, never imports the plugin,
 and refuses engines without hosting admission instead of dropping the guard.
+Shell-delegated launch resolution defers instruction projection publication
+using a call-scoped flag while retaining the selected engine provider and
+the caller's profile, PATH and installation-selection environment. Parent Python
+runtime overrides remain stripped; the flag does not alter later launches.
 Recovery resolves its runtime first, then checks the actual setup repository
 before running its setup script. Source-only worktree allocation remains
 available through `agent-worktrees create --json`; it does not return a launch
 plan or adopt the source repository as a harness.
+The Bash launcher parses profile environment assignments once into a quoted
+array, exports those values and passes the same literal assignments to tmux.
+Empty values, embedded quotes and newlines are not forwarded as shell source.
+The existing AHP credential exclusions remain intact. The engine does not
+classify shell renderers for native eligibility: an explicitly empty
+`BASH_ENV` permits the copied native seeded setup, while actual nonempty or
+unknown mux initializer state retains the existing owner. This is independent
+of marketplace cells and does not establish full launch or removal survival.
+Post-update interpreter refresh recognizes the legacy Python seed envelope
+only; it does not replace native Bash/PowerShell hosts or a POSIX `env` prefix.
+The native prefix applies the selected empty initializer before Bash while
+preserving Python-sensitive backend environment values. Older launchers that
+overwrite every seeded executable need this correction; no new renderer
+handshake or planner-admission fence is introduced.
 The shell launchers defer setup-log creation/pruning, trace publication, root
 registration and automatic update staging/apply until the actual target passes
 the versioned owner check. Early diagnostic messages remain in memory. Recovery
@@ -90,15 +216,29 @@ and core stages:
 
 ```text
 worktree-manager setup --apply --repository <https-git-url>
-  [--repository-target <absolute-path>] [--trust-repository-setup]
+  [--repository-target <absolute-path>] [--repository-commit <full-commit-id>]
+  [--trust-repository-setup] [--context <declared-name>]
 ```
 
-Without `--apply`, this remains a plan. The target and trust options require a
+Without `--apply`, this remains a plan. The target, commit and trust options require a
 repository and are validated before provisioning. Apply requires fresh actual
 core readiness, then invokes the engine's
 [`repos setup` contract](../plugins/agent-worktrees/docs/repository-setup.md)
 with inherited stdio. An older/absent engine refuses this optional stage, not
 the completed core installation. Repository failure never uninstalls core.
+
+`--repository-commit` requires a full 40- or 64-hex commit ID. It is forwarded
+as the engine's explicit `immutable-commit` capability request, never replaced
+with remote HEAD if that selected engine refuses it. Existing targets must
+already match; only a new checkout may select the requested commit. Unavailable
+commits and unsupported older receivers retain completed core work and refuse
+the repository stage without an unpinned retry.
+
+`--context` selects the trusted harness's optional
+[engine-owned continuity context](../plugins/agent-worktrees/docs/repository-setup.md#optional-selected-continuity-context).
+The engine/Fleet runtime owns source selection, original-operation enrollment
+and authenticated outbound connection; Manager does not implement a private
+installer or read grants. Missing/older support retains completed core work.
 
 The existing bootstrap forwards the same `setup` argument array. Selecting a
 repository does not change the Manager's installation/update source, enroll
@@ -107,6 +247,39 @@ required before even the repository's check entry runs. A repository without
 the supported declaration is unsupported, not inferred from a README or hook.
 Native synthetic consumer coverage is not proof of actual attended provider
 authentication or a working adopter onboarding command.
+
+### Optional Windows system Python bootstrap
+
+The Windows **bootstrap**, not the installed Manager CLI, accepts
+`--system-python` as its first argument:
+
+```powershell
+& .\bootstrap.ps1 --system-python setup --apply --repository <https-git-url>
+```
+
+It qualifies a physical Python 3.11+ from PATH or the standard Windows Python
+registration, requiring a valid Authenticode signature before probing it.
+Signature verification loads the security module from the current host's
+`PSHOME`, not an inherited module-search path from another PowerShell version.
+WindowsApps aliases and virtual environments are not substitutes. If no
+qualified interpreter exists, an actual interactive terminal may install the
+user-scoped `Python.Python.3.11` package through WinGet. Bootstrap repeats
+signature, version and base-interpreter qualification, then exposes only the
+qualified directory at the front of its process PATH;
+a package-manager success code alone is insufficient. A blocked/failed install
+or missing WinGet remains an error, without a managed-Python fallback or device
+policy, Defender, registry-policy or execution-policy override.
+An unexpected verification error or cancellation is not interpreter absence:
+it stops before package discovery/acquisition instead of triggering an install.
+
+The selected interpreter hosts canonical Manager runtime installation; this mode
+does not migrate existing runtimes or change their lifecycle owner. UV/Git
+provisioning, repository arguments and Manager source/update configuration retain
+their existing owners. Without the option, the existing UV-based bootstrap is
+unchanged. Repeated mode flags and repair combinations refuse before acquisition.
+The Bash counterpart explicitly refuses this Windows-specific mode before
+effects; it does not silently substitute a distribution package route.
+This optional mode alone is not a full adopter readiness or attended-auth claim.
 
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine
@@ -142,6 +315,60 @@ Empty/whitespace-only prior selectors have no runtime to retain, but their
 existence and exact bytes remain rollback state. Target and nonblank prior slot
 names still receive canonical validation.
 
+On Windows, explicit bootstrap construction and `self-install --apply` enter
+the existing installation execution driver. A caller with a live inherited or
+scoped witness joins that owner; a cold explicit caller submits a fixed
+installation recipe and drives the same finite native executor. Neither path
+calls `ensure_worker`, creates another mutation lock, or falls back from a
+failed background launch. Application arguments remain outside the bootstrap
+request. Its bounded completion receipt binds the root, source digest and
+actual installed slot; later selection by another request cannot silently
+change which runtime the bootstrap dispatches.
+
+### Local promoted installation inputs
+
+The standalone bootstrap and `scripts/runtime_install.py` advertise the
+read-only `--describe-source-inputs` descriptor. Its `install-source` capability
+accepts `--install-source <absolute-snapshot>` before application arguments;
+`--repository` remains the application's repository-adoption argument.
+Unknown or ambiguous `--repo` syntax is not a Manager-source selector.
+
+`tools/local_install_source.py` freezes a Git commit and materializes its declared
+closure without changing package versions or consuming changefiles, then builds
+the Manager's first-party wheels. Existing commit/tree and assembly identities
+distinguish deployment generations even when package versions are unchanged.
+Use repeated `--project` selections for a bounded core preparation, for example
+`--project standalone:worktree-manager --project agent-worktrees`; this avoids
+building the rest of the portfolio. The default remains Manager only, and the
+separate `--suite` option explicitly selects all declared projects.
+Ordinary source installation remains available. Resource-packaging hooks use
+the constructor's existing isolated source-build fallback rather than its
+static-project wheel cache; an explicitly prepared wheel application does not
+run those first-party build backends during installation.
+`--finalized-main --main-head <commit>` additionally verifies Main ancestry.
+Only real Dev-to-Main promotion accumulates release versions.
+This build step produces first-party preparation data, not yet an installable
+native runtime profile. An incomplete snapshot explicitly refuses installation.
+Wheel files belong in ignored build output, never Git.
+
+A complete snapshot additionally carries its prepared native profile and exact
+wheel closure. The adapter retains and inspects those bytes through the existing
+constructor and real installed-health gate. It does not resolve dependencies,
+execute first-party backends, clear automatic-update inhibition, or acquire
+permission from a running Manager. Independent native installation custody
+still governs publication; foreign or unsettled owners are not bypassed.
+
+While retaining the qualified candidate, the Windows installer adopts its
+finite launch broker through that slot's isolated installed
+`update_driver.windows_broker` entry, before selector publication and any
+daemon-activation callback. Broker retention/publication runs outside the
+application's selector lease. An application selector rollback does not undo a
+separately qualified broker action: its own durable runtime reference keeps
+that action valid independently of the selected application generation.
+Contained construction does not register a Task. The normal `spawn_daemon`
+default remains unchanged; this source integration does not authorize host
+installation or claim full cold-install, desktop or maintenance qualification.
+
 PowerShell, CMD and Bash launch the selected slot through the canonical retention
 bootstrap in isolated mode, preserve its exit status, and never resolve or acquire
 dependencies during ordinary launch. Mux cutover uses that same constructed
@@ -157,6 +384,13 @@ Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter
 prefix, never from the mutable selected marker.
+Normal mux-daemon startup uses the
+[external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
+under Manager's durable root. Explicitly read-only retention/bootstrap controls
+keep their separate no-bytecode contract.
+Worktrees' direct Manager and fast-Picker handoffs carry the same cache policy
+on their frozen engine callback command, using Worktrees' durable root rather
+than Manager's root. The callback keeps its original interpreter and arguments.
 The retained launch-session registration and pane-wrapper removal callbacks
 also use that payload's constructed interpreter and retention bootstrap, without
 requiring `uv`. Their bounded metadata work is dispatched through the existing
@@ -177,6 +411,26 @@ its runtime is already current. If an old caller skips installation because a
 concurrent update already selected the new runtime, run the same normal update
 again: that invocation uses the new caller's recovery check. Copying a payload
 alone does not replace code already loaded by an old process.
+
+An explicit `<repo> update` or `worktree-manager update` is manual by default:
+the automatic-update KillSwitch does not inhibit it, and manual intent does not
+force rebuilding already-current runtimes. Existing `--force`, `--force-runtime`,
+recreate and repair selections keep their own construction semantics.
+All automatic producers pass `--auto`, including Manager's optional maintenance
+before session launch/resume and unattended fleet/self-update sweeps. Independent
+schedule opt-ins do not exempt those calls from the hold. Explicit project
+updates remain manual. An applicable default-installation hold returns
+the visible exit-3 no-op before Manager runtime construction or downstream
+installers, while an inactive hold executes normally. The POSIX bootstrap checks
+the same canonical admission policy before construction; target-scoped updates
+retain their manual/automatic mode through the target parser and engine handoff.
+Both native bootstraps anchor a relative hold-file override to the caller's
+directory before staging, and queued bootstrap admission retains that exact path.
+Independent namespaced cells retain their existing exemption from that default hold.
+Interrupted-transaction settlement and live-installer exclusivity remain separate
+gates. The existing queued `repair` boolean records manual admission, not rebuild
+selection; old records without it remain automatic. Parsers without `--auto`
+support refuse the request rather than silently treating it as manual.
 
 Recovery requires the existing provider registration naming the canonical
 Manager root and local-bin launcher. Registered launchers may be older or
@@ -206,17 +460,43 @@ Repair-child launches explicitly forward standard input, output and error to
 the existing caller handles while retaining hidden native children and their
 completion custody. Redirected diagnostics must reach the durable request log,
 not disappear behind an exit code.
+Engine repair reasserts and explicitly exports the current driver's scoped
+participant witness before entering either publication boundary. Consuming the
+incoming environment witness does not authorize an unadmitted replacement
+driver; a lost owner refuses before publication or child execution.
 
 Engine repair tolerates transient Windows payload-directory sharing contention
 without stopping live sessions or disabling their hooks. A completed native
 plugin **update** reporting sharing/lock violation 32 or 33 may retry at most
 twice, after its owned process tree is quiescent, within the original shared
-180-second acquisition budget. Each retry revalidates the registered source,
-all marketplace definitions and the requested plugin's ledger entry after
-backoff. Installs, POSIX failures, timeouts, uncertain cleanup and
+acquisition budget (180 seconds by default). Each retry revalidates the
+registered source, all marketplace definitions and the requested plugin's ledger
+entry after backoff. Installs, POSIX failures, timeouts, uncertain cleanup and
 authentication, permission, integrity or policy refusals are not replayed.
 Persistent contention remains a failed update; a refreshed payload alone still
 does not prove a healthy, selected engine runtime.
+
+On Windows, a positively settled acquisition timeout retains up to 8,192 bytes
+from each native output stream before closing its private capture. The registered
+origin error includes bounded excerpts from both channels through the existing
+credential/URL redactor, without exposing the command representation. Unconfirmed
+cleanup retains its custody failure rather than reporting a settled timeout.
+This diagnostic recovery does not replay the acquisition or extend its deadline.
+
+For a measured slow-host recovery, set
+`WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC` for that update invocation to
+a positive finite duration of at most 3,600 seconds, for example `600`. The
+durable Manager invocation captures this value, and the worker restores that
+budget rather than inheriting a later caller's setting. An absent choice clears
+the worker's ambient override. Invalid values refuse submission. The internal
+Manager argument is consumed before engine handoff: no new shared execution-context
+key or engine argument is required, including for older engine participants.
+Retries still share one deadline and the same attempt ceiling; timeouts are not
+replayed. This does not change runtime-construction, dependency, health, cutover
+or rollback contracts. It is separate from the Worktrees installer watchdog.
+An older engine that cannot read the current update-driver schema must use the
+ordinary fresh-Manager update path; do not downgrade the queue to enable
+`--no-manager`.
 
 The **One-line bootstrap** below remains the fresh-install entry, not a required
 manual migration step for an adopted Manager. Its explicit
@@ -357,6 +637,8 @@ configuration blocks automatic work with a diagnostic; strings such as
 The Picker reports a disabled policy without blocking ordinary browsing.
 This switch is a veto, not installation consent: `true` does not bypass the
 updater's existing opt-in, publication, or ownership checks.
+The launch-time policy probe suppresses bytecode writes before importing the
+installed payload, preserving its sealed construction inventory.
 
 The policy vetoes Manager-initiated automatic launch update/reconciliation
 submissions, background staging, anchor healing, orphan/managed/finished-session
@@ -554,6 +836,22 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+Machine-SSH listing and follow-feed calls suppress configured local and remote
+forwarding with `ClearAllForwardings=yes`; aliases, routing, identity, host trust
+and timeouts remain unchanged. Interactive launches and effectful commands retain
+their configured forwarding behavior.
+
+Pressing `r` immediately shows retry progress and preserves the selected source,
+including All. Before a first successful list, the list area distinguishes
+`Worktrees connection unavailable` from a reachable service whose worktrees
+`could not load`; diagnostics and the retry hint appear there, not in a `WT`
+error badge. A read failure does not declare the host or its resources offline.
+After a successful list, including an empty one, later connection/refresh errors
+retain the last loaded data with a muted `~` source marker and scoped
+`Updates paused` notice rather than a fresh-connection checkmark.
+Refreshing preserves those rows, and successful recovery clears the notice.
+Held-feed staleness stays in availability metadata rather than rewriting every row title.
+
 Explicit version-1 machine tuples are validated by the shared dependency-free
 identity codec before current rows or stream publications are admitted.
 `engine_client.Worktree.machine` is their execution owner; the original physical
@@ -747,15 +1045,19 @@ paste buffer. Reopen the composer and press **Up/Down** to recall older/newer
 seeds; multiline cursor movement remains available until the first/last text
 line, and **Ctrl+Up/Down** recalls history from anywhere. Browsing back past the
 newest entry restores the current unsent draft, including edits made while
-browsing.
+browsing. Both composer caches keep each entry's original expiry deadline and
+exclude expired entries during navigation without replacing the current draft.
 
 History is per project, survives Manager restarts and runtime updates, and
 retains exact submitted text locally under `WORKTREE_MANAGER_ROOT` (or the
 normal `~/.worktree-manager` root). It is not synced, logged, or automatically
-executed. Consecutive identical submissions do not create duplicates; entries
-are not automatically expired. Treat this database as private prompt content.
-Initialized history accepts only the expected table with zero application/version
-markers; extra triggers, indexes, tables or foreign markers refuse prompt reads/writes.
+executed. Consecutive identical submissions do not create duplicates or extend
+their original deadline. Entries expire 90 days after submission; reads hide
+expired text even before physical maintenance. Treat this database as private
+prompt content. Recognized legacy history migrates without changing original
+IDs, projects or timestamps. Versioned history accepts only its expected table,
+expiry index and application/version markers; extra schema or foreign markers
+refuse prompt reads/writes.
 The history directory and database are owner-only on POSIX; Windows uses a
 protected owner/SYSTEM ACL, including inherited protection for SQLite journals.
 Existing history permissions are repaired before access; failure blocks submission.
@@ -767,6 +1069,14 @@ intent and never retries an allocation automatically.
 History reads open SQLite in read-only mode. A valid uninitialized empty database
 is treated as empty history without creating its schema. Corrupt, foreign, or
 incompatible stores refuse access instead of being silently repaired or migrated.
+Real production Picker use maintains both history and launch-journal input after
+first paint when automatic maintenance is enabled. Explicit confirmation also
+maintains both off-thread before saving. Offline machines physically expire text
+at their next permitted maintenance opportunity. Migration scrubs legacy freelist
+copies and safely checkpoints recognized WAL into DELETE mode; busy or unexpected
+sidecars report errors rather than being removed by hand. Pending daemon seeds
+remain untouched. See [the storage contract](docs/launch-attempt-storage.md#private-readers-and-expiry)
+for crash recovery, privacy and automatic-maintenance behavior.
 
 Nonempty prompts with Anchor, Bare, AHP, or Local model selected refuse
 confirmation visibly and keep the draft open without recording it. Clear the
@@ -894,6 +1204,236 @@ Seedless remote planning records forwarding only, while target resolution
 records its own machine-local preparation. Missing or mismatched receipts stop
 execution without automatically repeating allocation. Full prompts remain in
 the protected Manager journal, not in these engine metadata receipts.
+
+#### Read saved launch attempts
+
+Press **Ctrl+Shift+H** in either interactive Picker to open local launch
+history. The production Picker's `?` legend and the compact Picker footer
+advertise the shortcut. Metadata pages contain at most 25 attempts; project,
+action and Manager-outcome filters and Newer/Older controls stay within the local protected
+journal. Opening or refreshing this list never queries an engine.
+
+Select a row for bounded local detail (at most 20 Manager events and 10 engine
+receipts). Source errors and incomplete-page cursors remain visible; the CLI
+below can retrieve further pages. **Reveal private input** is a separate,
+explicit action for that exact attempt, subject to its original expiry.
+Back to list clears the displayed private detail. Long details are labeled as
+truncated previews after 32,768 Unicode characters; use the CLI for the full detail.
+Reads run off the UI thread, and Escape/Close remains available while the
+local engine responds. The screen never retries a launch, changes retention,
+or contacts the selected remote venue.
+
+`worktree-manager launch-attempts --json` reads bounded, local saved-intent
+metadata without starting the engine. Filter with `--project`, `--action`,
+`--machine`, `--environment`, `--provider`, `--venue`, `--outcome`, `--after` (inclusive Unix
+seconds), and `--before` (exclusive). `--limit` is 1-100. When `has_more` is
+true, pass both returned `next_before` and `next_before_id` as `--before` and
+`--before-id`; the ID tie-breaker preserves equal-timestamp entries.
+
+`--outcome` filters the **latest durable Manager boundary**, not a whole-attempt
+or remote-engine verdict. Each row and detail declares
+`manager_outcome_scope: "manager-boundary"` and retains `last_manager_event`
+with its sequence, timestamp, phase and prompt-free details. This observation
+is independent of event pagination; filtering happens before the row limit.
+`refused` means the Manager refused a step, `failed` means its launcher returned
+nonzero, `interrupted` requires an explicit interruption observation, and
+`returned` means only that its launcher returned zero. **None establishes
+Copilot launch, prompt acceptance, current liveness or safe replay.** An
+incomplete step, absent event or ambiguous engine/transport error remains
+`unknown`; elapsed time alone never turns it into a proven crash. Later
+Manager observations supersede earlier ones in this boundary projection,
+while the event history retains the earlier evidence. Engine, daemon and
+native observations cannot override the Manager's own boundary.
+
+To inspect explicitly selected configured SSH machines, use:
+
+```text
+worktree-manager launch-attempts --sweep-project example --source-machine worker-linux --source-machine other-wsl --json
+```
+
+`--sweep-project` selects **only the configuration source**, not a journal
+filter; `--project` still filters saved attempts on each target. The reader
+consults that registered project's existing local anchor, additively merges
+its root and canonical machine files (canonical entries win), and uses its
+configured knowledge supplier only when neither file exists. It never
+enumerates every project's files or provider venues. Cell-scoped registry
+selection is currently unavailable and refuses rather than substituting the
+machine-global registry.
+
+Select 1-8 configured machine/environment identities explicitly. The sweep
+refuses legacy multi-profile entries that cannot be normalized to independent
+execution spaces, rather than substituting their default SSH profile for a
+selected alias. Declare separate execution-space entries for those sources.
+It reads **one metadata page per source** through its configured SSH profile and
+the target's published absolute `~/.local/bin/worktree-manager` front door
+(`worktree-manager.ps1` on Windows), not a PATH-selected engine or a setup
+command. Only already-known host keys are accepted; agent, X11 and port
+forwarding, persistent
+control sockets and SSH local commands are disabled. The shared SSH transport
+owns proxy children and cleanup. A source has a 20-second read deadline, the
+sweep shares a 120-second deadline, and each source stream is limited to 1 MiB.
+Cleanup may add time after a deadline; no read is retried.
+
+The versioned sweep response labels observations non-atomic and retains each
+source's configured identity, status and independent pagination. Identity is
+based on the configured SSH profile, not a newly attested remote hostname or
+service readiness. Re-run with that one source and its `next_before` /
+`next_before_id` to continue; pages are not merged into a misleading global
+cursor. Unconfigured, ambiguous, duplicate, unavailable, incompatible,
+oversized or timed-out sources remain explicit errors, alongside independently
+read pages, and produce a nonzero exit. Remote stderr and unexpected response
+fields are never echoed. `--source-machine` is separate from the existing
+`--machine` journal-venue filter. Without an attempt ID this remains a
+metadata-list-only sweep: it refuses `--summary`, `--include-input` and detail
+page selectors before opening a transport.
+
+For one exact attempt on one explicitly selected configured SSH source:
+
+```text
+worktree-manager launch-attempts <attempt-id> --sweep-project example --source-machine worker-linux --json
+worktree-manager launch-attempts <attempt-id> --sweep-project example --source-machine worker-linux --include-input --json
+```
+
+This is not a fleet-wide prompt search. Exact detail refuses multiple sources,
+list filters, non-default `--limit` and `--summary` before reading configuration.
+It invokes the selected target's existing local detail reader through the same
+absolute published Manager launcher and SSH process owner; it never falls back
+to the host journal, provisions a target runtime or retries a launch.
+`--event-limit` / `--after-sequence` and `--receipt-limit` / `--receipt-after`
+select one independent target event/engine page. The source retains its
+20-second transport and 1 MiB response budgets; oversized detail is refused,
+not truncated or silently redacted. Smaller page limits can reduce a response.
+
+The result uses `worktree-manager-launch-history-remote-detail` v1 with one
+configured-profile-attributed `source`. `source.detail.attempt` contains
+validated metadata and events; only explicit `--include-input` admits its exact
+protected prompt/options, and missing, expired or erased input refuses that
+request. Default detail never admits a target's unexpected `input` field.
+`source.detail.engine` projects the existing prompt-free owner observations,
+positive boundaries, sanitized errors and continuation rather than echoing raw
+engine receipt bodies. Observations remain non-atomic, absence and prompt
+acceptance remain unknown, and the recorded-result/final-wrapper distinction
+below is unchanged.
+
+An independently unavailable engine can leave useful target intent:
+`source.status: partial` retains validated detail with the actual
+`target_exit_code`, a sanitized `incomplete-evidence` code and nonzero caller
+exit. A nonzero target exit never becomes clean success. Missing/old launchers,
+incompatible or foreign detail, malformed fields, timeouts and unavailable
+protected input remain attributed errors without echoing target stderr or
+arbitrary error text. Neither a partial nor a complete read is launch or replay
+authority.
+
+`worktree-manager launch-attempts <attempt-id> --json` reads one protected
+intent and its Manager events, then queries the installed engine once for that
+project's **local** receipts. The selected target in the intent is not evidence
+that a remote target was contacted by this read. Explicit request IDs in the
+current Manager event page and engine resolution page allow matching local
+target-admission receipts to be joined;
+unavailable target receipts remain missing, not successful.
+
+Use `--event-limit` (1-1000) and `--after-sequence` for Manager event pages.
+Use `--receipt-limit` (1-100) and `--receipt-after` with the engine's returned
+`next_after` for receipt pages. Each page declares incompleteness independently;
+an absent terminal event or an incomplete page is not a whole-attempt verdict.
+An unavailable/incompatible engine preserves the saved local detail with an
+explicit source error and nonzero exit, without invoking setup or replay.
+Per-receipt read errors remain in the engine response.
+
+For an explicit cross-page local projection, use
+`worktree-manager launch-attempts <attempt-id> --summary --json`. This reads at
+most 1,000 Manager events and ten existing engine pages of 100 receipts each;
+the engine calls share a 120-second deadline, rather than each acquiring a
+fresh deadline. At most 16 Manager request references are sent per call;
+engine-discovered admission references retain the engine's own per-page limit.
+The default detail, list and UI read budgets are unchanged. Summary cannot be
+combined with event/receipt page selectors.
+
+`summary.boundaries` keeps positive owner evidence separate: `allocation`
+requires a New admission's completed creation, `launcher_start` and
+`backend_start` require the corresponding actual process-spawned observation,
+and `native_session` requires the engine's qualified original native-session
+join. Each fact keeps its request or operation identity; process observations
+retain resolution/parent/worktree/incarnation, timestamp, PID and birth evidence.
+A backend command is not by itself proof of a Copilot session, a seed claim
+does not prove handoff, and a returned plan does not prove allocation. Multiple
+operations are not collapsed into one winning launch or conversation. The
+Manager-only `--outcome` filter retains its existing meaning.
+
+`summary.owner_observations` adds separate `resolution`, `execution` and
+`admission` lists from those same existing receipts. Each resolver/execution
+operation keeps its last observed phase and timestamp. `terminal_phase: null`
+means no terminal was read; the literal `unknown` phase preserves an owner's
+explicit uncertainty, not proof of a crash. Resolver `plan-ready`, `forwarded`
+and `remote-admission-returned` phases are resolver observations only.
+`recorded_exit_code` is the result recorded inside that owner, not proof of the
+wrapper's final return. `wrapper_exit_code` stays `null`: later persistence,
+output or receipt failures can still change the wrapper's actual exit.
+Execution `process_exit_code` and `receipt_uncertain` remain separate, including
+a zero child/recorded result followed by an actual wrapper return of 3 after an
+earlier receipt-write failure. Execution records retain parent and resolution
+identities, never letting a parent observation overwrite a child outcome.
+Admission observations retain only the existing creation/acceptance flags:
+neither incomplete creation nor missing acceptance proves refusal or failure.
+Repeated unchanged admissions are deduplicated; changed observations remain
+visible with a non-atomic-source diagnostic. No overall success/failure or
+prompt-acceptance verdict is synthesized from these lists.
+
+The projection labels its observations **non-atomic**, leaves absent boundaries
+`unknown`, and never claims snapshot completeness, current liveness, safe replay,
+or allocated-but-not-launched based on a missing event. A later-page failure
+retains independently observed facts. Limits, incompatible/unavailable sources,
+invalid receipts and changed admissions remain explicit `summary.errors` and
+produce a nonzero exit; page counts and the last continuation remain under
+`engine`. The selected remote is explicitly `not-queried`. These facts are a
+bounded local view of an attempt, not a remote sweep or a universal terminal
+outcome.
+
+Only `--include-input` with an exact attempt ID selects protected prompt/options.
+Expired or erased input refuses that request; list and ordinary detail never
+select its text. Resolution, launcher exit, seed claim and original native-session
+observations remain separate evidence. `prompt_acceptance` stays `unknown`,
+including after a zero exit or a qualified native-session join. These commands
+do not launch, repair, expire or retry. Only explicit sweep selections contact
+other machines. Complete terminal-outcome classification remains separate;
+local retention maintenance runs through the Picker/confirmation path, not
+these read-only inspection commands.
+
+The explicit cross-runtime source lane is
+`python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_launch_history_cli_native.py`.
+Set `WORKTREE_MANAGER_TEST_ENGINE_ARGV` to a JSON array naming a prepared
+candidate engine interpreter/entry command. The lane runs the real Manager
+entry and engine CLI against isolated synthetic intent, checking metadata and
+explicit input in separate cases and verifying unchanged fixture state.
+Its summary cases additionally cross two real engine pages (105 receipts),
+including a backend spawn and the engine's native-session join beyond page
+one, while preserving unknown allocation and prompt acceptance. They also
+preserve separate parent/child recorded results, unknown final wrapper exits,
+explicit resolver uncertainty and missing resolver terminals. A fault-injected
+actual execution owner runs a real child, fails an earlier receipt write,
+successfully writes the terminal with zero recorded/child exits and uncertainty,
+then returns 3; the reader must not call its final wrapper exit zero. They print
+source-read elapsed time, not a performance-budget verdict.
+It is not a required-unit-CI matrix, a latency qualification, installed
+Copilot acceptance or permission to provision a runtime.
+
+The explicit `tests/native/test_launch_history_sweep_native.py` lane exercises
+the shared transport process owner, real configured native shell and actual
+target Manager list CLI with a synthetic transport executable and isolated
+published launcher. It follows two independent pages and checks unchanged
+Manager journal/launcher bytes, plus missing and incompatible target refusals.
+Native shells may maintain their own OS caches outside Manager state. This
+lane does not claim real SSH authentication or installed target compatibility.
+Its exact-detail cases also exercise the actual target Manager reader through
+that shell and process owner: default privacy, explicit input, event
+continuation, expired input, partial engine failure and a projected synthetic
+engine process. Manager journal/launcher fixture bytes remain unchanged. The
+separate native Manager-to-selected-engine lane above qualifies real engine
+receipt consumption; the synthetic remote engine is not installed Copilot
+acceptance.
+
+#### SSH admission and pending intent
+
 Arbitrary prompt text is
 encoded, not interpolated into the remote shell. Requests are limited to an
 7 KiB UTF-8 envelope, including JSON metadata, to stay within remote command
@@ -926,6 +1466,11 @@ prompted requests using that fallback retain their seed and require a direct
 Copilot executable. Ordinary seedless fallback launches are unchanged.
 
 ## One-line bootstrap
+
+Global project `update` fetches this Main orchestrator independently of local
+runtime-source policy. The [bootstrap transport contract](../docs/install-contract.md)
+owns the explicit environment overrides, source precedence and older-caller
+compatibility; `[source]` still selects the Manager runtime, not this transport.
 
 **Windows (PowerShell):**
 
@@ -1135,6 +1680,64 @@ ownership contracts; their remaining convergence is tracked
 under [#7758](https://github.com/ThomasMichon/copilot-extensions/issues/7758),
 not inferred complete from these migrated entry points.
 
+## Remove an owned installation
+
+The standalone installer provides **`worktree-manager.uninstall`, generation 1**.
+Select an extracted, supported Manager payload and a base Python **outside**
+the target installation. Read that payload's
+`references/uninstall-contract.json` before invoking its installer; support is
+not inferred from package-version equality or an ambient command on `PATH`.
+
+```powershell
+$python = '<external-base-python>'
+$installer = '<external-manager-payload>\scripts\runtime_install.py'
+& $python -I -S -B $installer --root '<manager-root>' --uninstall --json
+& $python -I -S -B $installer --root '<manager-root>' --uninstall --apply --json
+```
+
+The first invocation previews without construction, fetching, service requests
+or creating lock files. `--apply` removes validated runtime slots, their
+selectors and attributable generated frontdoors/registration. Configuration,
+source preferences, project registrations, mappings, routing/recovery history,
+unknown root files and persistent lease files remain. There is no data purge.
+Settle any running Manager infrastructure through its existing lifecycle owner
+first: removal never stops Copilot, its mux, another installation or a service.
+Settled routing history is preserved under the daemon's existing spawn lease,
+not mistaken for a running daemon or deleted to make removal succeed.
+Under that quiescent custody, an owned finite Windows launch-broker registration
+is removed through the canonical broker owner before runtime files. Its action
+generation stays retained until external Task removal is confirmed. Pending
+publication requires installer recovery; unknown removal retains the runtime
+and ownership evidence rather than deleting the action beneath a live Task.
+Present installations also require a reliable process census (Windows or
+Linux `/proc`); other platforms refuse rather than assuming no process is live.
+
+Every present runtime slot must carry the construction-owned generation-1
+artifact inventory. Legacy, development, changed, unexpectedly linked, foreign, busy or
+otherwise unsupported targets refuse rather than being rebuilt or broadly
+deleted. Added ordinary CPython bytecode caches are removable only beside an
+unchanged inventory-owned Python source, with canonical cache names and matching
+timestamp/size or source-hash headers. Their observed identities join the
+in-memory removal plan; the sealed inventory is never rewritten. Unknown cache
+contents, links and changes to sealed entries still refuse. Generic frontdoor bytes alone do not establish ownership: removing
+shared commands requires the matching current Manager registration.
+An interpreter or installer inside the target refuses apply before effects,
+including on Windows; use the external invocation above instead of delayed
+self-deletion. Missing capability metadata is unsupported uninstall, not
+permission to try a different removal mechanism. Install/update remain available
+under their existing contracts.
+
+JSON results use `worktree-manager.uninstall-result`, version 1, with contract
+identity/generation and status `planned`, `absent`, `removed`, `refused` or
+`incomplete`. Exit codes are 0 for the first three, 1 for refusal/incomplete
+removal and 2 for invalid syntax. An absent target is not constructed.
+Partial removal is never success; withdrawn selectors are not restored to
+partly removed slots, and unresolved artifacts/evidence remain for their owner.
+There is no installed convenience command or automatic caller migration in this
+provider-first expansion. Older providers and rollback targets without the
+declaration/inventory retain their previous operations but cannot perform this
+uninstall contract.
+
 ## Choose the update source (fork / canary branch)
 
 By default the self-updater pulls the Worktree Manager payload from the canonical
@@ -1161,11 +1764,58 @@ repo = "https://github.com/<fork>/copilot-extensions.git"
 ref  = "canary"
 ```
 
-When a live `mux-daemon` is already serving managed sessions, `worktree-manager
-update` now cuts it over in place instead of stacking a stale resident beside
-the new code: the successor starts on a fresh loopback port, status writers
-follow the routed active endpoint first, and the predecessor drains accepted
-status-apply work plus its current republish cycle before retiring.
+Git-backed acquisition uses per-command Windows long-path support for cloning,
+fetching and checkout, including Main and custom refs. It does not change
+user-level or machine-level Git configuration. Routine Main and custom-ref
+self-update checkouts materialize only `worktree-manager`, its shared `libs`,
+and `.gitattributes`,
+including when reusing an existing staging checkout; unrelated plugin paths
+are not needed for Manager self-update.
+The standalone bootstrap expands retained sparse staging before construction:
+fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
+
+If acquired Manager content differs from an already published slot with the
+same package version, installation uses a distinct immutable repair generation
+instead of rewriting or rejecting the predecessor. Matching healthy generations
+remain reusable. I/O failures still propagate; this fallback does not authorize
+recovery of unknown execution effects or relax source-evidence validation.
+
+Manager update and bootstrap activation start the selected `mux-daemon` on a
+fresh loopback port without requiring a healthy or even present predecessor.
+Only the incoming generation is health-checked before routing is published;
+the installer does not recover, drain, shut down or terminate the old daemon.
+Each protocol-aware incumbent observes the healthy successor, drains its own
+accepted work and exits. Brief overlap is expected. The incoming process admits
+exclusive work only after acquiring the resident lease released by its
+predecessor. Existing cutover records and old code remain untouched; explicit
+legacy recovery is separate from ordinary update and repair. Publication proves
+incoming readiness, not that every old process has already converged.
+
+For a prepared source payload, `self_install(..., dry_run=True)` compares the
+full retained source identity and assembled bytes, not just the package version.
+It reports the selected source/repair slot and marker on exact reuse, or the
+requested immutable generation when a different source is planned. Invalid
+source evidence is an explicit error; dry-run does not construct or publish.
+Apply still runs installed health before reuse. A selected healthy repair of
+the same source generation is reused instead of repeatedly rebuilding repairs
+from a damaged base slot. Neither path changes the existing config/data root.
+An explicit `[source] ref = "dev"` now acquires that Manager repository's
+merged `dev` tip in its own clean, owned checkout and prepares it through the
+running Manager's trusted tools. Fetched tools are never executed. Its cache
+and immutable prepared payloads live below
+`<manager-root>/manager-source/runtime-sources/`, independently of the service
+`[runtime_source]` selection. The ordinary versioned installer, global commands,
+data root and mux cutover owner are unchanged. Acquisition, preparation or
+receipt failures are reported without an unqualified fallback; this mode
+requires Git. Main and other refs retain their existing Git/GitHub-tarball
+path and are not yet source-qualified by this contract. The standalone
+bootstrap's Python adapter applies the same Dev qualification before constructing
+Manager, using only its own declared process helper and trusted preparer under
+an isolated base interpreter. A supplied prepared Manager payload is validated
+and retained exactly rather than resolving Dev again. Recovery-only and adopted
+recovery entries do not acquire another Manager source. Qualifying Manager
+does not select the engine's build source; the independent service-source
+repair contract below owns that choice.
 
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the
@@ -1234,22 +1884,57 @@ owned checkout atomically. Failed initialization cleans only its private
 staging directory, leaving a later acquisition able to retry; an unowned
 incumbent is still refused rather than repaired automatically.
 
-**Source-backed suite execution is not connected yet.** With a non-marketplace
-policy, ordinary and bootstrap/repair `update` fail before Manager self-update,
-Manager bootstrap installation or engine repair rather than silently ignoring
-the selection. `reset` explicitly restores ordinary
-marketplace runtime delivery. Canonical source preparation, immutable runtime
-planning and the existing installation driver remain the next integration
-boundary; this command adds no alternate installer or recurring worker.
-The early preflight is read-only: invalid bootstrap arguments still retain
-their existing failure scope without opening aggregate update telemetry.
+Ordinary `update` qualifies the **exact executing engine** through its existing
+installation inventory before source acquisition or Manager self-update. A
+missing or unsupported prepared-source declaration refuses with an engine
+upgrade/repair diagnostic; it never tries an effectful new command and then
+replays marketplace delivery. For a capable engine, Manager acquires one exact
+service-source commit/tree and prepares every eligible runtime from it before
+either update stage. Existing `--skip-modules` semantics apply. Prepared
+generations persist below `<manager-root>/runtime-sources/prepared/`; the
+complete immutable packet crosses the existing engine process and durable
+request boundary. The capability read and execution use the same frozen engine
+argv, including call-scoped ownership rather than a stale inherited handle.
+The engine remains authoritative for complete portfolio admission, native
+installation, retries and outcomes; no alternate installer or recurring worker
+is introduced. Marketplace plugin-content refresh remains independent.
+Prepared payloads that require profile-qualified targets also require the actual
+engine's additive target capability before either update stage; see the
+[owned target contract](../plugins/agent-containers/docs/runtime-source-target.md).
+An old V1 source engine is sufficient only for the supported unprofiled baseline.
+
+Fresh suite repair can also honor that independent policy when the installed
+engine cannot provide inventory yet. It acquires one service-source selection,
+holds its lease through repair and the subsequent suite, and prepares the engine
+through the executing Manager's trusted toolkit. The fresh publication SDK
+revalidates the incumbent registered command owner and default runtime root;
+the prepared native installer supplies code, not a new owner or data root.
+Repair uses the installer's existing runtime-only update mode, enforces the
+complete transaction pin and requires the actual pinned slot and deployment
+receipt to be complete. A corrupt completion marker or failed installed-health
+check for an existing source generation enters the engine's canonical distinct
+`repair` mode, preserving the damaged generation. An already selected healthy
+repair with the same complete source identity is reused; the source pin still
+names the original source assembly, not a different commit.
+The repaired engine then supplies real inventory, and
+the suite prepares all eligible runtimes from the same original commit/tree
+without fetching a moving branch again. Manager's own source remains independent.
+This is legacy/default-root repair; namespaced source repair refuses before
+native payload refresh.
+
+Non-repair bootstrap updates and targeted service-runtime updates still refuse a
+non-marketplace policy before their effects. A targeted Manager self-update
+continues to follow its independent `[source]` policy. `reset` explicitly
+restores ordinary marketplace runtime delivery. Invalid bootstrap arguments
+retain their existing failure scope without opening aggregate update telemetry.
 
 Released Manager payloads also carry the trusted canonical
 [source-preparation toolkit](../tools/prepare_runtime_source.md) in
 `scripts/runtime-source-tools/`. It supports Manager's standalone project as
-well as runtime plugins without executing fetched tools. This packaged
-capability does not connect the acquisition diagnostic to installation or
-remove the update refusal above.
+well as runtime plugins without executing fetched tools. Ordinary source-backed
+updates invoke only this executing Manager's toolkit in an isolated Python
+process and verify its complete receipt and prepared bytes before forwarding.
+Fetched tools remain data; they cannot replace the trusted preparer.
 The existing update request's source identity includes this policy, so changing
 it after submission rejects the old request rather than running a different
 runtime selection under its name.

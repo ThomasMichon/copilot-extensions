@@ -12,7 +12,7 @@ _initialize_source_runtime() {
     PACKAGE_VERSION="$SRC_VERSION"
     SOURCE_RUNTIME_IDENTITY=""
     SOURCE_RUNTIME_MANIFEST=""
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     local py
     py="$(_bootstrap_python exclude-runtime-root)" || return 1

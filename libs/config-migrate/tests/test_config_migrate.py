@@ -9,6 +9,8 @@ stamp, and the backward-compatibility invariant via prior-version fixtures
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -30,20 +32,20 @@ from config_migrate.registry import MigratorGapError, SchemaError, UnknownSchema
 # --------------------------------------------------------------------------- #
 # Registry validation
 # --------------------------------------------------------------------------- #
-def test_registry_rejects_migrator_gap():
+def test_registry_rejects_migrator_gap() -> None:
     reg = SchemaRegistry()
     with pytest.raises(MigratorGapError):
         # current=3 needs migrators for v1 and v2; only v1 supplied.
         reg.register("x/y", current_version=3, migrators={1: lambda d: d})
 
 
-def test_registry_rejects_bad_baseline():
+def test_registry_rejects_bad_baseline() -> None:
     reg = SchemaRegistry()
     with pytest.raises(SchemaError):
         reg.register("x/y", current_version=1, baseline_version=2)
 
 
-def test_get_unknown_schema_raises():
+def test_get_unknown_schema_raises() -> None:
     reg = SchemaRegistry()
     with pytest.raises(UnknownSchemaError):
         reg.get("nope")
@@ -52,17 +54,17 @@ def test_get_unknown_schema_raises():
 # --------------------------------------------------------------------------- #
 # read_version
 # --------------------------------------------------------------------------- #
-def test_read_version_absent_is_baseline():
+def test_read_version_absent_is_baseline() -> None:
     assert read_version({}, baseline=1) == 1
     assert read_version({}, baseline=3) == 3
 
 
-def test_read_version_present():
+def test_read_version_present() -> None:
     assert read_version({SCHEMA_VERSION_KEY: 4}) == 4
 
 
 @pytest.mark.parametrize("bad", [0, -1, "2", 1.5, True])
-def test_read_version_invalid_marker(bad):
+def test_read_version_invalid_marker(bad: object) -> None:
     with pytest.raises(MigrationError):
         read_version({SCHEMA_VERSION_KEY: bad})
 
@@ -76,7 +78,7 @@ def _baseline_reg() -> SchemaRegistry:
     return reg
 
 
-def test_migrate_doc_baseline_stamps_unmarked():
+def test_migrate_doc_baseline_stamps_unmarked() -> None:
     reg = _baseline_reg()
     new, changed = migrate_doc({"a": 1}, "aw/config", reg)
     assert changed is True  # marker was absent
@@ -84,28 +86,28 @@ def test_migrate_doc_baseline_stamps_unmarked():
     assert new["a"] == 1
 
 
-def test_migrate_doc_idempotent_when_current_and_marked():
+def test_migrate_doc_idempotent_when_current_and_marked() -> None:
     reg = _baseline_reg()
     new, changed = migrate_doc({SCHEMA_VERSION_KEY: 1, "a": 1}, "aw/config", reg)
     assert changed is False
     assert new[SCHEMA_VERSION_KEY] == 1
 
 
-def test_migrate_doc_does_not_mutate_input():
+def test_migrate_doc_does_not_mutate_input() -> None:
     reg = _baseline_reg()
     src = {"a": 1}
     migrate_doc(src, "aw/config", reg)
     assert SCHEMA_VERSION_KEY not in src
 
 
-def test_migrate_doc_multistep():
+def test_migrate_doc_multistep() -> None:
     reg = SchemaRegistry()
 
-    def v1_to_v2(d: dict) -> dict:
+    def v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
         d["b"] = d.pop("a", None)
         return d
 
-    def v2_to_v3(d: dict) -> dict:
+    def v2_to_v3(d: dict[str, Any]) -> dict[str, Any]:
         d["c"] = (d.get("b") or 0) + 1
         return d
 
@@ -116,13 +118,13 @@ def test_migrate_doc_multistep():
     assert "a" not in new and new["b"] == 10 and new["c"] == 11
 
 
-def test_migrate_doc_fail_closed_on_newer():
+def test_migrate_doc_fail_closed_on_newer() -> None:
     reg = _baseline_reg()
     with pytest.raises(NewerThanCurrentError):
         migrate_doc({SCHEMA_VERSION_KEY: 2}, "aw/config", reg)
 
 
-def test_migrate_doc_non_dict_root():
+def test_migrate_doc_non_dict_root() -> None:
     reg = _baseline_reg()
     with pytest.raises(MigrationError):
         migrate_doc(["not", "a", "map"], "aw/config", reg)  # type: ignore[arg-type]
@@ -131,13 +133,13 @@ def test_migrate_doc_non_dict_root():
 # --------------------------------------------------------------------------- #
 # migrate_file
 # --------------------------------------------------------------------------- #
-def test_migrate_file_missing_is_skipped(tmp_path):
+def test_migrate_file_missing_is_skipped(tmp_path: Path) -> None:
     reg = _baseline_reg()
     res = migrate_file(tmp_path / "absent.yaml", "aw/config", reg)
     assert res.skipped and not res.changed
 
 
-def test_migrate_file_baseline_stamp_preserves_comments(tmp_path):
+def test_migrate_file_baseline_stamp_preserves_comments(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     p.write_text("# a header comment\n\nfoo: bar\nnested:\n  x: 1\n", encoding="utf-8")
@@ -152,7 +154,7 @@ def test_migrate_file_baseline_stamp_preserves_comments(tmp_path):
     assert loaded[SCHEMA_VERSION_KEY] == 1 and loaded["foo"] == "bar"
 
 
-def test_migrate_file_baseline_stamp_summary_wording(tmp_path):
+def test_migrate_file_baseline_stamp_summary_wording(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     p.write_text("foo: bar\n", encoding="utf-8")
@@ -160,7 +162,7 @@ def test_migrate_file_baseline_stamp_summary_wording(tmp_path):
     assert res.summary().endswith("stamped v1")
 
 
-def test_migrate_file_strips_leading_bom(tmp_path):
+def test_migrate_file_strips_leading_bom(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     # A BOM-prefixed, unmarked file (as some Windows editors save).
@@ -177,7 +179,7 @@ def test_migrate_file_strips_leading_bom(tmp_path):
     assert yaml.safe_load(p.read_text(encoding="utf-8"))["foo"] == "bar"
 
 
-def test_migrate_file_idempotent_second_run(tmp_path):
+def test_migrate_file_idempotent_second_run(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     p.write_text("foo: bar\n", encoding="utf-8")
@@ -188,7 +190,7 @@ def test_migrate_file_idempotent_second_run(tmp_path):
     assert p.read_text(encoding="utf-8") == after_first  # byte-identical no-op
 
 
-def test_migrate_file_creates_backup(tmp_path):
+def test_migrate_file_creates_backup(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     original = "foo: bar\n"
@@ -198,10 +200,10 @@ def test_migrate_file_creates_backup(tmp_path):
     assert bak.exists() and bak.read_text(encoding="utf-8") == original
 
 
-def test_migrate_file_shape_change_reserializes(tmp_path):
+def test_migrate_file_shape_change_reserializes(tmp_path: Path) -> None:
     reg = SchemaRegistry()
 
-    def v1_to_v2(d: dict) -> dict:
+    def v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
         d["renamed"] = d.pop("old", None)
         return d
 
@@ -215,7 +217,7 @@ def test_migrate_file_shape_change_reserializes(tmp_path):
     assert "old" not in loaded and loaded["renamed"] == 42
 
 
-def test_migrate_file_fail_closed_on_newer(tmp_path):
+def test_migrate_file_fail_closed_on_newer(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     p.write_text(f"{SCHEMA_VERSION_KEY}: 5\nfoo: bar\n", encoding="utf-8")
@@ -223,7 +225,7 @@ def test_migrate_file_fail_closed_on_newer(tmp_path):
         migrate_file(p, "aw/config", reg)
 
 
-def test_migrate_file_malformed_yaml_raises(tmp_path):
+def test_migrate_file_malformed_yaml_raises(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
     p.write_text("foo: : : bad\n  - broken", encoding="utf-8")
@@ -231,7 +233,9 @@ def test_migrate_file_malformed_yaml_raises(tmp_path):
         migrate_file(p, "aw/config", reg)
 
 
-def test_migrate_file_atomic_interrupted_write_preserves_original(tmp_path, monkeypatch):
+def test_migrate_file_atomic_interrupted_write_preserves_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """If the final rename fails, the original file is untouched and no temp leaks."""
     reg = SchemaRegistry()
     reg.register("m/c", current_version=2, migrators={1: lambda d: {**d, "added": True}})
@@ -239,7 +243,7 @@ def test_migrate_file_atomic_interrupted_write_preserves_original(tmp_path, monk
     original = "old: 1\n"
     p.write_text(original, encoding="utf-8")
 
-    def boom(src, dst):
+    def boom(src: str | Path, dst: str | Path) -> None:
         raise OSError("simulated interruption")
 
     monkeypatch.setattr(os, "replace", boom)
@@ -255,7 +259,7 @@ def test_migrate_file_atomic_interrupted_write_preserves_original(tmp_path, monk
 # --------------------------------------------------------------------------- #
 # run (batch)
 # --------------------------------------------------------------------------- #
-def test_run_batch_reports_per_file(tmp_path):
+def test_run_batch_reports_per_file(tmp_path: Path) -> None:
     reg = _baseline_reg()
     good = tmp_path / "good.yaml"
     good.write_text("foo: bar\n", encoding="utf-8")
@@ -286,12 +290,12 @@ def _windowed_registry() -> SchemaRegistry:
     """A schema at current v3 with a full v1->v2->v3 chain (the supported window)."""
     reg = SchemaRegistry()
 
-    def v1_to_v2(d: dict) -> dict:
+    def v1_to_v2(d: dict[str, Any]) -> dict[str, Any]:
         # v2 renamed ``name`` -> ``title``.
         d["title"] = d.pop("name", None)
         return d
 
-    def v2_to_v3(d: dict) -> dict:
+    def v2_to_v3(d: dict[str, Any]) -> dict[str, Any]:
         # v3 introduced ``enabled`` defaulting to True.
         d.setdefault("enabled", True)
         return d
@@ -310,7 +314,7 @@ _FIXTURES = {
 
 
 @pytest.mark.parametrize("label", sorted(_FIXTURES))
-def test_prior_version_fixtures_migrate_to_current(tmp_path, label):
+def test_prior_version_fixtures_migrate_to_current(tmp_path: Path, label: str) -> None:
     reg = _windowed_registry()
     p = tmp_path / f"{label}.yaml"
     p.write_text(yaml.safe_dump(_FIXTURES[label]), encoding="utf-8")

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import platform
 import subprocess
+import sys
+
+import pytest
 
 from agent_worktrees import config, installer
 
@@ -84,3 +87,24 @@ def test_venv_python_prefers_last_known_good_over_newest_slot(tmp_path, monkeypa
     (tmp_path / "last-known-good").write_text("1.5.3-dev595", encoding="utf-8")
 
     assert config.venv_python() == lkg_python
+
+
+@pytest.mark.parametrize("selected", ["current-version", "last-known-good", "scan"])
+def test_application_python_uses_physical_slots_without_moving_registries(
+    tmp_path, monkeypatch, selected,
+):
+    root = tmp_path / "application"
+    version = "1.2.3"
+    slot = root / "versions" / version
+    sub = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
+    python = slot / ".venv" / sub[0] / sub[1]
+    python.parent.mkdir(parents=True)
+    python.touch()
+    data = tmp_path / "original-data"
+    monkeypatch.setattr(config, "install_dir", lambda: data)
+    monkeypatch.setattr(config.sys, "prefix", str(slot / ".venv"))
+    if selected != "scan":
+        (root / selected).write_text(version, encoding="utf-8")
+    assert config.venv_python() == python
+    assert config.install_dir() == data
+    assert not data.exists()

@@ -157,7 +157,14 @@ def assert_source_owned_boundary(jobs: dict[str, Any]) -> None:
             "guards-full-sweep", "postmerge-workflows",
         ))
     assert "needs.qualify-candidate.result == 'success'" in publisher["if"]
-    assert set(record["needs"]) == {"merge-promotion", "publish-python-artifacts"}
+    coherent = any(
+        step.get("with", {}).get("path") == "reviewed-helpers"
+        and step["with"].get("ref") == "${{ github.workflow_sha }}"
+        for step in jobs["gate"]["steps"]
+    )
+    assert set(record["needs"]) == {"merge-promotion", "publish-python-artifacts"} | (
+        {"gate"} if coherent else set()
+    )
     assert record["continue-on-error"] is True
     assert "postmerge-workflows" not in jobs
     for name in ("qualify-candidate", "publish-python-artifacts", "merge-promotion"):
@@ -168,7 +175,9 @@ def assert_source_owned_boundary(jobs: dict[str, Any]) -> None:
         checkouts = [step["with"] for step in jobs[name]["steps"]
                      if step.get("with", {}).get("path") == "reviewed-helpers"]
         assert len(checkouts) == 1
-        assert checkouts[0]["ref"] == "${{ env.RELEASE_HELPERS_SHA }}"
+        assert checkouts[0]["ref"] == (
+            "${{ needs.gate.outputs.sha }}" if coherent else "${{ env.RELEASE_HELPERS_SHA }}"
+        )
         assert checkouts[0]["persist-credentials"] is False
     publication = next(step for step in publisher["steps"] if step.get("id") == "publish")
     for argument in (

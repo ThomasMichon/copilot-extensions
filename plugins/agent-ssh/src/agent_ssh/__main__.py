@@ -144,7 +144,9 @@ def _cmd_mesh_status(args: argparse.Namespace) -> int:
         if path is None:
             path = mesh_mod.find_machines_file()
         if path is not None:
-            mesh = mesh_mod.load_mesh(Path(path), strict=True)
+            mesh = mesh_mod.load_mesh(
+                Path(path), strict=True, preferences=args.path is None,
+            )
     except (OSError, UnicodeError, ValueError) as exc:
         msg = f"cannot load mesh source: {exc}"
         if args.json:

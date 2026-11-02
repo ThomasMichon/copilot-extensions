@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from agent_dispatch.__main__ import _cmd_cutover, build_parser
+
+pytestmark = pytest.mark.usefixtures("isolated_service_environment")
 
 
 def test_deploy_and_cutover_route_to_the_same_handler():

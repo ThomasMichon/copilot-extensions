@@ -1,0 +1,9 @@
+{
+  "comment": "Route existing-owner wakes through standard Bridge commands using retained hosted native identity and the existing outbox key.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

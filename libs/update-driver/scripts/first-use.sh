@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Installation driver lifecycle contract: vault-stamp-v1
 # Installation driver lifecycle contract: logger-install-v1
+# Installation driver lifecycle contract: bridge-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
+# Installation driver lifecycle contract: logger-command-v1
+# Installation driver lifecycle contract: bridge-command-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -63,13 +66,14 @@ case "$plugin" in
     agent-ssh) prefix=AGENT_SSH ;;
     agent-codespaces) prefix=AGENT_CODESPACES ;;
     agent-logger) prefix=AGENT_LOGGER ;;
+    agent-bridge) prefix=AGENT_BRIDGE ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
     printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
 fi
-if [[ "$installer_action" == install && "$plugin" != agent-logger ]]; then
-    printf 'Fixed install action requires Logger.\n' >&2; exit 1
+if [[ "$installer_action" == install && "$plugin" != agent-logger && "$plugin" != agent-bridge ]]; then
+    printf 'Fixed install action requires Logger or Bridge.\n' >&2; exit 1
 fi
 if [[ "$plugin" == agent-logger ]]; then
     for helper in command_binding.py command_lifecycle.py installer_engine.py \
@@ -79,9 +83,28 @@ if [[ "$plugin" == agent-logger ]]; then
         }
     done
 fi
-if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == agent-bridge ]]; then
+    for tool in xargs seq; do
+        command -v "$tool" >/dev/null || {
+            printf 'Bridge first use requires native tool: %s\n' "$tool" >&2; exit 1;
+        }
+    done
+    for helper in installer-engine.ps1 installer-engine.sh installer_engine.py installer_engine_process.py runtime_launcher.py \
+        installer_wheel_inputs.py installer_wheel_snapshot.py installer_wheel_acquisition.py \
+        installer_dependency_policy.py installer_dependency_config.py installation-context/installation_context.py \
+        installation-context/installation-context.ps1 installation-context/installation-context.sh \
+        install.ps1 install.sh repair-scheduled-task.ps1 versioned_runtime_native.ps1 versioned_runtime.py \
+        versioned_runtime_construction.py versioned_runtime_source.py \
+        versioned_runtime_publication.py versioned_runtime_leases.py; do
+        [[ -f "$payload/scripts/$helper" ]] || {
+            printf 'Bridge first use requires its complete materialized installation helpers.\n' >&2; exit 1;
+        }
+    done
+fi
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
     [[ "$plugin" != agent-logger ]] || label=Logger
+    [[ "$plugin" != agent-bridge ]] || label=Bridge
     [[ ( "$plugin" == agent-logger || "$(query "$manifest" module)" == "${plugin//-/_}" ) &&
         "$(query "$manifest" legacyRuntimeRoot)" == ".$plugin" &&
         "$(query "$manifest" payloadRootEnv)" == "${prefix}_PAYLOAD_ROOT" &&
@@ -92,20 +115,21 @@ if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == ag
         printf '%s first use requires its declared native runtime gate.\n' "$label" >&2; exit 1;
     }
 fi
-if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
     installation_hint="${prefix}_INSTALLATION_ID"
     [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
           "$(basename -- "$payload")" == "$plugin" ) ||
-        ( "$plugin" == agent-logger && "$installer_action" == provision &&
+        ( ( "$plugin" == agent-logger || "$plugin" == agent-bridge ) && "$installer_action" == provision &&
           "$(dirname -- "$payload")" == "$runtime/snapshots" ) ) ]] || {
         printf '%s first use requires its canonical installed payload and default legacy root.\n' "$label" >&2
         exit 1
     }
 fi
-if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
     label='Pull Requests'; [[ "$plugin" != agent-ssh ]] || label=SSH
     [[ "$plugin" != agent-logger ]] || label=Logger
+    [[ "$plugin" != agent-bridge ]] || label=Bridge
     [[ "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
           ( "$plugin" == agent-pull-requests || "$(basename -- "$payload")" == "$plugin" ) ) ||
@@ -119,6 +143,16 @@ if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" ==
         [[ "$(query "$receipt" schema)" == copilot-extensions.legacy-snapshot-source ]] || {
             printf '%s first use requires canonical selected snapshot provenance.\n' "$label" >&2; exit 1;
         }
+        if [[ "$plugin" == agent-bridge ]]; then
+            _native_foundation_plain "$payload/runtime-source.json" file
+            selected_source="$(cat -- "$payload/runtime-source.json")"
+            [[ "$(query "$selected_source" schema)" == copilot-extensions.runtime-source &&
+                "$(query "$selected_source" plugin)" == "$plugin" &&
+                "$(query "$selected_source" package_version)" == "$(query "$identity" version)" &&
+                "$(query "$selected_source" runtime_version)" == "$(basename -- "$payload")" ]] || {
+                printf 'Bridge first use requires its source-qualified selected snapshot.\n' >&2; exit 1;
+            }
+        fi
     fi
 fi
 [[ "$plugin" == agent-vault || "${#service_mode[@]}" == 0 ]] || {
@@ -217,7 +251,7 @@ if [[ "$run_owner" == 0 ]]; then
         printf '[installation-driver] launch acknowledgement: launched:%s log:%s\n' \
             "$__native_daemon_pid" "$log" >&2
         code=0
-        wait "$__native_daemon_pid" || code=$?
+        wait "$__native_daemon_wait_pid" || code=$?
         cat -- "$log" >&2
         exit "$code"
     fi

@@ -9,6 +9,7 @@ This document describes the implementation as it exists today. It intentionally 
 | CLI | `src/agent_vault/cli.py` | Parses `agent-vault` commands, resolves the active vault on each call, cold-starts the service, performs persistent-cache tier-0 reads, and sends newline-framed JSON requests to the daemon. |
 | Credential reader | `src/agent_vault/credential_reads.py` | Owns the cache-first `get` handler, pinned read-only behavior and authoritative cache reconciliation; the CLI retains its existing handler export and IPC/lifecycle seams. |
 | Service | `src/agent_vault/service.py` | Owns the in-memory KeePass master-password cache and credential-value cache, verifies/unlocks databases, handles entry operations, GCM delegation, KEK operations, endpoint advertisement, and shutdown. |
+| Accepted requests | `src/agent_vault/service_connections.py` | Retains accepted connections and native request futures until server shutdown actually settles them. |
 | KeePassXC backend | `src/agent_vault/keepassxc.py` | Locates `keepassxc-cli` and maps service actions to `keepassxc-cli` commands. KeePassXC is the only secret-store backend today. |
 | SSH key preparation | `src/agent_vault/ssh_key.py` | Validates and reuses a whole Ed25519 pair; separately confirmed first creation uses one existing create-only protected-field write. Returns public metadata, not private material or enrollment authority. |
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
@@ -68,6 +69,25 @@ On startup the daemon writes a rendezvous file at `~/.agent-vault/run/endpoint.j
 5. Registered extension transports. `before_builtin=True` transports run before built-ins; default transports run after built-ins fail.
 
 This matches the discovery/transport patterns while preserving the legacy fixed port for backward compatibility.
+
+Detached startup retains the lexical absolute home selection for custody
+checks. A linked home or parent is refused before creating the runtime directory
+or launch log; it is never rewritten to the linked target and inherited as safe.
+
+Direct async `run_server` callers retain daemon admission through accepted
+requests, including Windows named-pipe requests. Shutdown rejects new work,
+closes idle connections, and settles already-started native calls and response
+cleanup before removing endpoint/PID state, including after partial startup
+failure. Repeated cancellation cannot cancel an admitted credential operation
+or shut down an embedding loop's shared executor. The existing `stop`
+acknowledgement is sent before draining; this adds no credential replay,
+native-process termination, or change to password/cache custody.
+Listener-close failures do not bypass draining: independent closures are still
+attempted, and the exact failed closure is retried while admission remains held.
+An unresolved close is not treated as stopped intake, even after native requests
+finish. Once closure and owned request/connection cleanup are confirmed, the
+first failure is resurfaced rather than being replaced by repeated outer
+cancellation.
 
 ## Unlock, TTL, prompting, and failure mode
 
@@ -212,20 +232,13 @@ same-named package from the runtime directory or changing the daemon's cwd.
 PowerShell installer finalization calls only an already-loaded construction
 handler; a source-only stamp does not discover or import ambient cleanup modules.
 
-Windows `update` includes `Stop-VaultDaemonGraceful` in `scripts/install.ps1`: after building/activating the new slot, it pings the old daemon, sends the cooperative `--stop` action, waits briefly for the endpoint to be released, then starts/registers the scheduled task. This is the plugin's light connection-owner cutover: short in-flight requests finish, but the in-memory master password is intentionally released; reconnect is via the opt-in persistent cache or a single re-unlock.
-
-**POSIX/systemd `update` now uses the shared drain-safe zero-downtime cutover**
-(landed, #743): the `zdd` + `single-instance-lease` primitives (vendored) stand
-the new generation up, health-gate it, hand off the outgoing daemon's warmed
-vaults via a `systemctl --user set-environment` carrier, and drain the old one
-— **no forced re-unlock** on a routine POSIX version bump. This closes the
-`plugin-services` §*zero-downtime-cutover* behavior for agent-vault on that
-transport. **Windows is deliberately out of scope** for this cutover: the named
-pipe transport is not proven owner-gated, so the Windows update path still
-restarts (forcing a re-unlock) per invariant #3 below — hardening the pipe's
-DACL to make Windows eligible is separate, larger, security-sensitive follow-up
-work, not yet scheduled. See the invariants below for the binding security
-constraint on how the unlocked secret crosses generations.
+Windows updates now use incoming-first generation endpoints, shared work
+exclusion and predecessor self-retirement. Versioned auth-state transfer uses
+the shared private native channels rather than the ordinary service pipe.
+[Runtime replacement](runtime-replacement.md) owns the protocol, expiration,
+readiness distinction and qualification bounds. POSIX/systemd still uses its
+legacy restart/carrier implementation; migration remains open rather than
+being described as zero-downtime or private-channel qualification.
 
 ## Invariants
 
@@ -238,25 +251,24 @@ passes tests.
   cache in process memory only. During a zero-downtime cutover (#743) the
   outgoing (active) generation may hand that unlocked state to the incoming
   generation **only** over a transport we can prove is access-gated to the owner
-  — today the vault's AF_UNIX control socket (`0o600`, single-user by filesystem
-  permission) — and **never** over a non-loopback socket, plain loopback TCP, the
+  — the shared private native channel, or the legacy owner-gated AF_UNIX export
+  — and **never** over a non-loopback socket, plain loopback TCP, the
   network, a file on disk, an environment variable, a log line, or any third
-  party. The Windows named pipe is **excluded** from the handoff until it carries
-  a hardened owner-only security descriptor (the current pipe binds with the
-  default DACL); a host without a qualifying transport safely degrades to
-  re-unlock. The secret is transferred, used, and dropped; it is not persisted by
+  party. The ordinary Windows service pipe remains **excluded**; the separate
+  private channel has owner-only security and native peer authentication.
+  A host without a qualifying transport safely degrades to re-unlock.
+  The secret is transferred, used, and dropped; it is not persisted by
   the handoff. (The opt-in persistent cache is a separate, explicitly-encrypted
   surface and is unchanged by this.)
-- **One active vault per host.** A cutover stands up a passive generation on a
-  fresh port, health-gates it, atomically flips the routing record, and drains
-  the predecessor; the single-instance lease guarantees exactly one active owner
-  and reaps any drained-but-live stray. A failed/aborted cutover leaves the
-  original active generation serving (fail-safe rollback), never zero live
-  daemons.
-- **A cutover never forces a re-unlock on a routine version bump.** If the
-  incoming generation cannot obtain the unlocked state from the outgoing one, it
+- **One credential-work owner per installation.** Generation endpoints may
+  overlap, but the durable-home work lease excludes concurrent writers. Failed
+  pre-publication construction preserves the old route; confirmed supersession
+  commits forward and never reactivates a displaced writer.
+- **Compatible handoff preserves the original auth lifetime.** If the
+  incoming generation cannot obtain compatible, unexpired state from the outgoing one, it
   falls back to the existing behavior (provider unlock, opt-in cache, or a single
-  prompt) — it does not silently serve locked or crash the update.
+  prompt). Auth handoff is not a prerequisite for incoming startup or old-build
+  retirement.
 
 ## SUDO_ASKPASS
 

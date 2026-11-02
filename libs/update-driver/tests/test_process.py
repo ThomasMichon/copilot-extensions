@@ -2,6 +2,7 @@
 
 import io
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -63,6 +64,53 @@ def eventually(check, timeout=10):
             return result
         time.sleep(.02)
     raise AssertionError("fixture observation timed out")
+
+
+def test_executor_shim_reuses_external_bytecode_without_mutating_source(
+    area: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from update_driver import core
+
+    slot = area / "versions" / "incumbent"
+    driver = slot / "update_driver"
+    procutil = slot / "agent_procutil"
+    driver.mkdir(parents=True)
+    procutil.mkdir()
+    for name in ("_runner.py", "participant.py"):
+        shutil.copyfile(Path(core.__file__).with_name(name), driver / name)
+    shutil.copyfile(agent_procutil.__file__, procutil / "__init__.py")
+    monkeypatch.setattr(core, "__file__", str(driver / "core.py"))
+    monkeypatch.setattr(agent_procutil, "__file__", str(procutil / "__init__.py"))
+
+    def snapshot(root: Path) -> dict[str, tuple[bytes, int, int]]:
+        return {
+            str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_ino)
+            for path in root.rglob("*") if path.is_file()
+        }
+
+    before = snapshot(slot)
+    root = area / "state"
+    previous_prefix = sys.pycache_prefix
+    previous_environment = os.environ.get("PYTHONPYCACHEPREFIX")
+    for source in ("cold", "warm"):
+        request = enqueue(
+            RequestSpec("fixture", source=source),
+            runner=TrustedRunner((sys.executable, "-c", "print('actual product')"), str(area)),
+            root=root,
+        )
+        assert drain(root=root) == 0
+        result = wait(request.id, root=root, timeout=1)
+        assert result.exit_code == 0, result.log_path.read_text()
+        assert "actual product" in result.log_path.read_text()
+        assert snapshot(slot) == before
+        cache = snapshot(root / "cache" / "python")
+        assert any("participant." in name and name.endswith(".pyc") for name in cache)
+        if source == "cold":
+            cold_cache = cache
+        else:
+            assert cache == cold_cache
+    assert sys.pycache_prefix == previous_prefix
+    assert os.environ.get("PYTHONPYCACHEPREFIX") == previous_environment
 
 
 def test_two_process_workers_have_no_transaction_overlap(area):

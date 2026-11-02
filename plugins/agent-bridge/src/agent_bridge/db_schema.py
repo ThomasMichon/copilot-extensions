@@ -18,6 +18,16 @@ def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
         raise ValueError("Cold recovery stop gate requires supported writable preparation")
 
 
+def validate_exact_live_schema(conn: sqlite3.Connection) -> None:
+    """Require durable exact-native provenance before exposing its contract."""
+    column = next(
+        (row for row in conn.execute("PRAGMA table_info(live_messages)")
+         if row[1] == "exact_session"), None,
+    )
+    if column is None or column[2].upper() != "INTEGER" or column[3] != 1 or column[4] != "0":
+        raise ValueError("Exact live targeting requires supported writable preparation")
+
+
 class _SchemaMixin:
     """Schema initialization and migration helpers."""
 
@@ -34,6 +44,10 @@ class _SchemaMixin:
         from .acquisition_custody_schema import validate_schema as validate_acquisition_schema
         from .creation_custody_schema import ensure_schema as ensure_creation_schema
         from .creation_custody_schema import validate_schema as validate_creation_schema
+        from .creation_launch_schema import ensure_schema as ensure_creation_launch_schema
+        from .creation_launch_schema import validate_schema as validate_creation_launch_schema
+        from .provider_creation_launch_schema import ensure_schema as ensure_provider_launch_schema
+        from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -44,7 +58,7 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 28:
                     validate_schema(conn)
                 if recorded is not None and recorded["version"] >= 30:
-                    validate_inbox_schema(conn)
+                    validate_inbox_schema(conn, exact_native=recorded["version"] >= 40)
                 if recorded is not None and recorded["version"] >= 31:
                     validate_consumer_schema(
                         conn, require_history_indexes=recorded["version"] >= 32,
@@ -56,6 +70,12 @@ class _SchemaMixin:
                     validate_acquisition_schema(conn)
                 if recorded is not None and recorded["version"] >= 36:
                     validate_creation_schema(conn)
+                if recorded is not None and recorded["version"] >= 37:
+                    validate_creation_launch_schema(conn)
+                if recorded is not None and recorded["version"] >= 38:
+                    validate_provider_launch_schema(conn)
+                if recorded is not None and recorded["version"] >= 39:
+                    validate_exact_live_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -67,12 +87,16 @@ class _SchemaMixin:
                 ensure_turn_schema(conn)
                 ensure_acquisition_schema(conn)
                 ensure_creation_schema(conn)
+                ensure_creation_launch_schema(conn)
+                ensure_provider_launch_schema(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
                 validate_turn_schema(conn)
                 validate_acquisition_schema(conn)
                 validate_creation_schema(conn)
+                validate_creation_launch_schema(conn)
+                validate_provider_launch_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -89,6 +113,9 @@ class _SchemaMixin:
             validate_turn_schema(conn)
             validate_acquisition_schema(conn)
             validate_creation_schema(conn)
+            validate_creation_launch_schema(conn)
+            validate_provider_launch_schema(conn)
+            validate_exact_live_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -120,6 +147,7 @@ class _SchemaMixin:
         for col in (
             "claimed_at REAL", "outcome TEXT", "consumed_at REAL",
             "consumption_tracked INTEGER NOT NULL DEFAULT 0",
+            "exact_session INTEGER NOT NULL DEFAULT 0",
         ):
             if col.split()[0] not in live_columns:
                 conn.execute(f"ALTER TABLE live_messages ADD COLUMN {col}")
@@ -749,8 +777,8 @@ class _SchemaMixin:
         if from_version < 30:
             from .inbox_custody import ensure_schema, validate_schema
 
-            ensure_schema(conn)
-            validate_schema(conn)
+            ensure_schema(conn, exact_native=False)
+            validate_schema(conn, exact_native=False)
             conn.execute("UPDATE schema_version SET version=?", (30,))
             conn.commit()
             log.info("Schema migrated to version 30: retained inbox handoff storage")
@@ -808,3 +836,38 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (36,))
             conn.commit()
             log.info("Schema migrated to version 36: retained original keyed creation custody")
+
+        if from_version < 37:
+            from .creation_launch_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (37,))
+            conn.commit()
+            log.info("Schema migrated to version 37: retained original creation native observations")
+
+        if from_version < 38:
+            from .provider_creation_launch_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (38,))
+            conn.commit()
+            log.info("Schema migrated to version 38: retained original provider native observations")
+
+        if from_version < 39:
+            self._ensure_current_columns(conn)
+            validate_exact_live_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (39,))
+            conn.commit()
+            log.info("Schema migrated to version 39: durable exact-native live messages")
+
+        if from_version < 40:
+            from .inbox_custody import migrate_exact_native_guard
+
+            self._ensure_current_columns(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            with conn:
+                migrate_exact_native_guard(conn)
+                conn.execute("UPDATE schema_version SET version=?", (40,))
+            log.info("Schema migrated to version 40: exact-native input and cold rollback fence")

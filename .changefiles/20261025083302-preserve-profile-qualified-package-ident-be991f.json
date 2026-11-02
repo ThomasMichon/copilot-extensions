@@ -1,0 +1,21 @@
+{
+  "comment": "Preserve profile-qualified package identity in shared runtime consumers",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

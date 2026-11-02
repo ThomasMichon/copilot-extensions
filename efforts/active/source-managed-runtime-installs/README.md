@@ -12,18 +12,45 @@
 
 ## Guiding Intent
 
+**Contributor entry:** the [fast-install and cutover guide](../../../docs/patterns/fast-application-install-and-cutover.md)
+defines each app's required boundaries and qualification. The
+[ideal sequence, per-app status and contribution handoff](wheel-first-contributors.md)
+separate released support from retained/unmerged work and let independent app
+contributors coordinate through this same effort and #7028. Manager/Worktrees
+are the released first pair; remaining main services come next, with supported
+old/new coexistence. Index/Logger do not gate those independently releasable slices.
+
+**Ideal flow:** trusted source/promotion inputs -> Manager first -> repo-derived
+wanted apps -> bounded parallel staging -> app/optional whole-toolset readiness
+-> selected incoming startup -> verified serving result -> outgoing self-retire
+and retained last-good recovery. Background preparation and cheap subsequent
+launches complete the target; they are not all implemented by the first pair.
+
+Backing checkouts remain source inputs, but every source-install footprint is
+prepared by a promotion flow producing a main-equivalent snapshot and matching
+prebuilt wheels. Consume the existing cached-source-wheel-assembly effort's
+UV-native, pyproject-strict factory rather than extending a competing raw-source
+installer. Every app separates candidate staging/readiness from active
+publication and launch; the incumbent sunsets after its successor starts.
+The [current refinement](inception-transcript.md#promotion-mediated-backing-checkouts-and-app-staging)
+governs the wheel-first transition, not a claim that the historical source lane
+or installed fleet has already migrated.
+
 Separate Copilot plugin delivery from service-runtime deployment without
-disabling ordinary hook behavior. An opted-in installation can deploy clean,
-merged development source directly, retain a stable release or exact pin, and
+disabling ordinary hook behavior. An opted-in installation can select its backing
+source independently, consume its promoted snapshot and wheels, retain a stable release or exact pin, and
 iterate through immutable generations without waiting for marketplace payload
 updates or rewriting a live environment.
 
 Prove the source install on a disposable container before attempting a native
 Windows runtime-only pilot and completing the adopter's installed service/tool
 transition. Keep the dedicated source healthy and current through the existing
-maintenance owner and canonical install flow. Ordinary plugin self-provisioning
-remains the default; managed deployment is a local choice, not adoption of
-another product or a change to service-supervision ownership.
+maintenance owner and canonical install flow. The [wheel-first extension](wheel-first-transition.md) proposes independently
+maintained runtime installation as the ordinary suite path, with plugins as
+connectors rather than installation sources. Its initial reviewed proposal is an intent
+checkpoint merged before implementation, not a claim that the
+earlier optional-source deployment has already migrated or that native
+service-supervision ownership changes.
 
 ## Participants
 
@@ -35,6 +62,8 @@ another product or a change to service-supervision ownership.
 | Linux clean-room runner | Reproduces and verifies actual source installation and activation | Existing Docker clean-room rig; WSL is a supported host |
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
+| Wheel-first transition coordinator | Owns the reviewed proposal, prioritized independently releasable app slices and whole-flow qualification | #7028 and #9688; app assignments/evidence in the contributor matrix; existing custodians and separate deployment ownership remain |
+| Fresh recovery dispatcher implementer | Owns the bounded fresh-bootstrap/selected-source composition and disposable entry qualification | #7028; source handle `greased-latch`; existing application, footprint and execution owners retain their scopes |
 
 ## Coordination
 
@@ -57,19 +86,50 @@ source-managed, adopter, native, and deployment owners. Candidate-health and
 retained-good-generation qualification remain distinct from best-effort handoff and
 separately authorized rollout.
 
+The complete #7028 keeper and #7029 selector original/refined/inherited scope
+continues in the [direct source-selection Plan and Validation](retained-source-selector.md)
+under these same implementation, maintenance/setup, transaction, source/adopter
+and native custodians. Preserve #184/#403, the actual maintenance WIP and
+#8545/#356 setup seam, separate #7758 authority and exact remaining Logger
+evidence. #7028 stays open; direct tracker intake neither appoints an
+implementer nor releases an original source/resource obligation.
+
 - **Topology:** serial, coherent PRs against `dev`; this plan clears review before implementation.
 - **Host (owns PRs):** Implementation coordinator.
 - **Delegates:** bounded evidence, implementation or validation scopes only; no shared mutable git ownership.
 - **Handoff:** the next owner reads this README and the current slice evidence before continuing. A merged PR resolves only its actual Plan and Validation Plan items.
 - **Existing owners:** preserve #3654 (vendor pointers), #5472 (immutability), #4876 (artifact admission), #5851 (source isolation), and #6812/#6820 (update outcomes/sequencing). Reuse their mechanisms; do not fork their campaigns.
 
+Independent, non-overlapping app slices may proceed concurrently, including
+contributors from other operators. The [contributor handoff](wheel-first-contributors.md#contributing-from-another-agent-or-operator)
+defines discovery/claim, evidence and publication steps. Existing ownership
+and review gates remain; this is not a second effort or a global merge queue.
+
 ## Context
 
 Manager has independent runtime-source policy and owned acquisition diagnostics,
-separate from self-update configuration, but source-backed suite preparation and
-execution are not yet connected. A selected non-marketplace policy refuses
-updates rather than silently deploying marketplace code. Plugin bootstrap paths
-still need complete publication-boundary qualification.
+separate from self-update configuration, plus a shipped trusted canonical toolkit
+that prepares plugin and standalone Manager payloads. The normal source-backed
+suite caller now qualifies the exact executing engine, acquires one source
+commit/tree and prepares its runtime portfolio before either update stage.
+Fresh legacy suite repair now retains that same independent service selection
+through native engine recovery and subsequent suite preparation. Targeted and
+non-repair bootstrap service-source paths still refuse rather than silently
+deploying marketplace code. Plugin bootstrap paths still need complete
+publication-boundary qualification.
+The collected updater now preserves Containers' existing dependency profile
+through installed-owner target planning, native construction and selected
+source-qualified currentness, separately from the original source pin. Its
+native same-root witnesses do not qualify the complete eligible portfolio or an
+adopter's production data/serving transition.
+Worktrees now retains its original global command owner through collected
+prepared-source updater execution, native publication and installed source-unavailable
+restoration. Those bounded providers do not qualify an adopter's actual
+data/service cutover. The engine now
+advertises and accepts a complete prepared-source suite packet through its
+existing inventory and durable update process boundary; Manager's normal caller
+uses that capability without coupling its independent self-source or replacing
+the existing driver. Immutable Manager recovery and actual adoption remain open.
 
 Promotion composes versions and expands development vendor pointers into a
 self-contained `main` tree. Raw-dev non-editable installs have an existing
@@ -88,6 +148,99 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**Contributor-ready fast-install/cutover documentation (2026-11-02), summary:**
+link the exact per-app support guide, record the ideal end-to-end sequence even
+where unimplemented, and maintain each app's progress so other agents/operators
+can contribute bounded updates. The [verbatim capture and app matrix](wheel-first-contributors.md)
+also retain the core-service priority and independently releasable old/new
+coexistence refinement. This changes documentation and coordination, not rollout
+authority or the parent completion gate.
+
+**Manager-controlled automatic updates (2026-11-02), operator refinement:**
+put the existing automatic-update control in Manager's Configuration /
+Installation & Updates. Automatic invocations use `<repo> update --auto`;
+the setting may inhibit those requests, but not explicit user or agent
+`<repo> update` calls, which retain normal re-entrancy protection.
+The [verbatim request and bounded follow-up](automatic-update-control.md)
+preserve the distinction from general maintenance vetoes, recurring-worker
+enrollment and separately authorized rollout.
+
+**Git-addressed local promotion (2026-11-01), settled summary:** when local
+configuration selects Dev installation, `<repo> update` uses local promotion
+and reuses complete outputs for the unchanged selected Git hash. Locally
+sourced installs do not increment package versions; official Main releases
+remain the version authority. Different source hashes may share package
+versions without sharing installed code. The
+[verbatim agreement](inception-transcript.md#git-addressed-local-promotion-without-version-increments)
+refines the wheel-first proposal, not the current installer implementation.
+
+**Promotion-mediated source inputs and app staging (2026-10-31), settled summary:**
+stay out of the existing cached-source-wheel-assembly effort's UV-native,
+wheel-first and pyproject-strict implementation. Preserve install-from-any-backing-
+checkout as a source choice, but require promotion to produce every source-install
+footprint as a main-equivalent snapshot with matching prebuilt wheels.
+Every app must split staging/install preparation from activation.
+`install --stage` and normal `install` are proposed command spellings: staging
+loads and qualifies the candidate venv without active publication; normal
+installation updates binstubs and version redirects, launches the now-current
+version, and lets the outgoing version sunset after that startup.
+The [verbatim refinement](inception-transcript.md#promotion-mediated-backing-checkouts-and-app-staging)
+is authoritative. Existing owners, data, approvals and provider-version gates
+remain; no alternate builder, cache or project-declaration model is introduced.
+
+**Intentional footprint evolution (2026-10-31), operator refinement:**
+make schema changes deliberately, retain backward compatibility when practical,
+and permit obsolete support to retire rather than carrying an unlimited chain.
+The [verbatim refinement](inception-transcript.md#intentional-footprint-schema-evolution)
+and [bounded proposal](footprint-contract-evolution.md) retain the original
+disposable-inventory and incremental-recognition goals. This source rework
+does not authorize host cleanup, native execution or rollout.
+
+**2026-10-30 — wheel-first independent suite, settled summary:** promotion
+produces complete copyable uv projects and their associated first-party wheels;
+the upstream installer establishes Manager first, then repo-derived wanted
+services. Preparation, application-owned readiness and activation are separated
+where needed, with optional atomic local selection and last-good rollback.
+Plugin loading stops runtime installation/stamping and keeps bounded guidance.
+Whole-system install/change/reinstall/cutover/recovery is proven in Windows
+containers before an addressed manual host deployment. The automatic-update
+hold is not cleared by this work.
+
+The [verbatim request and subsequent scope summary](wheel-first-inception.md),
+[reviewable transition](wheel-first-transition.md),
+[measured performance](wheel-first-performance.md) and
+[generic recovery inputs](wheel-first-recovery-cases.md) preserve requested
+scope separately from agent-recommended implementation choices. Existing
+retained families and their custody remain; this extension does not supersede
+another contributor's open PR or silently waive an old admission check.
+
+**Runtime bytecode policy (2026-10-30):** the operator selected `external-cache`
+(verbatim response) rather than disabling bytecode writes. **Selected option,
+summary:** keep Python bytecode caching, but place it outside immutable runtime
+slots in durable runtime state. This does not authorize moving or deleting
+existing caches or changing installed systems.
+
+**I/O-only installation refusal boundary (2026-10-30), summary of operator direction:**
+only actual I/O errors, such as file locks or insufficient write permissions,
+may block applying an explicitly requested installation. Old layout,
+recognition, receipt, ownership-metadata and compatibility disagreements are not
+extra permission gates. The [verbatim clarification](inception-transcript.md#io-only-installation-refusal-boundary)
+is authoritative; the [fresh-default slice](fresh-default-installation.md)
+records the proposed installation/readiness outcome separation. Existing live
+operation approvals are unchanged.
+
+**Independent repair acceptance (2026-10-29), summary of operator direction:**
+install and run the complete V1 suite, then force-install V2 in repair mode
+without requiring a prior-install existence check or uninstalling, deleting,
+unregistering or touching V1. Applying and starting V2 briefly leaves both
+generations running. Replace the binstubs and update task registrations; after
+V2 starts, V1 should recognize that it is no longer current and shut down on
+its own. The installer should need little or no old-owner handling.
+The [verbatim request](inception-transcript.md#independent-v1-to-v2-repair-acceptance)
+is authoritative. The operator explicitly confirmed that this lifecycle applies
+to **ordinary updates and repair/force-install**. The test uses repair to prove
+independence from the incumbent; it does not authorize a live-host operation.
+
 **Immutable development alignment (2026-10-22), operator verbatim:**
 
 > So, mutable dev slot should probably be superseded by "immutable dev slot", and the "deploy from dev branch" effort. Basically, always deploy using an immutable venv, tagged with the hash of the source. Just set the new dev slot as current and handle cutover normally by giving the incoming version a start command and letting the old version shut off. We should endeavor to support baton-passing both ways; a version knows it's "old" simply because it's "not current", not via any ordering relationship between the active and owner versions.
@@ -97,14 +250,15 @@ locks describe different facts; no new competing artifact authority is needed.
 **Accepted alignment:** retain this effort's clean merged Dev source, Manager,
 maintenance, driver and installed-adoption owners/gates. All deployments use
 immutable venvs identified by complete source and admitted build inputs.
-Current selection starts the incoming owner through ordinary best-effort handoff;
+The incoming owner starts independently before the outgoing owner retires;
 full identity inequality, not version ordering, identifies the displaced owner.
-Reverse baton-passing prefers compatible health-gated drain, but permits bounded
-identity-checked old-owner shutdown and cold recovery when handoff contracts
-are incompatible or fail. This documentation revision neither
+Reverse baton-passing prefers compatible health-gated drain, but neither a
+matched handoff nor installer-driven old-owner shutdown is a prerequisite for
+publishing and starting the selected replacement. The 2026-10-29 clarification
+above governs ordinary updates and repair. This documentation revision neither
 restarts completed Phase 2 work nor claims remaining cutover/adoption proven.
 
-**Best-effort follow-on (2026-10-22), summary:** the operator permits outgoing
+**Historical best-effort follow-on (2026-10-22), summary:** the operator permits outgoing
 daemons to quick-terminate their owned scope, and the selected newcomer to
 force-terminate an identity-verified predecessor when handoff cannot complete.
 Clients tolerate transient network-like outages/stream cut-offs; child daemons
@@ -113,6 +267,12 @@ A breaking development contract must not veto replacement. The
 [canonical verbatim capture](../immutable-dev-slot/README.md#request) preserves
 the complete operator input. Existing source/maintenance/driver and native
 acceptance owners remain; no live shutdown or rollout is authorized here.
+The later 2026-10-29 clarification supersedes its predecessor-force-termination
+allowance for ordinary updates and repair/force-install. All retained families
+and linked source slices below use incoming startup followed by outgoing-owner
+self-retirement for those operations. Historical intake text cannot restore a
+force-termination acceptance route; explicit stop/uninstall or separately
+authorized stuck-writer recovery remains a distinct operation.
 
 **Settled request summary:** add a local gate only around service payload
 publication and installed runtime redirect updates; retain all other hook
@@ -138,6 +298,41 @@ Installation-cell/custom-root capability is separate work, not a prerequisite
 for this wholesale transition. The [verbatim clarification](inception-transcript.md#wholesale-same-installation-cutover)
 preserves all three operator statements. Exact native change/rollback consent,
 candidate health and data-format compatibility remain required.
+
+**Teardown-readiness priority (2026-10-25), summary:** prepare intentional
+per-machine tool outages before further installed transition. The existing
+installation-independent-sessions owner (#8669) retains wrappers, supported
+removal and actual process-survival qualification. The bounded companion #9022
+adds normally projected conduct guidance and a retained local notice identifying
+the maintenance owner, with native Copilot 30-minute standby polling and no
+supporting-service dependency. This does not activate a hold, replace native
+survival evidence or authorize host restart/removal.
+
+**Disposable-service alignment (2026-10-25), summary:** noncritical supporting services,
+including Manager's replaceable tooling, must be disposable while durable work and independently
+hosted Copilot sessions survive. One retained per-machine **YAML** maintenance
+banner both vetoes automatic updates/reprovisioning and explains missing
+`agent-*` catalog tools to agents. Normally projected conduct guidance prohibits
+self-repair during an explained hold and uses one native scheduled prompt every
+30 minutes until applicable clearance. This extends the earlier JSON-only
+source companion; it is not an already-implemented updater veto. The
+[reviewed-contract proposal](maintenance-banner.md) carries binding details,
+compatibility and consumer validation under #9040, preserving the existing
+maintenance, driver and #8669 survival owners. The
+[verbatim request](inception-transcript.md#disposable-services-and-yaml-maintenance-banner)
+is the authoritative capture; filename and parser/admission safeguards marked
+agent-recommended are proposed realization, not additional operator requests.
+
+**Critical-connectivity correction (2026-10-25), summary:** spare the actual
+machine-to-machine SSH host/client/proxy/tunnel/Gateway dependency closure from
+supporting-suite uninstall/reinstall, including forced removal over SSH.
+Treat that closure like critical Copilot/Mux/session-host substrate and audit
+each route instead of assuming that agent-ssh provisioning code serves requests.
+Credential relays are explicitly disposable. The [source audit and retention
+contract](connectivity-retention.md), tracked by #9048, distinguishes required
+transport from provisioning and agent credential brokerage; the
+[verbatim capture](inception-transcript.md#critical-connectivity-exemption)
+retains both operator messages. No live transport or uninstall action is authorized.
 
 **Execution follow-through summary:** the requested outcome covers all installed
 services and tools, including their management tools, rather than ending at a
@@ -191,8 +386,57 @@ The [request record](inception-transcript.md#explicit-repair-authorization-and-l
 retains the exact words. This approves source implementation, not a concrete
 repair run on a host.
 
+**Fresh-default upstream orchestration (2026-10-28), summary:** the global
+project binstub intercepts `<repo> update` and routes it to
+`worktree-manager update --project=<repo>`. Unless explicitly overridden by
+the supported environment seam, it runs the upstream GitHub Main one-line
+bootstrap. That orchestrator reads local Dev, marketplace-cell and test
+overrides and constructs the selected installation in its assigned slot.
+Its baseline is a fresh installation. Recognizers positively qualify valid
+existing footprints for incremental/ZDD reuse; a missing match selects a
+mostly fresh install that silences the old version, clears known disposable
+runtime state, retires known processes/tasks and replaces non-config globals.
+Old receipts establish ability to reuse incrementally, not permission to
+update. Config, durable state and previously protected execution/connectivity
+remain intact. The [verbatim direction](inception-transcript.md#fresh-default-upstream-installation-orchestration)
+supersedes receipt-as-permission assumptions in the earlier normal/repair
+design. Realization still uses the existing canonical installation owner,
+not a parallel updater, and proceeds through review before implementation.
+The [fresh-default slice](fresh-default-installation.md) reconciles the routing,
+footprint inventory and execution-driver work without replacing their owners.
+
+**Recognizer-manifest refinement (2026-10-28), summary:** expected runtime
+footprints have a maintained manifest serving two distinct roles: enumerate
+the disposable artifacts safe to reset, and describe markers plus supported
+version/contract ranges that positively qualify incremental/ZDD updating.
+Changes to installed artifacts also update that manifest and its footprint
+deltas/migrations, analogous to product schema upgrades. The
+[verbatim refinement](inception-transcript.md#recognizer-manifests-and-footprint-migrations)
+retains the operator's wording. Manifest recognition is not an update-permission
+receipt; unknown compatibility selects fresh installation within declared
+disposable scope while preserving config and durable data.
+
 ## Plan
 
+### Phase W — Wheel-first independent suite (proposal extension)
+- [x] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction. #9623 lands the intent; implementation and installation/fleet acceptance remain open.
+- [x] Capture the [ideal sequence, app matrix and contributor handoff](wheel-first-contributors.md), linked to the shared [application support guide](../../../docs/patterns/fast-application-install-and-cutover.md); documentation does not qualify unfinished apps.
+- [x] Release the bounded Manager/Worktrees fast-install slice (#9990, Main promotion #10024), preserving supported legacy paths for the rest. Whole-system bootstrap and rollout remain open.
+- [ ] Review, implement and qualify the bounded [fresh recovery dispatcher composition](fresh-recovery-dispatch.md), keeping current dispatch independent of the selected installation source and reusing native source, footprint, application and execution owners.
+- [ ] Reconcile the promotion-mediated backing-checkout and every-app staging/activation contract with the existing #9290 owners; consume their UV-native, pyproject-strict implementation without taking over construction/cache/profile/publisher work.
+- [ ] Complete independent Manager-first bootstrap and locally promoted uv/wheel inputs through existing source/release owners, beyond the released bounded app pair.
+- [ ] Qualify and release remaining main-service slices using the [app matrix](wheel-first-contributors.md#per-app-tracking), without making Index/Logger a prerequisite.
+- [ ] Route configured Dev `<repo> update` through that local promotion provider,
+  reusing complete unchanged-Git-hash outputs without local package-version
+  increments; retain official Main version authority and the app stage/activate split.
+- [ ] Prove whole-system Windows-container installation, source/version update, cutover, state survival and the generic recovery cases.
+- [ ] Integrate independent maintenance and bounded prepared plugin/guidance selection without foreground rebuilds/scans.
+- [ ] Complete review/CI and Main promotion of the remaining coherent implementation slices, then hand installation/fleet work to its assigned deployment owner; resolve whole-flow acceptance independently of PR count.
+
+This new direction is not retroactively qualified by completed historical
+phases or the environment-only benchmark. Its detailed acceptance matrix is
+in the [transition proposal](wheel-first-transition.md); existing unresolved
+Plan/Validation items below retain their owners and evidence.
 ### Phase 0 - Review the intent and plan
 - [x] Land the vision amendments and this canonical proposal through repository review.
 - [x] Confirm issue/slice ownership and preserve the existing dependency campaigns.
@@ -247,14 +491,41 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
 - [ ] Replace Main/release code through the existing global installation roots, binstubs and service registrations with immutable merged-Dev slots, preserving the same existing runtime configuration, databases and durable state; do not introduce custom roots, installation cells or a parallel data store for this cutover.
-- [ ] **Agent-recommended alignment qualification:** prove forward/reverse current-generation replacement, including same-package/different-source selection, with preferred compatible handoff and bounded identity-checked cold takeover when contracts break or drain fails; use identity inequality, not version ordering.
+- [ ] **Agent-recommended alignment qualification:** prove forward/reverse current-generation replacement, including same-package/different-source selection, with preferred compatible handoff and independent incoming startup when contracts break or drain fails; use identity inequality and observe outgoing-owner self-retirement after startup, not installer-driven termination.
+- [x] **Operator-selected external bytecode cache:** preserve cached imports
+  while routing generated bytecode to durable state outside immutable slots
+  through actual managed command, engine and resident launch paths.
+  **Agent-recommended realization:** retain existing owner/root/isolation
+  contracts and child propagation; no site-startup hooks, cache exemptions,
+  resealing, ambient setting changes or existing-data migration.
+  #9623 qualifies the integrated source, cold/warm native consumers and strict
+  original-slot retention in contained Windows ordinary/repair replacement;
+  this is not an installed-adopter rollout.
 - [ ] Maintain a separate installation source with main, stable/exact pin and opt-in merged-dev selection resolved once per run.
 - [x] Land Manager's independent default-off source policy and owned exact-commit acquisition diagnostics, refusing unconnected source-backed updates rather than silently installing from marketplace.
-- [ ] Ship the trusted canonical preparation toolkit inside Manager's own payload and qualify standalone Manager preparation, exact retained assets and fetched-tools-as-data isolation before connecting source-backed execution.
+- [x] Ship the trusted canonical preparation toolkit inside Manager's own payload and qualify standalone Manager preparation, exact retained assets and fetched-tools-as-data isolation before connecting source-backed execution.
+- [x] **Agent-recommended integration prerequisite:** preserve Worktrees' canonical command-binding receipt at Python-owned manifest publication and qualify a separately prepared source artifact through the real native global installer, retaining its existing owner, data root and global command.
+- [x] **Agent-recommended updater provider slice:** qualify collected prepared-source runtime steps against the installed owner, exact source pin, actual selected/completed slot and original global data, preserving native execution, module fallback, machine gates and explicit older-helper refusal before connecting Manager's whole-suite source orchestration.
+- [x] **Agent-recommended process-boundary slice:** qualify the executing engine's advertised prepared-source suite contract, durable exact input and complete eligible-portfolio admission before enabling Manager's capability-aware caller.
+- [x] **Agent-recommended normal caller slice:** qualify Manager's capability-aware, once-acquired service source and trusted preparation through the existing suite process, preserving the exact provider argv, independent Manager self-source and explicit unsupported bootstrap/repair/targeted paths.
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.
 - [ ] Qualify Manager's own clean-source, immutable non-editable installation and recovery independently of the selected service-runtime source.
+- [x] **Agent-recommended prepared Manager slice:** qualify exact-source dry-run/currentness, distinct installed-health repair and reuse of its healthy source generation, preserving the existing default config/data and global command through compatible-state recovery. Keep clean-source self-update acquisition, production migration compatibility and actual adoption separate.
+- [x] **Agent-recommended independent Manager acquisition slice:** route explicit Manager `[source] ref = "dev"` through the existing clean merged-source acquisition and trusted preparer, independently of service policy, into the same immutable installer and cutover owner. Qualify native Windows/Linux acquisition, source refusal, exact repair/reuse and fixture-default data continuity without changing Main/custom-ref/Git-optional behavior. Keep standalone bootstrap acquisition, production data compatibility and actual adoption separate.
+- [x] **Agent-recommended standalone Manager bootstrap slice:** reuse that acquisition and trusted preparation from the isolated base-interpreter bootstrap before Manager construction. Preserve explicit prepared inputs without reselecting Dev, recovery-only/adopted recovery, the original ownership SDK and all service-source repair refusal guards. Qualify actual native Windows/Linux construction, refusal, installed health and fixture-default continuity; keep shell prerequisite/download transport, service-source repair and production rollout separate.
+- [x] **Agent-recommended bounded service-source repair slice:** retain the incumbent legacy engine owner and default data root while preparing its independent service source for native runtime-only repair. Hold one original commit/tree and acquisition lease through repaired-engine inventory and suite preparation/execution; preserve targeted/non-repair bootstrap refusal and reject unsupported scoped source repair before native refresh. Qualify actual Windows/Linux construction, installed/global commands, fixture data continuity and an upstream advance between repair and inventory. Keep final portfolio execution, production migration compatibility and rollout separate.
+- [x] **Agent-recommended bounded existing-profile qualification:** preserve an installation's existing Containers dependency profile through prepared-source updater planning, native construction and source-qualified currentness. Qualify the actual selected profile/generation, unchanged-source reuse and explicit unsupported/foreign/incomplete outcomes without changing its root, enabling an unused role or substituting a base-profile runtime. Retain the full source pin and canonical native profile owner; existing profile support in a standalone installer is not collected-updater qualification.
+- [ ] **Agent-recommended bounded portfolio follow-through:** qualify source-backed updater readiness and actual execution across the eligible runtime owners rather than inferring a complete portfolio from the engine/profile witnesses. Preserve each installed command owner, canonical lifecycle tooling, existing default root, configured role and independent Manager/service/plugin selections. Use the existing collected updater and driver, retain one exact service commit and complete packet, and keep production data/serving cutover and recurring-maintenance consent separate.
+- [x] **Agent-recommended bounded source-owner SDK readiness:** ship the existing canonical lifecycle SDK in every current required-context Python runtime payload and qualify actual materialization plus the installed owner's source validator. Preserve command/catalog bytes and legacy compatibility; this finite prerequisite does not close whole-portfolio execution or adoption.
+- [x] **Agent-recommended bounded service-less execution witness:** qualify actual collected prepared-source updates through SSH's native install/update and Machines' native init frontends, retaining their original command owner, default fixture root/state, installed consumers, selected-source currentness, healthy reuse and source-unavailable global dispatch. Preserve Machines' CMD-only Windows contract and actual persistent-environment containment; this pair does not close the complete eligible portfolio or production adoption.
+- [x] **Agent-recommended bounded MCP execution witness:** qualify native construction and collected prepared-source updates while retaining its original global command owner, default fixture state, exact installed source/currentness and completion-preserving reuse. Explicitly disable cutover and version reaping in the fixture; do not infer live daemon replacement, serving readiness or whole-portfolio completion from construction/publication evidence.
+- [x] Qualify the bounded #9022 JSON maintenance-standby source projection and owner-attributed per-machine notice, retaining the native 30-minute polling instruction and explicit unsupported/missing-notice outcomes without a service dependency. This is static source delivery, not native polling or the subsequent YAML/update-veto contract. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
+- [x] Align the disposable-service visions and review the [shared YAML maintenance-banner contract](maintenance-banner.md), tracked by #9040, before consumer implementation.
+- [ ] Realize that single banner across automatic-update admission and normally projected conduct standby; qualify the actual consumer matrix, legacy notice transition and native 30-minute hold behavior. Preserve #8645/#7694/#7496/#7758 implementation ownership and #8669/#8864 session/removal acceptance.
+- [x] Audit and align [critical connectivity retention](connectivity-retention.md) under #9048, separating source observations from unqualified native removal behavior.
+- [ ] Enforce that contract for active and reconnectable machine access through normal/force/purge/reinstall, while leaving credential relays disposable; qualify actual platform consumers before removing the rest of the suite.
 
 ### Phase 4a - Manager-owned opt-in background maintenance
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
@@ -271,12 +542,104 @@ matrix; no schedule or cadence is enabled by this plan.
 - [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
 - [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
 
+### Phase 4a.1 - Manager automatic-update controls
+
+The [bounded control refinement](automatic-update-control.md) extends the
+existing maintenance and installation workspace owners, not another updater.
+
+- [ ] Review the automatic-control intent and validation plan before implementation.
+- [ ] Expose the applicable existing automatic-update control and independent
+  maintenance veto in Configuration / Installation & Updates with truthful
+  scope, persistence, errors and an actionable ON/OFF interaction.
+- [ ] Route automatic software updates after Manager startup and before
+  worktree creation/resume through canonical `<repo> update --auto`, preserving
+  origin through queued execution and retaining the existing single executor.
+- [ ] Prove that disabling automatic updates blocks only automatic requests;
+  explicit user/agent and selected-component updates retain their ordinary
+  path and re-entrancy guards without requiring force.
+- [ ] Qualify UI cancellation/persistence, queued policy changes, both launcher
+  adapters and supported mixed-version behavior; update owner docs and land
+  the bounded source through normal review and required CI.
+
 ### Phase 4b - Durable installation execution driver
 The [execution-driver slice](execution-driver.md), tracked by #7758, separates
 transaction execution from the existing recurring-maintenance assignment.
+Completed items below retain earlier source evidence; their conservative
+reuse/admission behavior is not an exception to the fresh-default revision.
 
+- [x] Review and implement [current footprint contracts and deliberate compatibility](footprint-contract-evolution.md):
+  separate current source hashes from semantic footprint/schema changes, retain
+  explicit supported legacy transitions and permit deliberate support retirement.
+  The existing append-only provider below remains historical source evidence,
+  not a requirement to ship every prior source snapshot indefinitely.
+  #9799 merged the bounded source implementation; native footprint/effect,
+  independent replacement and installed-adopter qualification remain open below.
+
+- [x] Review the [fresh-default upstream contract](fresh-default-installation.md) before changing
+  its routing or recovery implementation: global update interception, upstream
+  bootstrap and local overrides, positive incremental/ZDD recognizers, and the
+  mostly fresh known-runtime fallback. Preserve durable config/data, silence
+  the displaced owner and retain one installation execution owner; do not
+  turn missing incremental receipts back into update refusal.
+- [ ] **Operator-requested I/O-only refusal:** audit installation refusal paths
+  and remove non-I/O old-state admission vetoes. Use fresh construction and
+  current-output publication instead of demanding recognized old ownership,
+  receipts or contracts. Keep actual I/O failures attributable and preserve
+  unrelated/durable/protected state. **Agent-recommended realization:** separate
+  installation application from truthful build/start/readiness diagnostics.
+- [ ] Define maintained recognizer manifests with separate disposable-reset
+  inventories and incremental marker/version/contract ranges, plus historical
+  footprint deltas. Make installed-footprint changes carry manifest/migration
+  updates and validation against omitted artifacts or unsupported reuse.
+- [x] Land the bounded shared footprint/history provider and first MCP finite-inventory
+  adopter, including complete producer-tree omission controls and promotion-safe
+  version normalization. This does not qualify effect retirement, the remaining
+  manifest portfolio or assembled fresh/incremental installation.
+- [x] **Agent-recommended bounded construction integration:** qualify MCP's
+  footprint-driven reuse or distinct immutable repair through the existing
+  attached constructor and paired native adapters. Preserve original source
+  identity, incumbent bytes and selected-generation readiness; malformed or
+  oversized old completion/environment evidence selects non-reuse. This does
+  not close command-ownership recovery, reset effects or old-owner silence.
+- [x] **Agent-recommended bounded metadata recovery:** qualify fresh construction
+  and command publication with missing/corrupt deployment metadata under the
+  existing lifecycle owner. Preserve pending source custody without inventing
+  reuse evidence, exact Index/native launcher recognition, intact relocated
+  publisher matching and foreign/edited/storage-error refusal on Windows/Linux.
+  Keep actual reset effects, displaced-owner silence and portfolio acceptance open.
+- [x] **Agent-recommended bounded incumbent-process settlement:** qualify MCP's
+  original-birth native process pins, parent-first pause and descendant closure,
+  failed-inspection resume, exact exit confirmation and native fresh-path failure
+  propagation on Windows/Linux. Preserve protected/current/excluded scope; keep
+  disposable-state reset, old-code retirement and installed-host acceptance separate.
+- [x] **Agent-recommended bounded control-state reset:** implement the
+  [MCP reset ordering, existing-lock custody and retry-consistency slice](fresh-default-installation.md#bounded-mcp-control-state-reset---agent-recommended)
+  after its proposal clears review. Preserve winning current owners,
+  configuration/durable/foreign state and incremental handoff; keep old-code
+  collection and complete reactivation prevention open.
+- [x] **Operator-requested independent repair acceptance:** install and run
+  suite V1, force-install/start V2 without prior-existence prerequisites or
+  actions against V1, replace all binstubs/update task registrations, observe
+  temporary overlap and prove V1 self-retires after V2 starts. Reconcile
+  installer-driven retirement with this [start-first test](fresh-default-installation.md#independent-v1-to-v2-repair-acceptance---operator-requested)
+  before publishing the pending removal-based implementation.
+  Apply the same publish/start-first lifecycle to ordinary updates; do not make
+  prior-version inspection, process settlement or code removal an installation
+  prerequisite. Existing completed reset/retirement source controls below are
+  historical component evidence, not the required new update sequence.
+  #9623 qualifies both real Manager entry paths in the contained Windows
+  suite; same-existing-data adoption and live uninstall survival remain open.
+- [x] **Agent-recommended bounded displaced-code retirement superseded as an
+  update prerequisite:** the operator-requested independent replacement
+  acceptance above replaces the proposed mandatory teardown sequence.
+  The [unpublished prototype](fresh-default-installation.md#bounded-mcp-displaced-code-retirement---agent-recommended)
+  is retained, not an accepted implementation or a cleanup assignment.
+- [x] Qualify Main bootstrap transport independently of Manager/service runtime
+  source policy through the actual Linux and Windows global entry points, including
+  explicit transport overrides, broken incumbents and older explicit-source callers.
+  Complete target freezing, fresh construction and macOS qualification remain open.
 - [x] Review the execution-owner clarification and bounded implementation plan.
-- [ ] Review and implement [normal and operator-approved repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-version debounce, one active installer, clean normal rollback and bounded repair takeover without stale-marker vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record repair and unrelated services/data; no host/kernel restart prerequisite.
+- [ ] Implement fresh-default normal convergence and [explicit repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-target debounce, one active installer and bounded known-runtime retirement without stale-marker or missing-recognizer vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record history and unrelated services/data; no extra repair flag for normal fresh fallback or host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
 - [x] Land pinned-target active-request sharing through the existing queue and fixed first-use adapter; preserve later execution for unresolved moving targets. This does not close central desired-target selection, worker fan-out, same-boot recovery or repair takeover.
 - [x] Land native-confirmed same-boot failure settlement, preserving interrupted/no-exit-status outcomes and older request history; qualify strict native cleanup, participant refusal, schema-2 compatibility and subsequent normal execution on Windows/Linux. Owner death without durable proof and legacy/approved repair remain separate open work.
@@ -466,7 +829,7 @@ transaction execution from the existing recurring-maintenance assignment.
   reconciling `install` and the already-qualified bootstrap limited to their
   canonical installed source; do not infer adoption of command/explicit
   installer publishers, live sync/prune, custom roots/cells or rollout.
-- [ ] **Agent-recommended bounded publisher adoption:** route Logger's actual
+- [x] **Agent-recommended bounded publisher adoption:** route Logger's actual
   legacy primary, six payload targets and five auxiliary compatibility
   commands through its qualified single `provision` recipe and the same
   caller-independent queue. Preserve healthy read-only dispatch, exact
@@ -479,6 +842,82 @@ transaction execution from the existing recurring-maintenance assignment.
   cell dispatch and refuse unsupported cold cells/custom roots. Explicit
   installers, compound actions, live sync/prune, macOS and rollout remain
   separate; review this proposal before implementation.
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify Bridge's
+  existing legacy `stamp` and `provision` actions through the same native
+  foundation, canonical queue and frozen-input owner before changing ordinary
+  Bridge publishers. Admit only its canonical installed payload and default
+  legacy root; retain required context, own controls, exact source/root/project,
+  native staging and complete dependency closure. The
+  [bounded plan](bridge-first-use.md) preserves Bridge's actual first-install
+  registration/start effects and its platform-specific prepared-runtime
+  reconciliation rather than borrowing another plugin's service-less recipe.
+  Qualify actual materialized construction, safe installed command/module/
+  distribution identity, failed-candidate preservation, caller loss and
+  no-write refusals on native Windows/Linux with isolated effect adapters.
+  Snapshot acceptance, command/bootstrap/explicit-installer adoption, custom
+  roots/cells, live service deployment and existing lifetime/publication/
+  diagnostic custodians remain separate.
+- [x] **Agent-recommended bounded semantic prerequisite:** qualify Bridge's
+  fixed legacy `install` action through the same foundation, canonical queue
+  and frozen-input owner before migrating its bootstrap drift path. Preserve
+  its direct required-context declaration, exact source/root/project,
+  own controls, immutable content admission and actual native registration/
+  start semantics. Windows prepared `provision` only reconciles its task;
+  do not substitute that action for bootstrap's `install`. The
+  [bounded plan](bridge-install-action.md) requires actual materialized
+  native Windows/Linux construction, installed consumers, healthy reuse,
+  content-mismatch refusal, failed-candidate preservation, caller loss and
+  isolated registration/start outcomes. Ordinary publishers, selected
+  snapshots, cells/custom roots, live service deployment and rollout remain
+  separate.
+- [x] **Agent-recommended bounded bootstrap adoption:** route Bridge's
+  legacy first stamp and drift `install` through the qualified fixed actions,
+  packaged canonical foundation and same queue. Preserve actual selected/
+  completed source-aware readiness, own controls/publication, originating
+  project and independent guidance. Retain Windows bootstrap's existing
+  unattended Bridge logon choice, not merely the shell's noninteractive flag;
+  qualify its S4U/AtStartup task through isolated adapters without changing
+  ordinary installer defaults. The [bounded plan](bridge-bootstrap.md)
+  requires native Python-free hook deadline/output, caller loss/concurrency,
+  actual materialized construction/installed consumers, immutable failure
+  safety and no-write refusal. Remove age/PID reaping, reconcile-status
+  execution custody and direct installer fallback. Commands, explicit
+  installers, selected snapshots, cells/custom roots, live bridge sessions,
+  service deployment, macOS and rollout remain separate.
+- [x] **Agent-recommended bounded source prerequisite:** qualify Bridge's
+  canonical source-qualified selected legacy snapshot for the existing single
+  `provision` recipe through the same native foundation, staged-origin reader,
+  queue and frozen-input owner before adopting ordinary commands. Preserve
+  exact selected source/root/project, actual Bridge context and native
+  provisioning effects, source-independent installed consumers, immutable
+  failure safety and no-write refusal. The
+  [bounded plan](bridge-selected-snapshot.md) retains canonical-installed-only
+  `stamp`/`install`/bootstrap, ordinary unreceipted compatibility and all existing
+  source/publication/lifetime custody. Command/explicit-installer adoption,
+  cold cells/custom roots, live deployment and rollout remain separate.
+- [x] **Agent-recommended bounded publisher adoption:** route Bridge's actual
+  legacy primary and payload cold commands through its qualified single
+  `provision` recipe, packaged foundation and the same ordinary queue.
+  Preserve exact selected-source ownership and ordinary unreceipted
+  exact-publisher compatibility, actual Bridge context/native effects,
+  healthy read-only dispatch and original argument/stdin/stdout/exit behavior.
+  The [bounded proposal](bridge-commands.md) requires real native
+  Windows/Linux command, caller-loss/concurrency, installed-consumer and
+  no-write refusal proof before removing cold outer locks/status/direct
+  installer execution. Keep bootstrap `install`, explicit installers,
+  unsupported cold cells/custom roots, live service/session and rollout
+  separate; review and actually merge this proposal before implementation.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Dispatch's
+  fixed legacy `stamp` and `provision` actions through the same native foundation,
+  canonical queue and frozen-input owner before changing ordinary Dispatch
+  publishers. Preserve its required-context direct command, CMD catalog front,
+  exact canonical source/default root/project, native staging, own controls and
+  actual coordinator/supervisor installation semantics. The
+  [bounded proposal](dispatch-first-use.md) requires materialized Windows/Linux
+  construction, safe installed consumers, caller loss/concurrency, immutable
+  failure safety and no-write refusal with isolated native effects. Command/
+  bootstrap/explicit-installer adoption, selected snapshots, scoped publication
+  under #7030, live task processing, service deployment and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
@@ -489,6 +928,12 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Document the actual migrated entry points and remaining separately owned integrations; no partial slice is blanket installation-driver completion.
 
 ### Phase 5 - Prove assembled use and native Windows readiness
+- [x] **Agent-recommended bounded removal prerequisite:** land #9253's
+  producer-complete finite footprints and qualify its real macOS entrypoints
+  with original pipe capture and unchanged deadlines. The
+  [merged-source record](<journal/2026/10.27 native-runtime-removal.md>) does
+  not close whole-suite absence, original-session survival, protected
+  connectivity, native Windows adoption or maintenance standby.
 - [ ] Run the assembled runtime path in a fresh WSL-hosted clean-room container from a clean merged dev commit.
 - [x] Qualify every declared installer adopter against that exact merged commit with frozen scenario inputs, successful runner exit and source-independent installed command evidence; retain each adopter's separate report.
 - [ ] Exercise real commands and service interaction after source-checkout removal, including marketplace/runtime skew and non-deployment hooks.
@@ -557,11 +1002,13 @@ Plan/Validation/Coordination readback must deliver every row before administrati
 superseding #2822. Existing effort creation, a child document or this proposal is not
 receipt. If status, scope, custody or evidence tiers cannot be preserved, retain #2822.
 
-Current best-effort handoff interpretation: references above to compatible
-forward/reverse handoff do not reinstate zero-outage continuity, a compatibility veto,
-or incoming successor readiness before every old-runtime retirement. Preserve the
-accepted bounded, identity-checked cold-takeover route when handoff breaks, explicit
-outage/unknown recovery, and client/child retry obligations. Actual candidate/output CLI
+Current best-effort handoff interpretation: compatible forward/reverse handoff
+does not impose zero-outage continuity or an incumbent compatibility veto.
+Ordinary and repair replacement starts the incoming runtime independently;
+the outgoing owner observes supersession and retires itself after that startup.
+An incompatible handoff permits cold recovery from durable state, not an
+installer stop/force-termination of V1. Preserve explicit outage/unknown
+recovery and client/child retry obligations. Actual candidate/output CLI
 health still gates candidate promotion and completion, and a verified retained
 previous-good generation must survive failed construction or cutover. Best-effort
 continuity does not make an unhealthy candidate or corrupt current/LKG evidence
@@ -609,12 +1056,12 @@ Normal current reviewed Dev workflow remains mandatory; no new universal ACK.
   generation, safe selectors/redirects, failed construction/cutover preservation and
   explicit corrupt/unknown/LKG recovery. Never rewrite a completed slot or merely
   display a healthy-looking newer label.
-- [ ] Preserve accepted best-effort compatible handoff and bounded identity-checked
-  old-owner shutdown/cold takeover when handoff is broken, refused or hung. Cold
-  fallback may establish old-owner exclusion before incoming readiness. Temporary
-  outage/stream cut-off, durable recovery and client/child retries remain explicit; no
-  zero-outage, compatibility veto or incoming-ready-before-every-retirement rule is
-  reinstated.
+- [ ] Preserve best-effort compatible handoff and independent incoming startup
+  when handoff is broken, refused or hung. For ordinary updates and repair,
+  observe old-owner self-retirement only after incoming startup; installer-driven
+  shutdown or force termination cannot satisfy this item. Temporary outage,
+  stream cut-off, durable recovery and client/child retries remain explicit;
+  startup is not a promise of zero-outage or completed serving readiness.
 - [ ] Keep this finite legacy/version outcome independent of full
   runtime/adopter/maintenance/driver or every-host completion. Preserve the original
   supported evidence tiers and all separately owned parent obligations; no test,
@@ -684,9 +1131,10 @@ implementation, rollout or parent completion is declared.
   credential/relay/session/source/config custody and exact process/generation identity.
   Keep listener health, actual accepted handoff, transport result, serving identity and
   native exit separate; uncertain consequential outcomes cannot be replayed.
-- [ ] P6: Preserve current best-effort compatible handoff and bounded owning-authority
-  cold recovery when contracts are incompatible/refused/hung, INCLUDING permitted old
-  retirement before incoming ready. Do not reinstate universal
+- [ ] P6: Preserve best-effort compatible handoff and independent incoming startup
+  with cold recovery when contracts are incompatible/refused/hung. Ordinary and
+  repair replacement requires outgoing-owner self-retirement after incoming
+  startup, not old-owner termination to make room. Do not reinstate universal
   zero-outage/ACK/compatibility vetoes. Actual candidate/output CLI health, VERIFIED
   retained previous-good generation and durable recoverable progress remain mandatory;
   failure uses safe recovery OR proven justified commit-forward, never success-shaped
@@ -751,7 +1199,81 @@ implementation, rollout or parent completion is declared.
   Active, and perform no update, installer, test, native experiment,
   service/process/credential or configuration action through this intake.
 
+### Direct retained keeper and selector acceptance
+
+- [ ] Complete every unfinished #7028/#7029
+  [direct per-origin Plan row](retained-source-selector.md#plan), preserving
+  complete originals/refinements/inheritance, actual delivered credit,
+  alternatives, finite metrics/venues and unchanged source/resource ownership.
+
 ## Validation Plan
+
+- [x] Compare the contributor request capture with the operator's words and inventory every declared runtime root plus the separate SSH Manager dependency. Keep target behavior, released bounded evidence and unproven app/platform/rollout gates distinct.
+- [ ] Maintain the [app qualification matrix](wheel-first-contributors.md#per-app-tracking) against real front-door, failure/retry, state and native-lifetime evidence as contributions land; satisfy the [common app test contract](../../../docs/patterns/fast-application-install-and-cutover.md#app-specific-implementation-and-acceptance) for each claimed boundary.
+- [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
+- [ ] Keep [construction measurements](wheel-first-performance.md) distinct from installed readiness, native lifecycle, SSH-shaped execution and rollout evidence.
+- [ ] Prove preservation/explicit refusal for all [generic recovery classes](wheel-first-recovery-cases.md), without private identifiers or unofficial workarounds.
+- [ ] Qualify unchanged-Git-hash promotion reuse and changed-source replacement
+  with identical package versions through configured Dev update. Official Main
+  version composition remains separate; incomplete or incompatible outputs
+  cannot count as a reusable installation candidate.
+
+Completed refusal controls below retain their historical component evidence.
+They do not exempt an explicitly requested installation from the newer
+operator-requested I/O-only refusal boundary.
+
+- [x] **External bytecode cache:** cold and repeated actual managed imports
+  produce and reuse bytecode outside immutable slots; isolated interpreters
+  and nested service runtimes retain that policy. Sealed original slots remain
+  byte/time/native-identity identical through normal and repair qualification,
+  without disabling caching, changing caller environment or exempting caches.
+  Exact-head Windows run `41323397699` passes both modes with the original
+  retention assertions intact; native cold/warm source controls and the
+  merged qualification record supply the bounded consumer evidence.
+
+- [ ] **Operator-requested I/O-only refusal:** absent/corrupt/contradictory old
+  metadata, unrecognized/edited historical outputs and incompatible incumbents
+  do not block applying the requested installation. Inject real lock/permission
+  I/O failures and report their exact cause; independently expose failed
+  build/start/readiness without manufacturing a healthy service or a new
+  permission gate. Qualify through real ordinary and repair entry points.
+- [ ] **Fresh-default orchestration:** resolve the [public-entry-point and construction-path matrix](fresh-default-installation.md#validation-plan): global project update interception, upstream Main/default and explicit overrides, cold/broken old runtime, compatible incremental/ZDD and missing/incompatible recognition reaching mostly fresh installation under the same execution owner. Receipts must not become update permission.
+- [x] **Agent-recommended bounded metadata recovery:** native Windows/Linux
+  construction under pending missing/corrupt receipts publishes selectable
+  ownership without changing incumbent slot/data bytes. Exact and relocated
+  native launchers remain recognized; edited/foreign commands and storage
+  failures remain no-write refusals. This is not reset or old-owner-silence proof.
+- [ ] **Footprint evolution:** real installer-produced artifacts and process/registration effects match maintained manifests; installed-footprint changes without matching inventory/deltas fail validation. Qualify historical reset descriptors separately from incremental contract support, preserve unknown/foreign and durable/protected content, and prove displaced code cannot serve or reactivate.
+- [x] **Agent-recommended bounded incumbent-process settlement:** real synthetic
+  Windows/Linux trees and native shell adapters confirm old root/child exits,
+  original-parent survival, pause rollback and explicit no-reap refusal without
+  depending on an old deployment receipt. This does not close full reset or
+  the independently authorized critical-connectivity/installed-survival gates.
+- [x] **Agent-recommended bounded control-state reset:** qualify the
+  [native reset and contention matrix](fresh-default-installation.md#bounded-mcp-control-state-reset---agent-recommended),
+  including failed-reset retry remaining fresh, actual winner-state preservation,
+  distinct control/code roots and post-reset on-demand serving. This is not
+  full displaced-code silence, installed survival or all-tool/Manager adoption.
+- [x] **Operator-requested independent repair acceptance:** an external
+  observer confirms V1 is running before force-install, V2 is applied/started
+  without installer actions against V1, both briefly coexist, all current
+  binstubs/task registrations select V2, and V1 notices supersession and exits
+  on its own only after V2 starts. No uninstall, deletion, unregistration,
+  old-owner stop call or successful old-install probe may be a prerequisite.
+  Keep this contained suite test separate from live installed survival and
+  same-existing-data adoption.
+  Run the same lifecycle acceptance through an ordinary update as well as
+  repair/force-install. Installer execution remains serialized; runtime overlap
+  does not authorize concurrent installation writers or duplicate work ownership.
+  Exact-head Windows run `41323397699` passes preparation, exercise, assertions
+  and settlement in both modes. This closes the contained suite test only.
+- [x] **Mandatory update-time removal qualification superseded:** use the
+  operator-requested ordinary/repair V1-to-V2 acceptance above, not old-code
+  absence or installer-driven termination, to qualify replacement. Explicit
+  uninstall survival, durable-data adoption and the remaining portfolio stay open.
+- [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
+
+- [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
 
 - [ ] **Wholesale same-installation cutover:** every inventoried global binstub and applicable serving process executes its selected immutable merged-Dev slot while retaining the Main installation's existing runtime data/configuration identity. Prove actual installed/serving code identity and continuity of representative existing state; a new cell, copied database, changed data root or synthetic fresh profile does not satisfy this gate. Qualify data-format compatibility and supported recovery before a rollback; do not assume that sharing data makes arbitrary older code compatible.
 
@@ -773,14 +1295,14 @@ implementation, rollout or parent completion is declared.
   current portfolio bounds. Administrative intake is not implementation, native
   acceptance, rollout, or completion of unrelated parent work.
 
-- [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
+- [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality. Both ordinary updates and repair start the incoming runtime independently, then observe outgoing-owner self-retirement. Compatible handoff improves continuity; incompatible/refused/hung handoff permits cold recovery but cannot pass acceptance through installer-driven old-owner shutdown or force termination.
 - [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
-- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Distinguish authorization from native settlement, preserve actual failure/pending history, refuse implicit repair in ordinary callers, and verify scoped takeover, actual selected readiness and unrelated-data preservation separately.
+- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Preserve actual failure/pending history and one installation writer; verify incoming startup, selected readiness, old-owner self-retirement and unrelated-data preservation separately. Repair is not permission to stop V1 as an installation prerequisite. Separately authorized stuck-writer recovery is not this runtime-replacement test.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.
 - [ ] **Selection:** installed binstubs and native resolvers execute the exact completed selected generation, including hash-qualified dev sources.
-- [ ] **Failure:** incomplete/failed candidates remain unselected and preserve the previous healthy runtime and redirects.
+- [ ] **Failure:** incomplete/failed candidates remain unselected; preparation failure preserves the previous healthy runtime and redirects. For failures after incoming startup or outgoing-owner self-retirement, report actual service/selection state without claiming an untouched predecessor or successful replacement. An uncooperative V1 is an explicit convergence failure, not implicit authority to terminate it.
 - [ ] **Policy:** real hook and first-use paths do not publish runtime copies or redirects in managed mode; their non-deployment behavior still runs.
 - [ ] **Skew:** newer-plugin/older-service and older-plugin/newer-service interactions work within declared capabilities or return precise readiness outcomes.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
@@ -796,7 +1318,22 @@ implementation, rollout or parent completion is declared.
 - [ ] **Agent-recommended - rollout evidence:** retain a concise qualification/soak record before marking a development snapshot stable; do not infer stability from a clean install alone.
 - [ ] **Contribution gates:** targeted bounded tests, required install-contract checks, appropriate clean-room evidence and reviewed merged PRs cover the final implementation.
 
+- [ ] Complete the matching #7028/#7029
+  [direct Validation rows](retained-source-selector.md#validation-plan)
+  against their full Plan scope and original evidence tiers. Retain the
+  freshness/provenance, interpreter diagnostics, maintenance/setup and Logger
+  specifics; a generic portfolio/SDK row does not establish those outcomes.
+  Paper intake is not implementation, native/installed acceptance or release.
+
 ## Proposal
+
+The [wheel-first extension](wheel-first-transition.md) cleared its initial
+upstream intent review before implementation. That checkpoint is not
+application acceptance. Qualified app/integration slices now clear review
+independently under the [core-service refinement](wheel-first-contributors.md#request-capture);
+whole-flow qualification remains required regardless of PR count.
+Implementation remains scoped by its W0–W4 gates,
+native ownership and the explicit container-before-host requirement.
 
 Keep deployment policy, source selection and serving-generation selection
 separate. Reuse the canonical materializer, runtime construction/retention and
@@ -809,5 +1346,603 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+- [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
+
+### 2026-11-02 - Contributor-ready fast-install and cutover map
+
+The operator requested an exact per-app support guide, the ideal end-to-end
+sequence and app tracking suitable for other agents/operators. The
+[contributor handoff](wheel-first-contributors.md) captures that request
+verbatim, the core-service priority refinement and a separately labeled
+implementation organization. Its eleven-step target remains distinct from
+today's environment-only staging and independently released app slices.
+
+The [guide](../../../docs/patterns/fast-application-install-and-cutover.md)
+records copyable UV projects, source/profile admission, stage/setup/activation,
+stable front doors, resident ownership, failure/commit boundaries and native
+qualification. The matrix covers the 21 current runtime roots and separately
+tracks the SSH Manager dependency, which has no independent app entry point.
+Manager/Worktrees have the bounded #9990/#10024 release evidence; Bridge/MCP
+remain in active qualification and other app scopes retain their owners.
+No runtime, source producer, installed system, maintenance hold or deployment
+authority changed.
+
+Documentation consistency, runbook references, canonical effort structure and
+the new guide/matrix's exact local paths/anchors pass. Runtime unit, clean-room
+and live-venue reruns are inapplicable to this documentation-only slice; the
+matrix retains their outstanding application gates instead of implying a pass.
+
+- [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
+
+### 2026-10-28 - Fresh-default installation and recognizer manifests
+
+The operator changed the installation baseline: upstream fresh construction,
+with positive recognition selecting incremental/ZDD optimization rather than
+permission to update. Both requests are retained verbatim in the inception
+record. The installer vision and existing execution/deployment plans now carry
+that direction and a [bounded implementation/validation proposal](fresh-default-installation.md).
+
+Source research identified the existing global bootstrap interception,
+immutable-slot/receipt/removal helpers and durable update driver as integration
+owners. A complete disposable-footprint manifest, producer/delta completeness
+guard and old-process/registration silence remain implementation obligations,
+not delivered behavior. The prior normal/repair admission prose is reconciled;
+no separate updater, signing protocol or new blanket permission gate is added.
+Existing #7758, maintenance, removal and critical-connectivity owners remain.
+Review precedes new orchestration implementation; no host operation is authorized.
+
+#9487 merged as `5963bf78d5ed2d96217d843e03fb524b206dfbac` after genuine
+exact-head Copilot approval with no open findings and all required checks
+passing. Documentation consistency, three effort/vision structure checks and
+diff checks passed. The review gate closes; manifests, deltas, routing,
+fresh/incremental execution and native installed acceptance remain unfinished.
+The next bounded slice extends the existing finite uninstall inventory into
+the maintained footprint contract, rather than adding a second cleanup list.
+
+### 2026-10-28 - Direct retained keeper and source selector
+
+The complete #7028/#7029 original/refined/inherited acceptance is retained
+through the direct Plan/Validation annex and this continuing Coordination.
+The bounded read-only study checked full current contracts and actual current
+receiving rows, crediting delivered assembly, policy/acquisition/preparation,
+SDK and explicitly recorded native component witnesses at their finite tiers.
+
+The named #184/#403, maintenance/setup-holder and exact Logger role/six-command
+details remain explicit rather than disappearing into general portfolio rows.
+Existing implementation, transaction, source/resource and native custodians
+are unchanged. Normal review, actual merge and complete current receiving
+readback precede any supported #7029 tracker consolidation. #7028 stays open;
+no code, test, native, service, source claim or deployment action occurred.
+
+### 2026-10-28 - First maintained footprint provider
+
+The first source slice extends the existing finite uninstall inventory rather
+than introducing another cleanup owner. Agent MCP's version-2 profile contains
+one current reset inventory, append-only historical snapshots/deltas, separate
+layout recognizers and explicit process/control/registration/shared-environment/
+preserved-state descriptors. Its native remover consumes the same profile.
+The source guard covers complete producer trees, including new files, and
+compares published history with the source baseline.
+
+Bounded qualification passed 151 shared removal controls (three platform skips),
+124 canonical packaging controls (two skips), and four native MCP
+removal/restamp/provenance controls (one skip). Native removal/restamp exercised
+both Windows PowerShell and PowerShell with only the process census mocked.
+The installer contract passed for all 13 runtime plugins. The packaging fixture
+now supplies the Manager package manifest needed by the complete-payload
+validator and the new canonical support file. No deadline was enlarged after
+the initial combined batch timed out; its owned cleanup was verified and the
+failing fixtures were isolated and corrected.
+
+This is a data provider and finite-inventory convergence, not complete fresh
+orchestration or old-owner silence. Effect resolution/retirement, global
+bootstrap routing, driver integration, the remaining suite/Manager manifests,
+cross-platform assembled entry points and actual installed survival/adoption
+remain open under the same owners and authorization gates. No live cleanup,
+runtime update, service action or maintenance hold was performed.
+
+#9499 merged as `6fa86779c07f38db08a6db656efb26249b993989` after exact-head
+Copilot approval and all required checks passed. Both duplicate promotion-version
+findings are fixed and resolved. The final source passes 32 focused footprint
+controls, the 13-plugin install contract and the required 2,619-test unit packet.
+Generated packaging metadata is excluded consistently with materialization;
+only promotion-owned source-version literals are normalized, leaving surrounding
+producer code covered. The next slice separates Main bootstrap transport from
+independently selected Manager/service runtime sources at the existing global
+update interceptor and canonical bootstrap. The broad footprint and fresh-default
+Plan/Validation rows remain open.
+
+### 2026-10-28 - Bootstrap transport and runtime-source separation
+
+The existing global update interceptors now select Main bootstrap transport
+independently of Manager's runtime `[source]` policy. Explicit bootstrap repo/ref
+environment overrides affect only the initial acquisition. The canonical
+bootstrap owns the strict local source reader and forwards the ordinary update
+through its existing installer/driver path; the old explicit-source bootstrap
+form remains supported. Service-runtime policy stays separate, including the
+shared `[runtime_source]` table, and relative local sources are anchored before
+staging changes the working directory.
+
+Isolated Windows controls exercise real local-Git acquisition and the assembled
+global/installed-project front doors in Windows PowerShell and PowerShell Core.
+They retain exact source pins, original arguments/exit status, malformed-policy
+refusal before effects, old explicit callers and broken-runtime independence.
+The existing optional native update-diagnostics workflow now includes these
+front-door families and the POSIX equivalents rather than widening required PR
+CI. Native POSIX execution, review/merge and the parent's complete construction/
+retirement/survival gates remain uncredited until independently observed.
+No installed runtime, maintenance hold, service or protected process was changed.
+
+#9507 merged as `cf87d5c8e2559a72f2a413a69d417ea7f10d6676` after exact-head
+Copilot approval with no findings, all required checks and native workflow
+`40811339020` passed. The final unit packet passed 2,619 tests (12 deselected).
+Native entry-point families passed 109 controls on Linux (70 platform skips)
+and 80 on Windows (99 platform skips), including actual local-Git acquisition.
+The first native run exposed fixture-only context and default-encoding
+assumptions; explicit temporary working-directory and UTF-8 reads fixed them,
+and the complete workflow rerun passed on both platforms. A metadata-triggered
+required-check transition was awaited through the canonical PR watcher before
+the managed merge. This is merged source, not a running-system rollout.
+
+The next integration connects footprint reuse/no-match decisions to the existing
+canonical construction and execution owner, initially for one addressed installed
+owner. Missing reuse evidence must select fresh construction without discarding
+its finite reset inventory or requiring a separate repair command. Actual effect
+settlement, one-writer custody, durable/config/protected preservation and the
+remaining manifest portfolio retain their independent parent acceptance gates.
+
+The first construction integration now passes MCP's maintained footprint into
+the existing attached native constructor, inside its original installer
+transaction. No-match and occupied unusable targets select an absent immutable
+replacement generation without rewriting the incumbent; a compatible selected
+same-input replacement remains reusable. Source identity stays independent of
+the physical generation. Local regression qualification passed 127 tests,
+with three native-POSIX FIFO cases explicitly unqualified on Windows; lint,
+module-size and install-contract checks passed. The optional native
+update-diagnostics lane now includes the same constructor controls on Linux
+and Windows. The required local unit packet passed 2,619 tests (12 deselected)
+after refreshing only the changed runtime source fingerprint in its existing
+admission manifest; node inventory and effect restrictions are unchanged.
+Native execution, provider checks and review/merge remain pending.
+This is not effect-reset, corrupt command-ownership recovery,
+old-owner silence or complete fresh-install qualification.
+
+### 2026-10-28 - MCP footprint-driven construction qualification
+
+#9512 merged as `864dbfac12f42189b6632a365892ab7b8da1ebc5` after the
+current-head Copilot review reported no open findings and all required checks
+passed. Native workflow `40824809607` passed against
+`682966d55a352bf8562cf2174ea615399adfd812`: the combined MCP constructor,
+identity, readiness and serializer controls passed 48 tests on Linux
+(7 platform skips) and 38 on Windows (17 platform skips).
+The required local unit packet passed 2,619 tests (12 deselected);
+121 footprint/environment controls also passed.
+
+Review corrections preserve exact repair identities, avoid blocking completion
+reads and unusable fallback targets, retain physical generation identity in
+publication/readiness, and align reuse admission with the resolver's 64 KiB
+marker bound. Invalid installed UTF-8 metadata selects non-reuse without
+swallowing genuine storage errors. Actual admission and native constructor
+controls preserve both a healthy current slot and a damaged non-current desired
+slot while completing a distinct repair generation.
+
+The complete parent Plan and Validation Plan remain Active. The next bounded
+integration is fresh-path command publication through missing or corrupt old
+deployment metadata under the existing lifecycle/execution owner, preserving
+real foreign/edited command refusals and durable/protected state. Reset
+execution, identity-bound displaced effects and reactivation prevention, the
+remaining manifest portfolio, macOS and assembled public-entry/live survival
+acceptance remain open. No host rollout, maintenance hold, service or protected
+process was changed; merged source is not deployed-state proof.
+
+### 2026-10-29 - Fresh-path metadata and command-owner recovery
+
+#9533 merged as `318809886f29d17a9e533f340d61c9edd44552d7` after an
+exact-head Copilot approval with no active findings and required CI success.
+Native workflow `40836786937` passed on
+`cbbdeb6aad583147975468d3ece234a3a79a668b`: command-metadata recovery,
+pending ownership and teardown controls passed 37 tests on each platform
+(two platform skips each); MCP construction passed 52 tests on Linux
+(seven skips) and 40 on Windows (19 skips); prepared-source reconstruction
+passed 48 tests on each platform. The required local unit packet passed
+2,619 tests (12 deselected). The broader matcher/removal/lifecycle packet
+passed 904 tests with verified bounded-runner cleanup.
+
+Malformed ordinary deployment bytes now differ from genuine storage/identity
+errors. Missing/corrupt receipts no longer block construction or supply false
+incremental evidence; failed recovery retains its pending source owner.
+Review fixes reuse Index's existing launcher matcher with the resolved home
+and preserve intact incumbent publisher paths as literal matching data across
+payload relocation. Edited/foreign commands and explicit foreign ownership,
+policy and cell evidence still refuse mutation. The Linux teardown fixture
+now extracts the actual top-level preflight rather than an earlier `elif`.
+
+The parent remains Active. The next bounded integration is the maintained
+MCP reset inventory's actual known-runtime/effect settlement through the same
+installer and execution owner, with durable/protected preservation and
+displaced-owner/registration silence proved independently of candidate markers.
+Remaining manifests, assembled public entry points, macOS, all-tool/Manager
+same-data transition and live session/connectivity survival remain open.
+No host rollout, maintenance hold, service or protected process was changed;
+merged source does not establish released or installed state.
+
+### 2026-10-29 - Confirmed MCP incumbent-process settlement
+
+#9541 merged as `78a5d11f7652c2c3949d5d5c59883de28f7187e5` after
+Copilot approved the exact final head and required CI `40883025652` passed.
+The description-triggered source-attribution check was observed passing before
+the managed merge. The final metadata-only commit updates one existing unit
+source digest without changing the 2,619-node inventory, coverage targets,
+effect restrictions or 300-second packet budget.
+
+Native workflow `40881548874` passed on the unchanged runtime/test bytes at
+`470086a1b9a8f7e7dca716b71a4f0fed184c1b74` on Windows and Linux.
+Linux passed all 48 MCP retirement controls and all 17 native pause/custody
+controls without skips, including main-thread exit before census and during
+executable observation, opaque task names, rollback and actual caller-group
+death. Earlier full Windows broker qualification `40869467283` passed the
+unchanged nested caller-Job death witnesses and contained negative, retaining
+original targets and observing custodian kernel exit without desktop effects.
+
+Fresh MCP fallback now confirms original-birth root/descendant exit through
+native handle/pidfd custody, preserves protected/current/excluded scope, and
+cannot turn an explicit no-reap override into successful settlement. Review
+corrections cover disappeared/reused identities, same-birth protected exec,
+stable all-thread pauses, owner-death rollback, dead-main-thread census races,
+kernel-task recognition, opaque task names and available PowerShell warnings.
+Only the bounded process Plan/Validation items above are complete.
+
+The parent remains Active. The next bounded integration is actual reset of
+MCP's maintained disposable control/runtime inventory and displaced-code
+reactivation routes through the same native installer/execution owner.
+Durable/configuration/unknown/protected preservation, the remaining manifest
+portfolio, assembled public entry points, macOS, all-tool/Manager same-data
+transition and live session/connectivity survival remain open.
+No host rollout, maintenance hold, service or protected process was changed;
+merged source is not released or installed-state proof.
+
+### 2026-10-29 - Reviewed bounded MCP control-reset ordering
+
+#9551 merged as `8deff0bd1b4336d236468821d2af1dcd0fcb6c84` after Copilot
+approved the exact proposal head without inline findings and all required
+checks passed. The source worktree reconciled to that verified squash boundary
+without replaying post-merge commits.
+
+The next implementation follows the reviewed finite control-home reset,
+existing cutover/serve/routing custody and selected-generation retry-consistency
+contract. Its Plan and Validation items remain open until implementation and
+native qualification merge. Old-code collection, complete reactivation
+prevention and every installed/portfolio/survival acceptance gate remain open.
+No deployment, maintenance hold or host cleanup is authorized by this proposal.
+
+### 2026-10-29 - Qualified MCP control reset and retry consistency
+
+#9553 merged as `f39fdc789e1406c52506b78f1c8b1520c684ccc3` after Copilot
+approved exact head `181ae83d858e130ffcfe6dc3de75fd3cab73737a` with no active
+issues. Required checks, including source attribution after the final
+description edit, passed before managed merge. The source worktree reconciled
+to the verified squash boundary without replaying post-merge commits.
+
+Native workflow `40904358897` passed on Windows and Linux at that exact head.
+The retirement/reset packets passed 79 and 82 tests respectively, including
+Windows dead-routing recovery rather than skipping it; the construction/native
+adapter packets also passed. The combined local reset/footprint packet passed
+83 tests with three POSIX-only socket-type skips.
+
+Fresh reset now preserves winning owners, socket-home overrides, live routing
+and sidecar endpoints, lock identities and durable/foreign content. Windows
+timeouts require a successful exclusive endpoint bind before absence is
+established. Routing ports/PIDs and duplicate fields follow the actual client
+parser. Fresh construction cannot reuse the recorded deployment generation
+even when its old slot is absent, so completion/activation without successful
+integration cannot make the retry incremental.
+
+Only the bounded control-reset Plan and Validation items close. The next
+agent-recommended proposal addresses declared displaced code and restart
+routes, including the constructor's own predecessor-retention handoff.
+Old-code silence, the remaining manifest portfolio, assembled entry points,
+macOS, same-existing-data all-tool/Manager adoption and live session/transport
+survival remain open. No installed cleanup, rollout, service stop, maintenance
+hold or protected-process action ran; a source merge is not deployed-state proof.
+
+### 2026-10-29 - Reviewed MCP displaced-code retirement
+
+#9556 merged as `08d062c05d79de789c67123fa2c38d14915215f2` after Copilot
+approved exact proposal head `c64211c5fe3354860e38e66979975bf1bc287562`
+without active findings. Required source and metadata checks passed before
+managed merge. The source worktree reconciled to that verified squash boundary.
+
+The next implementation follows the reviewed finite executable/restart-route
+inventory, attached predecessor-retention handoff and canonical generation/
+publication custody. Keep the candidate retained and independently owned
+leases intact; qualify actual removal, preserved scope and interrupted fresh
+retries on Windows/Linux. The displaced-code Plan and Validation items remain
+open until that implementation and qualification merge. All parent portfolio,
+installed adoption and live survival gates remain open; this proposal grants
+no concrete host cleanup or rollout.
+
+### 2026-10-29 - Independent incoming startup for ordinary and repair updates
+
+#9601 merged as `230c7b1012e6e6767d1fbe6dc4541e73019d7470` after genuine
+Copilot approval of exact head `6284c967bf8a7acc7c99b4ffed5cab03148e08cc`,
+with no active findings and all required checks passing. The one review
+finding exposed inherited force-termination acceptance clauses; the correction
+reconciles the complete retained normal/repair interpretation instead of fixing
+only the newly added test row. Effort/vision structure and whitespace checks
+passed. The source worktree pulled forward to the actual squash boundary and
+the complete current ROOT README was read back.
+
+The operator's decisive V1-to-V2 test and explicit normal-and-repair scope now
+govern replacement: apply/start the incoming generation independently, replace
+current commands/update task registrations, observe brief runtime overlap, then
+prove the outgoing owner recognizes supersession and retires itself. Mandatory
+installer-driven old-code/process retirement is superseded as an update
+prerequisite. Its unpublished prototype is retained separately, not deployed
+or credited as the new lifecycle implementation. Explicit uninstall and
+separately authorized recovery retain their own scopes.
+
+The next stretch builds the contained real Manager/suite acceptance for both
+ordinary update and repair/force-install, then extends the existing incoming
+startup and supersession owners to make it pass. Those Plan and Validation
+items remain open. The parent stays Active with its complete portfolio,
+same-existing-data adoption and live all-code-absent session/connectivity
+survival gates intact. No host install, task mutation, service stop, maintenance
+hold or rollout occurred.
+
+The installed-suite candidate also exposed Dispatch's copied global admission
+helper without its required Python SDK. Both installers now publish the full
+helper file set, and Bash's publication journal covers those same dependencies.
+An actual publisher/copied-helper regression failed with the hosted SDK error
+under both PowerShell hosts before the correction; the focused launcher packet
+then passed 8 tests with 1 platform skip. The Bash stamp control is skipped on
+the Windows host, so native POSIX qualification remains open. Installer,
+documentation, headless, size and lint guards pass; no hosted suite or installed
+adoption result is inferred from this bounded repair.
+
+The bootstrap guard failures tracked by #9699 came from administrator-trusted
+fixture links, not a missing enforcement flag. Restricted same-user creation
+now retains the original guard/physical-path assertions and restores thread
+identity on failure. The complete local bootstrap packet passes 36 tests with
+9 legitimate skips (7 POSIX-only, 2 file-symlink prerequisites); native POSIX
+and those unprivileged file-symlink effects are not credited. Updated resident
+fixture controls pass 28 tests with the 2 hosted acceptance cases deselected,
+including real Manager subscriber transfer and incumbent log retention.
+Whole-suite normal/repair qualification and installed adoption remain open.
+
+The Codespaces candidate now starts the selected process independently of a
+running task, advertises passive readiness separately from serving work, and
+holds native work custody through cleanup. Independent review caught a lost
+lease-less predecessor exclusion across passive restarts; its durable native
+birth record and genuine lease-less restart/supersession controls resolve that
+named finding. The owner packet passes 165 tests with 1 skip, coordinator
+verification passes 8 new barrier controls, and native state-preserving removal
+passes 45 selected tests. Shared teardown validation now preserves foreign
+commands without granting publication, and native installer diagnostics retain
+stderr framing and line endings. The lifecycle packet records 88 passing cases
+and 18 platform skips; its two fixture-omission failures pass after restoring
+the actual removal function. Exact-head installed-suite qualification, not an
+aggregate component count, remains the next acceptance gate.
+
+Hosted run `41146273383` at `24abb8b041` fails both preparation stages before
+replacement: the fixture called `ensure_owner_running` without its required
+config argument. Both final settlement stages succeed with no remaining tasks.
+The caller now passes the existing supported `None` argument; a focused
+execution of the actual preparation snippet covers that contract, and the
+bounded fixture packet passes 29 tests with the 2 hosted cases deselected.
+No service API is changed, and Bridge's earlier failure remains unproven.
+
+Hosted run `41148076239` at `7ddefb7184` completes the normal Manager update
+with exit 0, then fails the fixture's unsupported assumption that Machines'
+stdio-safe command emits a resolver trace. Its real fast path selects the
+current slot directly. The fixture now uses its exact installed version output
+and the actual command-only Windows producer contract. Repair preparation
+reaches a successful baseline update but exceeds the outer 900-second stage
+budget before completing the independent engine setup. Preparation now has a
+bounded 1800-second budget; exercise, assertions and settlement remain separately
+bounded. Both failed jobs settle with no errors or remaining tasks.
+
+The corrected fixture/coordinator packet passes 41 tests with 2 hosted cases
+deselected. Bridge watchdog diagnostics pass 18 tests and retain PID, timestamp,
+failed probe and terminal reason before replacement log setup; the fixture also
+retains the existing application diagnostic stream. This is diagnostic evidence,
+not a fix or waiver for Bridge's early exit 70. Codespaces' observed predecessor
+exit before successor creation remains a separate readiness-ordering defect.
+Neither mode has qualified the complete start-first contract, and installed
+adoption and the parent Plan/Validation remain open.
+
+The Codespaces candidate now separates selection demotion from process
+retirement. Demotion stops new work admission; a fresh principal/birth-verified
+beacon of the different selected successor permits incumbent cleanup and exit.
+The native process control starts V2 before V1 drains, and retains the existing
+lease-less predecessor exclusions. Its custody packet passes 176 tests with
+1 skip. This closes the named source-level ordering defect, not the still-open
+exact-head hosted suite or installed-adoption gate.
+
+Run `41153778636` at `1d80d4f3d2` confirms normal Codespaces successor readiness
+before clean predecessor exit. Normal update returns 0, but its fixture next
+incorrectly requires an MCP resolver trace; MCP shares Machines' command-only
+direct-slot fast path. Repair reaches replacement, then the controlled delivery
+fixture rejects the required payload-only harness because it admits only the
+runtime roster. Delivery now uses the complete canonical catalog and records
+newly installed payloads without admitting unknown sources.
+
+Bridge's preserved watchdog diagnostics identify repeated Windows socket
+allocation error 10048, not evidence that the server stopped serving.
+The fixture's 20 ms route-metadata polling opened a fresh listener-probe TCP
+connection on every read. Metadata observation now omits that redundant
+connection; authenticated health and native birth/exit checks remain required.
+No watchdog policy, socket limits or host settings change.
+
+Normal settles cleanly; repair leaves birth-verified Index and Vault V1
+processes alive after native task cleanup. Both installer stop functions had
+tested their prospective payload-version interpreter, which was not installed
+after payload refresh alone, and skipped the real shutdown command. Explicit
+stop now resolves the installed selection. Native callee controls reproduce
+both omissions before correction and verify the selected interpreter afterward.
+The combined fixture/coordinator packet passes 48 tests with 2 hosted cases
+deselected; all 11 focused failures pass after correction. Full hosted
+qualification and final settlement remain open.
+
+Run `41158624541` at `6a3fa4881b` completes both real update operations with
+exit 0. In both modes, all seven replaced residents become ready before their
+incumbents exit 0, the independent engine remains healthy in the same process,
+and final settlement has no errors or remaining tasks. Qualification still
+fails on the fixture's unsupported scheduled-task resolver assumption.
+
+Bridge's real marker-resolving task launcher now supports a read-only
+`-ResolveOnly` observation before any startup effects. Native broker tasks use
+their actual installed V2 entrypoint, not the PowerShell resolver shape:
+verification loads bounded owned registration, checks exact XML action/root/
+principal agreement and the selected prefix, then executes the existing
+`--check-runtime` observation through the task interpreter's console companion
+without bytecode writes. Unknown shapes and old/changed registrations still
+refuse. Both new positive controls fail before correction; the updated bounded
+fixture/coordinator packet passes 52 tests with 2 hosted cases deselected.
+This source correction still requires exact-head hosted qualification.
+
+Run `41162149444` at `76e883b0d2` again completes both updates with exit 0,
+all seven successor-ready observations before predecessor exit 0, the same
+healthy independent engine and clean final settlement. The fixture next rejects
+Dispatch's custom marker-resolving coordinator launcher before reaching the
+formal assertions. Both generated Dispatch coordinator and supervisor launchers
+now expose the same read-only selected-interpreter observation before startup
+effects, with native controls covering current selection, last-known-good and
+unresolved selection without file changes. The task-routing proof remains
+required; this is not a hosted-suite pass.
+
+Run `41165376625` at `d7d0601416` completes preparation and replacement in
+both modes, including all actual task-routing probes, the seven ready-before-exit
+replacements, the retained healthy engine and clean settlement. Formal assertions
+now expose changed V1 sealed-content evidence in four provider slots in both modes
+and Manager in normal mode. The report has no changed-path metadata to identify
+the cause, so bounded before/after hashes and native file metadata are now retained
+without weakening comparison. The normal exclusive-work probe also ran after
+releasing the fixture subscriber; final routing/work checks now remain inside the
+existing live consumer-demand scope. The updated local fixture packet passes
+54 tests with the 2 hosted-only cases deselected. Full qualification remains open.
+
+Run `41167899886` at `b9f363e9d1` establishes held Manager work custody in both
+modes while preserving successful replacement and clean settlement. Exact
+retention diagnostics identify only added Python bytecode files, with no changed
+or removed sealed files and no truncated samples. Normal adds 120 Worktrees,
+1 Bridge, 3 Codespaces, 1 Dispatch, 4 embedded Index-server and 2 Manager cache
+files; repair adds the same Bridge/Codespaces/Dispatch/Index files. The retention
+assertion remains failed. The operator selected external caching rather than
+disabling it; the next source slice follows the actual managed command, engine
+and resident launch paths and must qualify cached imports outside immutable
+slots without moving existing data or exempting generated files.
+
+The external-cache source slice now routes actual Python command, resident and
+nested-server launches through owned durable cache prefixes, preserving isolation
+and explicit read-only bootstrap controls. Cold/warm parent controls pass for
+Bridge (14), Codespaces (14), Index (68 with 1 platform skip) and Dispatch (16).
+The shared implementation also qualifies the required-context Worktrees Python
+dispatch and Manager resolver. These are local source controls, not a new hosted
+whole-suite pass or installed rollout.
+
+The broader Companion/repair packet initially hid ten explicit-tier cases.
+Using the supported `--allow-explicit-tiers` path yields 43 passes, 2 platform
+skips and four real repair failures. The Companion environment leak is corrected
+through PowerShell's `Env:` provider, retaining existing credential-scrubbing
+assertions. The repair fixture no longer uses an escaping dependency path hook
+and materializes complete canonical payload dependencies before copying them.
+The subsequent contract trace corrects that diagnosis: public Manager updates
+already acquire canonical driver custody before internal repair, whereas those
+four fixtures invoked the internal path without its enclosing owner. They now
+run under a real isolated Manager transaction and authenticated participant.
+The construction fence unwinds its private stop signal inside canonical custody,
+then exits nonzero outside it; no package construction or fake repair success is
+permitted. The combined explicit repair, Companion and custody packet passes
+84 tests with 2 platform skips, including an unowned-repair refusal control.
+Monitor interpreter and retained-launch controls pass 19 tests without an
+unverified executable path hook. Generated payloads, installer helpers and
+vendored-library checks are in sync. An operator-authorized separate one-line
+full-dispatch mapping repair passes 78 dispatch/publication-label tests.
+These remain local source results, not hosted cache-retention qualification,
+merge, rollout or completion of the Plan and Validation Plan.
+
+Hosted run `41186916815` qualifies exact source `e99370d60a` in separate
+normal and repair Windows jobs. Repair passes; normal preparation, exercise
+and settlement pass, but strict retention still fails on two added Manager-slot
+bytecode files, with no changed or removed originals. The canonical driver's
+private executor starts an isolated interpreter without cache routing before
+loading its participant and Windows process helper. That hop now uses the
+existing driver-owned durable cache root, without changing custody or product
+arguments. A real queued cold/warm executor regression and settlement controls
+pass 36 tests with 3 skips and verified cleanup. Canonical archive regeneration
+finds no additional derived changes. Both complete hosted modes must qualify
+the corrected head before this draft becomes ready; no acceptance assertion is
+weakened and no live rollout is authorized.
+
+At corrected head `adebd56e6b`, hosted run `41189935743` passes normal mode:
+all 14 original slots have zero added, changed or removed files. Repair's
+preparation, exercise and settlement pass, but strict retention finds 145
+added files in the old Worktrees slot; the bounded path sample is truncated.
+Sampled modification times precede repair bootstrap startup, so the writer
+cannot be assigned to that installer without more evidence. Diagnostic-only
+fixture changes now compare preparation-end and pre-exercise state to the
+original seal and record scoped runtime process launch flags, never argument
+values. Their 56 local tests pass with the two hosted evidence assertions
+deselected and cleanup verified. No baseline is resealed, no assertion is
+relaxed, and the underlying retention discrepancy remains open.
+
+Diagnostic head `d8feab8525` passes both complete hosted modes in run
+`41192837539`, including strict original retention and clean settlement.
+Preparation-end and pre-exercise comparisons are unchanged, and the observed
+Worktrees resident carries cache-prefix and no-bytecode launch flags. The
+earlier 145 additions do not reproduce; that pass alone does not identify
+their writer. A separate source regression proves that Worktrees' frozen
+Manager engine callbacks still omit cache routing and create bytecode beside
+their source. Direct Manager, status-link and fast-Picker handoffs now reuse
+the existing cache-aware callback command with Worktrees' durable root.
+The cold/warm real child and affected callback/Picker controls pass 101 tests
+with 156 deselected and verified cleanup. Callback interpreter, argument,
+environment and custody contracts remain unchanged apart from the cache flags.
+The new exact head still needs both complete hosted modes and actual review;
+the historical writer is not claimed to be uniquely attributed.
+
+The [October 31 review-correction record](<journal/2026/10.31 review-corrections.md>)
+captures the reconciled source history, all six fixes, actual bounded local
+results and the remaining exact-head Windows/POSIX/review gates. No local result
+or earlier hosted head substitutes for qualification of the integrated changes.
+
+The [November 1 qualification correction](<journal/2026/11.01 replacement-qualification.md>)
+records the new review fixes and the dependency-free Index activation diagnosis.
+The corrected integrated head still requires exact-head whole-suite acceptance
+and actual review; the earlier passing packets do not close those gates.
+
+### 2026-11-01 - Qualified independent suite replacement
+
+#9623 merged as `7a522f7fd890a6497706462796576f3ea3585839` after the
+exact-head Copilot review recognized all three final corrections as resolved,
+with no new inline findings, and all required checks passed. Both complete
+Windows modes at `dac675ad9972` pass preparation, exercise, strict assertions
+and final settlement in run `41323397699`. The
+[qualification record](<journal/2026/11.01 replacement-qualification.md>)
+retains the actual evidence and its limits.
+
+Only the contained independent ordinary/repair replacement and external-cache
+source qualification close. The same PR also lands the wheel-first intent
+checkpoint, including promotion-mediated backing checkouts and every-app
+staging/activation; none of those proposed command/provider flows is credited
+as implemented. The full parent README was read back and the source worktree
+reconciled to the verified squash boundary without replaying its merged commits.
+
+The next stretch consumes the existing #9290 promotion/UV-native,
+pyproject-strict provider through the W1 Manager/application boundary. Keep
+construction, wheel caching, profiles and publishing with their existing
+owners; qualify provider support before sending proposed stage/source flags.
+Complete portfolio/platform acceptance, maintenance, actual same-existing-data
+adoption and live all-code-absent session/connectivity survival remain open.
+No host installation, cleanup, service operation, maintenance clearance or
+rollout occurred.
+
+### 2026-11-01 - Worktrees installation and resident retirement separation
+
+#9919 / #9935 implement the bounded Worktrees incoming-start-first slice.
+The [source and qualification record](<journal/2026/11.01 asynchronous-installer-drain.md>)
+retains the resident-owned custody, review corrections and source-process proof.
+Review and required CI still gate merge; parent acceptance and rollout remain open.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

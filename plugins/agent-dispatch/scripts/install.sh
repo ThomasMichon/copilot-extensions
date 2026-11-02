@@ -28,6 +28,7 @@
 # Usage:
 #   bash scripts/install.sh install        # venv + binstub + service + pivot
 #   bash scripts/install.sh update         # idempotent refresh (downgrade-guarded)
+#   bash scripts/install.sh prepare        # build/health-gate without adoption
 #   bash scripts/install.sh restore --retained-runtime RECORD
 #   bash scripts/install.sh status
 #   bash scripts/install.sh start | stop
@@ -44,6 +45,9 @@
 #   --require-graceful-cutover
 #                      On update: fail without restart/supervisor reconciliation
 #                      unless a routed coordinator cuts over successfully.
+#   --preserve-supervisors
+#                      With update --require-graceful-cutover: leave supervisor
+#                      definitions, processes and retained runtimes unchanged.
 #   --install-dir DIR  Override the runtime root (default ~/.agent-dispatch).
 # =============================================================================
 
@@ -358,6 +362,7 @@ NO_SUPERVISOR=0
 PURGE=0
 DRY_RUN=0
 REQUIRE_GRACEFUL_CUTOVER=0
+PRESERVE_SUPERVISORS=0
 RETAINED_RUNTIME=""
 INSTALL_DIR=""
 FORCE="${AGENT_DISPATCH_ALLOW_DOWNGRADE:-0}"
@@ -369,6 +374,7 @@ while [[ $# -gt 0 ]]; do
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
         --require-graceful-cutover) REQUIRE_GRACEFUL_CUTOVER=1; shift ;;
+        --preserve-supervisors) PRESERVE_SUPERVISORS=1; shift ;;
         --retained-runtime) RETAINED_RUNTIME="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
@@ -389,6 +395,12 @@ fi
 if [[ "$REQUIRE_GRACEFUL_CUTOVER" -eq 1 ]] &&
    { [[ "$ACTION" != update ]] || [[ "$NO_SERVICE" -eq 1 ]]; }; then
     _fail '--require-graceful-cutover requires update without --no-service'
+    exit 1
+fi
+if [[ "$PRESERVE_SUPERVISORS" -eq 1 ]] &&
+   { [[ "$ACTION" != update || "$REQUIRE_GRACEFUL_CUTOVER" -ne 1 ||
+         "$NO_SERVICE" -eq 1 || "$NO_SUPERVISOR" -eq 1 ]]; }; then
+    _fail '--preserve-supervisors requires update --require-graceful-cutover without --no-service or --no-supervisor'
     exit 1
 fi
 
@@ -466,6 +478,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
+    _require_actions runtime-activation || return $?
     # Swap the stable `.venv` symlink to this version's freshly-built slot, moving
     # a legacy real `.venv` aside on first migration (--replace-nonlink). No-op in
     # legacy mode. On POSIX a rename tolerates the daemons' open files, and
@@ -609,16 +622,20 @@ _versioned_activate() {
         _unlock_activate
         return 0
     fi
+    _require_actions runtime-activation || { _unlock_activate; return 3; }
     local receipt_file
     local receipt_args=()
     if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
         _runtime_publication_native_begin receipt_file || { _unlock_activate; return 1; }
         receipt_args=(--ownership-receipt "$receipt_file")
     fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
+    if "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
+        :
+    else
+        local activation_rc=$?
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         _unlock_activate
-        return 1
+        return "$activation_rc"
     fi
     _unlock_activate
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
@@ -945,7 +962,62 @@ _adopted_projects() {
 # remains only as an offline/network-restricted fallback
 # (AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to it) and is expected
 # to be dropped once the on-demand fetch path is validated.
+_runtime_admission_preflight() {
+    # Canonical bundle: tools/sync-installation-context.py FILES.
+    # Installer tests compare this Python-free list with that declaration.
+    local required
+    local -a required_files=(
+        _installation_context_base.py
+        _installation_context_files.py
+        _installation_context_source.py
+        _installation_context_lock_recovery.py
+        _installation_context_receipts.py
+        _installation_context_snapshot.py
+        _installation_context_runtime_slot_ownership.py
+        _installation_context_runtime_slot_completion.py
+        _installation_context_resolution.py
+        _installation_context_guest_environment.py
+        _installation_context_activation.py
+        _installation_context_legacy_attribution.py
+        _installation_context_legacy_transition.py
+        _installation_context_legacy_retirement.py
+        _installation_context_maintenance.py
+        _installation_context_mode_cli.py
+        _installation_context_deployment.py
+        _installation_context_publication.py
+        _installation_context_powershell.py
+        _installation_context_worker.py
+        installation_context.py
+        daemon_instance_runtime.pyz
+        installation-context.sh
+        installation-context.ps1
+        shell-caller-owned.ps1
+        plugin-publication-probe.ps1
+        plugin-publication-probe.sh
+        guest-environment.ps1
+        guest-environment.sh
+        json-query.awk
+    )
+    if [[ ! -d "$SCRIPT_DIR/installation-context" ]]; then
+        _fail "Required runtime admission bundle not found at $SCRIPT_DIR/installation-context"
+        return 1
+    fi
+    for required in "${required_files[@]}"; do
+        if [[ ! -f "$SCRIPT_DIR/installation-context/$required" ||
+              ! -r "$SCRIPT_DIR/installation-context/$required" ]]; then
+            _fail "Required runtime admission file missing or unreadable: $SCRIPT_DIR/installation-context/$required"
+            return 1
+        fi
+    done
+    if [[ -n "${1:-}" ]]; then
+        printf -v "$1" '%s\n' "${required_files[@]}" || return 1
+    fi
+    return 0
+}
+
 deploy_binstub() {
+    local required_bundle
+    _runtime_admission_preflight required_bundle || return 1
     _assert_source_runtime || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         local snapshot
@@ -990,10 +1062,15 @@ deploy_binstub() {
         fi
     done
     mkdir -p "$INSTALL_DIR/bin/installation-context" || return 1
-    for r in installation-context.sh installation-context.ps1 \
-        guest-environment.sh guest-environment.ps1 json-query.awk; do
+    while IFS= read -r r; do
         _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \
             "$INSTALL_DIR/bin/installation-context/$r" || return 1
+    done <<< "${required_bundle%$'\n'}"
+    for r in "$SCRIPT_DIR/installation-context/"*; do
+        [[ -f "$r" ]] || continue
+        [[ $'\n'"$required_bundle" == *$'\n'"${r##*/}"$'\n'* ]] && continue
+        _runtime_publication_copy "$r" \
+            "$INSTALL_DIR/bin/installation-context/${r##*/}" || return 1
     done
     if [[ ! "$INSTALL_DIR" -ef "$LEGACY_INSTALL_DIR" ]]; then
         _ok 'Scoped install keeps the global compatibility binstubs unchanged'
@@ -1018,6 +1095,20 @@ STUBEOF
 }
 
 _ensure_runtime() {
+    local prepare_only="${1:-0}"
+    if [[ "$prepare_only" == 1 && "$VERSIONED_RUNTIME" != 1 ]]; then
+        _fail 'Preparation requires a versioned runtime candidate'
+        return 1
+    fi
+    if [[ "${PRESERVE_SUPERVISORS:-0}" == 1 &&
+          ( -e "$INSTALL_DIR/.venv" || -L "$INSTALL_DIR/.venv" ) ]]; then
+        _fail 'Supervisor preservation requires an installation without a legacy .venv path'
+        return 1
+    fi
+    if [[ "$prepare_only" != 1 ]]; then
+        _runtime_admission_preflight || return 1
+        _maintenance_preflight || return $?
+    fi
     if [[ -z "${RETAINED_RUNTIME:-}" ]]; then
     _assert_source_runtime || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -1037,7 +1128,8 @@ _ensure_runtime() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
+    mkdir -p "$INSTALL_DIR" || return 1
+    if [[ "$prepare_only" != 1 ]]; then mkdir -p "$LOCAL_BIN" || return 1; fi
     _ok "Directories: $INSTALL_DIR"
 
     _versioned_slot_clean || return 1
@@ -1086,6 +1178,7 @@ _ensure_runtime() {
     # agent-procutil is exactly one of these.
     _STALE_CACHE_REFRESH_PACKAGES=(
         agent-dispatch
+        agent-update-driver
         agent-procutil
         agent-zdd
         agent-dropin-registry
@@ -1235,6 +1328,10 @@ _ensure_runtime() {
             _versioned_mark_complete || exit 1
         fi
         _supervisor_audit runtime-ready import-health-gate "" "" ok
+        if [[ "$prepare_only" == 1 ]]; then
+            _ok "Prepared runtime: $VENV_DIR (not activated; retention ends when this command exits)"
+            return 0
+        fi
         # Hold one publication lock across activation and required file writes.
         # Restore the previous selectors/readers if any publication fails;
         # the immutable candidate and its completion evidence remain reusable.
@@ -1295,11 +1392,15 @@ _ensure_runtime() {
             done
         fi
         local __dispatch_publication_root="$INSTALL_DIR"
+        _maintenance_preflight || { _unlock_publish; return 3; }
         _runtime_publication_begin_install || { _unlock_publish; return 1; }
-        if ! _runtime_publication_activate _versioned_activate; then
+        if _runtime_publication_activate _versioned_activate; then
+            :
+        else
+            local activation_rc=$?
             _runtime_publication_restore || _fail 'Activation publication rollback failed'
             _unlock_publish
-            return 1
+            return "$activation_rc"
         fi
         if _activation_superseded_now; then
             # This invocation's own build lost the cross-version activation
@@ -1345,10 +1446,12 @@ _ensure_runtime() {
             _unlock_publish
             return 0
         fi
-        if ! deploy_binstub || ! _write_manifest; then
+        local publication_rc=0
+        _require_actions runtime-activation && deploy_binstub && _write_manifest || publication_rc=$?
+        if [[ "$publication_rc" != 0 ]]; then
             _runtime_publication_restore || _fail 'Runtime publication rollback failed'
             _unlock_publish
-            return 1
+            return "$publication_rc"
         fi
         _runtime_publication_discard || { _unlock_publish; return 1; }
         # The Picker materializes templates only from its verified active
@@ -1357,6 +1460,7 @@ _ensure_runtime() {
         _unlock_publish
     else
         # Legacy (non-versioned) mode: no supersession concept, no lock.
+        _maintenance_preflight || return $?
         deploy_binstub || return 1
         _write_manifest || return 1
         _register_pivot
@@ -1370,7 +1474,8 @@ _ensure_runtime() {
     fi
 
     # Versioned: prune old slots, keeping current + previous-good + live-pinned.
-    if [[ "$VERSIONED_RUNTIME" == 1 && -z "${RETAINED_RUNTIME:-}" ]]; then
+    if [[ "$VERSIONED_RUNTIME" == 1 && -z "${RETAINED_RUNTIME:-}" &&
+          "${PRESERVE_SUPERVISORS:-0}" != 1 ]]; then
         _versioned_gc "$prev_version"
     fi
 
@@ -1461,6 +1566,7 @@ _wsl_windows_client() {
 }
 
 _install_service() {
+    _require_actions coordinator-replacement || return $?
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "Coordinator service skipped (--no-service): this host is a client only"
         return 0
@@ -1472,7 +1578,7 @@ _install_service() {
         if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
             systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
             systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
-            rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
+            rm -f "$UNIT_DIR/$SYSTEMD_UNIT" || return $?
             systemctl --user daemon-reload 2>/dev/null || true
             _ok "WSL guest (Windows-client opt-in): removed stale coordinator unit -- the Windows host owns the coordinator"
         else
@@ -1486,9 +1592,9 @@ _install_service() {
         _skip "systemd not available -- run 'agent-dispatch serve' manually if this host hosts a coordinator"
         return 0
     fi
-    mkdir -p "$UNIT_DIR"
+    mkdir -p "$UNIT_DIR" || return $?
     if [[ ! -f "$ENV_FILE" ]]; then
-        cat > "$ENV_FILE" << 'ENVEOF'
+        cat > "$ENV_FILE" << 'ENVEOF' || return $?
 # agent-dispatch coordinator service environment (edit + `systemctl --user restart agent-dispatch`)
 AGENT_DISPATCH_HOST=127.0.0.1
 # AGENT_DISPATCH_PORT=9847  # unset = OS-assigned dynamic port (Stage C), advertised via the rendezvous file; uncomment to pin
@@ -1507,13 +1613,13 @@ ENVEOF
         # the rendezvous file, so drop the old-default pin (discovery-capable clients
         # follow the dynamic port). Leave any operator-chosen custom port untouched.
         if grep -qE '^[[:space:]]*AGENT_DISPATCH_PORT[[:space:]]*=[[:space:]]*9847[[:space:]]*$' "$ENV_FILE"; then
-            sed -i -E 's|^[[:space:]]*AGENT_DISPATCH_PORT[[:space:]]*=[[:space:]]*9847[[:space:]]*$|# AGENT_DISPATCH_PORT=9847  # migrated (Stage C): unset = OS-assigned dynamic port advertised via the rendezvous file; uncomment to pin|' "$ENV_FILE"
+            sed -i -E 's|^[[:space:]]*AGENT_DISPATCH_PORT[[:space:]]*=[[:space:]]*9847[[:space:]]*$|# AGENT_DISPATCH_PORT=9847  # migrated (Stage C): unset = OS-assigned dynamic port advertised via the rendezvous file; uncomment to pin|' "$ENV_FILE" || return $?
             _ok "Service env: migrated stale AGENT_DISPATCH_PORT=9847 pin (Stage C) -> OS-assigned dynamic port"
         else
             _skip "Service env already exists: $ENV_FILE"
         fi
     fi
-    cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
+    cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF || return $?
 [Unit]
 Description=agent-dispatch -- portable agent task-queue coordinator
 After=network.target
@@ -1564,6 +1670,7 @@ EOF
 # supervisor is a SEPARATE unit -- deliberately left running so it outlives the
 # coordinator swap and re-adopts via the durable queue DB + routing table.
 _coordinator_cutover() {
+    _require_actions coordinator-replacement || return $?
     [[ "$NO_SERVICE" -eq 1 ]] && return 1
     command -v systemctl >/dev/null 2>&1 || return 1
     local py="$VENV_PYTHON"
@@ -1573,17 +1680,22 @@ _coordinator_cutover() {
     # /drain-capable). read_active_endpoint verifies a live listener too.
     "$py" -c 'import sys; from zdd.routing import read_active_endpoint; from agent_dispatch.config import routing_dir; sys.exit(0 if read_active_endpoint(routing_dir()) else 1)' 2>/dev/null || return 1
     _step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
-    local cutover_ok=0 output
+    local cutover_ok=0 output cutover_rc=0
     if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
         if output="$("$py" -m agent_dispatch _cutover --json)"; then
             if printf '%s' "$output" | "$py" -c 'import json, sys; result = json.load(sys.stdin); sys.exit(0 if isinstance(result, dict) and result.get("ok") is True else 1)'; then
                 cutover_ok=1
             fi
+        else
+            cutover_rc=$?
         fi
         [[ "$cutover_ok" -eq 1 ]] || _warn "Graceful cutover was not confirmed: $output"
     elif "$py" -m agent_dispatch _cutover >/dev/null 2>&1; then
         cutover_ok=1
+    else
+        cutover_rc=$?
     fi
+    [[ "$cutover_rc" -ne 3 ]] || return 3
     if [[ "$cutover_ok" -eq 1 ]]; then
         _ok 'Coordinator cut over to the new build (no in-flight claim dropped; supervisor/workers re-adopt via the queue DB + routing table)'
         return 0
@@ -1696,7 +1808,7 @@ _supervisor_profile_env_files() {
 
 _write_supervisor_default_env() {
     if [[ ! -f "$SUPERVISOR_ENV_FILE" ]]; then
-        cat > "$SUPERVISOR_ENV_FILE" << 'ENVEOF'
+        cat > "$SUPERVISOR_ENV_FILE" << 'ENVEOF' || return $?
 # agent-dispatch embody supervisor environment
 # (edit + `systemctl --user restart agent-dispatch-supervisor`)
 #
@@ -1765,7 +1877,7 @@ _write_supervisor_launcher() {
     # which primary/profile config is active. A defense-in-depth guard refuses
     # to run label-less (the install below won't enable it, but a hand-enable
     # must not embody everything).
-    cat > "$SUPERVISOR_LAUNCHER" << LAUNCHEOF
+    cat > "$SUPERVISOR_LAUNCHER" << LAUNCHEOF || return $?
 #!/usr/bin/env bash
 # agent-dispatch embody supervisor launcher -- GENERATED by install.sh (#2869).
 # Do not edit; edit supervisor.env or supervisors/<name>.env instead.
@@ -1875,7 +1987,7 @@ done
 
 exec "\$AGENT_RT_PY" -m agent_dispatch "\${args[@]}"
 LAUNCHEOF
-    chmod +x "$SUPERVISOR_LAUNCHER"
+    chmod +x "$SUPERVISOR_LAUNCHER" || return $?
 }
 
 _remove_supervisor_unit() {
@@ -1888,24 +2000,24 @@ _remove_supervisor_unit() {
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$unit" ]]; then
         _supervisor_action stop "$unit" "$env_file" "$reason"
         _supervisor_action disable "$unit" "$env_file" "$reason"
-        rm -f "$UNIT_DIR/$unit"
+        rm -f "$UNIT_DIR/$unit" || return $?
         systemctl --user daemon-reload 2>/dev/null || true
     elif [[ -f "$UNIT_DIR/$unit" ]]; then
-        rm -f "$UNIT_DIR/$unit"
+        rm -f "$UNIT_DIR/$unit" || return $?
     fi
 }
 
 _remove_all_supervisor_units() {
-    _remove_supervisor_unit "$SUPERVISOR_UNIT"
+    _remove_supervisor_unit "$SUPERVISOR_UNIT" || return $?
     local unit_path unit
     if [[ -d "$UNIT_DIR" ]]; then
         for unit_path in "$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service; do
             [[ -e "$unit_path" ]] || continue
             unit="${unit_path##*/}"
-            _remove_supervisor_unit "$unit"
+            _remove_supervisor_unit "$unit" || return $?
         done
     fi
-    rm -f "$SUPERVISOR_LAUNCHER"
+    rm -f "$SUPERVISOR_LAUNCHER" || return $?
 }
 
 _install_supervisor_unit() {
@@ -1923,7 +2035,7 @@ _install_supervisor_unit() {
         return 0
     fi
 
-    cat > "$UNIT_DIR/$unit" << EOF
+    cat > "$UNIT_DIR/$unit" << EOF || return $?
 [Unit]
 Description=agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)
 After=network.target $SYSTEMD_UNIT
@@ -1984,13 +2096,13 @@ EOF
 
 _install_supervisor_profiles() {
     local env_file name unit
-    mkdir -p "$SUPERVISOR_PROFILE_DIR"
+    mkdir -p "$SUPERVISOR_PROFILE_DIR" || return $?
     while IFS= read -r env_file; do
         [[ -n "$env_file" ]] || continue
         name="${env_file##*/}"
         name="${name%.env}"
         unit="$(_supervisor_unit_for_profile "$name")"
-        _install_supervisor_unit "$unit" "$env_file" "Embody supervisor profile '$name'"
+        _install_supervisor_unit "$unit" "$env_file" "Embody supervisor profile '$name'" || return $?
     done < <(_supervisor_profile_env_files)
 }
 
@@ -2004,7 +2116,7 @@ _reconcile_supervisor_profiles() {
         name="${name%.service}"
         env_file="$SUPERVISOR_PROFILE_DIR/$name.env"
         if ! _supervisor_profile_name_valid "$name" || [[ ! -f "$env_file" ]]; then
-            _remove_supervisor_unit "$unit" orphan-profile
+            _remove_supervisor_unit "$unit" orphan-profile || return $?
             _ok "Removed orphan supervisor profile unit: $unit"
         fi
     done
@@ -2021,7 +2133,7 @@ _retire_supervisor_profile_units() {
     for unit_path in "$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service; do
         [[ -e "$unit_path" ]] || continue
         unit="${unit_path##*/}"
-        _remove_supervisor_unit "$unit" master-profile-migration
+        _remove_supervisor_unit "$unit" master-profile-migration || return $?
         _ok "Retired per-profile unit (MODE=serve; the daemon runs it): $unit"
     done
 }
@@ -2100,10 +2212,11 @@ _status_supervisor_callback() {
 }
 
 _install_supervisor_service() {
+    _require_actions supervisor-reconcile || return $?
     SUPERVISOR_RECONCILE_FAILED=0
     if [[ "$NO_SUPERVISOR" -eq 1 ]]; then
         _supervisor_audit selection explicit-no-supervisor "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
-        _remove_all_supervisor_units
+        _remove_all_supervisor_units || return $?
         _skip "Embody supervisor skipped (--no-supervisor)"
         return 0
     fi
@@ -2114,7 +2227,7 @@ _install_supervisor_service() {
     # mode. Remove a stale unit if this host became client-only.
     if [[ "$NO_SERVICE" -eq 1 ]] || { _is_wsl && _wsl_windows_client; }; then
         _supervisor_audit selection client-only-policy "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
-        _remove_all_supervisor_units
+        _remove_all_supervisor_units || return $?
         _skip "Embody supervisor skipped (client-only / Windows-client WSL host)"
         return 0
     fi
@@ -2122,26 +2235,26 @@ _install_supervisor_service() {
         _skip "systemd not available -- run 'agent-dispatch supervise --all-repos --label <L>' manually"
         return 0
     fi
-    mkdir -p "$UNIT_DIR" "$SUPERVISOR_PROFILE_DIR"
+    mkdir -p "$UNIT_DIR" "$SUPERVISOR_PROFILE_DIR" || return $?
 
-    _write_supervisor_default_env
-    _write_supervisor_launcher
+    _write_supervisor_default_env || return $?
+    _write_supervisor_launcher || return $?
     _supervisor_audit service-reconcile configured-supervisor-pass "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE"
-    _install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" "Embody supervisor"
+    _install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" "Embody supervisor" || return $?
     if [[ "$(_supervisor_mode "$SUPERVISOR_ENV_FILE")" == "serve" ]]; then
         # MODE=serve: the master daemon runs the legacy profiles itself (via
         # --legacy-env), so the per-profile units are redundant and would
         # double-run -- retire them (their .env files stay; the daemon reads them).
         if systemctl --user is-enabled "$SUPERVISOR_UNIT" &>/dev/null \
             && systemctl --user is-active "$SUPERVISOR_UNIT" &>/dev/null; then
-            _retire_supervisor_profile_units
+            _retire_supervisor_profile_units || return $?
         else
             _supervisor_audit selection master-not-active "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
             _warn "Master supervisor is not enabled and active; preserving per-profile units"
         fi
     else
-        _install_supervisor_profiles
-        _reconcile_supervisor_profiles
+        _install_supervisor_profiles || return $?
+        _reconcile_supervisor_profiles || return $?
     fi
     local outcome=ok
     [[ "$SUPERVISOR_RECONCILE_FAILED" -eq 0 ]] || outcome=fail
@@ -2152,6 +2265,8 @@ _install_supervisor_service() {
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
+    _runtime_admission_preflight || return 1
+    _maintenance_preflight stamp || return $?
     _step 'agent-dispatch stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
     # Serialized under the SAME global activation lock _versioned_activate/
@@ -2258,6 +2373,7 @@ do_stamp() {
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         payload="$(_source_snapshot)" || { _unlock_stamp_binstub; return 1; }
     fi
+    _require_actions runtime-activation || { _unlock_stamp_binstub; return 3; }
     _runtime_publication_begin_install || { _unlock_stamp_binstub; return 1; }
     if ! {
         if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -2280,8 +2396,10 @@ do_stamp() {
 }
 
 do_install() {
+    _runtime_admission_preflight || return 1
+    _maintenance_preflight install || return $?
     _step 'agent-dispatch install'
-    _ensure_runtime || return 1
+    _ensure_runtime || return $?
     if _activation_superseded_now; then
         # A concurrent, newer install already activated -- either caught at
         # _ensure_runtime's own return, or only now via the LIVE re-check
@@ -2294,8 +2412,8 @@ do_install() {
         _skip 'agent-dispatch install (superseded by a newer concurrent build)'
         return 0
     fi
-    _install_service
-    _install_supervisor_service
+    _install_service || return $?
+    _install_supervisor_service || return $?
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
     _ok 'agent-dispatch install'
     echo '  Coordinator: systemctl --user status agent-dispatch'
@@ -2303,6 +2421,8 @@ do_install() {
 }
 
 do_update() {
+    _runtime_admission_preflight || return 1
+    _maintenance_preflight update || return $?
     _step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
@@ -2311,7 +2431,7 @@ do_update() {
     _write_update_marker
     trap '_lifecycle_finish "$?"; _clear_update_marker' EXIT
     _downgrade_guard
-    _ensure_runtime || return 1
+    _ensure_runtime || return $?
     if _activation_superseded_now; then
         # This invocation's own build lost the cross-version activation race
         # -- either caught immediately inside _ensure_runtime, or only
@@ -2424,19 +2544,34 @@ do_update() {
     # lock) cannot even start publishing until this invocation's ENTIRE
     # cutover/fallback action -- cutover attempt AND the unit reconciliation
     # that completes it -- has fully finished and released it.
+    local native_reconcile_rc=0
     if _coordinator_cutover; then
         _supervisor_audit coordinator-cutover coordinator-cutover-returned "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" ok
-        _install_service --no-restart
+        _install_service --no-restart || native_reconcile_rc=$?
     else
+        local cutover_rc=$?
+        if [[ "$cutover_rc" -eq 3 ]]; then
+            _fail 'Coordinator replacement inhibited after runtime publication; no restart fallback or supervisor reconciliation attempted.'
+            _unlock_cutover
+            return 3
+        fi
         if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
             _fail 'Required graceful cutover was not confirmed; runtime selection may already have changed. No restart or supervisor reconciliation attempted.'
             _unlock_cutover
             return 1
         fi
-        _install_service
+        _install_service || native_reconcile_rc=$?
     fi
-    _install_supervisor_service
+    if [[ "$native_reconcile_rc" == 0 && "${PRESERVE_SUPERVISORS:-0}" != 1 ]]; then
+        _install_supervisor_service || native_reconcile_rc=$?
+    elif [[ "$native_reconcile_rc" == 0 ]]; then
+        _skip 'Supervisor reconciliation and runtime collection explicitly preserved'
+    fi
     _unlock_cutover
+    if [[ "$native_reconcile_rc" != 0 ]]; then
+        _fail 'Native reconciliation did not complete; runtime or coordinator effects may already have committed. No further maintenance attempted.'
+        return "$native_reconcile_rc"
+    fi
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
     _ok 'agent-dispatch update'
 }
@@ -2531,56 +2666,102 @@ do_uninstall() {
     echo ''; echo '=== agent-dispatch uninstall ==='
     [[ "$DRY_RUN" -eq 1 ]] && echo '(dry run -- nothing will be changed)'
     echo ''
+    . "$SCRIPT_DIR/uninstall-runtime.sh"
+    _finite_runtime_uninstall --check || return 1
+    _dispatch_uninstall_preflight || return 1
     if command -v systemctl >/dev/null 2>&1; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
             echo "[dry-run] would stop supervisors + remove supervisor systemd units"
             [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]] && echo "[dry-run] would stop + disable + remove coordinator unit: $SYSTEMD_UNIT"
         else
-            _remove_all_supervisor_units
+            local unit_path
+            for unit_path in "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT_BASE"-*.service; do
+                [[ -f "$unit_path" ]] || continue
+                if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" ${unit_path##*/} "* ]]; then
+                    _remove_supervisor_unit "${unit_path##*/}" || return 1
+                else
+                    rm -f -- "$unit_path" || return 1
+                fi
+            done
             _ok "Embody supervisor services removed"
-            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
-            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
-            rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
+            if [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+                if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" $SYSTEMD_UNIT "* ]]; then
+                    systemctl --user stop "$SYSTEMD_UNIT" || return 1
+                    systemctl --user disable "$SYSTEMD_UNIT" || return 1
+                fi
+                rm -f "$UNIT_DIR/$SYSTEMD_UNIT" || return 1
+            fi
             systemctl --user daemon-reload 2>/dev/null || true
             _ok "Coordinator service removed"
         fi
     fi
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-        [[ -e "$STUB" || -e "$BOARD_STUB" ]] && echo "[dry-run] would remove binstubs: $STUB $BOARD_STUB"
-        [[ -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" ]] && \
-            echo "[dry-run] would remove pivot: $HOME/.agent-worktrees/pivots/agent-dispatch.json"
-    else
-        rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
-        rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
-    fi
+    [[ "$DRY_RUN" -eq 1 ]] || _finite_stop_owned || return 1
     if [[ "$PURGE" -eq 1 ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
             echo "[dry-run] would PURGE (config + DB): $INSTALL_DIR"
         else
-            rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"
+            _finite_runtime_uninstall --remove-runtime || return 1
+            remove_install_runtime_content "$INSTALL_DIR" || return 1
+            _ok "Runtime purged: $INSTALL_DIR (config + DB deleted; coordination retained)"
         fi
     else
-        # Versioned: the `.venv` link + the versions/ tree; else the real venv dir.
+        _remove_dispatch_runtime_code || return 1
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-                [[ -e "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
-                [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
-            else
-                [[ -d "$VENV_DIR" ]] && echo "[dry-run] would remove venv: $VENV_DIR"
-            fi
             echo "[dry-run] config + DB at $INSTALL_DIR would be kept (--purge to delete)"
         else
-            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-                [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-                [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-                [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
-            else
-                rm -rf "$VENV_DIR"
-            fi
             _ok "Venv removed (config + DB kept; --purge to delete)"
         fi
     fi
     [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
+    return 0
+}
+
+_dispatch_uninstall_preflight() {
+    local unit properties state
+    _dispatch_uninstall_loaded_units=()
+    for unit in "$UNIT_DIR/$SYSTEMD_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/${SUPERVISOR_UNIT%.service}-"*.service; do
+        [[ -e "$unit" || -L "$unit" ]] || continue
+        _finite_stop_tool check-unit --unit "$unit" || return 1
+        if command -v systemctl >/dev/null 2>&1; then
+            properties="$(systemctl --user show --all --no-pager --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory -- "${unit##*/}")" || return 1
+            state="$(printf '%s\n' "$properties" |
+                _finite_stop_tool check-effective-unit --unit "$unit")" || return 1
+            case "$state" in
+                loaded) _dispatch_uninstall_loaded_units+=("${unit##*/}") ;;
+                unloaded) ;;
+                *) _fail "Effective Dispatch service ownership was not admitted"; return 1 ;;
+            esac
+        else
+            _fail "Cannot verify effective Dispatch service ownership without systemctl"
+            return 1
+        fi
+    done
+    _finite_owned_pids >/dev/null
+}
+
+_remove_dispatch_runtime_code() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "[dry-run] would remove owned runtime code at: $INSTALL_DIR"
+        return 0
+    fi
+    _finite_runtime_uninstall --remove-runtime
+}
+
+_remove_dispatch_helper_files() {
+    local directory="$1" name ancestor="$1"
+    shift
+    while [[ "$ancestor" != "$INSTALL_DIR" ]]; do
+        [[ -d "$ancestor" && ! -L "$ancestor" ]] || { _fail "Refusing linked runtime helpers"; return 1; }
+        ancestor="${ancestor%/*}"
+        [[ -n "$ancestor" ]] || return 1
+    done
+    for name in "$@"; do
+        [[ -e "$directory/$name" || -L "$directory/$name" ]] || continue
+        [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || {
+            _fail "Refusing linked/non-file runtime helper"; return 1;
+        }
+    done
+    for name in "$@"; do rm -f -- "$directory/$name" || return 1; done
 }
 
 _lifecycle_emit() {
@@ -2614,6 +2795,7 @@ source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
 if [[ "$ACTION" == restore ]]; then
+    _maintenance_preflight update || exit $?
     restore_python="$(_bootstrap_python)" || exit 1
     # Recursion control only; the parent helper owns the real retention lease.
     if [[ -z "${_AGENT_DISPATCH_RESTORE_OWNER:-}" ]]; then
@@ -2637,6 +2819,9 @@ if [[ "$ACTION" == restore ]]; then
 fi
 _LIFECYCLE_ACTION=""
 case "$ACTION" in
+    install|update|provision|stamp) _runtime_admission_preflight || exit 1 ;;
+esac
+case "$ACTION" in
     install|provision) _LIFECYCLE_ACTION=install ;;
     update|start|stop) _LIFECYCLE_ACTION="$ACTION" ;;
 esac
@@ -2645,20 +2830,30 @@ if [[ -n "$_LIFECYCLE_ACTION" ]]; then
     _lifecycle_emit begin
 fi
 case "$ACTION" in
-    install|update|provision|stamp)
+    install|update|provision|stamp|prepare)
+        _maintenance_preflight || exit $?
         _initialize_source_runtime || exit 1
         _assert_source_runtime || exit 1
+        ;;
+esac
+case "$ACTION" in
+    install|update|provision)
+        if [[ "$PRESERVE_SUPERVISORS" != 1 ]]; then
+            . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+            reconcile_installer_instances "$SCRIPT_DIR"
+        fi
         ;;
 esac
 case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;
     provision) do_install ;;
+    prepare)   _ensure_runtime 1 ;;
     update)    do_update ;;
     start)     do_start ;;
     stop)      do_stop ;;
     status)    do_status ;;
     uninstall) do_uninstall ;;
-    *) _fail "Unknown action: $ACTION (use: install|stamp|provision|update|status|start|stop|uninstall)"; exit 2 ;;
+    *) _fail "Unknown action: $ACTION (use: install|stamp|prepare|provision|update|status|start|stop|uninstall)"; exit 2 ;;
 esac
 exit 0

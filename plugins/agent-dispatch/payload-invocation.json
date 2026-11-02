@@ -5,6 +5,7 @@
   "module": "agent_dispatch",
   "legacyRuntimeRoot": ".agent-dispatch",
   "installationContext": "required",
+  "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
   "purpose": "Coordinate queued agent work and task lifecycles",
   "installer": "install",

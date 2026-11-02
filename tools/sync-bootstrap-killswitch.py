@@ -18,7 +18,8 @@ FIRST lines can call it before running any reconcile logic -- see
 ``--check`` verifies two separate things, both required for the switch to
 actually work for a given plugin: (1) the vendored guard files exist and are
 byte-identical to canonical, and (2) each adopter's ``bootstrap-check.sh`` /
-``.ps1`` actually CALLS that guard. (2) exists because removing a call-site
+``.ps1`` actually CALLS that guard or is an exact inert compatibility body.
+(2) exists because removing a call-site
 block (accidentally, or in a future edit that doesn't touch the vendored
 guard file at all) would otherwise leave this check green while silently
 disabling the switch for that plugin -- the file being present and correct
@@ -52,6 +53,14 @@ CALL_SITE_MARKERS = {
     "bootstrap-check.sh": 'bash "$_bks_guard" check',
     "bootstrap-check.ps1": "& $_bksGuard check",
 }
+INERT_COMPATIBILITY_BODIES = {
+    "bootstrap-check.sh": ["printf '{}'", "exit 0"],
+    "bootstrap-check.ps1": [
+        "param([string]$BootstrapPython = '')",
+        "[Console]::Out.Write('{}')",
+        "exit 0",
+    ],
+}
 
 
 def _adopter_plugins() -> list[Path]:
@@ -67,7 +76,7 @@ def _sha(data: bytes) -> str:
 
 
 def _call_site_gaps(plugins: list[Path]) -> list[str]:
-    """Adopters whose bootstrap-check.sh/.ps1 does not call its vendored guard."""
+    """Non-inert bootstrap hooks that do not call their vendored guard."""
     gaps: list[str] = []
     for plugin in plugins:
         for hook_name, marker in CALL_SITE_MARKERS.items():
@@ -75,7 +84,12 @@ def _call_site_gaps(plugins: list[Path]) -> list[str]:
             if not hook.exists():
                 gaps.append(f"{hook.relative_to(REPO).as_posix()} (missing entirely)")
                 continue
-            if marker not in hook.read_text(encoding="utf-8", errors="replace"):
+            text = hook.read_text(encoding="utf-8", errors="replace")
+            commands = [
+                line.strip() for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            if marker not in text and commands != INERT_COMPATIBILITY_BODIES[hook_name]:
                 gaps.append(f"{hook.relative_to(REPO).as_posix()} (does not call its vendored guard)")
     return gaps
 
@@ -107,6 +121,16 @@ def main(argv: list[str] | None = None) -> int:
         for name in GUARD_NAMES
     ]
 
+    pretool = CANONICAL_DIR / "pretool_killswitch.py"
+    if not pretool.is_file():
+        print("canonical pretool-killswitch helper missing", file=sys.stderr)
+        return 1
+    pairs.extend((pretool.read_bytes(), REPO / target) for target in (
+        "plugins/agent-worktrees/scripts/pretool_killswitch.py",
+        "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
+        "plugins/agent-machines/src/agent_machines/pretool_killswitch.py",
+    ))
+
     drifted: list[str] = []
     written: list[str] = []
     for want_bytes, dest in pairs:
@@ -125,6 +149,14 @@ def main(argv: list[str] | None = None) -> int:
 
     scope = f"{len(plugins)} plugins"
     call_site_gaps = _call_site_gaps(plugins)
+    for entry, marker in (
+        ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
+        ("plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py", "switch.is_active()"),
+        ("plugins/agent-machines/src/agent_machines/__main__.py", "pretool_killswitch.register_parser(sub)"),
+    ):
+        source = REPO / entry
+        if not source.is_file() or marker not in source.read_text(encoding="utf-8"):
+            call_site_gaps.append(f"{entry} (does not call its vendored guard)")
     if args.check:
         ok = True
         if drifted:
@@ -156,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         if not ok:
             return 1
         print(f"bootstrap-killswitch guard files in sync across {scope}.")
-        print(f"All {len(plugins)} wired adopters call their guard.")
+        print(f"All {len(plugins)} adopters guard reconciliation or use inert compatibility hooks.")
         return 0
 
     if written:

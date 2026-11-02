@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
+import json
+import os
 from pathlib import Path
 import shlex
 import shutil
@@ -19,7 +21,7 @@ import pytest
 
 from agent_worktrees import repos, repository_bootstrap as bootstrap
 from test_repository_bootstrap import registry as registry
-from test_repository_setup import consumer, git, source as source
+from test_repository_setup import commit, consumer, git, source as source
 
 
 def _certificate(certfile: Path, keyfile: Path) -> None:
@@ -65,8 +67,9 @@ def _certificate(certfile: Path, keyfile: Path) -> None:
 
 
 @pytest.mark.timeout(240)
+@pytest.mark.parametrize("selection", ["default", "older", "missing", "blob"])
 def test_real_https_clone_credential_owner_and_repository_setup(
-    source: Path, registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    source: Path, registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str,
 ) -> None:
     consumer(source, """
 if ($r.mode -eq 'apply') { Set-Content -LiteralPath $state -Value 'done' }
@@ -74,6 +77,13 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
 [IO.File]::WriteAllText($r.result_file,
     ('{"version":1,"status":"' + $s + '","message":"owner verified"}'))
 """)
+    approved = git(source, "rev-parse", "HEAD")
+    (source / "newer.txt").write_text("remote HEAD is newer than the approved commit", encoding="utf-8")
+    commit(source)
+    requested = {
+        "default": None, "older": approved, "missing": "0" * 40,
+        "blob": git(source, "rev-parse", "HEAD:setup.ps1"),
+    }[selection]
     web = tmp_path / "web"
     web.mkdir()
     bare = web / "sample.git"
@@ -126,14 +136,58 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     url = f"https://localhost:{server.server_port}/sample.git"
     target = tmp_path / "acquired source"
     before = config.read_bytes()
+    registry_before = registry.read_bytes()
+    commands: list[list[str]] = []
+    original_run = subprocess.run
+
+    def run(argv, **kwargs):
+        commands.append(argv)
+        return original_run(argv, **kwargs)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", run)
     thread.start()
     try:
-        assert bootstrap.command([
-            url, "--target", str(target), "--apply", "--trust-repository-setup",
-        ]) == 0
+        if selection == "older":
+            root = Path(__file__).resolve().parents[3]
+            driver = root / "worktree-manager" / "tests" / "assets" / "repository-setup-driver.py"
+            log = tmp_path / "core-events.json"
+            progress = tmp_path / "consumer-progress.txt"
+            with progress.open("w", encoding="utf-8") as output:
+                try:
+                    result = subprocess.run(
+                        [sys.executable, str(driver), str(root / "worktree-manager" / "src"),
+                         url, str(target), str(log), approved],
+                        stdout=output, stderr=subprocess.STDOUT, text=True, timeout=180,
+                        env=dict(os.environ), **no_window_kwargs(),
+                    )
+                except subprocess.TimeoutExpired:
+                    pytest.fail("Pinned consumer timed out:\n" + progress.read_text(encoding="utf-8"))
+            detail = progress.read_text(encoding="utf-8")
+            assert result.returncode == 0, detail
+            assert "Repository setup: ready" in detail
+            assert json.loads(log.read_text()) == ["prerequisites", "core"]
+        else:
+            status = bootstrap.command([
+                url, "--target", str(target), "--apply", "--trust-repository-setup",
+                *(["--commit", requested] if requested else []),
+            ])
+            if selection in ("missing", "blob"):
+                assert status == 1
+                assert registry.read_bytes() == registry_before
+                assert target.is_dir() and (target / ".git").is_dir()
+                assert not (target / "setup.ps1").exists()
+                assert not (tmp_path / "calls.txt").exists()
+                assert not any("checkout" in argv or "fetch" in argv for argv in commands)
+                assert any("clone" in argv and "--no-checkout" in argv for argv in commands)
+                assert config.read_bytes() == before
+                return
+            assert status == 0
         assert observed == {"challenge": True, "authenticated": True}
         assert helper.with_suffix(".called").read_text() == "get"
-        assert git(target, "rev-parse", "HEAD") == git(source, "rev-parse", "HEAD")
+        assert git(target, "rev-parse", "HEAD") == (requested or git(source, "rev-parse", "HEAD"))
+        assert (target / "newer.txt").exists() == (selection == "default")
+        if selection == "older":
+            assert git(target, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
         registered = repos.read_registry(strict=True).repos["sample"]
         assert registered.local_path() == str(target)
         assert registered.remote == url

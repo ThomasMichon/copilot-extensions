@@ -89,7 +89,8 @@ def _load_yaml_mapping(path: Path) -> tuple[str, dict[str, Any] | None]:
 
 
 def requires_external(root: Path) -> tuple[str, bool]:
-    path = root / WORKTREES_CONFIG_RELATIVE
+    canonical = root / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    path = canonical if os.path.lexists(canonical) else root / WORKTREES_CONFIG_RELATIVE
     state, safe_path = _safe_file(path, root)
     if state == "absent":
         return "ready", False

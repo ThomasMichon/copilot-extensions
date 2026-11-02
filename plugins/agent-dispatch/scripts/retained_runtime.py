@@ -146,8 +146,10 @@ def validate(root: Path, record: dict[str, Any], manager: Any) -> tuple[str, Pat
 
 def restore(
     root: Path, record_path: Path, record: dict[str, Any], manager: Any,
-    shell: str, executable: str,
+    shell: str, executable: str, record_bytes: bytes | None = None,
 ) -> int:
+    if record_bytes is not None and read_object(record_bytes.decode("utf-8")) != record:
+        raise ValueError("Retained restoration bytes do not match the retained assembly")
     version, _payload, _slot = validate(root, record, manager)
     with manager.retention_lease(root, version), tempfile.TemporaryDirectory(
         prefix="dispatch-retained-runtime-",
@@ -156,7 +158,8 @@ def restore(
         # Pin the input as well as its slot: a caller replacing the supplied
         # record must not redirect the child to an unleased generation.
         record_path = Path(workspace) / "retained-runtime.json"
-        record_path.write_text(json.dumps(record), encoding="utf-8")
+        record_bytes = record_bytes if record_bytes is not None else json.dumps(record).encode("utf-8")
+        record_path.write_bytes(record_bytes)
         installer = SCRIPT_DIR / f"install.{shell}"
         command = (
             [executable, str(installer), "restore", "--retained-runtime", str(record_path),
@@ -165,6 +168,8 @@ def restore(
             [executable, "-NoProfile", "-NonInteractive", "-File", str(installer),
              "-Action", "restore", "-RetainedRuntime", str(record_path), "-InstallDir", str(root)]
         )
+        if shell == "ps1":
+            command.extend(["-RetainedRuntimeSha256", hashlib.sha256(record_bytes).hexdigest()])
         env = dict(os.environ, **{OWNER_ENV: str(os.getpid())})
         # This is a synchronous installer child, not a detached service. The
         # installer's existing bounded engine owns its lifecycle and diagnostics.
@@ -179,6 +184,7 @@ def main() -> int:
     parser.add_argument("action", choices=("capture", "inspect", "manifest", "restore"))
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--record", type=Path)
+    parser.add_argument("--expected-record-sha256")
     parser.add_argument("--shell", choices=("sh", "ps1"))
     parser.add_argument("--shell-executable")
     args = parser.parse_args()
@@ -190,7 +196,13 @@ def main() -> int:
         if args.record is None:
             raise ValueError("--record is required")
         record_path = args.record.absolute()
-        record = read_object(record_path.read_text(encoding="utf-8"))
+        with record_path.open("rb") as stream:
+            record_bytes = stream.read(1048577)
+        if len(record_bytes) > 1048576:
+            raise ValueError("Retained restoration record is over budget")
+        if args.expected_record_sha256 and hashlib.sha256(record_bytes).hexdigest() != args.expected_record_sha256:
+            raise ValueError("Retained restoration record changed after admission")
+        record = read_object(record_bytes.decode("utf-8"))
         version, payload, slot = validate(args.root, record, manager)
         if args.action == "inspect":
             print(json.dumps({"version": version, "payload": str(payload), "slot": str(slot)}))
@@ -199,7 +211,9 @@ def main() -> int:
         else:
             if not args.shell or not args.shell_executable:
                 raise ValueError("Restoration requires the controller's shell executable")
-            return restore(args.root, record_path, record, manager, args.shell, args.shell_executable)
+            return restore(
+                args.root, record_path, record, manager, args.shell, args.shell_executable, record_bytes,
+            )
         return 0
     except (OSError, ValueError, RuntimeError) as error:
         print(f"Retained-runtime restoration refused: {error}", file=sys.stderr)

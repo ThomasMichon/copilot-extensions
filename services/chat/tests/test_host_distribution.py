@@ -27,6 +27,19 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     assert core_refusal.returncode == 1 and core_refusal.stdout == ""
     assert json.loads(core_refusal.stderr) == {"error": "host_service_dependencies_missing"}
+    assert json.loads(run([
+        str(installed_chat.core_python), "-I", "-c",
+        "import importlib.util,json,sys; "
+        "from agent_chat_service import hosting; "
+        "assert importlib.util.find_spec('agent_procutil') is None; "
+        "assert not any(name == 'agent_procutil' or name.startswith('agent_procutil.') "
+        "for name in sys.modules); "
+        "config=json.loads(sys.argv[1]); "
+        "\ntry: hosting.HostedChat(config)"
+        "\nexcept hosting.HostError as error: print(json.dumps({'error':str(error)}))"
+        "\nelse: raise AssertionError('core-only host accepted missing service dependencies')",
+        json.dumps(config),
+    ], cwd=tmp_path)) == {"error": "host_service_dependencies_missing"}
     assert not Path(config["data_dir"]).exists()
     assert all(not (installed_chat.root / name).exists() for name in (
         "source", "helper-source", "lease-source", "endpoint-source",
@@ -37,10 +50,11 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
         str(interpreter), "-I", "-c",
         "import importlib.util,json,sys; from pathlib import Path; "
         "import agent_chat_service.hosting as host; import single_instance_lease; "
+        "import agent_procutil; import agent_procutil.daemon_instances; "
         "import endpoint_rendezvous; "
         "assert all(Path(m.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()) "
-        "for m in (host,single_instance_lease,endpoint_rendezvous)); "
-        "assert importlib.util.find_spec('agent_procutil') is None; "
+        "for m in (host,single_instance_lease,endpoint_rendezvous,"
+        "agent_procutil,agent_procutil.daemon_instances)); "
         "print(json.dumps({'installed':True}))", str(target),
     ], cwd=tmp_path))["installed"]
     run_dir = Path(config["data_dir"]) / "run"

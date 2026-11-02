@@ -7,6 +7,27 @@ from pathlib import Path
 from . import gateway_authorization, gateway_provider
 
 
+def validate_consumer_state(
+    state_dir: Path, *, config_d: Path, ssh_config: Path, authorization_dir: Path | None,
+) -> None:
+    """Keep a consumer's private state outside every directory owned by these writers."""
+    from . import gateway_profile, ssh_profile
+
+    state = state_dir.resolve()
+    destinations = {
+        config_d, ssh_config,
+        config_d.parent / gateway_profile._SOURCE_DIR,
+        config_d.parent / ssh_profile._LOCK_DIR_NAME,
+        ssh_config.parent / ssh_profile._LOCK_DIR_NAME,
+    }
+    if authorization_dir is not None:
+        destinations.add(authorization_dir)
+    for destination in destinations:
+        selected = destination.resolve()
+        if selected.is_relative_to(state) or state.is_relative_to(selected):
+            raise ValueError("SSH consumer requires a dedicated state directory outside local writer scopes")
+
+
 def apply_update(
     update, *, policy_path: Path, machine: str, environment: str,
     gateway: str, controller: str, identity_file: Path, public_key_file: Path,

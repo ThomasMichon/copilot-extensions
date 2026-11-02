@@ -24,6 +24,10 @@ worktree-resolve/``spawn_local`` path and the frontend reattach index is Phase 2
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import (
+    DaemonInstanceSpec, daemon_entrypoint, spawn_instance,
+)
+
 import argparse
 import asyncio
 import json
@@ -52,7 +56,7 @@ from .host import SessionHost
 from .osutil import child_preexec
 
 if TYPE_CHECKING:
-    from ..acquisition_launch_owner import AcquisitionLaunchOwner
+    from ..local_launch_owner import LocalLaunchOwner
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
@@ -218,7 +222,7 @@ def launch_session_host(
     host_version: str = "",
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
-    acquisition_launch: AcquisitionLaunchOwner | None = None,
+    acquisition_launch: LocalLaunchOwner | None = None,
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -227,11 +231,17 @@ def launch_session_host(
     reattach endpoint and writes a ``pid``/``child_pid``/``port`` state file,
     which this call waits for. The child inherits ``env`` (so worktree/plan env
     vars reach copilot). Raises ``TimeoutError`` if the host never reports ready.
+    ``state_dir`` is lexically anchored to the frontend's cwd before the host
+    changes cwd; filesystem links are not dereferenced.
 
     ``nonce`` (optional) is the connect-auth token: it is handed to the host
     process **via its environment** (not the command line, so it does not leak
     to ``ps``/Task Manager) and the host requires a matching nonce on ATTACH.
     The copilot child never sees it -- ``run_host`` strips it before spawn.
+
+    An explicit original local owner disables autonomous timeout retirement.
+    Its custody cannot expire into an ordinary resumable replacement; STATUS/
+    DETACH retain their custody predicate and explicit retirement is separate.
 
     The host process's own combined stdout/stderr is drained into a small,
     bounded in-memory tail (:class:`_CrashTailCapture`) during bootstrap: if
@@ -243,7 +253,10 @@ def launch_session_host(
     (``_detach_stdio_from_frontend``), so output after that point is never
     coupled to this frontend process's lifetime.
     """
-    sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
+    sd = (
+        Path(os.path.abspath(state_dir))
+        if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
+    )
     sd.mkdir(parents=True, exist_ok=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
 
@@ -256,8 +269,9 @@ def launch_session_host(
         host_argv += ["--host-version", host_version]
     if cwd:
         host_argv += ["--cwd", cwd]
-    host_argv += ["--unexpected-reap-seconds", str(unexpected_reap_seconds)]
-    host_argv += ["--active-reap-seconds", str(active_reap_seconds)]
+    retained_host = acquisition_launch is not None
+    host_argv += ["--unexpected-reap-seconds", str(0.0 if retained_host else unexpected_reap_seconds)]
+    host_argv += ["--active-reap-seconds", str(0.0 if retained_host else active_reap_seconds)]
     host_argv += ["--", *child_argv]
 
     child_env = os.environ.copy()
@@ -268,17 +282,24 @@ def launch_session_host(
     child_env.pop(_ACQUISITION_ENV, None)
     if acquisition_launch is not None:
         from ..acquisition_launch_owner import AcquisitionLaunchOwner
+        from ..creation_launch_owner import CreationLaunchOwner
         from ..runtime_custody import RuntimeCustodyError
 
-        if type(acquisition_launch) is not AcquisitionLaunchOwner or session_id != acquisition_launch.session_id:
-            raise RuntimeCustodyError("Local Host launch requires its original acquisition owner")
+        if (
+            type(acquisition_launch) not in (AcquisitionLaunchOwner, CreationLaunchOwner)
+            or session_id != acquisition_launch.session_id
+        ):
+            raise RuntimeCustodyError("Local Host launch requires its original local owner")
         child_env[_ACQUISITION_ENV] = acquisition_launch.child_context(child_argv, cwd)
 
     spawn_options = host_spawn_kwargs()
     if acquisition_launch is not None:
         acquisition_launch.begin_host()
-    proc = subprocess.Popen(
+    proc = spawn_instance(
         host_argv,
+        instance=DaemonInstanceSpec(
+            "agent-bridge-session-host", sd, Path(__file__).resolve(),
+        ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -286,6 +307,8 @@ def launch_session_host(
         cwd=cwd or None,
         **spawn_options,
     )
+    if acquisition_launch is not None:
+        acquisition_launch.retain_process(proc, str(state_file), nonce)
     crash_tail = _CrashTailCapture(proc.stdout)
     expected_identity: str | None = None
     if sys.platform != "win32" and not contained_test_mode():
@@ -338,6 +361,10 @@ def launch_session_host(
     # waiting on it rather than leaking a hung process (and anything it
     # already spawned), an unbounded-lifetime daemon thread, and its pipe
     # file descriptor.
+    if acquisition_launch is not None:
+        raise TimeoutError(
+            f"original session host readiness is unknown after {ready_timeout}s; retaining custody"
+        )
     _kill_host_process_tree(proc, expected_identity)
     try:
         proc.wait(timeout=5.0)
@@ -441,7 +468,7 @@ async def _spawn_child(
     spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
     admission = child_env.pop(_ACQUISITION_ENV, None)
     if admission is not None:
-        from ..acquisition_host_admission import require_child_admission
+        from ..local_host_admission import require_child_admission
 
         require_child_admission(
             admission, cwd=cwd or os.getcwd(),
@@ -461,6 +488,7 @@ async def _spawn_child(
     )
 
 
+@daemon_entrypoint("agent-bridge-session-host", source=__file__, purpose="production")
 async def run_host(
     child_argv: list[str],
     *,
@@ -495,7 +523,7 @@ async def run_host(
     admission = (env or {}).get(_ACQUISITION_ENV) or os.environ.get(_ACQUISITION_ENV)
     before_exec = None
     if admission is not None:
-        from ..acquisition_host_admission import require_child_admission
+        from ..local_host_admission import require_child_admission
 
         def before_exec() -> None:
             require_child_admission(admission, cwd=cwd or os.getcwd(), session_id=session_id, argv=child_argv)

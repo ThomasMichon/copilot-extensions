@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover - direct-script fallback
 
 def command_argv() -> list[str]:
     """Run the bundled fake engine without depending on ambient PYTHONPATH."""
-    return [sys.executable, str(Path(__file__).resolve())]
+    return [sys.executable, "-B", str(Path(__file__).resolve())]
 
 
 def main(argv: list[str] | None = None) -> int:

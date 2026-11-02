@@ -112,12 +112,19 @@ not a fence for resources shared by different journals or external executors.
 ## Noncooperative effects and uncertainty
 
 `accept_named_external(intent, resource=...)` reserves the fixed
-`runner.converge` operation in the existing canonical node journal. Acceptance
+`runner.converge` or `manager.converge` operation in the existing canonical node journal. Acceptance
 and the resource/operation binding commit together. A different operation can
 replace the retained binding only after an attributable terminal outcome and
 with a strictly higher generation. Accepted and UNKNOWN responsibilities do
 not expire or transfer. Exact repeats require the still-held binding; earlier
 terminal operations cannot reacquire a successor's resource.
+
+`inspect_named_external(resource=...)` reads that exact resource's currently
+held receipt without relying on a separate attempt publication. The same
+journal identity, original operation scope and receipt correlation still
+validate; a corrupt owner refuses rather than appearing absent. This is a
+read-only status seam, not admission, state reconstruction or permission to
+replay an effect. It adds no schema or second ownership store.
 
 The v4 journal migration adds this separate retained `external_owners` table;
 it does not alter cooperative allocation release/tombstone semantics.

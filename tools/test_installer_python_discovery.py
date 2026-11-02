@@ -105,6 +105,19 @@ function Invoke-Hidden {{
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_native_streaming_preserves_both_streams_and_failure_status(tmp_path, host):
+    code = "import sys;sys.stdout.write('native-out');sys.stderr.write('native-error');sys.exit(23)"
+    result = _run(host, f"""
+Invoke-Hidden -FilePath {_quote(sys.executable)} -StreamOutput `
+    -ArgList @('-I', '-c', {_quote(code)})
+exit $LASTEXITCODE
+""", tmp_path)
+    assert result.returncode == 23
+    assert result.stdout == "native-out"
+    assert result.stderr == "native-error"
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
 def test_bridge_reuses_signed_selection_without_more_launcher_children(tmp_path, host):
     candidate = tmp_path / "signed-python.exe"
     candidate.write_bytes(b"signature-fixture")

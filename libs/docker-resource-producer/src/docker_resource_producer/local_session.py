@@ -10,11 +10,11 @@ import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from .client import _json
-from .http_stream import MAX_BODY, read_response
+from .client import _json as _json
+from .http_stream import MAX_BODY, read_response as read_response
 from .models import Endpoint, VerificationError
 
 _MAX_WIRE = MAX_BODY + 128 * 1024
@@ -65,12 +65,12 @@ class _ResponseReader(io.BufferedReader):
         super().__init__(raw)
         self.consumed = 0
 
-    def read(self, size: int = -1) -> bytes:
+    def read(self, size: int | None = -1) -> bytes:
         value = super().read(size)
         self.consumed += len(value)
         return value
 
-    def readline(self, size: int = -1) -> bytes:
+    def readline(self, size: int | None = -1) -> bytes:
         value = super().readline(size)
         self.consumed += len(value)
         return value
@@ -101,7 +101,7 @@ class LocalDaemonSession:
         admitted = False
         try:
             before = self._socket_identity()
-            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            connection = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
             self.connection = connection
             self._set_deadline()
             connection.connect(str(self.path))
@@ -122,9 +122,10 @@ class LocalDaemonSession:
 
     def _socket_identity(self) -> tuple[tuple[int, int], ...]:
         identities: list[tuple[int, int]] = []
+        getuid: Callable[[], int] = getattr(os, "getuid")
         for path in [*reversed(self.path.parents), self.path]:
             metadata = path.lstat()
-            if stat.S_ISLNK(metadata.st_mode) or metadata.st_uid not in {0, os.getuid()}:
+            if stat.S_ISLNK(metadata.st_mode) or metadata.st_uid not in {0, getuid()}:
                 raise VerificationError("Daemon socket route has a link or foreign owner")
             if path != self.path:
                 sticky_root = metadata.st_uid == 0 and metadata.st_mode & stat.S_ISVTX

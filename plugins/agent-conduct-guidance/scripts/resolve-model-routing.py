@@ -6,12 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import stat
 import sys
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 from typing import Any
-
-from budget_routing import AdviceError, compose, instant
 
 SCHEMA = "copilot-extensions.model-routing"
 VERSION = 1
@@ -95,8 +94,6 @@ def _parser() -> argparse.ArgumentParser:
         help="ISO date used for evidence-expiry checks; defaults to today.",
     )
     parser.add_argument("--operator-model", help="Explicit demonstrated eligible model choice.")
-    parser.add_argument("--budget-posture", type=Path, help="Optional owner-issued posture JSON.")
-    parser.add_argument("--budget-at", help="RFC 3339 advice evaluation instant; defaults to now.")
     return parser
 
 
@@ -353,14 +350,26 @@ def _layer(
     allowed: bool,
     diagnostics: list[str],
 ) -> tuple[str, dict[str, list[dict[str, object]]]]:
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return "missing", {}
     if not allowed:
         diagnostics.append(f"{kind} config ignored because the repository is untrusted")
         return "untrusted", {}
     try:
+        root = path.parents[1] if kind == "operator" else path.parents[2]
+        current = root
+        for part in path.relative_to(root).parts:
+            current = current / part
+            metadata = current.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or (
+                getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise ConfigError("configuration traverses a link or reparse point")
+        if not path.resolve().is_relative_to(root.resolve()):
+            raise ConfigError("configuration escapes its source root")
         return "loaded", _load(path)
-    except ConfigError as exc:
+    except (ConfigError, OSError) as exc:
         diagnostics.append(f"{kind} config ignored: {exc}")
         return "invalid", {}
 
@@ -544,14 +553,21 @@ def main() -> int:
             "repository config suppressed because operator config is invalid"
         )
         repository = {}
+    from model_configuration import compose_routing
+
+    purposes, extra_sources, provenance = compose_routing(
+        repo, home, repository, operator, operator_status, _layer, _repo_is_trusted, diagnostics, _merge,
+    )
     result = {
         "schema": SCHEMA,
         "version": VERSION,
         "sources": {
             "repository": repo_status,
             "operator": operator_status,
+            **extra_sources,
         },
-        "purposes": _merge(repository, operator),
+        "purposes": _merge({}, purposes),
+        "provenance": provenance,
         "diagnostics": diagnostics,
     }
     selection_requested = any(
@@ -565,8 +581,6 @@ def main() -> int:
             args.trial_id,
             args.as_of,
             args.operator_model,
-            args.budget_posture,
-            args.budget_at,
         )
     ) or bool(args.available_model or args.constraint)
     if selection_requested:
@@ -582,8 +596,6 @@ def main() -> int:
             raise SystemExit("--trial-model requires a non-empty --trial-id")
         if args.operator_model is not None and args.trial_model is not None:
             raise SystemExit("--operator-model and --trial-model are mutually exclusive")
-        if args.budget_at is not None and args.budget_posture is None:
-            raise SystemExit("--budget-at requires --budget-posture")
         trial_id = args.trial_id.strip() if args.trial_id else None
         try:
             as_of = _selection_date(args.as_of)
@@ -602,18 +614,6 @@ def main() -> int:
             as_of=as_of,
             operator_model=args.operator_model,
         )
-        if args.budget_posture is not None:
-            try:
-                budget_at = (
-                    instant(args.budget_at) if args.budget_at is not None
-                    else datetime.now(timezone.utc)
-                )
-            except AdviceError as exc:
-                raise SystemExit(str(exc)) from exc
-            advice, diagnostic = compose(args.budget_posture, result["decision"], budget_at)
-            result["decision"]["budgetAdvice"] = advice
-            if diagnostic is not None:
-                diagnostics.append(diagnostic)
     print(json.dumps(result, indent=2, sort_keys=True))
     for diagnostic in diagnostics:
         print(f"[agent-conduct-guidance] {diagnostic}", file=sys.stderr)

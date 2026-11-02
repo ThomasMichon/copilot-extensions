@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             sources = (
                 discover_enabled_sources(
-                    root, require_trust=True,
+                    root, require_trust=True, runtime=True,
                     agent_worktrees_command=args.agent_worktrees_path,
                 ) if args.from_settings else None
             )
@@ -137,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             root,
             installed_root=installed_root,
             require_trust=args.operation == "render-local-cache",
+            runtime=args.operation == "render-local-cache",
             agent_worktrees_command=args.agent_worktrees_path,
         )
 

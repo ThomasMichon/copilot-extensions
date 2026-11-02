@@ -78,6 +78,7 @@ const CONFIG_DIR = process.env.AGENT_BRIDGE_CONFIG_DIR
 // --- State ---
 const state = {
   sessionId: process.env.SESSION_ID || null,
+  nativeSessionId: process.env.SESSION_ID || null,
   registered: false,
   base: null, // resolved bridge base url (http://127.0.0.1:PORT)
   token: null, // bearer token
@@ -308,7 +309,8 @@ async function pollInbox() {
     await drainInbox(sid, {
       getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight,
       mainTurn: state.mainTurn, log: extLog,
-      pluginReadiness: true, isCurrent: () => state.registered && state.sessionId === sid,
+      pluginReadiness: true, isCurrent: () => state.registered && state.sessionId === sid
+        && state.nativeSessionId === sid,
     });
   } finally {
     state.delivering = false;

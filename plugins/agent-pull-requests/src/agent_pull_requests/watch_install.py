@@ -184,10 +184,20 @@ def main(argv=None) -> int:
     parser.add_argument("--payload-root", type=Path, required=True)
     parser.add_argument("--snapshot-id", required=True)
     parser.add_argument("--runtime-version", required=True)
+    parser.add_argument("--expected-namespace-generation", type=int)
+    parser.add_argument("--expected-install-generation", type=int)
     args = parser.parse_args(argv)
     try:
         deadline = time.monotonic() + 300.0
         target = invocation(args.context, args.payload_root, args.snapshot_id, args.runtime_version)
+        expected = (args.expected_namespace_generation, args.expected_install_generation)
+        if any(value is not None for value in expected):
+            if any(value is None or value < 1 for value in expected):
+                raise ValueError("Activation requires both admitted receipt generations")
+            if expected != (
+                target.installation.namespace_generation, target.installation.install_generation,
+            ):
+                raise PermissionError("Installation receipt generation changed before activation")
         print(json.dumps(_activate_until(target, deadline)))
     except (OSError, ValueError, RuntimeError) as error:
         print(f"Watch activation refused: {error}", file=sys.stderr)

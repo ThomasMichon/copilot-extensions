@@ -28,6 +28,19 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class WorkerAdmissionInhibited(TaskError):
+    """A retryable action denial, never a failed or absent task."""
+
+    def __init__(self) -> None:
+        super().__init__("worker-admission is inhibited; retry after the action is cleared")
+
+    def detail(self) -> dict[str, object]:
+        return {
+            "code": "action_inhibited", "action": "worker-admission",
+            "retryable": True, "message": str(self),
+        }
+
+
 class ExclusiveKeyBusyError(TaskError):
     """Reacquiring ``exclusive_key`` collided with an active sibling -- retry
     later, not a hard failure (same discipline as ``SpawnState.DEFERRED``)."""
@@ -57,7 +70,8 @@ class Status:
     #: New liveness-cap exhaustion resolves to ``ABANDONED``.
     DEAD_LETTER = "dead_letter"
 
-    #: States a worker actively holds; recoverable by liveness GC (owner-gone).
+    #: Active worker states, including a pre-worker allocator claim. Owner-gone
+    #: GC applies only once an actual worker owns an allocator-placed claim.
     HELD = frozenset({CLAIMED, STARTED})
     #: Non-terminal states that retain an owner. Suspended tasks are deliberately
     #: excluded from HELD because they have no active lease or embodiment.
@@ -236,6 +250,7 @@ class SpawnReservation:
     inherited_worktree: str | None = None
     worktree_ownership: str | None = None
     creating_host: str | None = None
+    execution_machine: str | None = None
     driver: str | None = None
     agent_info: dict | None = None
     allocation_project: str | None = None
@@ -245,6 +260,7 @@ class SpawnReservation:
     allocation_reservation_key: str | None = None
     conversation_retired: bool = False
     release_requested: bool = False
+    native_release_pending: bool = False
     release_disposition: str | None = None
     exclusive_released: bool = False
     detail: str | None = None
@@ -274,6 +290,7 @@ class SpawnReservation:
             inherited_worktree=row["inherited_worktree"],
             worktree_ownership=row["worktree_ownership"],
             creating_host=row["creating_host"],
+            execution_machine=row["execution_machine"] if "execution_machine" in row.keys() else None,
             driver=row["driver"],
             agent_info=json.loads(row["agent_info"]) if "agent_info" in row.keys() and row["agent_info"] else None,
             allocation_project=row["allocation_project"] if "allocation_project" in row.keys() else None,
@@ -285,6 +302,8 @@ class SpawnReservation:
             conversation_retired=bool(row["conversation_retired"])
             if "conversation_retired" in row.keys() else False,
             release_requested=bool(row["release_requested"]),
+            native_release_pending=bool(row["native_release_pending"])
+            if "native_release_pending" in row.keys() else False,
             release_disposition=row["release_disposition"],
             exclusive_released=bool(row["exclusive_released"]),
             detail=row["detail"],

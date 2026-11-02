@@ -253,7 +253,7 @@ def test_only_the_owner_that_won_the_machine_logs_its_lifecycle(monkeypatch, cap
     ran: list[str] = []
     monkeypatch.setattr(owner_beacon, "_START_HOOKS", [])
     owner_beacon.on_owner_start(lambda: ran.append("opened log"))
-    monkeypatch.setattr(owner, "claim_owner_singleton", lambda _interval: False)
+    monkeypatch.setattr(owner, "claim_owner_singleton", lambda _interval, **_kwargs: False)
     with caplog.at_level(logging.INFO, logger="agent-codespaces"):
         asyncio.run(owner.run_owner_daemon(SimpleNamespace(), interval=15.0))
     lost = [r.getMessage() for r in caplog.records]

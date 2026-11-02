@@ -342,10 +342,21 @@ inline, so agents never hand-switch:
 - **gh/PR ops** (`create-pr`, `pr-merge`, `pr-ready`, `pr-status`, `pr-watch`,
   `pr-complete`, `pr-nudge`, label/GraphQL): the resolved account mints a token
   (`gh auth token --user <account>` → `GH_TOKEN`); an explicit
-  `pr.token_command`/`pr.token_env` still wins. No global switch.
+  `pr.token_command`/`pr.token_env` still wins. Account-token lookup is bounded
+  at 60 seconds. If an explicit repository `account:` or `account_map` choice
+  cannot supply a credential, execution refuses with the selected login;
+  it never substitutes an inherited token or another active account. Check
+  that login's authentication/credential store before retrying. Unconfigured
+  derived-owner hints retain legacy ambient behavior, and the existing
+  same-active-account Git/PR path remains unchanged. Identity and fallback
+  policy are selected from one registry snapshot before credential lookup;
+  removing a pin during that lookup cannot authorize an ambient retry.
+  Configuration changes apply to the next operation. No global switch.
 - **git push/fetch**: the account credential is injected per-invocation via
-  `http.extraheader` (this tool's own commands only), with a plain-push
-  retry fallback. Registration additionally **persists** a repo-local
+  `http.extraheader` (this tool's own commands only). A rejected explicitly
+  selected credential is reported without a plain-push/ambient retry;
+  unconfigured owner hints retain the legacy retry. Registration
+  additionally **persists** a repo-local
   `credential.https://<host>` override in `.git/config` (`username` + a
   `gh auth token`-backed `helper`) once the account resolves unambiguously,
   so a plain `git fetch`/`git pull` run by anything *other* than this tool

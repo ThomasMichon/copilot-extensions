@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,7 +41,9 @@ def _unique(pairs):
     return value
 
 
-def command_source(serialized: str) -> CredentialSource:
+def command_source(
+    serialized: str, *, remaining: Callable[[], float] | None = None,
+) -> CredentialSource:
     """Validate trusted non-secret argv once; acquire new typed material on every call."""
     try:
         if not isinstance(serialized, str) or len(serialized.encode("utf-8")) > 16384:
@@ -57,8 +61,14 @@ def command_source(serialized: str) -> CredentialSource:
 
     def acquire() -> _Material:
         try:
+            timeout = 15.0
+            if remaining is not None:
+                budget = remaining()
+                if type(budget) not in (int, float) or not math.isfinite(budget) or budget <= 0:
+                    raise ValueError("credential command operation budget exhausted")
+                timeout = min(timeout, budget)
             result = run_caller_owned(
-                list(argv), timeout=15, max_stdout_bytes=_MAX_BYTES, max_stderr_bytes=8192,
+                list(argv), timeout=timeout, max_stdout_bytes=_MAX_BYTES, max_stderr_bytes=8192,
             )
             if result.returncode or len(result.stdout.encode("utf-8")) > _MAX_BYTES:
                 raise ValueError

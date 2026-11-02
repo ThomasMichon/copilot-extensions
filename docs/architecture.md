@@ -49,7 +49,9 @@ place or activate a fleet workload. Native PR operation remains independent.
 The standalone [SSH service](../services/ssh/README.md) registers an explicit
 enrollment/public-directory control plane through the existing Gateway service
 channel. Declared principal/generation bindings gate automatic public-key
-admission; durable revisions and bounded notifications let the existing machine
+admission; an optional explicit peer policy instead retains a pending public
+candidate until exact authenticated approval, with separately selected recovery.
+Durable revisions and bounded notifications let the existing machine
 Fleet owner converge agent-ssh profiles and native login authorization.
 Its offline container recipe is independent of Copilot or a source checkout.
 An optional owned, non-root Linux OpenSSH child provides the native relay with
@@ -94,7 +96,7 @@ managed cutover; those remain separate slices of the
 
 | Plugin | Kind | Deployed as | Lifecycle |
 |--------|------|-------------|-----------|
-| [efforts](../plugins/efforts/) | Planning and execution skills (`planning-efforts`, `efforts-setup`, `driving-backlog-burndown`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
+| [efforts](../plugins/efforts/) | Planning and execution skills, plus opt-in transactional agendas with ordered subqueues and context-qualified continuations | Marketplace payload (skills + assets + standard-library Python helper) | Loaded on demand when a skill matches; legacy execution remains explicit; no runtime to install; optional agency/Manager delivery is separately negotiated |
 | [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Ambient continuity hook + session **extension** + `/handoff` skill | Marketplace payload (hook, scripts, extension, and skill) | Hook injects a concise owner-marked continuity kernel; extension is auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization and CLI-diagnostics skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review, startup hangs, module decomposition, agent hoisting, instruction-sync automation) | Marketplace payload (skills) | Loaded on demand when a CLI customization or startup-diagnostics prompt matches; no runtime to install |
@@ -102,8 +104,7 @@ managed cutover; those remain separate slices of the
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
-| [delegation-guidance](../plugins/delegation-guidance/) | **Deprecated** — no-op pointer at `agent-conduct-guidance` | Marketplace payload (README pointer only) | Ships no skills or instruction projections; kept installable so the name keeps resolving for existing adopters |
-| [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Consolidated ambient conduct-guidance modules (headless-process-spawn instruction projection + `spawning-headless-processes` skill; coordinator-first delegation instruction projection + `delegating-work` skill, migrated from `delegation-guidance`; scratch-space hygiene instruction projection + `using-scratch-space` skill) | Marketplace payload (static instruction projections + skills) | No `sessionStart` hook; each module's projection is a checked-in static fallback; detailed per-module skills load on demand; no runtime to install |
+| [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Independent ambient conduct modules and task-time procedures, including charter-bounded useful autonomy and persistent operator effect-scope pre-clearance; the plugin README owns the module list | Marketplace payload (static instruction projections + skills) | No grant broker, automatic tool approval or runtime; original evidence and current limits remain with existing effort/checkpoint/resource owners |
 | [agent-remote-driver](../plugins/agent-remote-driver/) | User-global SDK extension — baseline session drivability (attach/send/steer/abort) over a loopback HTTP surface, independent of agent-bridge | Marketplace payload (extension only) | Extension is auto-discovered from the enabled plugin's `extensions/` dir, same mechanism as `context-handoff`'s; no daemon, no runtime to install; not yet default-enabled (`cli-default-bridging` effort, pre-validation) |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
@@ -173,7 +174,7 @@ flowchart TB
       AV["agent-vault/<br/>scripts • src"]
       AI["agent-index/<br/>scripts • src"]
       AK["agent-machines/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ (deprecated) • agent-conduct-guidance/ • agent-remote-driver/<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • agent-conduct-guidance/ • agent-remote-driver/<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -229,7 +230,7 @@ flowchart TB
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 > `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-> `ai-attribution`, `delegation-guidance`, `agent-conduct-guidance`, and
+> `ai-attribution`, `agent-conduct-guidance`, and
 > `agent-remote-driver` —
 > deploy entirely from the marketplace payload — no installer, no
 > `~/.agent-*` runtime, no binstub.
@@ -540,12 +541,23 @@ flowchart TB
 
 `agent-dispatch` supplies the portable queue/lease authority agents coordinate
 through: a per-host loopback coordinator (`agent-dispatch serve`), a CLI and MCP
-surface, SSE events, and optional always-on **embody supervisors** that turn
-queued, label-gated tasks into autonomous bodies. The primary supervisor reads
-`~/.agent-dispatch/supervisor.env`; additional named profiles under
-`~/.agent-dispatch/supervisors/<name>.env` install as independent
-`agent-dispatch-supervisor-<name>` units/tasks using the same env schema, while
-the primary `agent-dispatch-supervisor` remains unchanged.
+surface, SSE events, and optional always-on supervisors that turn queued,
+label-gated tasks into autonomous bodies. The coordinator owns queue state;
+the separate supervisor daemon merges stored registrations and discovered
+declarations with operator overrides, then manages producer and worker-lane
+subprocesses. Each worker lane performs its own eligibility/capacity sweep and
+records reservations before invoking a backend. Coordinator garbage collection
+is not that allocation sweep, and an alive supervisor process does not prove
+its lane is advancing. Legacy env-profile launchers remain a separate
+configuration path. The
+[spawn supervisor guide](../plugins/agent-dispatch/docs/spawn-supervisor.md#coordinator-supervisor-daemon-and-worker-lanes)
+owns the process, routing and observability details.
+
+Current spawn reservation is separate from the embodied worker's task claim.
+The [current-versus-target assignment model](../plugins/agent-dispatch/docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
+distinguishes that implementation from the intended pool-owned `CLAIMED`
+startup transaction and links its reviewed-repair proposal; the target is not
+an installed behavior claim.
 
 Producer creation can be fenced by a coordinator-owned, durable generation over
 one permanent canonical repo-lane + source scope. An optional immutable required
@@ -575,7 +587,7 @@ coordinator-hosted MCP expose the same status/handoff primitive and structured
 rejections; bounded content-free events make transitions and rejected creates
 observable without exposing task content, capabilities, or control credentials.
 
-Its eight-state lifecycle includes explicit owner-preserving **suspended** work:
+Its nine-state lifecycle includes explicit owner-preserving **suspended** work:
 `started → suspended` parks a dormant, non-claimable task without losing its
 owner/session or durable context; `resume` wakes that same owner, while `release`
 clears ownership and requeues it for replacement embodiment. Suspended tasks are
@@ -591,12 +603,16 @@ lease, so cutover promotion recovers interrupted work without allowing a
 passive candidate to steal an in-flight delivery. The bridge atomically
 rechecks the captured owner-session identity when it enqueues the wake.
 
-Local agent bodies acquire sessions through `agent-bridge`, selecting ACP or
-CLI without a capability fallback that changes mode. Workspace allocation and
-terminal reclamation remain ground-layer responsibilities, not a second
-session-launch implementation in dispatch. The task's queue lane and worker's
-execution project are separate identities; allocation and acquisition must
-retain the same execution workspace. See the
+Local ordinary headless workers use Bridge keyed create without a prompt,
+store/read back the exact returned identities, then send the initial task under
+its native-conversation fence. Bridge internally allocates or resolves the
+workspace before native startup. The explicit acquisition/CLI path instead
+records a prepared workspace before asking Bridge to acquire its session.
+These remain distinct paths; Bridge's separate venue `create --cli --detach`
+interface is not a keyed-creation substitute. Workspace allocation and terminal
+reclamation remain ground-layer responsibilities. The task's queue lane and
+worker's execution project are separate identities; allocation and acquisition
+must retain the same execution workspace. See the
 [shared workspace contract](patterns/workspace-allocation-and-session-acquisition.md)
 and [local session acquisition guide](../plugins/agent-dispatch/docs/session-acquisition.md).
 Ground `create --creation-key` retains allocation intent and its original
@@ -798,6 +814,5 @@ closed; umbrella dotfiles#1081.)*
 - context-handoff [README](../plugins/context-handoff/README.md) · [context-handoff skill](../plugins/context-handoff/skills/context-handoff/SKILL.md)
 - customizing-copilot [README](../plugins/customizing-copilot/README.md) · [authoring-skills](../plugins/customizing-copilot/skills/authoring-skills/SKILL.md) · [defining-subagents](../plugins/customizing-copilot/skills/defining-subagents/SKILL.md) · [registering-mcp-servers](../plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) · [installing-plugins](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md) · [building-harnesses](../plugins/customizing-copilot/skills/building-harnesses/SKILL.md) · [reviewing-customizations](../plugins/customizing-copilot/skills/reviewing-customizations/SKILL.md) · [authoring-harness-plugins](../plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md) · [diagnosing-copilot-cli-startup](../plugins/customizing-copilot/skills/diagnosing-copilot-cli-startup/SKILL.md) · [hoisting-plugin-agents](../plugins/customizing-copilot/skills/hoisting-plugin-agents/SKILL.md) · [componentizing-modules](../plugins/customizing-copilot/skills/componentizing-modules/SKILL.md) · [setting-up-instruction-sync-worker](../plugins/customizing-copilot/skills/setting-up-instruction-sync-worker/SKILL.md)
 - ai-attribution [README](../plugins/ai-attribution/README.md) · [configuration](../plugins/ai-attribution/docs/configuration.md) · [setup](../plugins/ai-attribution/skills/ai-attribution-setup/SKILL.md) · [publication workflow](../plugins/ai-attribution/skills/ai-attribution/SKILL.md)
-- delegation-guidance [README](../plugins/delegation-guidance/README.md) — deprecated, see agent-conduct-guidance
 - agent-conduct-guidance [README](../plugins/agent-conduct-guidance/README.md) · [spawning-headless-processes skill](../plugins/agent-conduct-guidance/skills/spawning-headless-processes/SKILL.md) · [delegating-work skill](../plugins/agent-conduct-guidance/skills/delegating-work/SKILL.md) · [using-scratch-space skill](../plugins/agent-conduct-guidance/skills/using-scratch-space/SKILL.md)
 - agent-remote-driver [README](../plugins/agent-remote-driver/README.md)

@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit physical-row-budgeted scalar-index consolidation and retained ingestion replay",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "schema": "producer-work-reuse.authority-boundary-evidence",
+  "version": 1,
+  "product_source": "6bf5649a3a068c7e370bbae38009abfc02fe5a49",
+  "instrumentation": "plugins/agent-codespaces/tests/test_owner_authority_work.py",
+  "classification": "intercepted-production-boundary-requests-not-native-total-cost",
+  "workload": {
+    "candidate_accounts": 3,
+    "muxes_per_venue": 4,
+    "adopted_repositories": 0,
+    "active_plugin_config_providers": 0,
+    "per_venue_account_bindings": true,
+    "credentials": "synthetic only; CLI and provider-keyring variants",
+    "transport": "synthetic Windows-direct manager; actual config-source and resolution callgraph",
+    "consumers": "mux-only matrix plus explicitly marked mux-and-bridge cold frames",
+    "unknown_subprocess_boundary": "recorder failure",
+    "partial_observation": "retained; never a performance pass"
+  },
+  "opaque_unmeasured": [
+    "gh-internal-http",
+    "ssh-proxy-descendants",
+    "native-cpu",
+    "transcript-consumer"
+  ],
+  "runs": [
+    {
+      "raw_counter_frames": "authority-run-01.jsonl",
+      "frame_count": 12,
+      "partial_frames_detected": 0,
+      "completion_accounting": false,
+      "runner_summary": [
+        "17 passed in 15.89s"
+      ],
+      "sha256": "c7ad481b7038ec03f7181046bcdc8a91625115b00ecc70bff8927553b0161d9a",
+      "full_local_log_retained": true
+    },
+    {
+      "raw_counter_frames": "authority-run-02.jsonl",
+      "frame_count": 24,
+      "partial_frames_detected": 0,
+      "completion_accounting": false,
+      "runner_summary": [
+        "23 passed in 17.69s"
+      ],
+      "sha256": "b862aaf00fabe5eb1b8653e2cf1baeeb77e6b9be28b56284e411f31731aca30b",
+      "full_local_log_retained": true
+    },
+    {
+      "raw_counter_frames": "authority-run-03.jsonl",
+      "frame_count": 24,
+      "partial_frames_detected": 1,
+      "completion_accounting": true,
+      "runner_summary": [
+        "23 passed in 27.37s"
+      ],
+      "sha256": "ef648bd1a9cd8bc676ad72b0a4adf28f3c53e754062dbe4ae4f5b9c30619752f",
+      "full_local_log_retained": true
+    },
+    {
+      "raw_counter_frames": "authority-run-04.jsonl",
+      "frame_count": 24,
+      "partial_frames_detected": 2,
+      "completion_accounting": true,
+      "runner_summary": [
+        "23 passed in 21.64s"
+      ],
+      "sha256": "3d66b3a5d1be53c3967d1cf554254d05b43b0277024bf5d481d95dfd9a69e2d4",
+      "full_local_log_retained": true
+    },
+    {
+      "raw_counter_frames": "authority-run-05.jsonl",
+      "frame_count": 26,
+      "partial_frames_detected": 1,
+      "completion_accounting": true,
+      "runner_summary": [
+        "1 failed, 26 passed in 32.94s"
+      ],
+      "sha256": "a27b3c2a1cd5a4e8ce95f87305483151d64eb32c2ef67dd3a165748cc4360560",
+      "full_local_log_retained": true
+    },
+    {
+      "raw_counter_frames": "authority-run-06.jsonl",
+      "frame_count": 28,
+      "partial_frames_detected": 2,
+      "completion_accounting": true,
+      "runner_summary": [
+        "27 passed in 35.61s"
+      ],
+      "sha256": "92fa19da5592d21b3e8676170f5a7a72a751f7ef01b7e818dd172ceac1576d26",
+      "full_local_log_retained": true
+    }
+  ]
+}

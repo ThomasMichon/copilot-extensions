@@ -1,0 +1,9 @@
+{
+  "comment": "Recover unrecognized deployment metadata under the existing source-bound lifecycle without promoting pending layout evidence.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

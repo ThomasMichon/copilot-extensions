@@ -45,7 +45,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 SCHEMA = 1
 _ENDPOINT_LOCK_TIMEOUT = 5.0
@@ -193,7 +193,7 @@ class Endpoint:
             raise ValueError(f"malformed tcp address {self.address!r}; expected 'host:port'")
         return host, int(port)
 
-    def to_record(self) -> dict:
+    def to_record(self) -> dict[str, Any]:
         """The on-disk JSON record (keys per the pattern doc; ``endpoint`` = address).
 
         A service that also listens on secondary transports advertises them in an
@@ -213,7 +213,7 @@ class Endpoint:
         return rec
 
     @classmethod
-    def from_record(cls, data: dict, *, source: str = "file") -> Endpoint:
+    def from_record(cls, data: dict[str, Any], *, source: str = "file") -> Endpoint:
         alt = tuple(
             cls(transport=t, address=a, source=source)
             for entry in (data.get("alt") or [])

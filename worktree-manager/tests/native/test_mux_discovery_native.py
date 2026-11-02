@@ -9,8 +9,38 @@ import pytest
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client
 
-from worktree_manager import mux_daemon, mux_discovery
+from worktree_manager import mux_daemon, mux_discovery, pane_lifecycle
 from worktree_manager.mux_mapping_registry import MuxMappingRegistry
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows descendant-Job boundary")
+@pytest.mark.parametrize("native_incarnation", ["$1:100", "$3:300"])
+def test_pane_start_uses_real_native_probe_before_replacing_a_foreign_tombstone(
+    tmp_path, monkeypatch, native_incarnation,
+):
+    listing = f"%1\t0\twt-one\t{native_incarnation}\t{tmp_path}\n"
+    (tmp_path / "list-panes").write_text("print(" + repr(listing) + ")", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "manager"
+    registry = MuxMappingRegistry(root / "mux-mapping.json")
+    registry.register_next(dict(
+        project="project", worktree_id="one", worktree_path=str(tmp_path),
+        mux_session="wt-one", mux_bin=sys.executable, session_incarnation="$2:200",
+        panes=[{"pane_id": "%2", "role": "cli", "live": True}],
+    ))
+    registry.remove("project", "one", session_incarnation="$2:200", pane_id="%2", exit_code=7)
+    before = registry._path.read_bytes()
+    result = pane_lifecycle.admit(
+        "start", root=root, expected_installation=None,
+        project="project", worktree_id="one", worktree_path=str(tmp_path),
+        mux_session="wt-one", mux_bin=sys.executable, session_incarnation="$1:100", pane_id="%1",
+    )
+    admitted = native_incarnation == "$1:100"
+    assert result["result"]["applied"] is admitted
+    if admitted:
+        assert registry.get("project", "one")["session_incarnation"] == "$1:100"
+    else:
+        assert registry._path.read_bytes() == before
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows descendant-Job boundary")

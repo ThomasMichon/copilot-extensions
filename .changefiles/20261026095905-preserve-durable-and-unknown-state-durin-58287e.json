@@ -1,0 +1,17 @@
+{
+  "comment": "Preserve durable and unknown state during native uninstall; refuse foreign ownership, reconnect transport closures and uncoordinated runtime lease cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

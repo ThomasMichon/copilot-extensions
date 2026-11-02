@@ -71,71 +71,18 @@ def _claim_and_start_headless(q, task_id, *, wt, session, now):
 # -- tri-state, identity-keyed liveness_verdict ------------------------------
 
 
-def test_verdict_live_when_current_session_matches_owner(monkeypatch):
-    _bridge_ok(monkeypatch)
-    monkeypatch.setattr(
-        tracking, "run_background_capture", _fake_run(0, '{"session_id": "S1"}')
-    )
-    assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.LIVE
-
-
-def test_verdict_gone_when_worktree_reused_by_different_session(monkeypatch):
-    # A DIFFERENT session now occupies the worktree -> our owner is gone (the
-    # reused-worktree false-negative the design closes).
-    _bridge_ok(monkeypatch)
-    monkeypatch.setattr(
-        tracking, "run_background_capture", _fake_run(0, '{"session_id": "S2"}')
-    )
-    assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.GONE
-
-
-def test_verdict_gone_when_worktree_empty(monkeypatch):
-    # `{}` (CLI 404): no session occupies the worktree at all -> owner gone.
-    _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
-    assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.GONE
-
-
-def test_verdict_unknown_when_owner_identity_not_captured(monkeypatch):
-    # Even with a live session present, no captured owner identity means we can't
-    # attribute it -> unknown (the claim-before-registration false-positive guard).
-    # This holds even when the bridge answers empty and the local
-    # agent-worktrees registry would confirm the worktree gone: this shared
-    # resolver serves every claimed/started task's liveness GC, not only a
-    # spawn reservation's own worktree, so it never escalates an uncaptured
-    # owner_session_id to GONE by itself (see `worktree_directory_present` for
-    # the narrowly-scoped exception a spawn-reservation-owning caller may
-    # layer on top).
-    _bridge_ok(monkeypatch)
-    monkeypatch.setattr(
-        tracking, "run_background_capture", _fake_run(0, '{"session_id": "S1"}')
-    )
-    assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
-    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
-    assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
-
-
-
-
-@pytest.mark.parametrize(
-    "run",
-    [
-        _fake_run(1, "{}"),                 # non-zero exit -> bridge errored
-        _fake_run(0, ""),                    # exit 0 but silent -> ambiguous
-        _fake_run(0, "not json"),            # unparseable
-        _fake_run(0, "[]"),                  # valid JSON but not an object
-        lambda *_a, **_k: None,               # spawn error/timeout translated
-    ],
-)
-def test_verdict_unknown_on_any_resolver_failure(monkeypatch, run):
-    _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking, "run_background_capture", run)
-    assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.UNKNOWN
-
-
-def test_verdict_unknown_when_bridge_absent(monkeypatch):
-    monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
-    assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.UNKNOWN
+@pytest.mark.parametrize("data,owner,expected", [
+    ({"session_id": "S1"}, "S1", tracking.LIVE),
+    ({"session_id": "S2"}, "S1", tracking.GONE),
+    ({}, "S1", tracking.GONE),
+    ({}, None, tracking.UNKNOWN),
+    ({"session_id": "S1"}, None, tracking.UNKNOWN),
+    (None, "S1", tracking.UNKNOWN),
+    ({"status": "live"}, "S1", tracking.UNKNOWN),
+])
+def test_local_verdict_preserves_identity_tristate(monkeypatch, data, owner, expected):
+    monkeypatch.setattr(tracking, "_resolve_local_owner", lambda *a, **k: data)
+    assert tracking.liveness_verdict("wt", owner_session_id=owner) == expected
 
 
 def test_verdict_unknown_on_empty_worktree_handle():
@@ -143,30 +90,11 @@ def test_verdict_unknown_on_empty_worktree_handle():
     assert tracking.liveness_verdict(None, owner_session_id="S1") == tracking.UNKNOWN
 
 
-def test_verdict_uses_local_bridge_when_machine_is_this_machine(monkeypatch):
-    # Regression: every claimed/started task's stored owner is
-    # "<machine>/<worktree>", so `machine` is non-empty for *every* task, local
-    # or remote. Without gating it through `is_peer_machine`, a local task's
-    # liveness probe would shell an unnecessary self-SSH loopback (a visible
-    # OpenSSH window flash on every GC pass) instead of the direct local
-    # `agent-bridge` call every other caller in this module already takes.
-    _bridge_ok(monkeypatch)
+def test_verdict_uses_local_reader_when_machine_is_this_machine(monkeypatch):
     monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: False)
-
-    def local_only(*_a, **_k):
-        return _Proc(0, '{"session_id": "S1"}')
-
-    def ssh_forbidden(*_a, **_k):
-        raise AssertionError("must not shell SSH for this machine's own owner")
-
-    monkeypatch.setattr(tracking, "run_background_capture", local_only)
-    monkeypatch.setattr(tracking, "run_ssh_capture", ssh_forbidden)
-    assert (
-        tracking.liveness_verdict(
-            "wt", machine="cloud1", owner_session_id="S1"
-        )
-        == tracking.LIVE
-    )
+    monkeypatch.setattr(tracking, "_resolve_local_owner", lambda *a, **k: {"session_id": "S1"})
+    monkeypatch.setattr(tracking, "_run_capture", lambda *a, **k: pytest.fail("no process"))
+    assert tracking.liveness_verdict("wt", machine="local", owner_session_id="S1") == tracking.LIVE
 
 
 def test_verdict_still_uses_ssh_for_a_genuine_peer_machine(monkeypatch):

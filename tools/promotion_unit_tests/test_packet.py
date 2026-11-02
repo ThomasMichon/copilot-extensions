@@ -262,7 +262,7 @@ def test_packet_rejects_nonobject_or_malformed_json(packet_case, name):
 def test_packet_requires_each_regular_bounded_file(packet_case, monkeypatch, name):
     directory = packet_case[0]
     size = max(path.stat().st_size for path in directory.iterdir())
-    monkeypatch.setattr(packet, "MAX_PACKET_FILE_BYTES", size)
+    monkeypatch.setattr(packet, "MAX_UNIT_EVIDENCE_FILE_BYTES", size)
     (directory / name).write_bytes(b" " * (size + 1))
     with pytest.raises(UnitEvidenceError, match="bounded") as error:
         _verify(packet_case)

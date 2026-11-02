@@ -1,4 +1,4 @@
-"""Run the three independent full-source AST guards within one CI step."""
+"""Run the independent full-source guards within one CI step."""
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GUARDS = (
     "check-no-sibling-tracking-writes.py",
     "check-headless-launch.py",
+    "check-daemon-coverage.py",
     "check-asyncio-timeout-handlers.py",
 )
 
@@ -41,7 +42,7 @@ def _run_guard(guard: str) -> tuple[int, str]:
 
 def main() -> int:
     failed = False
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=len(GUARDS)) as pool:
         for guard, (status, output) in zip(GUARDS, pool.map(_run_guard, GUARDS)):
             print(f"::group::{guard}", flush=True)
             print(output, end="" if output.endswith("\n") else "\n", flush=True)

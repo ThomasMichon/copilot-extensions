@@ -1,0 +1,9 @@
+{
+  "comment": "Keep actual local resolve selectors independent of optional machine enrollment and fence managed tuple checkout namespaces",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

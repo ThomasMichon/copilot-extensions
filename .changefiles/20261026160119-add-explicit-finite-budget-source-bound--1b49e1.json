@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit finite-budget source-bound embedding backfill with repair-on-change and coverage-before-progress",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

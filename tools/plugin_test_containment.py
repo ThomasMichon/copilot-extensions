@@ -8,18 +8,45 @@ launch state; intentional interactive child launches are not rewritten.
 
 from __future__ import annotations
 
-import ctypes
 import os
-import shutil
+import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
+
+if __package__:
+    from .plugin_test_environment import (
+        ALLOW_HOST_STATE_ENV as ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES as ALWAYS_SANDBOX_ENV_NAMES,
+        ALWAYS_SCRUB_NAMES as ALWAYS_SCRUB_NAMES, CONTAINED_ENV as CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES as OPTIONAL_FILE_ENV_NAMES, ROOT_ENV_NAMES as ROOT_ENV_NAMES,
+        SANDBOX_ENV as SANDBOX_ENV, isolated_environment as isolated_environment,
+        registry_environment_changes,
+    )
+    from .native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
+    from .native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
+    from .plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
+    )
+else:
+    from plugin_test_environment import (
+        ALLOW_HOST_STATE_ENV as ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES as ALWAYS_SANDBOX_ENV_NAMES,
+        ALWAYS_SCRUB_NAMES as ALWAYS_SCRUB_NAMES, CONTAINED_ENV as CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES as OPTIONAL_FILE_ENV_NAMES, ROOT_ENV_NAMES as ROOT_ENV_NAMES,
+        SANDBOX_ENV as SANDBOX_ENV, isolated_environment as isolated_environment,
+        registry_environment_changes,
+    )
+    from native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
+    from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
+    from plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
+    )
 
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
@@ -28,85 +55,9 @@ sys.path.insert(
 )
 try:
     from agent_procutil import no_window_kwargs
+    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
-
-CONTAINED_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
-SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
-ALLOW_HOST_STATE_ENV = "COPILOT_EXTENSIONS_ALLOW_HOST_STATE"
-
-_ROOT_ENV = {
-    "HOME": "home",
-    "USERPROFILE": "home",
-    "APPDATA": "home/AppData/Roaming",
-    "LOCALAPPDATA": "home/AppData/Local",
-    "PROGRAMDATA": "program-data",
-    "PSModulePath": "powershell-modules",
-    "XDG_CONFIG_HOME": "home/.config",
-    "XDG_CACHE_HOME": "home/.cache",
-    "XDG_DATA_HOME": "home/.local/share",
-    "XDG_STATE_HOME": "home/.local/state",
-    "XDG_RUNTIME_DIR": "run",
-    "COPILOT_HOME": "home/.copilot",
-    "AGENT_HOME": "home",
-    "AGENT_WORKTREES_HOME": "agent-worktrees",
-    "AGENT_WORKTREES_PIVOTS_DIR": "agent-worktrees/pivots",
-    "AGENT_WORKTREES_PLUGINS_DIR": "agent-worktrees/plugins",
-    "AGENT_BRIDGE_CONFIG_DIR": "agent-bridge/config",
-    "AGENT_BRIDGE_PROVIDERS_DIR": "agent-bridge/providers",
-    "AGENT_DISPATCH_ROUTING_DIR": "agent-dispatch/routing",
-    "AGENT_DISPATCH_RUN_DIR": "agent-dispatch/run",
-    "AGENT_INDEX_DATA_DIR": "agent-index/data",
-    "AGENT_INDEX_BACKUP_DIR": "agent-index/backups",
-    "AGENT_INDEX_ENGINE_HOME": "agent-index/engine",
-    "AGENT_LOGGER_HOME": "agent-logger",
-    "AGENT_MCP_HOME": "agent-mcp",
-    "AGENT_VAULT_CORE_RUN_DIR": "agent-vault/run",
-    "AGENT_VAULT_KEK_DIR": "agent-vault/kek",
-    "TEMP": "tmp",
-    "TMP": "tmp",
-    "TMPDIR": "tmp",
-}
-
-_FILE_ENV = {
-    "AGENT_CONTAINERS_CONFIG": "agent-containers/config.yaml",
-    "AGENT_DISPATCH_DB": "agent-dispatch/state/dispatch.db",
-    "AGENT_DISPATCH_ENDPOINT": "agent-dispatch/run/endpoint.json",
-    "AGENT_WORKTREES_PROJECTS_YAML": "agent-worktrees/projects.yaml",
-    "AGENT_WORKTREES_REPOS_YAML": "agent-worktrees/repos.yaml",
-}
-
-ROOT_ENV_NAMES = tuple(_ROOT_ENV)
-OPTIONAL_FILE_ENV_NAMES = tuple(_FILE_ENV)
-ALWAYS_SANDBOX_ENV_NAMES = (
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "XDG_RUNTIME_DIR",
-)
-
-# Public (no leading underscore): also reused by
-# `coverage_guided_selection/baseline.py` so a coverage-baseline collection
-# run scrubs the exact same facility/host env vars `isolated_environment`
-# already scrubs for the trusted `run-plugin-tests.py` path -- without this,
-# a baseline collected on a machine with any of these ambient (e.g.
-# `AGENT_RT_ROOT` on a facility worktree host) can diverge from, and fail
-# tests that, the real validation gate's own containment would pass clean.
-ALWAYS_SCRUB_NAMES = {
-    "AGENT_RT_ROOT",
-    "AGENT_WORKTREES_CONFIG_ROOT",
-    "AGENT_WORKTREES_OWNER_REF",
-    "AGENT_WORKTREES_PAYLOAD_ROOT",
-    "COPILOT_AGENT_SESSION_ID",
-    "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
-    "COPILOT_PLUGIN_ROOT",
-}
-_ALWAYS_SCRUB_NAMES = ALWAYS_SCRUB_NAMES
-
-_CREDENTIAL_NAMES = {
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-}
 
 _T = TypeVar("_T")
 
@@ -142,7 +93,7 @@ class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
 
 
-class TestSandbox(tempfile.TemporaryDirectory):
+class TestSandbox(NativeTemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
     def __init__(self, *args, **kwargs):
@@ -219,30 +170,9 @@ def _registry_environment_drift(
     if current_snapshot is None:
         raise ContainmentError("Windows environment registry became unavailable")
 
-    def compare(
-        label: str,
-        expected: dict[str, tuple[Any, int]],
-        current: dict[str, tuple[Any, int]],
-    ) -> list[str]:
-        expected_folded = {
-            name.casefold(): (name, data) for name, data in expected.items()
-        }
-        current_folded = {
-            name.casefold(): (name, data) for name, data in current.items()
-        }
-        names = sorted(set(expected_folded) | set(current_folded))
-        drifted = [
-            name
-            for name in names
-            if expected_folded.get(name, (None, None))[1]
-            != current_folded.get(name, (None, None))[1]
-        ]
-        return [
-            f"{label}:{current_folded.get(name, expected_folded.get(name))[0]}"
-            for name in drifted
-        ]
-
-    return compare("User", snapshot.user, current_snapshot.user) + compare(
+    return registry_environment_changes(
+        "User", snapshot.user, current_snapshot.user,
+    ) + registry_environment_changes(
         "Machine",
         snapshot.machine,
         current_snapshot.machine,
@@ -254,50 +184,6 @@ def partition(items: list[_T], size: int) -> list[list[_T]]:
     if size <= 0:
         raise ValueError("partition size must be positive")
     return [items[index : index + size] for index in range(0, len(items), size)]
-
-
-def isolated_environment(
-    base: Mapping[str, str],
-    sandbox: Path,
-    *,
-    allow_explicit_tiers: bool = False,
-    allow_host_state: bool = False,
-) -> dict[str, str]:
-    """Return a contained environment, host-detached unless explicitly allowed."""
-    if allow_host_state and not allow_explicit_tiers:
-        raise ValueError("allow_host_state requires allow_explicit_tiers")
-    root = sandbox.resolve()
-    env = dict(base)
-    for name in _ALWAYS_SCRUB_NAMES:
-        env.pop(name, None)
-    if allow_host_state:
-        env[ALLOW_HOST_STATE_ENV] = "1"
-        for name in ALWAYS_SANDBOX_ENV_NAMES:
-            value = root.joinpath(*_ROOT_ENV[name].split("/"))
-            value.mkdir(parents=True, exist_ok=True)
-            env[name] = str(value)
-    else:
-        env.pop(ALLOW_HOST_STATE_ENV, None)
-        for name in _CREDENTIAL_NAMES:
-            env.pop(name, None)
-        for name, relative in _ROOT_ENV.items():
-            value = root.joinpath(*relative.split("/"))
-            value.mkdir(parents=True, exist_ok=True)
-            env[name] = str(value)
-        for name, relative in _FILE_ENV.items():
-            if name not in base:
-                env.pop(name, None)
-                continue
-            value = root.joinpath(*relative.split("/"))
-            value.parent.mkdir(parents=True, exist_ok=True)
-            env[name] = str(value)
-    env[CONTAINED_ENV] = "1"
-    env[SANDBOX_ENV] = str(root)
-    if allow_explicit_tiers:
-        env["COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS"] = "1"
-    else:
-        env.pop("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS", None)
-    return env
 
 
 def _directory_sizes(directories: Sequence[str | Path]) -> tuple[int, list[str]]:
@@ -352,6 +238,12 @@ def _tree_size(path: Path) -> int:
     return total
 
 
+def _temp_storage_violation(used_bytes: int, max_mb: int) -> str | None:
+    if used_bytes > max_mb * 1024 * 1024:
+        return f"temporary-storage limit exceeded ({max_mb} MiB)"
+    return None
+
+
 def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
     proc_root = Path("/proc")
     if not proc_root.is_dir():
@@ -381,46 +273,15 @@ def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]
     return count, rss
 
 
-def _ps_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
-    ps = shutil.which("ps")
-    if not ps:
-        return None
-    result = subprocess.run(
-        [ps, "-eo", "pgid=,rss=,stat="],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=2,
-    )
-    if result.returncode != 0:
-        return None
-    count = 0
-    rss_kib = 0
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 3:
-            if live_only and fields:
-                raise ValueError("Cannot parse POSIX process-group membership")
-            continue
-        if live_only and fields[2].startswith("Z"):
-            continue
-        try:
-            row_pgid, row_rss = map(int, fields[:2])
-        except ValueError:
-            if live_only:
-                raise
-            continue
-        if row_pgid == pgid:
-            count += 1
-            rss_kib += row_rss
-    return count, rss_kib * 1024
-
-
 def _posix_group_usage(pgid: int) -> tuple[int, int] | None:
+    if sys.platform == "darwin":
+        return _darwin_group_usage(pgid)
     return _linux_group_usage(pgid) or _ps_group_usage(pgid)
 
 
 def _posix_live_group_usage(pgid: int) -> tuple[int, int] | None:
+    if sys.platform == "darwin":
+        return _darwin_group_usage(pgid, live_only=True)
     return _linux_group_usage(pgid, live_only=True) or _ps_group_usage(pgid, live_only=True)
 
 
@@ -455,6 +316,17 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         while True:
             try:
                 usage = _posix_live_group_usage(pgid)
+            except GroupObservationChanged as exc:
+                if sys.platform != "darwin":
+                    raise UnreapedProcessError("Cannot verify POSIX process-group termination") from exc
+                if time.monotonic() >= deadline:
+                    if remaining:
+                        return False
+                    raise UnreapedProcessError(
+                        "Darwin process-group termination remained unknown after observation churn"
+                    ) from exc
+                time.sleep(0.05)
+                continue
             except (OSError, ValueError, IndexError, subprocess.TimeoutExpired) as exc:
                 raise UnreapedProcessError(
                     "Cannot verify POSIX process-group termination"
@@ -488,6 +360,12 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         raise UnreapedProcessError("POSIX process group remains live after SIGKILL")
 
 
+def _windows_last_error() -> int:
+    import ctypes
+
+    return ctypes.get_last_error()
+
+
 class _WindowsJob:
     """A kill-on-close Job Object for a signalled worker process."""
 
@@ -499,6 +377,7 @@ class _WindowsJob:
     _PROCESS_TERMINATE = 0x0001
 
     def __init__(self, limits: Limits) -> None:
+        import ctypes
         from ctypes import wintypes
 
         class _BasicLimit(ctypes.Structure):
@@ -604,6 +483,8 @@ class _WindowsJob:
         self._ExtendedLimit = _ExtendedLimit
 
     def assign(self, pid: int) -> None:
+        import ctypes
+
         process = self._kernel32.OpenProcess(
             self._PROCESS_SET_QUOTA | self._PROCESS_TERMINATE, False, pid
         )
@@ -620,22 +501,30 @@ class _WindowsJob:
         finally:
             self._kernel32.CloseHandle(process)
 
-    def close(self) -> None:
+    def close(self, *, qualification: Qualification | None = None) -> None:
         if self._handle:
             try:
                 if self.active_processes():
+                    if qualification is not None:
+                        qualification.forced_termination = True
                     if not self._kernel32.TerminateJobObject(self._handle, 124):
                         raise UnreapedProcessError(
                             "TerminateJobObject failed with error "
-                            f"{ctypes.get_last_error()}"
+                            f"{_windows_last_error()}"
                         )
-                    deadline = time.monotonic() + 5.0
+                    deadline = (
+                        min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
+                        if qualification is not None else time.monotonic() + 5.0
+                    )
                     while self.active_processes():
                         if time.monotonic() >= deadline:
                             raise UnreapedProcessError(
                                 "Windows Job Object still has active processes after termination"
                             )
                         time.sleep(0.01)
+                if qualification is not None:
+                    qualification.boundary.require(time.monotonic)
+                    qualification.job_zero_observed = True
             except (ContainmentError, KeyboardInterrupt, OSError) as exc:
                 if isinstance(exc, UnreapedProcessError):
                     raise
@@ -643,10 +532,16 @@ class _WindowsJob:
                     f"Windows Job Object termination could not be verified: {exc}"
                 ) from exc
             finally:
-                self._kernel32.CloseHandle(self._handle)
+                closed = self._kernel32.CloseHandle(self._handle)
                 self._handle = None
+                if qualification is not None:
+                    qualification.job_handle_closed = bool(closed)
+                    if not closed:
+                        raise UnreapedProcessError("Original Windows Job handle could not be closed")
 
     def active_processes(self) -> int:
+        import ctypes
+
         accounting = self._BasicAccounting()
         if not self._kernel32.QueryInformationJobObject(
             self._handle,
@@ -662,6 +557,8 @@ class _WindowsJob:
         return int(accounting.ActiveProcesses)
 
     def usage(self) -> tuple[int, int]:
+        import ctypes
+
         active = self.active_processes()
         extended = self._ExtendedLimit()
         if not self._kernel32.QueryInformationJobObject(
@@ -680,7 +577,14 @@ class _WindowsJob:
         )
 
 
-def _worker_command(command: Sequence[str], ready: Path) -> list[str]:
+def _worker_command(
+    command: Sequence[str], ready: Path, *, boundary: Boundary | None = None,
+) -> list[str]:
+    if boundary is not None:
+        return [
+            sys.executable, str(Path(__file__).resolve()), "_worker-qualification",
+            repr(boundary.start), boundary.utc, str(ready), *command,
+        ]
     return [sys.executable, str(Path(__file__).resolve()), "_worker", str(ready), *command]
 
 
@@ -694,7 +598,7 @@ def _windows_stdio_kwargs() -> dict[str, Any]:
     return {}
 
 
-def _worker_main(argv: Sequence[str]) -> int:
+def _worker_main(argv: Sequence[str], *, boundary: Boundary | None = None) -> int:
     if len(argv) < 2:
         raise SystemExit("worker requires a ready path and command")
     ready = Path(argv[0])
@@ -706,11 +610,20 @@ def _worker_main(argv: Sequence[str]) -> int:
             raise ContainmentError("POSIX controller status pipe is missing")
         return _posix_worker(command, ready, int(result_fd), int(owner_fd))
     deadline = time.monotonic() + 30.0
+    if boundary is not None:
+        boundary.require(time.monotonic, work=True)
+        deadline = min(deadline, boundary.start + WORK_SECONDS)
     while not ready.exists():
         if time.monotonic() >= deadline:
             print("containment worker was not assigned before launch", file=sys.stderr)
             return 126
-        time.sleep(0.01)
+        time.sleep(max(0, min(0.01, deadline - time.monotonic())))
+    if boundary is not None:
+        boundary.require(time.monotonic, work=True)
+        process = subprocess.Popen(
+            command, **no_window_kwargs(), **_windows_stdio_kwargs(),
+        )
+        return process.wait(timeout=boundary.remaining(clock=time.monotonic))
     return subprocess.run(
         command, check=False, **no_window_kwargs(), **_windows_stdio_kwargs(),
     ).returncode
@@ -767,17 +680,35 @@ def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int
         time.sleep(0.05)
 
 
-def _reap_controller(proc: subprocess.Popen) -> None:
+def _reap_controller(proc: subprocess.Popen, *, qualification: Qualification | None = None) -> None:
+    def remaining() -> float:
+        return (
+            max(0, min(5, qualification.boundary.whole_deadline - time.monotonic()))
+            if qualification is not None else 5
+        )
+
     try:
-        proc.wait(timeout=5)
+        proc.wait(timeout=remaining())
     except subprocess.TimeoutExpired:
+        if qualification is not None:
+            qualification.forced_termination = True
         try:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=remaining())
         except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
             raise UnreapedProcessError("Controller process could not be reaped") from exc
     except (OSError, KeyboardInterrupt) as exc:
         raise UnreapedProcessError("Controller process could not be reaped") from exc
+    if qualification is not None:
+        qualification.worker_reaped = True
+        handle = getattr(proc, "_handle", None)
+        if handle is not None and not qualification.worker_handle_closed:
+            try:
+                handle.Close()
+                qualification.worker_handle_closed = True
+            except OSError as exc:
+                raise UnreapedProcessError("Original controller handle could not be closed") from exc
+        qualification.boundary.require(time.monotonic)
 
 
 def _run_contained_process(
@@ -787,9 +718,14 @@ def _run_contained_process(
     env: Mapping[str, str],
     sandbox: Path,
     limits: Limits,
+    qualification: Qualification | None = None,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
+    if qualification is not None:
+        if os.name != "nt":
+            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
+        qualification.boundary.require(time.monotonic, work=True)
     sandbox.mkdir(parents=True, exist_ok=True)
     ready = sandbox / ".containment-ready"
     ready.unlink(missing_ok=True)
@@ -807,13 +743,23 @@ def _run_contained_process(
             worker_env["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(result_write)
             worker_env["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(owner_read)
             kwargs["pass_fds"] = (result_write, owner_read)
+        worker_command = (
+            _worker_command(command, ready, boundary=qualification.boundary)
+            if qualification is not None else _worker_command(command, ready)
+        )
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
         proc = subprocess.Popen(
-            _worker_command(command, ready),
+            worker_command,
             cwd=str(cwd),
             env=worker_env,
             start_new_session=os.name != "nt",
             **no_window_kwargs(),
-            **_windows_stdio_kwargs(),
+            **(
+                {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE,
+                 "stderr": subprocess.PIPE, "bufsize": 0}
+                if qualification is not None else _windows_stdio_kwargs()
+            ),
             **kwargs,
         )
     except BaseException:
@@ -830,6 +776,10 @@ def _run_contained_process(
     job = None
     posix_identity = None
     try:
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
+            assert proc.stdout is not None and proc.stderr is not None
+            qualification.capture.start((proc.stdout, proc.stderr))
         if os.name == "nt":
             try:
                 job = _WindowsJob(limits)
@@ -841,12 +791,19 @@ def _run_contained_process(
                     raise UnreapedProcessError(
                         "Unassigned controller could not be terminated"
                     ) from exc
-                _reap_controller(proc)
+                if qualification is not None:
+                    _reap_controller(proc, qualification=qualification)
+                else:
+                    _reap_controller(proc)
                 raise
         else:
             posix_identity = _posix_group_identity(proc.pid)
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
         ready.write_text("assigned\n", encoding="ascii")
-        started = time.monotonic()
+        started = qualification.boundary.start if qualification is not None else time.monotonic()
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
         next_temp_check = started
         next_usage_check = started
         while True:
@@ -856,27 +813,33 @@ def _run_contained_process(
                 assert result_read is not None
                 returncode = _posix_exit_code(result_read)
             now = time.monotonic()
-            if now - started > limits.wall_seconds:
+            remaining = (
+                qualification.phase_remaining(time.monotonic) if qualification is not None
+                else started + limits.wall_seconds - now
+            )
+            cycle_deadline = min(now + limits.poll_seconds, now + remaining)
+            if qualification is None and now - started > limits.wall_seconds:
                 print(
                     f"[LIMIT] wall-clock limit exceeded ({limits.wall_seconds:g}s)",
                     file=sys.stderr,
                 )
                 return 124
             if returncode is not None:
+                if qualification is not None:
+                    qualification.native_exit = returncode
+                    if returncode == 0 and not qualification.work_completed:
+                        raise QualificationError("Native receiver exited without qualified work-completion evidence.")
                 return returncode
             violation = None
-            if now >= next_temp_check:
-                temp_bytes = _tree_size(sandbox)
-                if temp_bytes > limits.max_temp_mb * 1024 * 1024:
-                    violation = (
-                        "temporary-storage limit exceeded "
-                        f"({limits.max_temp_mb} MiB)"
-                    )
+            if sys.platform != "darwin" and now >= next_temp_check:
+                violation = _temp_storage_violation(_tree_size(sandbox), limits.max_temp_mb)
                 next_temp_check = now + max(2.0, limits.poll_seconds)
             if violation is None and now >= next_usage_check:
                 usage = (
                     job.usage()
                     if os.name == "nt" and job is not None
+                    else _darwin_poll_group_usage(proc.pid, deadline=cycle_deadline)
+                    if sys.platform == "darwin"
                     else _posix_group_usage(proc.pid)
                 )
                 if usage is None:
@@ -892,10 +855,17 @@ def _run_contained_process(
                     elif rss_bytes > limits.max_memory_mb * 1024 * 1024:
                         violation = f"memory limit exceeded ({limits.max_memory_mb} MiB)"
                 next_usage_check = now + limits.poll_seconds
+            # Due Darwin resource sampling precedes synchronous directory traversal.
+            if sys.platform == "darwin" and violation is None and now >= next_temp_check:
+                violation = _temp_storage_violation(_tree_size(sandbox), limits.max_temp_mb)
+                next_temp_check = now + max(2.0, limits.poll_seconds)
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124
-            time.sleep(limits.poll_seconds)
+            if qualification is not None or sys.platform == "darwin":
+                time.sleep(max(0.0, cycle_deadline - time.monotonic()))
+            else:
+                time.sleep(limits.poll_seconds)
     except KeyboardInterrupt:
         print("[LIMIT] interrupted; reaping contained process tree", file=sys.stderr)
         return 130
@@ -903,7 +873,10 @@ def _run_contained_process(
         try:
             if os.name == "nt":
                 if job is not None:
-                    job.close()
+                    if qualification is not None:
+                        job.close(qualification=qualification)
+                    else:
+                        job.close()
             else:
                 if posix_identity is None:
                     raise UnreapedProcessError("POSIX ownership identity was not captured")
@@ -919,8 +892,17 @@ def _run_contained_process(
             except OSError as exc:
                 raise UnreapedProcessError("Controller pipes could not be released") from exc
             finally:
-                _reap_controller(proc)
+                if qualification is not None:
+                    _reap_controller(proc, qualification=qualification)
+                else:
+                    _reap_controller(proc)
         ready.unlink(missing_ok=True)
+        if qualification is not None:
+            assert proc.stdout is not None and proc.stderr is not None
+            qualification.capture.finish(
+                (proc.stdout, proc.stderr), qualification.boundary, time.monotonic,
+            )
+            qualification.observe_receiver(time.monotonic)
 
 
 def run_contained(
@@ -930,23 +912,53 @@ def run_contained(
     env: Mapping[str, str],
     sandbox: Path,
     limits: Limits,
+    daemon_purpose: str = "unattended-test",
+    daemon_lease: DaemonLeasePolicy | None = None,
+    qualification: Qualification | None = None,
 ) -> int:
-    """Run a contained tree and fail if it escapes into Windows environment state."""
+    """Run an owned test tree; interactive tests require an explicit lease policy."""
+    lifecycle_results: list[Any] = []
+    if qualification is not None:
+        if os.name != "nt":
+            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
+        if limits != Limits(wall_seconds=WORK_SECONDS):
+            raise QualificationError("Native qualification must preserve the original process, memory and poll limits.")
+        qualification.validate(sandbox, time.monotonic)
     environment_snapshot = _read_registry_environment()
+    if qualification is not None:
+        qualification.boundary.require(time.monotonic, work=True)
     unreaped = None
     try:
-        result = _run_contained_process(
-            command,
-            cwd=cwd,
-            env=env,
-            sandbox=sandbox,
-            limits=limits,
-        )
+        with daemon_test_lifecycle(
+            owner=f"contained-test-runner:{os.getpid()}",
+            registry_root=sandbox.resolve() / "daemon-instances",
+            purpose=daemon_purpose,
+            lease=daemon_lease,
+            **(
+                {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
+                if qualification is not None else {}
+            ),
+        ) as daemon_environment:
+            result = _run_contained_process(
+                command,
+                cwd=cwd,
+                env={**env, **daemon_environment},
+                sandbox=sandbox,
+                limits=limits,
+                **({"qualification": qualification} if qualification is not None else {}),
+            )
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic)
+            qualification.lifecycle_settled = all(
+                outcome.status in ("settled", "missing") for outcome in lifecycle_results
+            )
     except UnreapedProcessError as exc:
         unreaped = exc
         raise
     finally:
         try:
+            if qualification is not None:
+                qualification.boundary.require(time.monotonic)
             changed = _registry_environment_drift(environment_snapshot)
             if changed:
                 print(
@@ -963,6 +975,9 @@ def run_contained(
             ) from unreaped
     if changed:
         return 125
+    if qualification is not None:
+        qualification.registry_unchanged = True
+        qualification.require_settled(time.monotonic)
     return result
 
 
@@ -970,6 +985,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "_worker":
         return _worker_main(args[1:])
+    if args and args[0] == "_worker-qualification":
+        if len(args) < 5:
+            raise SystemExit("qualification worker requires the original origin, ready path and command")
+        boundary = Boundary.supplied(float(args[1]), args[2])
+        return _worker_main(args[3:], boundary=boundary)
     raise SystemExit("plugin_test_containment is an internal runner module")
 
 

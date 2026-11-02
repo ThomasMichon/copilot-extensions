@@ -516,6 +516,7 @@ def reap_bound_copilots(
     *,
     table: dict[int, dict] | None = None,
     include_children: bool = True,
+    exit_timeout: float | None = None,
 ) -> list[dict]:
     """Terminate exactly the resolved target processes (and their child tree).
 
@@ -536,6 +537,7 @@ def reap_bound_copilots(
 
     table = build_process_table() if table is None else table
     out: list[dict] = []
+    wait_options = {} if exit_timeout is None else {"exit_timeout": exit_timeout}
     for t in targets:
         pid = t["pid"]
         child_targets: list[tuple[int, str | None]] = []
@@ -550,24 +552,29 @@ def reap_bound_copilots(
         # Kill children first so the parent's exit can't re-home them.
         children_killed = 0
         children_identity_mismatch: list[int] = []
+        children_unconfirmed: list[int] = []
         for c, expected_child_start in child_targets:
             child_result = procs.terminate_pid_if_identity(
-                c, expected_child_start,
+                c, expected_child_start, **wait_options,
             )
             if not child_result.get("identity_verified"):
                 children_identity_mismatch.append(c)
                 continue
-            if child_result.get("killed"):
+            if exit_timeout is not None and not child_result.get("exit_confirmed"):
+                children_unconfirmed.append(c)
+            elif child_result.get("killed"):
                 children_killed += 1
         expected_start = (
             t.get("expected_start_time")
             or t.get("start_time")
         )
         terminate_result = procs.terminate_pid_if_identity(
-            pid, str(expected_start) if expected_start else None,
+            pid, str(expected_start) if expected_start else None, **wait_options,
         )
         identity_verified = bool(terminate_result.get("identity_verified"))
         killed = bool(terminate_result.get("killed"))
+        if exit_timeout is not None:
+            killed = killed and bool(terminate_result.get("exit_confirmed"))
         out.append({
             "session_id": t.get("session_id"),
             "pid": pid,
@@ -578,6 +585,8 @@ def reap_bound_copilots(
             "identity_verified": identity_verified,
             "identity_method": terminate_result.get("method"),
             "children_identity_mismatch": children_identity_mismatch,
+            **({"exit_confirmed": bool(terminate_result.get("exit_confirmed")),
+                "children_unconfirmed": children_unconfirmed} if exit_timeout is not None else {}),
         })
     return out
 
@@ -823,6 +832,7 @@ def clear_lock_residue(
     worktree_path: str | None = None,
     force_pids: set[int] | None = None,
     table: dict[int, dict] | None = None,
+    session_ids: list[str] | None = None,
 ) -> list[dict]:
     """Remove ``inuse.<pid>.lock`` residue for a worktree's session dirs.
 
@@ -853,7 +863,15 @@ def clear_lock_residue(
     removed: list[dict] = []
     if not state_dir.exists():
         return removed
-    for entry in sorted(state_dir.iterdir()):
+    if session_ids is None:
+        entries = sorted(state_dir.iterdir())
+    else:
+        from .session_projection import _valid_session_id
+
+        if any(not _valid_session_id(sid) for sid in session_ids):
+            raise ValueError("Invalid registered session identity")
+        entries = [state_dir / sid for sid in sorted(set(session_ids))]
+    for entry in entries:
         if not entry.is_dir():
             continue
         # Cheap gate: skip a dir with no lock file at all before paying for the
@@ -861,7 +879,10 @@ def clear_lock_residue(
         if not any(entry.glob("inuse.*.lock")):
             continue
         cwd = _session_cwd(entry)
-        wt = _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        wt = (
+            worktree_id if session_ids is not None
+            else _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        )
         if wt is None:
             try:
                 wt = tracking.find_worktree_id_by_session(entry.name)

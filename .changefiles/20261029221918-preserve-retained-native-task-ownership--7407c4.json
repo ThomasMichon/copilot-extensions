@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve retained native task ownership on process loss and safely redrive queued ordinary conversations.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

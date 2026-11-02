@@ -127,6 +127,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
             "uname",
             "tr",
             "mv",
+            "mkdir",
             "mktemp",
             "cat",
             "git",
@@ -149,9 +150,18 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     file = tmp_path / f"harness.{ext}"
     file.write_text(script, encoding="utf-8")
     command = ["/bin/bash", str(file)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(file)]
-    return subprocess.run(
-        command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30
-    )
+    try:
+        return subprocess.run(
+            command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired as error:
+        log = tmp_path / "uv.jsonl"
+        calls = log.read_text() if log.is_file() else "no UV calls"
+        pytest.fail(
+            f"native fixture timeout; UV calls: {calls}; "
+            f"stdout: {error.stdout!r}; stderr: {error.stderr!r}"
+        )
 
 
 def _prelude(ext: str, engine: Path = ENGINE) -> str:
@@ -179,6 +189,7 @@ def _retained_uv_fixture_prelude() -> str:
     return """
 import re, tempfile, tomllib
 if args[:2] == ["pip", "install"]:
+    assert "--no-editable" not in args and "--editable" not in args
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private = config.parent
     assert config.is_file() and not config.is_symlink() and private.name == "inputs"
@@ -191,7 +202,12 @@ if args[:2] == ["pip", "install"]:
         source = Path(match[1])
         if not source.is_dir() or not (source / "pyproject.toml").is_file():
             continue
-        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        retained = tomllib.loads((source / "pyproject.toml").read_text())
+        project = retained["project"]
+        for entries in retained.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            for entry in entries if isinstance(entries, list) else [entries]:
+                if "path" in entry:
+                    assert not entry.get("editable", False)
         original = Path(expected[project["name"]])
         assert source.resolve() != original.resolve() and source.resolve().is_relative_to(private)
         assert project == tomllib.loads((original / "pyproject.toml").read_text())["project"]
@@ -354,7 +370,7 @@ exit $result.ExitCode
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
     assert len(calls) == (1 if mode == "fatal" else 3)
     for actual in calls:
-        assert actual[:-3] == ["pip", "install", *args]
+        assert actual[:-3] == ["pip", "install", *args, "--link-mode", "copy"]
         assert actual[-3] == "--exclude-newer"
         assert actual[-1] == "--reinstall"
         cutoff = datetime.fromisoformat(actual[-2].replace("Z", "+00:00"))
@@ -674,6 +690,7 @@ def test_fixture_checkout_accepts_already_materialized_input(tmp_path, monkeypat
 def _snapshot_prelude() -> str:
     script = _prelude("ps1")
     for name in (
+        "Assert-DispatchActions",
         "Resolve-VendoredLib",
         "Materialize-DispatchSnapshot",
         "Get-DispatchSnapshotHash",
@@ -727,7 +744,7 @@ if ([IO.File]::ReadAllText((Join-Path $InstallDir 'stamp-candidate-1.2.3')) -cne
 
 
 @pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
-@pytest.mark.parametrize("mutation", ["unchanged", "plugin", "engine", "library"])
+@pytest.mark.parametrize("mutation", ["unchanged", "plugin", "engine", "library", "repository-policy"])
 def test_stamp_materializes_standalone_engine_pair_and_all_libraries(
     tmp_path, materialized, mutation,
 ):
@@ -735,8 +752,18 @@ def test_stamp_materializes_standalone_engine_pair_and_all_libraries(
     plugin = _fixture_checkout(tmp_path, materialized=materialized)
     engine = ier.find_engine_ref(plugin / "scripts/install.sh", "sh")
     assert engine is not None
-    sources = tomllib.loads((plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+    input_project = (plugin / "pyproject.toml").read_bytes()
+    sources = tomllib.loads(input_project.decode("utf-8"))["tool"]["uv"]["sources"]
+    input_library_projects = {
+        (plugin / source["path"] / "pyproject.toml").resolve():
+            (plugin / source["path"] / "pyproject.toml").read_bytes()
+        for source in sources.values()
+    }
+    if not materialized:
+        original_sources = tomllib.loads((PLUGIN / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+        assert sources["agent-repository-policy"] == original_sources["agent-repository-policy"]
     library = (plugin / sources["agent-procutil"]["path"]).resolve()
+    repository_policy = (plugin / sources["agent-repository-policy"]["path"]).resolve()
     runtime = tmp_path / "runtime"
     baseline_path = tmp_path / "baseline-path"
     change = {
@@ -749,6 +776,9 @@ def test_stamp_materializes_standalone_engine_pair_and_all_libraries(
         "library": (
             f"[IO.File]::WriteAllText('{library / 'new-lib.py'}', 'changed library source')"
         ),
+        "repository-policy": (
+            f"[IO.File]::WriteAllText('{repository_policy / 'new-lib.py'}', 'changed policy source')"
+        ),
     }[mutation]
     script = _snapshot_prelude()
     script += f"""
@@ -759,12 +789,16 @@ $SrcVersion='1.2.3'
 $Force=$false
 $script:GlobalActivationLockTimeoutSeconds=10
 function Deploy-SelfProvisioningBinstub {{ [IO.File]::WriteAllText((Join-Path $LocalBin 'stamp-proof'), 'deployed') }}
+$inputHash = Get-DispatchSnapshotHash -SnapshotDir $PluginDir
 Invoke-Stamp
+if ($inputHash -cne (Get-DispatchSnapshotHash -SnapshotDir $PluginDir)) {{ throw 'stamp mutated source input' }}
 $first = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 [IO.File]::WriteAllText('{baseline_path}', $first)
 $firstHash = Get-DispatchSnapshotHash -SnapshotDir $first
 {change}
+$inputHash = Get-DispatchSnapshotHash -SnapshotDir $PluginDir
 Invoke-Stamp
+if ($inputHash -cne (Get-DispatchSnapshotHash -SnapshotDir $PluginDir)) {{ throw 'restamp mutated source input' }}
 $second = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 if (($first -ceq $second) -ne ('{mutation}' -eq 'unchanged')) {{ throw '{mutation}: unexpected snapshot identity' }}
 if ($firstHash -cne (Get-DispatchSnapshotHash -SnapshotDir $first)) {{ throw 'published baseline snapshot was mutated' }}
@@ -773,6 +807,9 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
 """
     result = _run("ps1", script, tmp_path, env)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert (plugin / "pyproject.toml").read_bytes() == input_project
+    for project_path, original in input_library_projects.items():
+        assert project_path.read_bytes() == original, "stamp mutated canonical library metadata"
     snapshots = sorted((runtime / "snapshots").iterdir())
     snapshot = Path(baseline_path.read_text(encoding="utf-8").strip())
     published = Path((runtime / "payload-dir").read_text(encoding="utf-8").strip())
@@ -784,10 +821,13 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
     assert (snapshot == published) == (mutation == "unchanged")
     assert not (snapshot / "new-source.py").exists()
     assert not (snapshot / "libs/agent-procutil/new-lib.py").exists()
+    assert not (snapshot / "libs/repository-policy/new-lib.py").exists()
     if mutation == "plugin":
         assert (published / "new-source.py").read_text() == "changed plugin source"
     if mutation == "library":
         assert (published / "libs/agent-procutil/new-lib.py").read_text() == "changed library source"
+    if mutation == "repository-policy":
+        assert (published / "libs/repository-policy/new-lib.py").read_text() == "changed policy source"
     for ext in ("sh", "ps1"):
         assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             ENGINE / f"installer-engine.{ext}"
@@ -804,7 +844,7 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
             assert ref is not None and ier.is_local_ref(ref, selected)
     for name in (
         "installer_dependency_policy.py",
-        "installer_dependency_config.py",
+        "installer_dependency_config.py", "installer_retained_content.py",
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
@@ -812,7 +852,7 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
         "versioned_runtime_publication.py",
     ):
         source = ENGINE if name in (
-            "installer_dependency_policy.py", "installer_dependency_config.py",
+            "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
         ) else PLUGIN / "scripts"
         assert (snapshot / "scripts" / name).read_bytes() == (source / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
@@ -829,6 +869,15 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
     assert nested["tool"]["uv"]["sources"]["agent-dropin-registry"] == {
         "path": "../dropin-registry"
     }
+
+
+def test_stamp_preserves_already_materialized_policy_closure(tmp_path, monkeypatch):
+    generated = _fixture_checkout(tmp_path / "input", materialized=True)
+    monkeypatch.setattr(sys.modules[__name__], "PLUGIN", generated)
+    (tmp_path / "output").mkdir()
+    test_stamp_materializes_standalone_engine_pair_and_all_libraries(
+        tmp_path / "output", False, "repository-policy",
+    )
 
 
 @pytest.mark.parametrize(
@@ -941,7 +990,7 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
         str(snapshot / "libs" / lib)
         for lib in (
             "zdd", "dropin-registry", "plugin-resolve",
-            "single-instance-lease", "agent-procutil", "worktree-identity",
+            "single-instance-lease", "agent-procutil", "update-driver", "worktree-identity",
             "process-telemetry", "plugin-activation",
         )
     ]
@@ -1007,7 +1056,8 @@ exit $result.ExitCode
     assert calls[0] == ["venv", str(tmp_path / "slot"), "--allow-existing"]
     assert len(calls) == 2
     assert calls[1][:-3] == [
-        "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]"
+        "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]",
+        "--link-mode", "copy",
     ]
     assert calls[1][-3] == "--exclude-newer"
     assert calls[1][-1] == "--reinstall"

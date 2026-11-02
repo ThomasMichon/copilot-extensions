@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import venv
 from types import ModuleType
 from pathlib import Path
 
@@ -59,6 +60,161 @@ def _manifest(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+@pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher", "dispatcher-installed"] if os.name == "nt"
+                         else ["sh", "ps1", "dispatcher", "dispatcher-installed",
+                               "dispatcher-sh", "dispatcher-sh-installed"])
+def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
+    dispatcher = kind.startswith("dispatcher")
+    installed = kind.endswith("-installed")
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    root = profile / ".agent-example"
+    slot = root / "versions" / "immutable"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = slot / (
+        "Lib/site-packages" if os.name == "nt"
+        else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    package_name = "agent_worktrees" if dispatcher else "agent_example"
+    package = site / package_name
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        f"import {package_name} as package, json, sys\n"
+        "print(json.dumps([package.VALUE, package.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n",
+        encoding="utf-8",
+    )
+    if installed:
+        procutil = site / "agent_procutil"
+        procutil.mkdir()
+        (procutil / "__init__.py").touch()
+        shutil.copyfile(
+            REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
+            procutil / "python_cache.py",
+        )
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        record = site / "fixture.dist-info" / "RECORD"
+        record.parent.mkdir()
+        record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
+    scripts = manifest.parent / "scripts"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    (scripts / "resolve-runtime.sh").write_text(
+        "AGENT_RT_PY=" + shlex.quote(str(python).replace("\\", "/")) + "\n", encoding="utf-8",
+    )
+    assert generator.process_manifest(manifest, check=False) == []
+    shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
+    if kind == "cmd":
+        argv = [os.environ["COMSPEC"], "/d", "/c", str(shim)]
+    elif kind in ("ps1", "dispatcher", "dispatcher-installed"):
+        host = shutil.which("pwsh") or shutil.which("powershell")
+        if not host and os.name != "nt":
+            pytest.skip("PowerShell unavailable on this POSIX host")
+        assert host, "native PowerShell is required"
+        if dispatcher:
+            source = (REPO / "plugins" / "agent-worktrees" / "scripts"
+                      / "invoke-payload-runtime.ps1").read_text(encoding="utf-8")
+            start = source.index("function Invoke-AgentWorktreesRuntime(")
+            end = source.index("$python = Resolve-AgentWorktreesRuntime", start)
+            shim = tmp_path / "dispatcher-cache.ps1"
+            shim.write_text(
+                "$ErrorActionPreference = 'Stop'\n"
+                "$context = $null\n"
+                "$forwardArgs = @('argument with spaces')\n"
+                "$runtimeRoot = '" + str(root).replace("'", "''") + "'\n"
+                + source[start:end]
+                + "\nInvoke-AgentWorktreesRuntime '" + str(python).replace("'", "''") + "'\n",
+                encoding="utf-8",
+            )
+        argv = [host, "-NoProfile", "-NonInteractive", "-File", str(shim)]
+    elif kind.startswith("dispatcher-sh"):
+        source = (REPO / "plugins" / "agent-worktrees" / "scripts"
+                  / "invoke-payload-runtime.sh").read_text(encoding="utf-8")
+        start = source.index("run_runtime() {")
+        end = source.index('[[ -f "$MODE_RUNNER"', start)
+        shim = tmp_path / "dispatcher-cache.sh"
+        shim.write_text(
+            "set -eu\nCONTEXT=''\nRUNTIME_ROOT=" + shlex.quote(str(root)) + "\n"
+            "AGENT_RT_PY=" + shlex.quote(str(python)) + "\n"
+            + source[start:end] + '\nrun_runtime "$@"\n', encoding="utf-8",
+        )
+        argv = ["bash", str(shim)]
+    else:
+        if os.name == "nt":
+            git = shutil.which("git")
+            host = Path(git).parent.parent / "bin/bash.exe" if git else None
+            assert host and host.is_file(), "native Git Bash is required"
+            argv = [str(host), str(shim)]
+        else:
+            argv = ["sh", str(shim)]
+    environment = dict(os.environ)
+    child_env = {**environment, "USERPROFILE": str(profile), "HOME": str(profile)}
+    child_env.pop("PYTHONDONTWRITEBYTECODE", None)
+    child_env.pop("PYTHONPYCACHEPREFIX", None)
+
+    def snapshot():
+        return {
+            str(path.relative_to(slot)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (slot, *slot.rglob("*"))
+        }
+
+    before = snapshot()
+    cached_before = None
+    previous_cache = None
+    for _ in range(2):
+        result = subprocess.run(
+            [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
+            capture_output=True, text=True, timeout=30,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
+        prefix = str(root / "cache" / "python")
+        if os.name == "nt":
+            prefix = "\\\\?\\" + prefix
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path(prefix))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+                    previous_cache.stat().st_ino) == cached_before
+            assert (cached == previous_cache) is installed
+        cached_before = current
+        previous_cache = cached
+        assert snapshot() == before
+        if installed:
+            assert all(path.name.startswith("installed-") for path in (root / "cache" / "python").iterdir())
+    module = package / "__init__.py"
+    previous_stat = module.stat()
+    module.write_text("VALUE = 84\n", encoding="utf-8")
+    os.utime(module, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+    if installed:
+        record.write_text("fixture.py,sha256=" + "b" * 43 + ",1\n", encoding="utf-8")
+    result = subprocess.run(
+        [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
+        capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output[0] == 84 and output[2:] == [False, ["argument with spaces"]]
+    assert Path(output[1]) != previous_cache
+    assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+            previous_cache.stat().st_ino) == cached_before
+    assert dict(os.environ) == environment
 
 
 def _multi_manifest(tmp_path: Path) -> Path:
@@ -160,8 +316,13 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypa
         ).read_text(encoding="utf-8")
 
 
-def test_installer_lifecycle_does_not_change_command_catalog(tmp_path: Path) -> None:
-    manifest = _required_context_multi_manifest(tmp_path)
+@pytest.mark.parametrize("required_context", (False, True))
+def test_installer_lifecycle_does_not_change_command_catalog(
+    tmp_path: Path, required_context: bool,
+) -> None:
+    manifest = (
+        _required_context_multi_manifest(tmp_path) if required_context else _manifest(tmp_path)
+    )
     data = json.loads(manifest.read_text(encoding="utf-8"))
     before = generator.expected_files(manifest)
     primitive = manifest.parent / "scripts/installation-context/installation_context.py"
@@ -184,6 +345,20 @@ def test_installer_lifecycle_requires_boolean(tmp_path: Path, value: object) -> 
     data["installerLifecycle"] = value
     manifest.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="installerLifecycle must be a boolean"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("required_context", [False, True])
+def test_installer_lifecycle_requires_vendored_primitive(
+    tmp_path: Path, required_context: bool,
+) -> None:
+    manifest = (
+        _required_context_manifest(tmp_path) if required_context else _manifest(tmp_path)
+    )
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["installerLifecycle"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="installerLifecycle requires a vendored installation primitive"):
         generator.load_manifest(manifest)
 
 
@@ -607,14 +782,12 @@ def _agent_machines_import_sources(payload: Path) -> list[str]:
         for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
     ]
 def _dependency_materializer() -> ModuleType:
-    helper = (
-        REPO / "worktree-manager" / "src" / "worktree_manager"
-        / "_trusted_pointer_materializer.py"
-    )
+    helper = REPO / "tools" / "materialize_main.py"
     spec = importlib.util.spec_from_file_location("payload_dependency_materializer", helper)
     assert spec and spec.loader
     materializer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(materializer)
+    materializer.find_uv_editable_refs = materializer.uer.find_uv_editable_refs
     return materializer
 
 
@@ -644,7 +817,7 @@ def _stage_payload_dependencies(payload: Path, *, source_consumer: Path) -> None
         canonical_root=REPO,
         dest_root=payload,
     )
-    assert not any(line.startswith("SKIP ") for line in result), result
+    assert not any(line.startswith("SKIP ") for line in result), "\n".join(result)
     assert (payload / "libs" / "machine-transport" / "src" / "machine_transport").is_dir()
     assert (payload / "libs" / "remote-login-shell" / "src" / "remote_login_shell").is_dir()
 
@@ -847,6 +1020,81 @@ NATIVE_POWERSHELL_HOSTS = list(dict.fromkeys(filter(None, (
 ))))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows required-context command")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+def test_required_context_inner_command_external_cache(tmp_path: Path, host: str) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    root = _activate_agent_worktrees_context(tmp_path, home, context)
+    slot = root / "versions" / "immutable"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / "Scripts" / "python.exe"
+    package = slot / "Lib" / "site-packages" / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import agent_worktrees, json, sys\n"
+        "print(json.dumps([agent_worktrees.VALUE, agent_worktrees.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n", encoding="utf-8",
+    )
+    procutil = package.parent / "agent_procutil"
+    procutil.mkdir()
+    (procutil / "__init__.py").touch()
+    shutil.copyfile(
+        REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
+        procutil / "python_cache.py",
+    )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    record = package.parent / "fixture.dist-info" / "RECORD"
+    record.parent.mkdir()
+    record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    child_env = _agent_worktrees_test_environment(home, payload)
+    child_env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH"):
+        child_env.pop(key, None)
+
+    def snapshot(directory):
+        return {
+            str(path.relative_to(directory)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (directory, *directory.rglob("*"))
+        }
+
+    before = snapshot(slot), snapshot(payload)
+    cached_before = None
+    for _ in range(2):
+        result = subprocess.run(
+            [host, "-NoProfile", "-File",
+             str(payload / "bin" / "payload" / "agent-worktrees.ps1"), "argument with spaces"],
+            env=child_env, cwd=tmp_path, capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path("\\\\?\\" + str(root / "cache" / "python")))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert current == cached_before
+        cached_before = current
+        assert (snapshot(slot), snapshot(payload)) == before
+    assert not (home / ".agent-worktrees" / "cache").exists()
+    assert dict(os.environ) == environment
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows context semantics")
 @pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
 def test_worktrees_composed_status_preserves_independent_validation(tmp_path: Path, host: str) -> None:
@@ -910,13 +1158,14 @@ def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, h
         "TEST_NAMESPACE_REPLACEMENT": str(replacement),
     })
     native = payload / "scripts" / "installation-context" / "installation-context.ps1"
-    source = native.read_text(encoding="utf-8")
-    status_call = "$result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome"
+    owner = native.with_name("_installation_context_mode_cli.py")
+    source = owner.read_text(encoding="utf-8")
+    status_call = "    result = resolve_installation_mode(**mode_arguments)"
     assert source.count(status_call) == 1
-    native.write_text(source.replace(
+    owner.write_text(source.replace(
         status_call, status_call + "\n"
-        "[IO.File]::WriteAllText($env:TEST_NAMESPACE_RECEIPT, "
-        "[IO.File]::ReadAllText($env:TEST_NAMESPACE_REPLACEMENT))",
+        "    Path(os.environ['TEST_NAMESPACE_RECEIPT']).write_bytes("
+        "Path(os.environ['TEST_NAMESPACE_REPLACEMENT']).read_bytes())",
     ), encoding="utf-8")
     result = subprocess.run(
         [host, "-NoProfile", "-File", str(native), "status",
@@ -2381,9 +2630,14 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
         ):
             writer_path = plugin_root / "scripts" / writer_name
             if writer_path.is_file():
-                assert "emit-command-catalog" in writer_path.read_text(
-                    encoding="utf-8"
-                ), (
+                writer_text = writer_path.read_text(encoding="utf-8")
+                if data["inProcessCatalog"]:
+                    module_path = plugin_root / "scripts" / "emit_command_catalog.py"
+                    assert module_path in generated
+                    assert "emit_command_catalog.py" in writer_text
+                    assert "subprocess" not in writer_text
+                    break
+                assert "emit-command-catalog" in writer_text, (
                     f"{plugin}: {writer_name} no longer composes "
                     "emit-command-catalog"
                 )
@@ -2462,9 +2716,9 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
             )
             composes_catalog = any(
                 (plugin_root / "scripts" / writer_name).is_file()
-                and "emit-command-catalog"
-                in (plugin_root / "scripts" / writer_name).read_text(
-                    encoding="utf-8"
+                and any(
+                    emitter in (plugin_root / "scripts" / writer_name).read_text(encoding="utf-8")
+                    for emitter in ("emit-command-catalog", "emit_command_catalog.py")
                 )
                 for writer_name in (
                     "write_session_guidance.py",
@@ -2543,7 +2797,11 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 23
-    assert result.stdout.strip() == f"{project}|-m agent_example search two words"
+    assert re.fullmatch(
+        re.escape(f"{project}|-X pycache_prefix={home / '.agent-example/cache/python'}")
+        + r"/unsealed-[0-9a-f]{32} -m agent_example search two words",
+        result.stdout.strip(),
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -2797,7 +3055,11 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == "-m agent_example.helper two words"
+    assert re.fullmatch(
+        re.escape(f"-X pycache_prefix={home / '.agent-example/cache/python'}")
+        + r"/unsealed-[0-9a-f]{32} -m agent_example\.helper two words",
+        result.stdout.strip(),
+    )
 
 
 def test_multi_command_traces_use_manifest_plugin_identity(tmp_path: Path) -> None:
@@ -3402,3 +3664,366 @@ def test_powershell_shim_boot_trace_lines_survive_concurrent_invocations(
                 cursor += 1
             assert cursor < len(expected), phases
             cursor += 1
+
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "", []])
+def test_in_process_catalog_rejects_non_boolean_opt_in(tmp_path, value):
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = value
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="inProcessCatalog"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("other", ["catalogGate", "catalogBinding"])
+def test_in_process_catalog_rejects_unimplemented_policy_composition(tmp_path, other):
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    if other == "catalogGate":
+        (manifest.parent / "scripts/gate.py").write_text("")
+        data[other] = "scripts/gate.py"
+    else:
+        data[other] = True
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="inProcessCatalog"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_in_process_catalog_is_explicit_generated_source(tmp_path, multi):
+    manifest = (_multi_manifest if multi else _manifest)(tmp_path)
+    module = manifest.parent / "scripts/emit_command_catalog.py"
+    before = generator.expected_files(manifest)
+    assert module not in before
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    manifest.write_text(json.dumps(data))
+    after = generator.expected_files(manifest)
+    assert set(after) == {*before, module}
+    assert all(after[path] == content for path, content in before.items())
+    namespace = {"__file__": str(module), "__name__": "_catalog_test"}
+    exec(compile(after[module], str(module), "exec"), namespace)
+    context = namespace["render_context"](windows=True)
+    catalog = json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
+    assert catalog["plugin"] == data.get("plugin", data.get("command"))
+    assert catalog["payload"] == {"provenance": "payload-local"}
+    assert [row["id"] for row in catalog["commands"]] == (
+        ["agent-example", "example-helper"] if multi else ["agent-example"]
+    )
+    assert all(row["availability"] == "unavailable" for row in catalog["commands"])
+    assert all(row["argv"][0].endswith(".ps1") for row in catalog["commands"])
+
+
+
+_IN_PROCESS_ADOPTERS = (
+    "agent-bridge", "agent-containers", "agent-logger", "agent-machines",
+    "agent-mcp", "agent-pull-requests", "agent-vault",
+)
+
+
+def _catalog_parts(context):
+    prose, encoded = context.split("```json\n", 1)
+    return prose, json.loads(encoded.split("\n```", 1)[0])
+
+
+def _flight_snapshot(home):
+    # Native PowerShell owns its AppData startup cache, independently of the hook.
+    return {
+        path.relative_to(home): path.read_bytes()
+        for path in home.rglob("*")
+        if path.is_file() and path.relative_to(home).parts[0] != "AppData"
+    }
+
+
+def _flight_fixture(tmp_path, monkeypatch, state, *, multi=False):
+    manifest = (_multi_manifest if multi else _manifest)(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    manifest.write_text(json.dumps(data))
+    generator.process_manifest(manifest, check=False)
+    scripts = manifest.parent / "scripts"
+    shutil.copyfile(SCRIPT.parent / "command_binding.py", scripts / "command_binding.py")
+    for source in (REPO / "libs/versioned-runtime").glob("*.py"):
+        shutil.copyfile(source, scripts / source.name)
+    for suffix in (".ps1", ".sh"):
+        shutil.copyfile(
+            REPO / "plugins/agent-codespaces/scripts" / ("resolve-runtime" + suffix),
+            scripts / ("resolve-runtime" + suffix),
+        )
+    home = tmp_path / "home"
+    home.mkdir()
+    for key, value in (
+        ("HOME", str(home)), ("USERPROFILE", str(home)),
+        ("HOMEDRIVE", home.drive), ("HOMEPATH", str(home)[len(home.drive):]),
+    ):
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    runtime = home / ".agent-example"
+    if state != "missing":
+        slot = runtime / "versions/1.2.3"
+        (slot / "Scripts").mkdir(parents=True)
+        (slot / "bin").mkdir()
+        for path in (slot / "Scripts/python.exe", slot / "bin/python"):
+            path.write_text("This interpreter must never be invoked.", encoding="utf-8")
+            path.chmod(0o755)
+        if state != "incomplete":
+            _write_runtime_completion(slot, "1.2.3")
+        (runtime / ("last-known-good" if state == "lkg" else "current-version")).write_text(
+            "1.2.3", encoding="utf-8",
+        )
+    if state == "unverified-context":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(home / "unverified-context.json"))
+    before = _flight_snapshot(home)
+    return manifest, home, before
+
+
+@pytest.mark.parametrize("multi", [False, True])
+@pytest.mark.parametrize("state, expected", [
+    ("missing", "not installed"), ("incomplete", "incomplete or unavailable"),
+    ("installed", "already installed"), ("lkg", "already installed"),
+    ("unverified-context", "could not be verified for this installation context"),
+])
+def test_in_process_catalog_flight_check_is_passive(tmp_path, monkeypatch, multi, state, expected):
+    manifest, home, before = _flight_fixture(tmp_path, monkeypatch, state, multi=multi)
+    module_path = manifest.parent / "scripts/emit_command_catalog.py"
+    spec = importlib.util.spec_from_file_location("_flight_catalog_test", module_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A passive catalog must not spawn tools or services")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    context = module.render_context()
+    catalog = _catalog_parts(context)[1]
+    assert expected in context.split("\n```", 1)[1]
+    assert "binding" not in catalog
+    assert all(row["availability"] == "ready" for row in catalog["commands"])
+    assert _flight_snapshot(home) == before
+    assert not list(manifest.parent.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("powershell", marks=pytest.mark.skipif(os.name != "nt", reason="native Windows host")),
+    "pwsh",
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="native POSIX host")),
+])
+@pytest.mark.parametrize("state, expected", [
+    ("missing", "not installed"), ("incomplete", "incomplete or unavailable"),
+    ("installed", "already installed"), ("lkg", "already installed"),
+    ("unverified-context", "could not be verified for this installation context"),
+])
+def test_native_catalog_flight_check_is_passive(tmp_path, monkeypatch, shell, state, expected):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip("native catalog shell unavailable")
+    manifest, home, before = _flight_fixture(tmp_path, monkeypatch, state)
+    if shell == "bash":
+        command = [executable, str(manifest.parent / "scripts/emit-command-catalog.sh")]
+    else:
+        command = [executable, "-NoProfile", "-NonInteractive", "-File",
+                   str(manifest.parent / "scripts/emit-command-catalog.ps1")]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    context = json.loads(result.stdout)["additionalContext"]
+    assert expected in context.split("\n```", 1)[1]
+    catalog = _catalog_parts(context)[1]
+    assert "binding" not in catalog
+    assert all(row["availability"] == "ready" for row in catalog["commands"])
+    assert _flight_snapshot(home) == before
+    assert not list(manifest.parent.rglob("__pycache__"))
+
+
+def test_flight_check_selected_root_does_not_substitute_legacy(tmp_path, monkeypatch):
+    manifest, home, before = _flight_fixture(tmp_path, monkeypatch, "installed")
+    spec = importlib.util.spec_from_file_location(
+        "_selected_flight", manifest.parent / "scripts/command_binding.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    legacy = home / ".agent-example"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(home / "unverified-context.json"))
+    selected = {"status": "selected", "installation": {"runtimeRoot": str(home / "selected")}}
+    assert "not installed" in module.runtime_installation_status(selected, legacy)
+    assert "could not be verified" in module.runtime_installation_status({"status": "blocked"}, legacy)
+    assert _flight_snapshot(home) == before
+
+
+@pytest.mark.parametrize("plugin", _IN_PROCESS_ADOPTERS)
+def test_in_process_catalog_registered_writer_native_entry(tmp_path, plugin):
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    else:
+        shell = shutil.which("bash")
+    if not shell:
+        pytest.skip("native hook shell unavailable")
+    payload = tmp_path / "space 'quote $value[1]"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    source = REPO / "plugins" / plugin
+    data = generator.load_manifest(source / "payload-invocation.json")
+    assert data["inProcessCatalog"]
+    for name in (
+        "write-session-guidance.ps1", "write-session-guidance.sh",
+        "write_session_guidance.py", "emit_command_catalog.py",
+        "emit-command-catalog.ps1", "emit-command-catalog.sh",
+    ):
+        shutil.copyfile(source / "scripts" / name, scripts / name)
+    writer_path = scripts / "write_session_guidance.py"
+    audit = tmp_path / "writer-audit.jsonl"
+    # Observe the real writer process and its spawn boundary, not a mocked producer.
+    instrumentation = (
+        "\nimport sys as _audit_sys, json as _audit_json\n"
+        f"_audit_path = {str(audit)!r}\n"
+        "def _audit_record(event, args):\n"
+        "    if event in ('subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.spawn'):\n"
+        "        with open(_audit_path, 'a', encoding='utf-8') as stream:\n"
+        "            stream.write(_audit_json.dumps({'spawn': event}) + '\\n')\n"
+        "with open(_audit_path, 'a', encoding='utf-8') as _stream:\n"
+        "    _stream.write('{\"writer\":1}\\n')\n"
+        "_audit_sys.addaudithook(_audit_record)\n"
+    )
+    writer_path.write_text(writer_path.read_text().replace(
+        "from __future__ import annotations",
+        "from __future__ import annotations\n" + instrumentation,
+    ), encoding="utf-8")
+    sentinel = tmp_path / "forbidden"
+    for name in (data["installer"], "runtime-gate", "invoke-payload-runtime", "service", "network"):
+        for suffix in (".ps1", ".sh"):
+            (scripts / (name + suffix)).write_text(
+                f"Set-Content -LiteralPath '{sentinel}' -Value invoked; exit 91"
+                if suffix == ".ps1" else f"printf invoked > '{sentinel}'; exit 91\n",
+                encoding="utf-8",
+            )
+    output = payload / str(data["outputDir"])
+    output.mkdir(parents=True)
+    for command in data["commands"]:
+        for suffix in ("", ".ps1", ".cmd"):
+            target = output / (command["command"] + suffix)
+            trap = (
+                f"Set-Content -LiteralPath '{sentinel}' -Value invoked; exit 91"
+                if suffix == ".ps1" else
+                f'@echo invoked>"{sentinel}"' + chr(10) + '@exit /b 91' + chr(10)
+                if suffix == ".cmd" else
+                "#!/bin/sh" + chr(10) + f"printf invoked > '{sentinel}'; exit 91" + chr(10)
+            )
+            target.write_text(trap, encoding="utf-8")
+            target.chmod(0o755)
+    hooks = json.loads((source / "hooks.json").read_text())["hooks"]["sessionStart"]
+    entry = next(h for h in hooks if "write-session-guidance." in h["powershell"])
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+           "HOMEDRIVE": home.drive, "HOMEPATH": str(home)[len(home.drive):],
+           "COPILOT_PLUGIN_ROOT": str(payload), "PYTHONDONTWRITEBYTECODE": "1",
+           "POWERSHELL_UPDATECHECK": "Off"}
+    for key in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "COPILOT_EXTENSIONS_CONTEXT"):
+        env.pop(key, None)
+    command = (
+        [shell, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]]
+        if os.name == "nt" else [shell, "-c", entry["bash"]]
+    )
+    target = home / ".copilot/session-state/session-1/instructions" / plugin / "session-guidance.instructions.md"
+    calls = 0
+
+    def invoke(payload_input='{"sessionId":"session-1"}'):
+        nonlocal calls
+        calls += 1
+        result = subprocess.run(command, input=payload_input, env=env, text=True,
+                                capture_output=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "{}"
+        assert not sentinel.exists()
+        return target.read_text(encoding="utf-8") if target.exists() else ""
+
+    def reference():
+        argv = (
+            [shell, "-NoProfile", "-File", str(scripts / "emit-command-catalog.ps1")]
+            if os.name == "nt" else [shell, str(scripts / "emit-command-catalog.sh")]
+        )
+        result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        return _catalog_parts(json.loads(result.stdout)["additionalContext"])
+
+    first = invoke()
+    assert _catalog_parts(first[first.index("## "):]) == reference()
+    assert invoke() == first
+    assert not (home / str(data["runtimeRoot"])).exists()
+    primary = output / (str(data["commands"][0]["command"]) + (
+        (".cmd" if data["windowsCatalogShim"] == "cmd" else ".ps1") if os.name == "nt" else ""
+    ))
+    saved = primary.read_bytes()
+    primary.unlink()
+    unavailable = invoke()
+    assert _catalog_parts(unavailable[unavailable.index("## "):]) == reference()
+    assert _catalog_parts(unavailable[unavailable.index("## "):])[1]["commands"][0]["availability"] == "unavailable"
+    primary.write_bytes(saved)
+    primary.chmod(0o755)
+    assert invoke() == first
+    installer = scripts / (str(data["installer"]) + (".ps1" if os.name == "nt" else ".sh"))
+    installer.unlink()
+    content = invoke()
+    assert _catalog_parts(content[content.index("## "):]) == reference()
+    assert all(row["availability"] == "unavailable" for row in _catalog_parts(content[content.index("## "):])[1]["commands"])
+    before_invalid = target.read_bytes()
+    assert invoke('{"sessionId":"../escape"}')
+    assert target.read_bytes() == before_invalid
+    assert invoke("malformed json")
+    assert target.read_bytes() == before_invalid
+    module = scripts / "emit_command_catalog.py"
+    for noisy_source in (
+        "print('accidental module noise')" + chr(10) + "raise RuntimeError('broken module')",
+        "def render_context():" + chr(10) + "    print('accidental render noise')"
+        + chr(10) + "    raise RuntimeError('broken render')",
+    ):
+        module.write_text(noisy_source, encoding="utf-8")
+        assert "unavailable" in invoke()
+    module.write_text(
+        "def render_context(): return 'oversized source must not run'" + chr(10) + "#" * (64 * 1024),
+        encoding="utf-8",
+    )
+    assert "unavailable" in invoke()
+    module.write_text("this is not valid Python !!!", encoding="utf-8")
+    assert "unavailable" in invoke()
+    module.unlink()
+    assert "unavailable" in invoke()
+    records = [json.loads(line) for line in audit.read_text().splitlines()]
+    assert sum(row.get("writer", 0) for row in records) == calls
+    assert not any("spawn" in row for row in records)
+    assert not list(payload.rglob("__pycache__"))
+    print(f"entry-workcount {plugin}: wrapper={calls} writer={calls} nested-spawn=0")
+
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_in_process_catalog_retains_platform_availability_predicates(tmp_path, monkeypatch, multi):
+    manifest = (_multi_manifest if multi else _manifest)(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    data["windowsCatalogShim"] = "cmd"
+    manifest.write_text(json.dumps(data))
+    module = manifest.parent / "scripts/emit_command_catalog.py"
+    namespace = {"__file__": str(module), "__name__": "_catalog_predicates"}
+    exec(compile(generator.expected_files(manifest)[module], str(module), "exec"), namespace)
+    commands = ["agent-example", "example-helper"] if multi else ["agent-example"]
+    output = manifest.parent / "bin"
+    output.mkdir()
+    for command in commands:
+        (output / command).mkdir()
+        (output / (command + ".cmd")).mkdir()
+    monkeypatch.setattr(namespace["os"], "access", lambda *_: True)
+    windows = namespace["render_context"](windows=True)
+    assert "a newline" in windows
+    assert all(row["shell"] == "cmd" for row in _catalog_parts(windows)[1]["commands"])
+    assert all(row["availability"] == "ready" for row in _catalog_parts(windows)[1]["commands"])
+    posix = _catalog_parts(namespace["render_context"](windows=False))[1]
+    assert all(row["availability"] == ("unavailable" if multi else "ready") for row in posix["commands"])
+    installer = manifest.parent / "scripts/install.sh"
+    installer.unlink()
+    installer.mkdir()
+    assert all(row["availability"] == "unavailable" for row in _catalog_parts(namespace["render_context"](windows=False))[1]["commands"])

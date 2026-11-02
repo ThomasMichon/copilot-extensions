@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate resumable bounded ordinary delta pages across external provider processes without changing legacy syntax",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

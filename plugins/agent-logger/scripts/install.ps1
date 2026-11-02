@@ -49,6 +49,14 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($Action -eq 'uninstall' -and $InstallDir) {
+    if (($InstallDir -split '[\\/]') -contains '..') {
+        throw 'Logger uninstall requires a root without parent-traversal components'
+    }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -590,8 +598,14 @@ function Ensure-UvIndex {
 }
 
 $InstallDir = if ($InstallDir) { $InstallDir } else { Join-Path $env:USERPROFILE '.agent-logger' }
+if ($Action -eq 'uninstall' -and ($InstallDir -split '[\\/]' -contains '..')) {
+    throw 'Logger uninstall requires a root without parent-traversal components'
+}
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
-$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger'))
+if ($InstallDir.Length -gt [IO.Path]::GetPathRoot($InstallDir).Length) {
+    $InstallDir = $InstallDir.TrimEnd([char[]]'/\')
+}
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger')).TrimEnd([char[]]'/\')
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
     $InstallDir,
     $legacyInstallDir
@@ -879,12 +893,14 @@ function Resolve-SnapshotInstallerEngineSource {
 }
 
 function Materialize-SnapshotLibs {
-    param([Parameter(Mandatory)][string]$SnapshotDir)
+    param([Parameter(Mandatory)][string]$SnapshotDir, [switch]$PayloadCopied)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
     $libraries = [ordered]@{
+        'agent-configuration-layers' = 'configuration-layers'
         'agent-config-migrate' = 'config-migrate'
         'agent-procutil' = 'agent-procutil'
+        'agent-zdd' = 'zdd'
         'agent-dropin-registry' = 'dropin-registry'
         'agent-plugin-resolve' = 'plugin-resolve'
         'agent-plugin-activation' = 'plugin-activation'
@@ -897,7 +913,8 @@ function Materialize-SnapshotLibs {
     foreach ($entry in $libraries.GetEnumerator()) {
         $lib = $entry.Value
         $source = Join-Path $PluginDir "libs\$lib"
-        if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
+        $payloadLibrary = Test-Path -LiteralPath (Join-Path $source 'pyproject.toml')
+        if (-not $payloadLibrary) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"
         }
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) { continue }
@@ -905,8 +922,13 @@ function Materialize-SnapshotLibs {
         if ([System.IO.Path]::GetFullPath($source) -eq [System.IO.Path]::GetFullPath($destination)) {
             continue
         }
-        Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
-        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        if (-not ($PayloadCopied -and $payloadLibrary -and
+                (Test-Path -LiteralPath (Join-Path $destination 'pyproject.toml')))) {
+            if (Test-Path -LiteralPath $destination) {
+                Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
+            }
+            Copy-InstallerStageDirectory -Source $source -Destination $destination
+        }
         $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $lib
         $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $lib
         $text = $text.Replace($oldLine, $newLine)
@@ -1021,9 +1043,9 @@ function Publish-PayloadSnapshot {
     } else {
         $snapTmp = "$snapDir.tmp-$PID"
         if (Test-Path $snapTmp) {
-            Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item $snapTmp -Recurse -Force -ErrorAction Stop
         }
-        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop | Out-Null
         $exclude = @(
             '.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist',
             '.pytest_cache', '.mypy_cache', 'tests'
@@ -1031,10 +1053,14 @@ function Publish-PayloadSnapshot {
         Get-ChildItem -LiteralPath $PluginDir -Force |
             Where-Object { $exclude -notcontains $_.Name } |
             ForEach-Object {
-                Copy-Item -LiteralPath $_.FullName `
-                    -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+                $destination = Join-Path $snapTmp $_.Name
+                if ($_.PSIsContainer) {
+                    Copy-InstallerStageDirectory -Source $_.FullName -Destination $destination
+                } else {
+                    Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+                }
             }
-        Materialize-SnapshotLibs -SnapshotDir $snapTmp
+        Materialize-SnapshotLibs -SnapshotDir $snapTmp -PayloadCopied
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
         Publish-SnapshotSource -SnapshotDir $snapTmp
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
@@ -1321,7 +1347,23 @@ function Write-LoggerDeployManifest {
         $gitInfo = { param($Path) $script:SourceManifestGitInfo }
     }
     Assert-SourceRuntime
-    Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo $gitInfo -SourcePathOverride $manifestSource -PayloadHash (Get-PayloadHash) -VersionOverride $PackageVersion -AdditionalFields (Get-SourceRuntimeFields)
+    $legacyPublication = -not $script:SourceRuntimeIdentity -and -not $env:COPILOT_EXTENSIONS_CONTEXT
+    $manifest = Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo $gitInfo -SourcePathOverride $manifestSource -PayloadHash (Get-PayloadHash) -VersionOverride $PackageVersion -AdditionalFields (Get-SourceRuntimeFields) -PassThru:$legacyPublication
+    if ($legacyPublication) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Command ownership publication requires a bootstrap Python interpreter' }
+        $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'command_binding.py'),
+            '--payload-root', $PluginDir, '--plugin-id', 'agent-logger',
+            '--legacy-root', $InstallDir, '--source-payload-root', $sourcePath,
+            '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+        ) -InputText ($manifest | ConvertTo-Json -Depth 6 -ErrorAction Stop)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command ownership validation refused Logger deploy-manifest publication: $result"
+        }
+        Write-Ok "Deploy manifest written (source: $($manifest.source.kind))"
+    }
 }
 
 function Install-Package {
@@ -1363,7 +1405,7 @@ function Install-Package {
 
     # SAC-safe venv: prefer a signed base Python via --copies; rebuild unsigned.
     Invoke-VersionedSlotClean
-    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
         Write-Fail "Failed to create venv at $VenvDir"
         exit 1
     }
@@ -1375,25 +1417,22 @@ function Install-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $setuptoolsResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'setuptools>=83.0.0', '--quiet')
-    $setuptoolsOut = $setuptoolsResult.Output
-    if ($setuptoolsResult.ExitCode -ne 0) {
+    $bootstrapResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'setuptools>=83.0.0', 'pyyaml>=6.0', '--quiet')
+    if ($bootstrapResult.ExitCode -ne 0) {
         $ErrorActionPreference = $prevEAP
-        Write-Fail "setuptools install failed"
-        if ($setuptoolsOut) { Write-Host ($setuptoolsOut | Out-String) }
-        exit 1
-    }
-    $pyyamlResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'pyyaml>=6.0', '--quiet')
-    $pyyamlOut = $pyyamlResult.Output
-    if ($pyyamlResult.ExitCode -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-Fail "pyyaml install failed"
-        if ($pyyamlOut) { Write-Host ($pyyamlOut | Out-String) }
+        Write-Fail "Build prerequisites install failed"
+        if ($bootstrapResult.Output) { Write-Host ($bootstrapResult.Output | Out-String) }
         exit 1
     }
     # Local first-party code still resolves its external and build dependencies
-    # through the configured, seasoned index.
+    # through the configured, seasoned index, in one retained transaction.
+    $installArgs = @('--python', $VenvPython)
     foreach ($lib in @(
+        @{
+            Name = 'configuration-layers'
+            Package = 'agent-configuration-layers'
+            Dir = 'configuration-layers'
+        },
         @{
             Name = 'config-migrate'
             Package = 'agent-config-migrate'
@@ -1442,16 +1481,10 @@ function Install-Package {
             }
         }
         if (-not (Test-Path (Join-Path $libPath 'pyproject.toml'))) { continue }
-        $libResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, '--reinstall-package', $lib.Package, $libPath, '--quiet')
-        $libOut = $libResult.Output
-        if ($libResult.ExitCode -ne 0) {
-            $ErrorActionPreference = $prevEAP
-            Write-Fail "$($lib.Name) library install failed"
-            if ($libOut) { Write-Host ($libOut | Out-String) }
-            exit 1
-        }
+        $installArgs += @('--reinstall-package', $lib.Package, $libPath)
     }
-    $installResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -PayloadDirToScrub $PluginDir -Arguments @('--python', $VenvPython, "$PluginDir", '--quiet')
+    $installArgs += @('--reinstall-package', 'agent-logger', $PluginDir, '--quiet')
+    $installResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -PayloadDirToScrub $PluginDir -Arguments $installArgs
     $out = $installResult.Output
     $result = $installResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -1687,8 +1720,8 @@ function Deploy-SelfProvisioningBinstub {
     # The primary `agent-logger` binstub (.ps1 primary + .cmd fallback), SELF-
     # PROVISIONING (#1393): fast-path the built versioned slot's python; if no
     # slot is built yet (a `stamp` deferred the venv), provision on first use by
-    # running the slot-local snapshot's `scripts/install.ps1 provision`, then
-    # dispatch. Opt out with AGENT_LOGGER_NO_SELFPROVISION=1. Deployed byte-
+    # delegating to the selected snapshot's queued dispatcher. Opt out with
+    # AGENT_LOGGER_NO_SELFPROVISION=1. Deployed byte-
     # identically at stamp AND during Install-Package so a provision triggered by
     # this very binstub never rewrites the .cmd it is mid-execution.
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
@@ -1710,10 +1743,20 @@ AGENT_RT_ROOT="$_root"
 AGENT_RT_RESOLVE_TRACE_MODE=ready
 . "$_resolver"
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-_i="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_i" ] || _i="$(ls "$HOME"/.copilot/installed-plugins/*/agent-logger/scripts/install.sh 2>/dev/null | head -n1)"
-if [ -n "$_i" ] && [ -f "$_i" ]; then echo "[agent-logger] runtime not provisioned; run: bash \"$_i\" provision" >&2; else echo "[agent-logger] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
-exit 1
+_payload="$(cat "$_root/payload-dir" 2>/dev/null)"
+_shim="$_payload/bin/agent-logger"
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
+    echo '[agent-logger] selected snapshot command not found; re-enable/update the plugin.' >&2
+    exit 127
+fi
+if [ ! -f "$_gate" ] ||
+   ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
+    echo '[agent-logger] selected snapshot lacks the queued command contract; re-enable/update the plugin.' >&2
+    exit 126
+fi
+export COPILOT_PLUGIN_ROOT="$_payload"
+exec "$_shim" "$@"
 '@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
@@ -1740,27 +1783,21 @@ if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
 if ($env:AGENT_LOGGER_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-logger] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-logger] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
-$_probe = Join-Path $_snap 'scripts\installation-context\plugin-publication-probe.ps1'
-if (-not (Test-Path -LiteralPath $_probe -PathType Leaf)) {
-    [Console]::Error.WriteLine('[agent-logger] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.')
+$_shim = if ($_snap) { Join-Path $_snap 'bin\agent-logger.ps1' } else { '' }
+if (-not ($_shim -and (Test-Path -LiteralPath $_shim -PathType Leaf))) {
+    [Console]::Error.WriteLine('[agent-logger] cannot self-provision: selected snapshot command not found. Re-enable/update the plugin, then retry.')
+    exit 127
+}
+$_gate = Join-Path $_snap 'scripts\runtime-gate.ps1'
+if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
+    Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: logger-first-use-v1' -Quiet
+)) {
+    [Console]::Error.WriteLine('[agent-logger] selected snapshot lacks the queued command contract. Re-enable/update the plugin, then retry.')
     exit 126
 }
-$global:LASTEXITCODE = 0
-& $_probe -PayloadRoot $_snap -PluginId agent-logger -LegacyRoot $_root
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$_py = _Resolve-Py normal
-if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-logger] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-logger eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-logger] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
+$env:COPILOT_PLUGIN_ROOT = $_snap
+& $_shim @args
+exit $LASTEXITCODE
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
@@ -1805,6 +1842,26 @@ if (-not ($_shim -and (Test-Path -LiteralPath $_shim))) {
     [Console]::Error.WriteLine("[$_command] owning payload shim not found: $_shim")
     [Console]::Error.WriteLine("[$_command] re-enable/update agent-logger, then retry.")
     exit 127
+}
+$_gate = Join-Path $_payload 'scripts\runtime-gate.ps1'
+if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
+    Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: logger-first-use-v1' -Quiet
+)) {
+    if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
+        Select-String -LiteralPath $_gate -SimpleMatch 'AGENT_LOGGER_NO_SELFPROVISION' -Quiet
+    )) {
+        [Console]::Error.WriteLine("[$_command] selected snapshot lacks non-provisioning dispatch support; re-enable/update agent-logger.")
+        exit 126
+    }
+    $_resolver = Join-Path $_payload 'scripts\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $_resolver -PathType Leaf) -or -not (
+        Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet
+    )) {
+        [Console]::Error.WriteLine("[$_command] read-only runtime resolver is unavailable; re-enable/update agent-logger.")
+        exit 126
+    }
+    # The old gate owns effective-context resolution, but never construction.
+    $env:AGENT_LOGGER_NO_SELFPROVISION = '1'
 }
 $env:COPILOT_PLUGIN_ROOT = $_payload
 & $_shim @args
@@ -1855,6 +1912,85 @@ function Invoke-Stamp {
     }
 }
 
+function Get-FiniteUninstallPython {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+    $probe = @'
+import sys
+assert sys.version_info >= (3, 10)
+from pathlib import Path
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+print(Path(sys.executable).resolve(strict=True))
+'@
+    $candidates = @()
+    foreach ($name in @('python3', 'python')) {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
+                }
+            }
+        } catch { }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $nativeError = ''
+            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+                return $selected.Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
+function Get-LoggerUninstallTaskNames {
+    $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$names.Add($TaskName)
+    foreach ($candidate in @(Get-ScheduledTask -ErrorAction Stop)) {
+        if (-not $candidate.PSObject.Properties['TaskName'] -or
+            -not $candidate.PSObject.Properties['TaskPath'] -or
+            -not $candidate.PSObject.Properties['Actions']) { continue }
+        if ($candidate.TaskPath -ne '\' -or
+            $candidate.TaskName -notmatch '^Agent Logger Session Sync(?: - [a-f0-9]{12})?$') { continue }
+        $bound = $false
+        foreach ($action in @($candidate.Actions)) {
+            if ($action.PSObject.Properties['Arguments'] -and
+                "$($action.Arguments)".IndexOf(('"' + $TaskLauncher + '"'),
+                    [StringComparison]::OrdinalIgnoreCase) -ge 0) { $bound = $true }
+        }
+        if (-not $bound) { continue }
+        if (-not $candidate.PSObject.Properties['Principal'] -or
+            -not $candidate.Principal.UserId) { throw 'Logger task ownership cannot be revalidated' }
+        $owner = $candidate.Principal.UserId
+        if ($owner -notlike 'S-1-*') {
+            $owner = ([Security.Principal.NTAccount]::new($owner)).Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+        }
+        if ($owner -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+            throw 'Logger task runtime is owned by another account; uninstall refused'
+        }
+        [void]$names.Add($candidate.TaskName)
+    }
+    return @($names | Sort-Object)
+}
+
 try {
     . (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
     . (Join-Path $ScriptDir 'source-runtime.ps1')
@@ -1863,6 +1999,10 @@ try {
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
     if ($Action -ne 'status') { Enter-LoggerInstallLock }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
 switch ($Action) {
     'stamp' {
         if (-not $script:SkipStamp) { Invoke-Stamp }
@@ -1881,27 +2021,44 @@ switch ($Action) {
         Update-SyncTaskBinding
     }
     'uninstall' {
+        $uninstallPython = Get-FiniteUninstallPython -InstallRoot $InstallDir
+        if (-not $uninstallPython) { throw 'Logger uninstall requires an existing external Python 3.10+ outside runtime and prefix closure' }
+        $uninstallGuardArgs = @('-I', '-B', (Join-Path $PSScriptRoot 'uninstall_guard.py'), '--root', $InstallDir)
+        $guardError = ''
+        $null = Invoke-Hidden -FilePath $uninstallPython -ArgList $uninstallGuardArgs -ErrorOutput ([ref]$guardError)
+        if ($LASTEXITCODE -ne 0) { throw $guardError }
         if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
-        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-            if ($DryRun) {
-                Write-Host "[dry-run] would remove scheduled task: $TaskName"
+        foreach ($uninstallTaskName in @(Get-LoggerUninstallTaskNames)) {
+            if (Get-ScheduledTask -TaskName $uninstallTaskName -ErrorAction SilentlyContinue) {
+                if ($DryRun) {
+                    Write-Host "[dry-run] would remove scheduled task: $uninstallTaskName"
+                } else {
+                    Disable-ScheduledTask -TaskName $uninstallTaskName -ErrorAction Stop | Out-Null
+                    $task = Get-ScheduledTask -TaskName $uninstallTaskName -ErrorAction Stop
+                    if ($task.State -in @('Running', 'Queued', 'Unknown')) {
+                        throw 'Active Logger sync task; uninstall refused after disabling new scheduled starts'
+                    }
+                    Unregister-ScheduledTask -TaskName $uninstallTaskName -Confirm:$false
+                    Write-Changed "scheduled task removed (config at $InstallDir kept)"
+                }
             } else {
-                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-                Write-Changed "scheduled task removed (config at $InstallDir kept)"
+                Write-Warn2 "no scheduled task found"
             }
-        } else {
-            Write-Warn2 "no scheduled task found"
+        }
+        if (-not $DryRun) {
+            $guardError = ''
+            $null = Invoke-Hidden -FilePath $uninstallPython -ArgList ($uninstallGuardArgs + @('--idle', '--prepare')) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
         }
         if ($publishGlobalBinstubs) {
-            $anyStub = $false
-            foreach ($name in $BinstubNames) {
-                foreach ($ext in 'ps1', 'cmd') {
-                    $f = Join-Path $LocalBin "$name.$ext"
-                    if (Test-Path $f) {
-                        $anyStub = $true
-                        if ($DryRun) { Write-Host "[dry-run] would remove binstub: $f" }
-                        else { Remove-Item $f -Force -ErrorAction SilentlyContinue }
-                    }
+            $guardError = ''
+            $commandAction = if ($DryRun) { '--command-names' } else { '--remove-commands' }
+            $ownedCommandOutput = Invoke-Hidden -FilePath $uninstallPython -ArgList ($uninstallGuardArgs + @($commandAction)) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
+            $ownedCommands = @($ownedCommandOutput -split '\r?\n' | Where-Object { $_ -match '\.(ps1|cmd)$' })
+            if ($DryRun) {
+                foreach ($name in $ownedCommands) {
+                    Write-Host "[dry-run] would remove binstub: $(Join-Path $LocalBin $name)"
                 }
             }
             if (-not $DryRun) { Write-Changed "binstubs removed from $LocalBin" }
@@ -1909,8 +2066,16 @@ switch ($Action) {
             Write-Changed 'scoped install left legacy global binstubs unchanged'
         }
         if ($DryRun) {
+            Write-Host '[dry-run] would remove runtime generations, snapshots, generated dispatchers and runtime selectors'
             Write-Host "[dry-run] config/session-state at $InstallDir would be kept (agent-logger uninstall never removes it)"
             Write-Host 'agent-logger uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
+        } else {
+            $guardError = ''
+            $null = Invoke-Hidden -FilePath $uninstallPython -ArgList (
+                $uninstallGuardArgs + @('--idle', '--prepare', '--remove-runtime', '--shell', (Get-Process -Id $PID).Path)
+            ) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
+            Write-Changed 'runtime generations and generated dispatchers removed (config/session-state kept)'
         }
     }
     'status' {

@@ -188,16 +188,127 @@ def test_invalid_service_selector_is_rejected(selector):
         ServiceConfig(local_execution_space=selector)
 
 
-def test_hostname_is_not_a_current_space_selector():
+def test_hostname_and_platform_select_the_matching_space():
     with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
             patch("socket.gethostname", return_value="workstation"):
-        with pytest.raises(ValueError, match="explicit local_execution_space"):
-            agent_registry._detect_local_machine(_spaces())
+        current, platform = agent_registry._detect_local_machine(_spaces())
+        assert current.key == "workstation-windows"
+        assert platform == "windows"
         current, platform = agent_registry._detect_local_machine(
             _spaces(), "workstation-windows",
         )
     assert current.key == "workstation-windows"
     assert platform == "windows"
+
+
+def test_unmatched_hostname_does_not_invent_local_ownership():
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="unregistered-host"):
+        current, platform = agent_registry._detect_local_machine(_spaces())
+    assert current is None
+    assert platform == "windows"
+
+
+@pytest.mark.parametrize("platform,foreign", [
+    ("windows", "wsl"), ("windows", "linux"), ("wsl", "windows"), ("linux", "windows"),
+])
+def test_other_platform_hostname_remains_remote_only(platform, foreign):
+    machines = {"foreign": MachineConfig(
+        key="foreign", display_name="Foreign", hostname="workstation",
+        physical_host="workstation", execution_platform=foreign,
+    )}
+    with patch.object(agent_registry, "_detect_platform", return_value=platform), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, detected = agent_registry._detect_local_machine(machines)
+        assert current is None
+        assert detected == platform
+        with pytest.raises(ValueError, match="execution platform"):
+            agent_registry._detect_local_machine(machines, "foreign")
+
+
+@pytest.mark.parametrize("alias_kind", ["ssh", "machine", "compatibility", "key", "physical"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_target_names_do_not_override_an_explicit_remote_hostname(alias_kind, legacy):
+    machine = MachineConfig(
+        key="remote", display_name="Remote", hostname="remote-host",
+        physical_host="remote-host", execution_platform="linux",
+        ssh_environments=[SshEnvironment("linux", "remote-ssh", shell="bash")],
+    )
+    if alias_kind == "ssh":
+        machine.ssh_environments[0].alias = "workstation"
+    elif alias_kind == "machine":
+        machine.alias = "workstation"
+    elif alias_kind == "compatibility":
+        machine.compatibility_aliases = ("workstation",)
+    elif alias_kind == "key":
+        machine.key = "workstation"
+    else:
+        machine.physical_host = "workstation"
+    machine.legacy_key = machine.key if legacy else ""
+    with patch.object(agent_registry, "_detect_platform", return_value="linux"), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, _ = agent_registry._detect_local_machine({machine.key: machine})
+        resolver = AgentResolver({}, {machine.key: machine})
+    assert current is None
+    assert not resolver.is_local_transport("workstation", execution_space_key=machine.key)
+    assert not resolver.is_local_transport("workstation")
+
+
+def test_other_platform_sibling_cannot_override_a_remote_hostname():
+    machines = {
+        key: MachineConfig(
+            key=key, display_name=key, hostname=hostname,
+            physical_host="shared-host", execution_platform=platform,
+        )
+        for key, hostname, platform in (
+            ("native", "workstation", "windows"), ("remote", "another-host", "linux"),
+        )
+    }
+    with patch.object(agent_registry, "_detect_platform", return_value="linux"), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, _ = agent_registry._detect_local_machine(machines)
+    assert current is None
+
+
+def test_implicit_physical_hostname_selects_the_current_platform():
+    machines = _spaces()
+    for machine in machines.values():
+        machine.hostname = ""
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, _ = agent_registry._detect_local_machine(machines)
+    assert current.key == "workstation-windows"
+
+
+@pytest.mark.parametrize("exact_key", ["workstation", "WORKSTATION"])
+def test_exact_key_does_not_hide_same_platform_hostname_collision(exact_key):
+    machines = {
+        key: MachineConfig(
+            key=key, display_name=key, hostname="workstation",
+            physical_host="workstation", execution_platform="windows",
+        )
+        for key in (exact_key, "other-windows")
+    }
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        with pytest.raises(ValueError, match="[Aa]mbiguous"):
+            agent_registry._detect_local_machine(machines)
+        selected, _ = agent_registry._detect_local_machine(machines, exact_key)
+        assert selected.key == exact_key
+
+
+def test_same_platform_hostname_ambiguity_requires_explicit_selection():
+    spaces = _spaces()
+    spaces["another-windows"] = MachineConfig(
+        key="another-windows", display_name="Other", hostname="workstation",
+        physical_host="workstation", execution_platform="windows",
+    )
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        with pytest.raises(ValueError, match="[Aa]mbiguous"):
+            agent_registry._detect_local_machine(spaces)
+        current, _ = agent_registry._detect_local_machine(spaces, "workstation-windows")
+    assert current.key == "workstation-windows"
 
 
 def test_scoped_topology_rejects_an_unscoped_local_selection():
@@ -216,6 +327,49 @@ def test_legacy_only_topology_keeps_explicit_local_selection():
         )
     assert selected is legacy
     assert platform == "windows"
+
+
+@pytest.mark.parametrize("collision", ["none", "ssh-alias", "key", "shared-alias"])
+def test_selected_unscoped_local_host_keeps_local_routing_in_mixed_inventory(collision):
+    from agent_bridge.resolver_runtime import capture_resolver, restore_resolver
+    from agent_bridge.routes.worktrees import _is_local_target
+
+    local = MachineConfig(
+        key="legacy", display_name="Local", hostname="workstation",
+        ssh_environments=[SshEnvironment("windows", "local-ssh", shell="pwsh")],
+    )
+    remote = MachineConfig(
+        key="remote", display_name="Remote", hostname="another-host",
+        physical_host="another-host", execution_platform="linux", ssh_ready=True,
+        ssh_environments=[SshEnvironment("linux", "remote-ssh", shell="bash")],
+    )
+    if collision == "ssh-alias":
+        remote.ssh_environments[0].alias = "workstation"
+    elif collision == "key":
+        remote.key = "workstation"
+    elif collision == "shared-alias":
+        remote.ssh_environments[0].alias = "local-ssh"
+    agents = {"local": AgentConfig(
+        name="local", host=local.key, project="control", ssh_environment="windows",
+    )}
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        original = AgentResolver(agents, {local.key: local, remote.key: remote})
+        restored = restore_resolver(capture_resolver(original))
+        for resolver in (original, restored):
+            resolver._own_plugin_args = lambda *args: []
+            resolver._related_plugin_args = lambda *args: []
+            target = resolver.resolve("local")
+            assert target.type == "local"
+            assert target.execution_space_key is None
+            host = target.host or agents["local"].host
+            assert resolver.is_local_transport(host)
+            assert _is_local_target(host, resolver)
+            assert not resolver.is_local_transport(
+                remote.ssh_environments[0].alias, execution_space_key=remote.key,
+            )
+            if collision != "none":
+                assert not resolver.is_local_transport(remote.ssh_environments[0].alias)
 
 
 def test_targeting_and_locality_use_distinct_registered_keys():

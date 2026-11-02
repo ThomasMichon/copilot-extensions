@@ -8,7 +8,7 @@ from #8545, not first-repository discovery or guided local/remote/skip UI.
 
 ```text
 agent-worktrees repos setup <https-url> [--target <absolute-path>]
-  [--apply] [--trust-repository-setup]
+  [--commit <full-commit-id>] [--apply] [--trust-repository-setup] [--context <name>]
 ```
 
 Without `--apply`, inspect an existing source or report an unavailable
@@ -54,6 +54,37 @@ Successful acquisition/registration is retained if subsequent repository setup
 fails. No reset, stash, clean, implicit refetch, hosted repository creation or
 rollback of someone else's work is performed.
 
+### Optional immutable commit selection
+
+`--commit` accepts a full 40- or 64-hex commit object ID, not a branch, tag,
+abbreviation or revision expression. Invalid input refuses before acquisition.
+Without it, existing remote-HEAD behavior is unchanged.
+
+An existing qualified checkout must already have exactly that HEAD. A mismatch
+refuses without checkout, fetch, reset, registration or setup execution. For a
+new target only, clone without checking out remote HEAD, resolve the requested
+object as that exact commit, then check it out detached with hooks disabled.
+Ordinary source qualification and account revalidation still precede registration.
+If the full clone does not contain the commit (for example an unadvertised or
+pruned object), refuse without an extra fetch; preserve the partial target and
+require owner reconciliation before retry. The command never selects a different
+commit to make setup succeed. Execution trust remains bound to the actual
+qualified commit, declaration and setup entry.
+
+Source qualification and every subsequent revalidation use unreplaced Git
+objects, not the virtual history selected by `refs/replace`. The explicit
+detached checkout does likewise. An existing replacement-tree checkout cannot
+present different setup bytes as a clean approved commit; refusal preserves
+its source and replacement refs rather than rewriting either.
+
+The additive `repos-setup/1` CLI capability is `immutable-commit`.
+The selected executable's strict parser gates the explicit capability request
+before repository effects; an older receiver without `--commit` reports an
+unsupported argument. Callers must retain that failure and may not retry without
+the pin. The old no-pin form remains supported without a deprecation deadline.
+No package-version comparison, newer-payload inference or prerequisite service
+is needed for this opt-in, in-band requirement.
+
 ## Declaration and consent
 
 Commit `.agent-worktrees/repository-setup.json`:
@@ -87,6 +118,48 @@ reconciliation state. It must keep the selected source intact and keep personal
 state, generated output and adoption work in their appropriate owner locations.
 
 ## Request, result and readiness
+
+### Optional selected continuity context
+
+Declaration version `2` retains the same entrypoints and additionally requires
+bounded `contexts`, keyed by lowercase context names:
+
+```json
+{
+  "version": 2,
+  "entrypoints": {"posix": {"runtime": "bash", "script": "setup-manager.sh"}},
+  "contexts": {
+    "harness-a": {
+      "provider": "local-projection-v1",
+      "source": "~/.config/example/continuity.json"
+    }
+  }
+}
+```
+
+`--context harness-a` selects that exact revision-bound declaration. No source
+is guessed or opened by inspection/plan mode. Unknown names/providers refuse;
+there is no repository-local reusable enrollment script or fallback to another
+context. Ordinary repository setup must first be trusted and ready.
+The engine then consumes the [Fleet continuity
+contract](../../../fleet-manager/docs/continuity-bootstrap.md) through its own
+selected Python runtime with isolation, not an ambient executable on `PATH`.
+That selected engine environment needs the Fleet SDK and its service-Gateway
+dependency supplied by its normal construction owner. Capability discovery,
+bounded native process custody and check/apply preserve the original operation.
+Retained machine state is namespaced by the canonical qualified harness repository
+URL and context name, not the checkout path or commit. Two harnesses may reuse a
+context name without sharing keys/operations; later revisions of the same harness
+retain the original state and its strict source-binding checks.
+Missing support, source access, authentication or an unknown result refuses the
+optional stage without undoing repository/core readiness. Neither context
+selection nor authenticated connection authorizes SSH or another lifecycle.
+
+Without a selected context, legacy declaration and setup behavior are unchanged.
+Older engines strictly refuse the new declaration/argument; upgraded callers
+retain that outcome rather than retrying without selection. The repository
+script's request/result protocol below remains version one: continuity is
+engine/Fleet-owned orchestration, not a new responsibility hidden in that script.
 
 PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.

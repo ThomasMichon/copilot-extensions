@@ -1,0 +1,9 @@
+{
+  "comment": "Enforce automatic-update KillSwitch at dequeue with durable non-success no-op outcomes and explicit repair classification",
+  "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

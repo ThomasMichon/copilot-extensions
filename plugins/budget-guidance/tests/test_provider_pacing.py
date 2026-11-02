@@ -62,7 +62,8 @@ def test_same_period_average_forecasts_overrun_without_manufacturing_trailing_ra
     assert result["calculated"]["projected_overspend"] == "550"
     assert result["calculated"]["warning_band"] == "critical"
     assert result["advice"]["projection_kind"] == "cycle-average-estimate"
-    assert result["advice"]["autonomous_recommendation"] == "reduce-aggressiveness"
+    assert result["advice"]["monthly_recommendation"] == "review-avoidable-spend"
+    assert "autonomous_recommendation" not in result["advice"]
     assert result["advice"]["overrun_warning"] == "estimated-overrun"
     assert result["advice"]["concurrency"] is None
     assert result["advice"]["worker_mutation"] is False
@@ -78,8 +79,8 @@ def test_current_allowance_controls_exact_overrun_threshold(allowance: int, warn
     assert result["calculated"]["warning_band"] == warning
     assert result["calculated"]["projected_consumption"] == "1550"
     if warning == "on-track":
-        assert result["advice"]["autonomous_recommendation"] == "maintain-with-caution"
-        assert "increased concurrency" in result["advice"]["reason"]
+        assert result["advice"]["monthly_recommendation"] == "on-monthly-track"
+        assert "remaining monthly pace" in result["advice"]["reason"]
 
 
 def test_zero_service_consumption_is_a_valid_zero_rate_not_unavailable() -> None:
@@ -121,7 +122,7 @@ def test_incompatible_rate_evidence_is_unavailable_not_a_zero_rate(
     assert result["rate_evidence"]["diagnostic"] == diagnostic
     assert result["calculated"]["projection_rate"] is None
     assert result["calculated"]["projected_consumption"] is None
-    assert result["advice"]["autonomous_recommendation"] == "unavailable"
+    assert result["advice"]["monthly_recommendation"] == "unavailable"
     assert diagnostic in result["diagnostics"]
 
 
@@ -163,7 +164,7 @@ def test_missing_monthly_enums_only_withhold_rate(
     assert result["rate_evidence"]["availability"] == "unavailable"
     assert result["calculated"]["projection_rate"] is None
     assert result["calculated"]["warning_band"] == "no-rate"
-    assert result["advice"]["autonomous_recommendation"] == "unavailable"
+    assert result["advice"]["monthly_recommendation"] == "unavailable"
 
 
 def test_empty_monthly_evidence_only_withholds_rate() -> None:
@@ -263,7 +264,7 @@ def test_observed_overspend_still_warns_without_a_rate_estimate() -> None:
     assert result["calculated"]["warning_band"] == "overspent"
     assert result["advice"]["projection_kind"] is None
     assert result["advice"]["overrun_warning"] == "observed-overspend"
-    assert result["advice"]["autonomous_recommendation"] == "reduce-aggressiveness"
+    assert result["advice"]["monthly_recommendation"] == "review-avoidable-spend"
     assert result["advice"]["operator_launch_blocked"] is False
 
 
@@ -300,7 +301,7 @@ def test_incumbent_acquisition_adds_advice_using_only_one_existing_quota_rpc() -
     assert calls == [10]
     assert result["attribution"] == "session-owned-rpc"
     assert result["rate_evidence"]["kind"] == "cycle-average-estimate"
-    assert result["advice"]["autonomous_recommendation"] == "reduce-aggressiveness"
+    assert result["advice"]["monthly_recommendation"] == "review-avoidable-spend"
     assert result["advice"]["concurrency"] is None
     assert result["advice"]["worker_mutation"] is False
     assert result["advice"]["operator_launch_blocked"] is False

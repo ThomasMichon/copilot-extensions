@@ -345,11 +345,17 @@ def _start_service_systemd() -> bool:
         for _ in range(20):
             time.sleep(0.25)
             resp = send_command({"action": "ping"})
-            if resp and resp.get("ok"):
+            if _ready_for_work(resp):
                 return True
         return False
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+def _ready_for_work(response: dict | None) -> bool:
+    return bool(
+        response and response.get("ok") and response.get("accepting_work", True) is True
+    )
 
 
 def start_service(tcp_port: int | None = None) -> bool:
@@ -368,7 +374,7 @@ def start_service(tcp_port: int | None = None) -> bool:
     for _ in range(20):
         time.sleep(0.25)
         resp = send_command({"action": "ping"})
-        if resp and resp.get("ok"):
+        if _ready_for_work(resp):
             return True
     return False
 
@@ -387,7 +393,13 @@ def ensure_service(tcp_port: int | None = None) -> bool:
     """
     resp = send_command({"action": "ping"})
     if resp and resp.get("ok"):
-        return True
+        if _ready_for_work(resp):
+            return True
+        for _ in range(20):
+            time.sleep(0.25)
+            if _ready_for_work(send_command({"action": "ping"})):
+                return True
+        return False
     if IS_WSL:
         discovered = _discover_endpoint(config.resolve_context())
         if discovered is not None and discovered.source == "windows":
@@ -737,14 +749,14 @@ def cmd_installer_readiness(args):
 
 def cmd_start(args):
     resp = send_command({"action": "ping"})
-    if resp and resp.get("ok"):
+    if _ready_for_work(resp):
         status = _vault_status_label(resp["cli"])
         print(f"Already running - PID {resp['pid']}, status={status}")
         return 0
 
     if ensure_service():
         resp = send_command({"action": "ping"})
-        if resp and resp.get("ok"):
+        if _ready_for_work(resp):
             status = _vault_status_label(resp["cli"])
             print(f"Vault service started - PID {resp['pid']}, status={status}")
             return 0

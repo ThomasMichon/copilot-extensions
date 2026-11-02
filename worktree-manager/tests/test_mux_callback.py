@@ -1,40 +1,58 @@
 """Mux metadata dispatch keeps installed retention and development entry modes."""
 
 import sys
+from pathlib import Path
+import re
 
 import pytest
 
 from worktree_manager import mux_callback
 
 
-@pytest.mark.parametrize("installed", [False, True])
-def test_callback_command_preserves_entry_mode(tmp_path, monkeypatch, installed):
-    prefix = tmp_path / "versions" / "1.2.3+repair.fixture" if installed else tmp_path / "source" / ".venv"
+@pytest.mark.parametrize("installed", [False, True, "app"])
+@pytest.mark.parametrize("relative", [False, True, "parent"])
+def test_callback_command_preserves_entry_mode(tmp_path, monkeypatch, installed, relative):
+    slot = tmp_path / "versions" / "1.2.3+repair.fixture"
+    prefix = slot / ".venv" if installed == "app" else (
+        slot if installed else tmp_path / "source" / ".venv"
+    )
     prefix.mkdir(parents=True)
     if installed:
-        (prefix / ".runtime-bootstrap").mkdir()
-        (prefix / ".runtime-bootstrap" / "runtime_launcher.py").touch()
-        (prefix / ".install-complete.json").touch()
+        (slot / ".runtime-bootstrap").mkdir()
+        (slot / ".runtime-bootstrap" / "runtime_launcher.py").touch()
+        (slot / ".install-complete.json").touch()
     monkeypatch.setattr(sys, "prefix", str(prefix))
     monkeypatch.setattr(sys, "executable", str(prefix / "python"))
     monkeypatch.setattr(mux_callback, "direct_daemon_python", lambda value: (value, {}))
-    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "source-root"))
+    cwd = tmp_path / "caller" if relative == "parent" else tmp_path
+    cwd.mkdir(exist_ok=True)
+    monkeypatch.chdir(cwd)
+    selected = "../source-root" if relative == "parent" else "source-root"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", selected if relative else str(tmp_path / "source-root"))
     monkeypatch.setenv("PYTHONPATH", "development")
     command, env, root = mux_callback.callback_command(["remove", "--project=example", "--worktree-id=one"])
     assert command[-5:] == ["worktree_manager", "mux-daemon", "remove", "--project=example", "--worktree-id=one"]
     if installed:
         assert command[1:6] == ["-I", "-S", "-B", "-X", "utf8"]
-        assert str(prefix / ".runtime-bootstrap" / "runtime_launcher.py") in command
+        assert str(slot / ".runtime-bootstrap" / "runtime_launcher.py") in command
         assert "PYTHONPATH" not in env
         assert root == tmp_path
     else:
-        assert command[1] == "-m"
+        assert command[1] == "-X"
+        cache = Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+        assert cache.parent == root / "cache" / "python"
+        assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+        assert command[3] == "-m"
         assert env["PYTHONPATH"] == "development"
+        assert root == tmp_path / "source-root"
     assert env["WORKTREE_MANAGER_ROOT"] == str(root)
+    assert root.is_absolute()
 
 
-def test_incomplete_numbered_callback_cannot_fall_back_to_source(tmp_path, monkeypatch):
-    prefix = tmp_path / "versions" / "1.2.3"
+@pytest.mark.parametrize("nested", [False, True])
+def test_incomplete_numbered_callback_cannot_fall_back_to_source(tmp_path, monkeypatch, nested):
+    slot = tmp_path / "versions" / "1.2.3"
+    prefix = slot / ".venv" if nested else slot
     prefix.mkdir(parents=True)
     monkeypatch.setattr(sys, "prefix", str(prefix))
     with pytest.raises(RuntimeError, match="constructed"):
@@ -46,10 +64,11 @@ def test_dispatch_reuses_canonical_background_primitive(tmp_path, monkeypatch):
     monkeypatch.setattr(mux_callback, "callback_command", lambda arguments: (
         ["python", "-m", "fixture"], {"FIXTURE": "yes"}, tmp_path,
     ))
-    monkeypatch.setattr(mux_callback, "spawn_daemon", lambda command, **kwargs: captured.update(
+    monkeypatch.setattr(mux_callback, "spawn_finite_worker", lambda command, **kwargs: captured.update(
         command=command, **kwargs,
     ))
     assert mux_callback.main(["register"]) == 0
     assert captured["cwd"] == tmp_path
     assert captured["log_path"] == tmp_path / "mux-callback.log"
     assert captured["console_children"] is True
+    assert captured["instance"].lifecycle == "finite-worker"

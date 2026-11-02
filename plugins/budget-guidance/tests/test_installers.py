@@ -318,7 +318,7 @@ def test_native_retry_after_failure_publishes_clean_slot(native_failed_install_s
 
 def test_posix_installer_is_uv_first_when_ambient_python_is_absent():
     source = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
-    provisioning = source[source.index("echo '=== budget-guidance install ==='") :]
+    provisioning = source[source.index("if _ensure_uv; then HAVE_UV=1; fi") :]
 
     assert provisioning.index("if _ensure_uv; then HAVE_UV=1; fi") < provisioning.index(
         'PYTHON_CMD=""'
@@ -329,7 +329,7 @@ def test_posix_installer_is_uv_first_when_ambient_python_is_absent():
 
 def test_powershell_installer_is_uv_first_when_ambient_python_is_absent():
     source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    provisioning = source[source.index("Write-Host '=== budget-guidance install ==='") :]
+    provisioning = source[source.index("$uvCommand = Get-Command uv -ErrorAction SilentlyContinue") :]
 
     assert provisioning.index("$uvCommand = Get-Command uv") < provisioning.index(
         "$pythonCmd = $null"

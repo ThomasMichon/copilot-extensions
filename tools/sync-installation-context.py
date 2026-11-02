@@ -10,6 +10,9 @@ Dispatch, CodeSpaces, Containers, and Logger peer launchers consume the Python p
 inside their wheels. They must bootstrap validation from their own installed bytes,
 not import a validator from an as-yet-unvalidated receipt's payload pointer.
 
+Conduct vendors only the Python primitive for read-only configuration-owner
+qualification; it has no runtime or lifecycle assets.
+
 Worktree Manager -- a standalone, non-plugin payload outside ``plugins/`` --
 vendors the same primitive for its own read-only ``agent_plugin_runtime.py``
 resolver (worktree-manager-control-plane effort): it never provisions or
@@ -25,6 +28,9 @@ import shutil
 import stat
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
 
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installation-context"
@@ -47,9 +53,13 @@ FILES = (
     "_installation_context_mode_cli.py",
     "_installation_context_deployment.py",
     "_installation_context_publication.py",
+    "_installation_context_powershell.py",
+    "_installation_context_worker.py",
     "installation_context.py",
+    ARCHIVE_NAME,
     "installation-context.sh",
     "installation-context.ps1",
+    "shell-caller-owned.ps1",
     "plugin-publication-probe.ps1",
     "plugin-publication-probe.sh",
     "guest-environment.ps1",
@@ -76,6 +86,7 @@ ADOPTERS = (
     "budget-guidance",
 )
 LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
+PAYLOAD_PYTHON_ADOPTERS = ("agent-conduct-guidance",)
 
 #: Standalone, non-plugin payloads (outside ``plugins/``) that vendor the
 #: Python primitive the same way agent-dispatch/codespaces/containers do:
@@ -112,9 +123,10 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
             "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
             "agent-pull-requests", "agent-ssh",
+            "agent-mcp", "agent-vault",
         }
         for name in FILES
-        if name.endswith(".py")
+        if name.endswith(".py") and name != "_installation_context_worker.py"
     ] + [
         (
             CANONICAL_DIR / name,
@@ -125,11 +137,19 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
     ] + [
         (
             CANONICAL_DIR / name,
+            REPO / "plugins" / plugin / "scripts" / "installation-context" / name,
+        )
+        for plugin in PAYLOAD_PYTHON_ADOPTERS
+        for name in FILES
+        if name.endswith(".py") and name != "_installation_context_worker.py"
+    ] + [
+        (
+            CANONICAL_DIR / name,
             REPO / relative_dir / ("_installation_context.py" if name == "installation_context.py" else name),
         )
         for relative_dir, _label in STANDALONE_PYTHON_ADOPTERS
         for name in FILES
-        if name.endswith(".py")
+        if name.endswith(".py") and name != "_installation_context_worker.py"
     ] + [
         (CANONICAL_DIR / name, REPO / destination)
         for name, destination in STANDALONE_ASSETS
@@ -137,7 +157,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
 
 
 def unregistered_adopters() -> list[str]:
-    """Plugins that vendor the foundation but are absent from ``ADOPTERS``.
+    """Plugins that vendor the foundation but are absent from adopter sets.
 
     A plugin that ships ``scripts/installation-context/`` executes it, so a copy
     outside the adopter list never receives foundation updates while this tool
@@ -150,17 +170,22 @@ def unregistered_adopters() -> list[str]:
     return sorted(
         candidate.name
         for candidate in plugins_root.iterdir()
-        if candidate.name not in ADOPTERS
+        if candidate.name not in (*ADOPTERS, *PAYLOAD_PYTHON_ADOPTERS)
         and (candidate / "scripts" / "installation-context").is_dir()
     )
 
 
 def verify() -> list[str]:
     problems: list[str] = []
+    archive = CANONICAL_DIR / ARCHIVE_NAME
+    if ADOPTERS and (
+        not archive.is_file() or archive.read_bytes() != lifecycle_archive(REPO)
+    ):
+        problems.append("canonical caller-lifetime source archive is missing or drifted")
     for plugin in unregistered_adopters():
         problems.append(
             f"plugins/{plugin} vendors scripts/installation-context/ but is not "
-            "listed in ADOPTERS, so its copy never receives updates"
+            "listed in an adopter set, so its copy never receives updates"
         )
     for source, destination in vendor_pairs():
         relative = destination.relative_to(REPO).as_posix()
@@ -179,6 +204,12 @@ def verify() -> list[str]:
 
 def sync() -> list[str]:
     written: list[str] = []
+    if ADOPTERS:
+        archive = CANONICAL_DIR / ARCHIVE_NAME
+        data = lifecycle_archive(REPO)
+        if not archive.is_file() or archive.read_bytes() != data:
+            archive.write_bytes(data)
+            written.append(archive.relative_to(REPO).as_posix())
     for source, destination in vendor_pairs():
         if not source.is_file():
             raise FileNotFoundError(f"canonical source missing: {source}")
@@ -223,6 +254,7 @@ def main() -> int:
         print(
             "installation-context files in sync across "
             f"{len(ADOPTERS)} plugin adopters and "
+            f"{len(PAYLOAD_PYTHON_ADOPTERS)} Python-only payload adopters and "
             f"{len(STANDALONE_PYTHON_ADOPTERS)} standalone-payload adopter(s)."
         )
         return 0

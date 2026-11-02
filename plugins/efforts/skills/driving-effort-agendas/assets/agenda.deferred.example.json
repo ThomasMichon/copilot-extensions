@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "revision": 1,
+  "source": {"kind": "task", "ref": "assigned-capacity-maintenance"},
+  "entry": "qualify",
+  "nodes": {
+    "qualify": {
+      "source_ref": "Scope approval and current evidence",
+      "action": "Qualify the actual permitted effects, preserving any missing approval.",
+      "exit": ["Record current authority or the exact decision still pending."],
+      "on": {"approved": "apply", "pending": "research"},
+      "max_visits": 4
+    },
+    "apply": {
+      "source_ref": "Approved maintenance scope",
+      "action": "Perform only currently approved work; preserve unknown or blocked effects.",
+      "exit": ["Record the actual outcome and preserve any gated branch before moving."],
+      "on": {"validated": "reconcile", "blocked": "research"},
+      "max_visits": 3
+    },
+    "research": {
+      "source_ref": "Decision-ready proposal",
+      "action": "Within allowed access, analyze capacity/growth and prepare options, projections and a framework.",
+      "exit": ["The decision packet contains context, evidence, options, ramifications and requested scope."],
+      "on": {"packet_ready": "other"},
+      "max_visits": 3
+    },
+    "other": {
+      "source_ref": "Another authorized avenue in the same assignment",
+      "action": "Advance another accepted work package while retaining the deferred branch.",
+      "exit": ["Record useful progress or that all remaining permitted work is genuinely gated."],
+      "on": {"recheck_ready": "qualify", "root_done": "reconcile"},
+      "max_visits": 4
+    },
+    "reconcile": {
+      "source_ref": "Complete assignment acceptance",
+      "action": "Reconcile every active/deferred obligation and the canonical source gate.",
+      "exit": ["All required work is accepted or explicitly transferred to a named tracked objective."],
+      "on": {},
+      "max_visits": 3,
+      "terminal": true
+    }
+  }
+}

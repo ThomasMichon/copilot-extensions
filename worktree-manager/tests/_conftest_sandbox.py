@@ -20,6 +20,7 @@ _SELF_INSTALL_TEST_MODULES = {
     "test_update",
     "test_update_bootstrap",
     "test_update_bootstrap_activation",
+    "test_manager_broker_installation",
     "test_update_context_dispatch",
     "test_e2e_delivery",
 }

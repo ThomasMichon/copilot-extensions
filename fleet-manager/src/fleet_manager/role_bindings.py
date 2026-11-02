@@ -122,8 +122,9 @@ class RoleResource:
 
 def parse_bindings(value: object) -> tuple[tuple[ProviderInstance, ...], tuple[RoleBinding, ...]]:
     canonical(value)
-    namespace = fields(value, {"schema", "version", "providers", "bindings"})
-    record(namespace, "fleet-manager.role-bindings", {"providers", "bindings"})
+    namespace = fields(value, {"schema", "version", "providers", "bindings"}, {"substrates"})
+    record({key: item for key, item in namespace.items() if key != "substrates"},
+           "fleet-manager.role-bindings", {"providers", "bindings"})
     providers = namespace["providers"]
     bindings = namespace["bindings"]
     if not isinstance(providers, dict) or not isinstance(bindings, dict) or not providers or not bindings:

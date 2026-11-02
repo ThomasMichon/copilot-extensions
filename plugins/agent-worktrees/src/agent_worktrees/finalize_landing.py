@@ -41,7 +41,9 @@ def pr_base(record, repo) -> str:
     """The PR's base on the remote (:func:`remote_ref`) when the tracked PR targets
     a branch other than the configured default one (read from the provider); ""
     otherwise or unknown."""
-    from . import finalize_open_pr_gate as fopg
+    from . import finalize_open_pr_gate as fopg, pr_creation_state
+    if pr_creation_state.cancelled(getattr(record, "pr", None)):
+        return ""
     try:
         base = fopg.pr_base_ref(getattr(record, "pr", None), repo)
     except Exception:
@@ -123,7 +125,7 @@ def _pr_content_landed(
     # pulled forward onto different bases (one PR onto main, another onto dev) all pass.
     if not fopg.merged_content_exceeds(record, content_ref, tuple(bases), cwd=cwd, repo=repo):
         return True, None, evidence
-    message = fopg.merged_pr_block_message(record, content_ref, bases[-1], cwd=cwd)
+    message = fopg.merged_pr_block_message(record, content_ref, tuple(bases), cwd=cwd)
     detail = describe(evidence)
     return False, f"{message}\n{detail}" if detail else message, evidence
 

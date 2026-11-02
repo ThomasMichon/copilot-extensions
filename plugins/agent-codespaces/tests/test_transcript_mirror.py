@@ -406,12 +406,14 @@ async def test_a_cancelled_pass_keeps_the_codespace_until_its_push_finishes(tmp_
     task = asyncio.ensure_future(mirror("cs-1"))
     await asyncio.to_thread(entered.wait, 10)
     task.cancel()  # the Owner shutting down
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    await asyncio.sleep(0)
+    assert not task.done()
     probe = SingleInstance(tmp_path, service="transcript-mirror", lock_name="cs-1.lock")
     with pytest.raises(AlreadyRunningError):  # the push thread still runs, so the lock holds
         probe.acquire()
     go.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
     for _ in range(100):
         try:
             probe.acquire()

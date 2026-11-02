@@ -1,0 +1,9 @@
+{
+  "comment": "Reject absent provider JSON even when a legacy wrapper masks its failure exit",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

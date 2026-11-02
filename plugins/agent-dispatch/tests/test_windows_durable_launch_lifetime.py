@@ -183,6 +183,7 @@ def test_windows_durable_launch_lifetime(tmp_path, site, contained, record_prope
             probe.owned.add(caller.pid)
             wait(lambda: (root / "ready.json").exists(), "fake service never became ready")
             records = fixture.read_json(root / "ready.json")
+            assert fixture.read_json(root / "admitted.json") == records["service"]
             records["ordinary"] = fixture.read_json(root / "ordinary.json")
             for name, record in records.items():
                 pin(name, record)

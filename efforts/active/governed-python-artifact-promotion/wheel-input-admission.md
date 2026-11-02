@@ -206,6 +206,91 @@ published artifact set. Existing publication and source/candidate owners retain
 their scopes; source fallback does not wait for their artifact availability
 proof or take over their open work.
 
+## Actual Manager installer integration
+
+Continue through the existing Manager candidate and self-install lifecycle,
+not a second constructor or a bootstrap import of repository-only tooling.
+This is a bounded explicit-source caller; marketplace authentication, persisted
+offline admission and default enablement remain separate parent gates.
+
+1. Add optional inspected wheel inputs and explicit local-package selection to
+   the existing Manager candidate adapter. Its ordinary path stays unchanged.
+   The source-wheel path requires the existing source identity and the complete
+   first-party/runtime closure produced by `retain_source_runtime_inputs`, not
+   the compiler's third-party-only lock or its separate build-tool closure.
+2. Bind the wheel receipt into the generation before existing admission and
+   repair selection. Different locks or policies cannot occupy the ordinary
+   source generation. Retain the existing installed-health, distinct-generation
+   repair, retention and selector-recovery owners.
+3. Compose the authenticated source transaction with actual `self_install`.
+   Recheck the independently resolved owner, exact destination and source
+   before construction health and publication. Keep the source/input context
+   alive until the existing publication path settles. Neither an optional
+   constructor argument nor a serialized receipt grants approval.
+4. Exercise the real adapter and constructor with a complete synthetic Manager
+   wheel closure, unavailable network and poisoned ambient resolver settings.
+   Cover matching reuse, changed binding, missing first-party input, source
+   identity refusal and failed-health preservation. Separately test that the
+   authenticated caller reaches the existing self-install lifecycle.
+5. Do not describe these checks as offline admission across invocations, fresh
+   default bootstrap, production Manager dependency qualification or measured
+   installation speedup. Those require the remaining authenticated marketplace,
+   persisted-admission and native-consumer acceptance work.
+
+## Normal marketplace source authentication: next bounded provider
+
+Continue the source-authentication boundary before enabling normal bootstrap.
+This closes part of the existing verified-source intent, not a new approval
+mechanism or permission to select another release.
+
+1. Resolve the actual installation owner, effective registered marketplace,
+   requested plugin and native installed ledger through their existing owners.
+   Preserve source/ref, marketplace and installation separation. A source
+   descriptor, installed version, snapshot digest or matching JSON alone is
+   not immutable source authentication.
+2. Reuse `plugin_resolve.inventory`'s existing native Git-cache proof rather
+   than duplicating its catalog, remote, ref, committed-byte and complete
+   referenced-closure checks. Its current registered-installation branch
+   returns installed provenance without this Git proof; that record must not
+   be promoted into authenticated source evidence. Expose the same proof for
+   the actual registered selection while preserving ordinary inventory behavior.
+   The cache proof locates consistent bytes; a local remote URL and commit
+   are not, by themselves, origin authentication.
+3. Bind preparation to the proof's real Git commit and tree, exact selected
+   plugin/version and complete source inventory. Compose with the existing
+   source-acquisition owner's authenticated repository/ref checks, selecting
+   that exact commit rather than trusting a cache's self-described origin.
+   Unsupported registered refs stay unsupported; do not reinterpret them as
+   the repository's latest default branch. Verify prepared source against
+   the actual acquired payload; do not substitute a newer branch tip, manufacture
+   Git fields from a payload digest or treat optional artifact publication as
+   an authentication prerequisite. Unsupported source layouts remain explicit
+   limitations rather than guessed equivalent identities.
+4. Hold source/configuration custody through preparation, construction health
+   and publication. Recheck the registered selection and source bytes during
+   consumption. Missing supported acquisition evidence can make this provider
+   unavailable; supplied corrupt, foreign or changed proof is a refusal.
+   Neither outcome silently rewrites runtime-source preferences or enables a
+   different installation mode. Existing permitted ordinary installation remains
+   independent of this optional optimization.
+5. Qualify with actual registered Git-cache and installed-ledger fixtures,
+   real commits/trees and real preparation. Cover ref/version mismatch,
+   dirty or changed source closure, ambiguous caches, registration mutation,
+   two marketplace owners and unavailable evidence. Verify refusal before
+   backend execution and unchanged selected runtime. An argv/receipt-only
+   fixture does not qualify the provider.
+6. Keep this first provider composition explicit and repository-owned.
+   Bootstrap-safe packaging, representative production closure/feed validation,
+   measured finite defaults and actual normal installer integration remain
+   subsequent parent gates. Do not import repository tooling or an incidental
+   `packaging` dependency from a bootstrap interpreter, introduce another
+   resolver/constructor, or enable defaults on the strength of these fixtures.
+
+The explicit `runtime_marketplace_source` implementation composes this boundary
+without changing default consumers. Qualification remains in progress; the
+parent does not credit default marketplace/bootstrap integration, production
+closure/feed evidence or measured installation savings from this component.
+
 ## Validation and completion
 
 - [x] The bounded archive/file-inspection component and complete-profile byte

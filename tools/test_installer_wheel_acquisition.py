@@ -1,10 +1,12 @@
 """Controlled TLS-feed checks; no live feed or production installation."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 import ctypes
 import hashlib
+import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -20,7 +22,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_dependency_policy as policy
 import installer_wheel_acquisition as acquisition
-from installer_engine_process import _load_resource
 
 CERTIFICATE = Path(__file__).with_name("fixtures") / "wheel-feed-localhost.pem"
 IDENTITY = "sha256:" + "a" * 64
@@ -37,11 +38,17 @@ EXPECTED = {
 def feeds():
     owned = []
 
-    def create():
+    def create(*, certificate=CERTIFICATE):
         state = {"routes": {}, "requests": []}
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                self.respond(head=False)
+
+            def do_HEAD(self):
+                self.respond(head=True)
+
+            def respond(self, *, head):
                 state["requests"].append((self.path, dict(self.headers)))
                 if state.get("authorize") and not state["authorize"](self.headers):
                     self.send_response(401)
@@ -58,14 +65,15 @@ def feeds():
                     self.send_header(key, value)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                if not head:
+                    self.wfile.write(body)
 
             def log_message(self, *_arguments):
                 pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(CERTIFICATE)
+        context.load_cert_chain(certificate)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
         thread.start()
@@ -111,10 +119,20 @@ def limits(**changes):
     ), **changes)
 
 
+def _load_fixture_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Fixture module cannot be loaded: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def worker_procutil():
     name = "_wheel_acquisition_test_procutil"
     if name not in sys.modules:
-        _load_resource(
+        _load_fixture_module(
             name, Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py",
         )
     return sys.modules[name]
@@ -152,6 +170,145 @@ def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds):
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
 
 
+def parallel_projects(state, count=2):
+    expected = []
+    for index in range(count):
+        item = {
+            **EXPECTED, "name": f"fixture{index}",
+            "filename": f"fixture{index}-1.0-py3-none-any.whl",
+        }
+        expected.append(item)
+        metadata = json.dumps({
+            "meta": {"api-version": "1.1"}, "name": item["name"],
+            "files": [listed(filename=item["filename"], url="/files/" + item["filename"])],
+        }).encode()
+        state["routes"]["/simple/" + item["name"] + "/"] = (
+            200, {"Content-Type": "application/vnd.pypi.simple.v1+json"}, metadata,
+        )
+        state["routes"]["/files/" + item["filename"]] = (200, {}, DATA)
+    return expected, {item["name"]: datetime(2025, 1, 1, tzinfo=timezone.utc) for item in expected}
+
+
+def test_real_parallel_transfers_overlap_and_keep_selected_evidence_order(feeds):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    barrier = threading.Barrier(2)
+    completed = []
+
+    def download(handler):
+        barrier.wait(timeout=3)
+        if handler.path.endswith(expected[0]["filename"]):
+            time.sleep(0.1)
+        handler.send_response(200)
+        handler.send_header("Content-Length", str(len(DATA)))
+        handler.end_headers()
+        handler.wfile.write(DATA)
+        completed.append(handler.path)
+
+    for item in expected:
+        state["routes"]["/files/" + item["filename"]] = download
+    with acquire(state, expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2)) as result:
+        assert [item["filename"] for item in result.evidence()["files"]] == [
+            item["filename"] for item in expected
+        ]
+        assert result.evidence()["request_count"] == 4
+        paths = tuple(result.snapshot.paths.values())
+        assert all(path.read_bytes() == DATA for path in paths)
+    assert completed[0].endswith(expected[1]["filename"])
+    assert all(not path.exists() for path in paths)
+
+
+@pytest.mark.parametrize("maximum,accepted", [(3, False), (4, True)])
+def test_parallel_requests_share_one_inclusive_budget(feeds, maximum, accepted):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    options = dict(
+        expected=expected, cutoffs=cutoffs,
+        limits=limits(max_workers=2, max_requests=maximum),
+    )
+    if accepted:
+        with acquire(state, **options) as result:
+            assert result.evidence()["request_count"] == maximum
+    else:
+        with pytest.raises(acquisition.WheelError, match="request budget"):
+            with acquire(state, **options):
+                pytest.fail("parallel requests multiplied the aggregate limit")
+    assert len(state["requests"]) <= maximum
+
+
+@pytest.mark.parametrize("kind", ["metadata", "wheels", "redirects"])
+@pytest.mark.parametrize("accepted", [False, True])
+def test_parallel_transfers_share_aggregate_byte_and_redirect_budgets(feeds, kind, accepted):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    if kind == "metadata":
+        maximum = sum(len(state["routes"]["/simple/" + item["name"] + "/"][2]) for item in expected)
+        changes = {"max_total_metadata_bytes": maximum - int(not accepted)}
+        counter = "metadata_bytes"
+    elif kind == "wheels":
+        maximum = len(DATA) * len(expected)
+        changes = {"max_closure_bytes": maximum - int(not accepted)}
+        counter = "wheel_bytes"
+    else:
+        maximum = 2
+        changes = {"max_redirects": maximum - int(not accepted)}
+        counter = "redirect_count"
+        for item in expected:
+            state["routes"]["/files/" + item["filename"]] = (
+                302, {"Location": "/redirected/" + item["filename"]}, b"",
+            )
+            state["routes"]["/redirected/" + item["filename"]] = (200, {}, DATA)
+    options = dict(expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2, **changes))
+    if accepted:
+        with acquire(state, **options) as result:
+            assert result.evidence()[counter] == maximum
+    else:
+        with pytest.raises(acquisition.WheelError, match="budget"):
+            with acquire(state, **options):
+                pytest.fail("parallel transfers multiplied an aggregate budget")
+
+
+def test_parallel_digest_failure_settles_a_peer_before_releasing_private_inputs(feeds, monkeypatch):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    barrier = threading.Barrier(2)
+    peer_finished = threading.Event()
+    roots = []
+    temporary = policy._temporary_inputs
+
+    @contextmanager
+    def tracked(parent):
+        with temporary(parent) as root:
+            roots.append(Path(root))
+            yield root
+
+    def download(handler):
+        barrier.wait(timeout=3)
+        peer = handler.path.endswith(expected[1]["filename"])
+        body = DATA if peer else b"x" * len(DATA)
+        try:
+            handler.send_response(200)
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            if peer:
+                time.sleep(0.15)
+            handler.wfile.write(body)
+        except OSError:
+            pass
+        finally:
+            if peer:
+                peer_finished.set()
+
+    for item in expected:
+        state["routes"]["/files/" + item["filename"]] = download
+    monkeypatch.setattr(policy, "_temporary_inputs", tracked)
+    with pytest.raises(acquisition.WheelError, match="digest"):
+        with acquire(state, expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2)):
+            pytest.fail("one successful peer concealed a changed wheel")
+    assert peer_finished.wait(timeout=2)
+    assert roots and all(not root.exists() for root in roots)
+
+
 def test_html_metadata_preserves_hash_upload_time_and_python_hint(feeds):
     state = feeds()
     project(state)
@@ -187,21 +344,25 @@ def test_file_admission_refusals_precede_wheel_download(feeds, change, message, 
 @pytest.mark.parametrize("route", ["link", "redirect", "index-redirect"])
 def test_untrusted_origin_is_refused_before_endpoint_receives_a_request(feeds, route):
     state, untrusted = feeds(), feeds()
+    location = untrusted["origin"] + "/files/" + FILENAME + "?signature=synthetic-private-value"
     project(state)
     if route == "link":
-        project(state, [listed(url=untrusted["origin"] + "/files/" + FILENAME)])
+        project(state, [listed(url=location)])
     elif route == "redirect":
         state["routes"]["/files/" + FILENAME] = (
-            302, {"Location": untrusted["origin"] + "/files/" + FILENAME}, b"",
+            302, {"Location": location}, b"",
         )
     else:
         state["routes"]["/simple/fixture/"] = (
             302, {"Location": untrusted["origin"] + "/simple/fixture/"}, b"",
         )
-    with pytest.raises(ValueError, match="source trust"):
+    with pytest.raises(ValueError, match="source trust") as error:
         with acquire(state):
             pytest.fail("untrusted endpoint was reached")
     assert untrusted["requests"] == []
+    assert untrusted["origin"] in str(error.value)
+    assert "synthetic-private-value" not in str(error.value)
+    assert FILENAME not in str(error.value)
 
 
 def test_explicit_download_origin_allows_redirect_without_forwarding_credentials(feeds):
@@ -498,7 +659,7 @@ def test_acquisition_console_workers_from_windowless_parent_surface_no_ui(feeds,
     project(state)
     root = Path(__file__).resolve().parents[1]
     monkeypatch.syspath_prepend(str(root / "libs" / "agent-procutil" / "src"))
-    observer = _load_resource(
+    observer = _load_fixture_module(
         "_acquisition_window_observer",
         root / "libs" / "agent-procutil" / "tests" / "test_spawn_daemon_windows_integration.py",
     )
@@ -507,13 +668,18 @@ def test_acquisition_console_workers_from_windowless_parent_surface_no_ui(feeds,
     script = tmp_path / "windowless-parent.py"
     result_path, workers_path = tmp_path / "result.json", tmp_path / "workers.jsonl"
     script.write_text("""
-import json, pathlib, ssl, sys, time, traceback
+import importlib.util, json, pathlib, ssl, sys, time, traceback
 spec = json.loads(sys.argv[1])
 try:
     sys.path.insert(0, spec["engine"])
     import installer_wheel_acquisition as acquisition
-    from installer_engine_process import _load_resource
-    procutil = _load_resource("_windowless_acquisition_procutil", pathlib.Path(spec["procutil"]))
+    module_spec = importlib.util.spec_from_file_location(
+        "_windowless_acquisition_procutil", pathlib.Path(spec["procutil"]),
+    )
+    assert module_spec is not None and module_spec.loader is not None
+    procutil = importlib.util.module_from_spec(module_spec)
+    sys.modules[module_spec.name] = procutil
+    module_spec.loader.exec_module(procutil)
     sources = acquisition._worker_sources
     def observed_sources():
         result = sources()

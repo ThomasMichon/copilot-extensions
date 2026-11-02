@@ -20,6 +20,8 @@ from agent_procutil import no_window_flags
 
 from .config import RUNTIME_DIR, CodespacesConfig, RepoConfig
 from .worktrees import ContextRefused, validate_context
+from .owner_inventory import qualified_account_listing as qualified_account_listing
+from .owner_inventory import decode_listing
 
 log = logging.getLogger("agent-codespaces")
 
@@ -134,7 +136,7 @@ def list_codespaces(*, concurrent: bool = False) -> list[CodespaceInfo]:
     return list(merged.values())
 
 
-def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
+def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> list[CodespaceInfo]:
     """Run ``gh codespace list`` under one account (or ambient when None)."""
     from . import gh_account
 
@@ -144,7 +146,12 @@ def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
         "name,displayName,repository,gitStatus,state,machineName,lastUsedAt",
         "--limit", "50",
     ]
-    env = gh_account.env_for_account(login) if login else None
+    if qualified:
+        from .owner_inventory import qualified_environment
+
+        env = qualified_environment(login)
+    else:
+        env = gh_account.env_for_account(login) if login else None
 
     try:
         result = subprocess.run(
@@ -160,12 +167,7 @@ def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
             f"gh codespace list failed{who}: {result.stderr.strip()}"
         )
 
-    try:
-        entries = json.loads(result.stdout) if result.stdout.strip() else []
-    except (ValueError, TypeError):
-        # A malformed/unexpected payload for one account must not sink the
-        # whole cross-account merge; treat it as "no CodeSpaces here".
-        return []
+    entries = decode_listing(result.stdout, qualified=qualified)
     codespaces = []
     for e in entries:
         git_status = e.get("gitStatus", {})

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -149,35 +150,16 @@ def test_cli_routes_direct_flag(monkeypatch):
     assert seen == [True, False]
 
 
-@pytest.mark.parametrize("caller_job", [False, True])
 def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
-    monkeypatch, direct_env, tmp_path, caller_job,
+    monkeypatch, direct_env, tmp_path,
 ):
-    """Breakaway denied and the WMI broker failing must fail a direct start:
-    a daemon started inside the installer's Job would die when it closes."""
+    """Direct start preserves native refusal without accepting caller lifetime."""
     import agent_procutil
 
-    popens = []
-
-    def _popen(argv, **kwargs):
-        popens.append(kwargs.get("creationflags", 0))
-        exc = OSError(13, "Access is denied")
-        exc.winerror = 5
-        raise exc
-
     monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
-    monkeypatch.setattr(m.sys, "platform", "win32")
-    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
-    monkeypatch.setattr(agent_procutil.subprocess, "Popen", _popen)
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-    from agent_procutil import daemon
-    from agent_procutil import daemon_broker
-    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: caller_job)
-
-    def broker_failed(*_args, **_kwargs):
-        raise agent_procutil.DaemonSpawnError("broker failed")
-
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", broker_failed)
+    failure = agent_procutil.DaemonSpawnError("native cleanup Job escape refused")
+    launch = Mock(side_effect=failure)
+    monkeypatch.setattr(m, "spawn_daemon", launch)
     monkeypatch.setattr(m, "_daemon_launch_argv", lambda: ["py", "-m", "agent_bridge", "start"])
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
 
@@ -185,7 +167,6 @@ def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
         m._service_start(direct=True)
 
     assert info.value.code == 1
-    assert len(popens) == (0 if caller_job else 1), (
-        "known Job uses the broker directly; neither path permits a contained retry"
-    )
+    launch.assert_called_once()
+    assert launch.call_args.kwargs["contained_fallback"] is False
     assert not direct_env.exists()

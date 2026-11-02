@@ -30,6 +30,14 @@ front's job carrying `JOB_OBJECT_LIMIT_BREAKAWAY_OK`) or it is force-killed on
 front exit. A **negative control** proves that without breakaway the child
 correctly dies — i.e. the coupling is real and breakaway is the fix.
 
+On POSIX, the front detaches the **host**, which must lead its own process
+group. The workload inherits that group: losing a front still leaves work
+running, but disposable host lease expiry retires the active workload too.
+Explicit `TERMINATE` signals this host-owned group, ending both host and child;
+an unowned group is refused rather than signalling another owner's processes.
+Production hosts retain their non-expiring admission; this does not add a
+workload timeout.
+
 ## Components
 
 | File | Role |

@@ -5,7 +5,7 @@ import pytest
 from repository_policy import AgentHostingError, validate_hosting_result
 
 
-def answer(**changes) -> dict:
+def answer(**changes: object) -> dict[str, object]:
     return {
         "version": 1, "allowed": True, "repository": "/workspace",
         "expose_agent": None, "sources": [], "denied_by": [],
@@ -14,7 +14,7 @@ def answer(**changes) -> dict:
 
 
 @pytest.mark.parametrize("value", [None, True])
-def test_complete_admission(value) -> None:
+def test_complete_admission(value: bool | None) -> None:
     validate_hosting_result(answer(expose_agent=value))
 
 
@@ -27,7 +27,7 @@ def test_complete_admission(value) -> None:
     {"sources": [" "]}, {"denied_by": {}}, {"denied_by": None},
     {"denied_by": ["config.yaml"]}, {"error": ""}, {"code": None},
 ])
-def test_malformed_success_is_not_admission(changes) -> None:
+def test_malformed_success_is_not_admission(changes: dict[str, object]) -> None:
     with pytest.raises(AgentHostingError, match="version-1"):
         validate_hosting_result(answer(**changes))
 
@@ -35,7 +35,7 @@ def test_malformed_success_is_not_admission(changes) -> None:
 @pytest.mark.parametrize("key", [
     "version", "allowed", "repository", "expose_agent", "sources", "denied_by",
 ])
-def test_incomplete_success_is_not_admission(key) -> None:
+def test_incomplete_success_is_not_admission(key: str) -> None:
     value = answer()
     del value[key]
     with pytest.raises(AgentHostingError):
@@ -43,6 +43,6 @@ def test_incomplete_success_is_not_admission(key) -> None:
 
 
 @pytest.mark.parametrize("value", [None, True, [], "allowed"])
-def test_non_object_is_not_admission(value) -> None:
+def test_non_object_is_not_admission(value: object) -> None:
     with pytest.raises(AgentHostingError):
         validate_hosting_result(value)

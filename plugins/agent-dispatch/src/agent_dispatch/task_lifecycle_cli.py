@@ -8,6 +8,7 @@ import sys
 from worktree_identity import WorktreeMachineIdentityError, parse_machine_identity
 
 from .loop_commands import _resolve_cli_module
+from .task_recovery_cli import _cmd_reset as _cmd_reset  # compatibility export
 
 
 def _core():
@@ -214,11 +215,24 @@ def _cmd_yield(args: argparse.Namespace) -> int:
         return _core()._emit(c.yield_task(args.task_id, worker_id, note=args.note, exclude=exclude))
 
 def _cmd_start(args: argparse.Namespace) -> int:
+    generation = getattr(args, "pool_generation", None)
+    native = getattr(args, "owner_session_id", None)
+    if generation is not None and (generation < 1 or not native or not native.strip()):
+        print(
+            "agent-dispatch start: --pool-generation requires a positive generation "
+            "and --owner-session-id for the actual native conversation",
+            file=sys.stderr,
+        )
+        return 2
     worker_id = _core()._resolve_owner(args, verb="start")
     if worker_id is None:
         return 2
     with _core()._client(args) as c:
-        native = getattr(args, "owner_session_id", None)
+        if generation is not None:
+            return _core()._emit(c.start_pool_task(
+                args.task_id, worker_id, owner_session_id=native,
+                expected_generation=generation,
+            ))
         return _core()._emit(
             c.start(args.task_id, worker_id, owner_session_id=native)
             if native else c.start(args.task_id, worker_id)
@@ -342,22 +356,6 @@ def _cmd_force_stop(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 1
     return _core()._emit(result)
-
-def _cmd_reset(args: argparse.Namespace) -> int:
-    if args.to != "proposed":
-        print(
-            f"agent-dispatch: reset only supports --to proposed today, not {args.to!r}",
-            file=sys.stderr,
-        )
-        return 2
-    with _core()._client(args) as c:
-        return _core()._emit(
-            c.reset(
-                args.task_id,
-                reason=args.reason,
-                expected_status=args.expected_status,
-            )
-        )
 
 def _cmd_confirm(args: argparse.Namespace) -> int:
     """The Completion Review card's Confirm action -- corroborate a

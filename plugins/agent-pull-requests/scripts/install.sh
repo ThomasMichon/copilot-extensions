@@ -404,7 +404,7 @@ _source_runtime_identity() {
 }
 
 _initialize_source_runtime() {
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     if [[ "$SOURCE_RUNTIME_IDENTITY" == '{}' ]]; then
         _fail 'Source runtime identity disappeared during runtime selection'
@@ -593,6 +593,10 @@ _install_hook_files() {
 if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
     _initialize_source_runtime || exit 1
 fi
+if [[ "$ACTION" == uninstall ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime validate || exit 1
+fi
 if [[ "$ACTION" == "install" || "$ACTION" == "update" || "$ACTION" == "stamp" || "$ACTION" == "provision" || "$ACTION" == "uninstall" ]]; then
     if ! _enter_install_lock; then
         _fail "Timed out waiting for the install transaction lock: $INSTALL_DIR/.install.lock"
@@ -604,6 +608,12 @@ if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACT
     _source_runtime_unchanged || exit 1
 fi
 
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     snap_dir="$INSTALL_DIR/snapshots/$SRC_VERSION"
@@ -665,9 +675,9 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
-    rm -f "$LOCAL_BIN/agent-pull-requests"
-    remove_install_runtime_content "$INSTALL_DIR" || exit 1
-    _ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime || exit 1
+    _ok 'agent-pull-requests runtime removed (durable, unknown and coordination state retained)'
     exit 0
 fi
 

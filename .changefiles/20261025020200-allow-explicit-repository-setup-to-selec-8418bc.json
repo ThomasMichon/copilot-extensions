@@ -1,0 +1,9 @@
+{
+  "comment": "Allow explicit repository setup to select a full immutable commit without changing existing source",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

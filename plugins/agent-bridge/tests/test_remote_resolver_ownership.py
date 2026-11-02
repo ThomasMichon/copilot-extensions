@@ -57,7 +57,7 @@ async def test_owned_remote_allocation_never_retries_after_discarding_ownership(
             ),
         ]),
     )
-    with pytest.raises(RuntimeError, match="owner"):
+    with pytest.raises(RuntimeError, match="retained allocation"):
         await _resolve_worktree_remote(
             manager,
             SpawnTarget(
@@ -66,7 +66,7 @@ async def test_owned_remote_allocation_never_retries_after_discarding_ownership(
                 caller_owner_ref="workstation/project/wt-caller",
             ),
         )
-    assert manager.exec_command.await_count == 1
+    manager.exec_command.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -83,6 +83,11 @@ async def test_skew_cannot_drop_either_caller_metadata(metadata, unknown_flag):
     target = SpawnTarget(
         type="ssh", host="workstation", project="project", **metadata,
     )
+    if "caller_owner_ref" in metadata:
+        with pytest.raises(RuntimeError, match="retained allocation"):
+            await _resolve_worktree_remote(manager, target)
+        manager.exec_command.assert_not_called()
+        return
     with pytest.raises(RuntimeError, match="exit 2"):
         await _resolve_worktree_remote(manager, target)
     assert manager.exec_command.await_count == 1

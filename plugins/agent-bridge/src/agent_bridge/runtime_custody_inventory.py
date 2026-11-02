@@ -10,6 +10,7 @@ from .inbox_custody import decode_handoff
 from .turn_custody import original_handoff as original_turn_handoff
 from .acquisition_custody import launch_observation
 from .creation_custody import original_creation
+from .creation_launch_custody import LAUNCH_COLUMNS, PROVIDER_LAUNCH_COLUMNS
 
 
 COHORTS = {
@@ -18,9 +19,11 @@ COHORTS = {
               "runtime_custody_json", "native_handoff_json", "native_handoff_started_at",
               "native_accepted_at", "native_consumed_at", "native_outcome"),
     "workspace_embodiments": ("key_digest", "state", "session_id", "native_session_id", "turn_index",
-                              "facts_digest", "worktree_json", "runtime_custody_json", "creation_facts_json"),
+                              "facts_digest", "worktree_json", "runtime_custody_json", "creation_facts_json",
+                              *LAUNCH_COLUMNS),
     "provider_embodiments": ("key_digest", "state", "session_id", "native_session_id",
-                             "facts_digest", "runtime_custody_json", "creation_facts_json"),
+                             "facts_digest", "runtime_custody_json", "creation_facts_json",
+                             *PROVIDER_LAUNCH_COLUMNS),
     "acquisition_attempts": ("delivery_id", "target", "worktree_id", "state", "request_digest",
                              "runtime_custody_json", "launch_handoff_json", "launch_started_at",
                              "launch_result_json"),

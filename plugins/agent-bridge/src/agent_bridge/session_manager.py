@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from .acp_client import AcpClient
     from .native_turn_transport import NativeTurnTransport
     from .acquisition_host_transport import AcquisitionHostTransport
+    from .local_launch_owner import LocalLaunchOwner
 
 
 def __getattr__(name: str) -> type[AcpClient]:
@@ -788,6 +789,7 @@ class Session:
         if not preserve_target:
             migrate_selected_instance(target)
         self.client: AcpClient | None = None
+        self._local_launch_owner: LocalLaunchOwner | None = None
         self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
         self._handoff_in_progress = False
         self._remote_affinity_cookies: Any = None

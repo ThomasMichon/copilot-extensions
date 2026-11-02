@@ -51,6 +51,8 @@ def abandon_pr(
     pr_number: int | None = None,
     reason: str,
     confirm: bool,
+    creation_id: str | None = None,
+    expected_revision: int | None = None,
 ) -> dict:
     """Close a tracked PR WITHOUT merging -- the ``pr-abandon`` primitive.
 
@@ -90,6 +92,16 @@ def abandon_pr(
     primitive for that follow-on step once this claim is already settled.
     """
     from . import pr_ops
+    if creation_id is not None:
+        from .pr_creation_cancel import cancel_creation
+        if target_repo is not None or pr_number is not None:
+            return {"success": False, "error": "Local cancellation cannot override --repo or select --pr."}
+        return cancel_creation(
+            worktree_id, config, creation_id=creation_id, expected_revision=expected_revision,
+            reason=reason, confirm=confirm,
+        )
+    if expected_revision is not None:
+        return {"success": False, "error": "--expected-revision requires --creation."}
 
     base: dict = {"success": False, "worktree_id": worktree_id}
     if not (reason or "").strip():

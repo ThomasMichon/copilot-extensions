@@ -196,3 +196,48 @@ def test_on_json_mode_includes_in_flight_reconciles(tmp_path, monkeypatch, capsy
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
     assert payload.get("in_flight_reconciles") == ["fake-plugin"]
+
+
+def test_default_namespace_prefers_central_and_off_clears_legacy(tmp_path, monkeypatch, capsys):
+    from agent_machines import killswitch_cli as switch
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    monkeypatch.setattr(switch.Path, "home", classmethod(lambda cls: tmp_path))
+    root = tmp_path / ".copilot-extensions"
+    legacy = root / "bootstrap-killswitch.json"
+    primary = root / "killSwitches" / "bootstrap-killswitch.json"
+    root.mkdir()
+    legacy.write_text('{"active": true, "reason": "legacy pause"}', encoding="utf-8")
+    assert switch._state_file() == primary
+    assert _run(["bootstrap-killswitch", "status", "--json"]) == 0
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["active"] is True
+    assert observed["path"] == str(legacy)
+    assert _run(["bootstrap-killswitch", "on", "central pause", "--json"]) == 0
+    capsys.readouterr()
+    assert primary.exists() and legacy.exists()
+    assert _run(["bootstrap-killswitch", "status", "--json"]) == 0
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["active"] is True
+    assert observed["reason"] == "central pause"
+    assert observed["path"] == str(primary)
+    primary.write_text('{"active": false}', encoding="utf-8")
+    assert _run(["bootstrap-killswitch", "status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["active"] is False
+    assert _run(["bootstrap-killswitch", "off", "--json"]) == 0
+    assert not primary.exists() and not legacy.exists()
+
+
+def test_explicit_bootstrap_override_never_clears_default_copies(tmp_path, monkeypatch):
+    from agent_machines import killswitch_cli as switch
+    monkeypatch.setattr(switch.Path, "home", classmethod(lambda cls: tmp_path))
+    root = tmp_path / ".copilot-extensions"
+    (root / "killSwitches").mkdir(parents=True)
+    defaults = [root / "bootstrap-killswitch.json", root / "killSwitches/bootstrap-killswitch.json"]
+    for path in defaults:
+        path.write_text('{"active":true}', encoding="utf-8")
+    explicit = tmp_path / "isolated.json"
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(explicit))
+    assert _run(["bootstrap-killswitch", "on", "isolated"]) == 0
+    assert _run(["bootstrap-killswitch", "off"]) == 0
+    assert not explicit.exists()
+    assert all(path.exists() for path in defaults)

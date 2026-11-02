@@ -34,9 +34,8 @@ own subagent process with a separate context window. They are for **delegation**
 -- not host/machine identity (which a control harness handles through its own
 `AGENTS.md` / host-specific skills).
 
-This skill owns **authoring and review**, not runtime task routing. To decide
-whether the current task should be delegated, use
-`delegation-guidance:delegating-work`; do not give this skill bare runtime
+This skill owns **authoring and review**, not runtime task routing. It does
+not decide whether arbitrary work should be delegated; do not give it bare runtime
 phrases such as `sub-agent`, `delegate`, or `which agent`.
 
 Reference: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli

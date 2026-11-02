@@ -225,6 +225,18 @@ Cancelling a readiness waiter settles its control; a late readonly acknowledgmen
 cannot authorize later task or mode admission. Retrying creates a fresh observation,
 while existing task idempotency still prevents duplicate prompt admission.
 
+Failed or cancelled queued readiness waits emit a bounded application diagnostic
+through the existing `agent-bridge logs` owner. It retains the local numeric
+control ID, last observed stage (`queued`, `claimed` or `outcome`), fixed failure
+code, result status and missing-row count after ordinary control cleanup.
+Peer reason text is retained only when it exactly matches a known diagnostic
+code; plugin identities, selection digests, session IDs, cwd and request bodies
+are not logged. A timeout without a completed result is not proof of missing
+plugins, and a last-observed stage is not a later claim-state assertion.
+Existing bounded-buffer loss and file retention apply; these diagnostics never
+authorize replay, replacement or task admission. Successful waits and control
+settlement keep their existing behavior.
+
 Legacy provider/mux seed forwarding is not silently rewritten by this feature.
 Those launch owners must carry typed ownership plus the compiled expectation and
 withhold their seed before claiming this startup gate. No opaque CLI flags are

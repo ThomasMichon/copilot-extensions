@@ -1,0 +1,13 @@
+{
+  "comment": "Conclude stopped workers independently of interface metadata while preserving terminal shutdown ordering and safety gates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

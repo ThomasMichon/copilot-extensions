@@ -1,0 +1,9 @@
+{
+  "comment": "Bind normal payload entries to their selected marketplace before wheel-runtime dispatch",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

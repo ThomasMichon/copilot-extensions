@@ -21,6 +21,11 @@
 
 set -euo pipefail
 
+if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
+    printf '%s\n' '{"schema":"copilot-extensions.manager-source-inputs","version":1,"capabilities":["install-source"]}'
+    exit 0
+fi
+
 _bootstrap_progress() {
     local message="$1" state="${2:-running}" stamp line
     stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
@@ -29,6 +34,19 @@ _bootstrap_progress() {
     done <<< "$message"
 }
 
+if [ "${1-}" = --system-python ]; then
+    _bootstrap_progress '--system-python is a Windows WinGet bootstrap mode; unsupported on POSIX.' failed
+    exit 2
+fi
+
+case "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" in
+    ""|/*|"~"*) ;;
+    *)
+        BOOTSTRAP_KILLSWITCH_STATE_FILE="$(pwd -P)/$BOOTSTRAP_KILLSWITCH_STATE_FILE"
+        export BOOTSTRAP_KILLSWITCH_STATE_FILE
+        ;;
+esac
+
 ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"
 CONFIG="$ROOT/config.toml"
@@ -36,23 +54,75 @@ CONFIG="$ROOT/config.toml"
 # Source (repo + ref): user-level config file [source] overrides, else defaults.
 REPO='https://github.com/ThomasMichon/copilot-extensions.git'
 REF='main'
-if [ -f "$CONFIG" ]; then
-    # Read a key only from within the [source] table (ignore other tables).
-    _wm_src_cfg() {
-        awk -v k="$1" '
-            /^[[:space:]]*\[/ { insrc = ($0 ~ /^[[:space:]]*\[source\][[:space:]]*$/); next }
-            insrc && match($0, "^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"") {
-                s = substr($0, RSTART + RLENGTH); sub(/".*/, "", s); print s; exit
-            }' "$CONFIG"
-    }
-    cfg_repo=$(_wm_src_cfg repo)
-    cfg_ref=$(_wm_src_cfg ref)
-    [ -n "${cfg_repo:-}" ] && REPO="$cfg_repo"
-    [ -n "${cfg_ref:-}" ] && REF="$cfg_ref"
+explicit_source=0
+if [ "$#" -ge 4 ] && [ "${1-}" = --repair-update ] && [ "${4-}" = update ]; then
+    explicit_source=1
+fi
+if [ "${1-}" = --install-source ]; then explicit_source=1; fi
+if [ -f "$CONFIG" ] && [ "$explicit_source" -eq 0 ]; then
+    source_config="$(awk '
+        function value(text, quote, out, i, c, e, tail) {
+            quote = substr(text, 1, 1)
+            if (quote != "\"" && quote != sprintf("%c", 39)) exit 1
+            for (i = 2; i <= length(text); i++) {
+                c = substr(text, i, 1)
+                if (c == quote) {
+                    tail = substr(text, i + 1)
+                    if (tail !~ /^[[:space:]]*(#.*)?$/ || out == "") exit 1
+                    return out
+                }
+                if (c ~ /[[:cntrl:]]/) exit 1
+                if (quote == "\"" && c == "\\") {
+                    e = substr(text, ++i, 1)
+                    if (e != "\\" && e != "\"") exit 1
+                    c = e
+                }
+                out = out c
+            }
+            exit 1
+        }
+        /^[[:space:]]*\[/ {
+            insrc = ($0 ~ /^[[:space:]]*\[source\][[:space:]]*(#.*)?$/)
+            if ($0 ~ /^[[:space:]]*\[\[?[[:space:]]*(source|["\047]source["\047])([^A-Za-z0-9_-]|$)/ && !insrc) exit 1
+            if (insrc && source_seen++) exit 1
+            next
+        }
+        !insrc && /^[[:space:]]*["\047]?source["\047]?[[:space:].=]/ { exit 1 }
+        insrc && /^[[:space:]]*(repo|ref)[[:space:]]*=/ {
+            line=$0
+            sub(/^[[:space:]]*/, "", line)
+            key=line; sub(/[[:space:]]*=.*/, "", key)
+            sub(/^[^=]*=[[:space:]]*/, "", line)
+            if (seen[key]++) exit 1
+            print key "=" value(line)
+            next
+        }
+        insrc && $0 !~ /^[[:space:]]*(#.*)?$/ { exit 1 }
+        ' "$CONFIG")" || {
+            _bootstrap_progress 'source config cannot be safely read by the shell bootstrap.' failed
+            exit 126
+        }
+    while IFS= read -r line; do
+        case "$line" in repo=*) REPO="${line#*=}" ;; ref=*) REF="${line#*=}" ;; esac
+    done <<< "$source_config"
 fi
 
 installer_args=()
 recovery_only=0
+install_source=""
+if [ "${1-}" = --install-source ]; then
+    [ "$#" -ge 2 ] || { _bootstrap_progress '--install-source requires an absolute snapshot.' failed; exit 2; }
+    case "$2" in /*) ;; *) _bootstrap_progress '--install-source requires an absolute snapshot.' failed; exit 2 ;; esac
+    [ -d "$2" ] && [ ! -L "$2" ] || { _bootstrap_progress 'install-source must be an ordinary directory.' failed; exit 2; }
+    install_source="$2"
+    installer_args+=(--install-source "$install_source")
+    shift 2
+    case "${1-}" in
+        --install-source|--recover-for-repair|--repair-update|--bootstrap-update|--system-python)
+            _bootstrap_progress 'local install-source cannot be combined with another source or repair entry.' failed
+            exit 2 ;;
+    esac
+fi
 if [ "${1-}" = --recover-for-repair ]; then
     recovery_only=1
     installer_args+=(--recover-for-repair)
@@ -63,7 +133,11 @@ if [ "${1-}" = --recover-for-repair ]; then
     fi
     [ "$#" -eq 0 ] || { _bootstrap_progress 'repair recovery accepts only --json.' failed; exit 2; }
 fi
-if [ "${1-}" = --repair-update ]; then
+if [ "${1-}" = --bootstrap-update ]; then
+    shift
+    [ "${1-}" = update ] || { _bootstrap_progress 'bootstrap update only accepts update.' failed; exit 2; }
+    installer_args+=(--repair-update)
+elif [ "${1-}" = --repair-update ]; then
     [ "$#" -ge 4 ] || { _bootstrap_progress 'incomplete update bootstrap source.' failed; exit 2; }
     REPO="$2"
     REF="$3"
@@ -71,6 +145,16 @@ if [ "${1-}" = --repair-update ]; then
     [ "${1-}" = update ] || { _bootstrap_progress 'update bootstrap only accepts update.' failed; exit 2; }
     installer_args+=(--repair-update)
 fi
+case "$REPO" in ""|-*|*[[:cntrl:]]*) _bootstrap_progress 'invalid configured Git source.' failed; exit 126 ;; esac
+case "$REF" in ""|-*|*[[:cntrl:]]*) _bootstrap_progress 'invalid configured Git ref.' failed; exit 126 ;; esac
+# Anchor local runtime sources before staging changes Git's working directory.
+source_prefix="${REPO%%:*}"
+case "$REPO:$source_prefix" in
+    /*:*|*://*:*) ;;
+    *:*) case "$source_prefix" in
+        *[/\\]*|"$REPO") REPO="$(pwd -P)/$REPO" ;;
+    esac ;;
+esac
 
 if [ "$recovery_only" -eq 1 ]; then
     recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"
@@ -104,7 +188,7 @@ fi
 
 have_git=0
 command -v git >/dev/null 2>&1 && have_git=1
-if [ "$have_git" -eq 0 ]; then
+if [ "$have_git" -eq 0 ] && [ -z "$install_source" ]; then
     os="$(uname -s)"
     if [ "$os" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
         _bootstrap_progress 'git not found - installing via Homebrew...'
@@ -121,13 +205,19 @@ if [ "$have_git" -eq 0 ]; then
 fi
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
-if [ "$have_git" -eq 1 ]; then
+if [ -n "$install_source" ]; then
+    payload_parent="$install_source/source"
+elif [ "$have_git" -eq 1 ]; then
     mkdir -p "$STAGING"
     if [ ! -d "$STAGING/.git" ]; then
         rm -rf "$STAGING"; mkdir -p "$STAGING"
         git init --quiet -- "$STAGING"
     fi
     git -C "$STAGING" fetch --depth 1 -- "$REPO" "$REF"
+    if [ -f "$STAGING/.git/info/sparse-checkout" ]; then
+        # Fresh repair needs the engine SDK omitted by routine Manager self-update.
+        git -C "$STAGING" -c core.hooksPath= sparse-checkout disable
+    fi
     git -C "$STAGING" -c core.hooksPath= checkout -q --detach FETCH_HEAD
     if ! git -C "$STAGING" diff --quiet --no-ext-diff --no-textconv HEAD --; then
         _bootstrap_progress 'Git source checkout is incomplete or changed; refusing Manager construction.' failed

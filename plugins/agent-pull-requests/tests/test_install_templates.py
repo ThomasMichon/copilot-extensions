@@ -111,7 +111,7 @@ def test_installer_engine_wiring_accepts_real_materialized_payload(materialized_
     "installer-engine.ps1",
     "installer-engine.sh",
     "installer_dependency_policy.py",
-    "installer_dependency_config.py",
+    "installer_dependency_config.py", "installer_retained_content.py",
 ))
 @pytest.mark.parametrize("damage", ("missing", "modified"))
 def test_installer_engine_wiring_refuses_damaged_assets(materialized_payload, name, damage):

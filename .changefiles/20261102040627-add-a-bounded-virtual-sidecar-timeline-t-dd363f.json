@@ -1,0 +1,9 @@
+{
+  "comment": "Add a bounded virtual Sidecar timeline, typed observer core and configurable pre-compaction policy",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -9,7 +9,15 @@ shared install module resolved at install or runtime. Shared primitives such as
 resolved from a common location, so each installed plugin still ships everything
 it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
-manually or wire it as a git `pre-push` hook).
+explicitly while developing; publication validation belongs in CI, not a
+git `pre-push` hook).
+
+The independently maintained wheel-first transition has a
+[per-application support and cutover guide](patterns/fast-application-install-and-cutover.md)
+and a [canonical ideal-flow/app-tracking map](../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md).
+They distinguish environment staging, candidate readiness, activation and
+release; they do not claim that every app already implements the target flow.
+Existing plugin-native installation remains supported during the migration.
 
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply
@@ -31,6 +39,12 @@ quarantine receipts. Approved manual operational-lock recovery is not an
 installed-code patch or an installation-policy bypass. Repair does not make a
 failed update successful or establish whole-set rollback; the original
 operation's completion and consumer gates remain mandatory.
+
+Worktrees' separate [unattributed lifecycle recovery](../plugins/agent-worktrees/README.md#interrupted-unattributed-lifecycle-recovery)
+qualifies only an exact same-payload pending reservation after source provenance
+becomes available. It uses evidence-bound metadata repair under the existing
+publication lock, not directory-lock recovery, installation policy migration,
+runtime deployment or a claim that the interrupted operation completed.
 
 Standalone wheel/sdist resources name the same primitive `_versioned_runtime.py`
 instead of the plugin script's `versioned_runtime.py`. The source companion loads
@@ -62,6 +76,11 @@ the original source location.
 The native installer pins the complete receipt before waiting for its transaction
 lock and passes that same receipt into profile construction or deferred stamping.
 A valid receipt-only change is refused even when its runtime generation is unchanged.
+The collected updater uses Containers'
+[read-only source-target contract](../plugins/agent-containers/docs/runtime-source-target.md)
+to retain this independent profile dimension through planning, pinned execution
+and selected/completed-slot currentness, without changing the original source
+receipt or the installation's owner/data root.
 
 Source-qualified generations require an exact `current-version` or
 `last-known-good` selector. If neither resolves and source-qualified slots exist,
@@ -77,6 +96,21 @@ packages; full generation selection still follows the identity rules above.
 Index uses the same comparison for active/stamped publication freshness.
 These checks retain genuine package-downgrade refusal; portable comparison
 does not authorize a forced downgrade, source replacement or runtime rollout.
+
+The ordinary POSIX session-bootstrap hooks for Bridge, Dispatch and MCP
+use the vendored resolver in read-only mode for completed-runtime no-ops.
+Readiness requires the expected generation to be selected by `current-version`,
+its canonical completion marker and interpreter, and matching deployed/payload
+package identity. A healthy last-known-good or newest-slot fallback is recovery,
+not proof that the selected generation is ready. Prepared source payloads also
+retain canonical source-receipt and payload-byte validation against the deployment
+manifest; repair generations retain their package version. Valid pre-marker
+legacy links remain compatible, but cannot hide a broken/different selector or
+missing source receipt. No readiness cache, legacy link or publication permission
+is created. These predicates do not change admission, reconciliation or deadlines.
+`python tools/check-bootstrap-sync.py --sync-readiness` copies the Bridge
+reference predicate to these adopting families; the ordinary check detects drift.
+Other deploy-model families keep their own readiness contracts.
 
 The root `snapshot-provenance.json` installation-cell receipt is published after
 assembly and is validated independently by the cell contract; it is not a runtime
@@ -1212,28 +1246,37 @@ bootstrap rather than assigning empty values, and restores both their original
 values and absence afterward. A present empty `GIT_DIR` still redirects Git.
 
 The registered Manager root (or the existing explicit root/default when no
-provider is registered) is preserved. Its durable `config.toml` `[source]`
-overrides select the repository and ref; missing fields use the publication-owned
-defaults in the shell entry, checked against the supported Manager bootstrap
-defaults. Selection never reads `current-version`, an installed payload, or
-`source_config.py`: a missing/corrupt selected runtime cannot disable recovery.
-This is the existing config-over-bootstrap-defaults contract, not a second
-configuration authority. Source overrides are not rewritten, and an alternate
-selected control-plane provider is not replaced.
+provider is registered) is preserved. The shell entry fetches the published
+Main bootstrap by default. Explicit `WORKTREE_MANAGER_BOOTSTRAP_REPO` and
+`WORKTREE_MANAGER_BOOTSTRAP_REF` environment values override only that transport;
+an omitted field keeps its canonical default, and an empty, option-shaped or
+control-containing value is refused. Manager's durable `config.toml` `[source]`
+does not redirect this first fetch. The downloaded bootstrap reads that policy
+once to select the Manager runtime repository/ref; absent fields keep its
+canonical defaults. Service-runtime, marketplace-cell and test selections retain
+their existing downstream owners and environment.
+Neither selection reads `current-version`, an installed payload, or
+`source_config.py`: a missing/corrupt selected runtime cannot disable bootstrap.
+Runtime-source config is not rewritten, and an alternate selected control-plane
+provider is not replaced.
 
 GitHub sources with portable raw URLs retain the direct-download fast path.
 Other SSH, HTTPS, file, absolute or relative local Git sources use a fresh
 `git init`/exact-ref fetch/detached checkout in private per-attempt scratch, then
 invoke that checkout's ordinary `worktree-manager/bootstrap.sh` or `.ps1`.
 Relative filesystem sources are anchored before Git changes directories.
-A failed raw download may retry **only the same configured Git source**, using
+A failed raw download may retry **only the same bootstrap-transport Git source**, using
 normal Git credentials. No arbitrary-host raw URL is invented. Missing Git or
 native acquisition failures are explicit failures, not canonical-source
 fallbacks. Repository-routing environment variables are cleared without
-discarding credential/SSH inputs. The shell reader supports basic and literal
-quoted values, including escaped quotes/backslashes emitted by `source set`;
-unsupported/malformed explicit syntax fails visibly before acquisition and is
-distinct from broken-runtime recovery.
+discarding credential/SSH inputs. The canonical bootstrap's source reader
+supports basic and literal quoted values, including escaped quotes/backslashes
+emitted by `source set`; unsupported/malformed runtime policy fails visibly
+before prerequisite acquisition, staging or installation. An interceptor invokes
+`--bootstrap-update update ...` without substituting its transport source for runtime
+policy. The older `--repair-update <repo> <ref> update ...` form remains accepted
+for older callers. An explicitly overridden bootstrap must support the new
+source-free form; there is no fallback to installed runtime code on rejection.
 
 Windows scratch is created atomically with a protected DACL, owner equal to
 `WindowsIdentity.GetCurrent().User`, and explicit inheritable FullControl for
@@ -1669,6 +1712,40 @@ binstub  ~/.local/bin/<name>.ps1 (+ .cmd fallback)  →  signed venv python -m
 write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 ```
 
+Non-editable applies to the complete deployed dependency graph, including
+explicit development generations. Canonical source references may use
+`editable = true` to locate libraries in a source checkout; deployment must
+still install noneditable wheel content rather than references to those source
+directories. The canonical installer dependency CLI
+refuses explicit editable operands, including requirements-file entries, and
+non-copy link modes. It freezes editable source mappings in private retained
+metadata and supplies `--link-mode copy` to UV only when the caller has not
+already supplied it; `uv pip install` does not accept
+the global `--no-editable` option. The Python constructor uses the same
+non-editable retention mode, verifies installed origins and permits ordinary
+immutable wheel-cache hardlinks as described in the source-wheel cache contract
+below.
+Static admission recognizes the standard UV, setuptools and pywin32 bootstrap
+import hooks with their required slot-local modules, without executing them.
+Completion rejects symlink/reparse redirection, editable origins and escaping
+path hooks, not an ordinary file merely having another hardlink. Cache content
+is never modified in place; cache retirement unlinks its own names without
+invalidating installed files. Never refresh an existing completed
+editable environment in place: construct and qualify a distinct immutable slot,
+then perform the authorized selection/cutover. These rules do not authorize a
+host migration or waive an adopter's construction and lifecycle acceptance.
+
+The shared completion publisher also inspects the installed environment without
+executing its interpreter or import hooks. Both new completion and completed-slot
+reuse refuse editable origin metadata, editable finders, egg links, linked package
+files, system site-packages, and path hooks that escape the slot. Executable `.pth`
+hooks must be the exact supported UV or setuptools bootstrap with its installed
+module present; unknown executable hooks refuse rather than running to discover
+their effect. Completed-slot refusal reports `health-repair-required` and preserves
+its contents and the active selector. This is deployment admission, not permission
+to rewrite a published environment or a replacement for installed-origin and
+lifecycle qualification.
+
 > **Immutable-versioned layout (dotfiles #581 — the default; enforced).** The
 > `~/.<runtime>/.venv` above is really an **immutable, versioned** layout: each
 > version is built into `~/.<runtime>/versions/<version>/`, and the active one is
@@ -1705,6 +1782,11 @@ its content under retention; candidate and rollback owners retain references
 through cutover/drain or rollback settlement. Canonical cleanup takes
 construction, exclusive retention, then selector-publication ownership and
 rechecks selectors before deleting; activation shares the same protection.
+An external lifecycle that must survive installer death additionally publishes
+owner-scoped durable generation references before changing its registration.
+Cleanup preserves those generations until that owner confirms publication,
+recovery or removal and explicitly shrinks its references; process-local
+retention alone does not protect an interrupted external registration.
 The install-contract guard executes a small fresh-root lifetime/reclamation
 probe as well as checking byte-identical fan-out. See
 [`versioned-runtime`](../libs/versioned-runtime/README.md) for the exact API,
@@ -1712,6 +1794,24 @@ ordering, storage-failure behavior, and installer-adoption boundary. Shipping
 this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
+
+PowerShell construction-pipe failures retain the original helper diagnostic.
+Completion and final settlement close the caller-owned input on error, drain
+both output channels and wait for the same helper before disposal. The error
+includes that helper's stderr and exit code, rather than replacing a failed
+completion with a later broken-pipe exception. Existing incomplete-candidate
+cleanup and completed-slot retention still own the runtime outcome; no helper
+deadline, installer replay or admission bypass is added.
+
+The attached PowerShell completion adapter accepts `-RetainHelpers` when an
+installer needs a source-independent installed launch component. It retains the
+canonical runtime companions and `runtime_launcher.py` inside
+`.runtime-bootstrap` before publishing completion and transferring to retention.
+A completed reuse verifies those exact helper bytes without writing or repairing
+them. Missing, linked or changed helper evidence refuses completion. Bridge uses
+this boundary before its driver-owned Windows broker adoption and before
+selection or launch callbacks; removal retains the adopted action until its
+owned registration is confirmed gone.
 
 Read-only helper execution must not mutate the admitted payload. The runtime
 primitive loads its canonical sidecar source directly without creating or
@@ -2013,6 +2113,39 @@ or a source outside this reporter's supported shape produces an explicit notice
 and retains the existing Git authentication path, not a false auth refusal.
 Known failed credentials reported by a capable engine still block that fetch.
 
+### Supported standalone Manager removal
+
+The Manager's existing `scripts/runtime_install.py` owns optional
+`--root <target> --uninstall [--apply] [--json]`. It is a provider-first
+`worktree-manager.uninstall` generation-1 expansion, declared in the executing
+immutable payload's `references/uninstall-contract.json`; package versions and
+newer marketplace metadata are not capability negotiation. No ordinary caller
+emits new syntax against an older selected provider. Missing/invalid capability
+or unsupported legacy ownership gives explicit refusal without reconstruction;
+existing install/update behavior remains available.
+
+Construction seals an attributable per-slot inventory before completion.
+The inventory is created privately even under a permissive POSIX umask.
+Manager-owned child interpreters, including daemon, configuration and demo
+self-reexecution, disable bytecode writes to preserve that seal.
+Removal validates all present generations and integrations, then revalidates
+under canonical construction, exclusive retention and publication custody.
+Manager frontdoor publication uses that same publication authority. The
+daemon's existing spawn lease prevents ordinary service startup during removal;
+live/unknown lifecycle custody refuses, while settled routing history and
+persistent control files remain intact. No parallel selector, service or
+force-cleared lock is introduced.
+Present targets refuse preview and apply when reliable process enumeration is
+unavailable (currently outside Windows and Linux `/proc`).
+
+Preview/absence do not provision or create lock files. Apply requires a base
+interpreter and installer outside the target, withdraws only owned artifacts,
+preserves durable/unknown state and reports partial failure as incomplete.
+It never retires application/mux processes or restores selectors into a partly
+removed slot. See the
+[Manager removal operation](../worktree-manager/README.md#remove-an-owned-installation)
+for invocation, supported-target limits, result statuses and rollback behavior.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is
@@ -2054,6 +2187,9 @@ The byte-identical `payload-copy` block follows required output initialization
 and precedes contextual staging. Worktrees also uses it for its structured
 payload copy, without changing context selection, canonical-library handling,
 staging paths or watchdog ownership.
+Codespaces and Logger stamps reuse it for snapshot directories and dependency trees.
+Freshly copied materialized libraries retain that first copy; metadata rewriting
+still runs, while independent materialization still replaces its destination.
 Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
   `installed-plugins`) is authoritative. An inherited staging flag from another
@@ -2121,6 +2257,31 @@ watchdog (`<=0`) still leaves a finite 510-second updater safety bound. The
 worktrees self-installer retains its existing 600-second minimum, extended when
 a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
 values fail explicitly before launching the installer.
+
+The receipt-owned Python installer runner interprets that allowance as **inactivity**, not a maximum
+elapsed installation duration. Newly read stdout or stderr bytes renew it,
+including partial lines. It relays raw native bytes to their original channels
+or the admitted human-output descriptor through finite cancellable relays.
+Acknowledged relay writes renew delivery inactivity, including after the
+installer exits; an undrained pipe cannot block timeout or owner-loss checks.
+Legacy Python log callbacks receive complete lines and a final partial line
+only after native process-tree and pipe settlement. Retiring the owned tree precedes output drain,
+so a root exit cannot leave a pipe-holding descendant writing a late slot.
+Receipt validation and watchdog exit `124` still determine the actual outcome.
+This does not change a native self-stage parent's separate watchdog policy or
+legacy non-receipt subprocess adapters.
+
+The read-only Windows consumer census refreshes an incomplete current-user
+candidate at most once by PID and checks that its creation identity is unchanged.
+When descendants are requested, potential roots are recovered before computing
+their closure, so a newly identified runtime-root process cannot hide an
+external child. Rooted descendants still require current-user ownership.
+Confirmed-exited candidates retain their original snapshot rooting and ancestry
+for descendant discovery, but are omitted from returned live observations.
+A disappeared observation is omitted only after native process absence/exit
+confirmation; live unknown, ambiguous and changed-identity observations still
+refuse inspection. The existing native birth check and retirement pins remain
+separate, and the census never signals a process.
 
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
@@ -2278,9 +2439,20 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 lock on `<install-dir>/.install.lock` for every mutating action
 (`stamp`/`install`/`update`/`provision`, plus `uninstall` where provided) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
-fd 8 (fd 7 for `agent-ssh`), or a PID-bearing fallback entry
-`<install-dir>/.install.lock.pid` where `flock` is unavailable). In the matching
-agent-vault, agent-mcp, agent-containers and agent-ssh fallback blocks, every
+fd 8 (fd 7 for `agent-ssh`), or the product's fallback below).
+Machines and Containers share their persistent fd-8 transaction gate between
+publishers and legacy removal. Native `flock` and an existing Python's
+`fcntl.flock` acquire the same open file description, never an independent PID
+lock. The parent retains custody after the finite Python acquisition returns;
+closing the final inherited descriptor releases custody without replacing or
+truncating the inode. Neither capability means explicit refusal without
+provisioning. Historical `.install.lock.pid` and `.install.lock.pid.reap`
+receipts refuse unchanged until explicitly settled; their presence does not
+authorize stale-owner deletion.
+
+The PID-bearing fallback entry `<install-dir>/.install.lock.pid` remains for
+other adopters without `flock`. In the matching
+agent-vault, agent-mcp and agent-ssh fallback blocks, every
 acquisition and stale-owner cleanup holds the short, PID-bearing
 `.install.lock.pid.reap` admission mutex. The owner is read and checked while
 that mutex is held, and a confirmed stale link is removed and replaced before
@@ -2290,7 +2462,7 @@ This prevents a delayed reaper from removing a newly admitted live owner.
 A `.reap` link left by a process that died during admission is deliberately
 never reclaimed automatically, even when the main PID link is absent: runs
 fail closed at their deadline until the stale mutex is explicitly repaired.
-The four matching fallback bodies retain one identical protocol. Creation uses
+The three matching fallback bodies retain one identical protocol. Creation uses
 the POSIX `link` utility with a privately staged regular receipt, never bare
 `ln -s` at either shared lock pathname. `link` calls `link(2)` for the exact
 destination: an existing directory or directory symlink fails rather than
@@ -2340,7 +2512,14 @@ Read-only actions (`status`) and service controls do not take it.
 against the same install/update lock. Vault and SSH uninstall previews do not
 acquire or create the transaction lock or remove runtime/config contents.
 The normal transient payload self-staging protocol still applies.
-`agent-logger` already locks uninstall and keeps its state directory.
+`agent-logger` locks uninstall and removes declared reconstructible runtime
+children while keeping configuration, digests, session state and unknown root
+content. It validates deployment or in-root stamped ownership before changing
+tasks or commands. `agent-mcp` also provides an explicit legacy uninstall under
+its existing install lock, without staging or provisioning a replacement.
+It requires owned deployment/stamped metadata and quiescent, attributable
+runtime processes; unsupported or ambiguous process inspection refuses removal.
+See the plugins' READMEs for their retained contents and platform boundaries.
 
 For those three uninstallers, removing runtime/config contents must **not**
 remove the lock inode or in-flight staged sources. The canonical
@@ -2352,9 +2531,343 @@ invocations, not with purge. Moving the lock to a new
 path would not exclude an older installer holding the original lock, so purge
 preserves the existing identity instead. Removal errors stop that purge rather
 than reporting success. Nested links are unlinked, never traversed; filesystem
-roots, user homes, and linked install roots are refused. This changes no
-uninstaller's config-retention default and introduces no uninstall action for
-init-only plugins.
+roots, user homes, and linked install roots are refused. Callers may instead
+supply immediate-child names (`-EntryNames` on PowerShell; positional names
+after the root on Bash). All names are validated before removal, coordination
+entries cannot be selected, and unselected children remain untouched. Explicit
+empty/null PowerShell selections refuse rather than falling back to purge.
+Omitting the selection preserves existing purge behavior; the helper does not
+establish product ownership, acquire the transaction or retire live processes.
+
+Destructive adapters bind an unambiguous root before acquiring their transaction;
+Logger and MCP refuse parent-traversal components rather than mixing native
+filesystem traversal with Python's lexical normalization. POSIX removal children
+use the existing finite-process supervisor and settle descendant writers before
+returning or propagating a timeout. Its explicit caller-held mode needs no
+runtime process-utility dependency; without a construction descriptor it does
+not establish storage-custody retention after abrupt caller death. Existing
+construction callers retain their descriptor-backed contract.
+
+The state-preserving native adapters share
+`libs/installer-engine/installer_engine_uninstall.py`, packaged through the
+existing installer-engine synchronization/materialization owner. Native callers
+retain their whole-install transaction, service STOP and registration handling.
+The helper owns a finite, payload-declared artifact plan, typed or stamped
+product ownership, read-only policy guards and canonical generation/snapshot/
+redirect custody through selective native deletion. Its `--check` performs
+structural admission only; deletion repeats ownership, inventory, guards and
+current-user process attribution under custody. A matching deploy manifest is
+removed last and retained as retry proof on cleanup failure.
+An existing manifest is retained byte-for-byte. A stamped-only installation
+records untyped product retry evidence, never synthesizes command-publication
+ownership from its teardown admission.
+An explicit `--check --check-consumers` additionally acquires that removal
+custody and checks consumers before a non-daemon caller's first mutation;
+ordinary daemon adapters retain their owned service-STOP ordering. Finite
+`bin_entries` and `script_entries` may name nested files: every path segment
+is validated, only declared immediate children and their own bytecode are
+selected, and unknown siblings are retained.
+
+Agent MCP's `scripts/uninstall-profile.json` uses the version-3
+`copilot-extensions.installed-footprint` current-document contract. Its strict
+fields are `version`, `schema`, `plugin`, `revision`, `contract`, `producers`
+and `change`. The serialization version, semantic footprint revision and current
+source hashes describe different facts. `contract` contains `profile`, `effects`
+and named `recognizers`; its version-1 finite profile is the same inventory
+consumed by the shared helper and MCP's native adapter. There is no second native
+list or runtime source-history ledger. Existing version-1 finite profiles retain
+their own path. The canonical provider also reads version-2 histories through
+an adapter that validates them and exports only their effective current contract,
+without rewriting the installed document.
+
+Source-only edits refresh complete `scripts`/`src` producer hashes in place with
+`python tools/refresh-install-footprint.py`; they do not change `revision`,
+`change` or the number of compatibility rules. The initial explicit
+`--convert-v2` operation preserves the effective contract and its revision.
+Semantic changes, including producer-scope changes, require the next revision
+and a `change` with `from_revision`, an exact introduced/changed/retired `delta`,
+and `dispositions` for every retired identity. Effect entries are assessed
+individually. A retired descriptor must reference an equivalent retained current
+descriptor (`action: retained`, `target`, `reason`) or explicitly preserve unknown
+remnants (`action: preserve-unknown`, `reason`). Neither action grants deletion
+authority. Only the current assessment ships; Git owns earlier source assessments.
+The source guard compares normalized contracts against the real published baseline
+and continues to reject omitted producer scopes or stale source hashes.
+Producer scope identity remains part of the comparison even though digest values
+do not: retiring `src` cannot claim equivalent retention in the unrelated
+`scripts` scope.
+
+Named layout recognizers and the finite reset inventory are the explicit support
+portfolio: supported predecessor artifacts such as `.venv` and `venv` remain
+declared, rather than being rediscovered by unioning historical inventories.
+Compatibility is practical and removable, not a promise to support every source
+revision forever. Retiring a layout rule is a semantic change with a disposition;
+unrecognized incumbents remain preserved and select independent fresh construction.
+Unknown required incoming semantics still fail explicitly before effects.
+The [version-skew pattern](patterns/service-contract-evolution.md) governs later
+adapter retirement and the supported upgrade/rollback window.
+
+The constructor requires the exact declaration beside its executing provider.
+Uninstall uses the provider beside its executing inventory helper, including for
+plain v1 profile decoding; it never loads a newer provider from another payload.
+Other source dependency fallbacks retain the existing byte-identical canonical
+owner pairing. Thus frozen older payloads
+keep their older reader/document pair; they are not redirected to the new schema.
+New readers support v2/v3 before the co-packaged declaration switches to v3.
+An old-reader/v3 mismatch is an explicit pre-effect refusal, never an effectful
+probe followed by an older retry. Current, predecessor and rollback fixtures
+exercise these actual loading seams. Trusted declarations are ordinary unshared
+files with a separate 1 MiB read bound accommodating already-produced v2 histories;
+installed deployment/selection/completion markers retain their 64 KiB bound.
+Current-document size is independent of source-update count.
+
+Additional effect descriptors distinguish disposable tools/control state,
+identity-bound processes and owned children, registrations (none for MCP's
+installer), shared PATH integration and preserved configuration/data/locks.
+These descriptors are data, not executable deletion or termination selectors.
+Native owners still resolve and validate the addressed installation and every
+effect under their existing custody.
+
+The co-packaged `installer_engine_footprint.py` independently recognizes the
+legacy versioned layout using the deployment, selection and completion markers,
+supported footprint/schema/contract ranges and ordinary-file checks. The known
+legacy layout is revision 1, independent of the incoming manifest revision.
+The deployment's existing `runtime_version` must equal the selected generation;
+an old deployment record plus a newly completed/selected candidate is not
+integrated-layout reuse evidence.
+Missing, corrupt, foreign or unsupported evidence returns no match without
+discarding the reset inventory or executing installed code. A layout match is
+not update permission, source/content qualification, a lifecycle handshake or
+a health result. No new installed receipt is required.
+
+MCP's native installers now pass that maintained footprint into the existing
+attached construction session under the same installer lock/execution owner.
+The shared source-manifest loader keeps maintained history separate from the
+small installed-marker read budget, including construction, process retirement
+and control reset.
+PowerShell preserves an exited construction owner's captured stderr and exit
+code when its input pipe has already closed.
+A compatible layout can reuse an admitted candidate, including the selected
+same-input replacement generation. Otherwise construction is fresh: an occupied
+target receives a distinct `repair.<id>` generation, without rewriting the
+incumbent or requiring its completion receipt. Healthy incumbent references
+remain retained; unusable selectors/completion evidence do not veto either
+footprint-enabled construction path. Completion reads accept only ordinary,
+bounded files, not FIFOs or oversized evidence. Source identity remains pinned
+independently of the physical generation name; MCP still advertises that exact
+generation, including a repair suffix, for operational cutover comparisons.
+The optional protocol leaves other callers unchanged.
+MCP deployment manifests record the selected physical generation for ordinary
+and source-backed installs. Its native readiness checks validate the original
+payload/source separately from an admitted exact repair suffix, then require
+that selected completed slot rather than a healthy fallback. The shared POSIX
+readiness fragment uses the same read-only identity helper for Bridge and
+Dispatch; PowerShell keeps ordinary package readiness Python-free.
+Fresh construction now requires MCP's finite incumbent-process settlement after
+activation, separately from completion, and skips incremental graceful handoff. The
+reaper reuses the native current-user census, binds exact kernel births and pins
+Windows process handles or Linux pidfds. It pauses admitted parents while closing
+their descendant trees, refuses protected/current/excluded or uninspectable
+children, then waits for every pinned member's exit. Failed pre-termination
+inspection resumes the paused members. It never uses PID files, numeric tree
+kills or process-group signals as retirement authority. Fresh mode also covers
+known legacy `.venv`, `venv` and `tool` launch paths without an old deployment
+receipt. A disabled version-reap override requests check-only admission: it cannot
+report remaining old owners as settled. Incremental callers retain best-effort
+behavior but report unconfirmed retirement as incomplete.
+
+Fresh settlement holds the addressed socket home's existing cutover lock, then
+acquires its ordinary serve-instance lease and deadline-bounded routing lock
+before resetting declared control files. A live current owner or endpoint,
+uncertain passive scope or unsafe path makes reset incomplete without deleting
+that state. Reset preserves configuration, durable state, logs, unknown entries
+and lock-file identities; it never runs whole-uninstall or collects old code.
+The control home follows the forwarder's `AGENT_MCP_SERVE_SOCKET` override or
+default socket-home selection, not the code-root argument. Active and previous
+routing-only endpoints must also be idle; non-socket control names require
+ordinary unshared files, never listening socket artifacts.
+On Windows, a loopback connection timeout alone is not evidence of death:
+reset additionally requires a successful exclusive bind to that endpoint.
+An occupied or unverified bind preserves the controls and reports failure.
+Global commands and the final deployment record publish only after reset
+succeeds, so interrupted integration cannot gain incremental recognition from
+the candidate completion marker alone. MCP remains on-demand afterward.
+
+The reaper uses procutil's optional
+[`RetirementCustody`](../libs/agent-procutil/README.md) finite-worker API so
+installer death cannot strand its externally paused originals. The worker
+retains the native pins outside the production caller's cleanup boundary;
+lost caller custody resumes remaining originals rather than authorizing further
+termination. It reuses the already-adopted Windows broker, never installs a
+broker or requires a legacy runtime receipt to gain update permission.
+
+An identity disappearing before its tree is frozen is unconfirmed settlement,
+not success. Exited pins never seed later PID ancestry, every paused member's
+executable protection is rechecked, and an excluded root missing from census
+refuses retirement. Linux descendant observation may retain partial rows for
+unrelated nondumpable tasks; selected roots/children must remain fully inspected.
+An empty Linux command line is skipped only after a same-birth, single-thread
+zombie/dead-group observation or a positive `PF_KTHREAD` kernel-task flag.
+A zombie main thread with surviving userspace workers
+refuses census instead of hiding a potentially active runtime.
+Missing command-line, executable or identity files use the same group-exit
+proof; a leader exiting between reads cannot bypass it through a file-not-found
+exception.
+Kernel stat parsing preserves opaque task-name bytes, including non-UTF-8
+names, without weakening birth, state or thread-membership checks.
+The ordinary non-signaling uninstall census retains its existing strictness.
+Current-slot protection covers both image and launch path, including new
+descendants and same-birth execs. Retirement retains the canonical publication
+lease so another compliant publisher cannot change the selected generation
+during that scope.
+
+External pinned retirement is supported on Windows and Linux; another platform
+with a live old owner refuses rather than substituting PID-only termination.
+This bounded process boundary does not clear disposable control state, remove
+old code/reactivation routes, or qualify installed-host survival. The complete
+manifest-driven reset remains a native lifecycle obligation.
+
+`tools/check-install-contract.py` checks this first adopter's complete
+`scripts` and `src` producer trees, including added/removed files, with
+LF-normalized content digests. The manifest itself and Python bytecode caches
+and generated egg-info metadata are excluded, matching materialization.
+Promotion-owned `__version__`/`_FALLBACK_VERSION` literals in
+`src/*/__init__.py` and `src/*/_build_info.py` are normalized; all surrounding
+code remains covered.
+Coverage cannot be narrowed to selected files to hide a new
+producer. A producer change must carry its manifest revision and delta;
+published history is compared with the local publication merge-base, PR base, or CI push
+parent rather than trusting a rewritten baseline. Source digests are omission
+checks, not a signing or runtime-authorization protocol. The complete append-only
+manifest has a separate bounded 1 MiB reader; selectors, deployment evidence and
+completion markers retain their 64 KiB budget. Construction and the source guard
+use the same manifest reader, so valid history is not mistaken for one small
+runtime marker and an oversized publication is refused before rollout. This initial data
+provider alone neither executes effects nor grants update permission; native
+construction and process settlement consume the applicable parts separately.
+
+Worktrees uses its existing whole-action command lifecycle and the standard
+self-stage/re-exec path. Its pre-stage admission returns early for a genuinely
+absent default footprint without creating a runtime. Staged ownership resolves
+at the original source only through the inherited live lifecycle. Process
+inspection recognizes that exact teardown owner, native caller and canonical
+staging watchdog, never arbitrary Python ancestors. A nonempty legacy Worktrees
+`lib` refuses until its ownership has an explicit migration path.
+Watchdog matching accepts only the trusted literal body or its exact Bash 3.2
+quoted-heredoc backslash-newline rendering, not arbitrary whitespace/code changes.
+When project commands or receipts exist, cleanup resolves an already completed,
+selected-source-qualified interpreter read-only; it never constructs a runtime
+to uninstall one. A stamp-only project with neither candidate needs no runtime.
+Missing or foreign ownership still refuses before project-command mutation.
+Uninstall resolves the existing CWD-based project policy before admission and
+forwards that effective name through lifecycle and staging re-execution.
+An explicit project name retains precedence.
+Worktrees also checks exact owned global/update commands before accepting a
+finite `absent` result, including a missing or durable-only runtime root.
+Orphaned owned commands without runtime ownership evidence refuse without
+creating staging or deleting their bytes; foreign/custom-root commands remain.
+Process attribution preserves native argument boundaries rather than reparsing
+a display command. On macOS, the co-packaged stdlib-only
+`installer_engine_uninstall_darwin.py` uses libproc and sysctl to inspect a bounded
+current-user census, verifying process incarnation and executable identity
+around exact-argument capture. Unavailable inspection, ambiguous ownership,
+partial native results and excessive census churn refuse explicitly. This
+observation does not replace transaction custody or qualify session survival.
+Shell-only adopters also co-package `installer_engine_process.py`: POSIX finite
+deletion uses its bounded child owner even without the Python installer facade.
+Global command selection uses the co-packaged
+`installer_engine_commands.py` and exact current native-writer templates, not
+root/module strings in comments. Modified, foreign and unrecognized programs
+remain. Cmd wrappers that delegate to PowerShell require their exact owned
+peer; independently executable MCP/Machines cmd programs are checked against
+their complete native templates. Index separately admits its exact installed
+and product-verified session-stamped lifecycle-gate forms at the default root.
+Source-bearing legacy commands may also match the installed deployment's
+recorded artifact path, rendered through the current trusted writer. That path
+is literal template data, never a source to execute or project-command ownership.
+Logger also admits the complete byte-exact pre-queue global PowerShell writer
+family recorded at `bea4d7bb70c2ec727b2f38caeff9ec84eaca26c2`. These are
+read-only recognition templates, not programs to execute. Default-root and
+paired-CMD checks remain mandatory, edited siblings remain foreign, and this
+does not establish project-command or installation-cell ownership.
+
+Native Linux daemon STOP uses the separate co-packaged
+`installer_engine_stop.py`; the finite-removal helper still never stops a
+process. Before service control, the caller captures each admitted daemon's
+PID, kernel birth ticks, UID, boot identity and command-byte digest. After
+service STOP, it opens a pidfd and verifies that original admission before
+signaling the bound process. A replacement refuses rather than acquiring a
+fresh identity; an already-gone original settles without a numeric-PID signal.
+Unknown child/transport ownership and unavailable kernel-bound signaling refuse.
+Admission records contain no plaintext command arguments. Bridge console
+entrypoints and their shebang-expanded form, and Vault's persistent foreground
+handoff arguments, use the same admission as their actual native unit writers.
+Before service control, unit admission validates the active `[Service]`
+executable/launcher and root-bound working directory together. Comments cannot
+establish ownership. Dispatch's coordinator and supervisor registrations have
+separate exact writer forms; a supervisor registration must name its own unit.
+The loaded manager's command, working directory, fragment and load/activity
+state must also agree; checking the on-disk main unit alone is insufficient.
+Drop-in overrides and unparseable effective properties refuse explicitly.
+Proven inactive, unloaded legacy registrations may be removed without issuing
+service stop/disable against an unverified loaded registration. Effective
+command values are passed through stdin and are not printed in diagnostics.
+
+CodeSpaces, SSH and Pull Requests removal select only an already available
+interpreter whose executable, prefix, base prefix and base interpreter remain
+outside the removable root. Admission-only and dry-run paths use that same
+non-provisioning selector; absence refuses without invoking `uv` or downloading
+Python. Construction's bootstrap resolver retains its separate behavior.
+Other finite native adapters use the same executable/prefix/base closure
+checks and enumerate all available PATH candidates. An activated removable
+venv, broken first executable or physical alias cannot hide a later eligible
+external interpreter. Windows legacy adapters enumerate installed launcher
+targets without asking the launcher to provision one.
+Broker-capable Windows native install and uninstall share the construction
+driver's existing Python 3.11+ bootstrap prerequisite. Their uninstall selectors
+require an external interpreter outside the removable runtime and prefix/base
+closure; they never provision one to remove an installation. Other finite
+selectors retain their existing Python floor. A candidate launch failure rejects
+that candidate, not the remaining search.
+
+Before removing its broker, the native installer retains execution-driver and
+whole-install custody, completes structural admission and stops only its
+identity-verified services. `--admit-removal` then checks current consumers under
+the canonical runtime/snapshot/redirect custody without deleting code or
+stopping any process. That finite check releases generation/publication leases
+before the installation owner removes the broker, whose removal takes its own
+leases. Runtime deletion rechecks admission under custody and refuses while an
+adopted or pending broker configuration remains. CodeSpaces still refuses an
+existing Connection Owner task or live/reconnect transport; broker removal does
+not bypass that admission or retire those unrelated obligations.
+
+CodeSpaces' native POSIX whole-action transaction can use an existing `flock`
+capability on the same persistent install inode without Python, including cold
+stamping. Its existing-Python fallback uses attached, Bash-3.2-compatible
+transport; EOF settles an owner waiting for admission as well as a holder.
+When neither capability exists, mutation refuses without provisioning.
+MSYS retains the native Windows inode owner rather than assuming a POSIX
+`flock` port is interoperable. Read-only status needs neither lock capability.
+New POSIX CodeSpaces transaction roots are created with private permissions
+under both backends, independent of a group-writable caller umask. Existing
+unsafe roots still refuse without permission changes.
+Machines/Containers legacy removal accepts only its root override; unsupported
+preview/check/force/context/profile options refuse before staging or admission.
+The private adapters also reject trailing options rather than silently dropping
+them and performing removal.
+
+Installation-cell/managed roots, mutable development claims, linked ancestry,
+unrecognized legacy venv directories, foreign ownership, conflicting leases
+and unattributed live consumers refuse explicitly. Released coordination files
+remain; their existence is not proof of a live holder. Product profiles preserve
+unknown contents, databases, configuration, authentication and transport state
+by default. A transport guard may refuse removal until its active/reconnect
+dependency closure has independent custody. Index's default nested engine is
+included in the same ownership admission, including nested cell/managed/foreign
+metadata refusal under custody; an external engine override is not silently
+enrolled. Explicit purge remains a separate, destructive native caller action.
+Finite writer timeout settlement does not qualify whole-transaction custody
+after abrupt caller death, live Copilot survival or fresh SSH reconnection.
 
 `agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
 `flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through
@@ -2500,6 +3013,14 @@ signing level requirements"). Because these plugins ship publicly on GitHub, the
 fix must **not** require downloaders to disable SAC.
 
 ### Rules (Windows `install.ps1` / `init.ps1`)
+
+The signature-driven Python discovery below describes the current legacy
+implementation. The [setup-owned Python prerequisite](../visions/plugin-services/README.md#setup-owned-python-prerequisite)
+and [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+replace that discovery with trusted PATH Python supplied by upfront setup.
+Windows code-integrity enforcement, copied-venv construction and avoiding
+console-script trampolines remain separate from per-helper signature checks.
+The source migration is not complete merely because that intent is recorded.
 
 1. **Build the venv from a PSF-signed base Python via `--copies`.** Resolve a
    signed interpreter (`py -3.x` whose `Get-AuthenticodeSignature` reports
@@ -2658,6 +3179,80 @@ See the [source preparation tool](../tools/prepare_runtime_source.md) for the
 single owner of preparation syntax and metadata semantics. Preparing this
 payload does not change Copilot's plugin-content source or disable hooks.
 
+The explicit Worktrees updater's internal `PreparedRuntimeSource` input keeps
+the actual installed payload/command owner separate from that prepared artifact.
+Registered, module and engine plans resolve the installation root and incumbent
+scope through the owner; the prepared artifact must independently pass its own
+runtime-scope/machine gate. Commands, deadlines and source-qualified target come
+from the admitted artifact. Execution holds the existing owner's managed
+`command_binding.py --run-lifecycle` custody, including on the same artifact's
+module install fallback. This does not create an installation cell, data root,
+new driver, or a public alternative installation command.
+
+SSH, Machines and MCP's native publications under that transaction pin pass their
+unbound schema-3 manifest to the original installed owner's existing
+`command_binding.py --publish-legacy --write-manifest` operation. The borrowed
+management lease supplies ownership validation and atomic publication; a refused
+SDK call cannot fall back to replacing the manifest directly. Machines captures
+its original source locator before constructing an immutable snapshot, and MCP
+retains that locator before activation.
+`source.path` therefore retains the owning publisher while `source.version`
+remains the prepared package version and `runtime_source` identifies its exact
+code assembly. Ordinary unpinned and cell publication retain their separate
+existing paths; this does not declare those publishers migrated.
+
+The POSIX installer engine exposes `render_deploy_manifest` with the existing
+manifest writer's eight inputs. It returns the same JSON without staging or
+publishing into the runtime root, allowing the source caller to use the owning
+SDK's publication transaction. The equivalent PowerShell builder is
+`Write-DeployManifest -PassThru`. Ordinary `write_deploy_manifest` retains
+its own existing staging, publication-evidence and atomic replacement paths.
+
+The full canonical source pin crosses that child boundary in the call-scoped
+`COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN` environment entry. Its version-1
+capability declaration is the literal `SOURCE_PIN_ENV` assignment in the exact
+prepared `versioned_runtime_source.py` that the native frontend will execute,
+not a package-version inference or a declaration from a different payload.
+The installed owner's existing read-only source CLI first validates the full
+pin and assembly. The receiving source CLI then enforces the transaction pin
+independently of any frontend-local `--expected-source-identity` sample; neither
+can override the other. Revalidation precedes each installer attempt. Native
+initialization must invoke that validation whenever the transaction pin is
+present, even if `runtime-source.json` disappeared since planning; absence
+cannot downgrade the transaction to a package-only build.
+Old callers without the entry retain the existing CLI contract; an older
+prepared helper without that declaration refuses before installer execution
+rather than silently ignoring a required pin. Nothing retires the existing
+explicit CLI pin.
+
+A package-version match alone cannot skip a prepared-source update. Its receipt
+must match the full source identity, select that completed source slot or its
+strictly named distinct repair generation, record the actual selected runtime
+version, and name its venv. A healthy selected repair remains current for the
+original exact source pin; a foreign receipt or incomplete repair does not.
+Source-backed engine construction routes the canonical health-repair-required
+outcome through its existing distinct-generation repair owner rather than
+rewriting the damaged slot. Ordinary package-only behavior is unchanged.
+An ordinary update's requested adopted-Manager recovery survives that fallback,
+its control process and final settlement. Runtime-only callers retain their
+disabled recovery setting; health repair does not silently broaden that scope.
+Completion-probe subprocess failures,
+including timeouts, become explicit receipt failures on the collected step,
+not exceptions that abort the remaining update portfolio. Native candidate construction and
+health remain the installer's responsibility. Ordinary runtime updates clear
+inherited transaction pins. This is provider-side, unprofiled legacy-runtime
+execution support: Manager's non-marketplace suite-update preflight remains
+capability-aware and owns acquisition and whole-portfolio preparation. Fresh
+legacy engine repair may prepare its source before inventory is available, using
+the same trusted Manager toolkit and incumbent publication custody. The original
+service-source lease and exact commit/tree survive repair through suite
+preparation/execution; the Manager checkout is only the policy SDK, never an
+implicit service-source choice. Its native repair is runtime-only and verifies
+the actual selected completed source slot before ordinary suite orchestration.
+See [Manager's source contract](../worktree-manager/README.md#independent-runtime-source-acquisition).
+Namespaced source execution and profile-specific target selection
+are not inferred from this internal API.
+
 > **Self-stage caveat (#935).** When the `install-contract:v4 self-stage` prologue
 > re-execs out of the marketplace payload, the installer's *live* path is a
 > throwaway `~/.<name>/.install-stage/…` dir — which would read as `local`. The
@@ -2745,53 +3340,127 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
-### Independent Windows evaluator bootstrap
+### PATH Python evaluator bootstrap
 
-`bootstrap-python.ps1` is a standalone, read-only selector for an existing
-external CPython base that can evaluate the owning payload's stdlib SDK.
+`bootstrap-python.ps1` is a standalone, read-only selector for the existing
+`python` application on PATH that evaluates the owning payload's stdlib SDK.
 `sync-installer-engine.py` delivers byte-identical copies only to the declared
 Containers and Codespaces adopters. Loading the file or delivering a copy does
 not opt a caller into another evaluator or change its installer selection.
 
-`Resolve-EvaluatorBootstrapPython -ExcludedRoots <runtime/cell roots>` reads
-PEP 514 `PythonCore` registration as data, honoring current-user shadowing
-without interpreting opaque tags as versions or executing a launcher.
-It admits only ordinary, fixed-local-drive, non-venv bases: no remote or
-redirected paths, embedded path overrides or addressed runtime. Actual PE
-version/architecture, offline Windows Authenticode trust and the verified
-signer's CPython publisher establish admission before any Python runs.
-Final native paths and guarded metadata prevent a short-path alias or changed
-file from substituting for an independent executable.
-Candidate and addressed-root ancestors are inspected from the drive downward,
-before descending through any reparse point. A remote or redirected addressed
-root cannot establish independence and leaves the optional bootstrap unavailable;
-a genuinely missing local root suffix remains valid for first use.
-Native drive-root handle identity also rejects DOS-device/SUBST aliases on
-candidate or addressed-root drives, including missing suffixes beneath an alias.
+`Resolve-EvaluatorBootstrapPython` uses ordinary application-only `Get-Command`
+lookup, preserving PATH order without executing candidates, compiling native
+code, consulting the registry, verifying signatures or pinning interpreter files.
+Aliases and functions do not override the application. The compatibility
+`-ExcludedRoots` parameter is accepted but does not filter interpreters.
+The [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+assigns supported Python provisioning and durable PATH hygiene to upfront harness
+setup; standalone use retains an explicit Python 3.10+ prerequisite. Temporary
+and worktree interpreters should not be placed on durable PATH by setup, not
+rejected by a per-launch interpreter allowlist.
 
-The result has `Status`, `Reason`, `Python` and `Guard`. `selected` retains a
-read-only file guard; the caller must dispose it after its finite SDK reads.
-`unavailable` has no executable or guard. Unexpected I/O or native-verifier
-errors throw rather than becoming successful absence. There is no persistent
-path/admission cache, state write, interpreter acquisition or Manager dependency.
-The native verifier uses System32 libraries, no UI and cache-only URL retrieval.
-
-The selector never invokes Python itself. An opting-in caller chooses native
-PowerShell before evaluation when no independently admitted bootstrap exists.
-Once evaluation starts, interpreter/SDK failures remain terminal, not reasons
-to try another authority. SDK execution uses isolated no-site startup in a fresh
-process; ordinary plugin package-site initialization remains unchanged.
-Selection and evaluation together, including native compilation, still need
-the caller's real cold/first-touch and refusal qualification.
+The result retains `Status`, `Reason`, `Python` and `Guard` for caller
+compatibility. `selected` / `path-python` returns the resolved application path
+and a null guard; `unavailable` / `python-not-on-path` has neither. Only command
+absence becomes `unavailable`; unexpected discovery errors propagate.
+There is no interpreter acquisition, state write, persistent admission cache
+or mandatory Manager dependency. Missing Python produces a prerequisite
+diagnostic directing users to the existing setup flow, not an installer or
+compiled evaluator fallback. Actual interpreter/SDK startup failures remain
+terminal and visible. SDK execution retains isolated no-site startup in a fresh
+process; ordinary plugin package-site initialization is unchanged. OS code
+integrity enforcement and package integrity are separate and remain intact.
+Process containment, lifetime, endpoint, lock and cleanup guarantees also remain.
 
 Codespaces' and Containers' Windows runtime gates opt in for their initial
 `status` and selected-context `validate` reads. They pass the same explicit SDK
 expectations and the native evaluator's explicit Copilot home, even when `HOME`
-differs from `USERPROFILE`. They retain complete JSON and generation checks, and dispose the executable guard before
-resolving the ordinary plugin runtime. Missing optional bootstrap support,
-unavailable admission, or path inputs requiring native environment/drive
-semantics select PowerShell before evaluation. Publication probes and installer
-selection remain on their existing paths. POSIX dispatch is unchanged.
+differs from `USERPROFILE`. They retain complete JSON and generation checks.
+Missing payload evaluator support fails explicitly. Path inputs requiring native
+environment/drive semantics still select the legacy PowerShell SDK **after**
+the PATH prerequisite is satisfied; migrating that SDK path and the existing
+publication/installer paths remains open compiler-free work. This selector
+change does not qualify the whole dispatcher as compiler-free. POSIX dispatch
+is unchanged.
+
+`libs/installer-engine/bootstrap-file-guard.ps1` is an **unused, repository-only**
+building block for the compiler-free migration. Its stock .NET
+Framework/Windows PowerShell and CoreLib 10/PowerShell Core adapters open a
+no-follow file or directory handle
+with read sharing only, queries the same retained handle's volume/file identity,
+and returns the `SafeFileHandle` to the caller for disposal. Directory guards
+include directory-list access: attribute-only opens do not enforce sharing
+exclusion. Native errors,
+unsupported binding shapes, reparse points and object-kind mismatches throw;
+none becomes an unavailable-interpreter result. The Core adapter validates the
+existing managed `CreateFile` and file-information wrappers, their signatures,
+record layout, import and native-library search policy; it passes the exact
+`SafeFileHandle` to the identity query rather than substituting a raw handle.
+Unsupported assembly/binding shapes and 32-bit hosts refuse explicitly. The file is not
+distributed by the installer synchronizer and no runtime gate invokes it.
+
+The Core-only final-path operation calls an existing managed array-pin wrapper
+with the same retained handle and a fixed 32,768-character buffer. Native
+failure, overflow or invalid termination throws without returning a path;
+the temporary handle reference is always released. It returns the native path
+as data, not a canonical-path admission verdict. This operation is not
+qualified on Windows PowerShell.
+
+These primitives do **not** establish ordinary ancestors,
+drive mapping, publisher trust, complete Python/source closure or a safe helper
+handoff. Its native tests cover held-file write/rename/delete exclusion,
+directory rename/delete exclusion, same-handle final paths and release/error
+controls, not interpreter admission.
+
+The likewise **unused, repository-only**
+`libs/installer-engine/bootstrap-file-trust.ps1` composes that guard with
+existing Windows PowerShell or Core WinTrust bindings. Unsupported assembly,
+method and record shapes refuse before loading a library. The Core adapter
+constructs the stock by-reference record with existing Marshal APIs, not
+typed pointer assignment or emitted interop, and preserves the actual returned
+provider-state handle even when invocation throws after verification. It pins its own
+System32 library reference, refuses an ambiguous or redirected loaded module,
+and supplies the retained file handle with no UI and cache-only URL retrieval.
+Publisher extraction uses the actual verified provider/signer state while
+that state and the caller's file guard remain alive. Provider state closes
+before its inputs and the library reference are released; cleanup failures
+throw, and no trust result is returned before cleanup completes. Neither
+helper compiles or emits interop code.
+
+The Core loader uses the existing CoreLib managed `LoadLibraryEx` and
+`FreeLibrary` wrappers. Their exact signatures, LibraryImport exports,
+UTF-16 input, last-error preservation and BOOL return marshalling are checked
+before invocation. The load passes the absolute System32 path, a null reserved
+argument and the original `0x800` dependency-search flags directly.
+
+The public three-argument `NativeLibrary.Load` alternative was rejected:
+an absolute path does not preserve the requested dependency-search flags
+on its first attempt.
+[CoreCLR](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/nativelibrary.cpp)
+uses altered-search-path loading there. A matching module path is not a
+substitute for the explicit System32-only loader contract. Neither public
+NativeLibrary load nor free replaces the checked stock wrappers in this helper.
+
+Both adapters parse the x64 Windows
+[provider signer](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_sgnr)
+and [provider certificate](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert)
+ABI while the verified state remains alive. Windows PowerShell also exposes
+managed provider records whose layouts are checked; Core does not expose those
+records in its inspected WinTrust scope. Header definitions and a managed
+record roundtrip alone do not qualify Core provider calls: the native packet
+must exercise actual verified signer/certificate extraction and state cleanup.
+
+The signer primitive reports native verification status and the verified leaf's
+publisher; it does not select or execute Python, enforce a publisher policy, or
+admit canonical paths, ancestors, drive mappings or the complete interpreter
+and helper closure. Native controls distinguish the held file from a different
+reported pathname, reject unsigned/modified input and exercise state/error
+cleanup. The [bounded test flow](../TESTING.md#optional-stock-windows-bootstrap-building-blocks)
+does not qualify complete PowerShell Core prerequisite parity or enable either
+helper for callers.
+The existing selector and its compiled verifier remain unchanged
+until the [compiler-free prerequisite gates](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+are satisfied.
 
 ### Binstub publication failures
 
@@ -2944,7 +3613,7 @@ presentation-gap notice. Such a producer is not reported as successfully
 captured or universally time-framed.
 
 The human-output adapter retains the updater's installer process-tree owner,
-deadline and deployed-version receipt judgment. Streaming output does not turn
+inactivity protection and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
 
@@ -3134,6 +3803,14 @@ entrypoint. Existing source selection and subsequent governed acquisition own
 those decisions; the private candidate's installation policy is not a public
 release record.
 
+The internal native wheel-lock parser keeps its single-file, SHA-256-only
+default. A composition owner may explicitly request file matching by the
+already-recorded target tag order: every filename must match its package and
+version, SHA-256 remains mandatory, known auxiliary hashes must be well formed,
+and package markers must apply to the selected environment. The unique
+best-ranked compatible file is retained; ties refuse. This is not a second
+resolver or permission to acquire from any recorded URL.
+
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
@@ -3146,6 +3823,15 @@ not as dependency-seasoning rejection. Cleanup failure after otherwise successfu
 execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
 turns an incomplete cleanup into success. Context-owned runtime construction
 uses the same exception-preserving cleanup path.
+
+The deployment CLI and immutable runtime engine select non-editable retention.
+Explicit editable operands, including requirement-file entries, are refused.
+Admitted local `tool.uv.sources` mappings are preserved but their editable flags
+are disabled only in private retained metadata; the original checkout is unchanged.
+Deployment retention enforces non-editability through that private metadata
+without appending `--no-editable` to the caller's native UV argument list.
+Ordinary retained-source API callers keep their explicit
+editable-install behavior unless they select non-editable retention.
 
 Absolute, non-editable source-only installations retain the common source/resource
 layout without reproducing unrelated caller-directory or staging ancestry.
@@ -3299,6 +3985,10 @@ budgets and a per-metadata-file budget. It compares every archive's SHA-256 and
 actual Requires-Python, Provides-Extra and Requires-Dist with the validated
 record. The shared wheel inspector checks distribution/version/tag identity,
 safe members and each RECORD entry without extracting or executing code.
+`tools/runtime_wheel_inspection.py` owns this semantic layer over the shared
+stdlib archive inspector. Runtime admission imports it without loading promotion
+or publication tooling. The promotion adapter invokes the same inspector and
+additionally binds inspected members to the selected first-party source.
 Runtime RECORD entries support SHA-256, SHA-384 and SHA-512; weak/unsupported
 algorithms refuse, while archive locks remain SHA-256. Distribution aliases and
 runtime versions compare by normalized identity. First-party promotion retains
@@ -3325,6 +4015,106 @@ health. This is not an approval token: the existing authority still owes
 authenticated release/profile/feed/target admission before invoking a consumer.
 No production installer selects this mode automatically.
 
+`installer_wheel_snapshot.retain_wheel_bundle` accepts a previously acquired,
+independently selected ZIP containing exactly `wheels/<filename>` for the
+caller's complete wheel/hash map. It verifies the aggregate SHA-256 before
+opening members, rejects duplicate/extra/unsafe members, and checks each wheel's
+size and digest before handing it to the same `WheelSnapshot` owner. The outer
+archive and original unpacked files may disappear once retention succeeds.
+The existing bounded ZIP reader preflights the actual central-directory extent
+and count before `ZipFile` builds an index, and validates each complete compressed
+stream rather than a prefix truncated to a forged member size. Malformed filename
+encoding produces `WheelError`, like other invalid transport bytes.
+`open_wheel_bundle_snapshot` exposes the same adapter for a caller-owned private
+root. Its inclusive storage budget counts both unpacked and retained wheel
+copies; all operations share the caller's absolute deadline. There is no
+network call, new receipt, resolver, approval or live activation. Existing
+release/profile/feed admission and actual distribution obligations remain the
+installation owner's responsibility; a selected ZIP is not their substitute.
+
+`tools/core_runtime_profile.py` assembles an inert core release-profile
+candidate before transport construction:
+
+```text
+python tools/core_runtime_profile.py --manifest core-manifest.json --native-profile native-profile.json --wheel-dir wheels --output profile.json
+```
+
+Run it with the repository's profile-tooling interpreter (`packaging` is
+required). The existing native lock supplies the exact target, backend,
+acquisition policy and external wheel pins. The core manifest supplies
+first-party content identity and root/extras/conditions; every first-party
+distribution must be represented in the native lock. The producer inspects
+retained wheel bytes, derives current first-party metadata from them and
+requires the complete applicable closure to satisfy the unchanged external
+pins. A new dependency requirement cannot silently select another version.
+Missing, changed, incompatible or unreachable inputs refuse the candidate.
+The output binds the exact raw manifest digest and passes the existing
+whole-profile and release-binding checks. Publication is atomic and refuses
+an existing output; the destination directory must support hard links.
+
+The `promotion-main` field names the intended release channel, not an
+approval. This command neither authenticates source/release admission nor
+acquires dependencies, signs, publishes, installs or activates anything.
+Its caller retains those existing authorities and distribution obligations.
+
+`tools/runtime_profile_bundle.py` provides the matching repeatable transport producer:
+
+```text
+python tools/runtime_profile_bundle.py --profile profile.json --wheel-dir wheels --output core.zip
+```
+
+It freezes the exact profile, retains and inspects every selected wheel through
+the existing owners, then emits sorted `wheels/<filename>` members with fixed
+timestamps and no recompression. It reads the completed candidate through
+`retain_wheel_bundle` before atomically creating the output, without replacing
+an existing path. The destination directory must already exist and support
+same-filesystem hard links. Input filenames, archive/metadata/expanded sizes,
+wheel count, aggregate temporary storage and the common deadline remain bounded.
+The CLI reports the existing profile lock ID, transport SHA-256 and byte length;
+the profile is not modified or promoted to an approval record.
+
+The producer does not acquire dependencies, select a feed, approve a profile,
+install a runtime, publish an asset or change a channel. It does not replace
+source-material/notices packaging: the enclosing distribution owner must retain
+those materials and its publication authority. In particular, producing a
+third-party-inclusive transport does not authorize uploading it through the
+public first-party publisher. This command supplies a reproducible candidate
+for an existing build/publication pipeline, not automatic pipeline activation.
+
+`tools/runtime_profile_delivery.py` adds the complete candidate envelope around
+that unchanged transport:
+
+```text
+python tools/runtime_profile_delivery.py --profile profile.json --transport core.zip --transport-sha256 sha256:<digest> --materials materials.json --material-dir materials --output delivery.zip
+```
+
+`materials.json` is an explicit filename-to-record map. Each record contains
+`kind` (`source` or `notice`), `wheels` (a nonempty list of affected selected wheel
+SHA-256 identities), `sha256` and `size`. The caller selects and qualifies the
+required materials; the command never infers legal sufficiency or obtains
+distribution rights. An empty map explicitly selects no accompanying files,
+not a claim that none are required. The envelope contains the canonical,
+unchanged `profile.json`, `wheels.zip`, `materials/<filename>` and a bounded
+`delivery.json` binding their exact bytes. Existing profile identity remains
+the selection identity; the envelope digest is a transport identity, not a new
+provenance or approval authority.
+
+The producer retains inputs, writes deterministic sorted members, then reads
+the entire candidate through `retain_profile_delivery` before atomic,
+non-replacing publication to the local output path. The reader requires an
+independently selected outer digest and the exact selected profile. It rejects
+changed, omitted, duplicate, unsafe or unexpected files, preserves material
+bytes without unpacking or executing them, and yields the original retained
+wheel snapshot plus read-only material handles/paths for the context lifetime.
+The existing wheel inspector verifies the full dependency closure and metadata.
+Byte/file/storage bounds and one deadline cover assembly and readback.
+
+This is packaging, not pipeline activation, release approval, acquisition,
+installation, service cutover or license clearance. The existing public
+first-party publisher is unchanged. An aggregate distribution must still use
+its authorized channel; neither a self-described manifest nor this command
+authorizes public redistribution or replaces consumer-side feed admission.
+
 On Windows, original and retained wheel handles allow shared reads but deny
 writers and deletion for their held lifetime, including extended-length paths.
 NTFS read-access updates can advance handle change time, so that timestamp is
@@ -3340,6 +4130,14 @@ boundary as source construction. It retains the source graph for bootstrap
 process ownership and validates the existing extras/local-package selection.
 It does not introduce another allocator, mutable venv, cutover or fallback.
 Mutable dev construction refuses this mode.
+
+Only with inspected `wheel_inputs`, an explicit `local_packages=()` selects no
+first-party distribution. This supports a separate immutable build-tools
+environment while retaining authenticated source for process ownership and
+identity. Local extras are refused for that empty selection. Ordinary source
+construction keeps its existing primary-distribution inclusion.
+`WheelSnapshot.subset()` borrows an exact nonempty subset of the existing
+read-only handles; the original snapshot owner must remain open.
 
 The canonical dependency-policy owner projects only the complete retained
 wheel set into a private hash-required requirements file. Named local wheel
@@ -3400,6 +4198,66 @@ long selected wheel names. The same deadline caps closed-wheel constructor child
 retry waits through installed health; ordinary source child defaults are
 unchanged.
 
+The same worker overlaps up to eight package transfers, bounded by the selected
+`AcquisitionLimits.max_workers`; one selects serial acquisition. Request,
+redirect, aggregate metadata, closure and temporary-file limits are shared
+atomically, never multiplied by concurrency. Each transfer keeps the existing
+per-project feed precedence and origin-scoped credentials. Failed transfers
+cancel further work; the pool settles before the worker reports its original
+failure or releases private inputs. The outer owned-process deadline remains
+the bound for blocked native DNS or socket operations. Evidence preserves the
+selected input order, regardless of completion order.
+
+The shared `installer_native_feed.py` captures a caller's retained native UV
+settings using only the standard-library installer resources. It owns parsing,
+captured credential/OS-trust inputs and supported feed-policy refusals, not
+configuration precedence, profile approval, source authentication or resolution.
+Its caller supplies the existing secret-safe keyed identity operation; capture
+does not create a credential key or another approval store. The pure public-index
+rejection policy is shared with the existing build-tool trust owner through
+`installer_feed_policy.py`, without importing network acquisition into that
+owner. Canonical installer synchronization ships both helpers with each Python
+adopter. Their presence does not enable artifact/profile consumption.
+
+The native policy identity treats exported certificate DER values as a set:
+ordering and repeated identical certificates do not change trust. Other
+transport fields and any genuinely added, removed or replaced certificate
+remain invalidating. This does not rewrite existing receipts or force a stale
+profile to match; profiles whose previous representation produced another
+identity require normal independent current-policy admission.
+
+An owner may supply its independently selected first-party package tuple to
+native capture. The only admitted constraint exception is the single ordinary
+file retained under that transaction's configuration root, named by its exact
+arguments, containing precisely those sorted canonical names with impossible
+`<0,>=0` bounds. The selected registry wheels must exclude those names. The
+names enter the native policy identity; all other constraints, overrides,
+workspace constraints and package routing remain unsupported. Native compile
+uses `--constraints`, while installation retains its existing option spelling.
+
+The inert shared `installer_packaging_seed.retain_packaging_seed` supplies the
+admission toolkit's restricted `packaging>=23` bootstrap. It inherits the actual
+owner's held native compiler settings, applicable CLI resolution options and
+frozen seasoning cutoffs, rather than
+reading ambient configuration again. A fixed metadata-only project lets that
+same native UV compiler select one exact governed-feed wheel without running a
+source backend. The bounded stdlib inspector refuses dependencies, extras,
+non-pure/platform wheels, entry points and paths outside Packaging's Python
+package/dist-info layout before the existing offline constructor can execute it.
+The owner callback must verify the independently authenticated selected source
+and supplied revocations and return the actual current installation policy.
+It runs before resolution/construction and throughout retained health/custody.
+
+This uses the existing installation-owned `.source-build-tools` namespace and
+third-party-only immutable constructor, not a shared mutable venv or another
+approval mechanism. Its exact binding includes source, effective policy,
+native lock, inspected wheel/acquisition, interpreter bytes/facts and invoked
+installer/runtime tooling bytes. Changed bindings cannot reuse the old
+generation. Windows probes use an explicit native executable path for long
+immutable-slot names. This component does not activate an ordinary runtime,
+ship a complete toolkit, connect an ordinary installer or establish production
+feed availability, enabled budgets or installation savings.
+
 The repository-only `runtime_feed_configuration.retain_native_feed_inputs`
 composes an existing release selection with freshly resolved installation
 policy and the canonical retained UV preflight. It does not implement another
@@ -3433,6 +4291,207 @@ This consistency binding is not approval or offline
 reuse authority: authenticated admission, supplied revocation, source fallback,
 real release/client integration and measured production budgets remain parent
 gates.
+
+### Authenticated source-build preparation
+
+The repository-only `runtime_source_build.retain_source_runtime_inputs` composes
+the actual configured-runtime-source acquisition owner with canonical source
+preparation, the retained native compiler and the same governed feed worker.
+It uses no artifact index or fabricated release selection. An unsupported
+default marketplace source provider remains unavailable rather than guessed.
+Manager's existing `source_config.default_root` owns its configuration root;
+`self_install.default_root` re-exports that same function. Reading configured
+runtime-source policy therefore needs no Manager installer import and preserves
+the existing environment/home precedence. These narrow primitives do not yet
+package a complete installer toolkit or enable an ordinary installer.
+
+One native source lock includes declared runtime/build requirements and the
+frontend's `packaging` dependency. Its actual installation owner validates
+the held native indexes, credential/trust providers and supported configuration
+before the compiler can make package requests. The same retained transaction
+then resolves dependencies and supplies acquisition; no second resolver pass
+or artifact selection is introduced. `retain_source_configuration` exposes
+that existing pre-execution boundary without running the compiler; its native
+configuration identity is included in new source locks for later owner
+revalidation. It is not a source-lock candidate or an approval.
+Exact native wheel witnesses must be
+unambiguous; inspection precedes backend execution. A separate numbered
+build-tools environment runs the existing frontend offline, with owned
+deadline-bound children. The existing verified source-copy helper supplies a
+compact build workspace, avoiding Windows backend working-directory limits;
+both retained and compact source hashes remain checked around backend execution.
+Built runtime metadata must agree with authenticated
+static declarations. The final complete runtime profile contains only its
+reachable runtime closure, not build-only packages. Generation identity binds
+source, lock, build and actual acquisition facts through the existing receipt.
+Wheel completion uses `runtime_source_wheels.retain_source_profile`, not a
+second source-profile builder. Its optional admitted build role must match
+the same source, target, component, declared build roots, exact packages and
+acquired files before backend execution. Only that explained build-only
+closure may be excluded from the final runtime. Its tools binding records the
+actual admitted profile, not fabricated promotion-toolchain provenance; the
+ordinary promotion-toolchain and generator checks remain unchanged.
+When native source output lacks an asserted Python hint, acquisition retains
+the selected index hint and source admission compares it with actual wheel
+metadata before running a backend; artifact profiles retain their exact check.
+
+Keep the returned context open through installed health and recheck `verify()`
+before consumption. Pass its `local_packages` selection to the existing
+constructor alongside its wheel inputs. Current owner/source policy and byte custody remain live
+checks before each backend and around consumption, through the existing
+candidate verifier's nonserialized owner hook, not an approval map. This explicit composition does not enable a
+production consumer, persistent offline discovery, source-cache GC, activation
+or a live-feed exception. See [source preparation](../tools/prepare_runtime_source.md)
+and [validation coverage](../TESTING.md#wheel-input-inspection).
+
+### Explicit registered-marketplace source authentication
+
+`runtime_marketplace_source.retain_authenticated_marketplace_source` is a
+repository-only provider for an actual installed native Git/GitHub marketplace.
+It resolves effective registration, installation ownership and the native
+installed ledger through their existing owners. The reusable
+`plugin_resolve.inventory.native_git_inventory_item` proves only cache
+consistency: remote/ref, real commit/tree, catalog and complete referenced bytes.
+It does not authenticate the origin behind a local remote URL. Ordinary
+registered inventory and acquisition retain their existing behavior.
+
+The provider independently acquires the exact cached commit through
+`worktree_manager.runtime_source.acquire`, requires its fetched Main ancestry
+and tree, and runs canonical source preparation. The installed payload's actual
+assembly and version, including the ledger version, must match that prepared
+payload. It retains the acquisition lease and private prepared inputs and
+rechecks policy, runtime-source preferences, registration, ledger, cache and
+both payloads through consumption. Keep its context open and call `verify()`
+at the existing backend, health and publication boundaries.
+
+This initial provider supports root catalogs with `plugins/<plugin>` payloads
+and absent/Main/full-commit refs using the existing Main acquisition semantics.
+Other refs and layouts remain explicitly unavailable, never reinterpreted as
+the latest branch tip. Missing native evidence is unavailable; attributable
+corrupt, foreign, ambiguous or changed evidence refuses. It neither refreshes
+the native installation nor changes runtime-source preferences, requires
+artifact publication, maps the marketed engine to the distinct Manager identity,
+or enables bootstrap. Bootstrap-safe packaging, normal installer integration,
+production feed/closure qualification and measured installation savings remain
+separate gates.
+
+### Explicit Manager source-install integration
+
+The repository caller `runtime_source_build.install_manager_source_runtime`
+composes that held transaction with the actual Manager `self_install` lifecycle.
+It accepts only the base Manager installation owner, passes the authenticated
+prepared payload and complete first-party/runtime wheel set, and rechecks source
+policy at candidate health and immediately before publication. Installed
+interpreter markers must match the selected target before completion; the
+selected interpreter and UV executable are forwarded through installation and
+repair rather than rediscovered from the caller's interpreter, PATH or SDK.
+Command-name UV inputs are resolved once before admission, and that absolute
+selection is retained through both installation attempts.
+
+The existing standalone candidate adapter accepts these optional closed inputs
+without importing repository tooling or `packaging` during bootstrap. It derives
+the source generation's `.profile.<lock-id-prefix>` before admission and retains
+the existing construction, health, repair, retention and selector-recovery
+owners. Matching selected profile generations retain `already-current` reporting.
+Update detection compares the package version after removing generated source,
+profile and repair identity suffixes; those suffixes do not invent a new release.
+Ordinary source installation remains unchanged.
+
+Across invocations, `runtime_source_reuse.retain_source_runtime_reuse` can
+borrow the selected completed generation under the existing retention lease.
+It reads bounded, ordinary constructor evidence, verifies its full receipt
+and installed payload against the completion identity, and compares the
+current authenticated source, owner, native configuration, target, component,
+extras, local package selection, build profile and final profile. Configuration
+identity includes native resolution, prerelease, fork and dependency modes.
+Feed identity also binds the captured authentication headers through the
+existing machine-keyed opaque digest. Account changes and credential rotation
+invalidate reuse without persisting credentials in constructor evidence.
+Obsolete selections are unavailable; missing receipts on completed generations,
+malformed or changed evidence are integrity refusals, not permission to rebuild
+around them.
+Present but malformed completion markers are also integrity refusals; only
+genuinely absent completion evidence permits cold admission. Reuse rechecks
+completion identity during consumption. Closed construction and reuse clamp
+each construction/retention lock wait to the held wheel-input deadline rather
+than restarting an independent wait budget.
+Nonordinary selected slot paths refuse rather than becoming apparent absence.
+Reuse validates installed input evidence, including recorded URLs and archive
+digests, before invoking module health. Evidence mismatches or malformed origin
+metadata are integrity refusals, not permission to reacquire source inputs
+through the health-repair path. Module-health failures remain repairable.
+
+`WheelReuseInputs` is read-only constructor evidence, not cached wheel bytes
+or approval. The same engine can health-check its exact existing generation,
+including installed distributions, versions and archive origins, but cannot
+construct a missing runtime or a repair from this type. A genuine installed
+health failure releases receipt custody before normal source admission
+reacquires actual bytes and enters the existing distinct-generation repair
+path. The Manager lifecycle still owns publication and selector recovery.
+
+The optional `revoked_inputs` callback supplies current, immutable digest
+denials; it cannot approve inputs. Source admission checks it before installing
+build tools and before each backend, and installation/reuse rechecks it at
+health and immediately before publication. It covers source, lock, profile,
+build and runtime wheel identities. This callback does not query a feed for
+fresh server-side revocations; a consumer requiring that evidence must obtain
+it through its current authority before proceeding.
+
+This is an explicit repository API, not a new CLI mode or default bootstrap
+selection. Its caller still owns source/feed authentication; constructor input
+objects and receipts are not approval. The settings-only warm path makes no
+package-feed requests, resolves no dependencies and rebuilds no runtime;
+configured-source authentication may still access its selected Git origin.
+Default marketplace/bootstrap integration, production dependency/native
+qualification and measured cold/warm speedup remain separate gates.
+
+### Local wheel applications for Manager and Worktrees
+
+The explicit `--install-source` adapters accept locally prepared Manager or
+Worktrees inputs without changing ordinary bootstrap selection. Native entry
+points advertise support through their read-only `--describe-source-inputs`
+descriptor; callers must not send the option to an older executable that does
+not advertise it. PowerShell entry points use `-InstallSource`. Other services
+can continue using their existing source installers.
+
+`tools/local_install_source.py` freezes one full Git commit, materializes its
+declared resources and builds associated first-party wheels without consuming
+changefiles or changing package versions. Its default selects Manager only.
+Repeated `--project` options select a bounded set, such as
+`--project standalone:worktree-manager --project agent-worktrees`; `--suite`
+is a separate, explicit portfolio-wide choice. A first-party-only snapshot is
+preparation data and refuses runtime installation until its native profile is
+complete.
+
+`tools/local_install_profile.py --prepare-profile` completes one selected
+component's native dependency closure through the existing configured-feed
+compiler and acquisition owners. Supply `--component worktree-manager` or
+`--component agent-worktrees`, the first-party snapshot through
+`--install-source`, a fresh `--output`, and the selected absolute `--uv`.
+Consume the returned `snapshot` path, not an inferred output directory.
+Existing feed policy, artifact seasoning, source identity and installation
+custody still apply; a local snapshot is not independent authorization.
+
+The completed snapshot contains a copyable, locked UV application with its
+associated wheels and slot-local install entries. `install --stage` creates
+only the nested `.venv`; it does not run setup, publish globals, select a
+generation or start a service. Regular installation runs the component's
+setup, publication and startup owners. Global command shims follow the
+existing selected generation and invoke its slot-local UV project without
+dependency synchronization. Construction and reuse retain the canonical
+health, completion, retention and rollback checks.
+
+Flat historical slots remain supported alongside nested applications.
+Manager wheels carry the launchers' complete operational bin-resource closure,
+including pane helpers and mux configuration. Shell callbacks and companion
+handoffs resolve the immutable owning slot from those installed assets, using
+its flat or nested interpreter without following a selector or resolving a UV
+project at the asset directory.
+Resource-packaging hooks on ordinary source installations use the existing
+isolated source-build fallback rather than the static-project wheel cache.
+An explicitly prepared application installs its first-party wheels offline
+without running those first-party backends. Neither path upgrades, stops or
+removes unrelated service installations.
 
 ### Bounded wheel inspection
 
@@ -3574,12 +4633,144 @@ health. It verifies the copied file coverage and content against the admitted
 source identity, and records the transaction's actual non-editable installation
 origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
 source-copy utility for packaging fixtures, not the construction path.
+
+Ordinary immutable Python-engine candidates can reuse locally built wheels
+without changing raw-source delivery. `installer_source_build.py` positively
+admits static, pure-Python `setuptools.build_meta` projects with ordinary
+`setuptools`/`wheel` build requirements. The same retained native UV settings
+and frozen seasoning cutoffs admit a private copied build-tool environment.
+Its actual installed bytes and modes, selected interpreter/target, UV, build
+helper and build environment identify subsequent offline, no-isolation builds.
+An open build requirement or a backend version alone is not a cache identity.
+All selected build-requirement groups are provisioned before the offline
+construction loop. Local preparation, network-capable tool acquisition and
+offline source/tool hashing, copying, builds and verification have named
+progress and independent process allowances using the configured constructor
+child timeout; their numeric defaults and the outer request lifetime do not
+change. Acquisition time does not consume the offline allowance. Offline
+deadline errors identify that phase and retain their original cause; integrity
+refusals are not relabeled as timeouts or cache misses. Unsupported backend
+fallback and subsequent runtime installation run outside the offline phase:
+this boundary does not claim that the complete installation is network-free.
+Per-request update-driver custody stays with the constructor and its admission
+handoff. Its witness is excluded from the offline builder environment and cache
+identity, so a new update request does not invalidate unchanged project wheels.
+Other build-environment changes remain part of the identity.
+The base interpreter is resolved in the caller's context before changing child
+directories. Native `uv cache dir` selects the retained transaction's cache;
+offline builds keep that exact location even after feed configuration is removed.
+Hardlinked build executables or helper files retain the original isolated-source
+transaction before cache effects: strict snapshot hashing is not relaxed to
+admit a shared build identity. This does not disable immutable runtime-wheel
+hardlinks.
+
+Each compact project binds its own content and modes, excluding separately
+declared nested vendored projects. A library-only edit therefore need not rebuild
+unmodified app/library wheels. The installation owner's `.source-wheel-cache`
+uses the existing kernel construction leases and atomic entry publication;
+hits verify and select the stable, immutable archive without copying another
+source tree or changing its URL between generations. Keys read the retained
+project directly and bind normalized TOML content without remapped UV source paths;
+a miss copies and rechecks the project before running its build hook.
+Before a new non-isolated build, the admitted backend's
+`get_requires_for_build_wheel` hook must report no additional requirements.
+Otherwise the original isolated-source transaction is retained explicitly,
+including older Setuptools contracts that report `wheel` dynamically.
+An exact cache hit does not rerun this hook.
+Corrupt or incomplete entries fail explicitly instead of being
+silently rebuilt. Source or tool mutation during a build refuses publication.
+Tree verification reserves the aggregate file/byte budget before reading,
+then overlaps at most four held-input reads per batch. Selected file metadata,
+per-file size bounds and the shared deadline still apply, and all reads finish
+before return or error cleanup. Project builds and runtime activation stay serial.
+This storage is byte custody, not source, feed or installation authority.
+The assembly diagnostic reports built/reused project counts and tools,
+acquisition, offline and total elapsed time on stderr; named phase transitions
+are flushed separately without altering result framing. Those counts describe
+local wheels, not completed runtime generations or the whole update duration.
+
+Ordinary source-wheel phases now renew their quiet allowance from actual child
+stdout/stderr and completed file, copy and verification units. The owned
+constructor relays child bytes immediately, including partial lines; its
+Windows retention guardian keeps the final completion JSON on stdout and
+relays progress separately on stderr. Each completed source-phase renewal
+flushes its progress to stderr, keeping the native observer's allowance from
+lagging the local deadline when a quick unit precedes a longer productive unit.
+Frequent completed units emit a compact flushed progress byte rather than a
+full diagnostic line each time. Detailed reports use a minimum interval of one
+second or one quarter of the quiet allowance, whichever is shorter; the terminal phase reports the
+complete unit count. Every completed unit still renews and emits progress,
+without periodic keepalives or changing parsed stdout or native capture limits.
+A silent child still times out and must
+settle every owned writer before construction or retention custody is released.
+Native relay errors preserve their error codes; failed strict Job confirmation
+retains the exact process and Job rather than treating handle closure as proof.
+Legacy Python observers run after settlement and cannot perform live stdio.
+Source-cache publication reads the phase's current allowance rather than a
+stale pre-build wall-clock limit. Explicit caller-supplied absolute deadlines
+for closed-wheel acquisition/inspection remain absolute, and all byte, file,
+identity, seasoning and publication checks remain unchanged. No supervisor
+generates periodic output to conceal an idle backend.
+
+Initial source selection and UV-input retention use the same phase reporter.
+Completed directory scans, file copies, matching source comparisons and
+deterministic fingerprint entries renew the constructor's quiet allowance;
+the check precedes renewal, so late completion cannot erase a silent expiry.
+Retention reporting finishes before construction starts, while the original
+retained-input owner keeps its files until construction and native cleanup
+settle. The optional fingerprint callback does not change framing or digest
+bytes, and CLI stdout remains unchanged.
+
+Deferred source identity validation and snapshot stamping likewise report
+completed input checks, deterministic fingerprint entries and file copies on
+stderr. PowerShell source callers select stderr-only native byte streaming
+while retaining the original captured diagnostics, stdin, exit code and parsed
+stdout; POSIX command substitution already leaves stderr attached to its caller.
+Snapshot leases, source revalidation, copy semantics and publication cleanup
+remain with their original owners. Quiet copying still expires through the
+caller's existing process owner; progress cannot publish an incomplete snapshot.
+Native self-stage watchdog integration remains a separate boundary.
+
+Ordinary immutable source candidates request UV hardlinks from its extracted
+wheel cache, with UV's normal copy fallback when linking is unavailable.
+Mutable development refresh and the private build-tool environment retain
+copies. Installed preparation replaces generated build provenance atomically
+instead of overwriting a potentially shared cached file. Cache retirement may
+unlink its own files without invalidating the hardlinks in completed venvs.
+
+The final native install substitutes those inspected local archives for the
+already admitted local targets, retaining runtime dependency resolution,
+configuration and seasoning. Its additive `source_wheels` origin evidence binds
+archive digests and member hashes. Installed local contents are confirmed once,
+before any owner-defined preparation that intentionally generates runtime
+provenance. Existing installed health, completion and lifecycle publication
+remain in their original order. Completed-generation reuse does not construct
+another tools environment. Mutable dev builds, dynamic/custom backends,
+setup scripts beyond the ordinary `from setuptools import setup; setup()`
+boilerplate, `script-files`/`data-files` layouts, and custom build/cache settings explicitly retain the original
+isolated-source path. Graphs with differing build-requirement sets retain
+per-project isolated tools rather than combining potentially conflicting pins.
+Non-project UV source mappings, including Manager's admitted bundled `dbus-next`
+wheel, also retain the original transaction and its requirements-file mappings.
+A refusal or a failed supported build is not a silent
+fallback. This applies to actual Python-engine callers, not automatically to
+the other native installer implementations.
+
+Completed source-wheel generations compare canonical distribution names when
+checking their dependency graph. Older directory-origin evidence retains its
+original project-name spelling.
+
 Within that transaction, path-replacement forms and their ordered matcher are
 prepared once rather than rebuilt for each metadata scalar. Overlapping local
 package roots share verification only for the same original/retained file pair;
 every distinct pair still compares both content hashes and contributes its
 original-source hash. Neither result survives the transaction or replaces the
 construction owner's source-identity and fingerprint checks.
+Content comparisons overlap in batches of at most four, with at most four
+pending readers. Results and failures retain input order, and every submitted
+reader settles before return, refusal, cancellation or snapshot cleanup.
+Copying, resolver admission and publication remain sequential; no content check
+or installer deadline is removed.
 The bootstrap requires Python 3.11 or newer.
 The POSIX guardian observes its direct child without reaping it until the
 owned process group is settled. Python 3.11/3.12 on macOS lack `os.waitid`;
@@ -3635,6 +4826,12 @@ venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
 
+An optional owner-supplied `validate_candidate(slot)` runs after installed
+health but before a new completion marker, and before exposing any reused
+candidate. Source-profile callers use it to recheck retained source and the
+installed interpreter target under the same custody. A rejected new candidate
+remains incomplete; the hook does not activate or rewrite a published slot.
+
 An explicitly selected `extras` tuple on `numbered_candidate()` installs only
 declared optional groups on the primary package, inside that same retained UV
 transaction. Names are normalized and ordered; unknown, duplicate and mutable
@@ -3652,7 +4849,7 @@ Mutable `dev_candidate()` does not accept non-base profiles.
 For an independently declared role, `numbered_candidate(local_packages=(...),
 extras=(...))` additionally selects the exact local distribution closure to
 install. Names are normalized and must belong to the admitted source graph;
-the primary distribution is always included. The caller supplies every required
+source construction always includes the primary distribution. The caller supplies every required
 transitive local distribution, not paths or replacement project metadata.
 UV remains the dependency resolver: an incomplete closure fails resolution,
 rather than fetching an omitted first-party distribution from a registry.
@@ -3673,12 +4870,20 @@ unused roles. The selected extras and local names additionally bind candidate
 identity and installed-origin evidence. Fresh and reused health require selected
 non-editable installed origins and refuse any omitted local distribution that
 is actually present. `ReadyCandidate.local_packages` reports the normalized
-selection. An explicit empty tuple selects only the primary distribution;
+selection. Without inspected `wheel_inputs`, an explicit empty tuple selects only the primary distribution;
 `None` preserves the existing all-local-input behavior and its identity/receipt
 compatibility. Mutable `dev_candidate()` refuses explicit local selections.
 The caller owns the named role, distinct immutable slot, role-specific health
 and ordinary publication/removal lifecycle; this construction seam does not
 make an installer, service supervisor or selected command catalog by itself.
+
+Numbered content conflicts raise the typed `ContentRepairRequired` signal,
+which remains a `RuntimeError` for existing callers. The Manager adapter handles
+it inside candidate construction by selecting a distinct repair generation,
+just as for a settled installed-health repair; it never rewrites the published
+slot or leaks this recoverable admission outcome out of borrowed execution
+custody. Exact wheel-receipt reuse still cannot construct another generation.
+Other callers retain their existing handling of content conflicts.
 
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline
@@ -3696,6 +4901,37 @@ exact source-qualified runtime identity. It does not coalesce across source
 generations or silently downgrade to a plain package slot. Package provenance
 remains the declared package version; deployment evidence retains the full source
 identity, including when an explicit repair adds its own generation suffix.
+
+Worktrees retains the installed payload's command owner separately from those
+source inputs. Its Python publication binds the deployment manifest through
+the canonical legacy manifest-publication context, retaining the admitted
+command lease or publication lock through selection, commit and rollback.
+The resulting manifest includes the validated command receipt and completed
+lifecycle evidence, rather than replacing them with an unbound installed-build
+record. A prepared source artifact does not become the installation owner:
+the existing global command, runtime root and durable state remain addressed
+by the original installation identity. Namespaced publication retains its
+existing receipt and lock path.
+
+An installed Worktrees `dev-release` can restore a completed retained slot even
+when the original checkout and installed publisher are unavailable. Its exact
+completed-slot bootstrap validates the incumbent command receipt's normalized
+source, installation root and current environment, retaining the original
+publisher identity rather than attributing the bootstrap as a new source.
+Lifecycle evidence must be absent or complete for that same owner. Legacy
+publication custody precedes whole-operation cutover custody and is reused
+through nested settlement. This restoration does not override managed-deployment
+policy, admit unfinished lifecycle evidence, or grant ordinary source publishers
+permission to copy an incumbent receipt.
+Both legacy lock paths forward the caller's remaining wait budget; ordinary
+lifecycle admission consumes that same budget before acquisition.
+
+On Windows, release from `versions/dev` holds the selected slot's shared
+retention lease while the canonical finite execution driver drains and settles
+the request. Its isolated caller-owned executor uses that retained interpreter
+directly; it does not start a detached worker or send the mutable slot through
+the generic immutable-runtime launcher. Numbered-slot invocation and the
+generic launcher's refusal of `dev` remain unchanged.
 
 Reuse also runs an isolated installed-origin health probe under retention. Its
 historical, non-editable local origin remains attributable to this runtime's
@@ -3742,9 +4978,162 @@ The caller-owned monitor seam can return actual passive **and restart**
 process handles without releasing its cutover guard. Supplying both guard and
 handles transfers settlement responsibility to that lifecycle; older callers
 retain their existing asynchronous recovery backstop. Spawn/commit return
-values do not prove service readiness or process exit. Candidate readiness,
-failed-child exit and predecessor retirement are observed under retained
-custody; uncertain durable publication requires a terminal owner-led recovery
+values do not prove service readiness or process exit. The ordinary Worktrees
+installer opts into resident-owned predecessor retirement: it promotes and
+attests the published successor, then finishes without an old drain RPC or a
+predecessor-exit wait. The outgoing resident observes supersession and drains
+and retires independently; `retirement_pending` is not an exit receipt.
+Monitor identity and retirement accept both an owned version directory as the
+interpreter prefix and its managed `.venv` child. Health keeps the version slot
+name; slot retention, serving attestation and retained-helper lookup normalize
+only that owned layout, without treating an unrelated external environment as
+an installed slot.
+Both the outgoing and incoming monitors must advertise
+`status-monitor-async-retirement-v1` for this flow. The outgoing peer is
+authenticated before selector mutation; an unsupported or unrouted incumbent
+is an explicit refusal, not unsafe self-exit, a synchronous fallback or a
+package-version guess. Both peers also need guarded preparation recovery and
+a valid receiver generation; generation-less source/legacy residents refuse
+before selector mutation rather than leaving an unrecoverable preparation.
+Preparation health binds the responding PID and native birth to the captured
+spawned child before publication. The captured birth is rechecked at the
+publication boundary; another authenticated listener on the port is not that
+child. Route commitment precedes any promotion
+callback that can admit work. A failure after that frontier preserves the
+possibly admitted successor and remains an explicit failed commit-forward result.
+Before changing selectors or releasing installer retention, the owner reserves
+the canonical runtime reference first, then persists fsynced birth-identified
+retirement intent, including for a compatible resident that holds no runtime
+lease. An interruption between these writes leaves discoverable execution
+protection, not an unprotected intent or a claim-release grant. Reference
+capacity is checked by the canonical publisher before intent is written. Proven precommit
+rollback cancels only exact custody, without releasing a deferred dev claim.
+Retirement records distinguish prepared, retiring and cancelled intent.
+Preparation retains code and demand but cannot release a claim, even if the old
+process exits before publication. Only durable publication enables the matching
+retirement grant, before promotion can open successor admission. If the installer
+exits at that boundary, the selected resident's existing loop completes the
+exact birth-identified publication under the cutover lease, enables its grant
+and promotes itself. The attributable witness remains until serving readiness
+is confirmed; failed completion remains visible and retryable.
+Only an explicitly marked asynchronous witness permits resident completion.
+An exact selected PID, recorded native birth and port can complete even if the
+installer departed before writing `flipped`; unmarked synchronous witnesses
+retain their original recovery path. Durable confirmation preserves the
+previous route rather than republishing away the fallback. A subsequent
+installer rechecks pending witness refusal after acquiring cutover custody,
+before reserving retirement or invoking legacy recovery.
+The resident also reconciles abandoned prepublication preparation without a
+new worker: nonblocking acquisition of the same cutover guard proves no
+installer still owns that transition. Cancellation requires no witness and
+the original recorded native route, or positive predecessor exit without a
+foreign route. It revokes the nongrant, never grants dev-claim release, and
+retains live code. A different or unknown owner remains pending. Read-only
+inventory refresh cannot erase an earlier cleanup failure; only a successful
+cleanup pass clears that pending error.
+Marked interruptions are also recoverable under both the Worktrees and shared
+cutover guards. The original installer consumes a verified terminal result
+directly, rather than rereading a witness already cleared by completion.
+An absent or never-published passive candidate permits exact precommit
+cancellation; passive disposal rechecks publication under native routing
+custody and requires identity-bound exit. A selected candidate's positive exit
+permits restoration only while predecessor grants remain uncommitted.
+Receiver-bound undrain and serving attestation precede durable cancellation.
+The restored precommit witness is persisted before cancellation and preserves
+its original owner, so failed cancellation, final recording or removal stays
+retryable. Unknown native evidence, foreign routes or irreversible grants do
+not authorize rollback.
+A positively exited committed successor instead settles commit-forward,
+withdrawing only its exact dead route while preserving retiring predecessors
+and their accepted work. An exact granted retiree's discovery record is not
+an unrouted incumbent for the next installation; uncommitted and unknown
+identities retain the original refusal. No new recovery worker is introduced.
+The marked committed recovery result can still prove rollback before a
+retirement grant: that outcome restores the prior selectors and deployment
+manifest, rather than advertising the new selection against an old route.
+If conservative pre-flip history cannot establish a safe terminal outcome,
+installation fails after a bounded recovery attempt and releases its guards.
+The selected candidate, old canonical references, helpers and witness stay
+retained; uncertainty neither triggers selector rollback nor publishes a
+successful new deployment manifest. Legacy unmarked synchronous recovery
+keeps identity-verified predecessor drain, shutdown and native-exit settlement.
+An active serving owner does not hide a second live fallback: admission also
+requires that fallback's positive exit or exact granted retirement custody.
+The installer witness also records its own native birth. Strict native
+original-exit observation, rather than PID liveness, recognizes an exited
+object with a readable birth or Darwin zombie. Matching live identity keeps
+custody; positive original exit or PID reuse permits abandoned recovery,
+and observation errors remain unknown. Passive launch carries that exact
+attempt to the child, which durably registers its own PID/birth before opening
+an endpoint. On Windows/Linux, exact native cancellation of a registered,
+never-published child does not require an HTTP listener to have started.
+Optional health diagnostics cannot veto that native proof; a positively
+published or identity-unknown candidate still refuses cancellation.
+Missing-PID cancellation closes startup under the routing lease
+before clearing custody, so a delayed child cannot silently survive the gap
+between spawn and the installer's first PID write. Same-attempt parent writes
+cannot erase an already registered candidate birth. Every parent/child phase
+write serializes the whole read/merge/write under the shared routing lock.
+Trusted lexical callers already holding that lock borrow it explicitly;
+conditional callers retain their shorter lock-acquisition deadline.
+On Darwin, passive disposal uses the authenticated `cancel-preparation`
+operation only when the actual endpoint advertises
+`status-monitor-passive-cancel-v1`. The request binds PID, birth, port,
+`started_at` and publication witness; the receiver requires its own still-passive,
+never-published identity before closing. A pre-captured kqueue exit reference
+confirms completion. Unsupported peers refuse explicitly, with no PID-signaling
+fallback. Windows/Linux retain native identity-bound termination of proven
+passives. Ordinary successor publication never drains its predecessor.
+Cancellation is fsynced before cleanup and revokes the claim grant while keeping
+execution protection for any still-live code. Completed retirement is an
+idempotent commit outcome, not a missing-record loop.
+The elected successor remains needed while
+those identities are live or unknown and reconciles them in its existing loop.
+When recovery withdraws a dead successor into `previous`, a predecessor can
+release its cold-start lease from native exit evidence only for a strictly
+newer retained generation. Accepted work and execution references stay held.
+Only positive native exit releases references, even when the old birth token
+remains readable. Outgoing retirement latches actual successor readiness and
+settles all accepted work without grace-forced exit, even if the successor later
+dies. Before that latch, cached reads remain admitted through the published
+predecessor while every new write is independently fenced by current route
+ownership. Losing writer authority during agenda roster refresh is a handoff,
+not a producer failure: cached rows, sequence and any earlier producer error
+remain intact. Idle exit is serialized with installation through the existing
+cutover lease, rather than racing publication. Route-fenced discovery
+renewal prevents a predecessor from rewriting successor metadata; ready
+publication is advertised only after the discovery stamp succeeds. A known
+failed-but-committed activation settles as an error without indefinitely holding
+installation locks for a permanently unready candidate. Dev release similarly retains
+the original claim and defers its exact-snapshot release to that resident;
+changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
+duplicate release cannot bypass the original pending claim.
+Idle retirement rechecks election, accepted work, demand and pending retirement
+inside the acquired cutover custody before closing admission.
+If a just-accepted request remains after closure, the resident releases that
+idle-exit guard immediately and drains under its own latched retirement, allowing
+the next installation to proceed independently. A positively verified successor
+birth-token mismatch also releases the cold-start lease; unknown identity does not.
+Guarded synchronous
+rollback reuses its already-held routing authority for discovery renewal; this
+is a private call-chain fact, never an instruction accepted from a wire payload.
+Release also refuses other pending dev-code retirement; cancelled attempts do
+not prevent a newly authorized release retry. Reconstruction independently
+refuses an attributable resident actually executing `dev`, regardless of a
+different selector, and reselected `dev` prevents deferred claim release.
+A retry may durably cancel exact prepared dev release under the held cutover,
+inventory and publication guards only while the original dev claim and route
+still match and no cutover witness exists. Committed grants and foreign claims
+remain refusals. Reference cleanup occurs after publication custody is released,
+retaining live execution protection without recursively acquiring that lease.
+A rebuild or release retry first reconciles positively exited committed or
+cancelled residents under cutover custody, then rereads the claim before
+applying its inventory gates. Live, unknown, changed and prepared custody
+remains protected; cleanup never borrows an outer publication lease.
+There is no installer-owned subscription, new cleanup worker, forced unrouted
+restart or delayed daemon reaper in this path.
+Failed candidate children remain under installer custody, and uncertain durable
+publication requires a terminal owner-led recovery
 witness, never a missing/corrupt breadcrumb interpreted as success. Selector
 publication, monitor transition, and selector settlement share one exception-safe
 owning boundary: failures before either selector write, between writes, or after
@@ -3758,13 +5147,16 @@ the previous selector. For an uncertain publication, the same owning receiver
 can retry recovery under native ZDD transition authority instead of waiting for
 another installer blocked by its own guards. Recovery validates its breadcrumb,
 actual spawned handle, process start identities, and strict routing state.
-It confirms durable publication and actual predecessor drain before
-commit-forward, or restores and verifies the predecessor before retiring a
+It confirms durable publication and successor readiness before
+commit-forward, without contacting or waiting for the predecessor, or restores
+and verifies the predecessor before retiring a
 ready unpublished passive. Unknown evidence, formerly-published unhealthy
 candidates, and storage failures retain custody rather than manufacturing a
 terminal outcome. Promoted monitor demand uses its existing worktree-status
-subscription, renewed under the lifecycle's transition stack through actual
-predecessor retirement. The successor is reattested after that exit. Windows
+subscription, renewed under the lifecycle's transition stack until successor
+readiness is established. Resident process-retention leases protect live
+generations after installation returns; installation does not retain a worker
+or background thread to wait for predecessor exit. Windows
 exit evidence tests the native process signal, not whether a retained exited
 process object can still be opened. These
 pieces do not yet constitute complete adoption: dev/release, distinct-generation
@@ -3772,9 +5164,10 @@ repair, generation propagation and process-death/live monitor recovery still req
 own implementation and evidence.
 
 Construction uses the explicitly supplied base interpreter's `venv --copies`
-and one `uv pip install --no-sources --no-editable --link-mode copy` invocation
-over every frozen local package. It preserves the caller's configured indexes;
-it neither fetches unpublished local libraries from an index nor silently
+and one retained `uv pip install --link-mode copy` invocation over every frozen
+local package, with non-editable private source mappings. It preserves the
+caller's configured indexes; it neither fetches unpublished local libraries
+from an index nor silently
 downgrades to another interpreter. An isolated installed-origin health probe
 precedes immutable completion publication. Retention is acquired before
 construction ownership is released, so GC cannot discard a ready candidate
@@ -3812,6 +5205,18 @@ after caller death; release of the caller's construction byte lock alone does
 not admit destructive cleanup. The supplied runtime root, version and helper
 path must form a complete custody context. Child launch and settled-timeout
 outcomes retain their existing explicit error classes.
+The parent allows the guardian's existing startup grace only until its first
+output. Subsequent progress renews the configured child inactivity window,
+not the startup-plus-teardown allowance; a blocked output pipe cannot postpone
+hang detection by repeatedly borrowing that grace.
+When incremental output is requested, `timeout` bounds inactivity, not total
+productive execution. An explicitly supplied monotonic `deadline` remains an
+absolute cap through launch and settlement; without incremental output the
+finite execution timeout still applies. Preparation and native launch retain
+their finite startup checks in either mode.
+If the parent's quiet window expires first, it closes its liveness pipe and
+continues draining the guardian's settled completion before propagating the
+timeout, preserving the child's original stdout and stderr channels.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit
@@ -3841,10 +5246,34 @@ failed health, timeout and abrupt caller death. Equivalent POSIX execution and
 the authorized installed signed-Python deployment lane remains unverified; these
 fixtures do not complete the first-adopter or portfolio acceptance gates.
 
+`New-SignedVenv` retains seeded stdlib construction by default. UV-owned
+callers can pass `-WithoutPip`: the signed `--copies` path then also uses
+`--without-pip`, avoiding an unused `ensurepip` installation. Bridge, Logger,
+Vault, Pull Requests, the SSH UV branch and the foundation prerequisite producer
+use that option. It does not remove pip from existing slots or change genuine
+Python/pip fallback construction. Signature, slot-health and publication checks
+remain unchanged.
+
+Logger installs its existing setuptools/PyYAML prerequisites together, then
+submits its seven explicit helper roots and plugin root in one retained
+transaction. This replaces ten governed UV calls with two without removing
+dependencies or weakening build isolation, seasoning or reinstall policy.
+The local batch freezes canonical editable development mappings in private
+retained metadata and preserves a named reinstall for every root. Either failure
+stops before runtime activation; retained healthy construction reuse stays
+unchanged.
+
 `agent-codespaces` uses the canonical-reference form for both installers.
-Its Connection Owner service, sibling-library install order, and Windows
+Its Connection Owner service, complete explicit local closure, and Windows
 signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,
 transient retries, and deploy-manifest writing use the shared engine.
+Both installers submit the eight helper roots and plugin root in one retained
+UV transaction, preserving every named `--reinstall-package` selection or all
+nine editable roots. Normal installs freeze editable development mappings in
+private retained metadata so they cannot conflict with non-editable direct roots.
+UV resolves their dependency order once; a closure failure
+still refuses construction. Windows requires UV and omits pip seeding from
+its signed-copy venv as well.
 PowerShell `stamp` materializes both engine files and all declared local
 libraries into the snapshot, rewriting canonical references to snapshot-local
 paths before publishing it. POSIX `stamp` retains its owning-payload pointer;
@@ -3987,10 +5416,30 @@ version drifts** from the payload -- **unless the bootstrap-killswitch is
 active**, in which case that plugin's hook skips its own reconcile entirely for
 this session (see `libs/bootstrap-killswitch/README.md`; amends the
 *self-provisioning-runtime* vision in `visions/plugin-services/README.md`).
+Explicit `<repo> update` and `worktree-manager update` calls are manual by
+default and do not require clearing an automatic-update hold. All automatic
+producers pass `--auto`, including Manager pre-launch/resume maintenance and
+unattended fleet/self-update sweeps. The existing execution owner retires an
+inhibited automatic request with the visible exit-3 no-work outcome before its
+installer starts. Manual admission does not inject `--force`, recreate a healthy
+runtime, settle an interrupted transaction, or supersede a live installer.
+Existing force/repair options and installation-cell scope remain independent.
+The [driver contract](../libs/update-driver/README.md) defines persisted
+manual/automatic identity and compatible readers.
+
+An independent schedule opt-in does not exempt automatic updates from the hold.
+Generated unattended commands and task definitions include `--auto`. During
+rollout, quiesce old unmarked producers through their existing owners before
+upgrading the receiver, then reconcile their configured schedules with the
+automatic marker before re-enabling them. Source publication does not edit
+installed schedules or settle an already-running updater.
+Legacy launch-maintenance verbs retain their automatic admission semantics
+while their updated producers also spell out `--auto`.
+
 Every adopting plugin's `bootstrap-check.{ps1,sh}` checks its vendored
 `bootstrap-killswitch-guard.{ps1,sh}` as its very first step, before any
 version comparison below, against one shared, cross-plugin state file
-(`~/.copilot-extensions/bootstrap-killswitch.json`) -- an operator/agent hand-
+(`~/.copilot-extensions/killSwitches/bootstrap-killswitch.json`) -- an operator/agent hand-
 diagnosing a venv or install path directly sets this switch so a background
 reconcile can never race that diagnosis; it fails open to "reconcile proceeds
 normally" on a missing or malformed state file. This switch applies **only to
@@ -4077,3 +5526,104 @@ Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 if any privately-configured internal identifier leaks into the tree; it no-ops
 unless a denylist is configured, see the agent-codespaces README "Local
 identifier guard").
+## Consolidated first-party core artifact
+
+`bundle/core.json` selects the `core` composition in candidate promotions.
+Candidates without that marker retain the existing plugin/standalone artifact
+set. The core is an additional schema-5 manifest and ZIP in the existing
+`python-artifacts.json` index, identified by `composition:core` and the
+marketplace's existing `metadata.version`; it is not a dummy Python package.
+The existing immutable publisher and pinned promotion attestation apply.
+
+The canonical project inventory and runtime-root selector live in
+`tools/python_project_inventory.py`. Core includes plugin and standalone
+runtime roots, their selected extras and all reachable canonical first-party
+distributions. Index's service and engine environments remain separate.
+Conditional dependencies are retained as declarations, not evaluated on the
+build host. One locked toolchain builds each canonical distribution once
+through the same wheel-construction path used by individual artifacts.
+Standalone setup admission, injected resources and wheel/source checks still
+apply to their members.
+
+The manifest binds roots, extras, conditions, dependency edges, canonical
+project paths, source/resource hashes and the existing marketplace version.
+Promotion independently re-derives that closure before publication and refuses
+missing, duplicate, substituted or changed projects. An artifact-mode runtime
+profile bound to this manifest must include **every** first-party wheel,
+including shared libraries; legacy individual manifests retain their existing
+optional-library binding.
+
+The existing CLI can build this artifact explicitly:
+
+```bash
+python tools/build_python_artifacts.py core --core --out-dir <outside-source-directory>
+```
+
+Its existing toolchain-source, seasoning and shared-toolchain options are
+unchanged. Core selection executes inside the resolved build-toolchain
+environment; the calling interpreter needs no ambient `packaging` installation.
+Core construction requires a Python 3.11+ locked build interpreter, whose
+standard library supplies the TOML parser; an older selected interpreter is
+refused before core selection or child execution. This is the new core
+construction tool's floor, not a change to emitted wheel `Requires-Python`,
+installer target qualification or the shared toolchain's package set.
+Legacy plugin/standalone help and invocation keep their existing requirements.
+This artifact contains no third-party wheels and performs no runtime
+dependency resolution. It does not publish the separate complete delivery
+envelope, approve a runtime profile, enable an installer/updater, remove an
+origin qualification or migrate a service.
+
+## Compiler-free daemon-instance artifact construction
+
+The shared `agent-procutil` Linux lifetime owner is standard-library Python,
+using existing kernel/libc interfaces without native compilation. Source and
+release construction produce a pure Python wheel; governed verification rejects
+legacy native members and platform-specific procutil wheels. Ordinary wheel
+RECORD, metadata and exact candidate-source checks remain mandatory. There is
+no registered compiler build hook or generated-ELF admission exception.
+Interpreter selection, filesystem custody and unsupported-facility refusal
+are owned by [the process library](../libs/agent-procutil/README.md).
+
+For `installer_instance_reconcile.reconcile_installer_instances(helper_root,
+registry_root=...)`, `helper_root` contains the shared `daemon_instances.sh`
+and its source-only Python archive (or `daemon_instances.ps1` on Windows). The Python
+adapter loads `installer-instance-reconcile.sh` / `.ps1` beside its **own
+module**, not from that binding directory. Ship the Python adapter and
+its platform wrapper together; a procutil wheel package directory is a valid
+native binding root without an installer wrapper copied into it.
+
+Namespaced provisioning uses the same adapter, after its existing context and
+governance admission, including healthy reuse. A pending selection record is
+not cleanup authority: Index's recovery path must successfully validate and
+commit the existing selection transaction before its provision coordinator
+reconciles daemon instances. Unknown, refused, or failed recovery does not
+invoke cleanup. Status, import, and other read-only paths remain non-mutating.
+
+Source payload assembly publishes the deterministic canonical Python source
+archive and shared shell adapters through:
+
+```bash
+python tools/sync-versioned-runtime.py --only-installer-instances
+```
+
+The same command with `--check` audits source bytes and archive custody.
+The archive contains `.py` sources only, with no bytecode, native executable or
+compiler module; it is checked against the canonical source by the existing
+generator. Build/test scratch (`.test-runs`)
+is excluded from library payload copies and input fingerprints.
+Copy exclusion happens before traversal. Unfiltered build contexts still reject
+links inside scratch; excluding a path from fingerprints or a filtered-copy
+scan never authorizes an unfiltered copy to follow it.
+
+The on-demand artifact qualification is
+`tools/test_native_daemon_artifacts.py::test_real_pure_wheel_and_source_archive_need_only_selected_python`,
+with `PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` in a Linux build environment.
+It builds and verifies a pure wheel through the canonical owner, installs it
+offline with private publication permissions, exercises package/source entry
+points using an explicitly selected interpreter and no Python/compiler command
+on PATH, and runs lifecycle/artifact selectors through that installed
+interpreter with isolated per-test inventory. It is not part of ordinary
+unit-only PR collection. The compiler-absent clean-room scenario separately
+qualifies source-only lifetime and installer cleanup. Windows pre-Python
+bootstrap remains independently qualified; this Linux subtraction does not
+claim its compiler-free migration complete.

@@ -295,6 +295,11 @@ _ensure_cell_snapshot() {
         _fail "Cannot copy the payload into the cell snapshot staging directory"
         return 1
     fi
+    if ! _assert_cell_payload_identity "$stage" ||
+       ! _assert_source_runtime_identity; then
+        _remove_owned_cell_snapshot "$stage" || true
+        return 1
+    fi
     if [[ -e "$snapshot_root" || -L "$snapshot_root" ]]; then
         _remove_owned_cell_snapshot "$stage" || true
         if ! bash "$SLOT_RUNNER" snapshot-validate \
@@ -386,14 +391,46 @@ while [[ $# -gt 0 ]]; do
         --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
         --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
         --maintenance-token) MAINTENANCE_TOKEN="${2:-}"; shift 2 ;;
-        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|cell-retire-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
+        install|uninstall|stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|cell-retire-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
 export AGENT_MACHINES_ACTION="$ACTION"
+case "$ACTION" in
+    install|init|uninstall|stamp|provision|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|cell-retire-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ;;
+    *) _fail "Unknown installer action: $ACTION"; exit 2 ;;
+esac
+
+if [[ "$ACTION" == uninstall ]]; then
+    for ((argument_index=0; argument_index<${#ORIGINAL_ARGS[@]}; argument_index++)); do
+        case "${ORIGINAL_ARGS[$argument_index]}" in
+            uninstall) ;;
+            --install-dir) argument_index=$((argument_index + 1)) ;;
+            *) _fail "Unsupported legacy uninstall argument: ${ORIGINAL_ARGS[$argument_index]}"; exit 2 ;;
+        esac
+    done
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+case "$ACTION" in
+    install|init|stamp|provision|uninstall)
+        INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-machines}"
+        case "/$INSTALL_DIR/" in */../*) _fail 'Legacy runtime paths must not contain raw .. components'; exit 1 ;; esac
+        [[ "$INSTALL_DIR" == /* ]] || INSTALL_DIR="$PWD/$INSTALL_DIR"
+        . "$SCRIPT_DIR/legacy-transaction.sh"
+        _validate_install_root || { _fail 'Unsafe legacy runtime root or transaction lock'; exit 1; }
+        for ((argument_index=0; argument_index<${#ORIGINAL_ARGS[@]}; argument_index++)); do
+            if [[ "${ORIGINAL_ARGS[$argument_index]}" == --install-dir ]]; then
+                ORIGINAL_ARGS[$((argument_index + 1))]="$INSTALL_DIR"
+            fi
+        done
+        if [[ "$ACTION" == uninstall ]]; then
+            exec bash "$SCRIPT_DIR/legacy-uninstall.sh" "$INSTALL_DIR"
+        fi
+        ;;
+esac
 
 if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == cell-attribute-legacy || "$ACTION" == cell-deactivate || "$ACTION" == cell-retire-legacy ]]; then
     [[ "${ORIGINAL_ARGS[0]:-}" == "$ACTION" ]] || {
@@ -404,7 +441,7 @@ if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == ce
     for lifecycle_python in python3 python; do
         if command -v "$lifecycle_python" >/dev/null 2>&1; then
             cd "$HOME"
-            exec "$lifecycle_python" -I "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
+            exec "$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
         fi
     done
     _fail 'Cell lifecycle management requires an existing Python 3.10+ interpreter'
@@ -449,12 +486,11 @@ if [[ "$ACTION" == "slot-provision" ||
       "$ACTION" == "slot-cutover" ||
       "$ACTION" == "cell-provision" ]]; then
     cd "$HOME"
-    if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
-        export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
-        __cell_slot_direct=1
-    fi
+    __cell_slot_direct=1
 fi
 
+# The common guard deliberately distrusts inherited stage markers.
+if [[ "$__cell_slot_direct" -ne 1 ]]; then
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -594,8 +630,6 @@ INSTALL_WATCHDOG
     esac
 fi
 # === end install-contract:v4 self-stage ===
-if [[ "$__cell_slot_direct" -eq 1 ]]; then
-    unset COPILOT_PLUGIN_INSTALL_STAGED
 fi
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
@@ -641,6 +675,15 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-machines}"
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi
+case "$ACTION" in
+    install|init|stamp|provision)
+        . "$SCRIPT_DIR/legacy-transaction.sh"
+        _enter_install_lock || { _fail 'Could not acquire the install transaction lock; refusing to proceed unlocked'; exit 1; }
+        trap '_exit_install_lock' EXIT
+        trap '_exit_install_lock; exit 130' INT
+        trap '_exit_install_lock; exit 143' TERM
+        ;;
+esac
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
@@ -691,7 +734,7 @@ _source_runtime_identity() {
 
 _initialize_source_runtime() {
     SOURCE_RUNTIME_IDENTITY=""
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     local py
     py="$(_source_python)" || return 1
@@ -703,6 +746,7 @@ _initialize_source_runtime() {
 
 _assert_source_runtime_identity() {
     local payload="${1:-$PLUGIN_DIR}" identity
+    _assert_cell_payload_identity "$payload" || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$payload/runtime-source.json" || -L "$payload/runtime-source.json" ]]; then
         identity="$(_source_runtime_identity "$payload" "$SRC_VERSION")" || return 1
         if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -712,8 +756,35 @@ _assert_source_runtime_identity() {
     fi
 }
 
+_assert_cell_payload_identity() {
+    local payload="${1:-$PLUGIN_DIR}" identity
+    if [[ -n "${AGENT_MACHINES_EXPECTED_PAYLOAD_HASH:-}" ]]; then
+        identity="$(_cell_payload_identity "$payload")" || return 1
+        if [[ "$identity" != "$AGENT_MACHINES_EXPECTED_PAYLOAD_HASH" ]]; then
+            _fail 'Payload content changed after selection; refusing publication'
+            return 1
+        fi
+    fi
+}
+
+_cell_payload_identity() {
+    local py
+    py="$(_source_python)" || return 1
+    "$py" -I -B "$SCRIPT_DIR/cell_installer.py" identity \
+        --payload "${1:-$PLUGIN_DIR}" --version "$PACKAGE_VERSION"
+}
+
 PACKAGE_VERSION="$SRC_VERSION"
 _initialize_source_runtime || exit 1
+if [[ "$__cell_slot_direct" == 1 ]]; then
+    SELECTED_PAYLOAD_HASH="$(_cell_payload_identity)" || exit 1
+    if [[ -n "${AGENT_MACHINES_EXPECTED_PAYLOAD_HASH:-}" &&
+          "$AGENT_MACHINES_EXPECTED_PAYLOAD_HASH" != "$SELECTED_PAYLOAD_HASH" ]]; then
+        _fail 'Payload changed across the installation transaction'
+        exit 1
+    fi
+    export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$SELECTED_PAYLOAD_HASH"
+fi
 SELECTED_SOURCE_IDENTITY="$SOURCE_RUNTIME_IDENTITY"
 [[ -n "$SELECTED_SOURCE_IDENTITY" ]] || SELECTED_SOURCE_IDENTITY='{}'
 if [[ -n "${AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY:-}" &&
@@ -1093,6 +1164,8 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             _fail "selected cell runtime $SRC_VERSION failed immutable cutover validation"
             exit 1
         fi
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
         _write_cell_manifest \
             "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$PACKAGE_VERSION" \
             "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
@@ -1513,7 +1586,7 @@ _versioned_slot_clean() {
     fi
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
-        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        helpers="$("$py" -I -B "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
@@ -1760,7 +1833,9 @@ if [[ "$ACTION" == "stamp" ]]; then
             fi
         done
     fi
-    trap _unlock_stamp EXIT INT TERM
+    trap '_unlock_stamp; _exit_install_lock' EXIT
+    trap '_unlock_stamp; _exit_install_lock; exit 130' INT
+    trap '_unlock_stamp; _exit_install_lock; exit 143' TERM
     _assert_source_runtime_identity || exit 1
     # Review finding: the stamp lock above serializes writers against each
     # other, but the generated binstub reads payload-dir WITHOUT taking it.
@@ -1791,10 +1866,17 @@ if [[ "$ACTION" == "stamp" ]]; then
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     _unlock_stamp
+    _exit_install_lock
     trap - EXIT INT TERM
     exit 0
 fi
 
+case "$ACTION" in
+    install|init|provision|cell-provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 _step 'agent-machines init'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
@@ -1898,11 +1980,11 @@ for _lib_entry in \
     if [[ -f "$_lib_path/pyproject.toml" ]]; then
         if [[ "$HAVE_UV" -eq 1 ]]; then
             _lib_install_rc=0
-            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
+            "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
                 "$_lib_path" --quiet || _lib_install_rc=$?
         else
             _lib_install_rc=0
-            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
+            "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
         fi
         if [[ "$_lib_install_rc" -ne 0 ]]; then
             _fail "$_lib_dir_name library install failed"
@@ -1915,13 +1997,13 @@ done
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
     if [[ "$CELL_MODE" == 1 ]]; then
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
@@ -1933,13 +2015,13 @@ if [[ "$HAVE_UV" -eq 1 ]]; then
     fi
 else
     if [[ "$CELL_MODE" == 1 ]]; then
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR"; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR"; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
@@ -1959,7 +2041,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
     # Health-gate: never swap the stable .venv link onto a slot whose package
     # does not import -- a broken build must not become the live runtime.
-    if ! "$VENV_PYTHON" -c 'import agent_machines' 2>/dev/null; then
+    if ! "$VENV_PYTHON" -B -c 'import agent_machines' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         exit 1
     fi
@@ -2030,6 +2112,8 @@ fi
 SOURCE_PLUGIN_DIR="$PLUGIN_DIR"
 if [[ "$CELL_MODE" == 1 ]]; then
     SOURCE_PLUGIN_DIR="$ORIGIN_PAYLOAD_ROOT"
+elif [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    SOURCE_PLUGIN_DIR="$SOURCE_OWNER"
 fi
 if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
     VER="$PACKAGE_VERSION"
@@ -2060,7 +2144,7 @@ else
         SOURCE_FIELDS=", ${SOURCE_FIELDS%\}}"
     fi
     if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime_identity || exit 1; fi
-    cat > "$TMP" << EOF
+    manifest_json="$(cat << EOF
 {
   "schema_version": 3,
   "service": "agent-machines",
@@ -2080,13 +2164,27 @@ else
   "runtime": "python"$SOURCE_FIELDS
 }
 EOF
-    mv -f "$TMP" "$INSTALL_DIR/deploy-manifest.json"
+    )" || exit 1
+    if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+        if ! printf '%s\n' "$manifest_json" |
+            "$VENV_PYTHON" -I -B -X utf8 "$SOURCE_PLUGIN_DIR/scripts/command_binding.py" \
+                --payload-root "$SOURCE_PLUGIN_DIR" --source-payload-root "$SOURCE_PLUGIN_DIR" \
+                --plugin-id agent-machines --legacy-root "$INSTALL_DIR" \
+                --project-root "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" \
+                --publish-legacy --write-manifest >/dev/null; then
+            _fail 'Command ownership validation refused Machines source manifest publication.'
+            exit 1
+        fi
+    else
+        printf '%s\n' "$manifest_json" > "$TMP"
+        mv -f "$TMP" "$INSTALL_DIR/deploy-manifest.json"
+    fi
     _ok "Deploy manifest written (source: $KIND)"
 fi
 
 # -- 6. Verify ---------------------------------------------------------
 echo ''
-if "$VENV_PYTHON" -c 'import agent_machines' 2>/dev/null; then
+if "$VENV_PYTHON" -B -c 'import agent_machines' 2>/dev/null; then
     _ok 'Verification: module imports successfully'
 else
     _fail 'Verification: module import failed'

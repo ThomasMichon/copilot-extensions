@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve typed governance contracts in diagnostic and deployment test clients",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

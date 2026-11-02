@@ -32,6 +32,53 @@ def test_engine_home_default_and_override(monkeypatch, tmp_path):
     assert daemon.engine_home() == tmp_path
 
 
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows foreground re-exec contract")
+@pytest.mark.parametrize("linked", (False, True))
+def test_foreground_parent_home_reaches_real_reservation_before_model(tmp_path, monkeypatch, linked):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from agent_procutil.daemon_instances import cancel_instance_reservation, reserve_instance
+
+    launch = tmp_path / "launch"
+    home = tmp_path / "engine"
+    launch.mkdir()
+    home.mkdir()
+    selected = home
+    if linked:
+        selected = tmp_path / "linked-engine"
+        try:
+            selected.symlink_to(home, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"native directory symlink unavailable: {error}")
+    python = home / ".venv/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"private interpreter witness; never executed")
+    monkeypatch.chdir(launch)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_HOME", "../" + selected.name)
+    reached = []
+
+    def before_model(command, *, instance, **kwargs):
+        spec = replace(instance, purpose="production", registry_root=tmp_path / "registry")
+        receipt = reserve_instance(spec)
+        try:
+            assert receipt.record_path.is_file()
+            assert spec.runtime_root == selected
+            assert command[0] == str(selected / ".venv/Scripts/python.exe")
+            reached.append(True)
+        finally:
+            cancel_instance_reservation(receipt, creation_refused=True)
+        return SimpleNamespace(wait=lambda: 0)
+
+    monkeypatch.setattr(daemon, "spawn_instance", before_model)
+    if linked:
+        with pytest.raises((ValueError, OSError)):
+            daemon.run_foreground()
+        assert reached == []
+    else:
+        assert daemon.run_foreground() == 0
+        assert reached == [True]
+
+
 def test_engine_venv_python_layout(tmp_path):
     py = daemon.engine_venv_python(tmp_path)
     assert py.parent.parent == tmp_path / ".venv"
@@ -150,8 +197,14 @@ def test_engine_endpoint_env(monkeypatch):
 
 def test_engine_command_targets_durable_venv(tmp_path):
     cmd = daemon.engine_command(tmp_path)
-    assert cmd[1:] == ["-m", "agent_index_engine.app", "--host",
-                        daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
+    assert cmd[1] == "-X"
+    prefix = Path(cmd[2].removeprefix("pycache_prefix="))
+    cache_root = tmp_path / "cache" / "python"
+    cache_root.mkdir(parents=True)
+    assert os.path.samefile(prefix.parent, cache_root)
+    assert prefix.name.startswith("unsealed-")
+    assert cmd[3:] == ["-m", "agent_index_engine.app", "--host",
+                      daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
     assert str(tmp_path) in cmd[0]
 
 
@@ -421,31 +474,49 @@ def run(app, **kwargs):
 
 
 @pytest.mark.parametrize(("level", "expected"), [("warning", "warning"), (None, "info")])
+@pytest.mark.parametrize("external_cache", [False, True])
 def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
-    monkeypatch, tmp_path, level, expected
+    monkeypatch, tmp_path, level, expected, external_cache,
 ):
     """The durable engine venv survives service updates, so its app may hard-code
     ``info``; the launch bootstrap still applies the level without a rebuild."""
     import subprocess
     import sys
+    from agent_procutil import no_window_kwargs, python_cache_args
 
     pkg = tmp_path / "agent_index_engine"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "app.py").write_text(_OLD_ENGINE_APP, encoding="utf-8")
     (tmp_path / "uvicorn.py").write_text(_FAKE_UVICORN, encoding="utf-8")
+    prefix = [sys.executable, *(python_cache_args(tmp_path) if external_cache else [])]
     cmd = daemon._with_log_level_bootstrap(
-        [sys.executable, "-m", "agent_index_engine.app", "--host", "127.0.0.1", "--port", "1"]
+        [*prefix, "-m", "agent_index_engine.app", "--host", "127.0.0.1", "--port", "1"]
     )
-    assert cmd[1] == "-c"
+    assert cmd[:len(prefix)] == prefix and cmd[len(prefix)] == "-c"
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
     env.pop(daemon.ENGINE_LOG_LEVEL_ENV, None)
     if level:
         env[daemon.ENGINE_LOG_LEVEL_ENV] = level
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
-    assert result.returncode == 0, result.stderr
-    assert f"LEVEL={expected}" in result.stdout
-    assert "ARGS=--host 127.0.0.1 --port 1" in result.stdout
+    previous = None
+    for _cycle in range(2 if external_cache else 1):
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=env, timeout=60, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"LEVEL={expected}" in result.stdout
+        assert "ARGS=--host 127.0.0.1 --port 1" in result.stdout
+        if external_cache:
+            assert not list(pkg.rglob("*.pyc"))
+            cache_root = Path(prefix[2].partition("=")[2])
+            caches = list(cache_root.rglob("*.pyc"))
+            assert caches
+            current = {str(path): (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_ino)
+                       for path in caches}
+            if previous is not None:
+                assert current == previous
+            previous = current
 
 
 def test_start_raises_on_early_exit(monkeypatch, tmp_path):

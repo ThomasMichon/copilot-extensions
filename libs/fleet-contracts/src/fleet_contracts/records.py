@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import asdict, dataclass
-from typing import ClassVar
+from collections.abc import Hashable
+from dataclasses import Field, asdict, dataclass
+from typing import Any, ClassVar, TypeVar
+
+_T = TypeVar("_T")
 
 MAX_MESSAGE_BYTES = 65536
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -98,7 +101,9 @@ def _installation_id(value: str) -> None:
         raise ContractError("installation_id cannot contain control characters")
 
 
-def _object(value: object, required: set[str], optional: set[str] | None = None) -> dict:
+def _object(
+    value: object, required: set[str], optional: set[str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError("record must be an object")
     if not required <= value.keys() or value.keys() - required - (optional or set()):
@@ -106,20 +111,22 @@ def _object(value: object, required: set[str], optional: set[str] | None = None)
     return value
 
 
-def _wire(value: object, schema: str, fields: set[str]) -> dict:
+def _wire(value: object, schema: str, fields: set[str]) -> dict[str, Any]:
     data = _object(value, fields | {"schema", "version"})
     if data["schema"] != schema or type(data["version"]) is not int or data["version"] != 1:
         raise ContractError("unsupported contract schema or version")
     return data
 
 
-def _tuple(value: object, field: str, maximum: int, *, empty: bool = False) -> tuple:
+def _tuple(
+    value: list[_T] | tuple[_T, ...], field: str, maximum: int, *, empty: bool = False,
+) -> tuple[_T, ...]:
     if not isinstance(value, (list, tuple)) or len(value) > maximum or (not value and not empty):
         raise ContractError(f"{field} must be a bounded collection")
     return tuple(value)
 
 
-def _distinct(values: tuple, field: str) -> None:
+def _distinct(values: tuple[Hashable, ...], field: str) -> None:
     if len(set(values)) != len(values):
         raise ContractError(f"{field} contains duplicate identities")
 
@@ -139,8 +146,8 @@ def _check_tree(value: object, depth: int = 0) -> None:
         raise ContractError("JSON contains a nonfinite number")
 
 
-def _pairs(pairs: list[tuple[str, object]]) -> dict:
-    result: dict = {}
+def _pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
             raise ContractError("JSON object contains duplicate fields")
@@ -152,7 +159,7 @@ def _nonfinite(_: str) -> None:
     raise ContractError("JSON contains a nonfinite number")
 
 
-def decode_json(payload: bytes, *, max_bytes: int = MAX_MESSAGE_BYTES) -> dict:
+def decode_json(payload: bytes, *, max_bytes: int = MAX_MESSAGE_BYTES) -> dict[str, Any]:
     _integer(max_bytes, "max_bytes", maximum=MAX_RESPONSE_BYTES)
     if not isinstance(payload, bytes) or len(payload) > max_bytes:
         raise ContractError("JSON message exceeds the contract byte limit")
@@ -168,7 +175,7 @@ def decode_json(payload: bytes, *, max_bytes: int = MAX_MESSAGE_BYTES) -> dict:
     return value
 
 
-def encode_json(value: dict, *, max_bytes: int = MAX_MESSAGE_BYTES) -> bytes:
+def encode_json(value: dict[str, Any], *, max_bytes: int = MAX_MESSAGE_BYTES) -> bytes:
     _integer(max_bytes, "max_bytes", maximum=MAX_RESPONSE_BYTES)
     _check_tree(value)
     if not isinstance(value, dict):
@@ -185,8 +192,9 @@ def encode_json(value: dict, *, max_bytes: int = MAX_MESSAGE_BYTES) -> bytes:
 
 class _WireRecord:
     SCHEMA: ClassVar[str]
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {"schema": self.SCHEMA, "version": 1, **asdict(self)}
 
 

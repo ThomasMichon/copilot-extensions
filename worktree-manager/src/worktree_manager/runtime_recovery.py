@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+from .runtime_identity import running_slot
 
 
 def verify_adoption(path: Path, root: Path) -> None:
@@ -45,9 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--reused", action="store_true")
     args = parser.parse_args(argv)
-    slot = Path(sys.prefix).resolve()
+    slot = running_slot()
     root = args.root.resolve()
-    if slot.parent != root / "versions" or not (slot / ".runtime-bootstrap").is_dir():
+    if slot is None or slot.parent != root / "versions" or not (slot / ".runtime-bootstrap").is_dir():
         raise RuntimeError("Adopted activation must execute from its constructed Manager slot")
     verify_adoption(args.evidence, root)
 

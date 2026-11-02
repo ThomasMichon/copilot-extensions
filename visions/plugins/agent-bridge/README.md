@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -107,6 +107,12 @@ logical creation request recovers the same workspace and session outcome
 rather than creating another hidden agent. An existing conversation or
 uncertain prior launch still requires its ordinary continuity and ownership
 proof; sessionless is authoritative history, not an absence guess.
+
+For owned remote workspaces, Bridge consumes the ground layer's
+[origin-coordinated allocation](../agent-worktrees/README.md#origin-coordinated-remote-allocation).
+It does not replace that allocation transaction with its own remote-create and
+caller-ledger callback. Embodiment waits for confirmed workspace ownership;
+an unresolved allocation remains recoverable without starting a conversation.
 
 ### repository-owned hosting eligibility
 

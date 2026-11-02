@@ -1,0 +1,9 @@
+{
+  "comment": "Keep local project registration and installation independent of optional machine-map enrollment.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

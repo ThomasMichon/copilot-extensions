@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import subprocess
 import sys
@@ -21,6 +21,10 @@ RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", 
 DEFAULT_TIMEOUT_S = 120.0
 
 
+class ToolRosterAdmissionError(RuntimeError):
+    """The selected project tool settings are not safe to launch."""
+
+
 @dataclass(frozen=True)
 class RefreshResult:
     status: RefreshStatus
@@ -35,6 +39,7 @@ class RefreshResult:
     elapsed_ns: int | None = None
     publication_revision: str = ""
     counts_known: bool = True
+    tool_roster_blocked: bool = field(default=False, kw_only=True)
 
     @property
     def diagnostic(self) -> str:
@@ -96,6 +101,19 @@ def mark_failed_pair_composition(resolution: StatePair) -> None:
         mark_pair_pending(root)
 
 
+def prepare_companion_instructions(knowledge: Path) -> None:
+    from .static_instructions import prepare_output_namespace
+
+    try:
+        prepare_output_namespace(knowledge)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        from .knowledge_plugins import KnowledgePluginError
+
+        raise KnowledgePluginError(
+            f"cannot prepare paired knowledge instructions; repair and retry preparation: {exc}"
+        ) from exc
+
+
 def complete_pair_composition(repo_root: str | Path, summary: dict) -> None:
     if not summary.get("paired") or summary.get("action") not in ("composed", "disabled"):
         return
@@ -124,6 +142,11 @@ def prepare_for_launch(
     if dry_run:
         return RefreshResult("skipped", detail="dry-run launch")
     with step("Preparing instruction projections"):
+        try:
+            prepare_tool_roster(repo_root, config=config)
+        except ToolRosterAdmissionError as exc:
+            result = RefreshResult("failed", blocking=1, detail=str(exc), tool_roster_blocked=True)
+            return _report(result)
         if compose_pair:
             from . import knowledge_plugins
 
@@ -133,7 +156,36 @@ def prepare_for_launch(
                 result = RefreshResult("failed", blocking=1, detail=f"plugin composition failed: {exc}")
                 print(result.diagnostic, file=sys.stderr, flush=True)
                 return _report(result)
+        from . import guarded_anchors
+
+        diagnostic = guarded_anchors.prepare(repo_root)
+        if diagnostic:
+            print(diagnostic, file=sys.stderr, end="", flush=True)
         return refresh_local_cache(repo_root, timeout=None)
+
+
+def prepare_tool_roster(repo_root: str | Path, *, config: Config | None = None) -> None:
+    from . import copilot_plugin_profile as tool
+
+    try:
+        tool.prepare_checkout(repo_root, config=config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ToolRosterAdmissionError(f"tool plugin preparation failed: {exc}") from exc
+
+
+def prepare_admitted_launch(
+    repo_root: str | Path, *, dry_run: bool = False, defer_projections: bool = False,
+    compose_pair: bool = False, config: Config | None = None,
+) -> None:
+    """Block tool-roster failures without changing optional guidance-copy policy."""
+    if dry_run:
+        return
+    if defer_projections:
+        prepare_tool_roster(repo_root, config=config)
+        return
+    result = prepare_for_launch(repo_root, compose_pair=compose_pair, config=config)
+    if getattr(result, "tool_roster_blocked", False):
+        raise ToolRosterAdmissionError(result.detail)
 
 
 def refresh_local_cache(
@@ -204,28 +256,11 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None, session_id: str
         watch_started_at = time.time()
         if deadline is not None and deadline - time.time() < 1.5:
             return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
-        from .static_instructions import current
         from .local_cache_worker import watch_completion
         from .static_preparation import publication_revision
 
         root = _checkout_root(cwd).resolve()
         initial_revision = publication_revision(root)
-        remaining = max(0, deadline - time.time()) if deadline is not None else 1.0
-        try:
-            cached = current(
-                root, Path.home(),
-                deadline=time.monotonic() + min(remaining, 1.0),
-            )
-        except (TimeoutError, subprocess.TimeoutExpired):
-            cached = None
-        if cached is not None and cached.publication_revision == initial_revision:
-            watch_completion(root, session_id, prepared=True)
-            return RefreshResult(
-                "ready", unchanged=cached.unchanged, generation=cached.generation,
-                reused=True, detail="prepared generation reused; model admission unknown",
-            ).diagnostic + "\n"
-        if deadline is not None and deadline - time.time() < 1.5:
-            return RefreshResult("skipped", detail="backup refresh deadline too short after probe").diagnostic + "\n"
         watch_completion(
             root, session_id, initial_revision=initial_revision, started_at=watch_started_at,
         )

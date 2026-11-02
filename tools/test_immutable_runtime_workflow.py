@@ -33,13 +33,16 @@ def _python_body(step):
 
 def _enabled(expression, inputs):
     assert expression.startswith("${{ ") and expression.endswith(" }}")
-    for term in expression[4:-3].split(" && "):
-        if term == "github.event_name == 'workflow_dispatch'":
+    for clause in expression[4:-3].split(" && "):
+        if clause == "github.event_name == 'workflow_dispatch'":
             continue
-        match = re.fullmatch(r"(!?)inputs\.([a-z_]+)", term)
-        assert match, term
-        negative, name = match.groups()
-        if bool(inputs[name]) == bool(negative):
+        alternatives = []
+        for term in clause.strip("()").split(" || "):
+            match = re.fullmatch(r"(!?)inputs\.([a-z_]+)", term)
+            assert match, term
+            negative, name = match.groups()
+            alternatives.append(bool(inputs[name]) != bool(negative))
+        if not any(alternatives):
             return False
     return True
 
@@ -55,6 +58,10 @@ def test_manual_selection_preserves_every_existing_route_and_default():
     routes = {
         "immutable_runtime": {"immutable-runtime-linux", "immutable-runtime-macos"},
         "guardian_followthrough": {"guardian-followthrough-macos"},
+        "interactive_completion": {
+            "interactive-completion-linux", "interactive-completion-macos",
+            "interactive-completion-windows",
+        },
         "watch_owner": {
             "watch-owner-native-linux", "watch-owner-native-windows",
             "watch-owner-macos-refusal",
@@ -62,13 +69,41 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         },
         "dispatch_delegation": {"dispatch-delegation-linux", "dispatch-delegation-windows"},
         "pr_service": {"pr-service-linux", "pr-service-windows"},
+        "ssh_service": {"ssh-service-linux", "ssh-service-windows"},
         "pr_artifacts": {"pr-artifacts-linux", "pr-artifacts-windows"},
-        "dependency_compile": {"dependency-compile-linux", "dependency-compile-windows"},
+        "dependency_compile": {
+            "dependency-compile-linux", "dependency-compile-windows",
+            "source-build-linux", "source-build-windows",
+            "installer-latency-linux", "installer-latency-windows",
+            "logger-installer-latency-linux", "logger-installer-latency-windows",
+            "packaging-seed-linux", "packaging-seed-windows",
+            "marketplace-source-linux", "marketplace-source-windows",
+        },
+        "source_cache": {"source-cache-linux", "source-cache-windows"},
+        "uv_deployment_compatibility": {
+            "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
+        },
         "candidate_profiles": {"candidate-profiles-linux", "candidate-profiles-windows"},
         "chat_construction": {"chat-construction-linux", "chat-construction-windows"},
         "ssh_snapshot": {"ssh-snapshot-native-linux", "ssh-snapshot-native-windows"},
-        "wheel_inputs": {"wheel-inputs-linux", "wheel-inputs-windows"},
+        "wheel_inputs": {
+            "wheel-inputs-linux", "wheel-inputs-windows",
+            "source-profiles-linux", "source-profiles-windows", "source-profiles-macos",
+        },
         "runtime_profiles": {"runtime-profile-policy-linux", "runtime-profile-policy-windows"},
+        "update_diagnostics": {"update-diagnostics-linux", "update-diagnostics-windows"},
+        "native_launch": {
+            "native-launch-windows", "native-seed-reply-linux", "native-seed-reply-macos",
+        },
+        "ssh_headless": {"ssh-headless-linux", "ssh-headless-windows"},
+        "runtime_removal": {"runtime-removal-macos"},
+        "windows_broker_probe": {
+            "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
+        },
+        "windows_broker_consumers": {
+            "windows-broker-portable", "windows-native-process", "windows-broker-consumers",
+        },
+        "native_daemon_exit": {"native-daemon-exit-windows"},
     }
     defaults = {
         name: entry["default"] for name, entry in inputs.items()
@@ -92,7 +127,6 @@ def test_manual_selection_preserves_every_existing_route_and_default():
                 expected | routes["immutable_runtime"]
             )
     assert set(WORKFLOW["jobs"]) == diagnostics | set().union(*routes.values())
-    assert len(WORKFLOW["jobs"]) == 28
 
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "0123456789abcdef" * 2 + "01234567"])

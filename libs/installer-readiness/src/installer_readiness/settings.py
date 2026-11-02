@@ -300,11 +300,11 @@ def installations_from_settings(
     installations: dict[tuple[str, str], PluginInstallation] = {}
     scopes: dict[tuple[str, str], set[str]] = defaultdict(set)
     for item in enabled:
-        cells = cells_by_fingerprint.get(item.fingerprint, [])
-        if len(cells) != 1:
+        matching_cells = cells_by_fingerprint.get(item.fingerprint, [])
+        if len(matching_cells) != 1:
             code = (
                 "installation-not-found"
-                if not cells
+                if not matching_cells
                 else "ambiguous-installation-owner"
             )
             findings.append(
@@ -312,7 +312,7 @@ def installations_from_settings(
                     code,
                     (
                         f"enabled plugin '{item.source}' matches "
-                        f"{len(cells)} active installation cells"
+                        f"{len(matching_cells)} active installation cells"
                     ),
                     item.source,
                     remedy=(
@@ -322,9 +322,9 @@ def installations_from_settings(
                 )
             )
             continue
-        cell = cells[0]
+        matching_cell = matching_cells[0]
         receipt = (
-            Path(cell["cellRoot"])
+            Path(matching_cell["cellRoot"])
             / "plugins"
             / item.plugin_id
             / "install.json"
@@ -333,7 +333,7 @@ def installations_from_settings(
             validated = validate_context_receipt(
                 receipt,
                 durable,
-                expected_marketplace_id=cell["marketplaceId"],
+                expected_marketplace_id=matching_cell["marketplaceId"],
                 expected_plugin_id=item.plugin_id,
                 environment={},
             )

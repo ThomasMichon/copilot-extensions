@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Worktrees native argument envelopes when preparing local ACP launches.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

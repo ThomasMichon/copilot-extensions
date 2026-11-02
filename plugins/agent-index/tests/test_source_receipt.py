@@ -64,8 +64,8 @@ def test_receipt_reader_allows_actual_fts_publication(cold, monkeypatch, phase):
         original_handoff = domain.fts_handoff
 
         @contextmanager
-        def handoff():
-            with original_handoff() as nonce, holding():
+        def handoff(*, table_name=None):
+            with original_handoff(table_name=table_name) as nonce, holding():
                 yield nonce
 
         monkeypatch.setattr(domain, "fts_handoff", handoff)

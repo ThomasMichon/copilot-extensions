@@ -18,6 +18,24 @@ class PromotionArtifactError(RuntimeError):
     pass
 
 
+def read_build_system_requires(
+    source_dir: Path, *, error_type: type[Exception] = PromotionArtifactError,
+) -> list[str]:
+    """Read static build constraints without importing or executing a backend."""
+    pyproject = source_dir / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise error_type(f"{pyproject}: could not read/parse: {exc}") from exc
+    build_system = data.get("build-system", {})
+    if not isinstance(build_system, dict):
+        raise error_type(f"{pyproject}: [build-system] is not a table")
+    requires = build_system.get("requires", [])
+    if not isinstance(requires, list) or not all(isinstance(r, str) for r in requires):
+        raise error_type(f"{pyproject}: [build-system].requires is not a list of strings")
+    return requires
+
+
 def parse_wheel_identity(
     path: Path, *, error_type: type[Exception] = PromotionArtifactError,
     numeric_version: bool = False,
@@ -134,12 +152,21 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
         or any(not isinstance(value, str) or not value for value in build["requires"])
     ):
         raise PromotionArtifactError("unsupported candidate build backend or backend-path")
+    from native_daemon_artifacts import trusted_setup as native_setup
+
+    native = native_setup(source_dir, data)
+    if native is not None:
+        if trusted_setup is not None and trusted_setup != native:
+            raise PromotionArtifactError("conflicting trusted process owner setup")
+        trusted_setup = native
     for name in ("setup.py", "setup.cfg"):
         if (source_dir / name).exists() or (source_dir / name).is_symlink():
             if (
                 name == "setup.py" and trusted_setup is not None
                 and not (source_dir / name).is_symlink()
-                and (source_dir / name).read_bytes() == trusted_setup
+                # Git archives retain LF even when the trusted working copy uses CRLF.
+                and (source_dir / name).read_bytes().replace(b"\r\n", b"\n")
+                == trusted_setup.replace(b"\r\n", b"\n")
             ):
                 continue
             raise PromotionArtifactError(f"unsupported executable or alternate build configuration: {name}")

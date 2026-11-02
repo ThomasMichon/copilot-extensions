@@ -1,5 +1,20 @@
 # agent-vault
 
+[Configuration reference](docs/configuration.md)
+
+Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
+generated resolvers and service launchers. Configuration, authentication,
+`run/`, `logs/`, `core/`, `cache/` and unknown files are retained by default.
+Explicit purge still retains transaction coordination, and dry runs remain
+non-mutating. Linked roots, foreign manifests, unclassified consumers and live
+child processes refuse removal. Canonical batch-removal custody remains held
+through deletion; released lease registries retain their inodes without
+preventing idle removal. See the
+[install contract](../../docs/install-contract.md).
+The cross-adapter native fixtures are in
+`tests/test_native_uninstall_adapters.py`; cleanup requires the packaged shared
+finite-removal helper and selective native engine API.
+
 `agent-vault` is a standalone, machine-local secret store for Copilot CLI agents and local automation. It uses a user-selected KeePassXC `.kdbx` database, a small local daemon that caches the KeePass master password for a bounded time, and an `agent-vault` CLI that fetches API keys, SSH keys, credentials, and small sealed values on demand.
 
 It does **not** require a repo to be registered with `agent-worktrees`, and it
@@ -71,6 +86,9 @@ than choosing an unordered source hash or downgrading to a plain package slot.
 `agent-vault --version` exposes the selected generation while package metadata
 is unchanged. Compatibility helpers continue through their existing command
 routes; this source-adoption path does not change service-supervision policy.
+The existing service `ping` response adds the running process's frozen package
+`version` alongside its PID. This identifies the responding build, not a newly
+selected slot; older responses without the field do not establish build identity.
 Retained source slots pass the same isolated interpreter CLI `--help` probe as
 fresh slots before activation; importing only the lazy initializer is insufficient.
 Reselection refreshes source and venv manifest fields
@@ -380,7 +398,7 @@ diagnostics or plaintext artifacts.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. The installer also deploys platform supervision: a Windows Scheduled Task named `AgentVault`, or a Linux/WSL systemd user unit named `agent-vault.service` when systemd is available.
-- Windows updates cooperatively stop the old daemon before starting the new runtime so an in-flight request can finish; auth state reconnects through the opt-in persistent cache or by one re-unlock. POSIX updates rely on the systemd user service restart path.
+- Windows updates start the incoming generation independently; the old build settles its work and retires itself. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
 - There is **no** `agent-vault doctor` subcommand today. Use `agent-vault ping`, `agent-vault which`, `agent-vault cache-status`, and the installer `status` action for troubleshooting.
 
 ## Persistent cache and sealed values

@@ -279,6 +279,9 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
                        "records": _record_state(loader),
                        "error": loader.error_for_source(source.source_id)})
         assert "deadline" in loader.error_for_source(source.source_id)
+        assert loader.read_status_for_source(source.source_id)["failure_kind"] == (
+            "connection" if boundary == "startup" else "content"
+        )
         if boundary in {"startup", "initial-publication"}:
             assert loader.records() == []
             assert loader._state[source.cache_key] == "failed"
@@ -287,7 +290,7 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         else:
             assert loader.records()[0]["id"] == "one"
             assert loader.records()[0]["raw"]["dirty"] == 2
-            assert loader.records()[0]["title"].startswith("[stale]")
+            assert loader.records()[0]["raw"]["_availability"]["status"] == "stale"
         release_retry.write_text("release", encoding="utf-8")
         wait_until(lambda: bool(loader.records()) and loader.records()[0]["id"] == "two",
                    factor=factor)
@@ -347,8 +350,8 @@ def test_feed_heartbeat_expiry_uses_real_watchdog_after_committed_snapshot(monke
     monkeypatch.setattr(loader_feed, "_Watchdog", HeartbeatWatchdog)
     feed_error = loader_feed.CurrentFeedMixin._feed_error
 
-    def capture_expiry(loader, source, generation, reason):
-        feed_error(loader, source, generation, reason)
+    def capture_expiry(loader, source, generation, reason, **metadata):
+        feed_error(loader, source, generation, reason, **metadata)
         observed.append((reason, loader.records(), loader._state[source.cache_key]))
         loader.cancel()
         fault.set()
@@ -369,7 +372,7 @@ def test_feed_heartbeat_expiry_uses_real_watchdog_after_committed_snapshot(monke
         assert watchdogs[0].initial_budget == source.timeout
         assert watchdogs[0].armed == [loader_feed.INITIAL_TIMEOUT, loader_feed.IDLE_TIMEOUT]
         assert rows[0]["id"] == "one" and rows[0]["raw"]["dirty"] == 2
-        assert rows[0]["title"].startswith("[stale]") and state == "ready"
+        assert rows[0]["raw"]["_availability"]["status"] == "stale" and state == "ready"
         assert len(children) == 1 and children[0].poll() is not None
     finally:
         stop_loader(loader, worker, children)

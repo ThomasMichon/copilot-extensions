@@ -5,6 +5,44 @@ Back to the [canonical effort](README.md).
 The operator's literal proposal is retained below, including original typos.
 The effort README labels subsequent agent-recommended controls separately.
 
+## Operator - Reconstruction findings and cooperative task standby
+
+> Don't re-enable the task triggers
+
+> Let's track all these issues and put them into our effort for fixing
+
+The operator selected reuse of existing trackers plus two scoped new issues.
+
+> What disabled the task? My wish for the way tasks are disabled is that they run, but check for a KillSwitch, and if the KillSwitch id active, they just no-op and sleep, checking occasionally for the KillSwitch to clear. When it clears, they go back to work, resuming their loops and subscriptions. Basically a "run, but do no work" mode, not a disabled-in-system mode
+
+> Oh, I see. Ideally uninstall would have *de-registered* the task, too, though (a normal in-place update wouldn't)
+
+The agent acknowledged that it had used `Disable-ScheduledTask`, which disables
+the whole Windows task, not just automatic triggers. That is not the requested
+cooperative standby behavior. The manual program wipe retained registrations;
+it was not a complete supported uninstall and does not prove that a supported
+uninstaller fails to de-register them. Current operational settings and the public
+should-be requirement are separate; an implementation proposal is not evidence
+that a running task already honors the hold.
+
+## Operator - Storage lifetime separation
+
+> It's worth auditing how entangled config state, persisted runtime state, temporary runtime state, and runtime scripts are with each other. This could stand to be segmented better, so that our desired "safe uninstall" could practically be done by deleting a handful of folders. Obviously, we want a proper uninstall flow for each service, and worktree manager, but conceptually this is a good "goal"
+
+## Operator - Reviewed native phase deadline
+
+The agent presented this decision after actual Windows current-runtime phases
+repeatedly exceeded the five-second cap:
+
+> Real Windows cold callbacks still exceed the contract’s five-second phase cap after removing avoidable imports. Should I keep engineering against five seconds, or revise the contract to a ten-second cap and take that change through normal review and validation? No retries or resident Python waiter would be added.
+
+The operator selected:
+
+> review-ten
+
+This authorizes the native Windows phase deadline revision, not a bypass of
+review, acceptance, custody or live-host safeguards.
+
 ## Operator - Minimal launcher and redirectable hooks
 
 > Can we look into making the session launcher as barebones as possible, using "hooks" before and after the copilot session that call through to redirectable binstubs? By the time a Copilot session exits, the universe around it can look very different, but the core construction stays the same:
@@ -74,3 +112,59 @@ The effort README labels subsequent agent-recommended controls separately.
 The operator confirmed the proposed slug:
 
 > installation-independent-sessions
+
+## Operator - Priority and maintenance window
+
+> I have quiesced nearly all other sessions across all machines. Your work, which isolated Copilot sessions from updates to copilot-extensions tools and services, has priorty. I'm expanding the vision to include the concept of a "maintenance window and notification", where if the agent-* tols suddenly disappear out from under a running agent, then agent need to have a strategy to "pause", read a local-machine banner with instructions, and wait out the maintenance window. Once the maintenance window ends (the yaml file clears), then agents can resume.
+
+## Operator - Selected live test host
+
+Only the private host name is redacted below. The authorization applies to
+that one operator-selected machine, not to an arbitrary host or fleet.
+
+> As you continue this effort, feel free to use \<selected-test-host> as your test machine: you may audit the install footprint, separate state files from runtime data, and then carefully uninstall copilot-extensions services and tools from it, taking care to leave SSH-gateway connectivity running. Try to get to the point where you only leave muxed copilot processes alive, with all our services stopped and gone. Then focus on being able to perform a reinstall which stitches back up to the runtime data and carries on as though nothing was amiss. YOu have my full approval to uninstall, reinstall, re-release, and unblock main promotion with workflow fixes as needed until \<selected-test-host> demonstrates a "round trip" through install and reinstall, with a "clean state" in the middle. Definitiely worth making backups of data we store in ~/.agent- and ~/.&lt;repo&gt; first!
+
+## Operator - Legacy session migration
+
+The agent explained that the existing muxed sessions have legacy runtime-Python
+ancestors which a source update cannot retrofit. It asked how to handle those
+sessions after verified backups and qualification of the fixed launcher.
+
+The operator selected the structured-form value:
+
+> controlled-relaunch-after-fix
+
+The option's full label was:
+
+> Authorize controlled closure and relaunch after backups and launcher qualification, preserving resumable session state
+## Operator - exact-set mux restoration and command entry points
+
+> Once you have the new Mux wrapper, it should be pretty straightforward to each existing Mux pane on the target machine and then replace it with the new wrapper process. You'll just need to note which worktrees are currently active you can restore that exact set, properly resuming back into their associated sessions.
+>
+> I'd like it if `<repo> worktrees copilot --worktree-id ____` was the straightforward "launch this terminal into the mux session for the target worktree, resuming or re-attaching as appropriate". And we need a command which can simply create/restore the mux session for a worktree without attaching the current terminal, so other systems can leverage it to resume work.
+
+## Operator - per-worktree admission and two-cycle live test
+
+The private selected host name is replaced by `[selected test host]`; no
+surrounding requirement is changed.
+
+> We only want to block launches into the *same* worktree concurrently, before we have a chance to stand up the Mux session that other launch attempts would find themselves joining. We don't want to serializae launches into different worktrees; different worktrees should be able to launch in parallel
+
+> Great. Continue driving. Your goal is to be able to have us live-test on [selected test host]: we'll record which sessions are currently active, exit all their current mux sessions, uninstall (and likely manually scrub) copilot-extensons services and tools, do a fresh install, restore the muxes using the new system, then uninstall, scrub, and reinstall again. When I say "scrub" I just mean straggler processes and detritus that our current uninstall flow might miss, not runtime state or config.
+
+> Make sure you have an effort tracking the remaining phases of this work, so you can burndown to completion
+
+## Operator - graceful exit and repeated interrupt behavior
+
+> I've started using `/exit` in the CLI prompt to exit instead of trusting `Ctrl+C`, as Ctrl+C too-readily kills the parent Mux attach (leaving the pane running) instead of properly exiting Copilot
+
+> Ctrl+C has to be hit multiple times in a row within a duration to terminate Copilot; one round will not suffice
+
+## Operator - renderer admission
+
+> We should eliminate "conservative renderer admission". Does this have to do with marketplace-cell stuff?
+
+The agent clarified that the blanket renderer workaround was unrelated to
+marketplace cells and selected removal rather than adding another capability
+handshake. Concrete shell-initializer behavior and seed/lifecycle custody
+remain separate correctness obligations.

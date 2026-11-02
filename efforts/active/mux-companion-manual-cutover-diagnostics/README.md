@@ -8,6 +8,7 @@
 - **Status:** Active
 - **Vision:** vision-extending against [`visions/mux-companion`](../../../visions/mux-companion/README.md)
 - **Umbrella issue:** [#4369](https://github.com/ThomasMichon/copilot-extensions/issues/4369)
+- **Current Sidecar coordination:** [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811)
 - **Sub-issues:** filed per-step as each step is scoped for execution
 
 ## Guiding Intent
@@ -30,6 +31,22 @@ the precedent `agent-worktrees handoffs-check --execute` already set for the
 retire half, and adds no new behavior when the operator does not press the
 button.
 
+The purpose-first continuation also owns the same-window live Sidecar: an
+agenda-level subway timeline, owner-qualified push observations, work topology
+and truthful input/compaction indicators. Its current implementation amendment
+is [Step 7](sidecar-live-timeline.md). This adds source work without retiring the
+original recovery, manual/head, popup or Relay acceptance.
+
+## Participants
+
+| Participant | Scope | Reached via |
+| --- | --- | --- |
+| Sidecar source coordinator | Step 7 plan admission, bounded source integration, review and whole-root completion readback | Retained source workspace under the external harness |
+| Incumbent diagnostics and Relay custodians | Every original Step 1-6, direct intake, manual/head/native and current resource responsibility | Existing Coordination and complementary Mux-bind Relay root |
+
+Step 7's bounded contributors and non-overlapping integration roles are declared
+in its linked plan. A participant label does not transfer another owner's claim.
+
 ## Coordination
 
 The complete direct retained #4369 acceptance below continues through this SAME Active
@@ -50,6 +67,15 @@ source/head/background-work/provider holds. Closing a popup does not trigger cut
 consume a baton or retire a session.
 
 ## Context
+
+### Current Step 7 source approval
+
+The operator authorized continuing the implementation plan and starting source
+work when ready. [Step 7](sidecar-live-timeline.md) captures the exact request,
+strict pre-compaction warning definition and retained scope. Its plan/vision
+amendment must clear normal review before source execution. It authorizes no
+installed rollout, live user-Mux rebinding, answer automation, head repair,
+runtime threshold change, cutover or unrelated resource action.
 
 ### Prior art (directly reused, not rebuilt)
 
@@ -88,9 +114,19 @@ view highlighting whether resolved head matches the just-resumed session).
 
 ## Request
 
+**2026-11-02 continuation:** turn the subway-map guidance into a real live
+Sidecar with bottom-head/upward-history virtualization, owner push feeds and
+input/problem indicators. The operator defines compaction below 65% of
+qualified pre-context usage as premature and authorized plan completion followed
+by source execution. Exact capture, configurable-policy interpretation and
+implementation/validation are in [Step 7](sidecar-live-timeline.md).
+
 **2026-10-24 continuation:** prioritize purpose-first Summary and Claims over
 handoff session selection; add a switchable work-topology summary pane,
 attention indicators, a permanent claims status line and clickable view tabs.
+The 2026-10-25 operator revision replaces required clickable view tabs with
+visible mode-switching hotkey guides; the two-row and same-window requirements
+remain.
 The public-safe request capture, sequencing and acceptance details are in
 [purpose-first.md](purpose-first.md). This expands the same Companion effort;
 it does not retire the retained manual-cutover, expected-head or app-input
@@ -386,29 +422,54 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ### Step 6 - Purpose-first Summary and Claims continuation (#8811)
 
+The [timeline/subway and live-worktree guidance](timeline-guidance.md) supplies
+generic presentation examples for this same continuation. It mixes lifecycle
+events with work packages while keeping the current bound effort primary and
+creation context secondary. This documentation contribution does not close
+topology, native chrome, manual/head, app-input, relay or rollout acceptance.
+
 - [x] Land reviewed [purpose-first intent and sequence](purpose-first.md)
       and the revised `visions/mux-companion` before implementation.
-- [ ] Reuse existing authoritative purpose, summary and claims sources in
+- [x] Reuse existing authoritative purpose, summary and claims sources in
       the default Textual dialog; retain recovery as a secondary view.
+      Source merged in #8822; installed/native rollout remains separate.
 - [ ] Implement a compact topology presentation for phases, sub-agents,
       bridges, downstream worktrees, open PRs and accumulated tool-call stats,
       using the same sources as other companion clients.
-- [ ] Implement explicit CLI/summary pane switching with attention indicators
+- [x] Implement explicit CLI/summary pane switching with attention indicators
       that preserve the live CLI and its answer boundary.
-- [ ] Deliver a permanent second claims status line and clickable view tabs
+      Source merged in #8881 and #8941; installed/native-client attention
+      acceptance remains separately unchecked in Validation.
+- [ ] Deliver a permanent second claims status line and actionable mode-switch
+      hotkey guides
       through the Mux-bind owner, with tmux/psmux qualification.
+
+### Step 7 - Live Sidecar timeline and owner observations (#8811)
+
+- [ ] Complete S0-S5 and the own Validation Plan of the
+      [live Sidecar implementation](sidecar-live-timeline.md), using its
+      [proposed observation contract](sidecar-observation-contract.md).
+      Preserve every original parent clause, owner and evidence tier; a model,
+      widget, provider or source PR alone does not complete this root.
+      S0 and S1 source delivery are merged; S2 owner/provider integration is next.
 
 ## Validation Plan
 
+- [ ] Step 7: verify the complete source, real consumer, qualified pre-context,
+      history/viewport, native and bounded-performance acceptance in
+      [the linked plan](sidecar-live-timeline.md#validation-plan). Unsupported
+      evidence stays unknown/open; original manual/head/Relay gates remain.
+
 - [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
-- [ ] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
+- [x] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
       long values, missing/stale/error sources and secondary recovery actions.
+      The 156-test packet includes real process shutdown and target-cwd isolation.
 - [ ] Purpose-first: contract tests for graph identities, reported phases,
       agent/bridge/worktree/PR relationships and authoritative tool totals.
 - [ ] Purpose-first: prove actual CLI/summary switches preserve the original
       session/process/pane and surface question/idle attention without answers.
-- [ ] Purpose-first: qualify two-line status and real click/key dispatch on
+- [ ] Purpose-first: qualify two-line status and real mode-switch key dispatch on
       tmux and psmux, including narrow terminals and unrelated sessions.
 - [ ] Purpose-first: record source, clean-room, installed/native and rollout
       evidence separately; no passed source test substitutes for a live lane.
@@ -466,6 +527,520 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-11-02 - Sidecar foundation merged; owner integration next
+
+- #9979 merged as `74d9254007c1b06c0f058e20bc6a8cad05f3a8ad` through the
+  authorized Maintainer self-merge path after concrete corrections and required
+  green CI. No separate human-review layer or human acceptance claim was added.
+- Pulled the retained source workspace forward, then re-read this entire root
+  and both linked implementation/observation documents. Close only S1 source
+  delivery and the pure classifier criterion; retain every original root,
+  source-transport, selected-measurement, native, manual and Relay gate.
+- Source-head packets separately qualified 128 Manager, 226 owner-index and
+  111 Bridge cases. The new controller also passed strict checking. These are
+  source results, not installed or native-client evidence.
+- The merged foundation includes the virtual timeline, cooperative reader
+  lifetime, owner-qualified history and durable index admission intents. It
+  advertises no new provider capability and attaches no actual owner transport.
+- Continue with the advisory-agenda recovery/freshness guidance revision, then
+  S2's elected-owner capture, passive provider handlers and consumer integration.
+  Agenda relocation, archival and cleanup changes remain a separate design
+  proposal; unavailable planning state must not become an execution authority.
+- The whole effort remains Active. No rollout, live Mux change, head action,
+  resource release or original manual/native acceptance was performed.
+
+### 2026-11-02 - Durable admission-intent design amendment
+
+- Selected journal-qualified durable admission intents rather than downgrading
+  every unsealed owner interval. Validate admission before the intent commit;
+  materialization and resolution of the matching intent commit atomically.
+- An unresolved admitted operation survives takeover as explicit history
+  uncertainty. Recovery does not replay canonical work, invent events or equate
+  a fresh current capture with complete retained history.
+- The observation contract records this source-level transaction protocol and
+  its pre-intake/first-intent persistence limits. Canonical worktree writes and
+  the auxiliary index remain separate; no crash-atomic cross-store guarantee
+  or installed rollout is implied.
+- Implementation and isolated failure/recovery qualification are in progress.
+  The foundation PR and all original parent/native/Relay gates remain open.
+
+### 2026-11-02 - Durable admission-intent implementation qualification
+
+- Added auxiliary index protocol 1 with journal-qualified intent and gap tables.
+  Initialization, refresh, replacement, publication and admitted overflow retain
+  their exact owner/source/base-cursor and capture evidence across commits.
+- Successful materialization and intent resolution commit together. Failed gap
+  persistence leaves the admitted intent discoverable; takeover preserves
+  retained-history uncertainty without replaying canonical work.
+- The focused owner packet passed 226 cases, including interrupted admission,
+  stage-two SQL/connection failure, failed gap persistence, rollback of update
+  plus resolution, owner takeover fences and fresh-capture/history separation.
+  A known durable gap is partial coverage; original capture completeness remains
+  stored independently. Missing legacy intent coverage is explicitly unknown.
+- Independent protocol review is pending. No new capability is advertised and
+  no producer transport is attached. Agenda-home migration, logger archival and
+  cleanup-policy changes remain a separate design proposal, not implementation.
+
+### 2026-11-02 - Within-batch identity admission
+
+- Overflow admission checks the complete detached batch for conflicting native
+  identities, not only identities already stored in the journal. Matching
+  duplicates remain valid; null native IDs retain batch-offset identity.
+- Bounded streamed canonical JSON digests preserve boolean/integer/float/signed
+  zero distinctions without allocating an unrestricted oversized serialization.
+  Comparison-budget exhaustion rejects explicitly without changing facts or
+  sending gap notifications.
+- The expanded owner packet passed 200 cases, covering new and mixed identities,
+  combined/individual overflow, typed content conflicts, healthy/failed state,
+  duplicate controls, mutation during lock waits and comparison exhaustion.
+- This remains a source-review correction; provider attachment, native evidence,
+  deployment and the original whole-parent gates remain open.
+
+### 2026-11-02 - Conflict admission before overflow invalidation
+
+- Private size-only preflight failures retain detached, structurally validated
+  entries. Failure reconciliation checks accepted batch and native identities
+  inside the fenced owner transaction before changing projection availability.
+- Oversized reuse of an accepted batch returns `batch-conflict`; provably changed
+  accepted native evidence returns `event-conflict`. Existing facts, failure
+  qualification and subscriber notifications remain unchanged in both cases.
+- The focused owner packet passed 151 cases, including direct-history/runtime
+  entry and delta overflow, existing gaps, identity conflicts, admission refusals,
+  lock-wait caller-data mutation and unrepresentable reconciliation. Genuine
+  qualified new-batch overflow still yields unavailable/gap evidence.
+- This is another correction in the open source PR, not source feed attachment,
+  native acceptance, deployment or whole-parent completion.
+
+### 2026-11-02 - Cooperative observer teardown
+
+- Reproduced a controller race: a page already in its adapter's cleanup was
+  interrupted by teardown's task cancellation. Both close and selection
+  replacement failed the new regression while the prior ten cases passed.
+- Internal adapters now receive a request-local stop event for observation and
+  history. Teardown signals those events rather than canceling adapter tasks,
+  and retains all handles until their bounded owned cleanup finishes.
+- Late results remain revision-fenced. Cleanup errors after selection retirement
+  propagate through teardown rather than disappearing with stale callbacks.
+- All 14 controller cases passed, including cleanup already in progress, natural
+  observer completion, repeated caller cancellation and explicit cleanup failure.
+  The changed controller also passed strict checking.
+- This expands the unpublished internal adapter protocol; no provider transport,
+  CLI/resident capability, installed rollout or whole-parent gate is closed.
+
+### 2026-11-02 - Journal-local pending failures
+
+- Pending invalidation records the verified journal generation and source.
+  Snapshots, gaps, archived pages, initialization and append/recovery consume
+  only a matching failure; replacement B cannot contaminate healthy retained A.
+- Replacement persists A's own preexisting gap before retiring its pending
+  failure. B's failure/recovery neither changes that coverage nor erases it.
+  Recovery clears only the matching materialized target's pending failure.
+- Legacy key-based failure recording acquires the current owner/journal fence;
+  invalid reason metadata is rejected before any state change.
+- The focused owner packet passed 119 cases, including healthy and failed
+  predecessors across replacement failure/recovery and rejected legacy failure
+  admission. This remains source awaiting review, not attached feeds, rollout,
+  native qualification or whole-parent completion.
+
+### 2026-11-02 - Admission-qualified database failure handling
+
+- Connection and transaction-lock failures before source/cursor/replacement
+  checks report operation errors without invalidating existing facts or waking
+  subscribers as changed. Runtime wrappers consume an internal invalidation
+  qualification rather than repeating unconditional failure handling.
+- Failures after admitted mutation recheck the captured journal boundary or
+  successfully materialized target before withholding facts. A source that has
+  advanced, or an admission fence that cannot be reestablished, is not guessed
+  to match; the operation reports explicit unavailability.
+- The focused owner packet passed 116 cases. Real private SQLite lock fixtures
+  cover current, stale, wrong-source and replacement requests before admission;
+  SQL-trigger failures verify admitted refresh/replacement gaps still reach held
+  readers. A locked duplicate attempt preserves existing failed-newer state.
+- This is an open source-review correction, not installed source attachment,
+  native-client acceptance or whole-parent completion.
+
+### 2026-11-02 - Reject malformed batch metadata before invalidation
+
+- Runtime publication and reconciliation validate the batch reference before
+  capture/entry preflight or unchanged-capture refresh. Invalid batch metadata
+  cannot trigger oversized-delivery invalidation, alter current facts or wake
+  held subscribers.
+- Added malformed batch cases covering non-text, whitespace and overlong
+  identities with a matching current cursor and an otherwise oversized entry.
+- The focused owner contract/history/runtime packet passed 104 cases, including
+  unchanged complete/unknown reconciliation captures with invalid batch metadata.
+- This is a further review correction in the open foundation PR. Source
+  integration, native qualification and whole-parent gates remain open.
+
+### 2026-11-02 - Bounded change evidence and journal-local recovery
+
+- Large changed captures retain explicit before/after omission, capture-source
+  references, content hashes and byte sizes when full detail cannot fit the
+  entry budget. Unrepresentable admitted publication rechecks the current
+  source/cursor before invalidation and subscriber notification.
+- Journal rows preserve the capture's original completeness. Read frames alone
+  overlay retained-gap coverage, so unchanged recovery captures do not conflict
+  or append spurious observed-change history.
+- Successful fenced source replacement clears pending invalidation for the new
+  journal while retaining the old journal's gap. Same-source refreshes,
+  duplicate acknowledgements and rejected replacement fences cannot clear it.
+- The focused owner packet passed 98 cases, including changed large facts,
+  direct oversized publication, current/stale failure fences, complete/unknown
+  recovery and repeated/new reconciliation batch identities. Capture-valid
+  deeply nested facts use explicit bounded omission; malformed metadata remains
+  an error and cannot be hidden by the fallback.
+- This remains an open source review; no provider attachment, native result,
+  rollout or whole-parent completion is implied.
+
+### 2026-11-02 - Detached captures and visible keyboard selection
+
+- Publication, initialization and reconciliation detach validated nested capture
+  data before writer-lock waits. Hashes, fences and persisted facts all use that
+  detached input, not a caller-owned dictionary that can change during the wait.
+- Duplicate-only acknowledgements preserve failed-newer-capture invalidation.
+  Actual successful materialization can restore availability while retaining
+  history-gap qualification. Locator changes conflict under the same native
+  source/generation/record identity rather than creating another event.
+- Held readers receive refreshed snapshot metadata even when the event cursor
+  does not advance. Qualifier-only changes do not duplicate unchanged large facts.
+- Keyboard scrolling selects a visible event; Enter expands that selection.
+  Mouse selection is highlighted, Home requests bounded older history and
+  End/Follow selects the live bottom without changing focus or Escape handling.
+- Focused isolated packets passed: 86 owner contract/history/runtime cases and
+  80 Manager model/layout/widget/app cases. The unchanged controller, core/policy
+  and Bridge packets remain separately qualified.
+- These are further corrections in the open foundation PR, not attached source
+  feeds, native-client qualification, deployment or whole-effort completion.
+
+### 2026-11-02 - Observation freshness and viewer lifetime fences
+
+- Availability and completeness participate in both unchanged-capture and
+  duplicate-evidence checks; qualification changes require observed-change
+  publication rather than acknowledging stale observed facts.
+- Internal batch hashes use separately bounded inputs. Actual admitted
+  delivery overflow invalidates only the matching current source/cursor and
+  wakes subscribers with explicit unavailable/gap evidence.
+- Viewer teardown retains its reader/page handles and shields awaited cleanup
+  through caller cancellation. A concurrent close cannot start replacement readers.
+- Snapshot refresh merges preserve provider order and retained history after
+  display eviction. An unchanged effective before-boundary retains its pending
+  history demand, so a matching page remains admissible.
+- Updated focused packets passed: 88 Manager model/layout/widget/app/controller
+  cases and 73 owner cases; unchanged contract/policy and Bridge coverage remains
+  qualified. The independent four-module strict check also passed.
+- These source corrections remain in the same open foundation PR. No feed,
+  native, measurement or whole-effort gate is closed by this journal entry.
+
+### 2026-11-02 - Sidecar foundation source qualification
+
+- Authored the bounded typed timeline, virtual Line-API renderer and caller-owned
+  controller. Timeline is an alternate Companion tab; Summary remains initial.
+  Owner feeds are not attached yet, so current facts are not fabricated as history.
+- Added owner-fenced observation/history primitives and preserved optional SDK
+  start metadata with bounded evidence. Neither owner capability is advertised
+  by this foundation; writer, CLI, membership and consumer attachment remain open.
+- Focused isolated packets passed: 39 core/policy/controller cases, 65
+  model/layout/widget/app cases, 62 owner projection cases and 111 Bridge cases.
+  Required install-contract checks and the admitted type cohort passed; the four
+  independent new timeline core/model modules also passed strict checking.
+- Fixed actual Textual mount-context and delegated-message sender failures,
+  teardown ordering, stale sticky context, source-generation lane reservations
+  and a full-window scan in line painting. Source tests retain byte-limited
+  history continuation, explicit integrity reconciliation and unknown capacity.
+- This is tested source awaiting review, not a source merge or deployment.
+  Qualified pre-window measurement, attached push feeds, native clients,
+  performance measurement and all original parent/Relay gates remain open.
+
+### 2026-11-02 - Reviewed Sidecar source admission
+
+- Plan [#9960](https://github.com/ThomasMichon/copilot-extensions/pull/9960)
+  received current-head Copilot approval with no open issues, passed required
+  CI and merged as `c05dcb4dca059e4fff482a3c8816633814c54fa6`.
+- Re-read this complete parent contract and both linked plan/observation
+  documents, then pulled the retained source workspace forward. S0 admission
+  is complete; the bounded model/renderer/policy source slice can begin.
+- Source execution does not settle any original manual/head/native/Relay gate
+  or qualify an unknown pre-window denominator. No installed rollout, live
+  rebinding, runtime threshold change or process action was performed.
+
+### 2026-11-02 - Live Sidecar implementation amendment
+
+- Continued under #8811 after verifying the retained source venue, current
+  coordination and unchanged Companion core. Reused the existing workspace
+  and its controller; no new source-hosted agent or parallel canonical effort.
+- Added the linked implementation/validation and proposed observation contract
+  for true virtualized history, push-first owner adapters and truthful
+  notifications. The vision is extended before source execution; normal
+  plan review remains the admission gate.
+- The configurable warning uses strict unrounded pre-context utilization.
+  Current public SDK start fields can retain total token counts, but targeted
+  window capacity is not silently equated with active pre-window capacity.
+  Selected-runtime/denominator qualification remains explicit.
+- Preserve every incumbent manual/head, popup, relay/native and resource
+  responsibility. No source implementation, installed rollout, live rebinding,
+  threshold mutation or process action is claimed by this planning amendment.
+
+### 2026-10-31 - Timeline and current-worktree presentation guidance
+
+- Added generic fictional timeline/subway examples, expandable parallel Task
+  work and child agendas, blocked/deferred paths and current-position variants
+  to this existing effort's purpose-first guidance.
+- Current accepted effort purpose leads the heading; initial request is a
+  summarized, expandable creation-context record. Worktree/claim/binding/PR
+  events retain their owner meaning and do not become completion or approval.
+- This is a bounded documentation contribution under #8811. Existing source/UI,
+  native/relay and manual/head custodians retain the complete Active root;
+  no implementation, runtime, source replay, native action or rollout occurred.
+
+### 2026-10-25 - Operator selected keyboard guides instead of click tabs
+
+- The operator revised the purpose-first chrome request: "We can instead
+  show some hotkey guides to switch modes." Update standing intent and this
+  continuation through normal review before implementing the revised chrome.
+- The second permanent Claims row and same-window CLI/Summary panes remain
+  required. Guides must describe actual registered, context-appropriate
+  actions, retaining the distinction between Ctrl+K's popup and persistent
+  pane navigation. Do not advertise an unimplemented direct-toggle shortcut.
+- This withdraws the new clickable-mode-tab requirement, not the relay
+  root's historical accepted click deferral or any existing app-input,
+  manual/head, source/provider, native or resource hold. No unreleased mux,
+  live rebinding, runtime installation or rollout was selected.
+
+### 2026-10-25 - Optional attention consumer merged; native chrome boundary
+
+- #8941 merged after current-head Copilot approval, resolution of its
+  reviewed refresh single-flight race and required CI. Re-read this entire
+  root. Close only the Step 6 switching/attention source row; preserve the
+  actual native-client, rollout, topology and every retained manual/head,
+  app-input, relay and resource acceptance item under its existing owner.
+- Final source `5ec8862bc112ee71e5f14b0edfdc69a0dc5ac23b` passed 117
+  graph/attention/native tests plus 43 provider tests on Ubuntu 24.04 / tmux
+  3.4, and 41 attention/native tests on Windows / disposable PSMux 3.3.6 in
+  run `40183515001`. Neither platform packet skipped tests. The focused
+  post-review local packet passed 80 tests; the blocked-replacement
+  regression failed before the fix and passed after it. The earlier
+  integrated Windows packet passed 237 tests with one POSIX-only skip.
+- The optional indicator is explicitly last-reported and continuity-unknown.
+  Its independent worker revalidates one displayed head, uses bounded pulse
+  reads, failure backoff and stale-selection fencing, and cancels its owned
+  child on exit. Changed heads require Refresh. Hidden/unknown observer
+  visibility does not poll the engine. Nudges navigate only, never answer
+  or approve input.
+- Native qualification found that PSMux 3.3.6 can synthesize a client listing
+  while detached; the new visibility reader uses exact-pane
+  `session_attached` evidence instead. PSMux 3.3.5 setup/CLI/directory
+  instability remains separately unqualified under #8811; clean controls
+  did not establish causality. Pinned 3.3.6 results do not qualify the older
+  build, and no installed compatibility floor or runtime was changed.
+- Further isolated native research proved two stored status rows on PSMux
+  3.3.6 through its own state dump with options targeted to that disposable
+  session's server; a separate control retained one row. Indexed option
+  getters were not authoritative. This is stored-state/isolation evidence,
+  not rendered status or real-client mouse dispatch.
+- Released PSMux 3.4.0 still treats custom tmux mouse key names as unmodelled
+  and only routes status-format ranges to native windows. Its unreleased
+  development branch has a mouse-key routing implementation, but that is
+  not a released/qualified runtime. Native windows are not the selected
+  same-window pane design. Keep the withheld mouse-bind safety boundary;
+  do not silently enable it, substitute a layout or declare click delivery.
+- Continue native chrome through the existing Mux-bind owner after selecting
+  the supported-backend path. No live bindings, user mux, runtime update,
+  manual cutover or rollout was exercised. The interrupted keyed workspace
+  allocation remains separately owned and pending.
+
+### 2026-10-25 - Root-attention provider merged; optional UI consumer next
+
+- #8928 merged after current-head Copilot approval and required CI. Re-read
+  this entire root; retain every direct manual/head, app-input, relay,
+  source/provider and native hold. The combined switching/attention row
+  stays unchecked until the optional indicator and its consumer tests land.
+- Added the versioned read-only `session-attention` provider over one bounded
+  root live-pulse register. It exposes only last-reported busy, idle or
+  awaiting-operator state and transition time. Runtime continuity remains
+  unknown; initial busy may lack a transition timestamp. No intent,
+  question, transcript, event-tail, TTL or legacy-idle inference is used.
+- Final staged Windows packet: 145 passed, Ruff clean, install-contract
+  clean for 13 plugins. All 197 admitted source hashes matched after the
+  one reviewed additive routing hash change; inventory and budgets stayed
+  unchanged. Actual fresh-home CLI tests retained source-hosting denial and
+  whole-fixture byte/no-write controls.
+- Exact source `9a173d0ebead8d8a85c9ee063274fcc770a92018` passed 43 attention
+  provider/process tests and 77 graph/native tests, zero skips in either
+  packet, on Ubuntu 24.04 / tmux 3.4 in run `40179632871`.
+  This is isolated source/native evidence, not human input, status rendering
+  or a production deployment. No live repair or rollout was performed.
+- Continue with one optional cancellable attention consumer, selected-head
+  fencing and explicit uncertainty, then the outstanding native chrome and
+  broader status work. Unsupported providers must preserve all existing
+  views; the indicator may nudge a return to CLI but never send an answer.
+  The interrupted keyed workspace allocation remains separately owned and
+  pending; this merge does not settle it or grant manual state repair.
+
+### 2026-10-25 - Graph consumer merged; attention is the next source slice
+
+- #8916 merged after current-head Copilot approval and required CI. Re-read
+  this entire root and retain its complete manual/head, app-input and
+  complementary relay acceptance. The current task worktree was pulled
+  forward onto the confirmed merged source for continued work, not finalized.
+- Final graph/legacy consumer packet: 111 passed. Exact source
+  `1709949607a213d97f992d495ea2b86dcf7b22af` passed 77 tests with zero skips
+  on Ubuntu 24.04 / actual tmux 3.4 in workflow run `40177027971`, including
+  native pane navigation, graph contracts and real Textual consumers.
+  The earlier standalone combined Windows packet passed 343 tests with
+  three platform skips. These are source/isolated-native tiers, not rollout.
+- Fixed the reviewed missing-snapshot-key crash while retaining explicit
+  null for unavailable history. The PR description now records contract,
+  performance and documentation impact; production cold/warm latency is
+  unmeasured, not inferred from test duration.
+- Graph remains evidence-scoped: reported lifecycle is not allocation,
+  retained records are not lifetime totals, and a PR claim is not current
+  open/closed evidence. The broader topology row remains open for its
+  remaining source/status qualification; no narrower merge completes it.
+- Continue with lightweight, versioned root attention observations and a
+  cancellable single-session UI indicator, without rescanning history or
+  guessing questions from transcripts. Then qualify native two-line/click
+  chrome under the relay's existing safety boundary. No installation or
+  live configuration change is authorized by these source milestones.
+- A separate next-workspace allocation was interrupted before a tracking
+  record existed. Keyed replay correctly remains pending and targeted
+  creation repair reports the missing record, so no duplicate allocation or
+  manual state edit was attempted. Its creating session retains that
+  outstanding allocation; continuing in this existing task worktree does
+  not claim it settled.
+
+### 2026-10-25 - Same-window observer merged; native evidence retained
+
+- #8881 merged after current-head Copilot approval, required CI and native
+  qualification. Re-read this entire root before continuing. The combined
+  switching/attention row stays unchecked because question/idle attention is
+  not implemented; no historical manual/head or app-input hold is closed.
+- Final local packet: 270 passed, three platform skips, including actual
+  PSMux switching, original CLI PID retention, observer cleanup, fresh CLI
+  relaunch and pane-aware relaunch registration. Reconnect and detached
+  creation callbacks use snapshot/native-owner fences; unavailable metadata
+  cannot revive a successor or indefinitely orphan a bound observer.
+- Exact source `98a60ab111ab2a5c9aa3ec4dc6757be0a16b8b8c` passed the isolated
+  Ubuntu workflow run `40175168608`: actual tmux 3.4, one native test passed,
+  zero skips. This is not proof of rendered production chrome, real-client
+  mouse dispatch, first installation or rollout.
+- A separate disposable PSMux 3.3.5 option probe round-tripped `status=2`.
+  Indexed `status-format[0]` and `[1]` setters returned success but their
+  indexed reads were empty; scalar `status-format` did persist a value.
+  This is an unresolved rendering/capability qualification, not proof that
+  two-line chrome works or that every possible format is unsupported. Both
+  uniquely named probe sessions were cleaned up. The existing withheld
+  click-binding safety boundary and all native chrome acceptance remain.
+- The observer worktree was finalized through its owner. Continue with the
+  Graph consumer on top of the merged source, then attention and native chrome.
+
+### 2026-10-24 - Observer review fixes and lifecycle qualification
+
+- Addressed the four findings on #8881: native session-ID option targeting
+  for POSIX tmux, visible translation of Windows Job failures, a
+  cross-process guard around observer lookup/creation/publication, and
+  termination of the observer after its original CLI is confirmed ended.
+- The observer pins its original native incarnation before its first poll,
+  never adopts a successor, and treats unavailable evidence as unknown.
+  Its one-second check reads only the registered CLI's native inventory
+  off the UI loop, with no engine or transcript scan.
+- The local focused/native packet passed 136 tests with three platform
+  skips. It includes two overlapping processes and actual PSMux CLI exit,
+  observer termination and subsequent clean CLI relaunch.
+- Added the opt-in `mux-companion` Ubuntu portfolio for actual tmux option
+  targeting, same-window navigation and CLI-exit cleanup. Its result must
+  be recorded before claiming POSIX native qualification; Windows skips
+  do not prove that platform. No production rollout is authorized here.
+
+### 2026-10-24 - Same-window observer source and native controller proof
+
+- Added explicit Show Summary / Return to CLI navigation while preserving the
+  existing Ctrl+K popup. The installed-runtime observer reuses one pane in the
+  same native window; CLI identity comes from launcher registration, never
+  an assumed pane index. Stale, missing or ambiguous identities refuse.
+- The combined UI, registration, runtime-consumer and explicit native packet
+  passed (90 tests, two platform skips). The disposable native PSMux check passed three
+  view round trips with one observer, one window, the original CLI pane ID
+  and its unchanged process ID, including closing and reopening the observer.
+  The observer invocation reached its selected
+  synthetic installed prefix through the real bootstrap, including paths
+  with spaces and apostrophes. This is not an installed production rollout
+  or proof of rendered status chrome or mouse dispatch.
+- Native tests rejected two plausible but incorrect assumptions: pane-only
+  targets do not select PSMux's per-session server, and pane-scoped user
+  options are accepted without persisting. Actions now qualify native pane
+  targets with the session and retain the observer reference in a
+  session-scoped option; CLI identity remains in the Manager registry.
+- Session-level directories can differ from the exact CLI pane's worktree
+  directory. Navigation verifies that registered pane's actual directory
+  and native incarnation rather than relying on the session directory.
+  This does not repair the independent older discovery path.
+- The combined switching/attention and native chrome validation rows remain
+  open. Continue with authoritative topology and attention observations,
+  then two-line chrome/click acceptance; retain all earlier handoff holds.
+
+### 2026-10-24 - Summary/Claims merged; same-window observer next
+
+- #8822 merged after current-head Copilot approval, green required CI and
+  resolution of both shutdown and target-cwd findings. Source milestone only:
+  the full effort remains Active and installed rollout is not asserted.
+- Re-read Step 6, the Validation Plan and continuing Journal. Closed only the
+  Summary/Claims source and focused consumer-test rows. Topology, attention,
+  same-window view integration and two-line/click acceptance remain open.
+- A disposable native psmux 3.3.5 probe repeatedly split, selected and zoomed
+  two inert panes inside one window, retaining the original CLI pane ID and
+  PID. `status=2` and `status-format[1]` were accepted, with `status 2` read
+  back. This proves pane/option state, not rendered status or mouse dispatch.
+  Every probe session was cleaned up; no live session or installed slot changed.
+- The next source slice is an explicit same-window Summary observer and
+  return-to-CLI action, preserving Ctrl+K's existing popup and using the
+  Manager's installation-owned invocation path. Never assume pane index zero
+  or repurpose session-lineage succession as allocated-sub-agent topology.
+### 2026-10-25 - Bounded graph consumer source validation
+
+- Added a secondary Graph view for reported disposition history, typed
+  directed resource references and optional retained-session observations.
+  Inbound owners, outbound claims and reported subagents remain distinct;
+  claims alone do not establish whether a PR is open.
+- The graph uses the versioned #8905 provider only for one unambiguous
+  selected head session. Reads are on demand, off the UI loop, cancel on
+  shutdown and cannot replace a refreshed snapshot with an older result.
+  Unsupported or partial evidence cannot disable Summary, Claims or Recovery.
+- The focused packet passed 108 tests: literal/narrow/long graph rendering,
+  bounded fan-out and duplicates, schema/uncertainty handling, actual JSON
+  subprocesses with target-cwd isolation, and real Textual activation,
+  refresh, optional-source failure and blocked-read dismissal. Ruff and the
+  13-plugin install-contract gate passed.
+- After integrating the merged observer, the standalone combined packet
+  passed 343 tests with three platform skips and a clean host-state audit.
+  An earlier concurrent-provisioning run had the same passing assertions but
+  failed its machine-PATH drift audit; no shared environment was rolled back
+  and the drift's source was not established. A further actual Textual
+  late-result/refresh regression passed in the five-test UI packet.
+- This is source validation only. Question/idle attention, native mux view
+  tabs, two-line claims chrome, real mux-client dispatch and installed/rollout
+  evidence remain separate, unchecked acceptance. The parent stays Active.
+
+### 2026-10-25 - Retained session metadata provider merged
+
+- #8905 merged after current-head Copilot approval and required CI. Re-read
+  this entire parent effort; the topology, attention, mux chrome and retained
+  manual/native acceptance remain open. The earlier #8822 Summary/Claims
+  source delivery and its 156-test consumer packet now close only their
+  corresponding Step 6 and source-validation rows.
+- Added the optional, versioned `session-observations` engine command, with
+  streamed retained-file tool-event counts and reported subagent lifecycle.
+  Counts are not lifetime totals; incomplete history, missing producer fields
+  and unavailable evidence remain explicit. Reported completion does not mean
+  allocation release, retirement or resource custody.
+- The final focused provider packet passed 74 tests, including real CLI
+  subprocesses over fresh synthetic state, interrupted-read byte coverage,
+  launching-task metadata and unchanged source-hosting denial. Ruff and the
+  13-plugin install-contract gate passed. CI executed the unchanged admitted
+  unit inventory after its project-routing source hash was refreshed.
+- This is provider-first source delivery, not UI integration or deployment.
+  No runtime was installed. The next slice consumes the optional contract in
+  the bounded graph presenter; unsupported providers retain existing views.
 
 ### 2026-10-24 - Reviewed intent merged; Summary/Claims source slice
 

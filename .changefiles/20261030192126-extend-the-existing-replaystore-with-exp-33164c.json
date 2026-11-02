@@ -1,0 +1,9 @@
+{
+  "comment": "Extend the existing ReplayStore with explicit review-data adoption, reserved immutable intent and fenced native receipts without backend effects",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

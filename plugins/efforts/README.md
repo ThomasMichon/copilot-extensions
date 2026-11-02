@@ -17,7 +17,7 @@ outlives any single one.
 ## What this plugin ships
 
 This is a **payload-only plugin** — no runtime, virtualenv, service, installer,
-or binstub. Enabling the plugin is the whole install. It delivers three skills, an
+or binstub. Enabling the plugin is the whole install. It delivers four skills, an
 explicit repository-adoption contract, a minimal static completion-gate
 fallback, and cross-platform policy producers:
 
@@ -26,6 +26,48 @@ fallback, and cross-platform policy producers:
 | [**planning-efforts**](skills/planning-efforts/SKILL.md) | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
 | [**efforts-setup**](skills/efforts-setup/SKILL.md) | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
 | [**driving-backlog-burndown**](skills/driving-backlog-burndown/SKILL.md) | Execution: charter a scoped backlog recovery, maintain the item/owner ledger, supervise original owners through verified outcomes, and preserve state across native rollover or explicit transfer. Ships charter, dashboard, checkpoint and handoff templates; no scheduler or runtime is started. |
+| [**driving-effort-agendas**](skills/driving-effort-agendas/SKILL.md) | Opt-in execution aide: accepted tail queues, scoped subqueues, saved continuations and explicit context-qualified source CLI. Retains the transactional store and strict legacy count policy; installed copies must support the selected contract. No hook or service is required. |
+
+The optional agenda helper is invoked directly from the skill's payload path
+using an existing Python 3 interpreter and an explicit journal/state-home path.
+The [managed command contract](skills/driving-effort-agendas/references/managed-agenda.md)
+owns `read`/`next`/`check`/`history` and explicit `init`/semantic `update`/`publish`.
+The [field contract](skills/driving-effort-agendas/references/field-contract.md)
+distinguishes exact enums/identifiers from prose/raw JSON and documents literal
+text versus Markdown rendering; accepted string punctuation does not imply a
+rich-text renderer.
+SQLite transactions preserve full state/history, stable retry results and finite
+budgets. Optional argv-only delivery is separate from durable acceptance.
+The legacy inspector remains read-only. Explicit quiescent same-home adoption
+preserves exact cursor bytes before installing an unsupported-version marker,
+so already-installed old inspectors also refuse stale JSON. Filesystem fencing
+precedes SQLite acceptance; interrupted adoption requires explicit recovery.
+This migration durability path requires POSIX directory fsync; unqualified
+platforms are refused rather than claimed compatible. Neither path executes
+tasks or proves source completion.
+There is no global agenda binstub; CLI/App/ACP invocation requires a tool host
+with process execution and an existing Python interpreter. Manual use remains
+available for unmanaged homes; migration is explicit, never automatic.
+
+The [queue/continuation procedure](skills/driving-effort-agendas/references/context-qualified-continuations.md)
+requires relevant new context and a viable changed approach for productive
+revisits, not a numerical count or changed metadata. Unchanged repetition calls
+for bounded autonomous recovery, not default Operator steering. Original links,
+returns, history and independent resource/authority/completion gates remain.
+Existing cursor 1/2 and request 1 keep strict legacy admission. The
+[context-qualified source CLI](skills/driving-effort-agendas/references/context-qualified-commands.md)
+uses explicit fresh adoption with cursor 4/store generation 2/request 2,
+rich immutable identity records and qualified replanning decisions rather than
+implicit attempts. Installed copies may predate it; no automatic update or
+active-lane migration is implied. The version-3 refusal marker is never executable state.
+
+Its optional version-2 cursor preserves full deferred branch/return state,
+original budgets, pending decision packets and real attempt/revisit times.
+Due or actual-response signals permit condition reinspection—not consent or
+automatic restoration—while another authorized branch can continue. The
+[deferred-branch procedure](skills/driving-effort-agendas/references/deferred-branches.md)
+owns the format and examples. Version-1 cursors remain valid; no daemon,
+scheduler or per-node presence-poll loop is introduced.
 
 An adopting repository commits
 `.copilot-extensions/efforts/config.json` with the exact version 1 policy:
@@ -97,6 +139,22 @@ portable core.
 
 ## How executor plugins build on efforts
 
+### Optional scope approvals
+
+The canonical effort can capture original upfront approvals and one-time answers
+in **Scope Approvals** or a linked record. Preserve the operator/charter source,
+operations/destinations/owners/effects and accepted blast radius, limits,
+repetition/revision policy and later holds or revocation. Reuse only within that
+scope; plan review and source revisions are not new operational grants.
+
+The [planning procedure](skills/planning-efforts/SKILL.md#capture-and-reuse-scope-approvals)
+and its [record seam](skills/planning-efforts/references/efforts.md#scope-approvals)
+own capture and reuse. Checkpoints and handoffs retain references, exclusions and
+current changes. This is optional, standalone guidance, not an approval runtime;
+deployment, personal-data/disclosure and external-owner effects remain gated.
+
+### Executor ownership
+
 The README's **participants seam** is where executor plugins can plug in. The
 efforts plugin is standalone: a repo can use the README contract with no
 agent-worktrees registration and no executor plugin at all. When executor
@@ -116,8 +174,11 @@ command as optional enrichment. The worktree record owns one
 repository-relative pointer plus declared participant/slice identity; an open
 binding derives the existing follow-up cleanup gate and contributes a bounded
 pointer through agent-worktrees' existing session-conduct hook. The efforts
-plugin still owns no worktree state file and registers no session-start hook;
-its Phase 1 policy producers remain staged and unregistered.
+plugin does not own or rewrite the worktree provider's tracking records.
+Its optional agenda format describes separate agent-local data beside the
+worktree journal; the managed CLI writes only its explicitly adopted SQLite
+home, never the worktree provider's records. No session-start
+hook is registered; the policy producers remain staged and unregistered.
 
 ## Enable
 

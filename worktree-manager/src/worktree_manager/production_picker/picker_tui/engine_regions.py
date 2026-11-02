@@ -259,7 +259,7 @@ class _PickerNativeData(OptionList):
     # ---- data <-> options -------------------------------------------------
     def _signature(self):
         scr = self._screen
-        from .source_read_notices import failed_worktree_reads
+        from .source_read_notices import worktree_read_feedback
         wt = tuple(sorted(scr.wt_sel.ids)) if hasattr(scr, "wt_sel") else ()
         kind = scr._kind()
         worker_fp = ()
@@ -309,7 +309,7 @@ class _PickerNativeData(OptionList):
                 scr.size.width, getattr(scr, "cmd_mode", False),
                 getattr(scr.list_view, "query", ""),
                 getattr(scr.list_view, "sort_index", 0), fp, worker_fp,
-                tuple(failed_worktree_reads(scr)) if kind == "worktrees" else ())
+                tuple(worktree_read_feedback(scr)) if kind == "worktrees" else ())
 
     def _rebuild(self):
         scr = self._screen

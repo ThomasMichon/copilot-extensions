@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .source_identity import local_key
+
 
 def published_locality(rec, engine=None) -> bool:
     """Read published locality without evaluating a cold source's LOCAL."""
@@ -26,7 +28,7 @@ def verify_liveness(rec, source, project):
         if callable(local_check):
             is_local = bool(local_check(rec.get("machine"), rec.get("env")))
         else:
-            local = getattr(source, "LOCAL", None)
+            local = local_key(source)
             is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
         if not is_local or not (project_config.tracking_dir(project) / f"{wt_id}.yaml").exists():
             return None, is_local
@@ -103,7 +105,7 @@ def load_claims(engine, rec):
     machine, env = rec.get("machine"), rec.get("env")
 
     def query(*, transitive: bool = False) -> dict:
-        if (machine, env) == getattr(engine.src, "LOCAL", None):
+        if (machine, env) == local_key(engine.src):
             args = ["claims", *(["transitive"] if transitive else []), wid, "--json"]
             return engine_client.run_json(
                 context.project(), args, runner=engine._provider_runner(),

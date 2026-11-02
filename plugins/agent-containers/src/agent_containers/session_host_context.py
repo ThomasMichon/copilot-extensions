@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from typing import Any, Iterator
 
 from .config import SECURITY_PROFILE_LABEL, TRUSTED_PROFILE, ContainersConfig, FleetConfig
+from .lifecycle_ownership import validate_session_owner
 
 
 @dataclass
@@ -50,6 +51,7 @@ def resolve_context(
             f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
             "Session Host projection is trusted-fleet only"
         )
+    validate_session_owner(fleet, (inspection.get("Config") or {}).get("Labels") or {})
     return TrustedContext(
         config, fleet, fleet.exec_user or config.exec_user,
         fleet.workspace_folder or config.workspace_folder,

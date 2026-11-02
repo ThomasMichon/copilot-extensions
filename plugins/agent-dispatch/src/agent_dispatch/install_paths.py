@@ -4,11 +4,39 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 
 INSTALL_DIR_ENV = "AGENT_DISPATCH_INSTALL_DIR"
 LEGACY_INSTALL_DIRNAME = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
 SCOPED_SERVICE_HASH_LENGTH = 12
+
+_POSIX_ENV_REFERENCE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
+_WINDOWS_ENV_REFERENCE = re.compile(
+    r"'[^']*(?:'|$)|\$\$|%%|\$\{([^}]*)\}|\$([A-Za-z0-9_-]+)|%([^%]*)%"
+    r"|(?P<unclosed>\$\{[^}]*$|%[^%]*$)"
+)
+
+
+def _expand_service_env_value(value: str, env: dict[str, str]) -> str:
+    windows = os.name == "nt"
+    pattern = _WINDOWS_ENV_REFERENCE if windows else _POSIX_ENV_REFERENCE
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if windows:
+            if token.startswith("'") or match.group("unclosed") is not None:
+                return token
+            if token in ("$$", "%%"):
+                return token[0]
+            name = next(group for group in match.groups() if group is not None).upper()
+        else:
+            name = match.group(1)
+            if name.startswith("{"):
+                name = name[1:-1]
+        return env.get(name, token)
+
+    return pattern.sub(replace, value)
 
 
 def normalized_path(path: Path) -> str:
@@ -64,6 +92,8 @@ def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> di
     any other installed pin), and evaluator/producer-scope registrations
     would fail with ``control_authority_not_configured``.
 
+    Variable references use this captured mapping, including earlier pins,
+    rather than the triggering process's unrelated environment.
     Returns ``env`` for convenient chaining; mutates it in place.
     """
     env_file = install_dir_path / "service.env"
@@ -74,7 +104,10 @@ def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> di
                 if not s or s.startswith("#") or "=" not in s:
                     continue
                 k, v = s.split("=", 1)
-                env[k.strip()] = os.path.expandvars(v.strip())
+                key = k.strip()
+                if os.name == "nt":
+                    key = key.upper()
+                env[key] = _expand_service_env_value(v.strip(), env)
         except OSError:
             pass
     return env

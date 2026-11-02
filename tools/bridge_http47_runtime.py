@@ -119,7 +119,7 @@ def install(*, observer: bool = False) -> None:
     path, request = load_request()
     proof = request["source_proof"]
     root = Path(request["root"])
-    bind_installation = request.get("capture_generation") in (48, 49, 50)
+    bind_installation = request.get("capture_generation") in (48, 49, 50, 51)
     own = "tools/bridge_http47_runtime.py"
     if sha(Path(__file__).read_bytes()) != proof[own]["sha256"]:
         raise ValueError("HTTP-47 runtime guard source is unproven")
@@ -148,7 +148,10 @@ def install(*, observer: bool = False) -> None:
     early = sorted(name for name in modules if name in sys.modules)
     # The runner's portfolio containment plugin imports this dependency before
     # conftest. No Bridge module or child runtime gets this narrow exception.
-    if early and (not observer or early != ["agent_procutil"]):
+    if early and (not observer or early not in (
+        ["agent_procutil"],
+        ["agent_procutil", "agent_procutil.daemon_instances"],
+    )):
         raise ValueError(f"HTTP-47 production modules loaded before interpreter admission: {early}")
 
     class Origins:

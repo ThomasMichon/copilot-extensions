@@ -748,6 +748,7 @@ def test_cmd_exec_forwards_copilot_args_into_acp_command(monkeypatch):
     registrar pool's ``body.charter``) passed to ``agent-containers exec``
     must reach the launched in-container acp_command."""
     from agent_containers.resolver import LiveExecTarget
+    monkeypatch.setattr(cli.hosting_policy, "require_container_hosting", lambda *a, **k: None)
 
     target = LiveExecTarget(
         name="myfleet-1",
@@ -801,6 +802,7 @@ def test_cmd_exec_is_unchanged_without_copilot_args(monkeypatch):
     """No extra copilot_args (the overwhelming common case today) must
     launch the exact same acp_command as before this change."""
     from agent_containers.resolver import LiveExecTarget
+    monkeypatch.setattr(cli.hosting_policy, "require_container_hosting", lambda *a, **k: None)
 
     target = LiveExecTarget(
         name="myfleet-1",

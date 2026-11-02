@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 40
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -289,6 +289,7 @@ CREATE TABLE IF NOT EXISTS live_messages (
     delivered_at REAL,
     consumed_at REAL,
     consumption_tracked INTEGER NOT NULL DEFAULT 0,
+    exact_session INTEGER NOT NULL DEFAULT 0,
     claimed_at REAL,
     outcome TEXT
 );
@@ -356,12 +357,14 @@ class _CoreMixin:
                         "supported writable preparation or migration is needed"
                     )
                 from .runtime_custody import validate_schema
-                from .db_schema import validate_cold_recovery_schema
+                from .db_schema import validate_cold_recovery_schema, validate_exact_live_schema
                 from .inbox_custody import validate_schema as validate_inbox_schema
                 from .inbox_consumer_schema import validate_schema as validate_consumer_schema
                 from .turn_custody_schema import validate_schema as validate_turn_schema
                 from .acquisition_custody_schema import validate_schema as validate_acquisition_schema
                 from .creation_custody_schema import validate_schema as validate_creation_schema
+                from .creation_launch_schema import validate_schema as validate_creation_launch_schema
+                from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
 
                 validate_schema(self._get_conn())
                 validate_cold_recovery_schema(self._get_conn())
@@ -370,6 +373,9 @@ class _CoreMixin:
                 validate_turn_schema(self._get_conn())
                 validate_acquisition_schema(self._get_conn())
                 validate_creation_schema(self._get_conn())
+                validate_creation_launch_schema(self._get_conn())
+                validate_provider_launch_schema(self._get_conn())
+                validate_exact_live_schema(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                     raise ValueError("Read-only database changed during preparation")

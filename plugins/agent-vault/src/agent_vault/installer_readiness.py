@@ -50,6 +50,13 @@ def evaluate(
             "The agent-vault service is unavailable or unhealthy. Re-run the "
             "installer update; readiness did not start or restart the service.",
         )
+    if service.get("accepting_work") is False:
+        return _result(
+            "failed",
+            "The vault endpoint is reachable, but its selected generation is "
+            "not admitting credential work during replacement. Runtime "
+            "installation and service readiness are separate outcomes.",
+        )
     backend = service.get("cli")
     if backend == "not_found":
         return _result(

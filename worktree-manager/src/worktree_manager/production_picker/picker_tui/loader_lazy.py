@@ -99,6 +99,7 @@ class LazyLoadMixin:
             gen = self._gen.get(source.cache_key, 0)
         from ... import resident_picker
         from .data_ssh import _project
+        from .loader_current_feed import ReadFailure
 
         if not resident_picker.wait_for_local(
             _project(),
@@ -131,8 +132,8 @@ class LazyLoadMixin:
                     # the escape hatch if the operator believes it's back.
                     self._pinged_only.discard(source.cache_key)
                     self._state[source.cache_key] = "failed"
-                    self._error[source.cache_key] = (
-                        str(exc).strip() or type(exc).__name__
+                    self._error[source.cache_key] = ReadFailure(
+                        str(exc).strip() or type(exc).__name__, kind="connection",
                     )
             return
         with self._lock:
@@ -155,10 +156,11 @@ class LazyLoadMixin:
                 # unreachable ping must not stay promotable.
                 self._pinged_only.discard(source.cache_key)
                 self._state[source.cache_key] = "failed"
-                self._error[source.cache_key] = (
+                reason = (
                     (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
                     or ["unreachable"]
                 )[0]
+                self._error[source.cache_key] = ReadFailure(reason, kind="connection")
 
     def ensure_loaded(self, key) -> bool:
         """Promote one ping-only source to a real listing (picker-lazy-

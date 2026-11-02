@@ -60,8 +60,8 @@ manages can use it, not just this one):
    *applicable* tier's entries into one deduplicated list -- in the same
    `token|reason` / `regex:<pattern>|reason` format
    `check-no-internal-identifiers.py`'s CI-secret source has always used.
-4. **`check-no-internal-identifiers.py` consumes the sweep automatically**,
-   as a fourth, best-effort identifier source: when `agent-worktrees` is
+4. **Explicit manual audits can consume the sweep** as a fourth, best-effort
+   identifier source: when `agent-worktrees` is
    installed and reachable on `PATH`, the guard shells out to `identifiers
    sweep --format json` (scoped to this repo via cwd auto-resolution) and
    folds the result in alongside whatever `COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`
@@ -71,15 +71,18 @@ manages can use it, not just this one):
    successfully. Absent anywhere
    `agent-worktrees` isn't installed or this repo isn't registered (a fresh
    clone, CI), this source silently contributes nothing -- it's additive,
-   never a new requirement. Opt out entirely with
+   never a new requirement. Pre-push passes `--no-live-sweep` and consumes only
+   configured environment/local inputs, without launching this discovery.
+   Opt out of manual discovery entirely with
    `COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`.
 
 Because the pre-push git hook
 ([`tools/hooks/pre-push`](../tools/hooks/pre-push)) and `agent-worktrees`'
 own `create-pr`/`push-changes` flow both ultimately run `git push` (which
-fires the same `core.hooksPath` hook), this plays nice with `create-pr`
-automatically: no separate wiring needed, no duplicate invocation to keep in
-sync.
+fires the same `core.hooksPath` hook), configured identifier checks apply to
+both flows without duplicate discovery. To enforce cross-repo terms during a
+push, explicitly supply the sweep output through the configured environment or
+local denylist inputs first; the hook does not refresh those terms itself.
 
 ## Writing a `.identifier-blocklist/block-for-<tier>.yaml` file
 
@@ -179,8 +182,8 @@ before trusting it.
 CI runners don't have a local `repos.yaml` or any other repo's checkout, so
 the live sweep (source 4) never fires there -- `FORBIDDEN_IDS_WORK` /
 `FORBIDDEN_IDS_FACILITY` must still be provisioned by hand, but can now be
-*generated* from the same live sweep an operator's own pre-push hook already
-uses, rather than hand-copied from a separate private file:
+*generated* from an explicit live sweep, rather than hand-copied from a separate
+private file:
 
 ```powershell
 $aw = "agent-worktrees"   # the exact argv[0] from your session command catalog

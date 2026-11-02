@@ -5,6 +5,12 @@ Parent: [Linux role fleet](README.md). Integration: #8377. Standing intent:
 This records the reviewed plan and bounded source progress, not a running-state
 or whole-fleet retention claim.
 
+The [keyed attribution continuation](telemetry-attribution.md) extends this same
+#8377 sub-plan with truthful producer/subject/collector context, user-held-key
+self-lookup and a pre-shared-storage privacy projection. It is a proposal, not
+implemented configuration, deployed instrumentation or a second collector.
+Installer #8370 and formatter #6812 custody remain unchanged.
+
 ## Operator direction and scope
 
 The operator requested an audit of existing logging, predictable convention-based
@@ -99,6 +105,17 @@ The following implementation details are **agent-recommended**:
   admitted running behavior. Do not mark the parent effort Done at plan merge.
 
 ## Dispatch application source slice (#8377)
+
+The separately bounded
+[Dispatch spawn causal logging slice](dispatch-spawn-causal-logging.md)
+adds the next failure-stage correlation plan through these existing application
+owners. It does not replace native capture, installer diagnostics, telemetry
+attribution or their accepted source and running evidence.
+
+The next [persistent isolated reproducer proposal](persistent-isolated-reproducer.md)
+specifies credential-free synthetic qualification without borrowing production
+state, weakening restricted-container policy or changing the ephemeral test
+runner. It is a source plan, not provisioning or native/running acceptance.
 
 `spinning-sprocket` takes only the Dispatch application-handler and local
 discovery slice. Reconciliation confirmed #8370's independent installer capture

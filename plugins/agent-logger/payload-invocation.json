@@ -5,6 +5,7 @@
   "legacyRuntimeRoot": ".agent-logger",
   "installationContext": "required",
   "installerLifecycle": true,
+  "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_LOGGER_NO_SELFPROVISION",
   "payloadRootEnv": "AGENT_LOGGER_PAYLOAD_ROOT",
   "payloadDispatcher": {

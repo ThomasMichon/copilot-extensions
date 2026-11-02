@@ -18,6 +18,7 @@ from .gateway_service_channel import (
 )
 from .gateway_service_connector import verified_tls
 from .gateway_service_context import METHODS
+from .machine_identity import PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof
 
 
 @dataclass(frozen=True)
@@ -52,10 +53,17 @@ class ServiceCaller:
     """
 
     def __init__(self, *, gateway_origin: str,
-                 access_token_callback: Callable[[], Awaitable[str]], proof_key: Any,
-                 gateway_ca: str | None = None, timeout: float = DEADLINE) -> None:
+                 access_token_callback: Callable[[], Awaitable[str]] | None = None, proof_key: Any,
+                 gateway_ca: str | None = None, timeout: float = DEADLINE,
+                 machine_principal: str | None = None, machine_audience: str | None = None,
+                 machine_resource: str | None = None) -> None:
         self.gateway = origin(gateway_origin)
-        check(callable(access_token_callback), "invalid-token-source")
+        machine = (machine_principal, machine_audience, machine_resource)
+        self._machine = all(isinstance(item, str) and item for item in machine)
+        check((self._machine and access_token_callback is None)
+              or (all(item is None for item in machine) and callable(access_token_callback)),
+              "invalid-token-source")
+        self._principal, self._audience, self._resource = machine
         check(type(timeout) in (int, float) and 0 < timeout <= DEADLINE,
               "invalid-timeout")
         self._access, self._key = access_token_callback, proof_key
@@ -87,7 +95,8 @@ class ServiceCaller:
             ) as session:
                 # aiohttp retries idempotent requests even on a fresh connection.
                 session._retry_connection = False
-                async with session.get(self.gateway + "/_fleet/challenge",
+                endpoint = "/_fleet/machine-challenge" if self._machine else "/_fleet/challenge"
+                async with session.get(self.gateway + endpoint,
                                        allow_redirects=False) as response:
                     check(response.status == 200, "gateway-challenge-refused",
                           response.status if response.status in (401, 403, 429, 502, 503, 504)
@@ -97,21 +106,31 @@ class ServiceCaller:
                     challenge = unpack(raw.decode("utf-8"))
                 except UnicodeError:
                     raise TransportError("invalid-gateway-response", 502) from None
-                shape(challenge, {"nonce"})
+                shape(challenge, {"nonce", "profile"} if self._machine else {"nonce"})
+                check(not self._machine or challenge["profile"] == MACHINE_PROFILE,
+                      "unsupported-profile", 409)
                 nonce = challenge["nonce"]
                 check(isinstance(nonce, str) and len(nonce) == 43
                       and all(c.isascii() and (c.isalnum() or c in "-_") for c in nonce),
                       "invalid-gateway-response", 502)
                 try:
-                    access = await asyncio.wait_for(self._access(), 5)
-                    check(isinstance(access, str) and 0 < len(access) <= 8192
-                          and all(32 < ord(c) < 127 for c in access), "invalid-token-source")
-                    proof = make_proof(self._key, access, nonce=nonce,
-                                       target_uri=self.gateway + path, method=method)
+                    if self._machine:
+                        proof = make_machine_proof(
+                            self._key, principal=self._principal, audience=self._audience,
+                            kind="caller", resource=self._resource, method=method,
+                            target_uri=self.gateway + path + query, nonce=nonce, body=body)
+                        authenticated = selected | machine_headers(self._principal, proof)
+                    else:
+                        assert self._access is not None
+                        access = await asyncio.wait_for(self._access(), 5)
+                        check(isinstance(access, str) and 0 < len(access) <= 8192
+                              and all(32 < ord(c) < 127 for c in access), "invalid-token-source")
+                        proof = make_proof(self._key, access, nonce=nonce,
+                                           target_uri=self.gateway + path, method=method)
+                        scheme = "DP" + "oP "
+                        authenticated = selected | {"Authorization": scheme + access, "DPoP": proof}
                 except Exception:
                     raise TransportError("caller-credentials-unavailable", 401) from None
-                scheme = "DP" + "oP "
-                authenticated = selected | {"Authorization": scheme + access, "DPoP": proof}
                 attempted = True
                 async with session.request(
                     method, URL(self.gateway + path + query, encoded=True),

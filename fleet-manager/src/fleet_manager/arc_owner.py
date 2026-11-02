@@ -171,6 +171,45 @@ class ArcHelmOwner:
         self.native_failure: subprocess.SubprocessError | None = None
         self._lock = Lock()
 
+    def gateway_binding(self, slot, *, role: str, installation: str):
+        """Register only fixed convergence in the existing Gateway process.
+
+        Selected tooling/artifacts/support and physical custody remain required.
+        This does not adopt an incumbent release or provision a controller.
+        """
+        from .gateway_local_handler import LocalHandlerBinding, settled
+        from .gateway_service_handler import ServiceResponse
+        from .runtime_admission import AdmissionError
+
+        identifier(role, "ARC caller role")
+        identifier(installation, "ARC caller installation")
+
+        async def handle(local):
+            request = local.request
+            if request.method != "POST" or request.target != "/converge":
+                return ServiceResponse(404)
+            try:
+                intent = OperationIntent(request.body)
+                if intent.to_dict()["command"] != "runner.converge":
+                    raise PlanError("unsupported ARC operation")
+            except PlanError:
+                return ServiceResponse(400, (("content-type", "application/json"),),
+                                       canonical({"error": "invalid-arc-operation"}))
+            try:
+                permit = local.authorize_operation(
+                    intent, self.admission, authority=self.journal.authority,
+                    role=role, installation=installation)
+            except AdmissionError as error:
+                return ServiceResponse(403, (("content-type", "application/json"),),
+                                       canonical({"error": error.code}))
+            try:
+                receipt = await settled(lambda: self.converge(intent, permit))
+                return ServiceResponse(200, (("content-type", "application/json"),), receipt.encoded)
+            finally:
+                self.admission.discard(permit)
+
+        return LocalHandlerBinding(slot, handle)
+
     def _selected(self, request, expected=None):
         selected = self.current()
         if type(selected) is not ArcDeployment or (expected is not None and selected != expected):

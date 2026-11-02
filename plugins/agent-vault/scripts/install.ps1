@@ -78,6 +78,27 @@ function Copy-InstallerStageDirectory {
     }
 }
 # === end install-contract:v4 payload-copy ===
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-vault' }
+    $driverOptions = @()
+    foreach ($name in @('NoService', 'Purge', 'Force', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-vault' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -594,9 +615,10 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
 }
+
 # === end install-contract:v4 marker/toss helpers ===
 
 function Get-SourceKind {
@@ -842,6 +864,7 @@ function Install-Runtime {
 
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
+        if (-not (Invoke-VersionedMarkComplete)) { throw 'Retained runtime completion failed' }
         if ($script:SourceRuntimeIdentity) {
             if (-not (Test-RuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
             Assert-SourceRuntime
@@ -859,7 +882,7 @@ function Install-Runtime {
     }
 
     Invoke-VersionedSlotClean
-    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
         Write-Fail "Failed to create venv at $VenvDir"
         exit 1
     }
@@ -1018,7 +1041,14 @@ $portDirective
 `$_py = `$null
 if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver; `$_py = `$AgentRtPy }
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = '$($LinkPython -replace "'","''")' }
-& `$_py -m agent_vault.service --foreground --persistent
+`$_cacheId = [Guid]::NewGuid().ToString('N')
+`$_pythonCache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pythonCache.StartsWith('\\?\')) {
+    `$_pythonCache = if (`$_pythonCache.StartsWith('\\')) {
+        '\\?\UNC\' + `$_pythonCache.Substring(2)
+    } else { '\\?\' + `$_pythonCache }
+}
+& `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service --foreground --persistent @args
 exit `$LASTEXITCODE
 "@, $utf8NoBom)
     $action = New-ScheduledTaskAction `
@@ -1064,27 +1094,19 @@ exit `$LASTEXITCODE
 
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
-    # #1836/readiness-flap: Start-ScheduledTask is fire-and-forget, and the task
-    # itself only resolves + launches the active slot -- it does not confirm the
-    # replacement daemon actually comes up. Poll the fixed endpoint so
-    # install/update never silently returns "done" while the service is still
-    # down (e.g. immediately after Stop-VaultDaemonGraceful released it, or a
-    # slow first import on a cold venv).
-    $py = if (Test-Path $LinkPython) { $LinkPython } else { $null }
-    if ($py) {
-        $ready = $false
+    # IgnoreNew may leave the predecessor's task running. The selected owner
+    # starts its successor independently and verifies its generation, not merely
+    # the continued health of whichever daemon still serves the old endpoint.
+    if (Test-Path $LinkPython) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        for ($i = 0; $i -lt 40; $i++) {
-            Start-Sleep -Milliseconds 250
-            & $py -m agent_vault.service --ping 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-        }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskLauncher --ensure-selected
+        $ready = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
         if ($ready) {
             Write-Ok 'agent-vault service is running (post-(re)start readiness confirmed)'
         } else {
-            Write-Fail 'agent-vault service did not become reachable within 10s after (re)start'
+            Write-Fail 'agent-vault runtime installed, but its selected service generation is not ready'
             exit 1
         }
     }
@@ -1130,65 +1152,6 @@ function Invoke-Stamp {
     Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
 }
 
-function Stop-VaultDaemonGraceful {
-    <# Graceful drain-stop of the running vault daemon before a version cutover
-       (Thread B, lightest tier; docs/patterns/graceful-daemon-cutover.md).
-       agent-vault serves a FIXED endpoint (Unix socket / named pipe / fixed TCP),
-       so an active/passive port flip is inapplicable -- the new daemon rebinds the
-       SAME endpoint after the old releases it. The daemon's `--stop` sends a
-       cooperative shutdown that lets the in-flight request finish (drain) and
-       closes its listeners cleanly; it is NOT a kill. The unlocked in-memory
-       master is intentionally released -- the RECONNECT is the opt-in persistent
-       encrypted credential cache (credential-cache.enc, DPAPI-wrapped key) that a
-       fresh daemon reads on demand without a re-prompt, or (cache off) a single
-       re-unlock on first post-cutover use. Returns $true when a daemon was
-       drained+stopped. #>
-    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
-    if (-not $py) { return $false }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    # Only stop if one is actually running (ping), so a fresh install/update on a
-    # box with no live daemon skips straight to a normal start.
-    & $py -m agent_vault.service --ping 2>$null | Out-Null
-    $running = ($LASTEXITCODE -eq 0)
-    if (-not $running) { $ErrorActionPreference = $prevEAP; return $false }
-    Write-Step 'Graceful cutover: draining the in-flight request and stopping the old vault daemon (auth state reconnects via the persistent cache or a single re-unlock)...'
-    & $py -m agent_vault.service --stop 2>$null | Out-Null
-    # Give the old daemon a moment to close its listeners so the new one can rebind
-    # the fixed endpoint (Unix socket / named pipe / TCP).
-    for ($i = 0; $i -lt 20; $i++) {
-        Start-Sleep -Milliseconds 250
-        & $py -m agent_vault.service --ping 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { break }
-    }
-    $stillRunning = ($LASTEXITCODE -eq 0)
-    if ($stillRunning) {
-        # The graceful `--stop` request did not retire the process within the
-        # drain window (observed in practice: an asyncio shutdown race can leave
-        # the old daemon's OS process alive even after it stops answering as the
-        # advertised endpoint). Force-retire it by PID from the run-dir marker so
-        # a stuck predecessor never lingers to contend for the fixed endpoint
-        # with the daemon this update starts next -- otherwise repeated updates
-        # accumulate zombie processes that intermittently win the port/pipe bind
-        # race and make readiness flap.
-        $oldPid = $null
-        if (Test-Path $PidFile) {
-            $oldPid = (Get-Content -LiteralPath $PidFile -Raw -ErrorAction SilentlyContinue).Trim()
-        }
-        if ($oldPid -match '^\d+$' -and (Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue)) {
-            Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 250
-            Write-Warn "Old vault daemon (PID $oldPid) did not retire gracefully within 5s -- force-stopped"
-        } else {
-            Write-Warn 'Old vault daemon did not retire gracefully within 5s, and its PID could not be confirmed for a force-stop'
-        }
-    } else {
-        Write-Ok 'Old vault daemon drained + stopped (in-flight request finished; endpoint released for the new build)'
-    }
-    $ErrorActionPreference = $prevEAP
-    return $true
-}
-
 function Invoke-Install {
     Write-Step 'agent-vault install'
     Install-Runtime
@@ -1200,15 +1163,6 @@ function Invoke-Update {
     Write-Step 'agent-vault update'
     Invoke-DowngradeGuard
     Install-Runtime
-    # Thread B (lightest tier; docs/patterns/graceful-daemon-cutover.md): a version
-    # update must never kill in-flight, non-resumable work. Install-Runtime built +
-    # activated the new slot; now gracefully DRAIN + STOP the old daemon (finish the
-    # in-flight request, close cleanly -- not a kill) so the new slot can rebind the
-    # FIXED endpoint. Auth state reconnects on the new daemon via the opt-in
-    # persistent encrypted cache (no re-prompt) or a single re-unlock on first use.
-    # Skipped for a client-only host (-NoService). Register-AgentVaultTask then
-    # starts the new daemon on the now-free endpoint.
-    if (-not $NoService) { [void](Stop-VaultDaemonGraceful) }
     Register-AgentVaultTask
     Write-Ok 'agent-vault update'
 }
@@ -1235,10 +1189,22 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $LinkPython) {
+    $stopPython = $LinkPython
+    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+    if (Test-Path -LiteralPath $resolver) {
+        $previousRoot = $env:AGENT_RT_ROOT
+        try {
+            $env:AGENT_RT_ROOT = $InstallDir
+            . $resolver -TraceMode read-only
+            $stopPython = $AgentRtPy
+        } finally {
+            $env:AGENT_RT_ROOT = $previousRoot
+        }
+    }
+    if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $LinkPython -m agent_vault.service --stop 2>$null | Out-Null
+        & $stopPython -m agent_vault.service --stop 2>$null | Out-Null
         $ErrorActionPreference = $prevEAP
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -1288,10 +1254,33 @@ function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-vault uninstall ===' -ForegroundColor Cyan
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    $ownedProcesses = @(Get-VaultUninstallProcesses)
     if ($DryRun) {
         Write-Host '[dry-run] would stop agent-vault'
     } else {
-        Invoke-Stop
+        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        }
+        foreach ($row in $ownedProcesses) {
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
+                throw 'Vault process identity changed; refusing uninstall'
+            }
+            if ($now) {
+                Stop-Process -Id $row.ProcessId -ErrorAction Stop
+                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
+                    throw 'Owned Vault daemon did not stop'
+                }
+            }
+        }
+    }
+    if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         if ($DryRun) {
@@ -1301,46 +1290,114 @@ function Invoke-Uninstall {
             Write-Ok 'Scheduled task removed'
         }
     }
-    foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
-        if (Test-Path $stub) {
-            if ($DryRun) {
-                Write-Host "[dry-run] would remove binstub: $stub"
-            } else {
-                Remove-Item $stub -Force -ErrorAction SilentlyContinue
-                Write-Ok "Binstub removed: $stub"
-            }
-        }
-    }
     if ($Purge) {
         if (Test-Path $InstallDir) {
             if ($DryRun) { Write-Host "[dry-run] would purge runtime/config contents (coordination retained): $InstallDir" }
             else {
+                Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
                 Remove-InstallRuntimeContent -InstallRoot $InstallDir
                 Write-Ok "Runtime purged (transaction/staging coordination retained): $InstallDir"
             }
         }
     } else {
-        # Remove the runtime venv. In the versioned layout this is the `.venv`
-        # link AND the whole versions/ tree; otherwise the single real venv dir.
-        if ($VersionedRuntime) {
-            if ($DryRun) {
-                if ((Test-VenvIsLink $LinkDir) -or (Test-Path $LinkDir)) { Write-Host "[dry-run] would remove: $LinkDir" }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Write-Host "[dry-run] would remove: $verRoot" }
-            } else {
-                if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
-                elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
-            }
-        } elseif (Test-Path $VenvDir) {
-            if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
-            else { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
-        }
+        Remove-VaultRuntimeCode
         if ($DryRun) { Write-Host "[dry-run] state at $InstallDir would be kept (-Purge to delete)" }
         else { Write-Ok 'Venv removed (state kept; -Purge to delete)' }
     }
     if ($DryRun) { Write-Host 'agent-vault uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
+}
+
+function Get-VaultUninstallProcesses {
+    Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+    if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
+    $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+    if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\', '/') -or
+        $root -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\', '/')) {
+        throw 'Refusing uninstall of a filesystem or home root'
+    }
+    $ancestor = $root
+    while ($ancestor) {
+        $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing linked uninstall root' }
+        $ancestor = Split-Path -Parent $ancestor
+    }
+    $manifest = Join-Path $root 'deploy-manifest.json'
+    if (Test-Path -LiteralPath $manifest) {
+        $item = Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+        if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+            throw 'Refusing linked or non-file Vault deploy manifest'
+        }
+        $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($record.service -ne 'agent-vault' -or $record.source.plugin -ne 'agent-vault') {
+            throw 'Refusing foreign Vault deploy manifest'
+        }
+    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        if (@($task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
+        foreach ($taskAction in $task.Actions) {
+            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                -not ([string]$taskAction.Arguments).Contains((Join-Path $root 'service.ps1'))) {
+                throw 'Refusing foreign Vault scheduled task'
+            }
+        }
+    }
+    $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $owned = @()
+    foreach ($row in $rows) {
+        if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
+                $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ([string]$row.CommandLine -notmatch '(?i)(?:^|\s)-m\s+agent_vault\.service(?:\s+--foreground)?(?:\s+--persistent)?\s*$') {
+            throw "Runtime still in use by an unclassified process (pid=$($row.ProcessId))"
+        }
+        $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+        if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+            throw 'Vault daemon user ownership cannot be validated'
+        }
+        $owned += $row
+    }
+    $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+    foreach ($row in $rows) {
+        if ([int]$row.ParentProcessId -in $ownedIds -and [int]$row.ProcessId -notin $ownedIds) {
+            throw "Vault still owns a live child (pid=$($row.ProcessId)); refusing uninstall"
+        }
+    }
+    if (Test-Path -LiteralPath $PidFile) {
+        $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+        if ($value -notmatch '^[1-9][0-9]*$') { throw 'Refusing invalid Vault PID receipt' }
+        if (@($rows | Where-Object { $_.ProcessId -eq [int]$value }).Count -and [int]$value -notin $ownedIds) {
+            throw 'Vault PID receipt names a foreign process; refusing uninstall'
+        }
+    }
+    return $owned
+}
+
+function Remove-VaultRuntimeCode {
+    if ($DryRun) {
+        Write-Host "[dry-run] would remove owned runtime code at: $InstallDir"
+        return
+    }
+    Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+}
+
+function Remove-VaultHelperFiles {
+    param([string]$Directory, [string[]]$Names)
+    $item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Refusing linked or non-directory runtime helpers'
+    }
+    foreach ($name in $Names) {
+        $path = Join-Path $Directory $name
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+            throw "Refusing linked or non-file runtime helper: $path"
+        }
+    }
+    foreach ($name in $Names) {
+        $path = Join-Path $Directory $name
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+    }
 }
 
 # === install-transaction lock (fail-closed) ===
@@ -1425,6 +1482,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
+    if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     switch ($Action) {
         'install'   { Invoke-Install }
         'update'    { Invoke-Update }

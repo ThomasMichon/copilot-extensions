@@ -12,6 +12,7 @@ pytestmark = pytest.mark.guard
 _PLUGIN = Path(__file__).resolve().parents[1]
 _DECLARATION = _PLUGIN / "instruction-projections.json"
 _TEMPLATE = _PLUGIN / "instructions" / "scratch-space-fallback.instructions.md"
+_SKILL = _PLUGIN / "skills" / "using-scratch-space" / "SKILL.md"
 
 
 def test_projection_declaration_shape():
@@ -48,3 +49,28 @@ def test_template_is_reviewable_static_fallback():
         "/home/",
     ):
         assert forbidden not in content
+
+
+def test_scratch_guidance_requires_attributable_task_folders():
+    template = _TEMPLATE.read_text(encoding="utf-8")
+    skill = _SKILL.read_text(encoding="utf-8")
+    assert "worktree-stamped" in template
+    assert "<owner-stamp>-<task-slug>-<YYYYMMDD-HHMMSS>" in skill
+    for content in (template, skill):
+        content = " ".join(content.split())
+        assert "scratch-owner.json" in content
+        assert "retention" in content
+        assert "per-invocation" in content
+        assert "global settings" in content
+        assert "framework-owned artifacts" in content
+
+
+def test_scratch_breadcrumb_does_not_replace_release_or_confirmation():
+    template = _TEMPLATE.read_text(encoding="utf-8")
+    skill = _SKILL.read_text(encoding="utf-8")
+    assert "not a lease or deletion permission" in template
+    assert "not a lease, permission grant" in skill
+    for content in (template, skill):
+        assert "existing owner" in content
+        assert "deletion-confirmation policy" in content
+    assert "If custody is unknown" in skill

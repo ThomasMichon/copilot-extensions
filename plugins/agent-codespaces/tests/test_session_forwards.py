@@ -1047,7 +1047,9 @@ def test_claim_owner_singleton_refuses_a_second_live_owner(store, monkeypatch):
 
 async def test_run_owner_daemon_exits_without_touching_a_live_owners_beacon(store, monkeypatch):
     owner._write_liveness(15.0, active=["cs-1"])
-    monkeypatch.setattr(owner.os, "getpid", lambda: 999_999)
+    monkeypatch.setattr(
+        owner, "os", types.SimpleNamespace(**{**vars(owner.os), "getpid": lambda: 999_999}),
+    )
     monkeypatch.setattr(owner, "_pid_alive", lambda pid: True)
 
     class _Never:

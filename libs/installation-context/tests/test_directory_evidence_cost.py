@@ -19,7 +19,9 @@ pytestmark = [
 ]
 
 
-def _arguments(root: Path, payload: Path, plugin: str = "agent-example") -> tuple:
+def _arguments(
+    root: Path, payload: Path, plugin: str = "agent-example",
+) -> tuple[str | Path, ...]:
     return (
         "resolve", "--copilot-home", root / "copilot",
         "--durable-home", root / "durable", "--payload-root", payload,
@@ -82,17 +84,18 @@ def test_directory_batch_keeps_native_refusals(tmp_path: Path, fault: str) -> No
     marketplace = tmp_path / "marketplace"
     payload = marketplace / "plugins/agent-example"
     payload.mkdir(parents=True)
-    entry = {"name": "agent-example", "source": "plugins/agent-example"}
-    document = {"name": "example", "plugins": [entry]}
+    entry: dict[str, object] = {"name": "agent-example", "source": "plugins/agent-example"}
+    plugins = [entry]
+    document: dict[str, object] = {"name": "example", "plugins": plugins}
     plugin = "agent-example"
     if fault == "duplicate-entry":
-        document["plugins"].append(entry.copy())
+        plugins.append(entry.copy())
     elif fault == "wrong-name-case":
         entry["Name"] = entry.pop("name")
     elif fault == "wrong-plugins-case":
         document["Plugins"] = document.pop("plugins")
     elif fault == "wrong-name-type":
-        document["plugins"].append({"name": 42})
+        plugins.append({"name": 42})
     elif fault == "wrong-source-type":
         entry["source"] = []
     elif fault == "metadata-escape":
@@ -100,9 +103,9 @@ def test_directory_batch_keeps_native_refusals(tmp_path: Path, fault: str) -> No
     elif fault == "source-escape":
         entry["source"] = "../outside"
     elif fault == "nul-name":
-        document["plugins"].append({"name": "unrelated\0"})
+        plugins.append({"name": "unrelated\0"})
     elif fault == "nul-source":
-        entry["source"] += "\0"
+        entry["source"] = str(entry["source"]) + "\0"
     elif fault == "reserved-key":
         document["metadata\x1cpluginRoot"] = "forged"
     elif fault == "requested-backslash":

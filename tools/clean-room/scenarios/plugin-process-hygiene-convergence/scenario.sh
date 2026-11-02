@@ -5,14 +5,14 @@
 # contract (visions/plugin-services "process-count-scales-with-services-not-
 # sessions" and "hooks-and-callbacks-are-transient" Behaviors, PR #2300)
 # against a synthetic mock daemon -- not a real plugin runtime. No Copilot
-# install, no plugin marketplace, no auth: this scenario is pure Python
-# stdlib, so it runs identically on every OS and needs only `python3` on
-# PATH.
+# install, no plugin marketplace, no auth. The mock uses stdlib networking;
+# daemon ownership additionally needs the shared agent-procutil package.
 #
 # See efforts/active/plugin-process-hygiene/adversarial-convergence-mock.md
 # for the full design this harness implements.
 #
-# Name-free / public F1. Env: CR_PPC_SCENARIOS / CR_PPC_FLOOD_N / CR_PPC_ROUNDS.
+# Name-free / public F1. An installed agent-procutil or explicitly mounted
+# candidate source supplies the same instance-lifetime contract as other tests.
 # MUST be LF.
 set -uo pipefail
 
@@ -29,6 +29,14 @@ cr_init
 cr_meta "validates" "plugin-services (process-count-scales-with-services-not-sessions, hooks-and-callbacks-are-transient)"
 
 _PYTHON="$(command -v python3 || command -v python || true)"
+PROCUTIL_SOURCE="${CR_PPC_PROCUTIL_SOURCE:-}"
+if [ -z "$PROCUTIL_SOURCE" ] && [ -n "${CR_HARNESS_MOUNT:-}" ]; then
+    PROCUTIL_SOURCE="$CR_HARNESS_MOUNT/libs/agent-procutil/src"
+fi
+if [ -n "$PROCUTIL_SOURCE" ]; then
+    export PYTHONPATH="$PROCUTIL_SOURCE${PYTHONPATH:+:$PYTHONPATH}"
+fi
+_LIFECYCLE_READY=0
 
 # =========================================================================
 phase 0 "environment (no plugin install needed)"
@@ -37,12 +45,19 @@ if [ -z "$_PYTHON" ]; then
     jam "toolchain-venv" "no python3/python on PATH" "this scenario needs only a stdlib python3 -- install one"
 else
     pass "python available: $("$_PYTHON" --version 2>&1)"
+    if "$_PYTHON" -c 'from agent_procutil.daemon_instances import daemon_test_lifecycle' >/dev/null 2>&1; then
+        _LIFECYCLE_READY=1
+        pass "shared test-instance lifecycle is available"
+    else
+        jam "pythonpath" "shared agent-procutil instance lifecycle is unavailable" \
+            "use the installed package or mount candidate source with -HarnessMount"
+    fi
 fi
 
 # =========================================================================
 phase 1 "adversarial convergence battery (six scenarios)"
-if [ -z "$_PYTHON" ]; then
-    jam "toolchain-venv" "cannot run the convergence probe without python3" "fix phase 0 first"
+if [ -z "$_PYTHON" ] || [ "$_LIFECYCLE_READY" -ne 1 ]; then
+    jam "toolchain-venv" "cannot run the convergence probe without Python and its shared lifecycle" "fix phase 0 first"
 else
     capture "convergence-probe" -- "$_PYTHON" "$_SELF_DIR/fixtures/plugin_process_hygiene_convergence.py" \
         --scenarios "$SCENARIOS" --flood-n "$FLOOD_N" --rounds "$ROUNDS" || true

@@ -23,19 +23,49 @@ INSTALL_DIR=""
 # this script with an already-shifted (empty) "$@", so a positional action would
 # be lost across the staging boundary. Carry it through the exec via the env.
 ACTION="${AGENT_MCP_ACTION:-init}"
+UNINSTALL_REQUESTED=0
+EXPLICIT_ACTION=""
+INSTALL_DIR_SET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
-        --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-        stamp|provision|init) ACTION="$1"; shift ;;
-        *) shift ;;
+        --install-dir)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+                _fail '--install-dir requires a nonempty path value'
+                exit 2
+            fi
+            if [[ "$INSTALL_DIR_SET" == 1 ]]; then
+                _fail 'Duplicate --install-dir is not supported'
+                exit 2
+            fi
+            INSTALL_DIR="$2"; INSTALL_DIR_SET=1; shift 2 ;;
+        uninstall|install|stamp|provision|init)
+            if [[ -n "$EXPLICIT_ACTION" && "$EXPLICIT_ACTION" != "$1" ]]; then
+                _fail 'Conflicting installer actions are not supported'
+                exit 2
+            fi
+            ACTION="$1"; EXPLICIT_ACTION="$1"
+            [[ "$1" != uninstall ]] || UNINSTALL_REQUESTED=1
+            shift ;;
+        *)
+            _fail "Unsupported installer argument: $1"
+            exit 2 ;;
     esac
 done
+if [[ "$ACTION" == uninstall && "$UNINSTALL_REQUESTED" != 1 ]]; then
+    _fail 'Uninstall must be an explicit action, not inherited from the environment'
+    exit 2
+fi
+if [[ "$ACTION" == uninstall && "/$INSTALL_DIR/" == *"/../"* ]]; then
+    _fail 'Uninstall refuses parent-traversal path components'
+    exit 2
+fi
 export AGENT_MCP_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [[ "$ACTION" != uninstall ]]; then
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -175,7 +205,9 @@ INSTALL_WATCHDOG
     esac
 fi
 # === end install-contract:v4 self-stage ===
+fi
 
+if [[ "$ACTION" != uninstall ]]; then
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock/watchdog behavior WITHOUT a heavy venv build: this
@@ -207,6 +239,7 @@ if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
     exit 0
 fi
 # === end install-contract:v4 smoke seam ===
+fi
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -524,7 +557,7 @@ _enter_install_lock() {
 # === end install-transaction lock ===
 
 _bootstrap_python() {
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    if [[ "${1:-}" != external && -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
     local candidate
     for candidate in python3 python; do
         if command -v "$candidate" >/dev/null 2>&1; then command -v "$candidate"; return 0; fi
@@ -533,7 +566,50 @@ _bootstrap_python() {
 }
 
 source "$SCRIPT_DIR/source-runtime.sh"
-_initialize_source_runtime || exit 1
+_uninstall_external_python() {
+    local root="${1:?runtime root required}" candidate selected probe
+    probe='import sys
+from pathlib import Path
+assert sys.version_info >= (3, 10)
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
+    while IFS= read -r candidate; do
+        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
+        esac
+        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
+        [[ -n "$selected" && -x "$selected" ]] || continue
+        printf '%s' "$selected"
+        return 0
+    done < <(type -aP python3 python 2>/dev/null)
+    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
+    return 1
+}
+UNINSTALL_PYTHON=""
+if [[ "$ACTION" == uninstall ]]; then
+    UNINSTALL_PYTHON="$(_uninstall_external_python "$INSTALL_DIR")" || exit 1
+    if [[ -z "$UNINSTALL_PYTHON" ]]; then
+        _fail 'Uninstall requires an existing Python 3.10+ outside the runtime'
+        exit 1
+    fi
+    uninstall_status="$("$UNINSTALL_PYTHON" -I -B "$SCRIPT_DIR/uninstall_runtime.py" check \
+        --root "$INSTALL_DIR" --shell "$BASH")" || exit 1
+    if [[ "$uninstall_status" == absent ]]; then
+        _ok 'Legacy MCP runtime is already absent'
+        exit 0
+    fi
+else
+    _initialize_source_runtime || exit 1
+fi
 if ! _enter_install_lock; then
     _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -541,8 +617,19 @@ fi
 trap '_exit_install_lock' EXIT
 trap '_exit_install_lock; exit 130' INT
 trap '_exit_install_lock; exit 143' TERM
+if [[ "$ACTION" == uninstall ]]; then
+    "$UNINSTALL_PYTHON" -I -B "$SCRIPT_DIR/uninstall_runtime.py" remove \
+        --root "$INSTALL_DIR" --shell "$BASH"
+    exit $?
+fi
 _assert_source_runtime || exit 1
 
+case "$ACTION" in
+    install|init|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
@@ -592,14 +679,19 @@ _versioned_slot_clean() {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
     local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
-    py="$(_bootstrap_python)" || return 1
+    py="$(_bootstrap_python external)" || return 1
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" "" \
+        "$SCRIPT_DIR/uninstall-profile.json" agent-mcp || return 1
+    SRC_VERSION="$_RUNTIME_CONSTRUCTION_VERSION"
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_DIR="$VENV_DIR"
     _assert_source_runtime
 }
 
@@ -682,7 +774,8 @@ for _lib_entry in \
     'credential-relay:agent-credential-relay' \
     'agent-procutil:agent-procutil' \
     'single-instance-lease:agent-single-instance-lease' \
-    'zdd:agent-zdd'; do
+    'zdd:agent-zdd' \
+    'update-driver:agent-update-driver'; do
     _lib_dir_name="${_lib_entry%%:*}"
     _lib_pkg_name="${_lib_entry#*:}"
     _lib_path="$PLUGIN_DIR/libs/$_lib_dir_name"
@@ -729,6 +822,11 @@ _git_info() {
     echo "$commit $branch $dirty"
 }
 
+SOURCE_MANIFEST_PATH="$PLUGIN_DIR"
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+    SOURCE_MANIFEST_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+fi
+
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     # Point the stable .venv link at this version's freshly-built slot, moving a
@@ -745,7 +843,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     _versioned_mark_complete || exit 1
     # Source manifest inputs are captured before activation.
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
-        SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$PLUGIN_DIR/../.." && pwd)")" || exit 1
+        SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$SOURCE_MANIFEST_PATH/../.." && pwd)")" || exit 1
     fi
     _assert_source_runtime || exit 1
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
@@ -775,7 +873,7 @@ fi
 # used bridge, so this uses much shorter install-appropriate defaults
 # (still overridable, e.g. for a host with slow-starting upstream MCP
 # servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
-if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
+if [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" != fresh && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
     _cutover_health_timeout="${AGENT_MCP_CUTOVER_HEALTH_TIMEOUT:-15}"
     _cutover_drain_timeout="${AGENT_MCP_CUTOVER_DRAIN_TIMEOUT:-30}"
     _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
@@ -802,17 +900,29 @@ print("1" if d.get("ok") else "0")' "$_cutover_json" 2>/dev/null || printf '\n0\
     fi
 fi
 
+_settle_runtime_owners() {
+    [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" == fresh ]] || return 0
+    local arguments=("$SCRIPT_DIR/reap_versions.py" --root "$INSTALL_DIR" --link-name '.venv' --fresh --reset-control)
+    [[ -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]] || arguments+=(--check-only)
+    if ! "$VENV_PYTHON" -I "${arguments[@]}"; then
+        _fail 'Fresh MCP replacement could not settle its old runtime owners and control state'
+        return 1
+    fi
+    _ok 'Old MCP runtime owners and control state settled'
+}
+_settle_runtime_owners || exit 1
+
 # agent-mcp-specific (NOT part of the byte-identical activate block above): reap
 # processes still running from a now-stale (non-current) slot -- leaked/orphaned
 # bridge trees or a warmth daemon from the prior version -- so an upgrade never
 # leaves "two runtime versions resident". Best-effort; opt out with
 # AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
 # attributed to the current version and never reaps itself.
-if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
+if [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" != fresh && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
     _reap_script="$SCRIPT_DIR/reap_versions.py"
-    _reaped="$("$VENV_PYTHON" "$_reap_script" --root "$INSTALL_DIR" \
-        --link-name '.venv' 2>/dev/null || true)"
-    if [[ -n "$_reaped" ]]; then
+    if ! _reaped="$("$VENV_PYTHON" -I "$_reap_script" --root "$INSTALL_DIR" --link-name '.venv')"; then
+        _step 'Version-reap incomplete: old MCP runtime retirement was not confirmed'
+    elif [[ -n "$_reaped" ]]; then
         _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"
         _ok "Reaped $_n stale-version process(es)"
     fi
@@ -852,11 +962,13 @@ _source_kind() {
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime || exit 1; fi
-SOURCE_FIELDS=""
+SOURCE_FIELDS="\"runtime_version\": \"$SRC_VERSION\","
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
-    SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2},"
+    SOURCE_FIELDS="$("$VENV_PYTHON" -I -c 'import json,sys
+d=json.loads(sys.argv[1]); d["runtime_version"]=sys.argv[2]
+print(json.dumps(d)[1:-1] + ",")' "$SOURCE_RUNTIME_IDENTITY" "$SRC_VERSION")" || exit 1
 fi
-KIND="$(_source_kind "$PLUGIN_DIR")"
+KIND="$(_source_kind "$SOURCE_MANIFEST_PATH")"
 if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
     VER="$PACKAGE_VERSION"
 else
@@ -873,7 +985,7 @@ if [[ "$KIND" == "local" ]]; then
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
 TMP="$MANIFEST_PATH.tmp"
-cat > "$TMP" << EOF
+manifest_json="$(cat << EOF
 {
   "schema_version": 3,
   "service": "agent-mcp",
@@ -882,7 +994,7 @@ cat > "$TMP" << EOF
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {
     "kind": "$KIND",
-    "path": "$PLUGIN_DIR",
+    "path": "$SOURCE_MANIFEST_PATH",
     "repo": "copilot-extensions",
     "plugin": "agent-mcp",
     "version": "$VER",
@@ -894,7 +1006,21 @@ cat > "$TMP" << EOF
   "runtime": "python"
 }
 EOF
-mv -f "$TMP" "$MANIFEST_PATH"
+)" || exit 1
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+    if ! printf '%s\n' "$manifest_json" |
+        "$VENV_PYTHON" -I -B -X utf8 "$SOURCE_MANIFEST_PATH/scripts/command_binding.py" \
+            --payload-root "$SOURCE_MANIFEST_PATH" --source-payload-root "$SOURCE_MANIFEST_PATH" \
+            --plugin-id agent-mcp --legacy-root "$INSTALL_DIR" \
+            --project-root "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" \
+            --publish-legacy --write-manifest >/dev/null; then
+        _fail 'Command ownership validation refused MCP source manifest publication.'
+        exit 1
+    fi
+else
+    printf '%s\n' "$manifest_json" > "$TMP"
+    mv -f "$TMP" "$MANIFEST_PATH"
+fi
 _ok "Deploy manifest written (source: $KIND)"
 
 # -- 6. Verify ---------------------------------------------------------

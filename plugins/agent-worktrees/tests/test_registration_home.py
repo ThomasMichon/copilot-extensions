@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import installer, repos
 
@@ -46,9 +47,11 @@ def registration_home(request, monkeypatch, tmp_path):
 
 
 def test_registry_write_honors_registration_home(registration_home, tmp_path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, **no_window_kwargs())
     repos.add_repo(
         "example",
-        str(tmp_path / "repo"),
+        str(repo),
         repo_class="worktree",
         remote="https://github.com/example/repo.git",
         default_branch="main",

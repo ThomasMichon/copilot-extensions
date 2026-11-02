@@ -253,7 +253,7 @@ def test_local_resume_observes_exact_call_without_changing_result(
 
     monkeypatch.setattr(bridge, "run_startup", run)
     assert bridge.resume_worker("session-a", "private continuation", wait=wait) is (returncode == 0)
-    expected = [*prefix, "send", "session-a", "--prompt-file", "-"]
+    expected = [*prefix, "send", "session-a", "--require-agent-hosting", "--prompt-file", "-"]
     if not wait:
         expected.append("--no-wait")
     expected.extend([
@@ -319,7 +319,7 @@ def test_real_local_resume_trace_survives_caller_exit(tmp_path, monkeypatch, tim
     child = tmp_path / "bridge_child.py"
     child.write_text(
         "import pathlib,sys,time\n"
-        "assert sys.argv[1:]==['send','session-a','--prompt-file','-','--no-wait',"
+        "assert sys.argv[1:]==['send','session-a','--require-agent-hosting','--prompt-file','-','--no-wait',"
         "'--startup-communication-timeout','5','--startup-process-timeout','5']\n"
         "assert sys.stdin.read()=='private continuation'\n"
         f"with pathlib.Path({str(marker)!r}).open('a') as sink: sink.write('once\\n')\n"

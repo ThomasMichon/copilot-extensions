@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve valid nullable native discussion property bags while retaining malformed-type refusal",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

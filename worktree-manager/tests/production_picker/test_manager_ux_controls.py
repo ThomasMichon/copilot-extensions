@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from textual.widgets import OptionList
 
-from test_picker_tui import _fixture_source, _profiles_source
+from test_picker_tui import _fixture_source, _profiles_source, _wait_for_initial_setup
 from worktree_manager.production_picker import context
 from worktree_manager.production_picker.picker_tui import pivots
 from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
@@ -88,20 +88,28 @@ def test_one_update_affordance_preserves_update_owner(manager, payload):
     ]
 
 
-def test_configuration_highlight_activates_view_and_escape_returns_without_apply(monkeypatch):
+@pytest.mark.parametrize("size", [(118, 40), (80, 24)])
+def test_configuration_highlight_activates_view_and_escape_returns_without_apply(monkeypatch, size):
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
     async def run():
         app = PickerApp(_profiles_source(), live=False)
-        async with app.run_test(size=(118, 40)) as pilot:
-            await pilot.pause()
+        async with app.run_test(size=size) as pilot:
             screen = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, screen)
             applied = []
             screen._apply_profiles = lambda *args: applied.append(args)
             screen.pivots.insert(0, {"kind": "worktrees", "label": "Other"})
+            screen.htabs.insert(0, "Other")
             start = screen._left_pivots()[-1]
             screen.htab, screen.sel = start, ("V", 0)
             screen._nav_view_row(1)
             assert screen._in_configuration() and screen.sel == ("CFG", 0)
+            footer = screen.footer(size[0]).plain
+            assert "Enter: focus sections" in footer
+            assert "open Configuration" not in footer
+            await pilot.press("enter")
+            assert screen._in_configuration() and screen.sel == ("M", 0)
+            assert "Enter: focus content" in screen._focus_hint()
             screen._dispatch_key("escape")
             assert screen.htab == start and not screen._in_configuration()
             assert screen.sel == ("V", 0)

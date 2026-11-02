@@ -60,7 +60,11 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
     owner = WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
-    assert producer.publish_active_project(owner) == 1
+    observed = []
+    assert producer.publish_active_project(
+        owner, observe_records=lambda project, records: observed.append((project, records)),
+    ) == 1
+    assert observed == [("project", [record])]
     result = owner.handle({"contract_version": 1, "project": "project", "worktree_id": "one"})
     row = result["worktrees"][0]
     assert row["dirty"] == 4 and row["mux_session"] is True

@@ -127,6 +127,8 @@ def test_ordinary_generation_discovery_uses_frozen_content_and_retains_repair(
 def test_native_first_run_prefers_later_release_over_older_repair(
     tmp_path, resolver_kind, shell, development, preferred,
 ):
+    if os.name != "nt" and shell.endswith(".exe"):
+        pytest.skip("Windows resolver hosts require native Windows runtime paths")
     directory = (
         REPO / "libs" / "versioned-runtime" if resolver_kind == "canonical"
         else REPO / "plugins" / "agent-worktrees" / "scripts"
@@ -338,6 +340,7 @@ def test_manifest_interruption_stays_under_custody_until_restore_or_commit_forwa
         root=tmp_path, payload=tmp_path, signature=lambda: {},
         recheck=lambda: None,
         held=lambda *, timeout: nullcontext(),
+        manifest_publication=nullcontext,
     )
     monkeypatch.setattr(driver, "Governance", lambda *_args: governance)
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)

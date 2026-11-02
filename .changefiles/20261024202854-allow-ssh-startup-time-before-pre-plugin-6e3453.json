@@ -1,0 +1,9 @@
+{
+  "comment": "Allow slow SSH startup and relay probe retries within a bounded 30-second readiness budget.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Add private pure source-qualified publication reducer candidate and focused unit tests without production activation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

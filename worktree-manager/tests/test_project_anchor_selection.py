@@ -55,6 +55,20 @@ def test_repo_without_project_is_not_a_supplier(tmp_path):
     assert selected.dependency_paths == (root / "repos.yaml", root / "projects.yaml")
 
 
+def test_knowledge_reader_can_select_repo_without_adopting_it(tmp_path, monkeypatch):
+    anchor = str(tmp_path / "knowledge")
+    root = write_registries(
+        tmp_path, {"knowledge": {"class": "knowledge", "windows": anchor}}, {},
+    )
+    monkeypatch.setattr(state, "_platform_key", lambda: "windows")
+    before = (root / "projects.yaml").read_bytes()
+    selected = state.project_anchor_selection("knowledge", tmp_path, require_project=False)
+    assert selected.anchor == anchor
+    assert (root / "projects.yaml").read_bytes() == before
+    assert state.project_anchor_selection("knowledge", tmp_path).anchor is None
+    assert state.project_anchor_selection("absent", tmp_path, require_project=False).anchor is None
+
+
 def test_absent_registries_are_dependencies_without_creation(tmp_path):
     selected = state.project_anchor_selection("absent", tmp_path)
     assert selected.anchor is None

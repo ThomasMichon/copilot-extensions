@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import uuid
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
@@ -19,7 +19,7 @@ def test_required_sync_job_failure_never_resumes_child(monkeypatch):
     process = Mock(pid=123)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
-    monkeypatch.setattr(pu, "_assign_suspended_to_kill_on_close_job", lambda pid: None)
+    monkeypatch.setattr(pu, "_assign_suspended_to_kill_on_close_job", lambda pid, **kw: None)
     resume = Mock(return_value=True)
     monkeypatch.setattr(pu, "_resume_suspended_process", resume)
     with pytest.raises(RuntimeError, match="before child resume"):
@@ -216,6 +216,8 @@ class _FakeKernel32:
 
     def _create_job_object(self, attrs, name):
         self.calls.append(("CreateJobObjectW", attrs, name))
+        if hasattr(ctypes, "set_last_error"):
+            ctypes.set_last_error(0)
         return 101
 
     def _set_information_job_object(self, job, info_class, limit_info, size):
@@ -272,7 +274,7 @@ def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch, a
 
     assert job is not None
     assert fake.calls[:4] == [
-        ("CreateJobObjectW", None, None),
+        ("CreateJobObjectW", None, job.name),
         (
             "SetInformationJobObject",
             101,
@@ -443,7 +445,7 @@ def test_strict_sync_job_disallows_breakaway(monkeypatch):
         ["fixture"], require_job=True, allow_breakaway=False,
     )
     assert result is process and owned is job
-    assign.assert_called_once_with(process.pid, allow_breakaway=False)
+    assign.assert_called_once_with(process.pid, allow_breakaway=False, name=ANY)
 
 
 def test_spawn_sync_in_kill_on_close_job_resumes_when_assignment_fails(monkeypatch):
@@ -696,15 +698,31 @@ def _access_denied() -> OSError:
 
 
 @pytest.fixture()
-def fake_popen(monkeypatch):
+def fake_popen(monkeypatch, tmp_path):
     from agent_procutil import daemon, daemon_broker
+    from agent_procutil import _daemon_instance_store
+    monkeypatch.setattr(_daemon_instance_store, "bind_process", lambda *_: None)
+    from agent_procutil.daemon_instances import DaemonInstanceSpec
+    original = pu.spawn_daemon
+
+    def explicit_fixture(*args, **kwargs):
+        if "instance" not in kwargs:
+            kwargs["instance"] = DaemonInstanceSpec(
+                "fixture", tmp_path, Path(__file__).resolve(),
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pu, "spawn_daemon", explicit_fixture)
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: True)
 
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     calls: list = []
     fake = _FakePopen(calls)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
     monkeypatch.setattr(
-        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError("fixture")),
+        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
+            "fixture", process_created=False, admission_sent=False,
+        )),
     )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
@@ -803,6 +821,7 @@ def test_spawn_daemon_windows_detached_breakaway_and_log(tmp_path, monkeypatch, 
     assert argv == ["py", "-m", "svc"]
     assert kwargs["creationflags"] == (
         pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB
+        | pu._CREATE_SUSPENDED
     )
     assert kwargs["cwd"] == str(tmp_path)
     assert kwargs["stdin"] is subprocess.DEVNULL
@@ -823,7 +842,7 @@ def test_spawn_daemon_windows_console_children_uses_no_window(tmp_path, monkeypa
     )
     (_, kwargs), = fake_popen.calls
     assert kwargs["creationflags"] == (
-        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB | 0x20
+        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB | pu._CREATE_SUSPENDED | 0x20
     )
 
 
@@ -832,7 +851,9 @@ def test_spawn_daemon_explicit_env_replaces_inherited(tmp_path, monkeypatch, fak
     monkeypatch.setenv("SPAWN_DAEMON_LEAK", "1")
     pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", env={"A": "1"})
     (_, kwargs), = fake_popen.calls
-    assert kwargs["env"] == {"A": "1"}
+    assert kwargs["env"]["A"] == "1"
+    assert "SPAWN_DAEMON_LEAK" not in kwargs["env"]
+    assert kwargs["env"]["COPILOT_EXTENSIONS_DAEMON_INSTANCE"]
 
 
 def test_spawn_daemon_posix_new_session(tmp_path, monkeypatch, fake_popen):
@@ -863,6 +884,8 @@ def test_spawn_daemon_breakaway_denied_is_surfaced(tmp_path, monkeypatch, fake_p
 
     assert isinstance(info.value, OSError)
     assert len(fake_popen.calls) == 1
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
     assert "daemon not started" in log_path.read_text(encoding="utf-8")
 
 
@@ -877,7 +900,7 @@ def test_spawn_daemon_breakaway_denied_contained_fallback(tmp_path, monkeypatch,
     first, second = (kwargs["creationflags"] for _, kwargs in fake_popen.calls)
     assert first & pu._CREATE_BREAKAWAY_FROM_JOB
     assert second == pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP
-    assert "starting the daemon inside it" in log_path.read_text(encoding="utf-8")
+    assert "accepts caller-owned lifetime" in log_path.read_text(encoding="utf-8")
 
 
 def test_spawn_daemon_other_spawn_errors_propagate(tmp_path, monkeypatch, fake_popen):
@@ -886,6 +909,8 @@ def test_spawn_daemon_other_spawn_errors_propagate(tmp_path, monkeypatch, fake_p
     with pytest.raises(FileNotFoundError):
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log")
     assert len(fake_popen.calls) == 1
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
 
 
 def test_spawn_daemon_access_denied_without_breakaway_propagates(
@@ -896,6 +921,8 @@ def test_spawn_daemon_access_denied_without_breakaway_propagates(
     with pytest.raises(OSError):
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", breakaway=False)
     assert len(fake_popen.calls) == 1
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
 
 
 def _fake_credential_argv() -> tuple[list[str], str]:
@@ -1075,7 +1102,8 @@ def test_spawn_daemon_passes_allowed_creationflags_through(
     pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", extra_creationflags=flag)
     (_, kwargs), = fake_popen.calls
     assert kwargs["creationflags"] == (
-        pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB | flag
+        pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB
+        | pu._CREATE_SUSPENDED | flag
     )
 
 

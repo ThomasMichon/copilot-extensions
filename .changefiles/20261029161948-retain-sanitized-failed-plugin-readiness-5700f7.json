@@ -1,0 +1,9 @@
+{
+  "comment": "Retain sanitized failed plugin-readiness stages through ordinary control cleanup using existing diagnostic logs.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

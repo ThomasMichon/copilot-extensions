@@ -49,6 +49,7 @@ class QueueClaimQueriesMixin:
         _with_outcome: bool = False,
     ) -> Task | ClaimOutcome | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``."""
+        self.require_worker_admission()
         repo = self._canonical_repo(repo)
         ts = self._now(now)
         caps = set(self._canonical_selector_tokens(capabilities))
@@ -87,6 +88,11 @@ class QueueClaimQueriesMixin:
             producer_rejections: list[dict[str, object]] = []
             for row in rows:
                 if repo is not None and row["repo"] != repo:
+                    continue
+                from .queue_pool_placement import pool_assignment
+                if pool_assignment(conn, row["id"]) is not None:
+                    if task_id is not None:
+                        raise TaskError("retained pool assignment requires allocator placement")
                     continue
                 if closed_execution(conn, row["id"]) is not None:
                     if task_id is not None:
@@ -154,6 +160,7 @@ class QueueClaimQueriesMixin:
                     producer_rejections=producer_rejections,
                 )
                 return outcome if _with_outcome else None
+            self.require_worker_admission()
             conn.execute(
                 "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
                 " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
@@ -403,6 +410,8 @@ class QueueClaimQueriesMixin:
         repo: str | None = None,
         label: str | None = None,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         task_status: str | Sequence[str] | None = None,
         latest_only: bool = False,
@@ -432,6 +441,8 @@ class QueueClaimQueriesMixin:
         about.
         """
         repo = self._canonical_repo(repo)
+        if pool_accountable and limit == 0:
+            return []
         clauses: list[str] = []
         params: list[object] = []
         if task_id is not None:
@@ -461,6 +472,13 @@ class QueueClaimQueriesMixin:
         if conclusion_state is not None:
             clauses.append("r.conclusion_state = ?")
             params.append(conclusion_state)
+        if native_release_pending is not None:
+            clauses.append("r.native_release_pending = ?")
+            params.append(int(native_release_pending))
+        if pool_accountable:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM pool_reservation_bindings p WHERE p.reservation_key = r.key)"
+            )
         if resume_requested is not None:
             clauses.append("t.resume_requested = ?")
             params.append(1 if resume_requested else 0)
@@ -469,12 +487,24 @@ class QueueClaimQueriesMixin:
             clauses.append(f"t.status IN ({','.join('?' * len(statuses))})")
             params.extend(statuses)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(limit)
         with self._connect() as conn:
-            rows = conn.execute(
+            if pool_accountable:
+                # All classification reads must share the reservation snapshot.
+                conn.execute("BEGIN")
+            query = (
                 "SELECT r.* FROM spawn_reservations r "
                 f"{'JOIN tasks t ON t.id = r.task_id ' if join_tasks else ''}"
-                f"{where} ORDER BY r.reserved_at DESC LIMIT ?",
-                params,
-            ).fetchall()
+                f"{where} ORDER BY r.reserved_at DESC"
+            )
+            if pool_accountable:
+                from .queue_pool_accountability import ReservationAccountability
+                accounting = ReservationAccountability(conn)
+                rows = []
+                for row in conn.execute(query, params):
+                    if accounting.accountable(row):
+                        rows.append(row)
+                        if limit >= 0 and len(rows) >= limit:
+                            break
+            else:
+                rows = conn.execute(query + " LIMIT ?", [*params, limit]).fetchall()
         return [SpawnReservation._from_row(r) for r in rows]

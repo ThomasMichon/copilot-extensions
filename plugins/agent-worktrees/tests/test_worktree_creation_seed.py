@@ -11,7 +11,7 @@ import re
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import config as cfg
+from agent_worktrees import config as cfg, state_root
 
 
 def _create_config(tmp_path: Path) -> cfg.Config:
@@ -53,7 +53,7 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cf
     monkeypatch.setattr(
         m.state_root_mod,
         "resolve_state_root",
-        lambda config, cwd=None: m.state_root.StateRoot(
+        lambda config, cwd=None: state_root.StateRoot(
             path=None, source="knowledge_repo", repo="", stateless=False,
             requires_external=False, bound=False, error=None,
         ),
@@ -96,6 +96,11 @@ def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
 
     result = m._create_worktree_core(config)
 
+    assert Path(result["launch"]["record_path"]) == (
+        tmp_path / "tracking" / f'{result["worktree"]["id"]}.yaml'
+    )
+    assert type(result["launch"]["pane_shell_version"]) is int
+    assert result["launch"]["pane_shell_version"] == 1
     assert "--interactive" not in result["launch"]["cmd"]
     assert "--admission-only" in result["launch"]["cmd"]
     assert result["launch"]["cmd"][-2:] == ["--", "copilot"]

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "root_entries": [".venv", "current-version", "last-known-good", "running-version.json", "payload-dir", "stamped-version", "deploy-manifest.json", ".provision-status"],
+  "bin_entries": ["resolve-runtime.ps1", "resolve-runtime.sh", "bootstrap-check.ps1", "bootstrap-check.sh", "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh", "emit-mesh-pointer.ps1", "emit-mesh-pointer.sh"],
+  "script_entries": [],
+  "local_bin_entries": ["agent-ssh", "agent-ssh.ps1", "agent-ssh.cmd"],
+  "module": "agent_ssh",
+  "guard_module": "uninstall-state.py",
+  "guard_function": "check_under_custody"
+}

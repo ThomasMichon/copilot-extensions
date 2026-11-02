@@ -1,0 +1,9 @@
+{
+  "comment": "Recover current-roster reads and feed admission when a retained route has a confirmed exited or replaced owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

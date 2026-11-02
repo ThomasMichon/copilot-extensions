@@ -1,0 +1,21 @@
+{
+  "comment": "Publish daemon instance custody and native lease assets in the shared library and standalone service artifacts",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/index",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

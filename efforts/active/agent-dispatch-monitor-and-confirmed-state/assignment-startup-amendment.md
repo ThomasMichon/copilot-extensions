@@ -1,0 +1,364 @@
+# Pool-owned assignment startup and retry eligibility
+
+Status: **reviewed design; due-time admission, explicit atomic placement/start
+provider, opt-in caller and bounded explicit startup/retry source merged;
+ordinary publisher/caller integration and native qualification pending**.
+The documentation/design slice merged in
+[#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
+The existing due-time reservation check merged separately in
+[#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755).
+The explicit configured-pool atomic placement and affirmative-start provider
+merged in [#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859);
+this is source acceptance, not admitted caller or installed qualification.
+The [explicit caller boundary](../../../plugins/agent-dispatch/docs/pool-claim-start.md)
+provides negotiated placement and opt-in current-worker acceptance separately
+from ordinary supervisor/prompt migration and the selected startup policy.
+That explicit source slice merged in
+[#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955);
+it does not enable automatic publisher/cohort or supervisor migration.
+The bounded [startup/retry source receipt](journal/2026/11.02-bounded-startup-source.md)
+records [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976).
+Its explicit assignment consumers use the existing supervision owner; complete
+configured publication, ordinary initial prompts and installed/native adoption
+remain separate acceptance gates.
+The [configured-cohort transport receipt](journal/2026/11.02-configured-cohort-transport.md)
+records [#10050](https://github.com/ThomasMichon/copilot-extensions/pull/10050):
+explicit whole-owner projection and history recovery now reach the existing
+coordinator through a negotiated client, without automatic publication or admission.
+The [legacy admission fence receipt](journal/2026/11.02-configured-admission-fence.md)
+records [#10059](https://github.com/ThomasMichon/copilot-extensions/pull/10059):
+fresh legacy queued spawning refuses after projection without activating the
+ordinary publisher or migrating worker prompts.
+The [coordinator-source receipt](journal/2026/11.02-coordinator-source-projection.md)
+records [#10072](https://github.com/ThomasMichon/copilot-extensions/pull/10072):
+fresh explicit projection is bound to the coordinator's actual registrar and
+active/drain owner, without enabling automatic publication or worker migration.
+The [opt-in cadence source](journal/2026/11.02-publication-cadence.md)
+connects those existing owners behind default-off activation. It does not
+migrate ordinary allocation, initial prompts, direct legacy definitions,
+cross-endpoint continuity or native adoption; review and merge remain open.
+Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
+Parent: [monitor and confirmed-state effort](README.md).
+Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
+Reality: [current versus target architecture](../../../plugins/agent-dispatch/docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target).
+
+## Requested direction
+
+**Operator-directed summary, 2026-10-30:** `CLAIMED` is allocator-owned
+placement and startup, not just evaluation by an already-running worker.
+Consider all pools in their defined order and choose the first filter match
+with free capacity. If an agent/pool assignment already exists, wait for that
+pool's slot rather than silently switching pools. Create or reuse its spawn
+reservation and consume the slot in the `QUEUED -> CLAIMED` transaction;
+workspace creation and Copilot startup follow.
+
+Dispatch and the selected pool supervisor retain the reservation through a
+bounded number of startup attempts. Once a worker is reachable, keep nudging
+that same worker through the existing supervision owner until it explicitly
+accepts or declines, within the selected decision budget below.
+Exhaustion returns the task to `QUEUED`; startup failure
+is a supervisor outcome, distinct from a worker's "not me".
+
+A decline must carry objective machine-readable worktree, pool or machine
+exclusions and an explanatory note. The declining worker must finalize its
+own workspace before relinquishing the assignment so it can later be cleaned
+up. Consider explicit Retry-After eligibility for unresponsive startup after
+nudges and repeated same-pool rejection. Revise intent and architecture before
+behavioral implementation; the mismatch is a repair hypothesis, not proof of
+an operational root cause.
+
+### Selected startup and retry policy
+
+**Operator-selected policy, 2026-10-31; explicit source implemented in #9976,
+ordinary integration and installed/native qualification pending:**
+
+- Allow **3 startup attempts** per claim episode, retaining the same assignment
+  and reservation while those attempts remain accountable.
+- Once the worker is reachable, nudge the same worker every **5 minutes** and
+  allow up to **30 minutes** for an explicit accept/decline decision. This
+  selected interval supersedes the earlier unspecified cadence; the existing
+  supervision owner performs it, not a new timer or agent-owned schedule.
+- Retry cooldown is **task-wide**: successive cooldowns are **1 hour, 3 hours,
+  6 hours, then 12 hours**, capped at **12 hours**. Preserve retained pool
+  assignment and any independently scheduled later due time.
+- A successful transition to **`STARTED` resets both the cooldown escalation
+  and startup-attempt count**. Reachability, a delivered prompt or an unrelated
+  receipt does not perform that reset.
+
+This policy selects budgets and backoff, not an installed capability or a
+release. It does not resolve result-rejection reassignment or terminal-worktree
+closeout policy.
+
+### Selected pool scope and ordering
+
+**Operator-selected policy, 2026-10-31; reviewed in
+[#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773);
+implementation pending:**
+Capacity is separate for each **machine/environment pool instance**, not one
+shared cap across hosts. When multiple eligible instances have capacity, use
+**configurable pool priority**, not registration-ID order alone.
+
+**Agent-recommended representation:** identify an instance by the registration's
+stable logical identity together with its actual execution machine and
+environment. Keep logical identity distinct from workspace/native identity;
+an unidentified execution machine is not a fabricated `local` instance.
+Use an integer priority, default `0`, with higher values considered first;
+break ties by registration identity, machine and environment. Equal-priority
+instances remain separate capacity owners.
+
+The coordinator must obtain a **complete effective pool definition set** from
+the existing registration/reconciliation owner before placement. Preserve full
+effective permit/reject filters, declared/direct precedence, equivalent-source
+deduplication, pauses and operator overrides. The raw `registrations` list is
+not that set: current declaration conversion drops filters, while overrides
+and source reconciliation happen in the daemon. Do not add an independently
+configured pool registry or trust a caller's preferred subset, winner or
+available-slot count.
+
+Expand normalized instance definitions and their lossless representation
+first, then the owning provider's revision-fenced effective-set publication
+and atomic placement. Publication must distinguish machine/environment
+instances and replace a scope's complete set atomically; an incomplete or
+uncertain expected scope blocks new admission without erasing existing
+custody. A definition or published metadata alone does not establish that a
+legacy lane enforces the new placement contract. Caller migration and
+mixed-cohort fencing remain separate reviewed source gates.
+
+**Selected integration ownership:** the coordinator's actual registrar owns
+the whole configured cohort. Each machine/environment supervisor owns only its
+effective definition scope; host-local pointer bytes must not alternate as
+competing whole-cohort projections. The
+[source-owned projection boundary](../../../plugins/agent-dispatch/docs/pool-cohort-transport.md#coordinator-owned-source-composition)
+is a bounded provider composition, not automatic publication. Before enabling
+the existing reconciliation cadence, resolve unaccepted versus ambiguous
+original requests, preserve original client targets through reconnect, include
+all futures in existing shutdown accounting and explicitly refuse unsupported
+peers. The [request-custody source slice](journal/2026/11.02-publication-request-custody.md)
+addresses original-target recovery and confirmed-unaccepted supersession;
+it merged in [#10080](https://github.com/ThomasMichon/copilot-extensions/pull/10080)
+without enabling that cadence. Ordinary allocator and initial-prompt migration
+remain required.
+
+## Current foundations and discrepancy
+
+### Prioritized lifecycle clarification
+
+**Operator-directed summary, 2026-10-31:** prioritize the lifecycle behavior over
+further speculative metadata prerequisites. The assigned outcomes are:
+
+1. Make allocator-owned claiming, agent spawning and affirmative task start
+   explicit and consistent across the state machine and its actual consumers.
+2. Distinguish rejected claim attempts, worker declines, startup timeouts and
+   attempt exhaustion; none is a transport receipt or successful acceptance.
+3. Reconcile reserved-slot startup deadlines with the deadline for starting
+   work, preserving one assignment and accountable in-flight effects.
+4. Recover `SUSPENDED` work affirmatively to `STARTED`, or fence exhausted
+   recovery before returning it to `QUEUED` with attempt counters and backoffs.
+5. Require worktree-backed agents to finalize before posting `SUBMITTED`.
+   Calling finalization automatically before evaluators is a design option,
+   not unconditional permission for a foreign evaluator to finalize a workspace.
+
+The selected three-attempt, five-minute nudge, thirty-minute decision and
+task-wide 1/3/6/12-hour cooldown policy above remains authoritative.
+Recovery attempts must not erase startup history, reset counters on prompt
+delivery or override a later scheduled `not_before`. Uncertain native effects
+remain accountable until cancellation/fencing permits replacement capacity.
+
+**Legacy ordinary-source findings, not installed qualification:** fresh reservation currently
+does not transition the task to `CLAIMED`; worker `claim` and `start` remain
+separate from supervisor `reserve -> spawn -> record`. The supervisor's
+reservation/startup deadline, failed-reservation cap and stall nudge are
+different mechanisms from the selected claim-episode decision policy.
+Existing suspended/wake and confirmed-gone reconciliation owners preserve
+important native custody but do not implement the complete requested
+affirmative recovery/backoff policy. Existing completion/evaluator machinery
+also lacks a unified finalize-before-submission contract.
+Implementation must reconcile these existing owners rather than add another
+timer, retry registry or parallel completion mechanism.
+
+An adopted worktree-local agenda tracks these five outcomes and parks
+nonblocking discoveries. It does not replace this canonical Plan/Validation,
+reserve another participant's source, grant effects or declare completion.
+
+`Supervisor._eligible` filters future `Task.not_before` values.
+`QueueClaimQueriesMixin.claim_one` enforces the same due-time condition in its
+write transaction, alongside routing and ownership checks. This is useful
+existing scheduling authority, not a reason to add another timer.
+
+`SpawnReservationMixin.reserve_spawn` is a distinct pre-worker operation:
+it reserves queued, unowned work without transitioning the task to `CLAIMED`.
+Fresh queued admission now enforces the stored `Task.not_before` in the write
+transaction. Active/exclusive replay remains a non-spawning custody observation,
+and suspended re-embodiment preserves its existing owner/workspace path.
+This closes the selection-versus-reservation due-time gap without choosing a
+new retry policy. Existing claim identity and per-lane capacity selection still
+do not implement the target transaction. Source support is not installed proof.
+
+Startup revisions, allocation identity, native attachment history, effect
+custody and retained-reservation accounting are existing foundations. Preserve
+them and their unknown outcomes. An active reservation does not prove a native
+process exists; a launched process or delivered prompt does not prove acceptance.
+
+## Implementation plan
+
+The following sequencing and transaction means are **agent-recommended**;
+they implement the requested guarantees. The source receipts above identify
+the explicit implemented boundaries; remaining integration means are not
+claims of an installed or complete automatic lane.
+
+1. Define one coordinator-owned supervised-placement operation. Recheck
+   the complete effective instance set, priority ordering, routing, retry
+   eligibility, retained assignment and instance capacity at commit;
+   atomically bind the selected pool, create/reuse its reservation, consume the
+   slot and transition to `CLAIMED`. No network/process/workspace operation
+   runs inside that transaction. Attach real workspace/native identities later
+   under the existing assignment and startup fences.
+2. Keep bounded startup retries within that claim episode and reservation,
+   distinguishing the startup-attempt budget from task/recovery attempts.
+   Record attempt outcomes and explicit acceptance/decline. Reuse existing
+   coordinator/supervisor reconciliation for nudges; do not create an
+   agent-owned timer or infer acceptance from a transport receipt.
+3. On exhaustion, return the task to `QUEUED` with structured failure history.
+   Retain accountable startup/effect cleanup and block new admission while
+   outstanding work can still complete. Cancel or fence that work before
+   freeing its slot or permitting replacement execution. An unknown late
+   outcome is not permission to replay or an indefinite `CLAIMED` hold.
+4. On worker decline, durably record its exclusion scopes and explanation
+   while retaining the assignment/reservation. Finalize only its own correct
+   workspace through Worktrees, then atomically apply the routing disposition
+   and release the assignment to `QUEUED`. A narrowly task-aware closeout path
+   must avoid deadlocking on its own inbound task/session, without bypassing
+   foreign/shared-workspace, source, PR, claim or follow-up gates. Failed
+   finalization keeps a visible closeout blocker and its owner. Physical
+   reclamation still waits for the runner to stop and normal cleanup admission.
+5. Advertise stable pool identity consistently and enforce declined
+   worktree/pool/machine exclusions during selection, reservation and claiming.
+   Recording an exclusion that a later boundary ignores is not conformance.
+6. Implement the selected task-wide cooldown through the existing scheduling
+   authority, preserving any independently scheduled later `not_before`.
+   Persist the escalation stage and the active startup-attempt budget; reset
+   both only on the successful current `STARTED` transition. Do not reset
+   reservation keys/revisions or erase historical attempts, outcomes and
+   attachments. Keep retry eligibility separate from wake-delivery backoff
+   and monitored suspension. A reset clears this retry policy's counters,
+   not another owner's scheduled deadline or unresolved effect custody.
+7. Apply the same explicit recovery contract to suspended assigned work through
+   the existing wake/resume and supervision owners. An affirmative current
+   worker/native result may resume `STARTED`; prompt/wake delivery alone may
+   not. Retry within the accountable assignment and selected budget. On
+   exhaustion, cancel or fence outstanding startup/wake effects before releasing
+   capacity and returning `QUEUED` with the task-wide cooldown and retained
+   historical evidence. Preserve intentional monitored waits and operator holds:
+   being suspended is not itself a recovery failure.
+8. Require worktree-backed workers to finalize their own correct workspace
+   before submitting. Keep finalization and task submission separate
+   authoritative operations; a finalized-but-retained checkout is not proof of
+   process termination. Failed finalization must visibly block submission
+   without losing the result or task ownership. Qualify task-aware closeout
+   against its inbound task/session and preserve source, PR, outbound claim,
+   foreign/shared workspace, pairing, follow-up and runtime-effect gates.
+   Assess automatic finalize-before-evaluators at the existing worker/evaluation
+   boundary; do not let a remote evaluator silently finalize a different owner's
+   worktree. Explicitly define the equivalent applicability/readiness result
+   for tasks without a managed worktree.
+
+## Remaining policy choices
+
+- Result rejection from `SUBMITTED`: returning work to its retained worker
+  versus explicit fenced reassignment or assignment reconsideration.
+- Finalize-before-`SUBMITTED` is now required for worktree-backed workers.
+  Automatic finalization before evaluators and the supported no-worktree
+  applicability contract still need a reviewed integration design. This does
+  not reopen completed tasks for housekeeping or require physical checkout
+  deletion before submission.
+
+These remain independent policy decisions; neither is resolved by the selected
+startup/cooldown policy. Unsatisfiable retained routing must remain visible,
+not silently unpinned.
+
+## Compatibility and ownership
+
+Expand the owning coordinator/provider first, then migrate supervised callers
+using runtime-advertised support, not payload/package-version assumptions.
+Old reservation-plus-worker-claim clients cannot be treated as atomic placement
+clients. Define mixed-cohort admission and rollback before switching a lane;
+unsupported peers must not silently bypass required capacity/routing semantics.
+Preserve direct interactive claims without inventing a supervised reservation.
+The [configured-cohort legacy reservation fence](../../../plugins/agent-dispatch/docs/pool-claim-start.md#configured-cohort-legacy-reservation-fence)
+implements that admission prerequisite within the existing reservation
+transaction. It does not activate ordinary publication or caller migration.
+
+The [metadata provider boundary](../../../plugins/agent-dispatch/docs/pool-publication.md)
+separates revision/generation-fenced storage and control-authenticated transport
+from the still-pending admitted complete-source publisher, expected-scope
+membership and atomic placement. Transport support is not executing-runtime
+qualification. The singleton's OS lock is not a shared coordinator lease.
+
+Do not backfill legacy pool/native identity from labels or mark historical
+startup effects settled. Preserve manual sessions, suspended work, attachment
+history, existing holds and source claims. This slice does not take #6132's
+pool-capacity, #2879's executing-worker nudge, #9255/#8051's startup-progress,
+or the existing submission/conversation implementation ownership.
+
+## Validation Plan
+
+The existing scalar `not_before` reservation boundary and preserved
+active/suspended paths have source coverage in #9755 (13 new controls and
+100 total passing reservation cases). This is partial credit only; it does
+not resolve the selected retry scope, atomic placement or mixed-runtime matrix.
+
+The [#9976 source receipt](journal/2026/11.02-bounded-startup-source.md) adds
+coupled queue/API, existing-supervisor, exact-native transport and rollback
+controls for the selected explicit startup/retry policy. This is partial source
+credit, not completion of the ordinary-caller, mixed-cohort or installed/native
+matrix below.
+
+- [ ] Fake-clock selection and admission before, exactly at and after retry
+  eligibility; direct reservation/claim bypass attempts refuse early work.
+  Preserve later scheduled due times and cover the selected retry scope.
+- [ ] Prove the exact three-attempt budget, five-minute nudge cadence and
+  thirty-minute decision limit through the existing supervisor. Task-wide
+  cooldown advances through 1/3/6/12 hours and remains at 12; successful
+  current `STARTED` resets both counters. Restart/replay, prompt delivery,
+  failed/stale `STARTED` and unanswered nudges cannot manufacture a reset.
+- [ ] Priority-ordered all-pool selection, deterministic equal-priority ties,
+  mismatching filters, no-capacity waiting, retained-pool waiting and
+  unsatisfiable retained assignment are observable. Same logical registration
+  on two machine/environment instances has independent capacity. Complete
+  effective-set publication preserves filters, source precedence, pauses and
+  overrides; stale/partial publication cannot manufacture admission.
+- [ ] Concurrent allocators cannot overconsume a pool or assign one task
+  twice; reservation replay consumes one slot, not a second slot.
+- [ ] Initial `CLAIMED` works before a workspace/native exists; attachment and
+  `STARTED` require the actual current identities and explicit acceptance.
+- [ ] Nudges reuse the same assignment, do not duplicate pending work, and
+  distinguish delivery from a decision. Exhaustion returns `QUEUED`; delayed
+  launch success cannot bypass startup fencing or free capacity prematurely.
+- [ ] Worktree/pool/machine declines constrain every admission boundary.
+  Finalize succeeds before release; failed closeout retains custody; no
+  running, foreign/shared or otherwise protected workspace is reclaimed.
+- [ ] Coordinator/supervisor interruption between each durable transition
+  preserves history and either resumes the same operation or refuses replay.
+- [ ] New/new, old/new, new/old and rollback cohorts preserve supported manual,
+  supervised and suspended paths with truthful incompatibility errors.
+- [ ] Separate source/unit acceptance from authorized installed/native
+  forward-progress qualification. Source merge, release and running adoption
+  remain distinct; no production root-cause claim follows from this proposal.
+- [ ] SUSPENDED recovery distinguishes intentional waits, current affirmative
+  worker/native recovery, transport-only delivery, failed startup and exhausted
+  recovery. Preserve owner/generation/reservation fences and later due times;
+  prove selected counters/backoffs survive restart and late effects cannot
+  manufacture `STARTED` or prematurely release capacity.
+- [ ] Worktree-backed worker guidance and supported submission/evaluation
+  consumers agree on finalize-before-`SUBMITTED`. Failed closeout retains result
+  and task custody; successful finalized-but-retained state does not imply the
+  process stopped. Own inbound-task/session integration does not deadlock, and
+  foreign/shared, source, PR, claim, follow-up and effect gates remain enforced.
+  Qualify no-managed-worktree applicability explicitly.
+
+## Review and completion
+
+The documentation proposal has passed normal review and merged.
+Later source slices need their own eligible claims and current review gates.
+The parent remains Active until its complete Plan and Validation Plan are
+resolved or explicitly transferred, not merely because this amendment merges.

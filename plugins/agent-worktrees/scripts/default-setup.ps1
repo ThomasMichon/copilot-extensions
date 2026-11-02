@@ -1,5 +1,6 @@
 # agent-worktrees:launch-seed-boundary-v1
 # agent-worktrees:launch-attempt-boundary-v1
+# agent-worktrees:native-setup-owner-v1
 <#
 .SYNOPSIS
     Default / normalized session setup script for repos.
@@ -62,6 +63,10 @@ param(
     [string]$LaunchSeedRecord,
     [string]$LaunchSeedId,
     [string]$LaunchSeedRuntimePython,
+    [string]$LaunchSeedPreparation,
+    [string]$LaunchSeedNativeRoot,
+    [string]$LaunchSeedPreserveId,
+    [string]$LaunchNativeResumeSession,
     [string]$LaunchAttemptId,
     [string]$LaunchResolutionId,
     [string]$LaunchParentId,
@@ -75,21 +80,89 @@ if ($PSBoundParameters.ContainsKey('NativeArgumentsJson')) {
     if ($null -ne $CopilotArgs -and $CopilotArgs.Count -gt 0) {
         throw 'Native argument envelope cannot be combined with remaining arguments.'
     }
-    $nativeEnvelope = ConvertFrom-Json -InputObject $NativeArgumentsJson
-    if ($null -eq $nativeEnvelope -or $nativeEnvelope.args -isnot [System.Array]) {
-        throw 'Native argument envelope must contain an args array.'
-    }
-    foreach ($nativeArgument in $nativeEnvelope.args) {
-        if ($nativeArgument -isnot [string]) {
-            throw 'Native argument envelope must contain only strings.'
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        $nativeEnvelope = ConvertFrom-Json -InputObject $NativeArgumentsJson
+        if ($null -eq $nativeEnvelope -or $nativeEnvelope.args -isnot [System.Array]) {
+            throw 'Native argument envelope must contain an args array.'
         }
+        foreach ($nativeArgument in $nativeEnvelope.args) {
+            if ($nativeArgument -isnot [string]) {
+                throw 'Native argument envelope must contain only strings.'
+            }
+        }
+        $CopilotArgs = [string[]]$nativeEnvelope.args
+    } else {
+        $nativeDocument = [System.Text.Json.JsonDocument]::Parse($NativeArgumentsJson)
+        try {
+            $nativeArguments = $nativeDocument.RootElement.GetProperty('args')
+            if ($nativeArguments.ValueKind -ne [System.Text.Json.JsonValueKind]::Array) {
+                throw 'Native argument envelope must contain an args array.'
+            }
+            $values = [Collections.Generic.List[string]]::new()
+            foreach ($nativeArgument in $nativeArguments.EnumerateArray()) {
+                if ($nativeArgument.ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                    throw 'Native argument envelope must contain only strings.'
+                }
+                $values.Add($nativeArgument.GetString())
+            }
+            $CopilotArgs = $values.ToArray()
+        } finally { $nativeDocument.Dispose() }
     }
-    $CopilotArgs = [string[]]$nativeEnvelope.args
 }
 if ($ExecutionDirectory) {
     $CopilotArgs = @('-C', $ExecutionDirectory) + $CopilotArgs
 }
 
+$nativeSetup = $null
+$nativeSetupExit = $null
+if ($LaunchSeedPreparation) {
+    if (
+        $LaunchSeedPreparation -notin @('seed', 'admission') -or -not $LaunchSeedRecord -or
+        -not [IO.Path]::IsPathRooted($LaunchSeedNativeRoot) -or
+        (($LaunchAttemptId -or $LaunchResolutionId -or $LaunchParentId) -and
+            (-not $LaunchAttemptId -or -not $LaunchResolutionId))
+    ) { throw 'Native setup correlation or admission is incomplete.' }
+    . (Join-Path $PSScriptRoot 'native-seed-boundary.ps1')
+    $hostProcess = [Diagnostics.Process]::GetCurrentProcess()
+    $setupArguments = @(
+        '--phase', 'setup', '--record', $LaunchSeedRecord,
+        '--pid', [string]$PID, '--process-start-time',
+        $hostProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString(
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+    )
+    if ($LaunchSeedPreparation -eq 'admission') { $setupArguments += '--admission-only' }
+    foreach ($pair in @(
+        @('--seed-id', $LaunchSeedId), @('--preserve-seed-id', $LaunchSeedPreserveId),
+        @('--native-resume-session', $LaunchNativeResumeSession),
+        @('--launch-attempt-id', $LaunchAttemptId), @('--launch-resolution-id', $LaunchResolutionId),
+        @('--launch-parent-id', $LaunchParentId)
+    )) {
+        if ($pair[1]) { $setupArguments += @($pair[0], $pair[1]) }
+    }
+    $nativeSetup = Invoke-AwNativeSeedPhase $LaunchSeedNativeRoot (
+        $setupArguments + @('--', $hostProcess.MainModule.FileName, '-NoProfile', '-NoLogo', '-File', $PSCommandPath)
+    )
+    if (
+        -not $nativeSetup -or $nativeSetup.version -ne 1 -or
+        -not $nativeSetup.attempt_id -or -not $nativeSetup.resolution_id -or -not $nativeSetup.operation_id
+    ) { throw 'Native setup preparation is unconfirmed; no backend started.' }
+    $nativeSetupRecord = $LaunchSeedRecord
+    $nativeSetupCallback = @(
+        '--record', $nativeSetupRecord, '--launch-attempt-id', [string]$nativeSetup.attempt_id,
+        '--launch-resolution-id', [string]$nativeSetup.resolution_id,
+        '--operation-id', [string]$nativeSetup.operation_id
+    )
+    if ($nativeSetup.parent_id) { $nativeSetupCallback += @('--launch-parent-id', [string]$nativeSetup.parent_id) }
+    $LaunchSeedId = [string]$nativeSetup.setup_seed_id
+    if (-not $LaunchSeedId) { $LaunchSeedRecord = '' }
+    $LaunchAttemptId = [string]$nativeSetup.attempt_id
+    $LaunchResolutionId = [string]$nativeSetup.resolution_id
+    $LaunchParentId = [string]$nativeSetup.operation_id
+    Remove-Item Env:AGENT_WORKTREES_LAUNCH_EXECUTION -ErrorAction SilentlyContinue
+}
+
+try {
 # ── --stdio (ACP) mode: keep human output off the JSON-RPC channel ────────
 # In --stdio mode stdout is the ACP JSON-RPC stream (SSH merges Information into
 # stdout), so redirect all Write-Host to stderr. The repo setup hook runs as a
@@ -304,8 +377,32 @@ function Resolve-CopilotApplication {
 function Invoke-CopilotBackend {
     param([string]$Executable, [string[]]$LeadingArgs = @())
     if (-not $LaunchSeedRecord) {
-        & $Executable @LeadingArgs @CopilotArgs
+        $consoleControl = $null
+        try {
+            if ($nativeSetup) { $consoleControl = Register-AwNativeSeedConsoleControl }
+            & $Executable @LeadingArgs @CopilotArgs
+        } finally {
+            if ($consoleControl) {
+                $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)
+                [GC]::KeepAlive($consoleControl.Callback)
+            }
+        }
         return
+    }
+    if ($LaunchSeedNativeRoot -and [IO.Path]::GetExtension($Executable) -notin @('.cmd', '.bat')) {
+        if ([IO.Path]::GetExtension($Executable) -eq '.ps1') {
+            $LeadingArgs = @('-NoProfile', '-NoLogo', '-File', $Executable) + $LeadingArgs
+            $Executable = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        }
+        $code = Invoke-AwNativeSeedBackend -Root $LaunchSeedNativeRoot -Record $LaunchSeedRecord `
+            -SeedId $LaunchSeedId -Command (@($Executable) + $LeadingArgs + $CopilotArgs) `
+            -LaunchAttemptId $LaunchAttemptId -LaunchResolutionId $LaunchResolutionId -LaunchParentId $LaunchParentId
+        $global:LASTEXITCODE = $code
+        return
+    }
+    if ($LaunchSeedNativeRoot) {
+        $runtime = Get-AwNativeSeedRuntime $LaunchSeedNativeRoot
+        if ($runtime) { $LaunchSeedRuntimePython = $runtime.Python }
     }
     if (-not $LaunchSeedRuntimePython -or -not (Test-Path -LiteralPath $LaunchSeedRuntimePython -PathType Leaf)) {
         throw 'Launch-seed runtime is unavailable; the prompt remains staged.'
@@ -380,4 +477,16 @@ try {
     }
 }
 
+if ($null -eq $copilotExitCode) { $copilotExitCode = 0 }
+$nativeSetupExit = $copilotExitCode
 exit $copilotExitCode
+} finally {
+    if ($nativeSetup) {
+        if ($null -eq $nativeSetupExit) {
+            $outcome = @('--phase', 'interrupted') + $nativeSetupCallback
+        } else {
+            $outcome = @('--phase', 'returned', '--exit-code', [string]$nativeSetupExit) + $nativeSetupCallback
+        }
+        $null = Invoke-AwNativeSeedPhase $LaunchSeedNativeRoot $outcome
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "comment": "Add transactional agenda commands and optional held live projection",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

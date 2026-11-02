@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -196,12 +197,16 @@ try {
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("ownership", ["owned", "missing", "foreign"])
 def test_source_free_uninstall_preserves_transaction_and_staging_authority(
     tmp_path: Path,
     shell: str,
+    ownership: str,
 ) -> None:
     if shell == "bash" and os.name == "nt":
         pytest.skip("Full POSIX transaction requires real PID symlink and flock authority")
+    if shell != "bash" and os.name != "nt":
+        pytest.skip("Finite POSIX uninstall requires native Bash custody")
     payload = _payload(tmp_path)
     (payload / "runtime-source.json").unlink()
     env = _native_environment(tmp_path)
@@ -212,6 +217,13 @@ def test_source_free_uninstall_preserves_transaction_and_staging_authority(
     identity = lock.stat().st_ino
     (root / "current-version").write_text("1.2.2")
     (root / "config.json").write_text("{}")
+    manifest = root / "deploy-manifest.json"
+    if ownership != "missing":
+        manifest.write_text(json.dumps({
+            "schema_version": 3,
+            "service": "budget-guidance" if ownership == "owned" else "other-plugin",
+            "source": {"plugin": "budget-guidance", "kind": "local"},
+        }))
     stage = root / ".install-stage" / "owned"
     stage.mkdir(parents=True)
     (stage / "source.txt").write_bytes(b"staged-owner")
@@ -225,8 +237,16 @@ def test_source_free_uninstall_preserves_transaction_and_staging_authority(
         check=False,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
     assert lock.stat().st_ino == identity
-    assert not (root / "current-version").exists()
-    assert not (root / "config.json").exists()
+    if ownership == "owned":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (root / "current-version").exists()
+        assert not manifest.exists()
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+        expected = "payload-dir" if ownership == "missing" else "Foreign or invalid deployment manifest"
+        assert expected in result.stdout + result.stderr
+        assert (root / "current-version").read_text() == "1.2.2"
+        assert manifest.exists() == (ownership == "foreign")
+    assert (root / "config.json").read_text() == "{}"
     assert (stage / "source.txt").read_bytes() == b"staged-owner"

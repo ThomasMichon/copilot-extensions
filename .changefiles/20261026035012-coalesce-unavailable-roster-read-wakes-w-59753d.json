@@ -1,0 +1,9 @@
+{
+  "comment": "Coalesce unavailable roster-read wakes while retaining demand, recovery and periodic backstop semantics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

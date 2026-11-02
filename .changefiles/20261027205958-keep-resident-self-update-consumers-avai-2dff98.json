@@ -1,0 +1,9 @@
+{
+  "comment": "Keep resident self-update consumers available while live action inhibition is set; resume on clear without a manual restart.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

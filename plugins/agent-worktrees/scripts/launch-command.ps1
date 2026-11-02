@@ -1,4 +1,57 @@
+# agent-worktrees:startup-manifest-v1
 $ErrorActionPreference = 'Stop'
+
+if ($args.Count -ge 1 -and $args[0] -eq '--startup-manifest') {
+    $startupStream = $null
+    $startupReader = $null
+    $startupDocument = $null
+    try {
+        if ($args.Count -lt 2) { throw 'Missing startup manifest.' }
+        $startupStream = [IO.FileStream]::new(
+            [string]$args[1], [IO.FileMode]::Open, [IO.FileAccess]::Read,
+            [IO.FileShare]::None, 4096, [IO.FileOptions]::DeleteOnClose
+        )
+        $startupReader = [IO.StreamReader]::new($startupStream)
+        $startupDocument = [System.Text.Json.JsonDocument]::Parse($startupReader.ReadToEnd())
+        $startupHandoff = $startupDocument.RootElement
+        $startupVersion = $startupHandoff.GetProperty('version')
+        $startupWrapper = $startupHandoff.GetProperty('wrapper')
+        $startupArgv = $startupHandoff.GetProperty('argv')
+        if (
+            $startupVersion.ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
+            $startupVersion.GetInt32() -ne 1 -or
+            $startupWrapper.ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath($startupWrapper.GetString()),
+                [IO.Path]::GetFullPath($PSCommandPath),
+                [StringComparison]::OrdinalIgnoreCase
+            ) -or
+            $startupArgv.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+            $startupArgv.GetArrayLength() -eq 0
+        ) { throw 'Invalid startup manifest.' }
+        $startupValues = [Collections.Generic.List[string]]::new()
+        foreach ($startupArgument in $startupArgv.EnumerateArray()) {
+            if ($startupArgument.ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                throw 'Invalid startup argument.'
+            }
+            $startupValues.Add($startupArgument.GetString())
+        }
+        # Pane seeding can append an interactive prompt after serialization.
+        if ($args.Count -gt 2) {
+            foreach ($startupArgument in $args[2..($args.Count - 1)]) {
+                $startupValues.Add([string]$startupArgument)
+            }
+        }
+        $args = $startupValues.ToArray()
+    } catch {
+        [Console]::Error.WriteLine('ERROR: Could not consume startup argument handoff.')
+        exit 3
+    } finally {
+        if ($startupDocument) { $startupDocument.Dispose() }
+        if ($startupReader) { $startupReader.Dispose() }
+        if ($startupStream) { $startupStream.Dispose() }
+    }
+}
 
 $recovery = $false
 $offset = 0

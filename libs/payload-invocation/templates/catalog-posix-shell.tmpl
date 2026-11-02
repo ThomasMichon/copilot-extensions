@@ -21,6 +21,7 @@ command_path="$self_root/@@OUTPUT_DIR@@/@@COMMAND@@"
 installer_path="$self_root/scripts/@@INSTALLER@@.sh"
 availability="unavailable"
 [ -x "$command_path" ] && [ -f "$installer_path" ] && availability="ready"
+@@CATALOG_FLIGHT_POSIX_SHELL@@
 
 catalog="{\"schema\":\"copilot-extensions.session-command-catalog\",\"version\":1,\"plugin\":\"@@PLUGIN@@\",\"payload\":{\"provenance\":\"payload-local\"},\"commands\":[{\"id\":\"@@COMMAND@@\",\"argv\":[\"$(json_escape "$command_path")\"],\"shell\":\"direct\",\"purpose\":\"@@PURPOSE@@\",\"availability\":\"$availability\"}]}"
 context="## @@PLUGIN@@ session command catalog
@@ -29,5 +30,7 @@ Invoke the exact \`argv\` below. Do not search \`PATH\` or substitute a same-nam
 
 \`\`\`json
 $catalog
-\`\`\`"
+\`\`\`
+
+$runtime_status"
 printf '{"additionalContext":"%s"}\n' "$(json_escape "$context")"

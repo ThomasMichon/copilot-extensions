@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import re
 import shutil
 import subprocess
@@ -22,8 +23,10 @@ def test_uninstall_keeps_the_existing_transaction_lock_identity() -> None:
     assert '"$ACTION" == "uninstall"' in condition
     lock_actions = re.search(r"\$needsInstallLock = \$Action -in @\((.*?)\)", ps1)
     assert lock_actions is not None and "'uninstall'" in lock_actions.group(1)
-    assert 'remove_install_runtime_content "$INSTALL_DIR" || exit 1' in sh
-    assert "Remove-InstallRuntimeContent -InstallRoot $InstallDir" in ps1
+    assert "uninstall_state_preserving_runtime || exit 1" in sh
+    assert "Invoke-StatePreservingUninstall\n" in ps1
+    assert sh.index("uninstall_state_preserving_runtime || exit 1") > sh.index("if ! _enter_install_lock; then")
+    assert ps1.index("        Invoke-StatePreservingUninstall\n") > ps1.index("if ($needsInstallLock")
     assert 'rm -rf "$INSTALL_DIR"' not in sh
     assert "Remove-Item $InstallDir -Recurse" not in ps1
 
@@ -35,7 +38,7 @@ def test_native_powershell_uninstall_preserves_the_coordination_root(tmp_path: P
     home, root = tmp_path / "home", tmp_path / "runtime"
     home.mkdir()
     root.mkdir()
-    (root / "state").write_text("remove", encoding="utf-8")
+    (root / "state").write_text("preserve unknown operator state", encoding="utf-8")
     result = subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(SH_SCRIPT.with_suffix(".ps1")),
          "-Action", "uninstall", "-InstallDir", str(root)],
@@ -48,7 +51,8 @@ def test_native_powershell_uninstall_preserves_the_coordination_root(tmp_path: P
         cwd=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert sorted(path.name for path in root.iterdir()) == [".install.lock"]
+    assert (root / ".install.lock").is_file()
+    assert (root / "state").read_text(encoding="utf-8") == "preserve unknown operator state"
     assert not (home / ".local").exists()
 
 
@@ -79,6 +83,30 @@ def _cold_environment(home: Path) -> dict[str, str]:
         "HOME": str(home), "USERPROFILE": str(home),
         "XDG_CONFIG_HOME": str(home / ".config"),
     }
+
+
+@pytest.mark.parametrize("host", ("powershell.exe", "pwsh"))
+def test_native_payload_hash_does_not_require_optional_cmdlet(tmp_path: Path, host: str) -> None:
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip(f"native Windows {host} unavailable")
+    source = SH_SCRIPT.with_name("payload-mode.ps1").read_text(encoding="utf-8")
+    prefix = source[:source.index("$payload =")]
+    content = tmp_path / "content"
+    content.write_bytes(b"source bytes\x00\xff")
+    script = tmp_path / "hash.ps1"
+    script.write_text(
+        "param($Content)\n"
+        "function Get-FileHash { throw 'Optional cmdlet must not be required' }\n"
+        + prefix + "\nGet-PayloadSourceHash -Path $Content\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script), str(content)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip().casefold() == hashlib.sha256(content.read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])

@@ -57,7 +57,7 @@ _NO_MATERIALIZE_ENV = "WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE"
 _DEMO_PIVOT_MANIFEST: dict[str, object] = {
     "label": "Demo Queue",
     "after": "Worktrees",
-    "list": [sys.executable, "-m", "worktree_manager.demo_pivot", "list"],
+    "list": [sys.executable, "-B", "-m", "worktree_manager.demo_pivot", "list"],
     "entry": {"id": "id", "title": "title"},
     "columns": [
         {"key": "id", "header": "id", "width": 22},
@@ -84,11 +84,11 @@ _DEMO_PIVOT_MANIFEST: dict[str, object] = {
                 "name": "criteria",
                 "type": "multichoice",
                 "options_command": [
-                    sys.executable, "-m", "worktree_manager.demo_pivot", "vocabulary",
+                    sys.executable, "-B", "-m", "worktree_manager.demo_pivot", "vocabulary",
                 ],
             },
         ],
-        "run": [sys.executable, "-m", "worktree_manager.demo_pivot", "create",
+        "run": [sys.executable, "-B", "-m", "worktree_manager.demo_pivot", "create",
                 "{field.title}", "--prompt", "{field.prompt}"],
     },
 }

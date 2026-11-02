@@ -1,0 +1,9 @@
+{
+  "comment": "Classify container execution roots before WSL kernel hints in the POSIX installer",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

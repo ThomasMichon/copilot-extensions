@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import sys
 from types import SimpleNamespace
 
@@ -16,10 +15,12 @@ import pytest
 import bridge_http48_evidence as evidence
 import bridge_http49_evidence as producer_evidence
 import bridge_http50_evidence as recovery_evidence
+import bridge_http51_evidence as native_send_evidence
 import bridge_http47_validation as historical
 import capture_bridge_http48 as capture
 import capture_bridge_http49 as producer_capture
 import capture_bridge_http50 as recovery_capture
+import capture_bridge_http51 as native_send_capture
 import test_http47_capture_guards as old_guards
 from test_http47_capture_guards import (
     commit_fixture, fixture_git, source_seed as source_seed,
@@ -29,11 +30,12 @@ ROOT = Path(__file__).resolve().parents[3]
 historical_repository = old_guards.repository
 
 
-@pytest.fixture(params=["http48", "http49", "http50"])
+@pytest.fixture(params=["http48", "http49", "http50", "http51"])
 def capture_case(request):
     return {
         "http48": (evidence, capture), "http49": (producer_evidence, producer_capture),
         "http50": (recovery_evidence, recovery_capture),
+        "http51": (native_send_evidence, native_send_capture),
     }[request.param]
 
 
@@ -58,7 +60,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
     for path in paths:
         destination = root / path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / path, destination)
+        old_guards.copy_fixture_source(destination, path, original)
     # Composed publication-only cohorts, never an original historical receiver.
     protocol = root / evidence.previous.PREFIX / "protocol.py"
     text = protocol.read_text(encoding="utf-8")
@@ -171,7 +173,8 @@ def test_http48_capture_ignores_observation_object_key_order(
     observed = expected(root, evidence)
     for case in observed:
         observed[case] = dict(reversed(list(observed[case].items())))
-        nested = "recovery" if evidence.GENERATION == 50 else "ordinary_producer"
+        nested = ("receipt" if evidence.GENERATION == 51 else
+                  "recovery" if evidence.GENERATION == 50 else "ordinary_producer")
         observed[case][nested] = dict(reversed(list(
             observed[case][nested].items(),
         )))
@@ -223,7 +226,9 @@ def test_http48_capture_rejects_self_consistent_evidence_tampering(
     root, commit = repository
     registry, outputs, loaded = planned(root, commit, evidence)
     packet = loaded[evidence.PRIMARY][1]
-    source = evidence.previous.PREFIX + "routes/live_inbox.py"
+    source = evidence.previous.PREFIX + (
+        "native_send_admission.py" if evidence.GENERATION == 51 else "routes/live_inbox.py"
+    )
     if fault == "missing-source":
         del packet["execution_closure"][source]
     elif fault == "missing-installation-fragment":
@@ -389,7 +394,7 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
         verify_interpreters(tmp_path, {})
 
 
-@pytest.mark.parametrize("future_generation", [48, 49, 50])
+@pytest.mark.parametrize("future_generation", [48, 49, 50, 51])
 def test_http47_historical_current_hashes_are_not_future_source_inputs(
     historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, future_generation,
 ) -> None:

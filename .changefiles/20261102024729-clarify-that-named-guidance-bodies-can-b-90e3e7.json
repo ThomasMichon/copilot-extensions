@@ -1,0 +1,21 @@
+{
+  "comment": "Clarify that named guidance bodies can be read with repository file tools without the optional source resolver.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    },
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

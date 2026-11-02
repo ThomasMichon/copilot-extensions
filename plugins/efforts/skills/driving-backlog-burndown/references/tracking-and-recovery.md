@@ -125,8 +125,12 @@ shared trust, services, runtimes or policy on inferred authority.
 When an owner is parked on a human form, record the literal choice, age,
 required decision-maker and whether it is already covered. Do not replace the
 decision with another status prompt, silently choose a default or count queued
-messages as progress. Escalate genuinely missing decisions through the host's
-question mechanism; do not repeatedly ask for an authority already granted.
+messages as progress. Prepare the decision packet through permitted
+investigation/planning/docs and retain any adopted deferred-branch/return
+reference, actual attempt and revisit time. Continue another authorized avenue
+before a blocking prompt when useful safe work remains. After preparation is
+exhausted, use the host's supported decision surface; do not repeatedly ask for
+authority already granted or infer presence/consent from Autopilot or a clock.
 
 ## Same-owner context rollover
 
@@ -140,7 +144,8 @@ When the host provides native context management:
    its expected revision when replacing it; use atomic append only for short
    deltas. Do not overwrite another participant's checkpoint.
 3. Include parent completion gate, current slice, canonical paths/revisions,
-   pending human choices, full owner-roster/state pointers, uncovered owners,
+   pending human choices and decision/deferred-branch references, actual
+   attempt/revisit times and original return state, full owner-roster/state pointers, uncovered owners,
    live PRs/watches/shells/schedules, claims/leases and deadlines, and **exactly
    one next action**. Include the precise stopped/blocked boundary and what
    must not be retried or inferred.

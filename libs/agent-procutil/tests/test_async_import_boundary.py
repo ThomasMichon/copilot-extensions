@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, get_type_hints
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
@@ -94,7 +94,7 @@ def test_async_export_retains_job_class_and_parent_patch_seams(monkeypatch):
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(
         pu, "_assign_suspended_to_kill_on_close_job",
-        lambda pid: calls.append(("assign", pid)) or job,
+        lambda pid, **kw: calls.append(("assign", pid)) or job,
     )
     monkeypatch.setattr(
         pu, "_resume_suspended_process", lambda pid: calls.append(("resume", pid)) or True,
@@ -103,6 +103,6 @@ def test_async_export_retains_job_class_and_parent_patch_seams(monkeypatch):
     assert result is process and actual_job is job
     assert type(actual_job) is pu.JobHandle
     assert calls == [("assign", 123), ("resume", 123)]
-    spawn.assert_awaited_once_with("fixture", creationflags=7 | pu._CREATE_SUSPENDED)
+    spawn.assert_awaited_once_with("fixture", creationflags=7 | pu._CREATE_SUSPENDED, env=ANY)
     # No native handle was acquired by this fixture.
     job._handle = None

@@ -368,7 +368,7 @@ When the user asks to clean up worktrees:
    cleanup` in report mode. For accumulated or stale worktrees, follow
    [references/fleet-sweep.md](references/fleet-sweep.md) before treating its
    eligibility list as an objective-completion verdict.
-2. **Verify and preview candidates** -- establish landed content, inactive
+2. **Verify and preview candidates** -- establish the source disposition, inactive
    sessions, settled claims, resolved or explicitly transferred objectives,
    and unambiguous ownership. State each candidate's subject and completion
    evidence; honor the operator's exact approved scope and deletion policy.
@@ -388,6 +388,13 @@ When the user asks to clean up worktrees:
    separately. The fleet guide covers producer containment and cohort-based
    reconciliation without weakening action-time safety checks.
 
+**Resolve WIP; do not archive it as the outcome.** Commit and deliver useful
+work; explicitly abandon superseded/rejected work only with operator approval
+for the exact reset/discard. Recovery refs are not completion. Only selected
+planning/prototype artifacts belong in a canonical effort with purpose, execution
+owner and remaining gate retained. Completed-effort/history archival stays valid.
+Follow [cleanup-details.md](references/cleanup-details.md) before destructive action.
+
 **Never blanket-`--force` a batch of dirty worktrees.** `cleanup` refuses a
 worktree with uncommitted changes *on purpose* -- that refusal protects real,
 unlanded work. Treating "dirty" as a synonym for "safe to force" throws away
@@ -395,8 +402,9 @@ the one signal that distinguishes real work from noise, and one worktree's
 noise doesn't prove the same of another's. **For every worktree reported
 `dirty`, resolve it individually** -- read its actual diff (including staged
 and untracked paths), land real work through the repo's own flow (PR or
-direct, per `pr-profile`), and discard only confirmed noise file-by-file
-(never a bare `git clean -fd`). **Before actually discarding or force-clearing
+direct, per `pr-profile`), or obtain exact operator approval to abandon obsolete/
+rejected content. Discard confirmed noise only with the required approval,
+file-by-file (never a bare `git clean -fd`). **Before actually discarding or force-clearing
 anything, read [references/cleanup-details.md](references/cleanup-details.md)**
 for the exact per-path discard commands (staged vs. untracked differ), the
 fresh-safety-revalidation guarantees non-forced cleanup provides, and the

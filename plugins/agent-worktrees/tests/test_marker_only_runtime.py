@@ -109,7 +109,10 @@ def test_hooks_resolve_via_marker_not_venv():
         assert not re.search(r"\.venv[/\\](bin|Scripts)", text), (
             f"{hook.name} still resolves python through a .venv link"
         )
-        assert "resolve-runtime" in text, f"{hook.name} must source the resolver"
+        if hook.stem in {"bootstrap-check", "provision-check"}:
+            assert "resolve-runtime" not in text
+        else:
+            assert "resolve-runtime" in text, f"{hook.name} must source the resolver"
 
 
 def test_binstubs_are_marker_only():

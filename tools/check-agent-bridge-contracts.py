@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "native_send_idempotency": "NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION",
     "retained_inbox": "RETAINED_INBOX_PROTOCOL_VERSION",
     "retained_inbox_producer": "RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION",
     "retained_inbox_recovery": "RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION",
@@ -249,7 +250,7 @@ def _validate_schema(errors: list[str]) -> None:
     expected_definitions = {
         "sourcePath": (
             {"path", "sha256", "semantic", "non_semantic_reason"},
-            {"path", "sha256", "semantic", "non_semantic_reason"},
+            {"path", "sha256", "semantic", "non_semantic_reason", "current_path"},
         ),
         "fixture": (
             {"path", "sha256", "role", "generation"},
@@ -468,6 +469,7 @@ def _validate_contract(
                 {"path", "sha256", "semantic", "non_semantic_reason"},
                 errors,
                 source_label,
+                optional={"current_path"},
             ):
                 continue
             raw_path = source["path"]
@@ -476,7 +478,22 @@ def _validate_contract(
                     errors.append(f"{source_label}: duplicate source path {raw_path}")
                 local_sources.add(raw_path)
                 source_paths.add(raw_path)
-            path = _safe_file(raw_path, REPO, errors, source_label)
+            current_path = source.get("current_path", raw_path)
+            if "current_path" in source:
+                canonical = next((
+                    row for row in sources if isinstance(row, dict)
+                    and row.get("path") == current_path and "current_path" not in row
+                    and row.get("sha256") == source["sha256"]
+                ), None)
+                if (
+                    not isinstance(raw_path, str) or not raw_path
+                    or not (REPO / raw_path).resolve().is_relative_to(REPO.resolve())
+                    or (REPO / raw_path).exists() or canonical is None
+                ):
+                    errors.append(f"{source_label}: relocation requires an absent historical path and byte-identical registered canonical source")
+                if isinstance(current_path, str):
+                    source_paths.add(current_path)
+            path = _safe_file(current_path, REPO, errors, source_label)
             _validate_hash(path, source["sha256"], errors, source_label)
             semantic = source["semantic"]
             reason = source["non_semantic_reason"]
@@ -724,7 +741,7 @@ def _validate_contract(
 
     if (contract["id"] == "agent-bridge.http-wire" and type(current) is int
             and current >= 45 and isinstance(fixtures, list)):
-        from bridge_http45_evidence import validate_families
+        from agent_bridge_contract_families import validate_http_families
         loaded = {}
         for fixture in fixtures:
             if (not isinstance(fixture, dict) or not isinstance(fixture.get("path"), str)
@@ -734,19 +751,7 @@ def _validate_contract(
             data = _load_json(path, errors, label) if path is not None else None
             if isinstance(data, dict):
                 loaded[fixture["path"]] = (fixture["sha256"], data)
-        validate_families(fixtures, loaded, errors)
-        if current >= 47:
-            from bridge_http47_validation import validate_http47
-            validate_http47(REPO, {"contracts": [contract]}, loaded, errors)
-        if current >= 48:
-            from bridge_http48_evidence import validate_http48
-            validate_http48(REPO, {"contracts": [contract]}, loaded, errors)
-        if current >= 49:
-            from bridge_http49_evidence import validate_http49
-            validate_http49(REPO, {"contracts": [contract]}, loaded, errors)
-        if current >= 50:
-            from bridge_http50_evidence import validate_http50
-            validate_http50(REPO, {"contracts": [contract]}, loaded, errors)
+        validate_http_families(REPO, contract, loaded, errors, current)
 
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:

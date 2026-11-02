@@ -1,0 +1,9 @@
+{
+  "comment": "Type the installation-context fixture, vendoring and native-host test contracts without changing runtime behavior.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

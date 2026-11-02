@@ -1,0 +1,9 @@
+{
+  "comment": "Stage acquired embeddings durably before one source-aware delta writer boundary",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -81,6 +81,14 @@ moving every worktree publication function into the remote daemon.
 
 ## Central observation and registration
 
+Clients drive service demand: agents creating or tracking PRs ask the central
+service to connect to admitted forge backends and watch explicit PR sets.
+Reviewer task emitters request subscriptions to selected PR populations. The
+service owns continuing discovery and observation for those selections; a
+fixed startup list or a client-side native/fleet switch is not the complete
+intake model. The [caller-driven amendment](caller-driven-subscriptions.md)
+defines the proposed consumer contract and its validation obligations.
+
 The service shares an observation stream for the same forge, repository, PR and
 authorized account scope. Independent subscribers keep their own criteria,
 registration identity, deadline and delivery state. Sharing one operator's

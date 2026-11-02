@@ -61,7 +61,8 @@ def _read_guest_environment(profile: Path) -> Mapping[str, Any] | None:
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 65_536:
         _fail("guest-identity-invalid: guest registration must be a bounded regular file.")
     if os.name == "posix" and (
-        metadata.st_uid != os.getuid() or metadata.st_mode & 0o022
+        metadata.st_uid != cast(Callable[[], int], getattr(os, "getuid"))()
+        or metadata.st_mode & 0o022
     ):
         _fail("guest-identity-invalid: guest registration must be owned and writable only by this user.")
     registration = read_json(path)
@@ -161,10 +162,17 @@ def _host_default_wsl_distribution() -> str | None:
         return None
     import winreg
 
+    open_key = cast(
+        Callable[[int, str], AbstractContextManager[object]], getattr(winreg, "OpenKey"),
+    )
+    query_value = cast(
+        Callable[[object, str], tuple[object, int]], getattr(winreg, "QueryValueEx"),
+    )
+    current_user = cast(int, getattr(winreg, "HKEY_CURRENT_USER"))
     root = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, root) as key:
-            identity, _kind = winreg.QueryValueEx(key, "DefaultDistribution")
+        with open_key(current_user, root) as key:
+            identity, _kind = query_value(key, "DefaultDistribution")
     except FileNotFoundError:
         return None
     except OSError as error:
@@ -174,8 +182,8 @@ def _host_default_wsl_distribution() -> str | None:
     ) is None:
         _fail("guest-default-invalid: the host default WSL registration is malformed.")
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, root + "\\" + identity) as key:
-            distribution, _kind = winreg.QueryValueEx(key, "DistributionName")
+        with open_key(current_user, root + "\\" + identity) as key:
+            distribution, _kind = query_value(key, "DistributionName")
     except OSError as error:
         _fail(f"guest-default-invalid: cannot read the host default WSL distribution: {error}")
     return _guest_distribution_name(distribution)

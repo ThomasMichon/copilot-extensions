@@ -101,34 +101,32 @@ def test_prepare_ssh_config_uses_windowless_broker_on_windows(monkeypatch, tmp_p
 
 
 def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
+    import io
+    from agent_containers import docker_proxy_connection
+
     seen = {}
     process = SimpleNamespace(
-        stdin=SimpleNamespace(),
-        stdout=SimpleNamespace(),
-        wait=lambda: 17,
+        stdin=io.BytesIO(),
+        stdout=io.BytesIO(),
+        wait=lambda timeout=None: 17,
         poll=lambda: 17,
     )
 
     def fake_popen(args, **kwargs):
         seen["args"] = args
         seen["kwargs"] = kwargs
-        return process
+        return process, None
 
-    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(docker_proxy_connection, "spawn_sync_in_kill_on_close_job", fake_popen)
     monkeypatch.setattr(
-        docker_proxy,
+        docker_proxy_connection,
         "no_window_kwargs",
         lambda: {"creationflags": 0x08000000},
     )
-    monkeypatch.setattr(
-        docker_proxy.threading,
-        "Thread",
-        lambda **kwargs: SimpleNamespace(
-            start=lambda: None,
-            join=lambda timeout=None: None,
-        ),
+    connection = SimpleNamespace(
+        close=lambda: None, shutdown=lambda _: None,
+        recv=lambda _: b"", sendall=lambda _: None,
     )
-    connection = SimpleNamespace(close=lambda: None)
 
     docker_proxy._serve_connection("repo-1", connection)
 
@@ -146,9 +144,12 @@ def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
         "GatewayPorts=no",
     ]
     assert seen["kwargs"] == {
+        "require_job": True,
+        "allow_breakaway": False,
         "stdin": subprocess.PIPE,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.DEVNULL,
+        "bufsize": 0,
         "creationflags": 0x08000000,
     }
 
@@ -266,9 +267,8 @@ def test_docker_broker_failed_start_retires_process_and_endpoint(
         endpoint_file.write_text(json.dumps({"pid": process.pid}), encoding="utf-8")
         return process
 
-    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(docker_proxy, "spawn_daemon", fake_popen)
     monkeypatch.setattr(docker_proxy, "_healthy_endpoint", lambda *_args: False)
-    monkeypatch.setattr(docker_proxy, "windowless_daemon_kwargs", lambda **_kwargs: {})
 
     with pytest.raises(RuntimeError, match="did not become ready"):
         docker_proxy.ensure_broker(
@@ -292,12 +292,11 @@ def test_docker_broker_clean_early_exit_fails_without_waiting(
         poll=lambda: 0,
     )
     monkeypatch.setattr(
-        docker_proxy.subprocess,
-        "Popen",
+        docker_proxy,
+        "spawn_daemon",
         lambda *_args, **_kwargs: process,
     )
     monkeypatch.setattr(docker_proxy, "_healthy_endpoint", lambda *_args: False)
-    monkeypatch.setattr(docker_proxy, "windowless_daemon_kwargs", lambda **_kwargs: {})
     monkeypatch.setattr(
         docker_proxy.time,
         "sleep",
@@ -313,11 +312,9 @@ def test_docker_broker_clean_early_exit_fails_without_waiting(
         )
 
 
-def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
+def test_docker_broker_uses_attributed_daemon_launch(monkeypatch, tmp_path):
     endpoint_file = tmp_path / "proxy.json"
     seen = {}
-    launch_marker = object()
-    launch_options = {}
     process = SimpleNamespace(pid=123, poll=lambda: None)
 
     def fake_popen(args, **kwargs):
@@ -329,21 +326,12 @@ def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
         )
         return process
 
-    def fake_daemon_kwargs(*, breakaway):
-        launch_options["breakaway"] = breakaway
-        return {"startupinfo": launch_marker}
-
     health_results = iter((False, True))
-    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(docker_proxy, "spawn_daemon", fake_popen)
     monkeypatch.setattr(
         docker_proxy,
         "_healthy_endpoint",
         lambda *_args: next(health_results),
-    )
-    monkeypatch.setattr(
-        docker_proxy,
-        "windowless_daemon_kwargs",
-        fake_daemon_kwargs,
     )
 
     assert (
@@ -355,8 +343,8 @@ def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
         == 54320
     )
     assert seen["args"][0] == docker_proxy.sys.executable
-    assert seen["kwargs"]["startupinfo"] is launch_marker
-    assert launch_options["breakaway"] is True
+    assert seen["kwargs"]["instance"].runtime_root == endpoint_file.parent
+    assert seen["kwargs"]["log_path"] == endpoint_file.parent / "docker-proxy.log"
     # Never the caller's ambient cwd -- this is a long-lived detached
     # proxy daemon rooted at HOME instead.
     assert seen["kwargs"]["cwd"] == docker_proxy.os.path.expanduser("~")

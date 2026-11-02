@@ -599,8 +599,9 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
     rc = m.cmd_launch([])
 
     assert rc == 0
-    assert resolve_calls[0][0] == [
-        sys.executable,
+    assert resolve_calls[0][0][:2] == [sys.executable, "-X"]
+    assert resolve_calls[0][0][2].startswith("pycache_prefix=")
+    assert resolve_calls[0][0][3:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -615,8 +616,9 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
         tmp_path / "anchor"
     )
     assert child["env"]["COPILOT_THEME"] == "dark"
-    assert post_exit[0][0] == [
-        sys.executable,
+    assert post_exit[0][0][:2] == [sys.executable, "-X"]
+    assert post_exit[0][0][2].startswith("pycache_prefix=")
+    assert post_exit[0][0][3:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -1020,8 +1022,9 @@ def test_cmd_launch_passes_active_project_explicitly(monkeypatch, tmp_path):
     )
     rc = m.cmd_launch([])
     assert rc == 0
-    assert calls[0][0] == [
-        sys.executable,
+    assert calls[0][0][:2] == [sys.executable, "-X"]
+    assert calls[0][0][2].startswith("pycache_prefix=")
+    assert calls[0][0][3:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -2488,26 +2491,14 @@ def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
     rc = m.cmd_launch(["--no-update", "--no-mux", "--verbose"])
 
     assert rc == 0
-    resolve_argv = runs[0][0]
-    assert resolve_argv == [
-        sys.executable,
-        "-m",
-        "agent_worktrees",
-        "--project",
-        "example",
-        "resolve",
-        "--no-mux",
-    ]
-    post_exit_argv = runs[1][0]
-    assert post_exit_argv == [
-        sys.executable,
-        "-m",
-        "agent_worktrees",
-        "--project",
-        "example",
-        "post-exit",
-        "wt1",
-    ]
+    for argv, tail in (
+        (runs[0][0], ["resolve", "--no-mux"]),
+        (runs[1][0], ["post-exit", "wt1"]),
+    ):
+        assert argv[:2] == [sys.executable, "-X"]
+        assert argv[2].startswith("pycache_prefix=")
+        assert Path(argv[2].split("=", 1)[1]).is_absolute()
+        assert argv[3:] == ["-m", "agent_worktrees", "--project", "example", *tail]
     resolve_env = runs[0][1]["env"]
     assert resolve_env["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(cell_runtime)
     assert resolve_env["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(

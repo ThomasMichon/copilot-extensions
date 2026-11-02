@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -89,6 +90,52 @@ async def test_wrong_ambient_account_retries_explicit_keyring_accounts(
     assert calls[5].kwargs["env"]["GH_TOKEN"] == "owner-token"
     assert "GITHUB_TOKEN" not in calls[5].kwargs["env"]
     assert all("ssh" not in c.args[0] and "list" not in c.args[0] for c in calls)
+
+
+async def test_verified_fallback_account_reaches_ssh_config_and_proxy(run_gh, tmp_path):
+    source = codespace_transport.CodespaceConfigSource(NAME, config_dir=tmp_path)
+    transport = codespace_transport.CodeSpaceTransport(NAME, source=source)
+    run_gh.side_effect = [
+        _denied(),
+        _result(stdout="Logged in to github.com account owning-account\n"),
+        _result(stdout="owner-token"),
+        _result({"name": NAME, "state": "Available"}),
+        _result(stdout=(
+            "Host example-target\n"
+            "  User codespace\n"
+            "  ProxyCommand gh codespace ssh --stdio -c example-target\n"
+        )),
+    ]
+
+    assert await transport.is_running() is True
+    config = transport.ssh_config()
+
+    assert run_gh.call_args.args[0] == ["gh", "codespace", "ssh", "--config", "-c", NAME]
+    assert run_gh.call_args.kwargs["env"]["GH_TOKEN"] == "owner-token"
+    assert config.process_env["GH_TOKEN"] == "owner-token"
+    assert "GITHUB_TOKEN" not in config.process_env
+    assert Path(config.config_file).parent == tmp_path
+
+
+async def test_first_connection_resolves_account_without_prior_availability_read(run_gh):
+    manager = SimpleNamespace(ensure_connected=AsyncMock(), exec_command=AsyncMock(
+        return_value=SimpleNamespace(exit_code=0, stdout="ok", stderr=""),
+    ))
+    transport = codespace_transport.CodeSpaceTransport(NAME, manager=manager)
+    run_gh.side_effect = [
+        _denied(),
+        _result(stdout="Logged in to github.com account owning-account\n"),
+        _result(stdout="owner-token"),
+        _result({"name": NAME, "state": "Available"}),
+    ]
+
+    assert await transport.run("echo ok") == (0, "ok", "")
+    await transport.run("echo ok")
+
+    manager.ensure_connected.assert_awaited_once()
+    bound_source = manager.ensure_connected.await_args.args[1]
+    assert bound_source.gh_env["GH_TOKEN"] == "owner-token"
+    assert len(run_gh.call_args_list) == 4
 
 
 @pytest.mark.parametrize("accessible", [True, False])

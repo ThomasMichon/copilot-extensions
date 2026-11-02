@@ -1,0 +1,9 @@
+{
+  "comment": "Capture an explicit finite engine-origin acquisition budget for durable slow-host update recovery without changing default deadlines or retry admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

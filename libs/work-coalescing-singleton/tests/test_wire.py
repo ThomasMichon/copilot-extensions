@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Any, NoReturn
 
 from work_coalescing_singleton import client
 from work_coalescing_singleton.server import CoalescingServer
@@ -15,7 +16,7 @@ def _endpoint(server: CoalescingServer) -> tuple[str, int, str]:
     return host, int(port_s), rv["token"]
 
 
-def test_active_handler_count_is_nonzero_during_a_slow_request_and_zero_after():
+def test_active_handler_count_is_nonzero_during_a_slow_request_and_zero_after() -> None:
     """copilot-extensions#3798: `active_handler_count()` must reflect a
     connection accepted and dispatched to its handler thread even while
     that handler is mid-execution (not just while a client holds a
@@ -23,7 +24,7 @@ def test_active_handler_count_is_nonzero_during_a_slow_request_and_zero_after():
     release_gate = threading.Event()
     seen_count_during_compute: list[int] = []
 
-    def _slow_compute(kind, payload):
+    def _slow_compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         seen_count_during_compute.append(server.active_handler_count())
         release_gate.wait(timeout=5)
         return {"ok": True}
@@ -60,7 +61,7 @@ def test_active_handler_count_is_nonzero_during_a_slow_request_and_zero_after():
         server.close()
 
 
-def test_full_roundtrip_subscribe_request_release():
+def test_full_roundtrip_subscribe_request_release() -> None:
     server = CoalescingServer(
         lambda kind, payload: {"doubled": payload["n"] * 2}, linger_seconds=0.2
     )
@@ -83,11 +84,11 @@ def test_full_roundtrip_subscribe_request_release():
         server.close()
 
 
-def test_concurrent_clients_share_one_coalesced_execution_over_the_wire():
+def test_concurrent_clients_share_one_coalesced_execution_over_the_wire() -> None:
     calls = []
     gate = threading.Event()
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append(1)
         gate.wait(timeout=2)
         return {"n": payload["n"]}
@@ -96,9 +97,9 @@ def test_concurrent_clients_share_one_coalesced_execution_over_the_wire():
     server.start()
     try:
         host, port, token = _endpoint(server)
-        results: list[dict] = [None, None]  # type: ignore[list-item]
+        results: list[dict[str, Any] | None] = [None, None]
 
-        def call(idx, n):
+        def call(idx: int, n: int) -> None:
             results[idx] = client.request(
                 host, port, token, kind="k", key="shared", payload={"n": n},
                 request_deadline_s=3.0,
@@ -120,7 +121,7 @@ def test_concurrent_clients_share_one_coalesced_execution_over_the_wire():
         server.close()
 
 
-def test_close_admission_sends_structured_reason_over_the_wire_not_a_bare_refusal():
+def test_close_admission_sends_structured_reason_over_the_wire_not_a_bare_refusal() -> None:
     """The single-shot-caller admission-discipline contract end to end: once
     ``close_admission`` has been called, a real TCP client still completes a
     round trip (the socket stays open) and receives an explicit
@@ -146,7 +147,7 @@ def test_close_admission_sends_structured_reason_over_the_wire_not_a_bare_refusa
         server.close()
 
 
-def test_call_with_fallback_re_resolves_after_a_superseded_rejection():
+def test_call_with_fallback_re_resolves_after_a_superseded_rejection() -> None:
     """A structured ``reason`` rejection still falls through to the
     caller's ``fallback()`` just like any other miss -- the distinguishing
     behavior (re-resolving rendezvous on the *next* call rather than
@@ -174,7 +175,7 @@ def test_call_with_fallback_re_resolves_after_a_superseded_rejection():
         server.close()
 
 
-def test_wrong_token_is_ignored_not_crashed():
+def test_wrong_token_is_ignored_not_crashed() -> None:
     server = CoalescingServer(lambda kind, payload: {"ok": True}, linger_seconds=0.2)
     server.start()
     try:
@@ -192,16 +193,16 @@ def test_wrong_token_is_ignored_not_crashed():
         server.close()
 
 
-def test_call_with_fallback_uses_fallback_when_no_daemon_reachable():
+def test_call_with_fallback_uses_fallback_when_no_daemon_reachable() -> None:
     calls = {"boot": 0, "fallback": 0}
 
-    def dial():
+    def dial() -> None:
         return None  # never discoverable in this test
 
-    def boot():
+    def boot() -> None:
         calls["boot"] += 1
 
-    def fallback():
+    def fallback() -> dict[str, Any]:
         calls["fallback"] += 1
         return {"inline": True}
 
@@ -216,7 +217,7 @@ def test_call_with_fallback_uses_fallback_when_no_daemon_reachable():
     assert calls["fallback"] == 1
 
 
-def test_call_with_fallback_uses_daemon_when_dial_succeeds():
+def test_call_with_fallback_uses_daemon_when_dial_succeeds() -> None:
     server = CoalescingServer(lambda kind, payload: {"from": "daemon"}, linger_seconds=0.2)
     server.start()
     try:
@@ -235,12 +236,14 @@ def test_call_with_fallback_uses_daemon_when_dial_succeeds():
         server.close()
 
 
-def test_call_with_fallback_falls_back_on_request_deadline_exceeded():
+def test_call_with_fallback_falls_back_on_request_deadline_exceeded() -> None:
     gate = threading.Event()  # never set -- compute hangs past the deadline
 
-    server = CoalescingServer(
-        lambda kind, payload: gate.wait(timeout=5) and {}, linger_seconds=0.2
-    )
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        gate.wait(timeout=5)
+        return {}
+
+    server = CoalescingServer(compute, linger_seconds=0.2)
     server.start()
     try:
         host, port, token = _endpoint(server)
@@ -258,13 +261,13 @@ def test_call_with_fallback_falls_back_on_request_deadline_exceeded():
         server.close()
 
 
-def test_call_with_fallback_falls_back_when_dial_itself_raises():
+def test_call_with_fallback_falls_back_when_dial_itself_raises() -> None:
     """Copilot review finding: ``call_with_fallback``'s own docstring
     promises it never raises past this call, but a caller-supplied
     ``dial``/``boot`` that itself raises (rather than returning ``None``)
     used to escape uncaught."""
 
-    def _boom_dial():
+    def _boom_dial() -> NoReturn:
         raise RuntimeError("transient rendezvous read failure")
 
     result = client.call_with_fallback(
@@ -278,14 +281,14 @@ def test_call_with_fallback_falls_back_when_dial_itself_raises():
     assert result == {"inline": True}
 
 
-def test_call_with_fallback_falls_back_when_boot_itself_raises():
+def test_call_with_fallback_falls_back_when_boot_itself_raises() -> None:
     calls = {"dial": 0}
 
-    def _dial():
+    def _dial() -> None:
         calls["dial"] += 1
         return None  # never discoverable, even after "boot"
 
-    def _boom_boot():
+    def _boom_boot() -> NoReturn:
         raise RuntimeError("daemon spawn failed")
 
     result = client.call_with_fallback(

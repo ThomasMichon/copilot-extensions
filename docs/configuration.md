@@ -7,12 +7,18 @@ locations; it is not a second schema or command reference.
 For the interactive setup flow, read the illustrated
 [Configuration workbench walkthrough](configuration-workbench.md).
 
+For a reusable harness with separately bound private state, read
+[Harness and knowledge repositories](harness-and-knowledge.md). It explains
+knowledge grafting, the four configuration tiers and the authority boundaries;
+each plugin's reference owns its actual files, schema and precedence.
+
 Every piece of configuration in this suite lives in one of two homes, and picking
 the right one is the whole game:
 
-- **In the repo** — committed, shared by everyone who uses the repo, and it
-  *travels with the repo*. Describes **how the repo is worked** (which plugins,
-  what workflow, what topology).
+- **In the owning repo** — committed and available to that repo's authorized
+  readers. It *travels with that repo*. A reusable harness carries shared
+  conventions; its bound private knowledge repo can carry adopter preferences
+  and topology without making them part of the shared harness.
 - **Machine-local / user-global** — under `~/` (`~/.copilot`,
   `~/.copilot-extensions/marketplaces/<marketplace-id>/`, and transitional
   `~/.agent-*` / `~/.{project}` roots), **per-user and per-machine**, and
@@ -37,19 +43,43 @@ then re-run adoption when the machine-local projection needs refreshing.
 
 | | In the repo | Machine-local / user-global |
 |---|-------------|------------------------------|
-| **Put here** | Settings that should be **shared** and are **safe to commit** — the plugin set, PR/workflow policy, machine & agent topology, related-repo links | Anything **per-user / per-machine** or **secret** — absolute paths, machine identity, tokens, personal toggles |
+| **Put here** | Settings safe for the **owning repo's audience** — shared harness conventions or private knowledge preferences, plugin selection, workflow and topology | Local paths, runtime identity, credentials and host-specific overrides; repeatable non-secret preferences may instead belong in private knowledge configuration |
 | **Written by** | You or a repo-bootstrap command, through the repository's normal contribution flow | `install` / `update`, machine-local `register` / `adopt` commands, and you per machine |
 | **Committed?** | **Yes** | **No** (git-ignored / outside the tree) |
-| **Applies to** | Everyone who clones/uses the repo | Only this user on this machine |
+| **Applies to** | Selected contexts that use this repository's configuration | Only this user on this machine and, for exact overrides, the selected repository |
 
-> **Ownership tell:** a **committed, in-repo config that declares its own
-> workflow** is itself the signal that you *own* the repo — you can only commit
-> workflow into a repo you control. A repo you merely *contribute* to keeps any
-> such preference **machine-locally** instead (per the install-vs-adopt-boundary
-> pattern). This is why `install`/`update` never write repo config: they can't
-> know it's yours to change.
+> **Configuration is not authority:** committed workflow configuration expresses
+> repository-owned policy; it does not prove that its current reader may change
+> or bypass it. Keep personal choices for a repository you merely contribute to
+> in the supported private or machine-local preference scope. Follow the owning
+> repository's contribution flow for shared changes. `install`/`update` never
+> rewrite repository policy or grant repository ownership.
 
 ## The map
+
+### Agent plugin references
+
+These owner references define accepted fields, defaults, aliases, precedence
+and application boundaries. Companion declarations are configuration too:
+requirement packages and worker identities must not be confused with generated
+installation receipts or live registrations.
+
+| Plugin | Detailed configuration owner | Separate authority or state boundary |
+|--------|------------------------------|--------------------------------------|
+| agent-worktrees | [Configuration reference](../plugins/agent-worktrees/docs/config-reference.md) | Repository hosting/publication policy, registration and worktree custody |
+| agent-pull-requests | [Configuration and delegated policy](../plugins/agent-pull-requests/docs/configuration.md) | Worktrees owns target/provider policy; watch/review records are state |
+| agent-logger | [Configuration reference](../plugins/agent-logger/docs/config-reference.md) | Logging/sync opt-in, private sources/sinks and scheduled-process ownership |
+| agent-index | [Configuration reference](../plugins/agent-index/docs/configuration.md) | Installation role, index readiness and authorized corpus access |
+| agent-conduct-guidance | [Configuration and model-routing schema](../plugins/agent-conduct-guidance/docs/configuration.md) | Repository trust and demonstrated model eligibility |
+| agent-machines | [Requirement package configuration](../plugins/agent-machines/docs/configuration.md) | Resource authority, installation admission and explicit application |
+| agent-ssh | [Mesh and transport configuration](../plugins/agent-ssh/docs/configuration.md) | Logical execution identity, transport admission and credentials |
+| agent-bridge | [Configuration reference](../plugins/agent-bridge/docs/configuration.md), [machine profiles](../plugins/agent-bridge/docs/machine-config.md) | Adopted profile, selected execution target and service/resource custody |
+| agent-mcp | [Bridge configuration](../plugins/agent-mcp/docs/configuration.md) | Credential provider, backend/tool scope and subprocess custody |
+| agent-vault | [Selection and configuration](../plugins/agent-vault/docs/configuration.md) | Vault contents, database/credential ownership and runtime rendezvous |
+| agent-remote-driver | [Configuration versus descriptors](../plugins/agent-remote-driver/docs/configuration.md) | Session descriptors and tokens are generated state, not a preference schema |
+| agent-containers | [Fleet configuration](../plugins/agent-containers/docs/configuration.md) | Security profile, credential relay and current container ownership |
+| agent-codespaces | [Repository and provisioning configuration](../plugins/agent-codespaces/docs/configuration.md) | Credential sources, adoption and venue acquisition |
+| agent-dispatch | [Coordinator, registrar and identity configuration](../plugins/agent-dispatch/docs/configuration.md) | Task authority, supervisor registrations and live claims |
 
 ### Logical machines and physical hosts
 

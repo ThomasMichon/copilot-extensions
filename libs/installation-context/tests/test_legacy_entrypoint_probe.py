@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict
 
 import pytest
 
@@ -46,6 +47,12 @@ def _find_supported_bash() -> str | None:
 
 
 BASH = _find_supported_bash()
+
+
+class _LegacyFootprint(TypedDict):
+    paths: set[str]
+    services: list[dict[str, str]]
+    tasks: list[dict[str, str]]
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -232,7 +239,7 @@ def _run(
         capture_output=True,
         check=False,
         timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
 
@@ -525,7 +532,10 @@ def test_agent_index_status_does_not_create_legacy_stage(
     previous = sys.path.copy()
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import materialize_main
+        if TYPE_CHECKING:
+            from tools import materialize_main
+        else:
+            import materialize_main
     finally:
         sys.path[:] = previous
     changes = materialize_main.materialize_installer_engine_ref_into(
@@ -559,7 +569,7 @@ def test_agent_index_status_does_not_create_legacy_stage(
         capture_output=True,
         check=False,
         timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
     assert result.returncode == 0, result.stderr
@@ -567,7 +577,7 @@ def test_agent_index_status_does_not_create_legacy_stage(
 
 
 def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
-    expected = {
+    expected: dict[str, _LegacyFootprint] = {
         "agent-machines": {
             "paths": {
                 ".agent-machines",
@@ -927,6 +937,7 @@ def test_ps_profile_home_falls_back_to_directory_service(tmp_path: Path) -> None
 
     env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
     env.pop("OS", None)  # force the POSIX branch
+    assert POWERSHELL is not None
     result = subprocess.run(
         [POWERSHELL, "-NoProfile", "-File", str(harness)],
         capture_output=True,
@@ -934,6 +945,7 @@ def test_ps_profile_home_falls_back_to_directory_service(tmp_path: Path) -> None
         env=env,
         timeout=60,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(profile)
@@ -956,6 +968,7 @@ def test_ps_profile_home_uses_userprofile_on_windows(tmp_path: Path) -> None:
         (fake_bin / name).write_text("#!/bin/sh\nexit 9\n", encoding="utf-8")
         (fake_bin / name).chmod(0o755)
 
+    assert POWERSHELL is not None
     result = subprocess.run(
         [POWERSHELL, "-NoProfile", "-File", str(harness)],
         capture_output=True,
@@ -968,6 +981,7 @@ def test_ps_profile_home_uses_userprofile_on_windows(tmp_path: Path) -> None:
         },
         timeout=60,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(profile)

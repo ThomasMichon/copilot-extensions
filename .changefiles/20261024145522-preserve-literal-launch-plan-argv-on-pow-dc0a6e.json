@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve literal launch-plan argv on PowerShell 5.1 and 7 using the built-in JSON reader; make native parser fixtures strict and independent of hosting admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

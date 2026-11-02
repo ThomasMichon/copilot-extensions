@@ -1,0 +1,9 @@
+{
+  "comment": "Correct the Configuration focus hint to describe entering its already-visible section band.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -184,8 +184,21 @@ def proof_paths(
     if (root / (CONTRACT + "provenance.schema.json")).exists():
         paths.add(CONTRACT + "provenance.schema.json")
     paths.update(metadata_paths or set())
+    relocations = {}
     for contract in registry["contracts"]:
-        paths.update(item["path"] for item in contract["source_paths"])
+        sources = {item["path"]: item for item in contract["source_paths"]}
+        for source, row in sources.items():
+            paths.add(source)
+            if "current_path" not in row:
+                continue
+            current = row["current_path"]
+            canonical = sources.get(current)
+            if (safe(root, source).exists() or canonical is None
+                    or "current_path" in canonical or canonical["sha256"] != row["sha256"]):
+                raise ValueError("capture relocation requires an absent path and exact canonical owner")
+            safe(root, current)
+            relocations[source] = current
+    paths = {relocations.get(path, path) for path in paths}
     for folder in (
         root / "plugins/agent-bridge/src",
         *sorted((root / "libs").glob("*/src")),

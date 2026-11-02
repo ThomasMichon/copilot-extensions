@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 import json
+from collections.abc import Callable
 from dataclasses import replace
+from typing import Any, TypeVar
 
 import pytest
 
@@ -14,8 +18,15 @@ from fleet_contracts import (
 )
 from fleet_contracts.records import MAX_MESSAGE_BYTES, MAX_RESPONSE_BYTES
 
+_T = TypeVar("_T")
 
-def health(**changes):
+
+def _invalid_call(function: Callable[..., _T], /, *args: object, **kwargs: object) -> _T:
+    """Exercise rejected runtime inputs without weakening positive call signatures."""
+    return function(*args, **kwargs)
+
+
+def health(**changes: object) -> dict[str, object]:
     return {
         "status": "ok", "plugin": "agent-index", "version": "0.10.12-dev1",
         "passive": False, "promoted": True, "installationId": "mkt-id/agent-index",
@@ -23,7 +34,7 @@ def health(**changes):
     }
 
 
-def hit(**changes):
+def hit(**changes: object) -> dict[str, object]:
     return {
         "id": "source/chunk-1", "chunk_id": "source/chunk-1", "score": 0.75,
         "file_path": "src/file.py", "line_start": 1, "line_end": 4,
@@ -32,11 +43,11 @@ def hit(**changes):
     }
 
 
-def payload(value):
+def payload(value: dict[str, Any]) -> bytes:
     return encode_json(value, max_bytes=MAX_RESPONSE_BYTES)
 
 
-def test_health_preserves_native_identity_but_does_not_export_control_capability():
+def test_health_preserves_native_identity_but_does_not_export_control_capability() -> None:
     parsed = IndexHealth.from_backend(payload(health()), expected_installation_id="mkt-id/agent-index")
     assert parsed.can_accept_reads
     assert parsed.installation_id == "mkt-id/agent-index"
@@ -49,7 +60,9 @@ def test_health_preserves_native_identity_but_does_not_export_control_capability
 @pytest.mark.parametrize("state,passive,promoted", [
     ("passive", True, False), ("draining", False, True), ("draining", True, False),
 ])
-def test_native_health_distinguishes_read_admission_from_liveness(state, passive, promoted):
+def test_native_health_distinguishes_read_admission_from_liveness(
+    state: str, passive: bool, promoted: bool,
+) -> None:
     parsed = IndexHealth.from_backend(
         payload(health(status=state, passive=passive, promoted=promoted)),
         expected_installation_id="mkt-id/agent-index",
@@ -62,13 +75,13 @@ def test_native_health_distinguishes_read_admission_from_liveness(state, passive
     {"installationId": "other"}, {"plugin": "other"}, {"status": "ready"},
     {"passive": "false"}, {"promoted": 1}, {"passive": True}, {"promoted": False},
 ])
-def test_health_rejects_wrong_backend_or_inconsistent_evidence(changes):
+def test_health_rejects_wrong_backend_or_inconsistent_evidence(changes: dict[str, object]) -> None:
     with pytest.raises(BackendResponseError):
         IndexHealth.from_backend(payload(health(**changes)),
                                  expected_installation_id="mkt-id/agent-index")
 
 
-def test_search_preserves_original_wire_shape_and_unclipped_content():
+def test_search_preserves_original_wire_shape_and_unclipped_content() -> None:
     original = {"query": "query", "available": True, "hits": [hit()]}
     parsed = IndexSearchResult.from_backend(payload(original), expected_query="query",
                                            requested_limit=10)
@@ -78,7 +91,7 @@ def test_search_preserves_original_wire_shape_and_unclipped_content():
     assert decode_json(payload(parsed.to_dict()), max_bytes=MAX_RESPONSE_BYTES) == original
 
 
-def test_http_success_with_available_false_is_explicit_failure_not_empty_success():
+def test_http_success_with_available_false_is_explicit_failure_not_empty_success() -> None:
     unavailable = {"query": "query", "available": False, "error": "private-backend-detail", "hits": []}
     with pytest.raises(BackendResponseError) as caught:
         IndexSearchResult.from_backend(payload(unavailable), expected_query="query",
@@ -90,7 +103,7 @@ def test_http_success_with_available_false_is_explicit_failure_not_empty_success
     {"query": "other"}, {"available": 1}, {"hits": [hit(), hit()]},
     {"url": "https://untrusted.example"},
 ])
-def test_search_rejects_wrong_query_shape_or_result_count(changes):
+def test_search_rejects_wrong_query_shape_or_result_count(changes: dict[str, object]) -> None:
     value = {"query": "query", "available": True, "hits": [hit()], **changes}
     with pytest.raises(ContractError):
         IndexSearchResult.from_backend(payload(value), expected_query="query", requested_limit=1)
@@ -101,13 +114,15 @@ def test_search_rejects_wrong_query_shape_or_result_count(changes):
     {"line_start": True}, {"line_start": -1}, {"content": None},
     {"content": "\ud800"}, {"file_path": 5},
 ])
-def test_hit_validation_retains_types_without_coercion(changes):
+def test_hit_validation_retains_types_without_coercion(changes: dict[str, object]) -> None:
     with pytest.raises(ContractError):
         IndexHit.from_dict(hit(**changes))
 
 
-def test_large_response_has_separate_exact_byte_budget_and_no_silent_clipping():
-    original = {"query": "query", "available": True, "hits": [hit(content="x" * 70000)]}
+def test_large_response_has_separate_exact_byte_budget_and_no_silent_clipping() -> None:
+    original: dict[str, Any] = {
+        "query": "query", "available": True, "hits": [hit(content="x" * 70000)],
+    }
     raw = payload(original)
     assert MAX_MESSAGE_BYTES < len(raw) < MAX_RESPONSE_BYTES
     with pytest.raises(ContractError):
@@ -123,17 +138,17 @@ def test_large_response_has_separate_exact_byte_budget_and_no_silent_clipping():
         replace(parsed, available=False)
 
 
-def test_empty_search_success_remains_success_but_unvalidated_hit_collection_is_rejected():
+def test_empty_search_success_remains_success_but_unvalidated_hit_collection_is_rejected() -> None:
     result = IndexSearchResult.from_backend(
         payload({"query": "query", "available": True, "hits": []}),
         expected_query="query", requested_limit=10,
     )
     assert result.to_dict()["hits"] == []
     with pytest.raises(ContractError):
-        replace(result, hits=[IndexHit.from_dict(hit())])
+        _invalid_call(replace, result, hits=[IndexHit.from_dict(hit())])
 
 
-def test_direct_search_construction_and_replace_enforce_aggregate_response_budget():
+def test_direct_search_construction_and_replace_enforce_aggregate_response_budget() -> None:
     large = IndexHit.from_dict(hit(content="x" * 600000))
     valid = IndexSearchResult("query", True, (large,))
     assert len(payload(valid.to_dict())) < MAX_RESPONSE_BYTES
@@ -143,7 +158,7 @@ def test_direct_search_construction_and_replace_enforce_aggregate_response_budge
         replace(valid, hits=(large, large))
 
 
-def test_direct_search_aggregate_byte_boundary_is_exact():
+def test_direct_search_aggregate_byte_boundary_is_exact() -> None:
     empty_hit = IndexHit.from_dict(hit(content=""))
     empty = IndexSearchResult("query", True, (empty_hit,))
     overhead = len(payload(empty.to_dict()))
@@ -156,7 +171,7 @@ def test_direct_search_aggregate_byte_boundary_is_exact():
 
 
 @pytest.mark.parametrize("control", ["\x7f", "\x85", "\x9f"])
-def test_health_rejects_control_characters_in_opaque_installation_identity(control):
+def test_health_rejects_control_characters_in_opaque_installation_identity(control: str) -> None:
     with pytest.raises(ContractError):
         IndexHealth.from_backend(
             payload(health(installationId=f"market{control}/agent-index")),
@@ -168,14 +183,14 @@ def test_health_rejects_control_characters_in_opaque_installation_identity(contr
     b"not JSON", b"[]", b'{"status":"ok"}', b"\xff",
     b" " * (MAX_RESPONSE_BYTES + 1),
 ], ids=["invalid-json", "array", "missing-fields", "invalid-utf8", "oversized"])
-def test_invalid_backend_body_uses_backend_specific_error_class(raw):
+def test_invalid_backend_body_uses_backend_specific_error_class(raw: bytes) -> None:
     with pytest.raises(BackendResponseError):
         IndexHealth.from_backend(raw, expected_installation_id="mkt-id/agent-index")
     with pytest.raises(BackendResponseError):
         IndexSearchResult.from_backend(raw, expected_query="query", requested_limit=1)
 
 
-def test_invalid_backend_record_fields_are_classified_but_caller_inputs_are_not():
+def test_invalid_backend_record_fields_are_classified_but_caller_inputs_are_not() -> None:
     with pytest.raises(BackendResponseError):
         IndexHealth.from_backend(
             payload(health(version="")), expected_installation_id="mkt-id/agent-index",

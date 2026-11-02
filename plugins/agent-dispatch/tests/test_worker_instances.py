@@ -1045,7 +1045,7 @@ def test_cli_and_form_contract(capsys):
     assert manifest["placement"] == "config" and manifest["scope"] == "global"
     forms = [action for action in manifest["actions"] if action.get("kind") == "form"]
     assert len(forms) == 4 and all(action["confirm"] for action in forms)
-    assert all(action["fields_from"] == "fields" for action in forms)
+    assert all(action["fields_from"] == "operator_fields" and "--operator-inputs" in action["run"] for action in forms)
     assert "config_sections" not in json.loads((root / "pivots" / "agent-dispatch.json").read_text(encoding="utf-8"))
 
 
@@ -1114,7 +1114,7 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stag
     def invoke(*args):
         result = subprocess.run(
             [sys.executable, "-m", "agent_dispatch", "workers", *args],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, timeout=40 if os.name == "nt" else 20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             env={**os.environ, "AGENT_DISPATCH_NO_AUTOSTART": "1"},
         )

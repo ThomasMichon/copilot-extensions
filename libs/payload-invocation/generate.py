@@ -256,11 +256,16 @@ def load_manifest(path: Path) -> dict[str, object]:
     catalog_binding = data.get("catalogBinding", False)
     if not isinstance(catalog_binding, bool):
         raise ValueError(f"{path}: catalogBinding must be a boolean")
+    in_process_catalog = data.get("inProcessCatalog", False)
+    if not isinstance(in_process_catalog, bool):
+        raise ValueError(f"{path}: inProcessCatalog must be a boolean")
+    if in_process_catalog and (catalog_gate or catalog_binding):
+        raise ValueError(f"{path}: inProcessCatalog cannot compose catalogGate or catalogBinding")
     installer_lifecycle = data.get("installerLifecycle", False)
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
     if installer_lifecycle and (
-        installation_context != "required"
+        (manifest_version != LEGACY_VERSION and installation_context != "required")
         or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
     ):
         raise ValueError(f"{path}: installerLifecycle requires a vendored installation primitive")
@@ -297,6 +302,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["powershellPipelineInput"] = powershell_pipeline_input
     data["catalogGate"] = catalog_gate
     data["catalogBinding"] = catalog_binding
+    data["inProcessCatalog"] = in_process_catalog
     data["installerLifecycle"] = installer_lifecycle
     data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
@@ -411,6 +417,24 @@ def render(
         }
         for item in commands
     ]
+    flight_python = (
+        "runtime_status = 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+        "try:\n"
+        "    import importlib.util\n"
+        "    import sys\n"
+        "    sys.dont_write_bytecode = True\n"
+        "    flight_spec = importlib.util.spec_from_file_location(\n"
+        "        '_payload_flight_check', root / 'scripts' / 'command_binding.py'\n"
+        "    )\n"
+        "    assert flight_spec and flight_spec.loader\n"
+        "    flight_module = importlib.util.module_from_spec(flight_spec)\n"
+        "    flight_spec.loader.exec_module(flight_module)\n"
+        "    runtime_status = flight_module.runtime_installation_status(\n"
+        f"        catalog.get('binding'), Path.home() / '{data['runtimeRoot']}'\n"
+        "    )\n"
+        "except (ImportError, OSError, ValueError, AssertionError):\n"
+        "    pass\n"
+    )
     values = {
         "PLUGIN": str(data["plugin"]),
         "COMMAND": str(selected["command"]),
@@ -475,10 +499,65 @@ def render(
             if data["catalogBinding"] else ""
         ),
         "CATALOG_BINDING_ENV_POSIX": (
-            'SELF_ROOT="$self_root" ' if data["catalogBinding"] else ""
+            'SELF_ROOT="$self_root" '
         ),
         "CATALOG_BINDING_FLAGS_POSIX": (
-            " -I -B -X utf8" if data["catalogBinding"] else ""
+            " -I -B -X utf8"
+        ),
+        "CATALOG_FLIGHT_PYTHON": (
+            "from pathlib import Path\n"
+            "root = Path(os.environ['SELF_ROOT'])\n" + flight_python
+        ),
+        "CATALOG_FLIGHT_IN_PROCESS": "\n".join(
+            "    " + line if line else "" for line in flight_python.splitlines()
+        ) + "\n",
+        "CATALOG_FLIGHT_POWERSHELL": (
+            ""
+            if data["catalogBinding"]
+            else (
+                "$runtimeStatus = 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+                f"$flightRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
+                "$flightResolver = Join-Path $selfRoot 'scripts\\resolve-runtime.ps1'\n"
+                "if ($env:COPILOT_EXTENSIONS_CONTEXT) {\n"
+                "    $runtimeStatus = 'Backend installation: could not be verified for this installation context. No setup was attempted.'\n"
+                "} elseif (-not (Test-Path -LiteralPath $flightRoot)) {\n"
+                "    $runtimeStatus = 'Backend installation: not installed. Explicit package setup is required.'\n"
+                "} elseif (Test-Path -LiteralPath $flightResolver -PathType Leaf) {\n"
+                "    $previousRuntimeRoot = $env:AGENT_RT_ROOT\n"
+                "    try {\n"
+                "        $env:AGENT_RT_ROOT = $flightRoot\n"
+                "        $AgentRtPy = $null\n"
+                "        . $flightResolver -TraceMode read-only\n"
+                "        $runtimeStatus = if ($AgentRtPy) {\n"
+                "            'Backend installation: already installed. This read-only flight check does not start the service or establish service liveness.'\n"
+                "        } else {\n"
+                "            'Backend installation: incomplete or unavailable. Explicit package setup is required.'\n"
+                "        }\n"
+                "    } catch {} finally { $env:AGENT_RT_ROOT = $previousRuntimeRoot }\n"
+                "}\n"
+            )
+        ),
+        "CATALOG_FLIGHT_POSIX_SHELL": (
+            'runtime_status="$(\n'
+            '    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then\n'
+            "        printf '%s' 'Backend installation: could not be verified for this installation context. No setup was attempted.'\n"
+            f'    elif [ ! -e "$HOME/{data["runtimeRoot"]}" ]; then\n'
+            "        printf '%s' 'Backend installation: not installed. Explicit package setup is required.'\n"
+            '    elif [ -f "$self_root/scripts/resolve-runtime.sh" ]; then\n'
+            "        set +e\n"
+            f'        AGENT_RT_ROOT="$HOME/{data["runtimeRoot"]}"\n'
+            "        AGENT_RT_RESOLVE_TRACE_MODE=read-only\n"
+            '        AGENT_RT_PY=""\n'
+            '        . "$self_root/scripts/resolve-runtime.sh"\n'
+            '        if [ -n "$AGENT_RT_PY" ]; then\n'
+            "            printf '%s' 'Backend installation: already installed. This read-only flight check does not start the service or establish service liveness.'\n"
+            "        else\n"
+            "            printf '%s' 'Backend installation: incomplete or unavailable. Explicit package setup is required.'\n"
+            "        fi\n"
+            "    else\n"
+            "        printf '%s' 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+            "    fi\n"
+            ')"\n'
         ),
         "CATALOG_BINDING_POWERSHELL": (
             "function Write-CatalogBindingTrace([string]$Phase) {\n"
@@ -506,7 +585,7 @@ def render(
             "print(sys.executable,flush=True); sys.argv=sys.argv[1:]; "
             "runpy.run_path(sys.argv[0],run_name=''__main__'')' "
             f"$bindingHelper --payload-root $selfRoot --plugin-id '{data['plugin']}' "
-            "--legacy-root $legacyRoot)\n"
+            "--legacy-root $legacyRoot --flight-check)\n"
             "    $bindingExitCode = $LASTEXITCODE\n"
             "    Write-CatalogBindingTrace 'catalog-launcher-complete'\n"
             "    if ($candidate.Count -gt 0 -and "
@@ -528,18 +607,21 @@ def render(
             "$catalog['binding'] = @{ schema = 'copilot-extensions.command-installation-binding'; "
             "version = 1; status = 'unresolved'; reason = 'binding-interpreter-unavailable'; "
             "source = $null; installation = $null }\n"
+            "$runtimeStatus = 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
             "if ($bindingPython) {\n"
             "    if ($null -eq $bindingJson) {\n"
             "        Write-CatalogBindingTrace 'catalog-helper-start'\n"
             "        $bindingJson = & $bindingPython -I -B -E -X utf8 $bindingHelper "
-            f"--payload-root $selfRoot --plugin-id '{data['plugin']}' --legacy-root $legacyRoot\n"
+            f"--payload-root $selfRoot --plugin-id '{data['plugin']}' --legacy-root $legacyRoot --flight-check\n"
             "        $bindingExitCode = $LASTEXITCODE\n"
             "        Write-CatalogBindingTrace 'catalog-helper-complete'\n"
             "    }\n"
             "    if ($bindingExitCode -eq 0) {\n"
             "        try {\n"
             "            if ([string]::IsNullOrWhiteSpace($bindingJson)) { throw 'Binding response is empty' }\n"
-            "            $catalog['binding'] = $bindingJson | ConvertFrom-Json -ErrorAction Stop\n"
+            "            $flight = $bindingJson | ConvertFrom-Json -ErrorAction Stop\n"
+            "            $catalog['binding'] = $flight.binding\n"
+            "            $runtimeStatus = [string]$flight.runtimeStatus\n"
             "        }\n"
             "        catch { [Console]::Error.WriteLine($_); $catalog['binding'].reason = 'binding-response-invalid' }\n"
             "    } else { $catalog['binding'].reason = 'binding-resolver-failed' }\n"
@@ -633,6 +715,12 @@ def render(
         "CATALOG_SPECS_JSON_PS": json.dumps(
             catalog_specs_ps, ensure_ascii=True, separators=(",", ":")
         ),
+        "CATALOG_PLUGIN_PYTHON": repr(data["plugin"]),
+        "CATALOG_SPECS_PYTHON": repr(catalog_specs),
+        "CATALOG_INSTALLER_PYTHON": repr(data["installer"]),
+        "CATALOG_WINDOWS_SUFFIX_PYTHON": repr(windows_catalog_suffix),
+        "CATALOG_WINDOWS_SHELL_PYTHON": repr(windows_catalog_shell),
+        "CATALOG_MULTI_PYTHON": repr(data["multiCommandManifest"]),
         "CATALOG_CONTRACT_JSON": json.dumps(
             {
                 "plugin": data["plugin"],
@@ -718,6 +806,10 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             f"{catalog_prefix}-powershell.tmpl",
         ),
     )
+    if data["inProcessCatalog"]:
+        catalog_outputs += (
+            (manifest.parent / "scripts" / "emit_command_catalog.py", "catalog-python.tmpl"),
+        )
     protected_paths.update(path for path, _template in catalog_outputs)
     command_paths = set(generated)
     collisions = sorted(command_paths & protected_paths)

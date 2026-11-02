@@ -62,7 +62,7 @@ def test_managed_name_without_local_path_refuses_before_acquisition(
     )
     repos.write_registry(state)
     before = registry.read_bytes()
-    monkeypatch.setattr(bootstrap, "_clone", lambda *a: pytest.fail("managed name acquired"))
+    monkeypatch.setattr(bootstrap, "_clone", lambda *a, **k: pytest.fail("managed name acquired"))
     assert bootstrap.command([URL, "--target", str(tmp_path / "sample"), "--apply"]) == 1
     assert registry.read_bytes() == before
     assert not (tmp_path / "sample").exists()
@@ -81,7 +81,7 @@ def test_acquisition_prioritizes_selected_registry_account(
         bootstrap, "_credential_args",
         lambda url, account, **kwargs: observed.append(account) or [],
     )
-    monkeypatch.setattr(bootstrap, "_clone", lambda url, target, args: shutil.copytree(source, target))
+    monkeypatch.setattr(bootstrap, "_clone", lambda url, target, args, **k: shutil.copytree(source, target))
     target = tmp_path / "acquired"
     bootstrap.acquire("sample", target, URL)
     assert observed == ["selected"]
@@ -96,7 +96,7 @@ def test_selected_account_change_after_acquisition_refuses_registration(
     repos.write_registry(state)
     monkeypatch.setattr(bootstrap, "_credential_args", lambda *a, **k: [])
 
-    def clone(url, target, args):
+    def clone(url, target, args, **kwargs):
         shutil.copytree(source, target)
         current = repos.read_registry(strict=True)
         current.repos["sample"].account = "changed"
@@ -403,7 +403,8 @@ def test_rejected_selected_declaration_preserves_successful_acquisition(source, 
     assert repos.read_registry(strict=True).repos["sample"].local_path() == str(source)
 
 
-def test_real_manager_to_engine_to_repository_consumer(source, registry, tmp_path) -> None:
+@pytest.mark.parametrize("pinned", [False, True])
+def test_real_manager_to_engine_to_repository_consumer(source, registry, tmp_path, pinned) -> None:
     consumer(source, """
 if ($r.mode -eq 'apply') { Set-Content -LiteralPath $state -Value 'done' }
 $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
@@ -416,7 +417,7 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     env = dict(os.environ)
     result = subprocess.run(
         [sys.executable, str(driver), str(root / "worktree-manager" / "src"),
-         URL, str(source), str(log)],
+         URL, str(source), str(log), *([git(source, "rev-parse", "HEAD")] if pinned else [])],
         capture_output=True, text=True, timeout=180, env=env, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -424,3 +425,119 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
     assert "Repository setup: ready" in result.stdout
     assert repos.read_registry(strict=True).repos["sample"].local_path() == str(source)
+
+
+@pytest.mark.parametrize("value", ["", "main", "a" * 39, "g" * 40, "a" * 41, "HEAD^{commit}", "--all"])
+def test_invalid_commit_refuses_before_any_effect(tmp_path, registry, monkeypatch, value) -> None:
+    before = registry.read_bytes()
+    monkeypatch.setattr(bootstrap, "_selection", lambda *a, **k: pytest.fail("invalid intent selected"))
+    assert bootstrap.command([URL, "--commit", value, "--apply"]) == 2
+    with pytest.raises(protocol.SetupError, match="full"):
+        bootstrap.acquire("sample", tmp_path / "absent", URL, commit=value)
+    assert registry.read_bytes() == before
+    assert not (tmp_path / "absent").exists()
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_existing_commit_mismatch_preserves_head_source_and_registry(
+    source, registry, monkeypatch, apply,
+) -> None:
+    old = git(source, "rev-parse", "HEAD")
+    (source / "newer.txt").write_text("preserve newer work", encoding="utf-8")
+    commit(source)
+    head = git(source, "rev-parse", "HEAD")
+    before = registry.read_bytes()
+    monkeypatch.setattr(bootstrap, "_clone", lambda *a, **k: pytest.fail("existing source acquired"))
+    monkeypatch.setattr(protocol, "run", lambda *a, **k: pytest.fail("mismatched source executed"))
+    assert bootstrap.command([
+        URL, "--target", str(source), "--commit", old,
+        *(["--apply", "--trust-repository-setup"] if apply else []),
+    ]) == 1
+    assert git(source, "rev-parse", "HEAD") == head
+    assert git(source, "status", "--porcelain") == ""
+    assert (source / "newer.txt").read_text() == "preserve newer work"
+    assert registry.read_bytes() == before
+
+
+def test_existing_exact_commit_reuses_without_fetch_or_checkout(source, registry, monkeypatch) -> None:
+    head = git(source, "rev-parse", "HEAD")
+    monkeypatch.setattr(bootstrap, "_clone", lambda *a, **k: pytest.fail("existing source acquired"))
+    selected = bootstrap.acquire("sample", source, URL, commit=head.upper())
+    before = registry.read_bytes()
+    assert selected.commit == head
+    assert bootstrap.acquire("sample", source, URL, commit=head) == selected
+    assert registry.read_bytes() == before
+
+
+@pytest.mark.parametrize("phase", ["plan", "apply", "reverify"])
+def test_replacement_tree_cannot_satisfy_an_approved_commit(
+    source, registry, monkeypatch, phase,
+) -> None:
+    approved = git(source, "rev-parse", "HEAD")
+    for name in ("setup.ps1", "setup.sh"):
+        (source / name).write_text("# unapproved replacement source\n", encoding="utf-8")
+    commit(source)
+    replacement = git(source, "rev-parse", "HEAD")
+    git(source, "replace", approved, replacement)
+    git(source, "-c", "core.hooksPath=" + os.devnull, "checkout", "-q", "--detach", approved)
+    assert git(source, "rev-parse", "HEAD") == approved
+    assert git(source, "status", "--porcelain") == ""
+    before = registry.read_bytes()
+    monkeypatch.setattr(protocol, "_interpreter", lambda *a: pytest.fail("replacement source executed"))
+    if phase == "reverify":
+        # Revalidate a setup authorized by a reader that honored replacement refs.
+        script = source / ("setup.ps1" if sys.platform == "win32" else "setup.sh")
+        selected = protocol.Setup(
+            protocol.Source(source, URL, approved), script,
+            "powershell" if sys.platform == "win32" else "bash",
+            protocol._digest(source / protocol.DECLARATION), protocol._digest(script),
+        )
+        with pytest.raises(protocol.SetupError, match="source changes"):
+            protocol.run(selected, apply=True, trusted=True)
+    else:
+        assert bootstrap.command([
+            URL, "--target", str(source), "--commit", approved,
+            *(["--apply", "--trust-repository-setup"] if phase == "apply" else []),
+        ]) == 1
+    assert registry.read_bytes() == before
+    assert git(source, "rev-parse", "HEAD") == approved
+    assert git(source, "rev-parse", f"refs/replace/{approved}") == replacement
+    assert (source / "setup.ps1").read_text() == "# unapproved replacement source\n"
+
+
+@pytest.mark.parametrize("failure", ["peeled-tag", "checkout"])
+def test_new_commit_selection_failure_preserves_partial_target_without_registration(
+    tmp_path, registry, monkeypatch, failure,
+) -> None:
+    target = tmp_path / "selected"
+    before = registry.read_bytes()
+    calls = []
+    requested = "a" * 40
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "")
+        if "ls-remote" in argv:
+            return subprocess.CompletedProcess(argv, 0, URL, "")
+        if "clone" in argv:
+            assert "--no-replace-objects" in argv
+            target.mkdir()
+            (target / ".git").mkdir()
+            return subprocess.CompletedProcess(argv, 0)
+        assert failure == "checkout" and "checkout" in argv
+        assert "--no-replace-objects" in argv
+        assert "core.hooksPath=" + os.devnull in argv
+        assert "--detach" in argv and requested in argv and "--force" not in argv
+        assert "timeout" not in kwargs and not kwargs.get("capture_output", False)
+        return subprocess.CompletedProcess(argv, 7)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    monkeypatch.setattr(protocol, "_git", lambda *a: "b" * 40 if failure == "peeled-tag" else requested)
+    with pytest.raises(protocol.SetupError, match="exact selected commit|status 7"):
+        bootstrap.acquire("sample", target, URL, commit=requested)
+    assert registry.read_bytes() == before
+    assert (target / ".git").is_dir()
+    assert any("clone" in argv and "--no-checkout" in argv for argv, _ in calls)
+    assert not any("fetch" in argv for argv, _ in calls)
+    assert any("checkout" in argv for argv, _ in calls) is (failure == "checkout")

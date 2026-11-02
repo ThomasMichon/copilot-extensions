@@ -135,9 +135,24 @@ public static class CeInstallerDirectoryIdentity {
 }
 
 function Remove-InstallRuntimeContent {
-    <# The caller holds the install transaction lock. Never unlink that lock or
-       another invocation's staged source while removing runtime/config data. #>
-    param([Parameter(Mandatory)][string]$InstallRoot)
+    <# The caller holds the install transaction lock. Optional EntryNames limit
+       removal to those immediate children; omission retains purge semantics.
+       Never unlink the held lock or another invocation's staged source. #>
+    param(
+        [Parameter(Mandatory)][string]$InstallRoot,
+        [string[]]$EntryNames = @()
+    )
+
+    if ($PSBoundParameters.ContainsKey('EntryNames') -and
+        ($null -eq $EntryNames -or $EntryNames.Count -eq 0)) {
+        throw 'Selective runtime removal requires at least one entry'
+    }
+    foreach ($name in $EntryNames) {
+        if ($name -cnotmatch '\A[A-Za-z0-9._+-]+\z' -or
+            $name -in @('.', '..', '.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
+            throw "Invalid runtime removal entry: $name"
+        }
+    }
 
     $full = [System.IO.Path]::GetFullPath($InstallRoot)
     $root = $full.TrimEnd([char[]]@('\', '/'))
@@ -156,7 +171,20 @@ function Remove-InstallRuntimeContent {
             throw 'Refusing to purge a user home'
         }
     }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)) {
+    if ($EntryNames.Count -gt 0) {
+        $entries = @(
+            foreach ($name in $EntryNames) {
+                try {
+                    Get-Item -LiteralPath (Join-Path $full $name) -Force -ErrorAction Stop
+                } catch [System.Management.Automation.ItemNotFoundException] {
+                    continue
+                }
+            }
+        )
+    } else {
+        $entries = @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)
+    }
+    foreach ($entry in $entries) {
         if ($entry.Name -in @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
             continue
         }
@@ -423,7 +451,8 @@ function New-SignedVenv {
         [string]$UvCommand = 'uv',
         [bool]$RequireSignedBase = $false,
         [bool]$AllowExisting = $true,
-        [version]$MinimumSignedBaseVersion = [version]'3.10'
+        [version]$MinimumSignedBaseVersion = [version]'3.10',
+        [switch]$WithoutPip
     )
 
     $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
@@ -447,7 +476,9 @@ function New-SignedVenv {
 
     $signedBase = Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion
     if ($signedBase) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+        $venvArguments = @('-m', 'venv', '--copies')
+        if ($WithoutPip) { $venvArguments += '--without-pip' }
+        & $signedBase @venvArguments $VenvDir 2>&1 | Out-Null
         if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
             Write-Ok "Venv created from signed Python ($signedBase)"
             return $true
@@ -480,7 +511,8 @@ function Write-DeployManifest {
         [string]$SourcePathOverride = '',
         [string]$VersionOverride = '',
         [string]$PayloadHash = '',
-        [hashtable]$AdditionalFields = @{}
+        [hashtable]$AdditionalFields = @{},
+        [switch]$PassThru
     )
 
     $manifestPath = [IO.Path]::GetFullPath((Join-Path $InstallPath 'deploy-manifest.json'))
@@ -543,6 +575,8 @@ function Write-DeployManifest {
     foreach ($key in $AdditionalFields.Keys) {
         $manifest[$key] = $AdditionalFields[$key]
     }
+
+    if ($PassThru) { return $manifest }
 
     $tmp = $manifestPath + '.tmp-' + [Guid]::NewGuid().ToString('N')
     try {

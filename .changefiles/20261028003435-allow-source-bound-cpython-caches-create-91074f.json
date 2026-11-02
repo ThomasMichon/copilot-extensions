@@ -1,0 +1,9 @@
+{
+  "comment": "Allow source-bound CPython caches created after construction in supported Manager uninstall while preserving sealed artifacts and refusal fences.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

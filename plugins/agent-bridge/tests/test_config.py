@@ -19,6 +19,7 @@ from agent_bridge.config import (
     validate_config,
 )
 from agent_bridge.models import ServiceConfig, TopologyProfile
+from agent_bridge.session_modes import resolve_session_mode, write_session_mode
 
 
 @pytest.fixture()
@@ -40,6 +41,369 @@ def fake_repo(tmp_path):
     agents_dir.mkdir(parents=True)
     (agents_dir / "acp-agents.json").write_text(json.dumps({"test-agent": {}}))
     return repo
+
+
+class TestSessionModes:
+    @staticmethod
+    def policy(root, modes, *, legacy=False, **extra):
+        relative = ".agent-bridge" if legacy else ".copilot-extensions/agent-bridge"
+        path = root / relative / "config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump({"session_modes": modes, **extra}), encoding="utf-8")
+        return path
+
+    def test_fresh_default_and_adopter_fallback(self, config_home):
+        assert resolve_session_mode() == {"mode": "acp", "source": "default"}
+        assert resolve_session_mode(default="cli")["mode"] == "cli"
+
+    @pytest.mark.parametrize(
+        "repo,venue,mode,scope",
+        [
+            (None, None, "cli", "default"),
+            (None, "ssh", "acp", "venues.ssh"),
+            ("example", None, "acp", "repos.example.default"),
+            ("example", "ssh", "cli", "repos.example.venues.ssh"),
+            ("Example", "ssh", "acp", "venues.ssh"),
+        ],
+    )
+    def test_scope_priority_and_exact_case(self, tmp_path, config_home, repo, venue, mode, scope):
+        path = self.policy(tmp_path, {
+            "default": "cli", "venues": {"ssh": "acp"},
+            "repos": {"example": {"default": "acp", "venues": {"ssh": "cli"}}},
+        })
+        assert resolve_session_mode(operator_repo=tmp_path, repo=repo, venue=venue) == {
+            "mode": mode, "source": f"{path}#session_modes.{scope}",
+        }
+
+    def test_owner_priority_over_specificity_and_fallback(self, tmp_path, config_home):
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        target = tmp_path / "target"
+        target.mkdir()
+        self.policy(operator, {"default": "cli"})
+        self.policy(target, {"venues": {"local": "acp"}})
+        save_config(ServiceConfig(session_modes={"default": "acp"}))
+        assert resolve_session_mode(
+            operator_repo=operator, repo_root=target, venue="local", default="acp",
+        )["mode"] == "cli"
+        assert resolve_session_mode(repo_root=target, venue="local", default="cli")["mode"] == "acp"
+        assert resolve_session_mode(default="cli")["mode"] == "acp"
+
+    @pytest.mark.parametrize("policy", [
+        {"default": "other"}, {"venues": {"unknown": "cli"}},
+        {"repos": {"": {"default": "cli"}}}, {"unknown": "cli"}, None, [],
+    ])
+    def test_invalid_operator_policy_fails(self, tmp_path, config_home, policy):
+        self.policy(tmp_path, policy)
+        with pytest.raises(ValueError, match="refusing authority fallback"):
+            resolve_session_mode(operator_repo=tmp_path)
+
+    @pytest.mark.parametrize("content", ["session_modes:\n  default: invalid\n", "port: invalid\n", "[]"])
+    def test_invalid_service_policy_never_falls_back(self, tmp_path, config_home, content):
+        (config_home / "config.yaml").write_text(content)
+        self.policy(tmp_path, {"default": "cli"})
+        with pytest.raises(ValueError, match="refusing preference fallback"):
+            resolve_session_mode(operator_repo=tmp_path)
+
+    def test_unreadable_present_policy_fails(self, tmp_path, config_home, monkeypatch):
+        path = self.policy(tmp_path, {"default": "cli"})
+        original = Path.read_text
+
+        def denied(candidate, *args, **kwargs):
+            if candidate == path:
+                raise PermissionError("test denial")
+            return original(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", denied)
+        with pytest.raises(ValueError, match="refusing authority fallback"):
+            resolve_session_mode(operator_repo=tmp_path)
+
+    def test_set_exact_scope_preserves_config_and_unsets(self, tmp_path, config_home):
+        path = self.policy(tmp_path, {"default": "cli", "venues": {"local": "acp"}},
+                           custom={"preserved": [1, 2]})
+        written = write_session_mode(operator_repo=tmp_path, repo="example", venue="ssh", mode="cli")
+        assert written == {
+            "mode": "cli", "source": f"{path}#session_modes.repos.example.venues.ssh",
+        }
+        assert yaml.safe_load(path.read_text()) == {
+            "custom": {"preserved": [1, 2]},
+            "session_modes": {
+                "default": "cli", "venues": {"local": "acp"},
+                "repos": {"example": {"venues": {"ssh": "cli"}}},
+            },
+        }
+        assert resolve_session_mode(operator_repo=tmp_path, repo="example", venue="ssh") == written
+        write_session_mode(operator_repo=tmp_path, repo="example", venue="ssh", unset=True)
+        assert resolve_session_mode(operator_repo=tmp_path, repo="example", venue="ssh")["source"].endswith(
+            "#session_modes.default"
+        )
+
+    def test_machine_set_survives_save_and_adopt(self, config_home, fake_repo):
+        write_session_mode(machine_local=True, venue="codespace", mode="cli")
+        adopt_topology("example", str(fake_repo))
+        assert load_config().session_modes.venues == {"codespace": "cli"}
+        assert resolve_session_mode(venue="codespace")["mode"] == "cli"
+
+    def test_repo_model_roundtrip(self, tmp_path, config_home):
+        self.policy(tmp_path, {"default": "cli", "repos": {"example": {"venues": {"ssh": "acp"}}}})
+        loaded = load_repo_bridge_config(tmp_path)
+        assert loaded.session_modes.model_dump(exclude_none=True)["repos"]["example"]["venues"] == {"ssh": "acp"}
+
+    def test_canonical_legacy_and_overlay_authority(self, tmp_path, config_home, monkeypatch):
+        legacy = self.policy(tmp_path, {"default": "cli"}, legacy=True)
+        write_session_mode(operator_repo=tmp_path, venue="local", mode="acp")
+        assert "local" in yaml.safe_load(legacy.read_text())["session_modes"]["venues"]
+        canonical = self.policy(tmp_path, {"default": "acp"})
+        assert resolve_session_mode(operator_repo=tmp_path)["source"] == f"{canonical}#session_modes.default"
+        overlay = canonical.parent / "marketplaces" / "example" / "config.yaml"
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text("session_modes:\n  default: cli\n")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId":"example"}')
+        result = resolve_session_mode(operator_repo=tmp_path)
+        assert result["mode"] == "cli"
+        assert str(overlay) in result["source"]
+
+    def test_write_requires_explicit_destination(self, config_home):
+        with pytest.raises(ValueError, match="exactly one"):
+            write_session_mode(mode="cli")
+
+    def test_failed_atomic_replace_preserves_original(self, tmp_path, config_home, monkeypatch):
+        path = self.policy(tmp_path, {"default": "acp"}, unrelated="preserved")
+        before = path.read_bytes()
+
+        def denied(*args):
+            raise PermissionError("test denial")
+
+        monkeypatch.setattr("agent_bridge.config_write.os.replace", denied)
+        with pytest.raises(PermissionError):
+            write_session_mode(operator_repo=tmp_path, mode="cli")
+        assert path.read_bytes() == before
+        assert not list(path.parent.glob("*.pending"))
+
+    def test_set_does_not_change_aliased_scopes_or_unrelated_values(self, tmp_path, config_home):
+        path = self.policy(tmp_path, {})
+        path.write_text(
+            "shared: &venues\n  ssh: acp\n"
+            "session_modes:\n  venues: *venues\n"
+            "  repos:\n    example:\n      venues: *venues\n"
+        )
+        write_session_mode(operator_repo=tmp_path, repo="example", venue="ssh", mode="cli")
+        actual = yaml.safe_load(path.read_text())
+        assert actual["shared"] == {"ssh": "acp"}
+        assert actual["session_modes"]["venues"] == {"ssh": "acp"}
+        assert actual["session_modes"]["repos"]["example"]["venues"] == {"ssh": "cli"}
+
+    @pytest.mark.skipif(__import__("sys").platform == "win32", reason="POSIX permission bits")
+    def test_preserves_protected_permissions_and_restricts_new_files(self, tmp_path, config_home):
+        import os
+        import stat
+
+        path = self.policy(tmp_path, {"default": "acp"}, unrelated="private")
+        path.chmod(0o600)
+        old_umask = os.umask(0o022)
+        try:
+            write_session_mode(operator_repo=tmp_path, mode="cli")
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            path.unlink()
+            write_session_mode(operator_repo=tmp_path, mode="acp")
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        finally:
+            os.umask(old_umask)
+
+    @pytest.mark.parametrize("second_action", ["session-mode", "adopt", "remove", "migrate"])
+    def test_overlapping_subprocess_writers_preserve_both_scopes(
+        self, tmp_path, config_home, fake_repo, second_action,
+    ):
+        import subprocess
+        import sys
+
+        from agent_procutil import no_window_kwargs
+
+        save_config(ServiceConfig(
+            session_modes={"default": "acp"}, topologies={"existing": TopologyProfile()},
+            schema_version=1 if second_action == "migrate" else 2,
+            port=9280 if second_action == "migrate" else 0,
+        ))
+        first_script = """
+import sys
+from pathlib import Path
+from agent_bridge import session_modes as modes
+from agent_bridge import config_write as writes
+replace = writes.os.replace
+def held_replace(*args):
+    print("ready", flush=True)
+    sys.stdin.readline()
+    replace(*args)
+writes.os.replace = held_replace
+modes.write_session_mode(machine_local=True, venue="ssh", mode="cli")
+"""
+        second_script = """
+import sys
+from pathlib import Path
+from agent_bridge import session_modes as modes
+from agent_bridge import config, config_write as writes
+sleep = writes.time.sleep
+def contended(delay):
+    print("waiting", flush=True)
+    sleep(delay)
+writes.time.sleep = contended
+if sys.argv[2] == "session-mode":
+    modes.write_session_mode(machine_local=True, venue="container", mode="cli")
+elif sys.argv[2] == "adopt":
+    config.adopt_topology("example", sys.argv[1])
+elif sys.argv[2] == "migrate":
+    from agent_bridge.config_migrations import run_migrations
+    run_migrations()
+else:
+    config.remove_topology("existing")
+"""
+        processes = []
+        try:
+            first = subprocess.Popen(
+                [sys.executable, "-c", first_script, str(fake_repo)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, **no_window_kwargs(),
+            )
+            processes.append(first)
+            assert first.stdout.readline().strip() == "ready"
+            second = subprocess.Popen(
+                [sys.executable, "-c", second_script, str(fake_repo), second_action],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
+            )
+            processes.append(second)
+            assert second.stdout.readline().strip() == "waiting"
+            _, error = first.communicate("\n", timeout=10)
+            assert first.returncode == 0, error
+            _, error = second.communicate(timeout=10)
+            assert second.returncode == 0, error
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+        assert resolve_session_mode(venue="ssh")["mode"] == "cli"
+        if second_action == "session-mode":
+            assert resolve_session_mode(venue="container")["mode"] == "cli"
+        elif second_action == "adopt":
+            assert "example" in load_config().topologies
+        elif second_action == "migrate":
+            actual = yaml.safe_load((config_home / "config.yaml").read_text())
+            assert actual["schema_version"] == 2 and load_config().port == 0
+        else:
+            assert "existing" not in load_config().topologies
+
+    def test_stale_native_save_preserves_new_preference(self, config_home):
+        save_config(ServiceConfig(port=1234))
+        stale = load_config()
+        write_session_mode(machine_local=True, mode="cli")
+        stale.port = 2345
+        save_config(stale)
+        assert load_config().port == 2345
+        assert resolve_session_mode()["mode"] == "cli"
+        save_config(ServiceConfig(port=3456))
+        assert resolve_session_mode()["mode"] == "cli"
+
+    def test_conflicting_native_mode_edit_refuses_stale_save(self, config_home):
+        write_session_mode(machine_local=True, mode="acp")
+        stale = load_config()
+        write_session_mode(machine_local=True, mode="cli")
+        stale.session_modes.venues["ssh"] = "cli"
+        with pytest.raises(ValueError, match="changed concurrently"):
+            save_config(stale)
+        assert resolve_session_mode()["mode"] == "cli"
+
+    def test_non_ascii_values_survive_platform_default_readers(self, tmp_path, config_home, monkeypatch):
+        label = "caf\u00e9 \u65c5\u884c"
+        path = self.policy(tmp_path, {"default": "acp"}, default_env={"LABEL": label})
+        save_config(ServiceConfig(topologies={"example": TopologyProfile(default_env={"LABEL": label})}))
+        original = Path.read_text
+
+        def legacy_locale(candidate, *args, **kwargs):
+            if candidate in (path, config_home / "config.yaml") and not args:
+                kwargs.setdefault("encoding", "cp1252")
+            return original(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", legacy_locale)
+        write_session_mode(operator_repo=tmp_path, venue="ssh", mode="cli")
+        write_session_mode(machine_local=True, venue="local", mode="cli")
+        assert load_repo_bridge_config(tmp_path).default_env["LABEL"] == label
+        assert load_config().topologies["example"].default_env["LABEL"] == label
+        assert path.read_bytes().isascii()
+        assert (config_home / "config.yaml").read_bytes().isascii()
+
+    @pytest.mark.parametrize("kwargs", [{"repo": "../example"}, {"venue": "SSH"}, {"mode": "other"}])
+    def test_invalid_write_selectors(self, config_home, kwargs):
+        args = {"machine_local": True, "mode": "cli", **kwargs}
+        with pytest.raises(ValueError):
+            write_session_mode(**args)
+        assert not (config_home / "config.yaml").exists()
+
+    def test_actual_offline_command_fresh_set_read_and_error(self, tmp_path, config_home):
+        import os
+        import subprocess
+        import sys
+
+        from agent_procutil import no_window_kwargs
+
+        def command(*args):
+            return subprocess.run(
+                [sys.executable, "-m", "agent_bridge", "config", "session-mode", *args, "--json"],
+                cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True,
+                timeout=30, **no_window_kwargs(),
+            )
+
+        fresh = command()
+        assert fresh.returncode == 0, fresh.stderr
+        assert json.loads(fresh.stdout) == {"mode": "acp", "source": "default"}
+        help_result = command("--help")
+        assert help_result.returncode == 0, help_result.stderr
+        assert "agent-bridge.session-mode/v1" in help_result.stdout
+        save_config(ServiceConfig())
+        local = command("--machine-local", "--set", "cli")
+        assert local.returncode == 0, local.stderr
+        assert json.loads(local.stdout)["mode"] == "cli"
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        denied = command("--set", "cli")
+        assert denied.returncode == 1
+        assert "exactly one" in denied.stderr
+        set_result = command("--operator-repo", str(operator), "--venue", "container", "--set", "cli")
+        assert set_result.returncode == 0, set_result.stderr
+        assert json.loads(set_result.stdout)["written"]["source"].endswith("session_modes.venues.container")
+        read_result = command("--operator-repo", str(operator), "--repo", "example", "--venue", "container")
+        assert read_result.returncode == 0, read_result.stderr
+        assert json.loads(read_result.stdout)["mode"] == "cli"
+        self.policy(operator, {"default": "invalid"})
+        invalid = command("--operator-repo", str(operator))
+        assert invalid.returncode == 1
+        assert "refusing authority fallback" in invalid.stderr
+
+    def test_new_request_to_legacy_runtime_reports_unsupported_without_effects(self, tmp_path, config_home):
+        import subprocess
+        import sys
+
+        from agent_procutil import no_window_kwargs
+
+        # Model the pre-capability selected parser while retaining the actual
+        # command tree. A new payload cannot infer support from its own bytes.
+        script = """
+import argparse
+from agent_bridge.__main__ import build_parser
+parser = build_parser()
+sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+config = sub.choices["config"]
+commands = next(a for a in config._actions if isinstance(a, argparse._SubParsersAction))
+del commands.choices["session-mode"]
+parser.parse_args(["config", "session-mode", "--help"])
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], cwd=tmp_path,
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == 2
+        assert "invalid choice" in result.stderr and "session-mode" in result.stderr
+        assert not (config_home / "config.yaml").exists()
+        assert not (tmp_path / ".copilot-extensions").exists()
 
 
 class TestSaveConfig:

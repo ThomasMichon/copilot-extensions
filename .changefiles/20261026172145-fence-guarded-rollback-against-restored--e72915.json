@@ -1,0 +1,13 @@
+{
+  "comment": "Fence guarded rollback against restored-owner changes and preserve atomic observation cleanup lifetime.",
+  "changes": [
+    {
+      "plugin": "libs/zdd",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

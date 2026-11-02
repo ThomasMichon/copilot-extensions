@@ -1,0 +1,9 @@
+{
+  "comment": "Launch the actual Windows supervisor process through durable SDK admission, preserving launcher policy and caller-Job survival.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

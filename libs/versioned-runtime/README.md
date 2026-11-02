@@ -150,7 +150,9 @@ activation/cutover coordination. A repair's outer cutover guard remains required
 
 Shell installers use `construction-shell --shell ps1|sh` to obtain the canonical
 attached-pipe adapter. Its finite `construction-session` supervisor holds kernel
-ownership while the caller installs dependencies. Completion rechecks the
+ownership while the caller installs dependencies. Both rendered shell adapters
+explicitly launch Python controls with `-B`, preventing bytecode writes into the
+selected payload. Completion rechecks the
 payload fingerprint and transfers to retention before releasing construction;
 the caller settles that retention after selection/reconciliation. Failure or
 pipe EOF reclaims only the owned unfinished candidate. Cleanup refusals remain
@@ -218,6 +220,21 @@ separate references to the candidate and previous generation until their actual
 promotion/drain or rollback outcome settles. Neither an mtime grace period nor
 a completion helper's PID is a retention pin. These context managers must run
 in the owning installer process; a shell command that exits cannot retain them.
+
+External registrations can outlive an interrupted installer. Their existing
+execution owner uses
+`versioned_runtime_leases.replace_runtime_references(root, owner, versions, expected=previous)`
+to persist credential-free, owner-scoped generation names in
+`runtime-references.json`. Publish both old and desired generations before
+changing the external registration; retain that union until publication or
+explicit recovery settles, then compare and replace it with the remaining
+generation. Release with an empty list only after owned removal is confirmed.
+The writer takes shared target retention before publication custody, preserves
+other owners and refuses a changed expected set. Canonical cleanup reads these
+barriers under publication custody, including after the writer process dies.
+Only an absent record means no references; malformed, linked, oversized or
+unreadable evidence refuses deletion. References never expire by PID or age
+and do not provide a new mutation lock, recovery queue or force-release path.
 
 Canonical `gc`, `toss_incomplete`, and incomplete `slot` cleanup acquire
 construction, exclusive retention, then selector-publication ownership and
@@ -438,6 +455,10 @@ writers reuse the verified winner without rewriting it; conflicting receipts or
 copies refuse publication. The adapter's `--snapshot-root` mode returns that
 snapshot path, with `--expected-source-identity` retaining the caller's complete
 initial identity across the process boundary.
+Windows sharing/access-lock failures during the final rename use the runtime's
+existing finite retry/backoff policy. Both the candidate and original source
+are revalidated before each attempt; exhausted locks and other filesystem
+errors remain explicit publication failures, never a fallback winner.
 
 Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The

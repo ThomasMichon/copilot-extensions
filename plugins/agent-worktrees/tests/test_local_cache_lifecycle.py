@@ -153,7 +153,7 @@ class TestSessionstartDiagnostic:
             time.sleep(0.01)
         assert waits
 
-    def test_active_worker_keeps_its_log_and_is_not_redispatched(self, tmp_path, monkeypatch):
+    def test_reserved_dispatch_reports_unqueued_request_without_touching_log(self, tmp_path, monkeypatch):
         from single_instance_lease import SingleInstance
 
         monkeypatch.setattr(lcr, "_worker_directory", lambda root: tmp_path)
@@ -168,8 +168,8 @@ class TestSessionstartDiagnostic:
             result = lcr._queue_refresh(str(tmp_path))
         finally:
             lease.release()
-        assert result.status == "queued"
-        assert "dispatch already reserved" in result.detail
+        assert result.status == "failed"
+        assert "dispatch reserved; request not queued" in result.detail
         assert log_path.read_text() == "current worker result"
 
     def test_git_worktree_removal_reclaims_worker_metadata(self, tmp_path):
@@ -213,7 +213,7 @@ class TestSessionstartDiagnostic:
     @pytest.mark.parametrize("status,exit_code", [("ready", 0), ("timeout", 1), ("partial", 1)])
     def test_worker_records_its_real_outcome(self, tmp_path, monkeypatch, capsys, status, exit_code):
         monkeypatch.setattr(lcr, "_worker_directory", lambda root: tmp_path)
-        monkeypatch.setattr(lcr, "refresh_local_cache", lambda root: lcr.RefreshResult(status))
+        monkeypatch.setattr(lcr, "refresh_local_cache", lambda root, **kwargs: lcr.RefreshResult(status))
         assert lcr._run_refresh_worker(str(tmp_path)) == exit_code
         assert f"[local-guidance] {status}" in capsys.readouterr().out
 

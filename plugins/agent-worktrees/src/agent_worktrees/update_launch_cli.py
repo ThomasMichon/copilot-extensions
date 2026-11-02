@@ -14,10 +14,11 @@ from .reconcile_deployment import execution_diagnostic
 
 
 def add_parsers(sub) -> None:
-    parser = sub.add_parser("launch-update", help="Submit durable native launch maintenance")
+    parser = sub.add_parser("launch-update", help="Submit durable native launch maintenance", allow_abbrev=False)
     parser.add_argument("phase", choices=("bootstrap", "reconcile", "staged", "automatic"))
     parser.add_argument("--status", help="Staged acquisition status path")
     parser.add_argument("--detach", action="store_true", help="Return after durable submission")
+    parser.add_argument("--auto", action="store_true", help="Automatic launch maintenance; honor the automatic-update hold")
     parser.add_argument(
         "--defer-worktrees", action="store_true",
         help="Leave the Worktrees runtime to the launcher's staged request",
@@ -51,6 +52,8 @@ def cmd_launch_update(args: argparse.Namespace) -> int:
     from .update_driver_json_cli import _run_request
 
     flags = [args.phase]
+    if getattr(args, "auto", False):
+        flags.append("--auto")
     automatic_options = [
         option for name, option in (
             ("no_update", "--no-update"), ("with_reconcile", "--with-reconcile"),

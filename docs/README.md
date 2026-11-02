@@ -31,6 +31,9 @@ venue or another platform works.
 - [Testing](../TESTING.md) and [pipelines](pipelines.md): validation and
   release mechanics.
 - [Patterns](patterns/README.md): how contributors build reusable components.
+- [Fast application installation and cutover](patterns/fast-application-install-and-cutover.md):
+  per-app contributor contract, with ideal sequence and migration tracking in
+  the canonical effort; not a portfolio-wide installation promise.
 - [Documentation architecture](documentation-architecture.md): page roles,
   claim ownership, and maintenance checks.
 - [Visions](../visions/README.md): standing intent, not capability evidence.

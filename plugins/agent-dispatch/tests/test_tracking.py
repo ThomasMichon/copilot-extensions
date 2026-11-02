@@ -131,64 +131,22 @@ def test_enrich_local_body_tasks_ignores_nonlocal_handles(monkeypatch):
     assert tracking.enrich_local_body_tasks(tasks, reservations) is tasks
 
 
-def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
-    captured = {}
+def test_resolve_live_session_uses_passive_local_reader(monkeypatch):
+    calls = []
 
-    def fake_run(cmd, *, timeout, env=None):
-        captured["cmd"] = cmd
-        captured["timeout"] = timeout
-        return types.SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps({"session_id": "s9", "worktree_id": "wt-x"}),
-            stderr="",
-        )
+    def resolve(worktree, *, timeout):
+        calls.append((worktree, timeout))
+        return {"session_id": "s9", "worktree_id": worktree}
 
-    monkeypatch.setattr(
-        tracking, "agent_bridge_launch_prefix",
-        lambda: [r"C:\runtime\python.exe", "-m", "agent_bridge"],
-    )
-    monkeypatch.setattr(tracking, "run_background_capture", fake_run)
-
-    got = tracking.resolve_live_session("wt-x")
-    assert got == {"session_id": "s9", "worktree_id": "wt-x"}
-    cmd = captured["cmd"]
-    assert cmd[:3] == [r"C:\runtime\python.exe", "-m", "agent_bridge"]
-    assert not any(arg.lower().endswith((".cmd", ".bat")) for arg in cmd)
-    assert "--json" in cmd
-    assert cmd[cmd.index("--handle") + 1] == "wt-x"
-    assert "live-sessions" in cmd and "resolve" in cmd
-    assert captured["timeout"] == 3.0
+    monkeypatch.setattr(tracking, "_resolve_local_owner", resolve)
+    monkeypatch.setattr(tracking, "_run_capture", lambda *a, **k: pytest.fail("no process"))
+    assert tracking.resolve_live_session("wt-x") == {"session_id": "s9", "worktree_id": "wt-x"}
+    assert calls == [("wt-x", 3.0)]
 
 
-def test_resolve_live_session_none_without_cli(monkeypatch):
-    monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
-    assert tracking.resolve_live_session("wt-x") is None
-
-
-def test_resolve_live_session_degrades_on_failures(monkeypatch):
-    monkeypatch.setattr(
-        tracking, "agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
-    )
-
-    # non-zero exit
-    monkeypatch.setattr(
-        tracking, "run_background_capture",
-        lambda cmd, **kw: types.SimpleNamespace(returncode=1, stdout="", stderr="x"),
-    )
-    assert tracking.resolve_live_session("wt-x") is None
-
-    # invalid JSON
-    monkeypatch.setattr(
-        tracking, "run_background_capture",
-        lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout="not json", stderr=""),
-    )
-    assert tracking.resolve_live_session("wt-x") is None
-
-    # empty object
-    monkeypatch.setattr(
-        tracking, "run_background_capture",
-        lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout="{}", stderr=""),
-    )
+@pytest.mark.parametrize("data", [None, {}])
+def test_resolve_live_session_omits_unavailable_or_absent_overlay(monkeypatch, data):
+    monkeypatch.setattr(tracking, "_resolve_local_owner", lambda *a, **k: data)
     assert tracking.resolve_live_session("wt-x") is None
 
 

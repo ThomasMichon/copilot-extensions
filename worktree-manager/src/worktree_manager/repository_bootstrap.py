@@ -28,15 +28,32 @@ def _repository(value: str) -> str:
     return value
 
 
+def _commit(value: str) -> str:
+    if not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value):
+        raise argparse.ArgumentTypeError("repository commit must be a full 40- or 64-hex commit ID")
+    return value.lower()
+
+
+def _context(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value):
+        raise argparse.ArgumentTypeError("context must be a declared lowercase identifier")
+    return value
+
+
 def parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="worktree-manager setup", allow_abbrev=False)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--repository", type=_repository)
     parser.add_argument("--repository-target")
+    parser.add_argument("--repository-commit", type=_commit)
     parser.add_argument("--trust-repository-setup", action="store_true")
+    parser.add_argument("--context", type=_context)
     args = parser.parse_args(argv)
-    if (args.repository_target is not None or args.trust_repository_setup) and not args.repository:
-        parser.error("--repository-target and --trust-repository-setup require --repository")
+    if (
+        args.repository_target is not None or args.repository_commit is not None
+        or args.trust_repository_setup or args.context is not None
+    ) and not args.repository:
+        parser.error("repository target, commit and setup trust require --repository")
     if args.repository_target is not None and not Path(args.repository_target).expanduser().is_absolute():
         parser.error("--repository-target must be absolute")
     return args
@@ -48,14 +65,20 @@ def run(args: argparse.Namespace) -> int:
     print(f"    source: {args.repository}")
     if args.repository_target:
         print(f"    target: {args.repository_target}")
+    if args.repository_commit:
+        print(f"    commit: {args.repository_commit}")
     if not args.apply:
         print("    plan only; setup declaration remains uninspected until owner qualification.")
         return 0
     command = ["repos", "setup", args.repository, "--apply"]
     if args.repository_target:
         command.extend(["--target", args.repository_target])
+    if args.repository_commit:
+        command.extend(["--commit", args.repository_commit])
     if args.trust_repository_setup:
         command.append("--trust-repository-setup")
+    if args.context is not None:
+        command.extend(["--context", args.context])
     try:
         return run_engine_passthrough(None, command, terminal_aware=True)
     except EngineError as error:

@@ -22,6 +22,26 @@ def _terminal() -> bool:
     return protocol._terminal()
 
 
+def _commit(value: str) -> str:
+    if not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value):
+        raise protocol.SetupError("Repository commit must be a full 40- or 64-hex commit ID.")
+    return value.lower()
+
+
+def _context(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value):
+        raise argparse.ArgumentTypeError("Context must be a declared lowercase identifier.")
+    return value
+
+
+def _require_commit(source: protocol.Source, commit: str | None) -> None:
+    if commit is not None and source.commit != commit:
+        raise protocol.SetupError(
+            "Repository HEAD does not match the requested commit; "
+            "the existing target was preserved. Reconcile through its owner.",
+        )
+
+
 def _selection(url: str, target: str | None, *, ask: bool) -> tuple[str, Path]:
     canonical = protocol.https_url(url)
     name = urlsplit(canonical).path.rsplit("/", 1)[-1].removesuffix(".git")
@@ -147,7 +167,9 @@ def _acquisition_environment() -> dict[str, str]:
     return protocol._environment(attended=_terminal())
 
 
-def _clone(url: str, path: Path, credential_args: list[str]) -> None:
+def _clone(
+    url: str, path: Path, credential_args: list[str], *, commit: str | None = None,
+) -> None:
     environment = _acquisition_environment()
     resolved = subprocess.run(
         ["git", "ls-remote", "--get-url", "--", url], cwd=path.parent,
@@ -156,8 +178,8 @@ def _clone(url: str, path: Path, credential_args: list[str]) -> None:
     if resolved.returncode or protocol.https_url(resolved.stdout.strip()) != protocol.https_url(url):
         raise protocol.SetupError("Git URL rewrites select another remote; acquisition was refused.")
     completed = subprocess.run(
-        ["git", *credential_args, "-c", "core.hooksPath=" + os.devnull,
-         "clone", "--", url, str(path)],
+        ["git", "--no-replace-objects", *credential_args, "-c", "core.hooksPath=" + os.devnull,
+         "clone", *(["--no-checkout"] if commit else []), "--", url, str(path)],
         cwd=path.parent, env=environment, **protocol._stdio_kwargs(),
     )
     if completed.returncode:
@@ -165,10 +187,36 @@ def _clone(url: str, path: Path, credential_args: list[str]) -> None:
             f"Git acquisition exited with status {completed.returncode}; "
             "any partial target was preserved. Reconcile before retrying.",
         )
+    if commit is not None:
+        protocol._plain(path)
+        protocol._plain(path / ".git")
+        try:
+            resolved_commit = protocol._git(path, "rev-parse", "--verify", f"{commit}^{{commit}}")
+        except protocol.SetupError:
+            raise protocol.SetupError(
+                "Requested commit is unavailable in the acquired source; "
+                "the partial target was preserved without checkout or registration. "
+                "No additional fetch was attempted.",
+            ) from None
+        if resolved_commit != commit:
+            raise protocol.SetupError("Requested object is not the exact selected commit.")
+        completed = subprocess.run(
+            ["git", "--no-replace-objects", *credential_args, "-c", "core.hooksPath=" + os.devnull,
+             "-C", str(path), "checkout", "--detach", commit, "--"],
+            env=environment, **protocol._stdio_kwargs(),
+        )
+        if completed.returncode:
+            raise protocol.SetupError(
+                f"Git commit selection exited with status {completed.returncode}; "
+                "the partial target was preserved without registration.",
+            )
 
 
-def acquire(name: str, path: Path, url: str) -> protocol.Source:
+def acquire(
+    name: str, path: Path, url: str, *, commit: str | None = None,
+) -> protocol.Source:
     """Preserve unknown outcomes and register only a qualified matching checkout."""
+    commit = _commit(commit) if commit is not None else None
     canonical = protocol.https_url(url)
     registry = repos.read_registry(strict=True)
     _registration(registry, name, path, canonical)
@@ -190,8 +238,9 @@ def acquire(name: str, path: Path, url: str) -> protocol.Source:
             raise protocol.SetupError("Repository target ownership could not be qualified.")
         account = _account(registry, name, canonical)
         credential_args = _credential_args(url, account, cwd=parent)
-        _clone(url, path, credential_args)
+        _clone(url, path, credential_args, commit=commit)
         source = protocol.qualify(path, canonical)
+    _require_commit(source, commit)
     with registry_lock(repos._repos_yaml_path()):
         current = repos.read_registry(strict=True)
         _registration(current, name, path, canonical)
@@ -215,8 +264,10 @@ def command(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="repos setup", allow_abbrev=False)
     parser.add_argument("repository")
     parser.add_argument("--target")
+    parser.add_argument("--commit", type=_commit)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--trust-repository-setup", action="store_true")
+    parser.add_argument("--context", type=_context)
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
@@ -226,17 +277,26 @@ def command(argv: list[str]) -> int:
         name, path = _selection(canonical, args.target, ask=args.apply)
         _registration(repos.read_registry(strict=True), name, path, canonical)
         print(f"Repository source: {canonical}\nSelected checkout: {path}", flush=True)
+        if args.commit:
+            print(f"Requested commit: {args.commit}", flush=True)
         if not args.apply:
             if path.exists():
                 selected = protocol.inspect(path, canonical)
+                _require_commit(selected.source, args.commit)
+                if args.context:
+                    from .repository_continuity import selected as select_context
+                    select_context(selected, args.context)
                 print(f"Commit: {selected.source.commit}\nSetup entry: {selected.script}")
             else:
                 print("Setup declaration: uninspected until acquisition.")
             print("Plan only: no acquisition, registration or repository code execution.")
             return 0
-        source = acquire(name, path, args.repository)
+        source = acquire(name, path, args.repository, commit=args.commit)
         print(f"Acquisition/registration: ready\nCommit: {source.commit}", flush=True)
         selected = protocol.inspect(source.path, source.url)
+        if args.context:
+            from .repository_continuity import selected as select_context
+            select_context(selected, args.context)
         if selected.source != source:
             raise protocol.SetupError("Repository revision changed before setup qualification.")
         print(f"Setup entry: {selected.script}", flush=True)
@@ -244,6 +304,9 @@ def command(argv: list[str]) -> int:
         if not trusted and _terminal():
             trusted = input("Run setup from this exact repository revision? [y/N] ").strip().lower() == "y"
         result = protocol.run(selected, apply=True, trusted=trusted)
+        if result.status == "ready" and args.context:
+            from .repository_continuity import run as run_continuity
+            result = run_continuity(selected, args.context, apply=args.apply)
         print(f"Repository setup: {result.status}: {result.message}", flush=True)
         return 0 if result.status == "ready" else 1
     except (protocol.SetupError, OSError, subprocess.TimeoutExpired, repos.RepositoryResolutionError) as error:

@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from agent_worktrees import __main__ as cli
 from agent_worktrees import tracking, worktree_identity
 
@@ -498,6 +500,46 @@ def test_managed_sweep_retains_record_when_removal_fails():
     assert report["skipped"] == [
         {"id": "retry", "reason": "worktree remove failed"}
     ]
+
+
+def test_managed_sweep_defers_when_native_launch_owns_target(monkeypatch):
+    from contextlib import contextmanager
+    from agent_worktrees import worktree_lifecycle
+
+    real_guard = worktree_lifecycle.guard
+
+    @contextmanager
+    def contended(path):
+        with real_guard(path), real_guard(path, timeout=0):
+            pytest.fail("A managed sweep crossed the target's active launch")
+            yield
+
+    monkeypatch.setattr(worktree_lifecycle, "guard", contended)
+    with patch(
+        "agent_worktrees.__main__._remove_managed_worktree",
+        side_effect=AssertionError("busy launch must not be removed"),
+    ) as remove:
+        report = _managed_sweep([_mgd("busy")], dry_run=False)
+    assert report == {
+        "removed": [], "skipped": [{"id": "busy", "reason": "lifecycle-busy"}],
+    }
+    remove.assert_not_called()
+
+
+def test_managed_sweep_holds_target_lease_through_removal():
+    from agent_worktrees import worktree_lifecycle
+
+    def remove(record, repo, tracking_dir):
+        path = tracking_dir / f"{record.worktree_id}.yaml"
+        with pytest.raises(TimeoutError), worktree_lifecycle.guard(path, timeout=0):
+            pass
+        with worktree_lifecycle.guard(tracking_dir / "another.yaml", timeout=0):
+            pass
+        return False, ["retained by test"]
+
+    with patch("agent_worktrees.__main__._remove_managed_worktree", side_effect=remove):
+        report = _managed_sweep([_mgd("leased")], dry_run=False)
+    assert report["skipped"] == [{"id": "leased", "reason": "retained by test"}]
 
 
 def test_managed_sweep_rechecks_live_session_before_removal():

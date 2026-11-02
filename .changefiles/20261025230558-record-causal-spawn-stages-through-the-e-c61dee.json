@@ -1,0 +1,9 @@
+{
+  "comment": "Record causal spawn stages through the existing worker-lane application logger without changing allocation or launch behavior.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

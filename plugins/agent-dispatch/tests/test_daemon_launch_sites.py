@@ -51,6 +51,7 @@ def test_resident_launch_sites_use_spawn_daemon(
         return SimpleNamespace(pid=4242)
 
     monkeypatch.setattr(agent_procutil, "spawn_daemon", spawn)
+    monkeypatch.setattr(procutil, "spawn_finite_worker", spawn)
     if site == "coordinator":
         main._spawn_coordinator_process()
     elif site == "supervisor":
@@ -68,6 +69,7 @@ def test_resident_launch_sites_use_spawn_daemon(
     assert options["console_children"] is console_children
     assert Path(options["cwd"]) == (Path(cwd()) if cwd else tmp_path)
     assert options["display"].startswith("agent_dispatch ")
+    assert options["instance"].lifecycle == ("finite-worker" if site == "self-deploy" else "resident")
 
 
 def test_spawn_dispatch_daemon_writes_its_log_under_the_runtime_root(tmp_path, monkeypatch):

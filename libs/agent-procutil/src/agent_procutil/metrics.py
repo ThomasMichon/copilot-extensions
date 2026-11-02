@@ -30,7 +30,6 @@ class _SampleProcess(Protocol):
     def create_time(self) -> float: ...
     def ppid(self) -> int: ...
     def cpu_times(self) -> _CpuTimes: ...
-    def children(self, *, recursive: bool) -> list[_SampleProcess]: ...
 
 
 class _Backend(Protocol):
@@ -39,6 +38,8 @@ class _Backend(Protocol):
     ZombieProcess: type[Exception]
 
     def Process(self, pid: int) -> _SampleProcess: ...
+
+    def _ppid_map(self) -> dict[int, int]: ...
 
 @dataclass(frozen=True)
 class ProcessIdentity:
@@ -225,6 +226,8 @@ class OwnedProcessCpuSampler:
             return self._observation([CpuIssue(self._root.pid, "metrics_unavailable")])
 
         issues: list[CpuIssue] = []
+        children_by_parent: dict[int, list[int]] | None = None
+        topology_error: Exception | None = None
         queue = list(self._records)
         visited: set[int] = set()
         discovery_attempts = 0
@@ -242,7 +245,21 @@ class OwnedProcessCpuSampler:
                     continue
                 times = process.cpu_times()
                 cpu = float(times.user + times.system)
-                children = process.children(recursive=False)
+                if children_by_parent is None and topology_error is None:
+                    try:
+                        # Share psutil's own children() topology helper for this
+                        # attempt only; retained/reparented roots use it too.
+                        children_by_parent = {}
+                        for child_pid, parent_pid in backend._ppid_map().items():
+                            children_by_parent.setdefault(parent_pid, []).append(child_pid)
+                    except (
+                        backend.AccessDenied, backend.NoSuchProcess, backend.ZombieProcess,
+                    ) as error:
+                        topology_error = error
+                if topology_error is not None:
+                    raise topology_error
+                assert children_by_parent is not None
+                children = children_by_parent.get(pid, ())
                 # A fresh object is required: psutil caches create_time on
                 # an existing Process instance, which cannot detect reuse.
                 if backend.Process(pid).create_time() != expected:
@@ -260,17 +277,18 @@ class OwnedProcessCpuSampler:
                 issues.append(CpuIssue(pid, "cpu_counter_regressed"))
             else:
                 record.maximum_cpu = cpu
-            for child in children:
+            for child_pid in children:
                 if discovery_attempts >= self._cap:
                     self._truncated = True
                     break
                 discovery_attempts += 1
-                if child.pid in self._records:
+                if child_pid in self._records:
                     continue
                 if len(self._records) >= self._cap:
                     self._truncated = True
                     break
                 try:
+                    child = backend.Process(child_pid)
                     created_at = child.create_time()
                     if (
                         child.ppid() != pid
@@ -280,13 +298,14 @@ class OwnedProcessCpuSampler:
                         issues.append(CpuIssue(child.pid, "descendant_identity_unavailable"))
                         continue
                 except backend.AccessDenied:
-                    issues.append(CpuIssue(child.pid, "access_denied"))
+                    issues.append(CpuIssue(child_pid, "access_denied"))
                     continue
                 except (backend.NoSuchProcess, backend.ZombieProcess):
-                    issues.append(CpuIssue(child.pid, "process_unavailable"))
+                    issues.append(CpuIssue(child_pid, "process_unavailable"))
                     continue
                 if (
                     not math.isfinite(created_at)
+                    or created_at < expected
                     or created_at < self._root.created_at
                 ):
                     issues.append(CpuIssue(child.pid, "descendant_identity_unavailable"))

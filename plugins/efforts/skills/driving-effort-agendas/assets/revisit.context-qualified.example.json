@@ -1,0 +1,21 @@
+{
+  "context": {
+    "facts": [
+      {
+        "kind": "input",
+        "subject": "validation-input",
+        "value": {"content": "fixture-input-B"},
+        "evidence_ref": "example:observed-corrected-input-B"
+      }
+    ]
+  },
+  "judgment": {
+    "qualification": "agent-judgment",
+    "changed_subjects": ["validation-input"],
+    "causal_change": "The bounded investigation identified a missing fixture precondition. The corrected input changes what the same validation command can establish.",
+    "evidence_refs": ["example:observed-corrected-input-B"]
+  },
+  "approach": {
+    "action": "Run the same bounded validation command."
+  }
+}

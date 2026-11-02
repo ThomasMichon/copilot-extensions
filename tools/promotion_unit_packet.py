@@ -16,7 +16,7 @@ import stat
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from promotion_unit_contract import (
-    CANDIDATE_PROFILE, MAX_PACKET_FILE_BYTES, UnitEvidenceError, admit_manifest, decode_json, manifest_digest,
+    CANDIDATE_PROFILE, MAX_UNIT_EVIDENCE_FILE_BYTES, UnitEvidenceError, admit_manifest, bounded_bytes, decode_json, manifest_digest,
     relative_file, source_sha, verify_observations, verify_sources,
 )
 
@@ -54,11 +54,11 @@ def _read_file(directory: Path, name: str) -> tuple[bytes, dict]:
     path = directory / name
     try:
         before = path.lstat()
-        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_PACKET_FILE_BYTES:
+        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_UNIT_EVIDENCE_FILE_BYTES:
             raise UnitEvidenceError(
                 f"packet file must be regular, unlinked and bounded: {name} "
                 f"(mode={stat.S_IFMT(before.st_mode)}, bytes={before.st_size}, "
-                f"limit={MAX_PACKET_FILE_BYTES})",
+                f"limit={MAX_UNIT_EVIDENCE_FILE_BYTES})",
             )
         with path.open("rb") as stream:
             opened = os.fstat(stream.fileno())
@@ -66,8 +66,8 @@ def _read_file(directory: Path, name: str) -> tuple[bytes, dict]:
                 before.st_dev, before.st_ino,
             ):
                 raise UnitEvidenceError(f"packet file changed during opening: {name}")
-            raw = stream.read(MAX_PACKET_FILE_BYTES + 1)
-        if len(raw) > MAX_PACKET_FILE_BYTES:
+            raw = bounded_bytes(stream, MAX_UNIT_EVIDENCE_FILE_BYTES)
+        if len(raw) > MAX_UNIT_EVIDENCE_FILE_BYTES:
             raise UnitEvidenceError(f"packet file exceeds its size limit: {name}")
     except OSError as exc:
         raise UnitEvidenceError(f"cannot read packet file {name}: {exc}") from exc
@@ -198,6 +198,12 @@ def verify_packet(
     _verify_coverage(coverage, manifest)
     if source_root is not None:
         verify_sources(source_root.resolve(), manifest["sources"])
+        if "tools/promotion_release_helpers.py" in manifest["sources"]:
+            from promotion_release_helpers import verify_helper_coverage
+
+            verify_helper_coverage(
+                source_root.resolve(), manifest, coverage, development_root=development_root,
+            )
     if manifest["profile"] == CANDIDATE_PROFILE:
         if source_root is None or development_root is None:
             raise UnitEvidenceError("candidate packet requires both authoritative source roots")

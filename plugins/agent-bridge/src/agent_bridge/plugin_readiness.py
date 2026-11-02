@@ -5,12 +5,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 READINESS_CONTROL = "control:plugin-readiness"
+logger = logging.getLogger(__name__)
+_DIAGNOSTIC_REASONS = frozenset({
+    "invalid-readiness-request", "invalid-expected-plugin", "native-observation-error",
+    "public-session-plugin-observation-unavailable", "cancelled", "session-changed",
+    "session-cwd-or-id-changed", "malformed-plugin-list", "malformed-plugin-row",
+    "selected-loadout-pending", "selected-plugin-disabled", "readiness-timeout",
+})
 
 
 class ExpectedPlugin(BaseModel):
@@ -125,31 +133,53 @@ async def wait_plugin_readiness(
     if control_id is None or reason is not None:
         raise PluginReadinessError(f"readiness-admission-refused:{reason}")
     completed = False
+    stage = "queued"
+    diagnostic_code: str | None = "readiness-wait-interrupted"
+    status = "pending"
+    missing_count = 0
     try:
         deadline = time.monotonic() + expectation.timeout_seconds
         while time.monotonic() < deadline:
             control = db.live_control_state(current, control_id)
+            if control and control.get("claimed_at") is not None:
+                stage = "claimed"
             outcome = control.get("outcome") if control else None
             if outcome is not None:
                 completed = True
+                stage = "outcome"
                 if not outcome.startswith("{"):
+                    diagnostic_code = "readiness-control-rejected"
                     raise PluginReadinessError(f"readiness-control-{outcome}")
                 try:
                     result = PluginReadinessResult.model_validate_json(outcome)
                 except ValueError as exc:
+                    diagnostic_code = "malformed-readiness-result"
                     raise PluginReadinessError("malformed-readiness-result") from exc
                 if result.session_id != current or result.selection_digest != digest:
+                    diagnostic_code = "readiness-result-context-changed"
                     raise PluginReadinessError("readiness-result-context-changed")
                 if db.resolve_live_session_id(current) != current:
+                    diagnostic_code = "native-session-changed"
                     raise PluginReadinessError("native-session-changed")
                 if result.status != "ready":
+                    status = result.status
+                    missing_count = len(result.missing)
+                    diagnostic_code = (
+                        result.reason if result.reason in _DIAGNOSTIC_REASONS
+                        else "unrecognized-readiness-reason"
+                    )
                     missing = ",".join(result.missing[:8])
                     raise PluginReadinessError(
                         f"{result.status}:{result.reason}" + (f":{missing}" if missing else ""),
                     )
+                diagnostic_code = None
                 return result.model_copy(update={"control_id": control_id})
             await asyncio.sleep(min(0.05, max(0, deadline - time.monotonic())))
+        diagnostic_code = "readiness-timeout"
         raise PluginReadinessError("readiness-timeout")
+    except asyncio.CancelledError:
+        diagnostic_code = "cancelled"
+        raise
     finally:
         if not completed:
             if not db.withdraw_live_control(current, control_id, time.time()):
@@ -158,3 +188,8 @@ async def wait_plugin_readiness(
                 db.ack_live_messages(
                     current, [control_id], now=time.time(), controls=True, outcome="cancelled",
                 )
+        if diagnostic_code is not None:
+            logger.warning(
+                "plugin-readiness control_id=%d last_observed_stage=%s code=%s status=%s missing_count=%d",
+                control_id, stage, diagnostic_code, status, missing_count,
+            )

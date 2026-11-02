@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded explicit configured-SSH launch-history metadata inspection without provisioning or replay",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

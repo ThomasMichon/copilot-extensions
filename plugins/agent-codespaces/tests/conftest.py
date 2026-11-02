@@ -6,12 +6,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _mock_gh_presence(monkeypatch):
+def _mock_gh_presence(monkeypatch, request):
     """Mock tool presence for CLI units that already mock GitHub operations.
 
     Missing-tool tests override this seam explicitly; no unit needs a live,
     authenticated host gh installation just to reach its mocked command.
     """
+    if request.node.get_closest_marker("installer_only"):
+        return
     monkeypatch.setattr("agent_codespaces.__main__._gh_binary_available", lambda: True)
 
 

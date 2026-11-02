@@ -11,13 +11,15 @@ change) can show as "fails to resolve" even though it's reachable.
 Used by:
 - sessionStart hook (warn only, never blocks) -- the launcher fetches the anchor
   pre-launch, so the behind-count is accurate there without a second fetch.
-- Finalization flow (blocks on dirty anchor, warns on stash/behind)
 - CLI: ``agent-worktrees anchor-check`` (pass ``--fetch`` for a fresh count)
+
+Publication does not call this full status/stash/history inventory. It keeps
+the source workspace cleanliness check and Git's guarded checkout/fast-forward
+operations instead.
 """
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -52,9 +54,8 @@ class AnchorReport:
 def _resolve_toplevel(repo_path: str | Path) -> Path:
     """Resolve the git toplevel from an arbitrary path inside a repo."""
     try:
-        r = subprocess.run(
-            ["git", "-C", str(repo_path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+        r = git_ops.git(
+            "rev-parse", "--show-toplevel", cwd=repo_path, check=False, timeout=5,
         )
         if r.returncode == 0 and r.stdout.strip():
             return Path(r.stdout.strip())

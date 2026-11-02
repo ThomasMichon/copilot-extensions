@@ -78,6 +78,7 @@ class LocalOtlpSink:
         self._deadline = None
         self._last_reply = None
         self._payload_bytes = 0
+        self._service_instance_id = None
 
         class LoopbackSpanExporter(SpanExporter):
             # The SDK HTTP exporter's constructor parses/logs ambient headers
@@ -152,6 +153,8 @@ class LocalOtlpSink:
                 resource=Resource({
                     "service.name": record["component"],
                     "service.namespace": "copilot-extensions",
+                    **({"service.instance.id": self._service_instance_id}
+                       if self._service_instance_id is not None else {}),
                 }),
                 attributes=attributes, status=Status(status),
                 start_time=record["start_time_ns"],

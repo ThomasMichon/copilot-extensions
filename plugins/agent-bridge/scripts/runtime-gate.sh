@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installation driver contract: bridge-first-use-v1
 set -euo pipefail
 
 export PYTHONUTF8=1
@@ -233,107 +234,33 @@ assert_runtime_publication() {
 }
 
 assert_runtime_publication
-resolve_runtime normal
-if [[ -n "$AGENT_RT_PY" ]]; then
-    run_runtime "$@"
+if [[ -v AGENT_BRIDGE_PINNED_CONTEXT ]]; then
+    printf '[agent-bridge] pinned invocation requires a prepared owning runtime; provision independently.\n' >&2
+    exit 126
 fi
-mkdir -p "$RUNTIME_ROOT"
-STATUS_PATH="$RUNTIME_ROOT/.provision-status"
-_lock_link=""
-_reap_owned=0
-_unlock_provision() {
-    if [[ "$_reap_owned" == 1 ]]; then
-        _reap_owned=0
-        rmdir "$_reap_mutex" 2>/dev/null || true
-    fi
-    if [[ -n "$_lock_link" ]]; then
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
-        _lock_link=""
-    else
-        flock -u 9 2>/dev/null || true
-        exec 9>&-
-    fi
-}
-trap '_unlock_provision' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-    exec 9>"$RUNTIME_ROOT/.provision.lock"
-    flock 9
-else
-    _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
-    _reap_mutex="$RUNTIME_ROOT/.provision.reap.mutex"
-    _reap_waits=0
-    until ln -s "$$" "$_lock_link" 2>/dev/null; do
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        case "$_owner" in
-            *[!0-9]*|"") _live=0 ;;
-            *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
-        esac
-        if [[ "$_live" == 1 ]]; then
-            sleep 1
-            continue
-        fi
-        # Match the canonical shim: keep competing stale reapers from
-        # replacing the owner between revalidation and removal.
-        if ! mkdir "$_reap_mutex" 2>/dev/null; then
-            if [[ "$_reap_waits" -ge 30 ]]; then
-                printf '[agent-bridge] provisioning reaper mutex is unavailable: %s; retry or repair it through explicit installation management.\n' \
-                    "$_reap_mutex" >&2
-                exit 126
-            fi
-            _reap_waits=$((_reap_waits + 1))
-            sleep 1
-            continue
-        fi
-        _reap_owned=1
-        _reap_waits=0
-        _owner2="$(readlink "$_lock_link" 2>/dev/null || true)"
-        if [[ -n "$_owner2" && "$_owner2" == "$_owner" ]]; then
-            case "$_owner2" in
-                *[!0-9]*) rm -f -- "$_lock_link" ;;
-                *) kill -0 "$_owner2" 2>/dev/null || rm -f -- "$_lock_link" ;;
-            esac
-        fi
-        _reap_owned=0
-        rmdir "$_reap_mutex" 2>/dev/null || true
-    done
+if [[ -n "$CONTEXT" || "$RUNTIME_ROOT" != "$HOME/.agent-bridge" ||
+      -v AGENT_BRIDGE_INSTALLATION_ID ]]; then
+    printf '[agent-bridge] cold namespaced/custom-root provisioning requires explicit installation management.\n' >&2
+    exit 126
 fi
+if [[ -v UPDATE_DRIVER_WITNESS ]]; then
+    printf '[agent-bridge] nested first-use submission is unsupported; retain the current installation owner.\n' >&2
+    exit 126
+fi
+FIRST_USE="$PAYLOAD_ROOT/libs/update-driver/scripts/first-use.sh"
+if [[ ! -f "$FIRST_USE" ]] ||
+   ! grep -Fq '# Installation driver lifecycle contract: bridge-command-v1' "$FIRST_USE"; then
+    printf '[agent-bridge] packaged installation driver lacks the Bridge command contract.\n' >&2
+    exit 126
+fi
+PROJECT="$(pwd -P)"
+EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
+printf '[agent-bridge] runtime not provisioned -- waiting for the installation driver. Extend your timeout; caller exit does not cancel the operation.\n' >&2
+printf '::agent-provisioning:: plugin=agent-bridge reason=first-use status=%s\n' \
+    "$EXECUTION_ROOT" >&2
+bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT" \
+    --installer-action provision --wait
 resolve_runtime
-if [[ -n "$AGENT_RT_PY" ]]; then
-    _unlock_provision
-    trap - EXIT INT TERM
-    run_runtime "$@"
-fi
-assert_runtime_publication
-printf '%s\n' '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
-    'agent-bridge' "$STATUS_PATH" >&2
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-
-apply_runtime_env
-set +e
-bash "$INSTALLER" provision --install-dir "$RUNTIME_ROOT" >&2
-PROVISION_EXIT=$?
-set -e
-if [[ "$PROVISION_EXIT" -ne 0 ]]; then
-    printf 'failed rc=%s %s\n' "$PROVISION_EXIT" "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    printf '[agent-bridge] provisioning FAILED. See the log above; retry, or run: bash "%s" provision --install-dir "%s"\n' \
-        "$INSTALLER" "$RUNTIME_ROOT" >&2
-    exit "$PROVISION_EXIT"
-fi
-
-resolve_runtime
-if [[ -n "$AGENT_RT_PY" ]]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    _unlock_provision
-    trap - EXIT INT TERM
-    run_runtime "$@"
-fi
-
-_unlock_provision
-trap - EXIT INT TERM
-printf 'failed rc=1 %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-printf '[agent-bridge] provisioning reported success but no runtime slot resolved.\n' >&2
+[[ -z "$AGENT_RT_PY" ]] || run_runtime "$@"
+printf '[agent-bridge] driver completed without a resolvable runtime.\n' >&2
 exit 1

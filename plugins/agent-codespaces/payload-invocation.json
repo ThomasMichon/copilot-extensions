@@ -5,6 +5,7 @@
   "module": "agent_codespaces",
   "legacyRuntimeRoot": ".agent-codespaces",
   "installationContext": "required",
+  "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_CODESPACES_NO_SELFPROVISION",
   "purpose": "Manage GitHub Codespaces lifecycle transport and dispatch",
   "payloadRootEnv": "AGENT_CODESPACES_PAYLOAD_ROOT",

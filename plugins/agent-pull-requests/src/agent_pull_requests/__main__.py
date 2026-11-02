@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import importlib.util
 import json
@@ -532,6 +534,7 @@ def _watch_boot() -> None:
     home = "AGENT_PULL_REQUESTS_HOME"
     spawn_daemon(
         [sys.executable, "-m", "agent_pull_requests", "serve"],
+        instance=DaemonInstanceSpec("agent-pull-requests", root, Path(__file__).resolve()),
         cwd=root,
         log_path=root / "watch-daemon.log",
         env_overrides={home: str(root)} if os.environ.get(home, "").strip() else None,
@@ -623,6 +626,7 @@ def _cmd_watch_status(args: argparse.Namespace) -> int:
     return 0
 
 
+@daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the resident PR-watch daemon in the foreground.
 
@@ -659,6 +663,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from work_coalescing_singleton import CoalescingServer
 
     from .watch_daemon import WatchDaemon, rendezvous_fields, state_dir, write_lock_data
+    from .watch_retirement import WatchRetirement
 
     lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
     try:
@@ -667,30 +672,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         print(f"agent-pull-requests: watch daemon already running (pid {exc.holder_pid})")
         return 0
 
-    daemon = WatchDaemon(
-        fetch=_watch_github_snapshot, native_fetch=_watch_native_snapshot,
-        poll_interval=args.poll_interval,
-    )
-    server = CoalescingServer(daemon.compute, on_idle=None)
-    server.start()
-    write_lock_data(rendezvous_fields(server))
-    print(f"agent-pull-requests: watch daemon listening ({server.rendezvous()['endpoint']})")
-    try:
-        daemon.wait_for_shutdown()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.close_admission(reason="shutdown")
-        server.close()
-        deadline = time.monotonic() + _WATCH_HANDLER_DRAIN_TIMEOUT_S
+    with WatchRetirement(timeout=_WATCH_HANDLER_DRAIN_TIMEOUT_S) as retirement:
+        retirement.release = lease.release
+        daemon = WatchDaemon(
+            fetch=_watch_github_snapshot, native_fetch=_watch_native_snapshot,
+            poll_interval=args.poll_interval,
+        )
+        retirement.close_owner = daemon.close
+        server = CoalescingServer(daemon.compute, on_idle=None)
+        retirement.server = server
+        server.start()
+        write_lock_data(rendezvous_fields(server))
+        print(f"agent-pull-requests: watch daemon listening ({server.rendezvous()['endpoint']})")
         try:
-            while server.active_handler_count():
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("PR watch request handlers did not drain")
-                time.sleep(0.02)
-        finally:
-            daemon.close()
-        lease.release()
+            daemon.wait_for_shutdown()
+        except KeyboardInterrupt:
+            pass
     return 0
 
 
@@ -812,6 +809,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    from .workspace_cli import add_parser as add_workspace_parser
+    add_workspace_parser(subparsers)
 
     status = subparsers.add_parser("status", help="read one pull request by owner/repo + number")
     status.add_argument(
@@ -977,11 +976,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    from .watch_invocation import WatchInvocation
-
+def main(argv: list[str] | None = None, *, workspace_host=None) -> int:
     global _WATCH_INVOCATION
     args = build_parser().parse_args(argv)
+    if args.command == "workspace":
+        from .workspace_cli import run
+        return run(args, workspace_host)
+    from .watch_invocation import WatchInvocation
     _WATCH_INVOCATION = WatchInvocation.capture(
         require_selected=not (args.command == "serve" and args.passive_instance),
     )

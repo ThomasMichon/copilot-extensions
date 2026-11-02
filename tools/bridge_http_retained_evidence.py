@@ -31,6 +31,7 @@ class EvidenceSpec:
     extra_paths: tuple[str, ...]
     probes: dict[str, int]
     capability_floors: tuple[tuple[str, int], ...]
+    scope: str = "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification"
 
     @property
     def label(self) -> str:
@@ -102,8 +103,10 @@ def build_outputs(
     if not set(spec.affected) <= sources.keys():
         raise ValueError(f"{spec.label} semantic owners must be registered before capture")
     for source, row in sources.items():
-        if row["sha256"] != proof[source]["sha256"]:
+        if row["sha256"] != proof[row.get("current_path", source)]["sha256"]:
             raise ValueError(f"unclassified {spec.label} source drift: {source}")
+        if "current_path" in row and row["semantic"]:
+            raise ValueError(f"{spec.label} relocated source must defer semantics to its canonical owner")
         if source in spec.affected and row["semantic"] is not True:
             raise ValueError(f"{spec.label} affected source is not semantic: {source}")
     if spec.generation not in http["evidence_window"]["generations"]:
@@ -162,7 +165,7 @@ def build_outputs(
             safe(root, installation.ENTRY).read_bytes(),
         )),
         "input_sha256": proof[spec.input]["sha256"], "checked_probes": spec.probes,
-        "scope": "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification",
+        "scope": spec.scope,
     }, previous.PREFIX + "protocol.py", f"Actual source-bound {spec.label} local ASGI observations.")
     shared = {"path": spec.primary, "sha256": digest(outputs[spec.primary])}
     for source, row in sources.items():

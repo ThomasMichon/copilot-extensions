@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare singleton-bound pool metadata inputs and retain original revision-fenced request custody without activating publication",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid loading PowerShell Management on proven native pre-tool reads while preserving live controls and policy fallback.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

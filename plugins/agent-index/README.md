@@ -58,6 +58,26 @@ its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service
 slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
+Explicit Windows stop resolves the installed selected runtime, not the
+installer payload's prospective slot. A payload refresh without runtime
+installation therefore does not skip shutdown of the existing owner.
+
+Native legacy `uninstall` stops the registered service/engine and removes owned
+runtime generations, source snapshots, selectors and generated command helpers.
+The default nested engine's code is included; data, configuration, model/cache
+contents, unknown entries and persistent coordination remain by default.
+`--purge` / `-Purge` explicitly removes retained data while keeping the install
+transaction root and lock identity. An external `AGENT_INDEX_ENGINE_HOME`
+refuses this combined removal and requires separate authenticated teardown.
+Native publishers and legacy session stamps serialize on the same whole-action
+transaction; a busy session stamp defers without publishing. Removal holds the
+canonical custody described in the [install contract](../../docs/install-contract.md).
+These controls do not establish live-session or reconnect-transport acceptance.
+Global commands are removed only for the default legacy root and only when
+their bytes match the installed or session-stamped lifecycle-gate launcher.
+Modified commands, foreign payload bindings and commands belonging to a custom
+root remain. Nested engine launchers and generated resolver bytecode are removed;
+unknown helpers and their bytecode remain unless purge is explicitly requested.
 
 The manifest's source-inventory `additionalPythonProjects` declaration names
 `server/pyproject.toml`, so the independently packaged embedding engine cannot
@@ -67,7 +87,8 @@ construction or installed readiness.
 
 Both canonical installers use the shared installer engine for uv acquisition,
 venv/package retries and deploy manifests. Native installs keep the versioned
-primary CLI base-only for both roles. A host installs `[store,server]` once,
+primary CLI base-only for both roles, plus the local `[native-installer]`
+execution-driver closure on Windows. A host installs `[store,server]` once,
 in its required slot-owned server sibling. Both the primary CLI and any required
 server sibling must pass isolated CLI `--help` probes before fresh or retained
 activation, in addition to host dependency/server-import checks.
@@ -75,6 +96,23 @@ Host search, indexing, workers
 and service starts execute in that complete runtime, preserving original
 arguments and exit codes. A missing host runtime is reported explicitly rather
 than falling back to a client environment.
+
+Explicit native Windows `install`/`update`/`provision` adopts the primary CLI
+installation's finite launch broker after retained slot completion and before
+selection or lifecycle callbacks. `-NoService`, contained tests and POSIX do not
+register it. A completed slot without retained runtime helpers is not modified:
+select a distinct fresh generation instead. Owning uninstall removes the primary
+broker before deleting runtimes. Start/ensure and daemon spawn never provision
+this prerequisite. Normal installer engine ensure and the user-mode
+`engine-update` restart use the active primary CLI to manage the separate durable
+engine. An engine-only installation cannot perform that user-mode restart until
+the primary runtime is explicitly installed; refusal occurs before stopping the
+engine and never auto-installs a manager. Engine interpreter selection remains
+engine-owned. The generated task/logon engine launcher uses the engine-local
+CLI only for foreground `engine run`: it waits on the engine rather than
+requesting a detached launch, so it needs no engine-local broker. Direct
+engine-interpreter `engine start` is not this supported management path and
+does not gain broker adoption from the primary runtime.
 
 The legacy `agent-index mcp` stdio adapter is an HTTP client, not part of the
 host's `[store,server]` profile. It requires the explicit `[stdio-mcp]` extra
@@ -143,6 +181,9 @@ runs its local service through the plugin's own installer/runtime lifecycle.
 use zdd cutover when replacing a live service. The independent durable engine's
 explicit lifecycle remains separate and is never coupled to routine host
 cutover.
+During suite updates, activation uses the selected consuming repository rather
+than the physical build artifact. The updater carries that repository through
+the existing `AGENT_INDEX_REPO` binding while preserving an explicit override.
 
 The installer exposes explicit installation-context actions for disposable
 installation-cell validation:
@@ -251,6 +292,10 @@ and the CLI also have an `index` path (`agent_index_reindex` over MCP), but
 reindexing is an operator/runtime action, not something agents trigger.
 
 ## Corpus configuration
+
+See the complete [configuration reference](docs/configuration.md) for every
+file/field family, four-tier ordinary composition, native source-list merging,
+explicit selectors, activation boundaries and reload behavior.
 
 The runtime belongs to this plugin; scope is data/config:
 

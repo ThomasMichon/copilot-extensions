@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (plugins/agent-worktrees, plugins/context-handoff)
 - **Branch(es):** `worktree/<local-agent-worktree-branch>` (private branch name; not public-safe to record verbatim)
 - **Created:** 2026-09-11
-- **Status:** Active
+- **Status:** Blocked (parked by maintainer direction, 2026-11-02)
 - **Source umbrella:** #2457; continuing coordination is this Plan/Validation/Journal and open bounded-source issues
 - **Sub-issues:** TBD
 
@@ -55,16 +55,40 @@ deferred follow-on (see Phase 2's closing note). This keeps the schema,
 ordering, and validation plan coherent for one well-understood runner instead
 of speculatively designing for both at once.
 
+## Current status and parking
+
+The maintainer directed a current-state reconciliation and parking on
+2026-11-02. This pauses further execution of this effort; it does not mark the
+effort Done, remove acceptance, or authorize a live handoff or cleanup action.
+
+Delivered source includes the stage vocabulary and producer instrumentation
+(#2472, #2491, #2493, #2494), durable project/worktree trace and linkage
+(#2496), and diagnostic documentation (#2538). The bounded predecessor
+lock-release/process-exit repair landed in #2565; the foreground-failure
+successor cleanup repair landed in #3119. #2571 was superseded, not merged.
+These are source-delivery receipts, not fresh platform or installed acceptance.
+
+Still open are complete producer/correlation population, full per-stage
+mirroring into both session archives, independent-writer/platform proof,
+and one complete thirteen-stage native cutover/archival proof. The retained
+later age-reclaim/stage-9 questions and separately deferred Bridge/ACP runner
+scope remain unchanged. All unchecked Plan and Validation items stay pending.
+
+Resume only on explicit maintainer direction, after revalidating current
+source and the existing architecture, producer, validation and lifecycle
+owners. No new active executor or resource-custody transfer is implied by
+parking; the existing claims, holds and independent issue owners remain.
+
 ## Participants
 
 Single local agent, no dispatch/coordination topology needed.
 
 ## Coordination
 
-This existing Active ROOT Plan, Validation and Journal remain the continuing
+This same ROOT Plan, Validation and Journal remain the canonical, now parked
 observability coordination record. #2457 is the source umbrella, retained open until the
 complete reviewed intake and current full readback permit administrative supersession;
-afterward it is historical provenance, not a required live claim token. Continue through
+afterward it is historical provenance, not a required live claim token. On explicit resumption, continue through
 eligible open bounded-source issues and the SAME current architecture/producer/journal
 custodians. Keep #912's SAME explicit nonexpiring claimant and all twelve direct
 #1920/#1921/#1922 rows, #3000/head/task and host/provider roles untouched. Independent
@@ -175,7 +199,14 @@ Copilot session" and the next item are both implicitly step 8/9 in the
 original message. This effort treats them as 13 distinct, ordered stages,
 renumbering from the "acknowledges handoff" step onward.)
 
+**Later maintainer direction (2026-11-02):** update the effort to reflect
+delivered source and remaining acceptance, then park its execution. This is a
+pause, not a withdrawal of the original thirteen-stage or archival requirements.
+
 ## Plan
+
+Unchecked work is parked pending explicit resumption. Existing completed
+source/historical evidence and independently owned claims are not changed.
 
 ### Phase 1 — Unified event schema + shared emitter
 - [x] Define one canonical stage vocabulary covering all 13 stages, layered
@@ -638,8 +669,8 @@ this clarification settles no existing unchecked item.
 
 <!-- backlog-reconciliation:7556:transfer:2457:to:efforts/active/handoff-cutover-lifecycle-journal/README.md -->
 
-This SAME existing reviewed ROOT remains Active and becomes final tracking only after
-normal reviewed actual merge and full current readback. Preserve
+This SAME existing reviewed ROOT remains the acceptance record after the reviewed
+consolidation in #7911; its execution is now explicitly parked. Preserve
 Architecture/producer/validation ownership, every original Plan/Validation/Journal row,
 prior source/native proof and all live claim/host/provider custody. The mandate is
 observation and durable diagnosis, not authority to operate or repair a live handoff.
@@ -692,13 +723,13 @@ invent its thirteen-stage equivalence.
   eligible open bounded-source coordination, without leaving a required closed live
   token or releasing a claim.
 
-Receiving gate: land the complete unchecked residual and corresponding
-Validation/Coordination through a NEW normal reviewed ACTUAL merge, read back the
-CURRENT full ROOT Plan/Validation/Coordination and unchanged owners, then and only then
-supersede #2457 as tracking. Keep Status Active until the complete own Plan/Validation
-resolves or transfers to named accepted objectives. If policy/custody still needs #2457
-live or any clause is missing, retain it. No handoff/lifecycle, native/model, state,
-source or process action is authorized.
+The historical receiving gate required a normal reviewed actual merge and full
+current readback before superseding #2457 as tracking; that consolidation is
+not implementation acceptance. The maintainer-directed parked status does not
+resolve or transfer any unchecked clause. Do not mark the effort Done until
+its complete Plan/Validation resolves or transfers to named accepted objectives.
+Existing issue/claim custody remains unchanged. No handoff/lifecycle,
+native/model, state, source or process action is authorized by this record.
 
 ## Validation Plan
 
@@ -804,6 +835,17 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
 `activity.jsonl` by hand as done here.
 
 ## Journal
+
+### 2026-11-02 - Current-state reconciliation and parked execution
+
+Parked further effort execution on explicit maintainer direction. Credited
+the delivered trace/instrumentation, diagnostics and bounded process-lifecycle
+repairs at their actual scope; #2571 remains superseded rather than merged.
+The complete retained thirteen-stage clauses, full dual archival scope,
+concurrent/native validation and separately owned runner boundaries remain
+unchecked where previously unresolved. This changes neither runtime behavior
+nor any claim, hold, session, issue disposition or release/rollout authority.
+Resumption requires an explicit decision and current source/owner reconciliation.
 
 ### 2026-10-22 - Direct retained acceptance from #2457
 

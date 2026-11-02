@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,11 +19,32 @@ from promotion_python_artifacts import (
 )
 from verify_promotion_workflows import VerificationError
 from standalone_python_artifacts import artifact_label
+from release_controller_contract import required_mode_arguments
+
+CONTROLLER_REQUIRED_ARGUMENTS = (
+    (("publish",), (), ("--merged-commit", "--candidate-commit", "--dev-head")),
+    (("prepare",), (), ("--candidate-commit", "--dev-head")),
+    (("publish-candidate",), (), (
+        "--candidate-commit", "--dev-head", "--main-before", "--promotion-run",
+        "--candidate-root", "--qualification-receipt",
+    )),
+    (("publish-candidate",), ("source-units-v2", "candidate-units-v3"), (
+        "--unit-packet-dir", "--unit-manifest", "--dev-root",
+    )),
+)
+SOURCE_CANDIDATE_REQUIRED_ARGUMENTS = (
+    (("publish-candidate",), ("source-units-v2", "candidate-units-v3"), ("--complete-source-dir",)),
+)
+_ATTESTATION_TIMEOUT = 120
+_PUBLIC_GOOD_INIT_ERROR = (
+    "Error: failed to choose verifier based on provided bundle issuer: "
+    "public good verifier is not available (initialization may have failed)"
+)
 
 
 def _gh(
     argv: list[str], *, verification: bool = False, binary: bool = False,
-    timeout: int = 120,
+    timeout: float = _ATTESTATION_TIMEOUT,
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     if verification and "ARTIFACT_VERIFY_TOKEN" in env:
@@ -63,12 +85,26 @@ def verify_attestation_subject(
         raise PromotionArtifactError("invalid expected attestation identity")
     if path.is_symlink() or not path.is_file():
         raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
-    _check(_gh([
+    argv = [
         "attestation", "verify", str(path), "--repo", repository,
         "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
         "--signer-digest", signer_digest, "--source-digest", source_digest,
         "--source-ref", source_ref, "--deny-self-hosted-runners",
-    ], verification=True))
+    ]
+    deadline = time.monotonic() + _ATTESTATION_TIMEOUT
+    result = _gh(argv, verification=True)
+    if result.returncode == 1 and result.stderr.strip().splitlines()[-1:] == [
+        _PUBLIC_GOOD_INIT_ERROR,
+    ]:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            print(
+                "gh attestation: Public Good verifier initialization unavailable; "
+                "retrying once with unchanged policy and remaining deadline",
+                file=sys.stderr,
+            )
+            result = _gh(argv, verification=True, timeout=remaining)
+    _check(result)
 
 
 def verify_attestations(
@@ -394,22 +430,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--unit-packet-dir", type=Path)
     parser.add_argument("--complete-source-dir", type=Path)
+    parser.add_argument("--build-source-dir", type=Path)
     parser.add_argument("--unit-manifest")
     parser.add_argument("--dev-root", type=Path)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(argv)
-    if args.operation == "publish" and (
-        not args.merged_commit or not args.candidate_commit or not args.dev_head
-    ):
-        parser.error("publish requires --merged-commit, --candidate-commit and --dev-head")
-    if args.operation == "prepare" and (not args.candidate_commit or not args.dev_head):
-        parser.error("prepare requires --candidate-commit and --dev-head")
-    if args.operation == "publish-candidate" and not all((
-        args.candidate_commit, args.dev_head, args.main_before, args.promotion_run,
-        args.candidate_root, args.qualification_receipt,
-    )):
-        parser.error("publish-candidate requires candidate, source, base and qualification identities")
+    if args.build_source_dir is not None and args.operation != "prepare":
+        parser.error("original build-source retention is only available during prepare")
+    missing = sorted(
+        flag for flag in required_mode_arguments(
+            args.operation, args.qualification_profile, CONTROLLER_REQUIRED_ARGUMENTS,
+        ) if not getattr(args, flag.removeprefix("--").replace("-", "_"))
+    )
+    if missing:
+        parser.error(f"{args.operation} requires " + ", ".join(missing))
     unit_inputs = (args.unit_packet_dir, args.unit_manifest, args.dev_root)
     if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
         if args.operation != "publish-candidate" or any(value is None for value in unit_inputs):
@@ -418,6 +453,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("legacy qualification cannot consume source-unit packet inputs")
     try:
         qualification_digest = None
+        if args.build_source_dir is not None and (
+            args.source_ref != "refs/heads/main" or args.source_digest != args.signer_digest
+            or not os.environ.get("ARTIFACT_VERIFY_TOKEN")
+        ):
+            raise PromotionArtifactError("original build-source retention requires independent trusted Main admission")
         if args.operation == "publish-candidate":
             if not os.environ.get("ARTIFACT_VERIFY_TOKEN"):
                 raise PromotionArtifactError("candidate publication requires independent consumer read authority")
@@ -446,12 +486,17 @@ def main(argv: list[str] | None = None) -> int:
             args.directory, repository=args.repository, signer_digest=args.signer_digest,
             source_digest=args.source_digest, source_ref=args.source_ref, repo=args.repo,
         )
+        if args.build_source_dir is not None and signed_index["schema_version"] != 2:
+            raise PromotionArtifactError("original build-source retention requires a source-owned index")
         repo = args.repo
         source_candidate = (
             args.operation == "publish-candidate" and signed_index["schema_version"] == 2
         )
         if source_candidate:
-            if args.qualification_profile in ("source-units-v2", "candidate-units-v3") and args.complete_source_dir is None:
+            if any(not getattr(args, flag.removeprefix("--").replace("-", "_"))
+                   for flag in required_mode_arguments(
+                       args.operation, args.qualification_profile, SOURCE_CANDIDATE_REQUIRED_ARGUMENTS,
+                   )):
                 raise PromotionArtifactError("source candidate publication requires complete source subjects")
             from promotion_artifact_readiness import verify_ready_artifact_set
 
@@ -471,6 +516,19 @@ def main(argv: list[str] | None = None) -> int:
                 dev_head=args.dev_head, repo=repo,
             )
             print(f"artifact-ready: {tag}")
+        if args.build_source_dir is not None:
+            from promotion_release_evidence import publish_build_source
+            from promotion_source_archive import candidate_tree_and_parent
+
+            build_tree, build_parent = candidate_tree_and_parent(repo, candidate_sha=args.candidate_commit)
+            build_source = publish_build_source(
+                args.directory, source_directory=args.build_source_dir,
+                repository=args.repository, tag=tag, index=signed_index,
+                candidate_sha=args.candidate_commit,
+                tree=build_tree, main_before=build_parent,
+                signer_digest=args.signer_digest,
+            )
+            print(f"build-source-retained: {tag}/{build_source['candidate_sha']}")
         if args.operation == "publish":
             publish_artifacts(
                 args.directory, repository=args.repository, merged_commit=args.merged_commit,

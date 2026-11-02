@@ -17,6 +17,39 @@ KIND = "mux-discover-v1"
 LOG = logging.getLogger(__name__)
 
 
+def confirm_creation_cli(payload: dict) -> dict:
+    """Confirm the actual launch pane; psmux's session_path may remain HOME."""
+    try:
+        probe = run_mux_child(
+            [payload["mux_bin"], "list-panes", "-s", "-t", "=" + payload["mux_session"], "-F",
+             "#{pane_id}\t#{pane_dead}\t#{session_name}\t"
+             "#{session_id}:#{session_created}\t#{pane_current_path}"],
+            capture_output=True, text=True, timeout=2, **no_window_kwargs(),
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return {"applied": False, "reason": "enumeration-unavailable"}
+    if probe.returncode or not isinstance(probe.stdout, str):
+        return {"applied": False, "reason": "enumeration-unavailable"}
+    rows = [line.split("\t") for line in probe.stdout.splitlines() if line.strip()]
+    if any(
+        len(row) != 5 or not re.fullmatch(r"%[0-9]+", row[0])
+        or row[1] not in {"0", "1"} or row[2] != payload["mux_session"]
+        or not re.fullmatch(r"\$[0-9]+:[0-9]+", row[3])
+        for row in rows
+    ) or len({row[0] for row in rows}) != len(rows) or len({row[3] for row in rows}) > 1:
+        return {"applied": False, "reason": "session-unconfirmed"}
+    if rows and rows[0][3] != payload["session_incarnation"]:
+        return {"applied": False, "reason": "stale-incarnation"}
+    matches = [row for row in rows if row[0] == payload["panes"][0]["pane_id"]]
+    if len(matches) != 1 or matches[0][1] != "0" or not matches[0][4]:
+        return {"applied": False, "reason": "cli-unconfirmed"}
+    if os.path.normcase(os.path.realpath(matches[0][4])) != os.path.normcase(
+        os.path.realpath(payload["worktree_path"])
+    ):
+        return {"applied": False, "reason": "unattributed-path"}
+    return {"applied": True}
+
+
 def _valid_native_incarnation(value) -> bool:
     if not isinstance(value, str):
         return False

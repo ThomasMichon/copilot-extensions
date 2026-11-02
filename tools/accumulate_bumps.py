@@ -282,7 +282,7 @@ def _write_version(path: Path, pattern: re.Pattern[str], new_version: str, *, co
     new_text, n = pattern.subn(rf"\g<1>{new_version}\g<3>", text, count=count)
     if n == 0:
         return False
-    path.write_text(new_text, encoding="utf-8")
+    path.write_text(new_text, encoding="utf-8", newline="\n" if path.suffix == ".json" else None)
     return True
 
 
@@ -302,7 +302,7 @@ def _write_source_fallbacks(base_dir: Path, old_version: str, new_version: str) 
         text = path.read_text(encoding="utf-8")
         new_text, n = pattern.subn(rf"\g<1>{new_version}\g<2>", text)
         if n:
-            path.write_text(new_text, encoding="utf-8")
+            path.write_text(new_text, encoding="utf-8", newline="\n")
             written += n
     return written
 
@@ -351,7 +351,7 @@ def _write_instruction_projection_owners(plugin: str, old_version: str, new_vers
         text = template_path.read_text(encoding="utf-8")
         if old_tag not in text:
             continue
-        template_path.write_text(text.replace(old_tag, new_tag), encoding="utf-8")
+        template_path.write_text(text.replace(old_tag, new_tag), encoding="utf-8", newline="\n")
         written += 1
     return written
 
@@ -374,7 +374,7 @@ def _write_marketplace_entry(plugin: str, new_version: str, *, also_metadata: bo
         new_text, meta_n = meta_re.subn(rf"\g<1>{new_version}\g<3>", new_text, count=1)
         if meta_n == 0:
             return False
-    MARKETPLACE.write_text(new_text, encoding="utf-8")
+    MARKETPLACE.write_text(new_text, encoding="utf-8", newline="\n")
     return True
 
 

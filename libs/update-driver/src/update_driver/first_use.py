@@ -24,6 +24,7 @@ RECIPES = {
     "agent-ssh": "AGENT_SSH",
     "agent-codespaces": "AGENT_CODESPACES",
     "agent-logger": "AGENT_LOGGER",
+    "agent-bridge": "AGENT_BRIDGE",
 }
 LOGGER_COMMANDS = (
     ("agent-logger", "agent_logger"),
@@ -60,6 +61,25 @@ LOGGER_CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_LOGGER_HOME", "AGENT_LOGGER_INSTALLATION_ID",
     "AGENT_LOGGER_NO_SELFPROVISION", "AGENT_LOGGER_PINNED_CONTEXT",
+)
+BRIDGE_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_BRIDGE_HOME", "AGENT_BRIDGE_INSTALLATION_ID",
+    "AGENT_BRIDGE_NO_SELFPROVISION", "AGENT_BRIDGE_PINNED_CONTEXT",
+    "AGENT_BRIDGE_ALLOW_DOWNGRADE", "AGENT_BRIDGE_NONINTERACTIVE",
+)
+BRIDGE_HELPERS = (
+    "installer-engine.ps1", "installer-engine.sh",
+    "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "installer_wheel_acquisition.py",
+    "installer_dependency_policy.py", "installer_dependency_config.py",
+    "installer_source_build.py", "installer_source_wheel_cache.py",
+    "installation-context/installation_context.py",
+    "installation-context/installation-context.ps1", "installation-context/installation-context.sh",
+    "install.ps1", "install.sh", "repair-scheduled-task.ps1",
+    "versioned_runtime_native.ps1", "versioned_runtime.py",
+    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py", "versioned_runtime_leases.py",
 )
 
 
@@ -99,12 +119,27 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
         "AGENT_LOGGER_VALIDATED_CONTEXT", "AGENT_LOGGER_PAYLOAD_ROOT",
         "AGENT_LOGGER_ACTION", "AGENT_LOGGER_DRY_RUN",
+        "AGENT_BRIDGE_VALIDATED_CONTEXT", "AGENT_BRIDGE_PAYLOAD_ROOT",
+        "AGENT_BRIDGE_ACTION", "AGENT_BRIDGE_DRY_RUN", "AGENT_BRIDGE_FORCE",
+        "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
     ):
         result.pop(key, None)
     return result
 
 
 def _inspect(
+    payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
+) -> dict:
+    """Normalize source-controlled validation failures without enclosing custody operations."""
+    try:
+        return _inspect_payload(payload, runtime_root, project, installer_action=installer_action)
+    except ProvisionError:
+        raise
+    except (AttributeError, RuntimeError) as error:
+        raise ProvisionError(f"owning source validation failed: {error}") from error
+
+
+def _inspect_payload(
     payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
 ) -> dict:
     """Run only in the isolated inspection/owned execution process."""
@@ -127,9 +162,15 @@ def _inspect(
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
         raise ProvisionError("stamp-to-selected-snapshot provisioning requires SSH")
-    if installer_action == "install" and plugin != "agent-logger":
-        raise ProvisionError("fixed install action requires Logger")
+    if installer_action == "install" and plugin not in ("agent-logger", "agent-bridge"):
+        raise ProvisionError("fixed install action requires Logger or Bridge")
     prefix = RECIPES[plugin]
+    if plugin == "agent-bridge" and any(not (scripts / name).is_file() for name in BRIDGE_HELPERS):
+        raise ProvisionError("Bridge first use requires its complete materialized installation helpers")
+    if plugin == "agent-bridge" and sys.platform.startswith("linux"):
+        for tool in ("xargs", "seq"):
+            if shutil.which(tool) is None:
+                raise ProvisionError(f"Bridge first use requires native tool: {tool}")
     no_self = prefix + "_NO_SELFPROVISION"
     if (
         manifest.get("schema") != "copilot-extensions.payload-invocation"
@@ -159,8 +200,9 @@ def _inspect(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
-    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger"):
-        label = {"agent-ssh": "SSH", "agent-codespaces": "CodeSpaces", "agent-logger": "Logger"}[plugin]
+    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger", "agent-bridge"):
+        label = {"agent-ssh": "SSH", "agent-codespaces": "CodeSpaces", "agent-logger": "Logger",
+                 "agent-bridge": "Bridge"}[plugin]
         if (
             (plugin != "agent-logger" and manifest.get("module") != plugin.replace("-", "_"))
             or manifest.get("legacyRuntimeRoot") != "." + plugin
@@ -170,21 +212,22 @@ def _inspect(
             }
         ):
             raise ProvisionError(f"{label} first use requires its declared native runtime gate")
-    if plugin in ("agent-codespaces", "agent-logger") and (
+    if plugin in ("agent-codespaces", "agent-logger", "agent-bridge") and (
         prefix + "_INSTALLATION_ID" in os.environ
         or runtime_root != Path.home() / ("." + plugin)
         or not (
             payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
             and payload.name == plugin
-            or plugin == "agent-logger" and installer_action == "provision"
+            or plugin in ("agent-logger", "agent-bridge") and installer_action == "provision"
             and payload.parent == runtime_root / "snapshots"
         )
     ):
         raise ProvisionError(
             f"{label} first use requires its canonical installed payload and default legacy root"
         )
-    if plugin in ("agent-pull-requests", "agent-ssh", "agent-logger"):
+    if plugin in ("agent-pull-requests", "agent-ssh", "agent-logger", "agent-bridge"):
         label = {"agent-ssh": "SSH", "agent-logger": "Logger",
+                 "agent-bridge": "Bridge",
                  "agent-pull-requests": "Pull Requests"}[plugin]
         installed = (
             payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
@@ -208,11 +251,21 @@ def _inspect(
 
     try:
         roots = engine._package_roots(payload)
-    except RuntimeError as error:
+    except (AttributeError, RuntimeError) as error:
         raise ProvisionError(f"owning source dependencies refused: {error}") from error
     if any(not root.is_relative_to(payload) for root in roots):
         raise ProvisionError("first-use provisioning requires a self-contained owning payload")
     digest = engine.runtime.fingerprint_source(engine._source_files(roots))
+    selected_source = None
+    if plugin == "agent-bridge" and payload.parent == runtime_root / "snapshots":
+        package_version = identity.get("version")
+        if not isinstance(package_version, str) or not package_version:
+            raise ProvisionError("Bridge selected snapshot requires its package version")
+        selected_source = engine.runtime_source.read_source_identity(
+            payload, package_version, plugin=plugin,
+        )
+        if selected_source is None or selected_source.runtime_version != payload.name:
+            raise ProvisionError("Bridge first use requires its source-qualified selected snapshot")
     spec = importlib.util.spec_from_file_location("_first_use_installation_context", helper)
     if spec is None or spec.loader is None:
         raise ProvisionError("owning installation helper is unavailable")
@@ -247,6 +300,7 @@ def _inspect(
         "mode": resolution["actualMode"], "environment": resolution["environment"],
         "context": resolution["context"],
         "install_generation": resolution["installGeneration"],
+        **({"runtime_source": selected_source.document()} if selected_source is not None else {}),
         **({"installer_action": installer_action} if installer_action != "provision" else {}),
     }
 
@@ -267,7 +321,7 @@ def inspect(
         ],
     )
     result = subprocess.run(
-        argv, env={**_environment(payload), **imports}, cwd=project,
+        argv, executable=argv[0], env={**_environment(payload), **imports}, cwd=project,
         stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
         timeout=60, **no_window_kwargs(),
     )
@@ -314,6 +368,7 @@ def enqueue(
         "agent-ssh": SSH_CONTEXT_KEYS,
         "agent-codespaces": CODESPACES_CONTEXT_KEYS,
         "agent-logger": LOGGER_CONTEXT_KEYS,
+        "agent-bridge": BRIDGE_CONTEXT_KEYS,
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
@@ -342,7 +397,10 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         payload = Path(admission["payload"])
         runtime_root = Path(admission["runtime_root"])
         installer_action = admission.get("installer_action", "provision")
-        logger_snapshot = admission["plugin"] == "agent-logger" and payload.parent == runtime_root / "snapshots"
+        selected_snapshot = admission["plugin"] in ("agent-logger", "agent-bridge") and (
+            payload.parent == runtime_root / "snapshots"
+        )
+        label = {"agent-logger": "Logger", "agent-bridge": "Bridge"}.get(admission["plugin"])
         if client_only and (
             installer_action != "provision" or admission["plugin"] != "agent-vault"
         ):
@@ -360,6 +418,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
             # Keep these files: native publication may retain a source path into them.
             legacy_stage = admission["plugin"] in {
                 "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
+                "agent-bridge",
             }
             inputs = _path(
                 runtime_root / ".install-stage" if legacy_stage
@@ -373,19 +432,19 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
             try:
                 frozen = engine.freeze_inputs(payload, destination)
             except RuntimeError as error:
-                if not logger_snapshot:
+                if not selected_snapshot:
                     raise
-                raise ProvisionError(f"selected Logger snapshot freeze validation failed: {error}") from error
+                raise ProvisionError(f"selected {label} snapshot freeze validation failed: {error}") from error
             if frozen.payload_hash != admission["input_hash"] or _inspect(
                 payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
             ) != admission:
                 raise ProvisionError("owning source or installation changed while freezing provision inputs")
         except (ProvisionError, OSError, ValueError, ImportError, SyntaxError) as error:
-            if not logger_snapshot:
+            if not selected_snapshot:
                 raise
             # No installer has started; this new recipe can certify a settled refusal.
             custody.assert_owned()
-            print(f"Selected Logger source refused before installer execution: {error}", file=sys.stderr)
+            print(f"Selected {label} source refused before installer execution: {error}", file=sys.stderr)
             return 1
         custody.assert_owned()
         environment = _environment(payload)
@@ -481,7 +540,7 @@ def _run_installer(
     # The queue's existing owned process encloses this entire native tree.
     # The installer retains its staging, lifecycle and publication checks.
     return subprocess.call(
-        argv, env=environment, cwd=project,
+        argv, executable=argv[0], env=environment, cwd=project,
         stdin=subprocess.DEVNULL, **no_window_kwargs(),
     )
 

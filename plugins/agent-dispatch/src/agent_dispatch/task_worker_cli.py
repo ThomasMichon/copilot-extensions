@@ -107,6 +107,8 @@ def _read_task_token(filename: str) -> str:
 def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
     if args.command not in _COMMANDS or getattr(args, "task_id", None) != worker.task_id:
         raise DispatchError(403, "command is outside the projected task authority")
+    if getattr(args, "pool_generation", None) is not None:
+        raise DispatchError(403, "pool acceptance cannot override projected task authority")
     forbidden_options = (
         "history", "machine", "worktree", "duplicate_of", "resolve", "base", "override_live",
         "owner_session_id",

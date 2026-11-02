@@ -34,6 +34,12 @@ async def spawn_in_kill_on_close_job(
         return process, None
 
     spawn_kwargs = dict(kwargs)
+    from . import _job_scopes
+
+    job_name = _job_scopes.new_name()
+    spawn_kwargs["env"] = _job_scopes.child_environment(
+        spawn_kwargs.get("env"), append=job_name,
+    )
     spawn_kwargs["creationflags"] = (
         int(spawn_kwargs.get("creationflags", 0)) | _procutil._CREATE_SUSPENDED
     )
@@ -48,7 +54,7 @@ async def spawn_in_kill_on_close_job(
             except ProcessLookupError:
                 pass
             raise RuntimeError("spawned suspended process has no integer pid")
-        job_handle = _procutil._assign_suspended_to_kill_on_close_job(pid)
+        job_handle = _procutil._assign_suspended_to_kill_on_close_job(pid, name=job_name)
         if not _procutil._resume_suspended_process(pid):
             _procutil.log.debug("killing pid %s because suspended-start resume failed", pid)
             try:

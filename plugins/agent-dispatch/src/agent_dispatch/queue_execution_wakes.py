@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, replace
+from typing import Any
 
 from .queue_common import RunWaiterWakeOperation, WakeOperation
 from .queue_execution_custody import (
-    SendOutcome, execution_scope_qualified, require_custody_scope,
+    ExecutionSendUnresolved, SendOutcome, execution_scope_qualified, require_custody_scope,
     require_execution_send_reconciliation,
 )
 from .queue_execution_handoff import _scope_key, require_execution_admission
@@ -48,6 +49,14 @@ def wake_custody_clear_sql(outbox: str) -> str:
     )
     return (
         wake_clear
+        + f" AND NOT EXISTS (SELECT 1 FROM spawn_reservations cooling"
+        f" WHERE cooling.task_id = {outbox}.task_id AND cooling.cooling_token IS NOT NULL)"
+        + " AND NOT EXISTS (SELECT 1 FROM spawn_reservations releasing"
+        f" WHERE releasing.task_id = {outbox}.task_id"
+        " AND releasing.attempt = (SELECT MAX(attempt) FROM spawn_reservations latest"
+        " WHERE latest.task_id = releasing.task_id)"
+        " AND (releasing.release_requested = 1 OR releasing.conversation_retired = 1"
+        " OR releasing.state = 'releasing'))"
         + " AND NOT EXISTS (SELECT 1 FROM execution_send_custody c"
         " JOIN spawn_reservations r ON r.key = c.reservation_key"
         " JOIN tasks retained ON retained.id = c.task_id"
@@ -56,6 +65,46 @@ def wake_custody_clear_sql(outbox: str) -> str:
         + execution_lineage_match_sql("retained", "current")
         + " OR r.exclusive_key = current.exclusive_key))"
     )
+
+
+def _require_no_owner_wake(
+    queue, conn: sqlite3.Connection, task, *, operation: str, protect_pending: bool,
+) -> None:
+    """The existing outbox excludes retirement racing or following a native wake."""
+    for table in TABLES:
+        rows = conn.execute(
+            f"SELECT * FROM {table} WHERE task_id = ? AND ("
+            "status IN ('pending', 'delivering', 'delivered', 'failed')"
+            " OR execution_send_state IN ('pending', 'unknown'))", (task.id,),
+        ).fetchall()
+        for row in rows:
+            if table == "run_waiter_wakes" and row["sender"] == CLAIM_RELEASE_SENDER:
+                continue
+            if row["execution_send_state"] in {"pending", "unknown"} or row["status"] == "delivering":
+                raise TaskError(f"wake delivery excludes physical {operation}")
+            if (
+                row["status"] == "pending" and not protect_pending
+                and row["execution_send_state"] != "sent" and row["attempts"] == 0
+            ):
+                continue
+            current = (
+                queue._wake_is_current(task, WakeOperation._from_row(row))
+                if table == "wake_outbox" else queue._run_waiter_wake_is_current(
+                    conn, task, RunWaiterWakeOperation._from_row(row),
+                )
+            )
+            if current:
+                raise TaskError(f"current owner wake excludes physical {operation}")
+
+
+def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
+    _require_no_owner_wake(queue, conn, task, operation="cooling", protect_pending=True)
+
+
+def require_no_wake_for_release(queue, conn: sqlite3.Connection, reservation) -> None:
+    task = queue._fetch(conn, reservation["task_id"])
+    if task is not None:
+        _require_no_owner_wake(queue, conn, task, operation="release", protect_pending=False)
 
 
 def unresolved_wake_send(
@@ -79,6 +128,84 @@ def unresolved_wake_send(
         if row is not None:
             return row
     return None
+
+
+def reservation_wake_accountable(conn: sqlite3.Connection, reservation: sqlite3.Row) -> bool:
+    """A wake targets a native/workspace, independently of reservation lineage."""
+    from .ordinary_native_bindings import reservation_native_identity
+
+    native = reservation_native_identity(conn, reservation)
+    for table in TABLES:
+        wakes = conn.execute(
+            f"SELECT w.* FROM {table} w WHERE execution_send_state IN ('pending', 'unknown')"
+            " AND (w.task_id = ? OR w.owner_session_id = ?"
+            " OR substr(w.owner, instr(w.owner, '/') + 1) = ?)",
+            (reservation["task_id"], native, reservation["worktree"]),
+        ).fetchall()
+        for wake in wakes:
+            if _wake_targets_reservation(wake, reservation, native):
+                return True
+    return False
+
+
+def _wake_targets_reservation(wake: Any, reservation: Any, native: str | None) -> bool:
+    from .bridge_remote import normalize_host
+    if native and wake["owner_session_id"]:
+        if native != wake["owner_session_id"]:
+            return False
+    else:
+        worktree = wake["owner"].partition("/")[2]
+        if reservation["worktree"] and worktree:
+            if reservation["worktree"] != worktree:
+                return False
+        elif wake["task_id"] != reservation["task_id"]:
+            return False
+    host = reservation["execution_machine"]
+    wake_host = wake["owner"].partition("/")[0]
+    return not (host and wake_host and normalize_host(host) != normalize_host(wake_host))
+
+
+class ReservationWakeSnapshot:
+    """Index unresolved wakes once; preserve the exact per-native matching rule."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+        self.by_task: dict[str, list[Any]] = {}
+        self.by_native: dict[str, list[Any]] = {}
+        self.by_worktree: dict[str, list[Any]] = {}
+        self.unidentified_task: dict[str, list[Any]] = {}
+        self.unidentified_worktree: dict[str, list[Any]] = {}
+        self.results: dict[tuple[Any, ...], bool] = {}
+        for table in TABLES:
+            for wake in conn.execute(
+                f"SELECT * FROM {table} WHERE execution_send_state IN ('pending', 'unknown')",
+            ):
+                self.by_task.setdefault(wake["task_id"], []).append(wake)
+                worktree = wake["owner"].partition("/")[2]
+                self.by_worktree.setdefault(worktree, []).append(wake)
+                if wake["owner_session_id"]:
+                    self.by_native.setdefault(wake["owner_session_id"], []).append(wake)
+                else:
+                    self.unidentified_task.setdefault(wake["task_id"], []).append(wake)
+                    self.unidentified_worktree.setdefault(worktree, []).append(wake)
+
+    def accountable(self, reservation: Any) -> bool:
+        from .ordinary_native_bindings import reservation_native_identity
+        native = reservation_native_identity(self.conn, reservation)
+        key = (reservation["task_id"], native, reservation["worktree"], reservation["execution_machine"])
+        if key not in self.results:
+            candidates = (
+                self.unidentified_task.get(reservation["task_id"], [])
+                + self.by_native.get(native, [])
+                + self.unidentified_worktree.get(reservation["worktree"], [])
+            ) if native else (
+                self.by_task.get(reservation["task_id"], [])
+                + self.by_worktree.get(reservation["worktree"], [])
+            )
+            self.results[key] = any(
+                _wake_targets_reservation(wake, reservation, native) for wake in candidates
+            )
+        return self.results[key]
 
 
 class QueueExecutionWakesMixin:
@@ -161,6 +288,20 @@ class QueueExecutionWakesMixin:
             )
             if not current or task is None:
                 raise TaskError("wake send task fence advanced")
+            if conn.execute(
+                "SELECT 1 FROM spawn_reservations WHERE task_id = ?"
+                " AND cooling_token IS NOT NULL LIMIT 1", (task.id,),
+            ).fetchone():
+                raise ExecutionSendUnresolved("spawn cooling remains unresolved")
+            reservation = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt DESC LIMIT 1",
+                (task.id,),
+            ).fetchone()
+            if reservation and (
+                reservation["release_requested"] or reservation["conversation_retired"]
+                or reservation["state"] == "releasing"
+            ):
+                raise TaskError("wake reservation release or retirement advanced")
             require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
             if row["execution_send"] is not None:
                 raise TaskError("settled wake send is observation only; retain its transport history")

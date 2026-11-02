@@ -6,6 +6,7 @@ import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,6 +15,8 @@ from repository_policy import AgentHostingError
 from agent_bridge import hosting_policy, local_launch_preparation, provider_creation, transport
 from agent_bridge.agent_registry import AgentConfig, AgentResolver, CliNamespaceResolver
 from agent_bridge.connect import ConnectTracker
+from agent_bridge.models import StartSessionRequest
+from agent_bridge.routes import sessions
 from agent_bridge.session_host import agent_runner, launcher
 from agent_bridge.session_host_connection import _SessionHostConnectionMixin
 from agent_bridge.transport import SpawnTarget
@@ -21,6 +24,68 @@ from test_repository_hosting_policy import deny, local_scope as _local_scope, re
 
 local_scope = _local_scope
 repo = _repo
+
+
+@pytest.mark.asyncio
+async def test_http_start_with_cold_ssh_manager_checks_policy_before_agent_effects(
+    tmp_path: Path, session_manager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ssh_manager import ConnectionManager, SSHConfig, SSHProfileSource
+    from ssh_manager import manager as ssh_owner
+
+    effects: list[str] = []
+    manager = ConnectionManager()
+    connection = ssh_owner.ConnectionInfo(
+        host="receiver", config=SSHConfig(host_alias="receiver"),
+        socket_path=tmp_path / "synthetic-control", master_process=None,
+        platform=manager._platform,
+    )
+    monkeypatch.setattr(ssh_owner.ConnectionInfo, "multiplexed", property(lambda _self: True))
+    payload = {
+        "version": 1, "allowed": True, "repository": str(tmp_path / "receiver"),
+        "expose_agent": None, "sources": [], "denied_by": [],
+    }
+
+    async def connect(
+        host: str, source: SSHProfileSource, port_forwards: list[str] | None = None,
+        *, preserve_existing_forwards: bool = False,
+    ) -> ssh_owner.ConnectionInfo:
+        assert host == source._host_alias == "receiver"
+        assert port_forwards is None and preserve_existing_forwards is True
+        effects.append("connect")
+        manager._connections[host] = connection
+        return connection
+
+    async def command(*args: str, **kwargs: Any) -> SimpleNamespace:
+        assert "agent-policy check --project-root" in args[-1]
+        effects.append("policy")
+        return SimpleNamespace(
+            returncode=0, communicate=AsyncMock(return_value=(json.dumps(payload).encode(), b"")),
+        )
+
+    class AgentBoundaryReached(Exception):
+        pass
+
+    def agent_boundary(_target: SpawnTarget) -> None:
+        effects.append("agent-boundary")
+        raise AgentBoundaryReached
+
+    monkeypatch.setattr(manager, "ensure_connected", connect)
+    monkeypatch.setattr("ssh_manager.get_default_manager", lambda: manager)
+    monkeypatch.setattr(ssh_owner, "create_ssh_subprocess", command)
+    monkeypatch.setattr(session_manager, "_provider_backed_target", agent_boundary)
+    monkeypatch.setattr(sessions, "apply_request_preferences", lambda *_args: ({}, "caller-settings"))
+    resolver = SimpleNamespace(resolve_async=AsyncMock(return_value=SpawnTarget(
+        type="ssh", host="receiver", project="example-harness",
+    )))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        session_manager=session_manager, resolver=resolver, ready=True,
+    )))
+    with pytest.raises(AgentBoundaryReached):
+        await sessions.start_session(StartSessionRequest(agent="receiver"), request)
+    assert effects == ["connect", "policy", "agent-boundary"]
+    assert session_manager.list_sessions() == []
+    assert session_manager.db.execute_read("SELECT * FROM sessions") == []
 
 
 @pytest.mark.asyncio
@@ -239,7 +304,8 @@ async def test_ssh_unenforcing_receiver_never_opens_agent_channel(monkeypatch: p
             type="ssh", host="receiver", project="source", cwd="/workspace", explicit_cwd=True,
         ))
     manager.open_stdio_channel.assert_not_awaited()
-    manager.ensure_connected.assert_not_awaited()
+    manager.ensure_connected.assert_awaited_once()
+    assert manager.ensure_connected.call_args.kwargs == {"preserve_existing_forwards": True}
     command = manager.exec_command.call_args.args[1]
     assert "agent-policy check --path /workspace" in command
 
@@ -249,7 +315,7 @@ async def test_ssh_unenforcing_receiver_never_opens_agent_channel(monkeypatch: p
 async def test_project_only_ssh_queries_receiving_owner_metadata(
     monkeypatch: pytest.MonkeyPatch, worktree_id: str | None,
 ) -> None:
-    manager = SimpleNamespace(exec_command=AsyncMock(return_value=SimpleNamespace(
+    manager = SimpleNamespace(ensure_connected=AsyncMock(), exec_command=AsyncMock(return_value=SimpleNamespace(
         timed_out=False, exit_code=0, stdout=json.dumps({
             "version": 1, "allowed": True, "repository": "/remote/source",
             "expose_agent": None, "sources": [], "denied_by": [],
@@ -259,6 +325,8 @@ async def test_project_only_ssh_queries_receiving_owner_metadata(
     await hosting_policy.require_target_hosting(SpawnTarget(
         type="ssh", host="receiver", project="harness", worktree_id=worktree_id,
     ))
+    manager.ensure_connected.assert_awaited_once()
+    assert manager.ensure_connected.call_args.kwargs == {"preserve_existing_forwards": True}
     command = manager.exec_command.call_args.args[1]
     assert command.startswith("harness agent-policy check ")
     assert (

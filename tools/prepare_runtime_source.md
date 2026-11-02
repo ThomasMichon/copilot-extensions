@@ -35,6 +35,37 @@ or changes refs. Modified, untracked and ignored working files are refused;
 inherited Git repository/configuration selectors cannot redirect the probes.
 The selected commit is archived by object identity, not copied from mutable
 working files. Source admission is checked again before publication.
+Archive creation fixes `tar.umask=0022` for that Git invocation, independent
+of repository configuration: tracked executables retain mode `0755` and
+ordinary files `0644`. Native support therefore does not become group-writable
+and fail its runtime custody checks. No checkout configuration is changed.
+Configured source acquisition and preparation explicitly disable Git's ambient
+automatic line-ending conversion, so their clean-checkout checks observe the
+same literal source bytes on Windows and POSIX. Repository-owned attributes
+remain applicable.
+
+Python callers may supply `prepare(..., deadline=<absolute monotonic time>)`
+to share their transaction's deadline with Git probes/archive creation,
+construction-lease waits and archive/initial payload-copy chunks. The CLI and
+ordinary callers retain their existing defaults. Callers still own whole-task
+process containment and source acquisition; this parameter grants no source
+authorization.
+
+`runtime_source_build.py` is a repository-only composition over this preparation,
+the actual configured-runtime-source owner, the retained native dependency
+compiler, governed wheel acquisition and the existing numbered constructor.
+It includes declared build requirements in the same native lock, inspects them
+before backend execution, and validates its held native feed configuration
+before compilation can make package requests. It constructs a separate immutable tools environment,
+then uses the existing build frontend offline with owned, deadline-bound
+children. Built runtime metadata is checked against static source declarations;
+the final source-mode profile excludes build-only dependencies and binds the
+actual wheel bytes. Its profile-qualified generation is distinct from the
+prepared source identity. No artifact index or source-approval file is required.
+The returned context must remain held through installed health; `verify()`
+rechecks its actual owner/source policy and byte custody. This validation
+composition does not enable production callers, activate a runtime or provide
+persistent offline lock discovery.
 
 ## Prepared payload and identity
 

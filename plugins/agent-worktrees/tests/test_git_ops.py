@@ -7,6 +7,7 @@ import typing
 from pathlib import Path
 
 import pytest
+import agent_procutil
 
 from agent_worktrees.git_ops import (
     GitError,
@@ -211,8 +212,11 @@ class TestPush:
         injected cross-account token."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         no_hooks_seen: list[bool] = []
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
@@ -345,8 +349,11 @@ class TestPushTimeout:
         import subprocess
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
                      no_hooks=False, kill_tree=False, isolated_repository=False):
@@ -422,13 +429,14 @@ class TestPushTimeoutTreeKill:
         outer_script = tmp_path / "outer.py"
         outer_script.write_text(
             f"import subprocess, sys, time\n"
-            f"p = subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
+            f"p = subprocess.Popen([sys.executable, '-I', '-S', '-B', {str(grandchild_script)!r}])\n"
             f"open({str(ready)!r}, 'w').write(str(p.pid))\n"
             f"time.sleep(60)\n"
         )
-        cmd = [sys.executable, str(outer_script)]
+        python = getattr(sys, "_base_executable", None) or sys.executable
+        cmd = [python, "-I", "-S", "-B", str(outer_script)]
 
-        original_spawn = push_timeout.spawn_sync_in_kill_on_close_job
+        original_spawn = agent_procutil.spawn_sync_in_kill_on_close_job
 
         def ready_spawn(*args, **kwargs):
             proc, job = original_spawn(*args, **kwargs)
@@ -449,7 +457,7 @@ class TestPushTimeoutTreeKill:
                 proc.wait(timeout=5)
                 raise
 
-        monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", ready_spawn)
+        monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", ready_spawn)
         grandchild_pid: int | None = None
         grandchild_start_time: str | None = None
         try:
@@ -517,7 +525,7 @@ class TestPushTimeoutTreeKill:
         fake_proc = types.SimpleNamespace(
             pid=999999, poll=lambda: None, kill=lambda: calls.append("kill"),
         )
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: True)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: True)
         push_timeout._kill_tree(fake_proc)
         assert calls == ["kill"], "root must be killed via its own Popen handle"
 
@@ -533,7 +541,7 @@ class TestPushTimeoutTreeKill:
         harmless no-op)."""
         from agent_worktrees import push_timeout
 
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
         sweep_called = []
         monkeypatch.setattr(
             push_timeout.subprocess, "run",
@@ -549,7 +557,7 @@ class TestPushTimeoutTreeKill:
         handle guarantees that exact PID hasn't been reused."""
         from agent_worktrees import push_timeout
 
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
         monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows")
         sweep_called = []
         monkeypatch.setattr(
@@ -571,7 +579,7 @@ class TestPushTimeoutTreeKill:
         performed)."""
         from agent_worktrees import push_timeout
 
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: True)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: True)
         sweep_called = []
         monkeypatch.setattr(
             push_timeout.subprocess, "run",
@@ -724,10 +732,8 @@ class TestCrossAccountAuth:
         from agent_worktrees import repos as repos_mod
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/example-org/r.git")
         # Registry maps this owner's repo to a different account login.
-        monkeypatch.setattr(
-            repos_mod, "account_for_github_owner",
-            lambda owner: "host-acct" if owner == "example-org" else owner,
-        )
+        registry = repos_mod.ReposRegistry(account_map={"example-org": "host-acct"})
+        monkeypatch.setattr(repos_mod, "read_registry", lambda **kwargs: registry)
         monkeypatch.setattr(go, "_active_gh_account", lambda: "example-org")
         seen: list[str] = []
 
@@ -797,8 +803,11 @@ class TestCrossAccountAuth:
         override so the default credential helper can authenticate."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         calls: list[bool] = []
 
         def fake_git(*args, **kwargs):
@@ -1417,7 +1426,7 @@ class TestClassifyGitTimeout:
 
         (tmp_path / ".git").mkdir()
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             # Branch detection succeeds so classification reaches the git ops.
             if args[:2] == ("rev-parse", "--abbrev-ref"):
                 return subprocess.CompletedProcess(
@@ -1449,12 +1458,14 @@ class TestClassifyGitTimeout:
 
         (tmp_path / ".git").mkdir()
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             if args[:2] == ("rev-parse", "--abbrev-ref"):
                 return subprocess.CompletedProcess(
                     ["git", *args], 0, "worktree/x\n", "")
-            raise subprocess.TimeoutExpired(
+            error = subprocess.TimeoutExpired(
                 cmd=["git", *args], timeout=timeout or go._CLASSIFY_GIT_TIMEOUT)
+            error.observation_started = True
+            raise error
 
         monkeypatch.setattr(go, "git", fake_git)
 
@@ -1471,7 +1482,7 @@ class TestClassifyGitProcessCount:
     def _run(monkeypatch, responses):
         calls = []
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             calls.append(args)
             return responses(args)
 
@@ -1614,7 +1625,7 @@ class TestClassifyGitStateFetchFailed:
 
     @staticmethod
     def _run(monkeypatch, *, fetch_returncode, responses):
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             if args[:1] == ("fetch",):
                 return types.SimpleNamespace(
                     returncode=fetch_returncode, stdout="", stderr="",

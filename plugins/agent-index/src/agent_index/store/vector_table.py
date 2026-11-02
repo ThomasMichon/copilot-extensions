@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -84,18 +85,64 @@ class VectorTable:
 
     # -- write ---------------------------------------------------------------
 
-    @source_write
-    def upsert(self, chunks: list[Chunk], vectors: np.ndarray) -> int:
+    def upsert(
+        self, chunks: list[Chunk], vectors: np.ndarray, *,
+        bounded_provenance: bool = False, bounded_input: bool = False,
+    ) -> int:
         """Insert or update vectors by chunk_id.
 
         Args:
-            chunks: Chunk objects (only chunk_id is used).
+            chunks: Chunk objects; selected bounded modes validate canonical fields.
             vectors: Embedding vectors, shape ``(n, dim)``, float32.
+            bounded_input: Also verify raw canonical input under writer exclusion.
 
         Returns:
             Number of rows written.
         """
+        if not (bounded_provenance or bounded_input):
+            return self._upsert(chunks, vectors)
+        from .chunk_id_index import ChunkIdIndexPreparationRequired
+        from .content_store import ContentStore
+        from .source_projection import projection_records
+
+        domain = self._source_domain
+        if domain is None:
+            raise ChunkIdIndexPreparationRequired(
+                "Bounded vector provenance requires a participating source store",
+            )
         self._validate(chunks, vectors)
+        if not chunks:
+            return 0
+        if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
+            raise ValueError("Bounded vector provenance requires unique chunk IDs")
+        content = ContentStore(domain.path, table_name=self._content_table)
+        with domain.read(self._db):
+            projection_records(
+                self._db, self._content_table, chunks, bounded_content=content,
+                require_current_input=bounded_input,
+            )
+        refusal: ChunkIdIndexPreparationRequired | SourceLayoutError
+        with domain.write(self._db):
+            try:
+                canonical = projection_records(
+                    self._db, self._content_table, chunks, bounded_content=content,
+                    require_current_input=bounded_input,
+                )
+            except (ChunkIdIndexPreparationRequired, SourceLayoutError) as exc:
+                refusal = exc
+            else:
+                return self._write_vectors(chunks, vectors, canonical=canonical)
+        raise refusal
+
+    @source_write
+    def _upsert(self, chunks: list[Chunk], vectors: np.ndarray) -> int:
+        self._validate(chunks, vectors)
+        return self._write_vectors(chunks, vectors)
+
+    def _write_vectors(
+        self, chunks: list[Chunk], vectors: np.ndarray,
+        *, canonical: dict[str, dict[str, object]] | None = None,
+    ) -> int:
         table = self._get_or_create_table()
         now = time.time()
 
@@ -110,23 +157,29 @@ class VectorTable:
         if self._source_domain is not None:
             from .source_projection import projection_records
 
-            canonical = projection_records(self._db, self._content_table, chunks)
+            if canonical is None:
+                canonical = projection_records(self._db, self._content_table, chunks)
             for record in records:
                 provenance = canonical[record["chunk_id"]]
                 record.update(source=provenance["source"], language=provenance["language"])
 
         chunk_ids = [c.chunk_id for c in chunks]
-        if self._source_domain is not None:
-            self._source_domain.effect(f"vector-upsert:{self._table_name}")
-        try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-            table.delete(f"chunk_id IN ({id_list})")
-        except Exception:
-            if self._source_domain is not None:
-                raise
-            pass
+        mutation = (
+            self._source_domain.bucket_mutation(
+                self._table_name, f"vector-upsert:{self._table_name}",
+                (record["source"] for record in records),
+            ) if self._source_domain is not None else nullcontext()
+        )
+        with mutation:
+            try:
+                id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+                table.delete(f"chunk_id IN ({id_list})")
+            except Exception:
+                if self._source_domain is not None:
+                    raise
+                pass
 
-        table.add(records)
+            table.add(records)
         logger.info("Upserted %d vectors to %s", len(records), self._table_name)
         return len(records)
 
@@ -138,13 +191,8 @@ class VectorTable:
         table = self._get_or_create_table()
         if self._source_domain is not None:
             self._source_domain.effect(f"vector-delete:{self._table_name}")
-        try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-            table.delete(f"chunk_id IN ({id_list})")
-        except Exception:
-            if self._source_domain is not None:
-                raise
-            pass
+        id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+        table.delete(f"chunk_id IN ({id_list})")
 
     @source_write
     def delete_stale(self, *, before: float) -> int:
@@ -241,7 +289,9 @@ class VectorTable:
         return arr
 
     @source_read
-    def get_vectors(self, chunk_ids: list[str]) -> dict[str, np.ndarray]:
+    def get_vectors(
+        self, chunk_ids: list[str], *, strict: bool = False, bounded: bool = False,
+    ) -> dict[str, np.ndarray]:
         """Batch-read stored embeddings for *chunk_ids* present in this table.
 
         Returns ``{chunk_id: vector}`` for the ids that exist here; ids absent
@@ -250,24 +300,37 @@ class VectorTable:
         """
         if not chunk_ids:
             return {}
-        table = self._get_or_create_table()
-        id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-        try:
-            rows = (
-                table.search()
-                .where(f"chunk_id IN ({id_list})")
-                .select(["chunk_id", "vector"])
-                .limit(len(chunk_ids))
-                .to_list()
-            )
-        except Exception:
-            return {}
+        strict = strict or bounded
+        if bounded:
+            from .chunk_id_index import indexed_chunk_rows
+
+            rows = indexed_chunk_rows(self, chunk_ids, columns=["chunk_id", "vector"])
+        else:
+            table = self._get_or_create_table()
+            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+            try:
+                rows = (
+                    table.search()
+                    .where(f"chunk_id IN ({id_list})")
+                    .select(["chunk_id", "vector"])
+                    .limit(len(chunk_ids))
+                    .to_list()
+                )
+            except Exception:
+                if strict:
+                    raise
+                logger.warning("Vector batch read failed", exc_info=True)
+                return {}
         out: dict[str, np.ndarray] = {}
         for r in rows:
             vec = r.get("vector")
             if vec is None:
+                if strict:
+                    raise RuntimeError("Stored vector is missing")
                 continue
             arr = np.asarray(vec, dtype=np.float32)
+            if strict and (arr.shape != (self._dim,) or not np.isfinite(arr).all()):
+                raise RuntimeError("Stored vector has invalid dimensions or values")
             if arr.shape == (self._dim,):
                 out[r["chunk_id"]] = arr
         return out
@@ -300,9 +363,13 @@ class VectorTable:
 
         try:
             cutoff = datetime.timedelta(days=older_than_days)
-            if self._source_domain is not None:
-                self._source_domain.effect(f"vector-compact:{self._table_name}")
-            table.optimize(cleanup_older_than=cutoff)
+            maintenance = (
+                self._source_domain.physical_maintenance(
+                    self._table_name, f"vector-compact:{self._table_name}",
+                ) if self._source_domain is not None else nullcontext()
+            )
+            with maintenance:
+                table.optimize(cleanup_older_than=cutoff)
             logger.info(
                 "Optimized table %s (cleanup older than %d days)",
                 self._table_name, older_than_days,

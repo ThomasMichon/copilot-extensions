@@ -21,6 +21,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native driver admission")
+def test_unowned_internal_repair_refuses_before_construction(repair_case):
+    case = repair_case
+    (case.runtime / "bin").mkdir()
+    assert case.update.repair_engine(case.source) != 0
+    assert not case.effect.exists()
+    assert "Native driver admission must precede publication custody" in case.calls[-1][1].stderr
+
+
 @pytest.mark.parametrize("source_state", ["present", "missing-payload"])
 def test_cell_only_repair_does_not_require_a_shared_manifest(
     repair_case, monkeypatch, source_state,
@@ -32,11 +41,21 @@ def test_cell_only_repair_does_not_require_a_shared_manifest(
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(case.incumbent))
     if source_state == "missing-payload":
         case.incumbent.rename(case.incumbent.with_name("retained-payload"))
-    assert case.update.repair_engine(case.source) != 0
-    assert case.effect.is_file()
+    assert case.run_manager_request(lambda: case.update.repair_engine(case.source)) != 0
+    assert case.effect.is_file(), case.calls[-1][1].stdout + case.calls[-1][1].stderr
     assert str(root) in case.calls[-1][0]
     assert not case.manifest.exists()
     assert not (case.runtime / "bin").exists()
+
+
+def test_independent_source_repair_refuses_cell_before_native_refresh(repair_case, monkeypatch):
+    case = repair_case
+    _activate_scope(case, monkeypatch)
+    before = case.manifest.read_bytes()
+    with pytest.raises(RuntimeError, match="authorized legacy installation"):
+        case.update._refresh_source(case.source, dict(os.environ), independent=True)
+    assert case.acquisitions == [] and not case.effect.exists()
+    assert case.manifest.read_bytes() == before
 
 
 def _complete_slot(root: Path, version: str) -> Path:
@@ -60,16 +79,18 @@ def test_successful_automatic_repair_keeps_cell_for_real_suite_resolution(
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT")
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(case.incumbent))
     shared_python = _complete_slot(case.runtime, "0.9.0")
-    observed = case.update._wait
     selected = []
 
-    def finish_reached_construction(command, environment, cwd):
-        result = observed(command, environment, cwd)
-        assert result != 0 and case.effect.is_file()
+    def finish_admitted_repair(command, environment, cwd):
+        # This is successful-repair routing, not the separate native abort control.
+        flag = "-InstallDir" if os.name == "nt" else "--install-dir"
+        assert command[command.index(flag) + 1] == str(root)
+        assert environment["COPILOT_EXTENSIONS_CONTEXT"] == str(context)
         selected.append(_complete_slot(root, "1.0.0"))
+        (root / "bin").mkdir()
         return 0
 
-    monkeypatch.setattr(case.update, "_wait", finish_reached_construction)
+    monkeypatch.setattr(case.update, "_wait", finish_admitted_repair)
     monkeypatch.setattr(agent_plugin_runtime, "_load_installation_context", lambda: case.primitive)
     monkeypatch.setattr(
         engine_client, "_INHERITED_ENGINE_COMMAND",
@@ -90,18 +111,20 @@ def test_successful_automatic_repair_keeps_cell_for_real_suite_resolution(
         engine_client, "subprocess",
         SimpleNamespace(run=execute, TimeoutExpired=subprocess.TimeoutExpired),
     )
-    assert manager._cmd_update([
+    assert case.run_manager_request(lambda: manager._cmd_update([
         "--repair-engine", str(case.source), "--project", "sample", "--force",
-    ]) == 5
+    ])) == 5
     assert len(calls) == 1
     command, options = calls[0]
     assert command == [
-        str(selected[0]), "-m", "agent_worktrees",
+        str(selected[0]), *agent_plugin_runtime.python_cache_args(selected[0].parents[3]),
+        "-m", "agent_worktrees",
         "--project", "sample", "update", "--no-manager", "--force",
     ]
     assert options["env"]["COPILOT_EXTENSIONS_CONTEXT"] == str(context)
     assert "COPILOT_EXTENSIONS_CONTEXT" not in os.environ
     assert not (case.runtime / "bin").exists()
+    assert not case.effect.exists()
 
 
 def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
@@ -112,19 +135,19 @@ def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
 
     case = repair_case
     (case.runtime / "bin").mkdir()
-    observed = case.update._wait
     selected = []
 
-    def finish_reached_construction(command, environment, cwd):
-        result = observed(command, environment, cwd)
-        assert result != 0 and case.effect.is_file()
+    def finish_admitted_repair(command, environment, cwd):
+        flag = "-InstallDir" if os.name == "nt" else "--install-dir"
+        assert command[command.index(flag) + 1] == str(case.runtime)
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
         selected.append(_complete_slot(case.runtime, "1.0.0"))
         manifest = json.loads(case.manifest.read_text())
         manifest["source"] = {"plugin": "agent-worktrees", "version": "1.0.0"}
         case.manifest.write_text(json.dumps(manifest), encoding="utf-8")
         return 0
 
-    monkeypatch.setattr(case.update, "_wait", finish_reached_construction)
+    monkeypatch.setattr(case.update, "_wait", finish_admitted_repair)
     monkeypatch.setattr(
         engine_client, "_INHERITED_ENGINE_COMMAND",
         [str(case.runtime / "versions/stale/bin/python"), "-m", "agent_worktrees"],
@@ -143,11 +166,16 @@ def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
         engine_client, "subprocess",
         SimpleNamespace(run=execute, TimeoutExpired=subprocess.TimeoutExpired),
     )
-    assert manager._cmd_update(["--repair-engine", str(case.source)]) == 0
+    assert case.run_manager_request(
+        lambda: manager._cmd_update(["--repair-engine", str(case.source)]),
+    ) == 0
     assert calls[0][0] == [
-        str(selected[0]), "-m", "agent_worktrees", "update", "--no-manager",
+        str(selected[0]), *engine_client.agent_plugin_runtime.python_cache_args(
+            selected[0].parents[3],
+        ), "-m", "agent_worktrees", "update", "--no-manager",
     ]
     assert "COPILOT_EXTENSIONS_CONTEXT" not in calls[0][1]["env"]
+    assert not case.effect.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell update-entry inspection contract")

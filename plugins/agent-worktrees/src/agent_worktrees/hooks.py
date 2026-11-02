@@ -17,8 +17,8 @@ Hooks fire only when ``AGENT_WORKTREES_HOOKS=1`` is set in the environment;
 the shim short-circuits otherwise, so recovery mode (slim environment) and
 external git operations are inert by default.
 
-Guard decisions live here in Python. The shim skips runtime startup for the
-existing authorized pre-push no-op, while always chaining local hooks.
+Pre-commit decisions live here in Python. Pre-push uses only shell/ref policy,
+resolved once by the existing installer, while always chaining local hooks.
 Normal hook installation refreshes managed shims; a payload update alone
 does not prove that an existing shim has been refreshed.
 """
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shlex
 import stat
 import sys
 from pathlib import Path
@@ -445,6 +446,22 @@ def hooks_dir_for(anchor: str | Path) -> Path | None:
     return common / "hooks"
 
 
+def _pre_push_shim(anchor: str | Path) -> str:
+    """Render the branch-only hook from the existing policy owners."""
+    script = Path(__file__).with_name("pre_push.sh")
+    pr_enabled = _pr_enabled(anchor)
+    protected = " ".join(
+        f"refs/heads/{branch}" for branch in _protected_branches(anchor)
+    ) if pr_enabled else ""
+    return (
+        "#!/bin/sh\n"
+        f"# {_SHIM_MARKER} -- managed; do not edit.\n"
+        f"aw_pr_enabled={int(pr_enabled)}\n"
+        f"aw_protected_refs={shlex.quote(protected)}\n"
+        + script.read_text(encoding="utf-8")
+    )
+
+
 def install_hooks(anchor: str | Path) -> list[str]:
     """Install the PR-workflow shims into *anchor*'s shared hooks dir.
 
@@ -458,7 +475,10 @@ def install_hooks(anchor: str | Path) -> list[str]:
     installed: list[str] = []
     for name in HOOK_NAMES:
         target = hdir / name
-        shim = _SHIM_TEMPLATE.format(name=name)
+        shim = (
+            _pre_push_shim(anchor) if name == "pre-push"
+            else _SHIM_TEMPLATE.format(name=name)
+        )
         if target.exists():
             existing = target.read_text(encoding="utf-8", errors="replace")
             if _SHIM_MARKER in existing:

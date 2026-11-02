@@ -261,6 +261,20 @@ class HostedChat:
     """One explicitly owned store and local endpoint, with caller-controlled lifetime."""
 
     def __init__(self, config):
+        try:
+            from agent_procutil.daemon_instances import admit_daemon_instance
+        except ImportError:
+            raise HostError("host_service_dependencies_missing") from None
+        self._instance_guard = admit_daemon_instance(
+            "agent-chat-service", source=__file__, purpose="production",
+        )
+        try:
+            self._initialize(config)
+        except BaseException:
+            self._instance_guard.close()
+            raise
+
+    def _initialize(self, config):
         config = _validate_config(config)
         try:
             from endpoint_rendezvous import clear_endpoint, write_endpoint
@@ -356,6 +370,7 @@ class HostedChat:
         if self.lease is not None:
             self.lease.release()
             self.lease = None
+        self._instance_guard.close()
         if drain_error is not None:
             raise drain_error
 
@@ -370,13 +385,30 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
+    try:
+        return _run(args.config)
+    except HostError as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr, flush=True)
+        return 1
+
+
+def _run(config_path):
+    try:
+        from agent_procutil.daemon_instances import admit_daemon_instance
+    except ImportError:
+        raise HostError("host_service_dependencies_missing") from None
+    with admit_daemon_instance("agent-chat-service", source=__file__, purpose="production"):
+        return _serve(config_path)
+
+
+def _serve(config_path):
     stop = threading.Event()
     previous = {}
     try:
         for name in ("SIGINT", "SIGTERM"):
             sig = getattr(signal, name)
             previous[sig] = signal.signal(sig, lambda *_: stop.set())
-        with HostedChat(load_config(args.config)) as host:
+        with HostedChat(load_config(config_path)) as host:
             print(json.dumps({
                 "schema": "agent-chat.host-ready", "version": 1,
                 "transport": host.transport, "endpoint": host.endpoint,

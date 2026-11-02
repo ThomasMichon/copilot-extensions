@@ -62,6 +62,11 @@ destination follows its declared policy. Verify the selected writable state
 home before writing personal material. Do not commit credentials, private
 hostnames, machine paths, or real operator activity into the portable repo.
 
+The [harness/knowledge reference](harness-and-knowledge.md) explains binding,
+writable state homes, knowledge-over-harness repository preferences and the
+distinct machine and repository+machine tiers. The relationship does not grant
+installation, execution or publication authority.
+
 ### Example: control repo with an execution venue
 
 A hypothetical maintainer adds agent-bridge and **one** venue provider:

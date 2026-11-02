@@ -21,6 +21,11 @@ explicitly assigned fleet machines. A fleet belongs to exactly one operator;
 it never hosts another operator's state or credentials. Ordinary process
 waiters and supported native PR operation remain working alternatives.
 
+The central service is caller-driven: agents ask it to connect to forge
+backends and subscribe to PR sets as they create PRs; reviewer task emitters
+also request subscriptions to the PR ranges they need to watch. A client-side
+native/fleet switch alone does not deliver this service intake model.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -45,6 +50,16 @@ client/migration lane under the same effort host. Keep #7188 service/consumer, #
 conformance and Worktrees publication/resource and credential/provider claims bounded
 and unchanged. Continue through this Plan/Validation/Journal and eligible open bounded
 source claims, not a closed tracker or new generic sign-off rendezvous.
+
+The complete #6007 keeper and #6286/#7188 original/refined/inherited outcomes
+continue through the [direct per-origin Plan, Validation and Coordination](retained-pr-service-outcomes.md)
+under these same delegation, PR-service and domain custodians. Preserve
+#6286's own installed-adoption exit separately from #7188's broader fleet,
+provider/client/image and latest registration-intent duties. Existing
+implementation reservations, real source/resource holds and operational
+authorization remain; no source claim, task or resource state is released
+or changed by this tracker intake. #7778's supersession of signature-like
+source checkpoints remains in force, and #6007 stays open.
 
 - **Topology:** Serial, independently reviewable PRs against `dev`.
 - **Host (owns PRs):** Delegation driver.
@@ -72,6 +87,11 @@ source claims, not a closed tracker or new generic sign-off rendezvous.
   issues, resolving actual overlaps through normal review, not a new sign-off
   rendezvous. Native client work remains useful before fleet deployment.
 - **Handoff:** Continue from this README, its next unchecked item, and the current PR state. Do not replay the preserved branch wholesale.
+
+The caller-driven intake slice below extends the same watcher/client
+integration responsibility. Provider/inventory, credential, publication/claim
+and reviewer task owners remain unchanged; this is not a new generic producer
+framework, fleet controller or permission to activate a live backend.
 
 ## Context
 
@@ -191,8 +211,26 @@ of third-party bytes. The
 [construction proposal](artifact-construction.md) separates first-party release
 artifacts from governed, target-specific offline image inputs.
 
-## Plan
+Continuation selection after offline-input source delivery, verbatim:
 
+> watcher-integration
+
+Continue watcher/client integration while actual image validation remains
+pending an approved builder, pinned base and runtime closure. This does not
+waive image acceptance or authorize unrelated runtime repair.
+
+Caller-driven service usage clarification, verbatim:
+
+> So, I expect that as agents start making PRs, the central service will be asked to connect to different backends and subscribe to a set of PRs. In addition, reviewer task emitters will wind up using this service to request subscriptions to ranges of PR that need watching.
+
+The [caller-driven subscription proposal](caller-driven-subscriptions.md)
+contains the **agent-recommended** interpretation, design and validation:
+author-side exact PR sets and reviewer-selected PR populations share the
+central service rather than requiring static startup entries or independent
+discovery pollers. The selection grammar and admission mechanics are design
+details, not additional operator quotations or live deployment authority.
+
+## Plan
 ### Governed watch-owner cutover prerequisite
 
 _Agent-recommended design and validation, explicitly selected for review._
@@ -331,6 +369,10 @@ _Operator-required scope; agent-recommended implementation and validation._
   the existing shared artifact path, preserving plugin compatibility and
   canonical source/resource identity (confirmed by #8293). This source leaf
   does not admit a runtime dependency closure or establish image acceptance.
+- [x] Land canonical retained hashed dependency compile/export through the
+  existing installer owner, preserving resolver seasoning, input isolation and
+  ordinary installation behavior (confirmed by #8327). This source prerequisite
+  constructs candidate locks, not approved target profiles or acquired closures.
 - [ ] Deliver the [shared artifact construction](artifact-construction.md)
   proposal through review, standalone first-party artifact support, admitted
   runtime closure and actual offline image acceptance. Preserve public
@@ -344,6 +386,76 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [ ] Prove standalone/container lifecycle, restart and upgrade continuity,
   account/fleet isolation, observation sharing, disconnection recovery and the
   real client/Gateway/service path before treating fleet deployment as complete.
+
+### PR-service offline image inputs
+
+_Delegation driver source slice; agent-recommended implementation under the
+reviewed artifact-construction plan. The planning worktree retains its broader
+fleet-service binding._
+
+- [x] Land the repository-only offline-context consumer and exact retained-wheel
+  and fresh offline-install controls through normal review and Linux/Windows
+  source validation (confirmed by #8885). This does not close profile/feed/base approval, actual
+  image construction, container lifecycle or fleet acceptance above.
+
+### PR-service watcher/client integration
+
+_Delegation driver source validation slice; agent-recommended under the
+existing serving/consumer contract, not a second watcher or evaluator._
+
+- [x] Qualify actual watch-service observation through the real Gateway and
+  Dispatch replay/queue consumers: shared targets, unchanged nonevents,
+  original identities across restart and one wake per event after lost ACK.
+  Source confirmed by #8927. This finite proof does not close live provider credentials, the
+  independent evaluator route, image or installed/fleet acceptance.
+- [x] Review the [scoped replay selection amendment](pr-service-contract.md#scoped-replay-selection-amendment-agent-recommended-proposed)
+  before implementing a parallel opt-in v2 binding contract. Preserve strict v1
+  wire/record compatibility, original identities and default native operation
+  (confirmed by #8938; implementation and qualification remain below).
+- [x] Deliver the parallel v2 provider/client binding seam without changing v1
+  (#8945). Exact-head native source qualification passed 340 cases on each of
+  Linux and Windows; scoped Dispatch intent and explicit programmatic
+  coordinator selection followed in #8957.
+- [x] Implement and qualify current service/consumer binding at every replay
+  operation, then wire explicit optional coordinator composition through its
+  existing lifetime, active-route and credential owners. No configuration label
+  grants admission or deployment authority (source confirmed by #8957).
+- [x] Exercise the amendment's mixed-version/rollback, remapped-target,
+  malformed binding, restart, credential-loss and ambiguous-response controls
+  through the real Gateway and durable queue/store. Keep live provider, image,
+  independent evaluator and installed/fleet acceptance separate (#8945, #8957).
+- [x] Qualify the actual watch-service and Dispatch consumer with the native
+  credential-backed observation path and typed credential exchange in one
+  isolated integration. Preserve renewal/refusal, original intent and one wake
+  after recovery; synthetic issuers/forge responses do not close live provider,
+  installed, image or fleet acceptance (GitHub source proof in #8975).
+- [x] Qualify the corresponding native ADO configured-observation reader through
+  the same actual watcher, typed credential exchange and scoped Dispatch path.
+  Preserve provider-native state and credential refusal without crediting
+  GitHub-only coverage as ADO parity or taking over broader conformance
+  (bearer-auth source proof in #8980; basic authentication and live forge
+  transport remain outside this finite evidence).
+
+### Caller-driven backend and PR-set intake
+
+_Operator-required usage; agent-recommended design, sequencing and validation._
+
+- [x] Review the [caller-driven subscription amendment](caller-driven-subscriptions.md)
+  and corresponding PR/reviewer vision changes before implementation (#9033).
+- [ ] Add caller-driven connections to admitted forge backends and durable
+  exact-PR-set registrations through the existing central service owners;
+  preserve current credentials, identities and legacy watch contracts.
+- [ ] Add bounded provider-backed discovery and continuing membership for
+  reviewer PR selections, reusing native provider/inventory and watch cores
+  rather than a second forge adapter or polling service.
+- [ ] Integrate confirmed author-side PR creation/tracking without repeating
+  publication after subscription failure or losing its existing PR claim.
+- [ ] Integrate reviewer emitters with shared discovery and replay while
+  retaining eligibility, one-task-per-target deduplication and reviewer lineage.
+- [ ] Qualify real client/service and consumer paths, initial membership versus
+  changes, overlapping selections, partial discovery, disconnect/restart,
+  lost results and scoped cancellation at the proposal's named evidence tiers.
+  Keep provider, image and installed/fleet acceptance separately open.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -628,7 +740,20 @@ or silently expanding a bounded source claim.
   delivery. No live wait, evaluator, provider, task wake, service or runtime action is
   authorized.
 
+### Direct retained keeper and per-origin acceptance
+
+- [ ] Complete every unfinished #6007/#6286/#7188
+  [direct per-origin Plan row](retained-pr-service-outcomes.md#plan),
+  preserving complete original/refined/inherited scope, distinct finite exits,
+  actual checked source/release credit, semantic choices, domain-specific
+  bounds and unchanged source/resource ownership.
+
 ## Validation Plan
+
+- [ ] Resolve the caller-driven backend, exact-set and reviewer-selection
+  [validation contract](caller-driven-subscriptions.md#validation-agent-recommended)
+  through actual author and reviewer consumers. A static configured-target
+  watch or per-coordinator backend switch is not equivalent delivery.
 
 - [ ] Resolve every directly retained #2874 Plan/Validation clause above at its original
   finite scope and evidence tier, preserving alternatives, same owners, holds, and
@@ -673,6 +798,18 @@ All items below are **agent-recommended** acceptance checks.
   evidence tier; a built wheel, synthetic lock or public CI run cannot certify
   governed-feed admission or fleet deployment.
 
+- [ ] Complete the matching
+  [direct per-origin Validation rows](retained-pr-service-outcomes.md#validation-plan)
+  against their full Plan scope and existing linked contract matrices.
+  Keep all original cell, provider/native-ADO, credential, service/client,
+  image/profile/feed/base, lifecycle/storage/cross-host, installed/fleet and
+  performance venues distinct. Source/native/release credit is not an
+  installed proof; no universal signature or native-every-host gate returns.
+- [ ] Read back every
+  [continuing per-origin Coordination row](retained-pr-service-outcomes.md#continuing-coordination),
+  retaining original holders, exact actual conditions and #7778's
+  nonblocking-consultation rule before separately supported tracker disposition.
+
 ## Proposal
 
 Reliable delivery is a prerequisite, not an optional follow-up. The watch
@@ -689,6 +826,271 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-31 - Accept the caller-driven registration proposal
+
+- #9033 merged as `9a6adc0dc3ad6704830729ecdec246feb507ea47` from
+  head `0ac5d27621695193b2d402947319559c55517593`. Current-head Copilot
+  review `5725904092` approved without open findings, required CI
+  `41261657361` passed, and the documentation-impact thread was resolved.
+- The rebase retained the newer per-origin keeper and incremental review
+  contracts alongside the caller-driven intake proposal. The original
+  source replay preserved its author and message; a separate revision-date
+  commit records the integrated intent without changing that provenance.
+- Re-read the current Plan and Validation boundary after the verified merge
+  and pull-forward. Close only proposal review. Backend connections and
+  exact-set intake are the next implementation slice under #7188; selections,
+  author/reviewer integration, live provider, image, installed/fleet and
+  independent-evaluator acceptance remain open. No runtime, credential,
+  service or deployment was activated, and #6007 remains Active.
+
+### 2026-10-28 - Direct retained keeper, adoption and fleet outcomes
+
+The complete #6007/#6286/#7188 originals, refinements and inherited acceptance
+are retained through the named Plan/Validation/Coordination ledger. The
+bounded read-only study checked forty-one actual current texts and complete
+nested eligibility under stable actor/roster guards, with current receiver,
+four directly needed contract sub-documents and selected intent read at one
+immutable source pin. No product code, test, credential or runtime was operated.
+
+All fifty-four existing checked source/documented-qualification baselines
+remain credited without duplicate implementation. #6286's remaining installed
+prerequisite is not expanded into all #7188 fleet work. Original domain bounds,
+single-operator authority, actual source/resource holders and the specific
+latest registration-intent receipt gap remain. The older source-owner
+signature rendezvous is not reinstated.
+
+Normal review, actual merge and full current receiving readback precede any
+separately supported administrative source consolidation. This does not mark
+native/installed/provider/image/fleet outcomes complete, release a claim,
+appoint an owner or authorize deployment. #6007 and this effort remain open.
+
+### 2026-10-25 - Clarify caller-driven central registration
+
+- Captured the operator's service-usage clarification verbatim and re-read it
+  against the source. The intended consumers are PR-creating agents and
+  reviewer task emitters requesting PR sets/ranges from the central service,
+  not merely coordinators choosing a native/fleet access mode.
+- Source tracing found fixed startup scope/observation mappings in the current
+  host and Gateway, confirmed-PR publication and claim boundaries in the
+  existing authoring path, and repository/filter-based reviewer discovery.
+  Native provider inventory and continuous-watch foundations are reusable;
+  their existence does not establish caller-driven connection or selection
+  support.
+- Propose reviewed vision and contract extensions before implementation.
+  Preserve all delivered exact-PR/credential proofs, existing owners and
+  remaining live provider, image, installed/fleet and evaluator acceptance.
+
+### 2026-10-25 - Merge native ADO watcher credential recovery
+
+- #8980 merged as `cf82e5f8e6e5f6d639655c0152857b4984908e10` from
+  approved head `1268534a72bbbee9c54b4624b5c41a61768f5ef3`.
+  Copilot review `5643208853` approved without findings; complete review and
+  review/issue comments were read. Required CI `40193320812` passed.
+- Exact-head native run `40193388396` passed all four selected jobs:
+  Dispatch passed 237 cases on Windows and 236 on Linux with one explicit
+  platform skip; PR service/client passed 296 plus 44 standalone cases on each
+  platform. Totals were 577 Windows passes and 576 Linux passes with one skip.
+  The new case constructs the actual native ADO configured snapshot and bearer
+  request headers after real typed credential acquisition, through the same
+  WatchService and scoped Dispatch queue. Only forge HTTP responses and the
+  issuer/provider are synthetic. No legacy `az` or ambient-PAT fallback is used.
+- The focused ADO case passed locally, followed by both provider cases
+  together. Fatal lint, install-contract, documentation consistency, changed-
+  module and whitespace gates passed. No production code, credential/native
+  deadline, required unit portfolio or manual job budget changed.
+- Re-read the parent Plan/Validation after merge. Managed completion retained
+  its backup and reconciled only the already-merged commit after refreshing
+  the recorded PR head. This closes only the ADO bearer source leaf; basic
+  authentication, broader conformance, live provider results, normal backend
+  activation, images and installed/fleet acceptance remain distinct and open.
+  No next activation, rollout or runtime owner change follows from this proof.
+### 2026-10-25 - Merge native credential-backed watcher integration
+
+- #8975 merged as `5773f281ac4881bb98ca44dfe74e87ed55fa171f` from
+  approved head `19eeb2cc1b9d8c83d6045d91c4f06f23b2f0bd0d`.
+  Copilot review `5643127045` approved without findings; complete reviews and
+  review/issue comments were read. Required CI `40191259030` passed.
+- Exact-head native run `40191323874` passed all four selected jobs:
+  Dispatch passed 236 cases on Windows and 235 on Linux with one explicit
+  platform skip; PR service/client passed 296 plus 44 standalone cases on each
+  platform. Totals were 576 Windows passes and 575 Linux passes with one skip.
+  The joined control executes actual native GitHub snapshot construction and
+  typed credential acquisition through the watcher and durable queue. Only
+  issuer/provider and forge responses are synthetic; no live provider
+  permission, image or deployment is certified.
+- Local validation passed the joined case with 15 existing transport cases,
+  all four refactored credential controls and a final focused run including
+  captured-log and SQLite-sidecar secrecy checks. The integration fixture uses
+  current time, explicit test-issuer renewal and completed native observation
+  before consuming recovery; production/native-command deadlines are unchanged.
+- Re-read the parent Plan/Validation after merge, refreshed the recorded merged
+  head and used managed completion to retain its backup and reconcile only the
+  already-merged commit. Continue the finite ADO native-reader counterpart
+  above. Independent evaluator, live provider, image and installed/fleet
+  acceptance and their existing owners remain open. No runtime was activated.
+
+### 2026-10-25 - Merge scoped durable intent and coordinator composition
+
+- #8957 merged as `2b89f0cbf3e50b5997a481287ac109d06bc920b6` from
+  approved head `0b23f098058ff3c5ee8ef13010c66e5038023ee9`.
+  Copilot review `5642864682` approved without findings; full reviews and
+  review/issue comments were read. Required CI `40187435521` passed.
+- Exact-head native run `40187527865` passed 235 selected cases on Windows
+  and 234 on Linux with one explicit platform skip. Scoped durable intent,
+  v1 compatibility, original-ID replay, real watcher nonevents/restart/lost-ACK
+  recovery and the trusted programmatic front door passed. Default CLI startup
+  still selects no remote backend.
+- The initial hosted Windows run exhausted the 30-second item watchdog in
+  the multi-phase watcher integration. Bounded local phase instrumentation
+  found distributed observation/durable/restart/recovery cost, with complete
+  v1/v2 calls taking 20.90/23.46 seconds. Only that Windows integration item
+  now has a 120-second watchdog; internal and production deadlines and all
+  functional assertions are unchanged. The final local transport packet passed
+  15 cases before publication; temporary instrumentation was removed.
+- Re-read the parent Plan/Validation after merge. Refreshing the recorded
+  merged PR head let managed completion retain its backup and reconcile only
+  the two already-merged commits. Continue the finite native credential-backed
+  watcher/consumer integration above, not a new polling or credential owner.
+  Independent evaluator, production providers, image and installed/fleet
+  acceptance remain open; no runtime or deployment was activated.
+
+### 2026-10-25 - Merge scoped replay provider/client support
+
+- #8945 merged as `913a1a970ba982a3ebfdd0510ec4e8ae0beef478` from
+  approved head `dfedfefc2f74aff628d31a41b0311b7179b7e1f0`.
+  Copilot review `5642688345` approved without findings; all reviews and
+  review/issue comments were read. Required checks passed.
+- Exact-head native run `40183559810` passed 296 selected service/client cases
+  and 44 standalone cases on each of Linux and Windows, 340 per platform.
+  The real TLS/PoP path covers v1 compatibility, v2 expected-binding refusal,
+  post-discovery remapping, provider rollback without downgrade, disk restart
+  and original-ID recovery across policy/channel/cancellation loss. Synthetic
+  issuer/provider fixtures are not production credential or fleet proof.
+- The local expanded packet passed 295 cases before the final persisted-
+  namespace control; its final 38-case binding rerun and all 75 workflow-scope
+  controls passed. Fatal lint, install-contract, documentation consistency,
+  changed-module and whitespace gates passed. Only the existing manual
+  native lane expands; required CI gains no process matrix.
+- Re-read the parent Plan/Validation and current journal after merge. Managed
+  completion retained a backup and reconciled only the merged source commit.
+  Continue the scoped Dispatch durable-intent variant and explicit optional
+  coordinator composition. No service, credentials, runtime update, image or
+  deployment was enabled. Parent, independent evaluator, live provider,
+  installed and fleet acceptance remain open.
+
+### 2026-10-25 - Merge the scoped replay selection contract
+
+- #8938 merged as `edde802ec4819310f6e4e19cae015b4a387dbd4b` from
+  approved head `1daa5bab124dfd5bac51b52009c1128ade4ed53b`.
+  Copilot review `5642584036` approved without findings; full reviews and
+  review/issue comments were read. Required checks passed, as did local
+  documentation consistency and whitespace validation.
+- Re-read the current parent intent, Coordination, relevant Plan/Validation
+  and journal after merge. Close only the proposal-review item. The parallel
+  opt-in v2 contract retains v1 and requires expected binding comparison at
+  the real operation boundary, not a capability-only or configuration-label
+  authority check.
+- Continue provider-first implementation and real transport compatibility
+  qualification, then scoped durable intent and explicit optional coordinator
+  composition. No runtime, credentials, image or deployment was enabled by
+  this documentation-only merge. The parent remains Active.
+
+### 2026-10-25 - Merge actual watcher/client source qualification
+
+- #8927 merged as `e1c153dd7c37d64c9ab7ca489951f03a1bead149` from
+  approved head `f81fdff9d5658d53045abc6ebdcf2fc39bebc105`.
+  Copilot review `5642404042` approved with no blocking issues; all reviews,
+  review comments and issue comments were read. The one initial contention
+  finding is fixed and its thread is resolved. Required checks passed.
+- Exact-head native acceptance `40179487266` passed 202 tests on Windows
+  and 201 tests with one explicit skip on Linux. The final transport file
+  passed all ten cases locally. Nonevent and empty-pending assertions require
+  successful replay cycles; blocked transport is not credited as no-wake
+  evidence. Original IDs remain bound through all retry/recovery paths.
+- Re-read the current parent intent, Coordination, Plan, Validation and latest
+  journal after merge. Close only this finite source-validation leaf. Managed
+  sync safely aborted an individual-commit replay conflict after the squash;
+  managed completion then verified the merged head and dropped only its two
+  upstreamed commits, retaining a backup and this continuing worktree.
+- Continue the explicit watcher/client selection contract. The real
+  coordinator front door still does not configure the optional replay
+  factory, and current v1 capabilities do not attest its namespace. Do not
+  turn a configuration label into scope authority or silently enable a
+  backend. Propose and review any missing backwards-compatible binding seam
+  before production selection. Image, provider, independent evaluator,
+  installed and fleet gates remain open.
+
+### 2026-10-25 - Merge offline PR image inputs and retain real image acceptance
+
+- #8885 merged as `f541c831e939e31ba0ef419c1ae9fb24ceca71fe` from
+  approved head `9e112793999ab860309c69d07e12c5ad83d3e8c7`.
+  Copilot review `5641852096` approved without findings; complete reviews and
+  review/issue comments were read. Required CI `40169117492` passed.
+  Exact-head native acceptance `40169147365` passed all 180 selected core
+  cases and 44 standalone cases on each of Linux and Windows.
+- Re-read the current parent intent, coordination, Plan, Validation and latest
+  journal after merge. Close only the finite offline-input source slice.
+  Managed pull-forward retained the reviewed tip and advanced this continuing
+  worktree to the confirmed merge without discarding unpublished work.
+- The helper and native synthetic installation do not approve a real runtime
+  profile, base or feed, build an image, or prove a deployed watcher. Continue
+  real offline image construction and packaged process acceptance through the
+  existing shared owners; all provider, credential, writer transfer,
+  update/rollback, installed and fleet gates remain open. No SSH work resumes.
+
+### 2026-10-25 - Exercise the actual watcher-to-Dispatch consumer chain
+
+- Following the operator's `watcher-integration` selection, compose the
+  existing `WatchService`, connector, native observation child and both disk
+  owners with the real TLS/PoP Gateway and finite Dispatch replay consumer.
+  Two waits for the same authorized PR share a native observation target.
+  Repeated identical snapshots produce no wake; service/queue restart retains
+  original request, deadline and registration identities. A subsequent
+  matching state change completes one wake per task, including recovery after
+  a committed ACK response is lost.
+- The native child supplies synthetic provider snapshots, not real forge or
+  credential-provider qualification. The independent periodic evaluator,
+  actual image construction, installed adoption, live providers and fleet
+  gates remain open. No production polling, retry, deadline or activation
+  behavior changes.
+- The focused integrated case passes. Its surrounding replay, real-transport
+  and coordinator-maintenance packet passes 72 tests under existing runner
+  bounds. Initial test assumptions were corrected to distinguish a prepared
+  waiter from an active one and a completed observation cycle from transient
+  store contention. Read-only capability negotiation may retry before any
+  waiter exists; no uncertain mutation is retried with a new identity.
+  Hosted current-head Windows/Linux qualification remains required.
+
+### 2026-10-24 - Resume PR-service construction on the shared profile owner
+
+- Resume the PR service and watcher system. Separate SSH repair and native
+  desktop validation are not prerequisites for this service slice.
+- Close #8367 with operator confirmation as superseded by #8568 and #8586.
+  Preserve its reviewed commits and carry forward the unique #8327 effort
+  record rather than overwrite the newer release-profile representation or
+  installation-owned policy composition. No runtime-profile consumer is
+  enabled by this disposition.
+- #8327 merged as `18b688bb57d2c7fb33ea793bfae8ff3065facff6` from
+  approved head `1b1310c79ed783dbf10eb4890e186d3ddacaaa44`; required CI
+  `40039650223` and exact-head native acceptance `40039790134` passed.
+  The latter exercised all 55 selected tests on Linux and Windows. Local
+  targeted validation passed 234 cases and workflow scope passed 59.
+  This closes only retained hashed compile/export, not approved profile,
+  exact acquisition, offline image or installed/fleet acceptance.
+- Continue target-specific runtime closure and offline image construction
+  through the existing artifact and dependency owners. The parent remains
+  Active; provider, lifecycle, credentials, client, installed and fleet gates
+  remain open. No SSH update or unrelated deployment follows.
+- Implement the bounded PR offline-context consumer over canonical retained
+  exact-profile wheel inspection. Its context contains only the existing
+  recipe, complete wheels and exact version/hash lock; it grants no approval
+  and performs no acquisition or image build. All 44 standalone tests pass,
+  including 19 context controls and actual fresh offline installation with
+  synthetic packages followed by tampered-wheel refusal. An existing real
+  restart/ACK test now retries only the exact pre-entry store-busy response,
+  preserving original IDs and failing immediately on uncertainty. Local
+  Docker connection is unavailable, so image acceptance remains open.
 
 ### 2026-10-23 - Retain canonical dependency compile inputs before runtime admission
 

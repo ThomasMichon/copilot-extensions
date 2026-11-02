@@ -87,6 +87,67 @@ paths, discovery schema and synchronous behavior.
 Maintenance attempts are debounced even when storage is unavailable; only an
 explicit forced retry bypasses that window.
 
+### Explicit strict pre-effect write
+
+`DiagnosticLog.write_event_strict(event)` is a separate synchronous API, not a
+change to `write_event`, logging handlers, legacy/retained spool callbacks or
+buffer delivery. `process_telemetry.append.strict_write_capability()` reports
+`linux-file-directory-fsync-v1` only when the executing implementation has the
+Linux primitives; other platforms return `None` and strict writes raise
+`NotImplementedError` before custody or file effects. Package version, a queue
+offer, callback count and later readback are not this capability or readiness.
+Windows append-only writes are unchanged; no `FlushFileBuffers` or Windows
+strict-durability support is claimed.
+
+The caller supplies an already provisioned persistent local directory, bounded
+privacy-filtered JSON fields with an explicit aware timestamp, and the same
+participating custody owner used for rotation/retention. Strict writes create
+no parent directory, perform no history maintenance, and refuse expired or
+unparseable timestamps rather than silently skipping them. Equality at the
+30-day cutoff and future timestamps retain the existing policy. The encoded
+record must be one complete UTF-8 JSONL object, preserve the caller's fields,
+contain no nonfinite JSON numbers, and fit **65,536 bytes including newline**.
+Field preservation compares exact primitive JSON types recursively, including
+booleans versus numbers and integers versus floats. Nonfinite literal tokens
+and overflow notation such as `1e400` refuse, as do duplicate object fields,
+unsupported input types and lossy custom encoders.
+Finite primitive input is validated and deeply snapshotted before any callback.
+The timestamp decoder and encoder each receive an independent deep copy;
+encoded fields are compared with the untouched snapshot, not an event that
+the encoder could modify. Mutations that alter serialized fields refuse
+before custody, including timestamp or nested correlation changes.
+This bounds the submitted write, not arbitrary caller encoder work or heap use;
+owners must bound inputs before encoding.
+
+Under that existing custody, rollover preserves an interrupted old tail, and
+the append owner opens the directory and no-follow plain single-link file,
+performs exactly one `O_APPEND` write, checks its complete byte count, syncs
+the file and then its containing directory, and closes both descriptors before
+return. This includes active-file creation/rollover name changes. Any failure,
+including custody, encoding, append, short write, sync or close, is reported as
+degraded and propagated. A failure can leave a partial or complete record;
+there is no suffix retry, rollback, automatic replay or grant to call a backend.
+
+Call the backend only after the direct method returns successfully. An async
+owner must await this synchronous operation off the event loop; a timeout or
+lost reply is unknown, never permission to continue or repeat accepted work.
+Successful return means these kernel sync calls completed, not a hardware
+power-loss guarantee, network-filesystem guarantee, mounted-volume proof,
+permanent authority ledger or completion of the following effect. Caller
+provisioning must durably establish ancestors and exclude nonparticipating
+writers, foreign mounts and concurrent namespace replacement. Existing
+diagnostic age retention still applies: authoritative task/operation state
+remains in its existing journal/database, not this log.
+
+Synthetic syscall and caller-ordering tests live in
+`tests/test_strict_diagnostics.py`. The separately selected
+`tests/native_strict_diagnostics.py` exercises actual Linux local-file append,
+sync, lock contention, interrupted-tail rollover and refusal fixtures. Its
+sync failures are injected, not real disk exhaustion. Actual shared-volume,
+crash/interrupted-driver, storage-failure and other-platform qualification remain
+separate integration work; this API does not automatically wire or admit a
+reproducer case. Neither file expands the required unit-only CI packet.
+
 Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
 writer, not another collector or service. Its producer copies bounded primitives
 without a blocking logging-handler lock, formatting, file access or history work.
@@ -309,8 +370,12 @@ Body/event name are `agent.source.observation`; `ce.schema` is
 ok/cancelled → INFO, error → ERROR, unavailable → WARN. Attributes contain only
 component, stage, outcome, measured duration/queue wait, optional fixture roster
 and the four admitted identity fields. Unavailable duration is absent, not zero.
-Correlation uses actual trace/span fields. Resources contain only service name
-and namespace; scope is `copilot-extensions.process-telemetry`, version `1`.
+Correlation uses actual trace/span fields. All three signals' Resources contain
+service name, namespace and `service.instance.id`: one opaque random UUID per
+configured signals sink, stable across its exports and distinct from other sinks
+in the same process. It is not derived from trace, session or source metadata
+and is never a datapoint or record attribute. Scope is
+`copilot-extensions.process-telemetry`, version `1`.
 No prompt, raw message, code, exception text, environment, path or arbitrary
 attribute map is accepted.
 
@@ -323,7 +388,8 @@ Metrics use public SDK data models, `MetricExporter` and public `encode_metrics`
 | `ce.source.queue_wait` | DELTA Histogram / `s` | independently measured queue waits |
 
 Only `ce.stage`/`ce.outcome` labels are admitted; there are at most 56 data
-points per batch, no dynamic resource dimensions, identity labels or exemplars.
+points per batch, no identity labels or exemplars. The resource instance UUID
+distinguishes independently owned DELTA streams without adding a datapoint label.
 Histogram bounds are 1, 5, 10, 25, 50, 100, 250, 500 ms and 1, 2, 5, 10 s,
 plus +Inf. Count/sum/min/max remain measurements, not a percentile estimate.
 Sampling is not inverse-weighted. Local drop/loss counters are not silently
@@ -387,7 +453,9 @@ optional genuine SDK/protobuf loopback fixtures, malformed/partial ACKs,
 slow-drip/deadline controls, missing SDK and legacy trace compatibility.
 Manager's existing source-observation tests exercise the same writer through
 actual SDK export and protobuf-derived JSONL readback. Test receivers own
-their port-zero socket/thread and close them; they never configure a shared
-collector. These are isolated API/wire controls, not a live native rollout.
+their port-zero socket/thread and close them. Manager readback accepts legacy
+service-only Resources or a canonical instance UUID, rejecting malformed instance
+IDs and unexpected Resource attributes. These controls never configure a shared
+collector and are isolated API/wire controls, not a live native rollout.
 Native source/installed/serving measurements and overhead qualification are
 separate acceptance, not asserted by these unit/integration tests.

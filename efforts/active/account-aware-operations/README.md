@@ -32,6 +32,12 @@ switch or leaking one operation's credentials into another.
   behavior.
 - **Public coordination token:** the reviewed plan PR until a dedicated issue
   is authorized; implementation does not begin under the temporary token.
+- **Finite #810 intake:** existing identity-contract and scoped-wrapper command
+  custodians retain the Windows argument-fidelity slice below. Preserve its
+  native-route OR point-of-use-guidance alternative, source/resource/native
+  duties and current ownership. This tracking amendment does not start
+  implementation under the temporary token, appoint an owner, change
+  authentication or require a new generic acknowledgement.
 
 ## Context
 
@@ -100,6 +106,23 @@ degradation without global identity mutation.
   correctly.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Finite Windows scoped-command argument fidelity from #810
+
+**Agent-recommended tracking amendment.** This finite contract enters the
+existing Phase 5 intake and Phase 2 command-execution scope; it does not
+reopen account-resolution foundations or change the Draft status.
+
+- [ ] **P810-1:** Preserve literal Windows PowerShell arguments through the
+  actual scoped-gh entry: use a native literal-argument route OR explicit
+  point-of-use quoting guidance if script invocation semantics remain.
+  Preserve comma-joined `--json`/`--label`, spaces/quoting, combined
+  spaced-search/comma-json arguments and the actual exit. Forwarding parsed
+  `@args` cannot reconstruct comma grouping already lost by the script entry.
+- [ ] **P810-2:** Preserve repository/account-scoped invocation, unchanged
+  machine-global active account and synthetic public examples. Reuse existing
+  command/identity owners; neither both alternatives, a new resolver, an
+  optional-warning mandate nor a headless-window redesign is required.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -119,6 +142,14 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   binding.
 - [ ] Windows and POSIX command paths preserve equivalent scoping and exit
   semantics.
+- [ ] **V810-1:** Qualify the chosen supported Windows entry/guidance with
+  literal comma lists, quoted and variable controls, spaces, combined
+  arguments and native exit. An available shim or post-parse forwarding
+  alone is not the actual argument-matrix witness.
+- [ ] **V810-2:** Resolve every direct #810 Plan clause while preserving
+  intended scoped-auth/repository behavior and the unchanged global account.
+  Record source, release and actual native/installed proof separately; no
+  unrelated account-provider or every-host completion gate is added.
 
 ## Proposal
 
@@ -127,6 +158,17 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-10-28 - Finite Windows argument-fidelity intake
+
+- Added direct #810 Plan and actual global Validation with continuing
+  coordination, retaining native literal arguments OR explicit point-of-use
+  quoting guidance. Existing scoped invocation is credit, not a fresh native
+  argument-matrix result.
+- Status, original Request, participants, prior rows and the temporary-token
+  implementation restriction remain unchanged. Normal reviewed delivery and
+  current readback precede any separate source judgment; this amendment runs
+  no wrapper, authentication probe, native experiment or implementation.
 
 ### 2026-08-29 - Kickoff
 

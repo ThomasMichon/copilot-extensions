@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import git_ops
 from .lease_config import LeaseSettings
 from .lease_protocol import (
@@ -101,12 +103,11 @@ class GitLeaseStore:
         self._auth_args: list[str] = []
         if settings.auth_remote and settings.auth_cwd:
             try:
-                from . import git_ops
                 self._auth_args = git_ops._auth_config_args(
                     settings.auth_remote, cwd=settings.auth_cwd
                 )
-            except Exception:
-                self._auth_args = []
+            except git_ops.GitError as exc:
+                raise GitError(str(exc)) from exc
 
     def acquire(
         self,
@@ -769,6 +770,7 @@ class GitLeaseStore:
                     env=env,
                     timeout=45,
                     check=False,
+                    **no_window_kwargs(),
                 )
         except FileNotFoundError as exc:
             raise GitError("git executable was not found") from exc

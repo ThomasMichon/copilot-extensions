@@ -362,6 +362,10 @@ def test_resolve_returns_wrapper_without_token(monkeypatch):
     )
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig()
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: {"Id": "instance-123", "Config": {"Labels": {}}},
+    )
     monkeypatch.setattr(r, "load_config", lambda: config)
     monkeypatch.setattr(r, "get_lease", lambda name: None)
     monkeypatch.setattr(
@@ -462,13 +466,17 @@ def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
     _stub_agent_bridge(monkeypatch)
     monkeypatch.setattr(
         r, "get_container",
-        lambda config, name: types.SimpleNamespace(fleet="myrepo"),
+        lambda config, name: types.SimpleNamespace(fleet="myrepo", container_id="instance-123"),
     )
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig(
         workspace_folder="/workspaces/myrepo",
         security_profile="trusted",
         acp_command="copilot --acp --stdio",
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: {"Id": "instance-123", "Config": {"Labels": {}}},
     )
     monkeypatch.setattr(r, "load_config", lambda: config)
     monkeypatch.setattr(r, "get_lease", lambda name: None)
@@ -494,8 +502,9 @@ def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
     assert transport["name"] == "myrepo-1"
     assert transport["workspace_folder"] == "/workspaces/myrepo"
     assert transport["security_profile"] == "trusted"
-    assert transport["acp_command"] == "copilot --acp --stdio"
-    assert transport["ssh"]["host_alias"] == "agent-container-myrepo-1"
+    assert "copilot --acp --stdio" in transport["acp_command"]
+    assert transport["acp_command"].endswith("repository_policy_launch")
+    assert transport["ssh"]["host_alias"] == "agent-container-instance-123"
     assert transport["provider_command"] == ["/payload/bin/agent-containers"]
     assert spec["venue"]["target_id"] == "container:myrepo-1"
     assert spec["venue"]["transport"] == "ssh"

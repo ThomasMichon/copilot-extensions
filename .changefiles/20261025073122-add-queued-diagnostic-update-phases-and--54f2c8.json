@@ -1,0 +1,9 @@
+{
+  "comment": "Add queued diagnostic update phases and plugin selection, avoid implicit repair for selected phases, and prune credential-helper startup while retaining bounded fail-closed capture.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

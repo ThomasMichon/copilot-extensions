@@ -190,7 +190,7 @@ def test_invalid_native_execution_root_never_creates_directories(
     assert sorted(str(path.relative_to(installation)) for path in installation.rglob("*")) == before_runtime
 
 
-@pytest.mark.parametrize("mixed_case", [False, pytest.param(
+@pytest.mark.parametrize("mixed_case", [pytest.param(False, id="stock_case"), pytest.param(
     True, marks=pytest.mark.skipif(os.name != "nt", reason="PowerShell case-insensitive binding"),
 )])
 @pytest.mark.parametrize("wait", [False, True])
@@ -251,7 +251,8 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         logs = list(root.glob("first-use-*.log"))
-        text = "\n".join(path.read_text(errors="replace") for path in logs)
+        process_logs = list(root.glob("process-first-use-*.log"))
+        text = "\n".join(path.read_text(errors="replace") for path in [*logs, *process_logs])
         if (root / "foundation-entered").exists() and (
             "Foundation construction failed" in text or "fixture foundation refusal" in text
         ):
@@ -260,6 +261,11 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
     else:
         pytest.fail(result.stdout + result.stderr + text)
     assert len(logs) == 1 and logs[0].parent == root
+    if os.name == "nt":
+        assert len(process_logs) == 1 and process_logs[0] != logs[0]
+        assert diagnostic in logs[0].read_text(encoding="utf-8")
+        if not wait:
+            assert json.loads(result.stdout)["diagnostic_log"] == str(process_logs[0])
     assert not list(project.glob(".native-daemon-*"))
     assert not (root / "queue.sqlite3").exists() and not installation.exists()
 

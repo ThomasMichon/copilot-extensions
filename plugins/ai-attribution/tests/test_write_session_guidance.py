@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -159,10 +160,135 @@ def test_missing_cwd_never_caches(monkeypatch, tmp_path):
     assert not writer._cache_dir(tmp_path).exists()
 
 
+def test_root_lookup_is_reused_for_cache_and_profile(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(writer, "_repo_root", lambda cwd: calls.append(cwd) or cwd)
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    payload = {"sessionId": "session-1", "cwd": str(repo)}
+    assert writer.write_session_guidance(payload, home=tmp_path)
+    assert calls == [str(repo)]
+    calls.clear()
+    assert writer.write_session_guidance(payload, home=tmp_path)
+    assert calls == [str(repo)]
+
+
+def test_writer_subprocesses_do_not_allocate_windows_consoles(monkeypatch):
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(kwargs)
+        output = b'{"additionalContext":"policy"}' if "input" in kwargs else "repo"
+        return SimpleNamespace(returncode=0, stdout=output)
+
+    monkeypatch.setattr(writer.subprocess, "run", run)
+    monkeypatch.setattr(writer, "_contributor_argv", lambda root: ["shell"])
+    assert writer._repo_root("repo") == "repo"
+    assert writer._run_contributor(Path("."), b"{}") == "policy"
+    expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    assert [call["creationflags"] for call in calls] == [expected, expected]
+
+
 def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "x" * 5000)
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("base_bytes", [3400, 4050])
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_large_profile_never_displaces_policy_or_tightening(monkeypatch, tmp_path, base_bytes):
+    kernel = "Self-authored contributions may omit disclosure."
+    base = kernel + "x" * (base_bytes - len(kernel))
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: base)
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    config = tmp_path / ".copilot" / "ai-attribution.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"version": 1, "rules": [
+        {"header": "AI " * 150, "required": True},
+    ]}),
+                      encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(repo)}, home=tmp_path
+    )
+    actual = _target(tmp_path).read_text(encoding="utf-8")
+    assert base in actual
+    assert actual.startswith("Disclose AI for ALL contributions.\n\n")
+    assert len(actual.encode("utf-8")) <= 4096
+    cache = json.loads(next(writer._cache_dir(tmp_path).glob("*.json")).read_text())
+    assert cache["profile_header"] + cache["profile_guidance"] + "\n" == actual
+    shell = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
+    if not shell:
+        pytest.skip("native shell unavailable")
+    if os.name == "nt":
+        native_path = os.pathsep.join((
+            str(Path(shutil.which("git")).parent), str(Path(shell).parent),
+            str(Path(os.environ["SystemRoot"]) / "System32"),
+        ))
+        command = [shell, "-NoProfile", "-File", str(_PLUGIN / "scripts" / "write-session-guidance.ps1")]
+    else:
+        tools = tmp_path / "native-tools"
+        tools.mkdir()
+        for name in ("git", "jq", "sha256sum", "shasum", "cat", "cut", "date",
+                     "awk", "dirname", "wc", "mkdir", "mv", "rm"):
+            executable = shutil.which(name)
+            if executable:
+                (tools / name).symlink_to(executable)
+        if not shutil.which("jq") or not (shutil.which("sha256sum") or shutil.which("shasum")):
+            pytest.skip("native JSON/hash tools unavailable")
+        native_path = str(tools)
+        command = [shell, str(_PLUGIN / "scripts" / "write-session-guidance.sh")]
+    env = {**os.environ, "PATH": native_path, "HOME": str(tmp_path),
+           "USERPROFILE": str(tmp_path), "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+    env.pop("AI_ATTRIBUTION_FORCE_REFRESH", None)
+    result = subprocess.run(
+        command, input=json.dumps({"sessionId": "session-2", "cwd": str(repo)}),
+        text=True, capture_output=True, env=env, check=True,
+    )
+    assert json.loads(result.stdout) == {}
+    warm_target = _target(tmp_path).parents[3] / "session-2" / "instructions" / "ai-attribution" / _target(tmp_path).name
+    assert warm_target.read_text(encoding="utf-8") == actual
+
+
+@pytest.mark.parametrize("raw", [
+    "invalid", '{"version":1,"rules":' + "[" * 10000 + "]" * 10000 + "}",
+    json.dumps({"version": 1, "variables": {"assistant": "human-review"},
+                "rules": [{"header": "{assistant}ed"}]}),
+], ids=["invalid-json", "deep-json", "review-claim"])
+def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_path, raw):
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    config = tmp_path / ".copilot" / "ai-attribution.json"
+    config.parent.mkdir()
+    config.write_text(raw, encoding="utf-8")
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    actual = _target(tmp_path).read_text(encoding="utf-8")
+    assert "Required disclosure." in actual
+    assert "rejected" in actual
+    assert actual.startswith("Disclose AI for ALL contributions.\n\n")
+
+
+@pytest.mark.parametrize("directories", [
+    "~missing-attribution-user/instructions", ",".join(["x"] * 129),
+], ids=["missing-user", "entry-limit"])
+def test_discovery_errors_preserve_kernel(monkeypatch, tmp_path, directories):
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", directories)
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    actual = _target(tmp_path).read_text(encoding="utf-8")
+    assert "Required disclosure." in actual
+    assert "discovery rejected" in actual
+    assert actual.startswith("Disclose AI for ALL contributions.\n\n")
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))
@@ -272,7 +398,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_powershell_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
+def test_powershell_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp_path):
     """Proves the wrapper's cache fast path actually skips python on a hit,
     by stripping every python interpreter from PATH before invoking it: if
     the fast path did not serve this from cache and instead fell through to
@@ -291,19 +417,15 @@ def test_powershell_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
 
-    key = writer._repo_cache_key(str(repo))
-    cache_dir = writer._cache_dir(home)
-    cache_dir.mkdir(parents=True)
-    (cache_dir / f"{key}.json").write_text(
-        json.dumps(
-            {
-                "version": writer._CACHE_FORMAT_VERSION,
-                "computed_at": time_module.time(),
-                "guidance": "[owner: ai-attribution@1.0.0]\ncached policy only",
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    monkeypatch.setattr(
+        writer, "_run_contributor",
+        lambda *args: "[owner: ai-attribution@1.0.0]\ncached policy only",
     )
+    assert writer.write_session_guidance({"sessionId": "seed", "cwd": str(repo)}, home=home)
 
     payload = json.dumps(
         {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
@@ -428,7 +550,7 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
+def test_bash_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp_path):
     """Same proof as the PowerShell equivalent, adapted for bash: build an
     isolated PATH containing symlinks only to the tools the fast path needs
     (bash, jq, sha256sum/shasum, git, coreutils) and deliberately excluding
@@ -443,19 +565,15 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
 
-    key = writer._repo_cache_key(str(repo))
-    cache_dir = writer._cache_dir(home)
-    cache_dir.mkdir(parents=True)
-    (cache_dir / f"{key}.json").write_text(
-        json.dumps(
-            {
-                "version": writer._CACHE_FORMAT_VERSION,
-                "computed_at": time_module.time(),
-                "guidance": "[owner: ai-attribution@1.0.0]\ncached policy only",
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(home))
+    for variable in ("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "XDG_CONFIG_HOME", "APPDATA"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(
+        writer, "_run_contributor",
+        lambda *args: "[owner: ai-attribution@1.0.0]\ncached policy only",
     )
+    assert writer.write_session_guidance({"sessionId": "seed", "cwd": str(repo)}, home=home)
 
     isolated_bin = tmp_path / "isolated-bin"
     isolated_bin.mkdir()
@@ -491,6 +609,61 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     content = _target(home).read_text(encoding="utf-8")
     assert "cached policy only" in content
     assert "unavailable" not in content
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_bash_warm_missing_roster_uses_constant_parser_processes(monkeypatch, tmp_path):
+    bash, jq, sha = _bash_prereqs()
+    if os.name == "nt" or not (bash and jq and sha):
+        pytest.skip("native POSIX bash/jq/hash tools unavailable")
+    repo, home, tools = (tmp_path / name for name in ("repo", "home", "tools"))
+    home.mkdir()
+    tools.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    for tool in ("git", "sha256sum", "shasum", "cat", "cut", "date", "awk",
+                 "wc", "mkdir", "mv", "rm"):
+        source = shutil.which(tool)
+        if source:
+            (tools / tool).symlink_to(source)
+    for tool in ("jq", "dirname"):
+        source = shutil.which(tool)
+        assert source
+        wrapper = tools / tool
+        wrapper.write_text(
+            "#!/bin/sh\nprintf '" + tool + "\\n' >> \"$CALL_LOG\"\nexec "
+            + shlex.quote(source) + " \"$@\"\n", encoding="utf-8"
+        )
+        wrapper.chmod(0o700)
+    log = tmp_path / "calls"
+    counts = []
+    for size in (1, 128):
+        directories = [tmp_path / f"missing-{i}" for i in range(size)]
+        monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", os.pathsep.join(map(str, directories)))
+        assert writer.write_session_guidance(
+            {"sessionId": f"seed-{size}", "cwd": str(repo)}, home=home
+        )
+        log.write_text("", encoding="utf-8")
+        env = {**os.environ, "PATH": str(tools), "CALL_LOG": str(log),
+               "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+        env.pop("AI_ATTRIBUTION_FORCE_REFRESH", None)
+        session = f"warm-{size}"
+        result = subprocess.run(
+            [bash, str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+            input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+            text=True, capture_output=True, env=env, check=True, timeout=30,
+        )
+        assert result.stdout == "{}"
+        target = home / ".copilot" / "session-state" / session / "instructions" / "ai-attribution" / "session-guidance.instructions.md"
+        assert "Required disclosure." in target.read_text(encoding="utf-8")
+        calls = log.read_text(encoding="utf-8").splitlines()
+        assert "dirname" not in calls
+        counts.append(calls.count("jq"))
+    assert 0 < counts[0] == counts[1] <= 12
 
 
 def test_bash_wrapper_falls_back_on_cold_cache(tmp_path):

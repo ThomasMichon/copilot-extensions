@@ -22,6 +22,7 @@ from .worktrees_projection_index import (
 CONTRACT_VERSION = 1
 READ_ACTION = "worktrees-read"
 CAPABILITY = "worktrees-current-v1"
+_DEMAND_LINGER_SECONDS = 30.0
 _FIELDS = frozenset(
     {
         "contract_version",
@@ -91,7 +92,7 @@ def owner_generation(db_path: Path) -> str | None:
 class WorktreesRuntime:
     """No request callback loads records or waits for the owner's state lock."""
 
-    def __init__(self, db_path: Path, *, wake=None, now=time.monotonic, elected=None) -> None:
+    def __init__(self, db_path: Path, *, wake=None, now=time.monotonic, elected=None, admitted=None) -> None:
         from .worktrees_feed import WorktreesFeed
 
         self.store = WorktreesProjection(db_path)
@@ -103,10 +104,19 @@ class WorktreesRuntime:
         self._error: str | None = None
         self._publication_errors: dict[str, str] = {}
         self._demand: dict[str, float] = {}
+        self._unready_demand: set[str] = set()
         self._wake = wake
         self._now = now
         self._elected = elected
+        self._admitted = admitted
         self.feed = WorktreesFeed(self)
+        from .agenda_runtime import AgendaRuntime
+
+        self.agendas = AgendaRuntime(self)
+
+    @property
+    def _read_elected(self):
+        return self._elected if self._admitted is None else self._admitted
 
     def activate(self) -> None:
         with self._activation_lock:
@@ -129,9 +139,7 @@ class WorktreesRuntime:
                             or self._elected is None or not self._elected()
                         ):
                             raise
-                        with self._lock:
-                            self._admitting = False
-                        self.feed.close("superseded")
+                        self.close_admission("superseded")
                         # Rollback elects the resident again, not its fenced writer.
                         self.store = WorktreesProjection(self.store.db_path)
             except (ProjectionError, ProjectionUnavailable, sqlite3.Error, OSError) as exc:
@@ -139,7 +147,7 @@ class WorktreesRuntime:
                     self._admitting = False
                     self._error = str(exc)
                     self._reason = "unavailable"
-                self.feed.close("unavailable")
+                self.close_admission("unavailable")
                 if isinstance(exc, (sqlite3.Error, OSError)):
                     raise ProjectionUnavailable(str(exc)) from exc
                 raise
@@ -147,7 +155,9 @@ class WorktreesRuntime:
                 self._admitting = True
                 self._reason = "ready"
                 self._error = None
+                self._unready_demand.clear()
             self.feed.activate()
+            self.agendas.activate()
             if self._wake is not None:
                 self._wake.set()
 
@@ -156,6 +166,7 @@ class WorktreesRuntime:
             self._admitting = False
             self._reason = reason
         self.feed.close(reason)
+        self.agendas.close(reason)
 
     def health(self) -> dict:
         from .worktrees_feed import FEED_CAPABILITY
@@ -164,6 +175,8 @@ class WorktreesRuntime:
             return {
                 "capabilities": [
                     CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
+                    "worktree-agendas-v1",
+                    "worktree-agendas-v2",
                 ],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,
@@ -173,11 +186,29 @@ class WorktreesRuntime:
                 },
             }
 
+    def agenda_handle(self, action: str, payload: dict) -> dict:
+        return self.agendas.publish(payload) if action == "agenda-publish" else self.agendas.read(payload)
+
+    def stream(self, action, payload, disconnected):
+        if action == "agenda-feed":
+            return self.agendas.stream(payload, disconnected)
+        return self.feed.stream(payload, disconnected)
+
+    def agenda_counts(self, server) -> dict:
+        return {
+            "agenda-feed": self.agendas.feed.active_count(),
+            "agenda-read": server.current_read_count("agenda-read"),
+            "agenda-publish": server.current_read_count("agenda-publish"),
+        }
+
+    def agenda_busy(self, server) -> list[str]:
+        return [key for key, value in self.agenda_counts(server).items() if value]
+
     def picker_bootstrap(self, payload: dict) -> dict:
         from . import picker_bootstrap_runtime
         from .execution_spaces import ExecutionSpaceError
 
-        if self._elected is not None and not self._elected():
+        if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
             if not self._admitting:
@@ -187,7 +218,7 @@ class WorktreesRuntime:
             result = picker_bootstrap_runtime.build(payload)
         except (ExecutionSpaceError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
             return self._failure("unavailable", str(error))
-        if self._elected is not None and not self._elected():
+        if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
             if not self._admitting or self.store.generation != generation:
@@ -200,27 +231,44 @@ class WorktreesRuntime:
             "runtime_root": str(cfg.install_dir()), **result,
         }
 
+    def _record_demand_locked(self, project: str) -> None:
+        now = self._now()
+        previous = self._demand.get(project)
+        if previous is None or previous < now - _DEMAND_LINGER_SECONDS:
+            self._unready_demand.discard(project)
+        self._demand[project] = now
+
+    def register_project_demand(self, project: str, *, unready: bool = False) -> None:
+        """Renew admitted producer demand, coalescing wakes for unpublished projects."""
+        with self._lock:
+            if not self._admitting:
+                return
+            self._record_demand_locked(project)
+            if unready and project not in self._unready_demand:
+                self._unready_demand.add(project)
+                if self._wake is not None:
+                    self._wake.set()
+
     def handle(self, payload: dict) -> dict:
         try:
             project, selection = request_selection(payload)
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
-        if self._elected is not None and not self._elected():
+        if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
             if not self._admitting:
                 return self._failure(
                     self._reason, self._error or "current-roster admission closed"
                 )
-            self._demand[project] = self._now()
+            self._record_demand_locked(project)
             publication_error = self._publication_errors.get(project)
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
             )
         except ProjectionUnavailable as exc:
-            if self._wake is not None:
-                self._wake.set()
+            self.register_project_demand(project, unready=True)
             return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
@@ -239,12 +287,13 @@ class WorktreesRuntime:
             "generation": self.store.generation,
         }
 
-    def demand_projects(self, *, linger: float = 30.0) -> set[str]:
+    def demand_projects(self, *, linger: float = _DEMAND_LINGER_SECONDS) -> set[str]:
         with self._lock:
             cutoff = self._now() - linger
             self._demand = {p: at for p, at in self._demand.items() if at >= cutoff}
+            self._unready_demand.intersection_update(self._demand)
             projects = set(self._demand)
-        return projects | self.feed.projects()
+        return projects | self.feed.projects() | self.agendas.feed.projects()
 
     def publish(self, project: str, rows, *, observed_at: float) -> None:
         with self._activation_lock:
@@ -252,7 +301,8 @@ class WorktreesRuntime:
                 if not self._admitting:
                     raise ProjectionUnavailable("current-roster publisher is not admitted")
             try:
-                self.store.publish(project, rows, observed_at=observed_at)
+                self.store.publish(project, rows, observed_at=observed_at, authority_check=self._elected)
+                self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:
                 if self.store.superseded:
                     self.close_admission("superseded")
@@ -263,6 +313,7 @@ class WorktreesRuntime:
                 raise
         with self._lock:
             self._publication_errors.pop(project, None)
+            self._unready_demand.discard(project)
         self.feed.changed(project)
 
     def publication_failed(self, project: str, error: Exception) -> None:

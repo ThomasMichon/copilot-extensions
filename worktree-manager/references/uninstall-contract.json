@@ -1,0 +1,9 @@
+{
+  "schema": "copilot-extensions.manager-uninstall-contract",
+  "version": 1,
+  "identity": "worktree-manager.uninstall",
+  "generation": 1,
+  "supported_callers": [1],
+  "target_inventory": 1,
+  "service_policy": "quiescent-only"
+}

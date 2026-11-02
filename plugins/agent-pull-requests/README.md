@@ -3,6 +3,9 @@
 Cross-repository pull-request commands for Copilot CLI sessions that need to
 act on `owner/repo` targets **without** requiring a local checkout of that repo.
 
+Configuration: [canonical owner reference](docs/configuration.md). PR/provider
+preferences remain delegated to Worktrees; this plugin has no independent YAML.
+
 This plugin is the extraction from `agent-worktrees`' worktree-bound PR
 commands into a separate, API-first surface:
 
@@ -27,6 +30,16 @@ installers run its actual CLI in isolation with `--help`. A successful package
 import alone is not candidate health; a failed entry point leaves the prior
 selection and completion intact.
 
+The Windows legacy `install`, `update`, and `provision` actions enter the finite
+native installation driver before staging, then adopt the finite launch broker
+after immutable-slot completion and before runtime selection. Construction
+retention stays attached through adoption. Durable watch launches only consume
+an already-adopted broker; `status` and `stamp` never install one. Owned legacy
+uninstall removes the broker contract before removing launchers or runtime
+content, preserving them if removal is refused. The explicit installation-cell
+adapter remains a separate contract; these legacy recipes do not admit cell
+actions or context arguments.
+
 Both native installers also accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). Its verified
 receipt selects a source-qualified immutable generation; the deploy manifest
@@ -43,10 +56,15 @@ dispatch; cold refusal and missing/older helper readiness do not provision.
 Retained snapshots preserve canonical source identity after publisher removal.
 
 The installer's `uninstall` action holds the same transaction lock as
-install/update. It removes runtime/config contents but retains the lock files
-and `.install-stage` coordination, so the install directory may remain.
-Normal self-staging reap removes dead-owner stages on later invocations; purge
-never replaces a held lock.
+install/update. It removes only explicitly named runtime code and selectors;
+watch subscriptions, journals, replay and observation state, authentication,
+configuration, unknown entries, lock files and `.install-stage` remain.
+Matching deployment ownership and the installer-engine entry-list API are
+required. Foreign roots and links refuse before removal; unowned binstubs are
+retained. The canonical uninstall engine holds runtime, snapshot and
+redirect-publication custody throughout finite native cleanup. Persistent
+lease registries alone do not veto removal, and their inodes remain intact.
+Normal self-staging reap removes dead-owner stages on later invocations.
 
 The installation-cell adopter remains under validation below. Its generated
 payload command and `scripts/init.ps1` / `scripts/init.sh` resolve native
@@ -100,6 +118,14 @@ read-only no-op without it); only the native command path claims Python-free
 genesis. The separate guidance hook is unchanged.
 
 ## Verbs
+
+Source embeddings additionally expose the finite
+[workspace service/client API](docs/workspace-integration.md) through the
+existing PR owner. These library interfaces do not install a writer, acquire
+credentials or imply that a running service has adopted the protocol.
+The [workspace tool/CLI façade](docs/workspace-tools.md) uses those same owners,
+with exact retained-source reads and explicit unavailable unbound execution.
+Source declarations do not register operational tools or prepare/fetch a workspace.
 
 ```text
 agent-pull-requests status --repo <owner/repo> --number <n> [--json]
@@ -835,3 +861,27 @@ while stage-observed execution completed in 26.92 seconds and was still doing
 native source verification near the former cap. Only that native parameter
 gets the additional margin; the other parameters, subprocess deadlines,
 group/plugin budgets, production code and all assertions remain unchanged.
+## Review workspace candidate
+
+The first offline, source-invokable read-generation slice is documented in
+[review workspaces](docs/review-workspaces.md). It normalizes supplied ADO
+evidence and reports synchronization deltas; live acquisition, exact source,
+service caching and submission are not yet supported by that entry point.
+The [protected owner-read embedding](docs/owner-read.md) provides the next
+source integration contract; an actual authorized owner must adopt it before
+any live owner-backed operation exists.
+The [exact local source attachment](docs/source-attachment.md) verifies already
+prepared common/head objects through the existing Worktrees workspace owner and
+returns a separate attachment envelope, without fetching or rewriting metadata.
+
+The [review owner-store data APIs](docs/review-owner-store.md) explicitly extend
+the same durable replay owner with selected review intents and fenced native
+receipts. They are not a backend executor or serving authorization.
+
+The [protected review executor](docs/protected-review-executor.md) orchestrates
+selected actions over those same records and the actual existing owner's pinned
+write transport. Source support is not installed backend authority or adoption.
+
+The [explicit generation cache](docs/generation-cache.md) stores retained
+immutable views with CAS publication; it starts no provider read or service
+and is separate from replay state and submission receipts.

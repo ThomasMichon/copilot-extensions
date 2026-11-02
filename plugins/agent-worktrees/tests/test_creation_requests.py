@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -144,6 +145,49 @@ def test_changed_facts_conflict_before_allocating(allocation):
     with pytest.raises(requests.CreationRequestFailure) as caught:
         requests.create(config, "logical", {**facts, "anchor": "different"}, allocate)
     assert caught.value.status == "conflict"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("caller", ["caller-a", "caller-b", None])
+def test_bridge_replay_retains_caller_facts_and_refuses_unrecorded_legacy_caller(
+    allocation, legacy, caller,
+):
+    config, facts, allocate, calls, records = allocation
+    facts = {**facts, "kind": "bridge", "caller_worktree": "caller-a"}
+
+    def bridge(reserve):
+        result = allocate(reserve)
+        path = records / f"{result['worktree']['id']}.yaml"
+        record = json.loads(path.read_text())
+        record["caller_worktree"] = "caller-a"
+        path.write_text(json.dumps(record))
+        return result
+
+    first = requests.create(config, "logical", facts, bridge)
+    if legacy:
+        old = {key: value for key, value in facts.items() if key != "caller_worktree"}
+        with sqlite3.connect(records.parent / "workspace-creation.sqlite3") as connection:
+            connection.execute(
+                "UPDATE creations SET facts=?", (json.dumps(old, sort_keys=True, separators=(",", ":")),),
+            )
+    current = {key: value for key, value in facts.items() if key != "caller_worktree"}
+    if caller is not None:
+        current["caller_worktree"] = caller
+    if caller == "caller-a" and not legacy:
+        assert requests.create(config, "logical", current, bridge)["worktree"] == first["worktree"]
+    else:
+        with pytest.raises(requests.CreationRequestFailure) as caught:
+            requests.create(config, "logical", current, bridge)
+        assert caught.value.status == "conflict"
+    assert len(calls) == 1
+
+
+def test_legacy_bridge_journal_without_caller_remains_replayable(allocation):
+    config, facts, allocate, calls, _ = allocation
+    facts = {**facts, "kind": "bridge"}
+    first = requests.create(config, "logical", facts, allocate)
+    assert requests.create(config, "logical", facts, allocate)["worktree"] == first["worktree"]
     assert len(calls) == 1
 
 

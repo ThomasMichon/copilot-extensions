@@ -22,6 +22,7 @@ from promotion_unit_contract import (
 )
 from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
+from promotion_release_helpers import verify_helper_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
@@ -86,6 +87,7 @@ def main() -> int:
             dev_sha=args.source_sha, candidate_tree=args.candidate_tree,
         )
     verify_sources(ROOT, manifest["sources"])
+    verify_helper_contract(ROOT, manifest, development_root=args.development_root)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     os.environ.pop("PYTEST_ADDOPTS", None)
@@ -97,7 +99,7 @@ def main() -> int:
     # Pytest's Windows capture adapter loads native console support before collection.
     prepare_framework_io()
     with tempfile.TemporaryDirectory(prefix="promotion-units-") as temporary:
-        run = UnitRun(None, ROOT, manifest["sources"], Path(temporary))
+        run = UnitRun(None, ROOT, manifest["sources"], Path(temporary), nodes=manifest["nodes"])
         cov = coverage.Coverage(
             data_file=None, config_file=False,
             include=[str(ROOT / name) for name in manifest["coverage_targets"]],
@@ -122,7 +124,9 @@ def main() -> int:
                     "--log-file", str(Path(temporary) / "pytest.log"),
                     "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
                     "--basetemp", str(Path(temporary) / "pytest"),
-                    *[str(ROOT) + "/" + node for node in manifest["nodes"]],
+                    *[str(ROOT / name) for name in dict.fromkeys(
+                        node.partition("::")[0] for node in manifest["nodes"]
+                    )],
                 ], plugins=[run])
             finally:
                 run.active = False

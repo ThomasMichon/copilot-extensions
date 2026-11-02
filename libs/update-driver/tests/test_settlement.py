@@ -136,7 +136,7 @@ def test_only_native_proof_and_closed_participants_settle_failed_execution(
         on_settled()
         raise OSError("preparation refused before process creation")
 
-    monkeypatch.setattr(owned_process, "run_caller_owned", refused)
+    monkeypatch.setattr(owned_process, "run_installation_owned", refused)
     if not participants_closed:
         original_close = core.Transaction._close
 
@@ -182,7 +182,7 @@ def test_native_settlement_requires_complete_typed_evidence(area, monkeypatch, c
         on_settled()
         raise OSError("known preparation boundary")
 
-    monkeypatch.setattr(owned_process, "run_caller_owned", refused)
+    monkeypatch.setattr(owned_process, "run_installation_owned", refused)
     with pytest.raises(OSError):
         drain(root=root)
     with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:

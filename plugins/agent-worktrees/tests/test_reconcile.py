@@ -2688,6 +2688,27 @@ def test_hook_shims_drifted_false_when_identical(tmp_path, monkeypatch):
     assert reconcile.hook_shims_drifted(plugin_dir) is False
 
 
+@pytest.mark.parametrize("name", [
+    "pre-tool-hook.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1",
+    "hook_client.py", "hook_pre_policy.py", "hook_policy_process.py",
+])
+@pytest.mark.parametrize("change", ["missing", "changed"])
+def test_hook_policy_assets_trigger_repair(tmp_path, monkeypatch, name, change):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    plugin_dir = tmp_path / "plugin"
+    scripts, bin_dir = _make_hook_layout(home, plugin_dir, deploy=True)
+    (scripts / name).write_text("# current helper\\n", encoding="utf-8")
+    deployed = bin_dir / name
+    deployed.write_text("# current helper\\n", encoding="utf-8")
+    if change == "missing":
+        deployed.unlink()
+    else:
+        deployed.write_text("# stale helper\\n", encoding="utf-8")
+    assert reconcile.hook_shims_drifted(plugin_dir) is True
+
+
 def test_hook_shims_drifted_true_when_shim_missing(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

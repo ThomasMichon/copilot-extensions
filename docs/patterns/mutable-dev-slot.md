@@ -60,9 +60,15 @@ implicitly enables development mode for ordinary install/update.
 
 ## Legacy behavior and migration
 
-The existing pilot's `dev` action installs editable packages against its
-owner's worktree, even when dependency environments are distinct protected
-generations. That is legacy behavior to replace, not full immutable deployment.
+The historical pilot's `dev` action installed editable packages against its
+owner's worktree, even when dependency environments were distinct protected
+generations. Codespaces now uses the same non-editable dependency packet for
+development and numbered generations. The canonical deployment CLI refuses
+explicit editable requirements and shared artifact links, and forces
+`--no-editable --link-mode copy` even when source-reference metadata declares
+editable canonical libraries. A source mapping is not a deployment exemption.
+Full frozen-assembly, cutover and installed-generation acceptance remain
+per-adopter obligations, not consequences of those flags alone.
 Do not advertise source edits as immediately deployed or hot-patch a completed
 runtime. Until an adopter supplies frozen, non-editable construction and the
 complete cutover contract, report the gap rather than inventing a supported

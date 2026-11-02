@@ -371,6 +371,8 @@ def dispatch_cli(argv: list[str]) -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--config")
     parser.add_argument("--output", help="New worker config file for export-config only")
+    from . import pr_publication_labels_cli, pr_publication_labels
+    pr_publication_labels_cli.add_options(parser)
     parser.add_argument("--base")
     parser.add_argument("--expected-head")
     parser.add_argument("--lenses", default="")
@@ -390,9 +392,12 @@ def dispatch_cli(argv: list[str]) -> int:
             raise CheckError(resolution.error or "repository publication binding is unavailable")
         repo = resolution.repo_config
         policy = getattr(repo.pr, "publication_checks", None)
-        if policy is None:
-            raise CheckError("this repository has no configured publication checks")
         if args.operation == "export-config":
+            from dataclasses import replace
+            config = pr_publication_labels.activate(config, args.publication_origin, args.publication_label)
+            origin = pr_publication_labels.selected(config.default_repo.pr)
+            if origin is not None:
+                repo = replace(repo, pr=replace(repo.pr, publication_origin=origin))
             from .pr_worker_config import export_config
             if not args.output or any((
                 args.expected_head, args.lenses, args.summary, args.fixed,
@@ -402,6 +407,10 @@ def dispatch_cli(argv: list[str]) -> int:
             result = export_config(args.repo, repo, args.workspace, args.base, Path(args.output))
             print(json.dumps(result))
             return 0
+        if args.publication_origin or args.publication_label:
+            raise CheckError("Publication-origin options apply only to export-config")
+        if policy is None:
+            raise CheckError("this repository has no configured publication checks")
         if args.output:
             raise CheckError("--output applies only to export-config")
         root = Path(args.workspace).resolve()

@@ -22,6 +22,14 @@ class PluginRef:
 
     source: str
     enable: bool = True
+    allow_missing: bool = False
+
+    def selection(self) -> dict:
+        from plugin_resolve.reflection import selection_spec
+
+        return selection_spec({
+            "source": self.source, "enable": self.enable, "allow_missing": self.allow_missing,
+        })
 
 
 @dataclass

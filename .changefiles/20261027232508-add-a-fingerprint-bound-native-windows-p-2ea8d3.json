@@ -1,0 +1,9 @@
+{
+  "comment": "Add a fingerprint-bound native Windows pre-tool read entry and an opt-in resident SDK pilot with explicit strict policy responses.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

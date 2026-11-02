@@ -53,19 +53,17 @@ as a recurring constant.
 ## Advice-only boundary
 
 The returned `advice` block identifies estimated overruns or observed overspend
-and recommends reducing autonomous aggressiveness when appropriate. An
-on-track estimate recommends maintaining with caution, not automatically
-increasing parallelism.
+and offers optional monthly economy suggestions when appropriate. The
+`monthly_recommendation` is `review-avoidable-spend`, `on-monthly-track`, or
+`unavailable`; it replaces the former `autonomous_recommendation`.
+An on-track estimate is information about monthly pace, not a worker strategy.
 
 `concurrency` remains null: account totals alone do not establish per-worker
 cost, a safe worker count, or model eligibility. Advice never blocks
 operator-directed work, launches or changes workers, sleeps, suspends,
 qualifies a model, clears a hold, or weakens a product/review/safety gate.
-Session-start delivery and routing integration remain separate effort items.
-
-Cooperative pacing is an explicit operator or autonomous-owner decision, used
-sparingly after considering the task and current evidence. A warning does not
-authorize a suspension, create a timer, or turn a freshness bound into a sleep
-interval. This helper offers no worker-control interface.
+No lookup is required before honoring a request. An optional suggestion to
+reuse valid results or bound a prolonged speculative detour is not an
+enforcement gate. This helper offers no worker-control or model-routing interface.
 
 See [budget-guidance](../README.md) for offline/manual posture support.

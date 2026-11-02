@@ -1,0 +1,21 @@
+{
+  "source_commit": "de0495f9eaa1e3d1b888c5c2ea24ce543cd117d4",
+  "sources": [
+    {
+      "fixture_path": "schema38_db_schema.py",
+      "sha256": "aae9283544586dce8adaea550c5a74045cd67bee8e74bb7c9e3bf9f6720f946d",
+      "source_path": "plugins/agent-bridge/src/agent_bridge/db_schema.py"
+    },
+    {
+      "fixture_path": "schema38_inbox_custody.py",
+      "sha256": "3400f262278222031ebef397d316f586be2ebd05aa5a7be8bbb244923bbaa4ab",
+      "source_path": "plugins/agent-bridge/src/agent_bridge/inbox_custody.py"
+    },
+    {
+      "fixture_path": "schema38_db_live_session_aliases.py",
+      "sha256": "da82065d8c256cd6ea7e95d705f6ae4da3137a06fd432d993a0973245d362568",
+      "source_path": "plugins/agent-bridge/src/agent_bridge/db_live_session_aliases.py"
+    }
+  ],
+  "version": 1
+}

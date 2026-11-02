@@ -377,7 +377,7 @@ class TestBuildMuxNewWindowArgv:
 class TestMuxNewWindow:
     @pytest.mark.parametrize("launch", [sessions.mux_new_window, sessions.mux_new_session])
     @pytest.mark.parametrize("failure", ["rejected", "missing_binary", "timeout", "locked_manifest"])
-    def test_failed_manifest_ownership(self, tmp_path, monkeypatch, capsys, launch, failure):
+    def test_failed_prepared_manifest_ownership(self, tmp_path, monkeypatch, capsys, launch, failure):
         wrapper = tmp_path / "pane-wrapper.ps1"
         wrapper.write_text("# test\n")
         wrapper.with_name("pane-launch.ps1").write_text("# test launcher\n")
@@ -387,6 +387,12 @@ class TestMuxNewWindow:
         manifest = Path(argv[-1][1:-1].replace("''", "'"))
         monkeypatch.setattr(sessions, "build_mux_new_window_argv", lambda *a, **k: argv)
         monkeypatch.setattr(sessions, "build_mux_new_session_argv", lambda *a, **k: argv)
+
+        def admitted(arguments, *, prepare, **kwargs):
+            arguments.extend(prepare())
+            return sessions.mux_creation.run(arguments)
+
+        monkeypatch.setattr(sessions.mux_creation, "run_or_join", admitted)
 
         def spawn(*args, **kwargs):
             if failure == "missing_binary":

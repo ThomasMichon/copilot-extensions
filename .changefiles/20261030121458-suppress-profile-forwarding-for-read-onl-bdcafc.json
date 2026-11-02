@@ -1,0 +1,9 @@
+{
+  "comment": "Suppress profile forwarding for read-only SSH worktree listings and follow feeds",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

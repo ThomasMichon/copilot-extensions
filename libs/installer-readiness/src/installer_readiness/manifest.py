@@ -233,14 +233,14 @@ def _payload_commands(root: Path) -> tuple[dict[str, Path], str]:
         raise _ContractProblem("payload invocation outputDir is invalid")
     raw_commands = data.get("commands")
     if raw_commands is None:
-        command = _payload_command(data, label="payload command")
-        raw_plugin = data.get("plugin", command[0])
-        if raw_plugin != command[0]:
+        parsed_command = _payload_command(data, label="payload command")
+        raw_plugin = data.get("plugin", parsed_command[0])
+        if raw_plugin != parsed_command[0]:
             raise _ContractProblem(
                 "legacy payload plugin must equal command; use commands for "
                 "distinct plugin identity"
             )
-        parsed_commands = [command]
+        parsed_commands = [parsed_command]
     else:
         if any(field in data for field in ("command", "module", "purpose")):
             raise _ContractProblem(

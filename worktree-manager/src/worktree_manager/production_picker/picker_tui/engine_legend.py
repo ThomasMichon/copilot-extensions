@@ -75,6 +75,12 @@ class LegendScreen(ModalScreen[None]):
 
     def _body(self) -> Text:
         t = Text()
+        t.append("Launch history\n", style=C_HEADER)
+        t.append(
+            "  Ctrl+Shift+H opens saved local launch metadata and bounded detail.\n"
+            "  Private prompts require explicit reveal; history never retries a launch.\n\n",
+            style=C_DIM,
+        )
         t.append("Worktree state\n", style=C_HEADER)
         for label, meaning in self._STATE_MEANINGS:
             color = C_STATE.get(label, "")

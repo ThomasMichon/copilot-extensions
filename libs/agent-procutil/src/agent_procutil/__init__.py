@@ -1,72 +1,27 @@
-"""Windows-headless / detached process-spawn helpers (shared, vendored per plugin).
-
-A copilot-extensions runtime frequently runs **windowless**: under a hidden
-Windows Scheduled Task launched via ``conhost --headless``, inside the
-agent-bridge daemon, or from a session-start hook whose parent has no console of
-its own. When such a windowless parent shells out to a *console* program -- a
-``.cmd`` binstub that re-execs ``python.exe``, or ``git.exe`` / ``ssh.exe`` /
-``pwsh.exe`` -- Windows allocates a fresh console **window** for the child, which
-flashes on screen once per spawn.
-
-These helpers standardize the fix across every plugin so the behavior (and the
-exact creation flags) can't drift between copies:
-
-* :func:`no_window_kwargs` -- ``CREATE_NO_WINDOW`` for a non-interactive child
-  whose output is still captured over pipes (the common case: git/gh/az checks).
-* :func:`detached_kwargs` -- fully detach a background child so it outlives its
-  parent AND carries no console (so no window); optionally break away from a
-  parent Job object.
-* :func:`windowless_daemon_kwargs` -- keep a Windows daemon in a
-  ``CREATE_NO_WINDOW`` host while optionally breaking away from an inherited
-  Job object; use this when its own children must inherit the windowless host.
-* :func:`windowless_python` -- select the safest available ``pythonw.exe`` for a
-  detached Python daemon on Windows so neither a venv launcher nor its base
-  interpreter can allocate a second console.
-* :func:`windowless_python_env` -- preserve the original venv context when
-  ``windowless_python`` targets a base install's ``pythonw.exe``.
-* :func:`direct_python` -- keep a console daemon's PID on the actual interpreter,
-  not a Windows venv redirector, while retaining its venv context.
-* :func:`spawn_daemon` -- the one launch primitive for a long-lived daemon:
-  windowless, escapes the caller's Job object / session, runs from an
-  explicit durable ``cwd``, and appends its stdout/stderr to a log file.
-
-Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
--> ``start_new_session=True``), so call sites stay platform-agnostic::
-
-    subprocess.run(cmd, capture_output=True, **no_window_kwargs())
-    subprocess.Popen(
-        [windowless_python(), "-m", "my_daemon"],
-        **detached_kwargs(breakaway=True),
-    )
-
-Most consumers reference this canonical source via a `uv`-editable
-pointer in dev, materialized into a real per-plugin copy at release; at
-least one consumer (`agent-worktrees`, per its own self-contained
-build-surface requirement) ships a real local copy in dev too -- see
-this package's own ``README.md`` § Vendoring for the mechanism, and
-``tools/check-vendored-libs-sync.py`` for the enforcement.
-
-Synchronous imports do not load asyncio. Accessing the async spawn helper
-loads its implementation; the asyncio module attribute remains available for
-callers that patch subprocess creation.
+"""Self-contained headless creation and caller-owned finite containment.
+README.md owns the launch, interpreter and lifetime contracts.
+Async helpers and native ABI types load lazily.
 """
 
 from __future__ import annotations
 
-import ctypes
 import logging
 import math
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
     import asyncio as asyncio
+    import ctypes as ctypes
 
     from ._async import spawn_in_kill_on_close_job
+    from ._windows_job_types import _JobBasicAccountingInformation as _JobBasicAccountingInformation
     from .daemon_broker import WindowsDaemonProcess
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
@@ -79,39 +34,58 @@ _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 _CREATE_SUSPENDED = 0x00000004
 _CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-# Permit (but do not require) a contained descendant to opt out of the
-# kill-on-close job via its own CREATE_BREAKAWAY_FROM_JOB creation flag.
-# Without this, Windows rejects that child spawn outright -- a real hazard
-# for a command like `agent-worktrees update`, whose own daemon cutover
-# (``status_monitor_cutover.py``, via ``windowless_daemon_kwargs(breakaway=
-# True)``) deliberately spawns its successor with CREATE_BREAKAWAY_FROM_JOB
-# so the new daemon outlives the updater. Ordinary descendants that never
-# request breakaway stay contained and still die with the job as before.
+# Permit explicitly requested successor breakaway; ordinary descendants stay contained.
 _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 _JobObjectExtendedLimitInformation = 9
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SUSPEND_RESUME = 0x0800
 _ERROR_ACCESS_DENIED = 5
+_JOB_SCOPES_ENV = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+_JOB_SCOPE_NAME = re.compile(r"Local\\ce-owned-job-[0-9a-f]{32}\Z")
 
 log = logging.getLogger("agent-procutil")
 
 __all__ = [
-    "direct_python",
+    "DaemonSpawnError",
+    "JobHandle",
+    "SyncProcessLaunchError",
     "contained_test_mode",
+    "detached_kwargs",
+    "direct_python",
     "no_window_flags",
     "no_window_kwargs",
-    "JobHandle",
+    "python_cache_args",
+    "spawn_daemon",
     "spawn_in_kill_on_close_job",
     "spawn_sync_in_kill_on_close_job",
-    "SyncProcessLaunchError",
-    "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
     "windowless_python_env",
-    "spawn_daemon",
-    "DaemonSpawnError",
 ]
+
+
+def python_cache_args(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Select enabled external bytecode for the target installed generation.
+
+    ``runtime`` is the target interpreter or venv, not the current redirect.
+    Omit it only when launching this process's own installed environment.
+    """
+    if __name__ in sys.modules:
+        from .python_cache import cache_arguments
+    else:
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location(
+            __name__ + ".python_cache", Path(__file__).with_name("python_cache.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cache_arguments = module.cache_arguments
+
+    return cache_arguments(root, runtime=runtime)
 
 
 def contained_test_mode() -> bool:
@@ -123,17 +97,57 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-class JobHandle:
-    """Owned Windows Job Object handle.
+def _new_job_name() -> str:
+    return "Local\\ce-owned-job-" + uuid.uuid4().hex
 
-    Keep an instance alive as long as its assigned child process should be
-    tied to this owner. Closing it releases the handle; with
-    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` that also terminates any process
-    still assigned to the job. Off Windows callers never receive one.
+
+def _job_scope_names(environment) -> tuple[str, ...]:
+    value = environment.get(_JOB_SCOPES_ENV)
+    if value is None:
+        return ()
+    if not isinstance(value, str) or len(value) > 4096:
+        raise ValueError("invalid owned Job scope metadata")
+    names = value.split(";")
+    if (
+        len(names) > 64 or len(set(names)) != len(names)
+        or any(_JOB_SCOPE_NAME.fullmatch(name) is None for name in names)
+    ):
+        raise ValueError("invalid owned Job scope metadata")
+    return tuple(names)
+
+
+def _job_child_environment(
+    environment=None, *, append: str | None = None, inherit_current: bool = True,
+) -> dict[str, str]:
+    if type(inherit_current) is not bool:
+        raise ValueError("owned Job scope inheritance must be a boolean")
+    child = dict(os.environ if environment is None else environment)
+    names = list(_job_scope_names(os.environ)) if inherit_current else []
+    for key in tuple(child):
+        if key.upper() == _JOB_SCOPES_ENV:
+            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
+    names = list(dict.fromkeys(names))
+    if append is not None:
+        names.append(append)
+    if names:
+        child[_JOB_SCOPES_ENV] = ";".join(names)
+        _job_scope_names(child)
+    return child
+
+
+def _publish_job_scope(name: str) -> None:
+    os.environ[_JOB_SCOPES_ENV] = _job_child_environment(append=name)[_JOB_SCOPES_ENV]
+
+
+class JobHandle:
+    """Own a Windows Job for its assigned child's bounded lifetime.
+    Closing a KILL_ON_JOB_CLOSE Job terminates remaining members.
+    Non-Windows callers never receive a Job owner.
     """
 
-    def __init__(self, handle: Any) -> None:
+    def __init__(self, handle: Any, *, name: str | None = None) -> None:
         self._handle = handle
+        self.name = name
 
     @property
     def handle(self) -> Any:
@@ -164,13 +178,16 @@ class JobHandle:
         handle = self._handle
         if not handle:
             raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        import ctypes
+        accounting_type = __getattr__("_JobBasicAccountingInformation")
+
         kernel32 = _kernel32()
         _configure_job_teardown_api(kernel32)
         deadline = time.monotonic() + timeout_seconds
         if not kernel32.TerminateJobObject(handle, 1):
             raise ctypes.WinError(ctypes.get_last_error())
         while True:
-            accounting = _JobBasicAccountingInformation()
+            accounting = accounting_type()
             returned = ctypes.c_uint32()
             if not kernel32.QueryInformationJobObject(
                 handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
@@ -189,7 +206,37 @@ class JobHandle:
                 raise TimeoutError("Job still has active processes after termination timeout")
             time.sleep(min(0.05, remaining))
 
-    def __enter__(self) -> "JobHandle":
+    def try_terminate_and_confirm_empty(self) -> bool:
+        """Perform one owned-Job settlement step without waiting.
+
+        Busy/error retains the handle; only verified emptiness permits close.
+        """
+        handle = self._handle
+        if not handle:
+            raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        import ctypes
+        accounting_type = __getattr__("_JobBasicAccountingInformation")
+        kernel32 = _kernel32()
+        _configure_job_teardown_api(kernel32)
+        if not kernel32.TerminateJobObject(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+        accounting = accounting_type()
+        returned = ctypes.c_uint32()
+        if not kernel32.QueryInformationJobObject(
+            handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
+            ctypes.byref(returned),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if returned.value != ctypes.sizeof(accounting):
+            raise RuntimeError("Job accounting returned an unexpected structure size")
+        if accounting.ActiveProcesses:
+            return False
+        if not kernel32.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle = None
+        return True
+
+    def __enter__(self) -> JobHandle:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -200,23 +247,13 @@ class JobHandle:
 
 
 def _kernel32() -> Any:
+    import ctypes
+
     return ctypes.WinDLL("kernel32", use_last_error=True)
 
 
-class _JobBasicAccountingInformation(ctypes.Structure):
-    _fields_ = [
-        ("TotalUserTime", ctypes.c_int64),
-        ("TotalKernelTime", ctypes.c_int64),
-        ("ThisPeriodTotalUserTime", ctypes.c_int64),
-        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
-        ("TotalPageFaultCount", ctypes.c_uint32),
-        ("TotalProcesses", ctypes.c_uint32),
-        ("ActiveProcesses", ctypes.c_uint32),
-        ("TotalTerminatedProcesses", ctypes.c_uint32),
-    ]
-
-
 def _configure_job_teardown_api(kernel32: Any) -> None:
+    import ctypes
     from ctypes import wintypes
 
     kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
@@ -231,10 +268,13 @@ def _configure_job_teardown_api(kernel32: Any) -> None:
 
 
 def _ntdll() -> Any:
+    import ctypes
+
     return ctypes.WinDLL("ntdll", use_last_error=True)
 
 
 def _build_job_extended_limit_info() -> type[ctypes.Structure]:
+    import ctypes
     from ctypes import wintypes
 
     ulong_ptr = ctypes.c_size_t
@@ -276,6 +316,7 @@ def _build_job_extended_limit_info() -> type[ctypes.Structure]:
 
 
 def _configure_job_api(kernel32: Any) -> None:
+    import ctypes
     from ctypes import wintypes
 
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
@@ -293,6 +334,7 @@ def _configure_job_api(kernel32: Any) -> None:
 
 
 def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
+    import ctypes
     from ctypes import wintypes
 
     kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -303,6 +345,8 @@ def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
 
 
 def _log_job_failure(operation: str) -> None:
+    import ctypes
+
     error = ctypes.get_last_error()
     if error == _ERROR_ACCESS_DENIED:
         log.debug("%s failed with access denied; child job binding skipped", operation)
@@ -311,21 +355,17 @@ def _log_job_failure(operation: str) -> None:
 
 
 def _assign_suspended_to_kill_on_close_job(
-    pid: int, *, allow_breakaway: bool = True,
+    pid: int, *, allow_breakaway: bool = True, name: str | None = None,
 ) -> JobHandle | None:
-    """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
-
-    The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
-    child process lifetime; close it once ordinary cleanup has finished.
-    Internal callers use either a still-suspended child or their own current
-    process, whose identity cannot be reused during this call. The latter
-    establishes inherited containment before a cross-OS owner creates children.
+    """Bind a still-suspended child or this process to an owned kill-on-close Job.
+    Hold the returned handle until ordinary child cleanup finishes.
     """
     if not _is_windows():
         return None
     if pid <= 0:
         log.debug("invalid pid %r; child job binding skipped", pid)
         return None
+    import ctypes
 
     job = None
     process = None
@@ -333,10 +373,13 @@ def _assign_suspended_to_kill_on_close_job(
         kernel32 = _kernel32()
         _configure_job_api(kernel32)
 
-        job = kernel32.CreateJobObjectW(None, None)
+        name = name or _new_job_name()
+        job = kernel32.CreateJobObjectW(None, name)
         if not job:
             _log_job_failure("CreateJobObjectW")
             return None
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
 
         limit_info = _build_job_extended_limit_info()()
         limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -364,7 +407,9 @@ def _assign_suspended_to_kill_on_close_job(
             _log_job_failure("AssignProcessToJobObject")
             return None
 
-        owned = JobHandle(job)
+        owned = JobHandle(job, name=name)
+        if pid == os.getpid():
+            _publish_job_scope(name)
         job = None
         return owned
     except Exception:
@@ -412,22 +457,44 @@ def _resume_suspended_process(pid: int) -> bool:
 
 
 def __getattr__(name: str) -> Any:
-    if name == "spawn_in_kill_on_close_job":
-        from ._async import asyncio, spawn_in_kill_on_close_job
-
-        globals().setdefault("asyncio", asyncio)
-        globals()[name] = spawn_in_kill_on_close_job
-        return spawn_in_kill_on_close_job
-    if name == "asyncio":
+    if name == "ctypes":
+        import ctypes
+        value = ctypes
+    elif name == "asyncio":
         import asyncio
-
-        globals()[name] = asyncio
-        return asyncio
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        value = asyncio
+    elif name == "_JobBasicAccountingInformation":
+        if name in globals():
+            return globals()[name]
+        import threading
+        with globals().setdefault("_job_type_lock", threading.Lock()):
+            if name not in globals():
+                import ctypes
+                class _JobBasicAccountingInformation(ctypes.Structure):
+                    _fields_ = [
+                        ("TotalUserTime", ctypes.c_int64),
+                        ("TotalKernelTime", ctypes.c_int64),
+                        ("ThisPeriodTotalUserTime", ctypes.c_int64),
+                        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                        ("TotalPageFaultCount", ctypes.c_uint32),
+                        ("TotalProcesses", ctypes.c_uint32),
+                        ("ActiveProcesses", ctypes.c_uint32),
+                        ("TotalTerminatedProcesses", ctypes.c_uint32),
+                    ]
+                globals()[name] = _JobBasicAccountingInformation
+            return globals()[name]
+    elif name == "spawn_in_kill_on_close_job":
+        from ._async import asyncio, spawn_in_kill_on_close_job
+        globals().setdefault("asyncio", asyncio)
+        value = spawn_in_kill_on_close_job
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__) | {"asyncio"})
+    return sorted(set(globals()) | set(__all__) | {"asyncio", "ctypes", "_JobBasicAccountingInformation"})
 
 
 class SyncProcessLaunchError(OSError):
@@ -451,37 +518,12 @@ def spawn_sync_in_kill_on_close_job(
     allow_breakaway: bool = True,
     **kwargs: Any,
 ) -> tuple[subprocess.Popen, JobHandle | None]:
-    """Synchronous (``subprocess.Popen``) counterpart to
-    :func:`spawn_in_kill_on_close_job`, for callers that cannot use ``asyncio``.
-
-    Mirrors the same containment contract: on Windows the child is created
-    with ``CREATE_SUSPENDED``, assigned to a kill-on-close Job Object, and then
-    resumed, with no gap between creation and assignment in which it (or a
-    descendant it spawns) could escape the job. A caller that later needs to
-    forcibly terminate the whole process tree -- e.g. after its own
-    ``communicate(timeout=...)`` raises ``subprocess.TimeoutExpired`` -- should
-    call ``job_handle.close()``, which (via
-    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``) kills every process still in the
-    job, not just the immediate child. A plain ``proc.kill()`` on Windows only
-    terminates that immediate child: any grandchildren it spawned (a `.cmd`
-    shim re-execing `python.exe`, a `pwsh.exe` wrapper invoking `git`/`copilot`,
-    etc.) survive, can keep the stdout/stderr pipes open, and leave a
-    subsequent ``communicate()`` blocked indefinitely even though the direct
-    child is already dead -- exactly the failure mode that left a real
-    self-update sweep tick alive-but-stuck for over a day in practice.
-
-    With ``require_job=True``, failed Windows Job assignment kills the still
-    suspended child before it can launch descendants and raises explicitly.
-    ``allow_breakaway=False`` prohibits descendants from escaping this Job and
-    rejects an explicit CREATE_BREAKAWAY_FROM_JOB flag on the initial child.
-    The default permits explicit breakaway, preserving legacy daemon semantics.
-    Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
-    returned with ``job_handle=None`` so existing cleanup paths remain in
-    charge -- containment is a best-effort hardening layer, not a hard
-    dependency for the child to execute at all. Off Windows this is a plain
-    ``subprocess.Popen`` call returning ``(process, None)``.
-    Process-creation OS errors are ``SyncProcessLaunchError`` instances;
-    subsequent containment or cleanup errors retain their original types.
+    """Create a suspended Windows child, bind its Job and scopes, then resume.
+    Retain the returned Job for whole-tree cleanup; root kill alone is not enough.
+    Required assignment fails before resume; disabling breakaway forbids escape.
+    Failed optional assignment resumes with unknown custody and unresolved scopes.
+    POSIX returns plain Popen; creation OS errors retain SyncProcessLaunchError.
+    README.md owns the full compatibility and lifetime contract.
     """
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
@@ -494,25 +536,37 @@ def spawn_sync_in_kill_on_close_job(
         try:
             return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
         except OSError as error:
-            kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            kind = (
+                SyncProcessNotFoundError
+                if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            )
             raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
+    job_name = _new_job_name()
+    spawn_kwargs["env"] = _job_child_environment(
+        spawn_kwargs.get("env"), append=job_name,
+    )
     spawn_kwargs["creationflags"] = (
         int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
     )
     try:
         process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
     except OSError as error:
-        kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        kind = (
+            SyncProcessNotFoundError
+            if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        )
         raise kind(error) from error
     job_handle: JobHandle | None = None
     try:
         pid = process.pid
         if allow_breakaway:
-            job_handle = _assign_suspended_to_kill_on_close_job(pid)
+            job_handle = _assign_suspended_to_kill_on_close_job(pid, name=job_name)
         else:
-            job_handle = _assign_suspended_to_kill_on_close_job(pid, allow_breakaway=False)
+            job_handle = _assign_suspended_to_kill_on_close_job(
+                pid, allow_breakaway=False, name=job_name,
+            )
         if job_handle is None and (require_job or not allow_breakaway):
             process.kill()
             process.wait(timeout=5)
@@ -550,46 +604,13 @@ def _local_pythonw(python: str) -> str | None:
 
 
 def _venv_home_python(python: str, filename: str) -> str | None:
-    venv_root = os.path.dirname(os.path.dirname(python))
-    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
-    try:
-        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
-            home = next(
-                (value.strip() for line in fh
-                 for key, _, value in [line.partition("=")] if key.strip() == "home"),
-                "",
-            )
-    except OSError:
-        return None
-    # Keep resolution outside the optional-config read: access errors, unreadable
-    # reparse points and cycles are not evidence that an interpreter is absent.
-    if not home:
-        return None
-    # CPython rereads this home through __PYVENV_LAUNCHER__, even if the
-    # requested executable is missing. Validate independently of selection.
-    try:
-        os.stat(home)
-    except (FileNotFoundError, NotADirectoryError):
-        return None
-    except OSError as exc:
-        if getattr(exc, "winerror", None) == 448:
-            raise RuntimeError(
-                "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
-                "by RedirectionGuard; rebuild the runtime with a physical Python home."
-            ) from exc
-        raise
-    return _physical_executable(os.path.join(home, filename))
+    from ._interpreter import venv_home_python
+
+    return venv_home_python(python, filename, resolve_executable=_physical_executable)
 
 
 def _venv_home_pythonw(python: str) -> str | None:
-    """Return the base ``pythonw.exe`` recorded by a venv's ``pyvenv.cfg``.
-
-    Relocatable Windows venv launchers (for example from ``uv venv``) can ship a
-    tiny local ``pythonw.exe`` trampoline that re-execs the base interpreter
-    named by ``pyvenv.cfg``'s ``home = ...`` entry. When that base install also
-    ships a genuine GUI-subsystem ``pythonw.exe``, prefer it over the local
-    trampoline so the detached daemon never re-enters a console interpreter.
-    """
+    """Prefer the venv's physical base GUI interpreter over its local trampoline."""
     return _venv_home_python(python, "pythonw.exe")
 
 
@@ -773,9 +794,16 @@ _DAEMON_EXTRA_CREATIONFLAGS = (
 class DaemonSpawnError(OSError):
     """:func:`spawn_daemon` could not give the daemon its own lifetime."""
 
-    def __init__(self, message: str = "", *, cleanup_confirmed: bool = True) -> None:
+    def __init__(
+        self, message: str = "", *, cleanup_confirmed: bool = True,
+        process_created: bool | None = None, admission_sent: bool = True,
+        process_identity: tuple[int, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.cleanup_confirmed = cleanup_confirmed
+        self.process_created = process_created
+        self.admission_sent = admission_sent
+        self.process_identity = process_identity
 
 
 def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
@@ -944,6 +972,7 @@ def spawn_daemon(
     extra_creationflags: int = 0,
     display: str | None = None,
     stderr_log_path: str | os.PathLike[str] | None = None,
+    instance=None,
 ) -> subprocess.Popen | WindowsDaemonProcess:
     """Launch a resident daemon; load its implementation only for daemon callers.
 
@@ -957,5 +986,5 @@ def spawn_daemon(
         argv, cwd=cwd, log_path=log_path, env=env, env_overrides=env_overrides,
         console_children=console_children, breakaway=breakaway,
         contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
-        display=display, stderr_log_path=stderr_log_path,
+        display=display, stderr_log_path=stderr_log_path, instance=instance,
     )

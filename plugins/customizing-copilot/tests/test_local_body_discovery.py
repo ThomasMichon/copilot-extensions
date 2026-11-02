@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 
-from test_instruction_delivery import delivery, fixture, projections
+from test_instruction_delivery import delivery, fixture, managed_path, projections
 from context_budget import _repo_instruction_files
 
 pytestmark = pytest.mark.guard
@@ -15,6 +15,7 @@ def test_only_reviewed_fallback_is_excluded_from_repository_discovery(tmp_path: 
     repo, source, spec = fixture(tmp_path)
     assert not projections.sync_repository(repo, [source]).blocking
     assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    managed = managed_path(repo, spec.destination)
     selector = repo / spec.destination
     local = repo / delivery.local_destination(spec.destination)
     fallback = repo / delivery.fallback_destination(spec.destination)
@@ -29,18 +30,19 @@ def test_only_reviewed_fallback_is_excluded_from_repository_discovery(tmp_path: 
     }
     automatic, conditional = _repo_instruction_files(repo)
     assert automatic == explicit
-    assert local in automatic
+    assert local not in automatic
+    assert managed in automatic
     assert fallback not in automatic | conditional
     text = selector.read_text()
-    assert delivery.local_destination(spec.destination) in text
+    assert delivery.managed_destination(spec.destination, spec.plugin) in text
     assert delivery.fallback_destination(spec.destination) in text
     assert "Never assume authorization." not in text
     assert "](" not in text and "@import" not in text
     assert delivery.RECEIPT_PREFIX not in text
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selected["selectedPath"] == delivery.local_destination(spec.destination)
+    assert selected["selectedPath"] == managed.relative_to(repo).as_posix()
     assert selected["modelAdmission"] == "unknown"
-    assert delivery.complete_body(local.read_bytes(), delivery.parse_marker(local.read_bytes()))
+    assert managed.read_bytes() == (source.payload_root / spec.template).read_bytes()
     assert not delivery.complete_body(selector.read_bytes(), delivery.parse_marker(selector.read_bytes()))
     inventory = projections.instruction_delivery_inventory(repo, automatic)["categories"]
     assert inventory["local_bodies"]["count"] == 1
@@ -49,7 +51,7 @@ def test_only_reviewed_fallback_is_excluded_from_repository_discovery(tmp_path: 
     assert not inventory["reviewed_fallbacks"]["automatically_discovered"]
     legacy = repo / delivery.legacy_local_destination(spec.destination)
     legacy.parent.mkdir(parents=True, exist_ok=True)
-    legacy.write_bytes(local.read_bytes())
+    legacy.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
     automatic, _ = _repo_instruction_files(repo)
     assert legacy not in automatic | conditional
     inventory = projections.instruction_delivery_inventory(repo, automatic)["categories"]
@@ -76,8 +78,8 @@ def test_fallbacks_cannot_use_automatically_loaded_instruction_names(name: str) 
         delivery.fallback_destination(f".github/instructions/policy/{name}.instructions.md")
 
 
-@pytest.mark.parametrize("case", ["canonical", "older-version", "edited", "foreign", "tracked", "race", "new-failure"])
-def test_legacy_local_retirement_requires_complete_owned_publication(
+@pytest.mark.parametrize("case", ["canonical", "older-version", "edited", "foreign", "tracked", "new-failure"])
+def test_legacy_local_outside_reserved_namespace_is_retained_and_reported(
     tmp_path: Path, case: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, source, spec = fixture(tmp_path)
@@ -92,52 +94,39 @@ def test_legacy_local_retirement_requires_complete_owned_publication(
     old.write_bytes(raw)
     if case == "older-version":
         (source.payload_root / "plugin.json").write_text('{"name":"policy","version":"1.0.1"}')
-    new = repo / delivery.local_destination(spec.destination)
+    new = repo / delivery.managed_destination(spec.destination, spec.plugin)
     if case == "tracked":
         monkeypatch.setattr(
             projections, "_resolve_git_tracked_paths", lambda root, paths: ({old.relative_to(repo).as_posix()}, False)
         )
-    elif case == "race":
-        original = projections._resolve_git_tracked_paths
-        calls = 0
-
-        def tracked(root: Path, paths: list[str]) -> tuple[set[str], bool]:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                old.write_bytes(b"concurrent legacy edit")
-            return original(root, paths)
-
-        monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracked)
     elif case == "new-failure":
         def fail(path: Path, content: bytes) -> None:
             raise OSError("publication failed")
 
-        monkeypatch.setattr(projections.transaction, "create_exclusive", fail)
+        monkeypatch.setattr(projections.transaction, "atomic_write", fail)
     result = projections.render_local_cache(repo, lambda: [source])
-    if case in {"canonical", "older-version"}:
-        assert not result.blocking and not old.exists()
-        assert b"Never assume authorization." in new.read_bytes()
-        assert old.relative_to(repo).as_posix() in result.removed
+    assert old.read_bytes() == raw
+    assert old.relative_to(repo).as_posix() not in result.removed
+    assert any(f.check == "projection-local-cache-legacy" for f in result.findings)
+    if case == "new-failure":
+        assert result.blocking and not new.exists()
     else:
-        assert old.read_bytes() == (b"concurrent legacy edit" if case == "race" else raw)
-        if case != "new-failure":
-            assert new.read_bytes() == canonical
-            assert any(f.check == "projection-local-cache-legacy" for f in result.findings)
+        assert not result.blocking
+        assert new.read_bytes() == (source.payload_root / spec.template).read_bytes()
 
 
-def test_legacy_local_compatibility_reads_are_authenticated(tmp_path: Path) -> None:
+def test_legacy_local_compatibility_bytes_do_not_override_reviewed_fallback(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path)
     assert not projections.sync_repository(repo, [source]).blocking
     old = repo / delivery.legacy_local_destination(spec.destination)
     old.parent.mkdir(parents=True, exist_ok=True)
     old.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selected["selectedPath"] == delivery.legacy_local_destination(spec.destination)
+    assert selected["selectedPath"] == delivery.fallback_destination(spec.destination)
     old.write_bytes(old.read_bytes().replace(b"authorization.", b"authorization!"))
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selected["selectedPath"] == delivery.fallback_destination(spec.destination)
-    assert "rejected" in selected["diagnostic"]
+    assert selected["diagnostic"] is None
 
 
 def test_disabled_legacy_source_is_retained_with_visible_migration_finding(tmp_path: Path) -> None:
@@ -164,13 +153,13 @@ def test_git_adopter_requires_new_ignore_rule_before_publication(tmp_path: Path)
     old.write_bytes(raw)
     result = projections.render_local_cache(repo, lambda: [source])
     assert old.read_bytes() == raw
-    assert not (repo / delivery.local_destination(spec.destination)).exists()
+    assert not (repo / delivery.managed_destination(spec.destination, spec.plugin)).exists()
     assert any(f.check == "projection-local-cache-ignore" for f in result.findings)
     (repo / ".gitignore").write_text(".github/instructions/**/*.local.instructions.md\n")
     result = projections.render_local_cache(repo, lambda: [source])
     assert not result.blocking
-    assert not old.exists()
-    assert (repo / delivery.local_destination(spec.destination)).exists()
+    assert old.read_bytes() == raw
+    assert (repo / delivery.managed_destination(spec.destination, spec.plugin)).exists()
 
 
 def test_ignore_probe_permission_failure_is_not_non_git_directory(
@@ -184,7 +173,7 @@ def test_ignore_probe_permission_failure_is_not_non_git_directory(
     assert not io.ignored_local_paths(tmp_path, [".github/copilot/context-locals/policy/a.local.md"])
 
 
-def test_invalid_new_unpaired_local_falls_back_to_authenticated_legacy(tmp_path: Path) -> None:
+def test_unpaired_legacy_siblings_do_not_establish_a_current_managed_copy(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path)
     old = repo / delivery.legacy_local_destination(spec.destination)
     old.parent.mkdir(parents=True)
@@ -192,76 +181,27 @@ def test_invalid_new_unpaired_local_falls_back_to_authenticated_legacy(tmp_path:
     new = repo / delivery.local_destination(spec.destination)
     new.parent.mkdir(parents=True)
     new.write_bytes(b"foreign new file")
-    selected = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selected["selectedPath"] == delivery.legacy_local_destination(spec.destination)
+    with pytest.raises(ValueError, match="no managed copy"):
+        projections.resolve_instruction_source(repo, spec.destination, [source])
 
 
-def test_legacy_index_race_is_rechecked_before_retirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    repo, source, spec = fixture(tmp_path)
-    old = repo / delivery.legacy_local_destination(spec.destination)
-    old.parent.mkdir(parents=True)
-    raw = projections.render_projection(spec, include_prefer_local=False).content
-    old.write_bytes(raw)
-    calls = 0
-
-    def tracked(root: Path, paths: list[str]) -> tuple[set[str], bool]:
-        nonlocal calls
-        if paths == [delivery.legacy_local_destination(spec.destination)]:
-            calls += 1
-        return ({old.relative_to(root).as_posix()} if calls >= 2 else set()), False
-
-    monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracked)
-    result = projections.render_local_cache(repo, lambda: [source])
-    assert old.read_bytes() == raw and calls == 2
-    assert any("became tracked" in f.message for f in result.findings)
-
-
-def test_legacy_edit_during_final_tracking_probe_is_retained(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, source, spec = fixture(tmp_path)
-    old = repo / delivery.legacy_local_destination(spec.destination)
-    old.parent.mkdir(parents=True)
-    old.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
-    original = projections._resolve_git_tracked_paths
-    legacy_probes = 0
-
-    def tracking(root: Path, paths: list[str]) -> tuple[set[str], bool]:
-        nonlocal legacy_probes
-        if paths == [delivery.legacy_local_destination(spec.destination)]:
-            legacy_probes += 1
-            if legacy_probes == 2:
-                old.write_bytes(b"edited during final tracking probe")
-        return original(root, paths)
-
-    monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracking)
-    result = projections.render_local_cache(repo, lambda: [source])
-    assert old.read_bytes() == b"edited during final tracking probe"
-    assert any("changed during tracking" in f.message for f in result.findings)
-
-
-def test_new_local_staged_during_render_is_not_replaced(
+def test_new_local_staged_after_initial_tracking_probe_is_not_replaced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, source, spec = fixture(tmp_path)
     assert not projections.render_local_cache(repo, lambda: [source]).blocking
-    local = repo / delivery.local_destination(spec.destination)
+    local = repo / delivery.managed_destination(spec.destination, spec.plugin)
     before = local.read_bytes()
     template = source.payload_root / spec.template
     template.write_bytes(template.read_bytes().replace(b"Never assume", b"Do not assume"))
-    original = projections._transactional_write
-    tracked_now = False
+    calls = 0
 
-    def write(*args, **kwargs):
-        nonlocal tracked_now
-        tracked_now = True
-        return original(*args, **kwargs)
+    def tracking(root: Path, paths: list[str]) -> tuple[set[str], bool]:
+        nonlocal calls
+        calls += 1
+        return (set(paths) if calls >= 2 else set(), False)
 
-    monkeypatch.setattr(projections, "_transactional_write", write)
-    monkeypatch.setattr(
-        projections, "_resolve_git_tracked_paths",
-        lambda root, paths: (set(paths) if tracked_now else set(), False),
-    )
+    monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracking)
     result = projections.render_local_cache(repo, lambda: [source])
     assert result.blocking
     assert local.read_bytes() == before

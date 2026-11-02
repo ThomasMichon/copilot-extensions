@@ -212,6 +212,7 @@ class WorktreeManagerApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
+        ("ctrl+shift+h", "launch_history", "Launch history"),
     ]
 
     def __init__(
@@ -389,6 +390,8 @@ class WorktreeManagerApp(App):
             self._activate(self._pivot_by_tab[event.tab.id])
 
     def on_key(self, event: Key) -> None:
+        if self.screen is not self.screen_stack[0]:
+            return
         descriptor = self._active_pivot()
         actions = (*descriptor.pivot.actions, *descriptor.pivot.view_actions)
         action = next(
@@ -408,6 +411,12 @@ class WorktreeManagerApp(App):
 
     def action_refresh(self) -> None:
         self._start_load(self._active_pivot(), force=True)
+
+    def action_launch_history(self) -> None:
+        from .launch_history_screen import LaunchHistoryScreen
+
+        if self.screen is self.screen_stack[0]:
+            self.push_screen(LaunchHistoryScreen(self._project))
 
     def _active_pivot(self) -> _PivotDescriptor:
         return next(pivot for pivot in self._pivots if pivot.key == self._active_key)
@@ -692,6 +701,8 @@ class WorktreeManagerApp(App):
             pass
 
     def on_data_table_row_selected(self, event) -> None:  # Enter on a row
+        if self.screen is not self.screen_stack[0]:
+            return
         descriptor = self._active_pivot()
         if (
             descriptor.pivot.entity == "worktree"

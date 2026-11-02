@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify real PR watch-service observation and Dispatch replay across unchanged snapshots, restart and lost ACK",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

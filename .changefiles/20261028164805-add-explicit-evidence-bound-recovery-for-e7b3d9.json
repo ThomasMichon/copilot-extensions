@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit evidence-bound recovery for interrupted same-payload unattributed lifecycle reservations without publishing readiness.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

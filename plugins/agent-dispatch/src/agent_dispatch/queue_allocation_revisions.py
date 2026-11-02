@@ -9,7 +9,10 @@ from .queue_records import SpawnState
 
 
 def _allocation_disposed(row: sqlite3.Row) -> bool:
-    if row["state"] not in SpawnState.RELEASABLE or row["conclusion_state"] != "complete":
+    if (
+        row["state"] not in SpawnState.RELEASABLE or row["conclusion_state"] != "complete"
+        or row["native_release_pending"]
+    ):
         return False
     try:
         detail = json.loads(row["conclusion_detail"] or "{}")
@@ -42,7 +45,7 @@ def revision_disposed(rows: list[sqlite3.Row]) -> bool:
     }
     keys = {row["creation_key"] for row in disposed if row["creation_key"]}
     return bool(disposed) and all(
-        row["state"] not in SpawnState.ACTIVE and (
+        row["state"] not in SpawnState.ACTIVE and not row["native_release_pending"] and (
             (row["worktree"], row["allocation_project"], row["worktree_path"]) in identities
             if row["worktree"] else row["creation_key"] in keys
         )

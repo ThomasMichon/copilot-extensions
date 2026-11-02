@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, TypedDict, cast
 
 CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 PEERS = {
@@ -25,18 +25,23 @@ PEERS = {
     "agent-dispatch": "agent_dispatch",
     "agent-ssh": "agent_ssh",
     "agent-pull-requests": "agent_pull_requests",
+    "agent-machines": "agent_machines",
 }
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
     "agent-logger", "agent-index", "agent-machines", "agent-worktrees", "agent-pull-requests",
-    "agent-ssh",
+    "agent-ssh", "agent-mcp", "agent-vault",
 }
 
 
-def no_window_kwargs() -> dict[str, int]:
+class _NoWindowKwargs(TypedDict, total=False):
+    creationflags: int
+
+
+def no_window_kwargs() -> _NoWindowKwargs:
     """Keep the standalone bootstrap dependency-free and its children windowless."""
     if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NO_WINDOW}  # headless-guard: allow dependency-free canonical bootstrap
+        return {"creationflags": cast(int, getattr(subprocess, "CREATE_NO_WINDOW"))}  # headless-guard: allow dependency-free canonical bootstrap
     return {}
 
 
@@ -69,10 +74,10 @@ def _active_context(
     primitive: ModuleType, receipt: Path, durable: Path, plugin: str,
     cell: Path, environment: dict[str, str],
 ) -> dict[str, Any]:
-    context = primitive.validate_context_receipt(
+    context = cast(dict[str, Any], primitive.validate_context_receipt(
         receipt, durable, expected_plugin_id=plugin,
         expected_cell_root=cell, environment=environment,
-    )
+    ))
     namespace = primitive.validate_namespace_receipt(
         context["namespaceReceipt"], durable,
     )
@@ -81,8 +86,8 @@ def _active_context(
     return context
 
 
-def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict[str, str]:
-    """Rebind installation routing, retaining non-routing caller/session data."""
+def legacy_peer_environment(inherited: dict[str, str]) -> dict[str, str]:
+    """Remove caller routing and credentials before a peer selects its own roots."""
     environment = {}
     for key, value in inherited.items():
         upper = key.upper()
@@ -96,12 +101,19 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_CONTAINERS_",
             "AGENT_LOGGER_", "AGENT_WORKTREES_", "AGENT_BRIDGE_", "AGENT_INDEX_",
             "AGENT_MACHINES_", "AGENT_SSH_", "AGENT_PULL_REQUESTS_",
+            "AGENT_MCP_", "AGENT_VAULT_",
         )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))
         ):
             continue
         environment[key] = value
+    return environment
+
+
+def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict[str, str]:
+    """Rebind installation routing, retaining non-routing caller/session data."""
+    environment = legacy_peer_environment(inherited)
     plugin = context["pluginId"]
     prefix = plugin.upper().replace("-", "_")
     environment.update({
@@ -161,13 +173,13 @@ def _governance(
     environment: dict[str, str],
 ) -> dict[str, Any]:
     plugin = context["pluginId"]
-    resolution = primitive.resolve_installation_mode(
+    resolution = cast(dict[str, Any], primitive.resolve_installation_mode(
         legacy_root=Path.home() / f".{plugin}",
         payload_root=context["payloadRoot"], plugin_id=plugin,
         context=context["installReceipt"], durable_home=durable,
         expected_cell_root=context["cellRoot"],
         environment=environment,
-    )
+    ))
     allowed = (
         resolution["status"] == "ready"
         and resolution["reason"] == "namespaced-active"

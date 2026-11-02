@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-11-01
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -22,25 +22,27 @@ portable, attributable, and intentionally budgeted.
   enabled.
 - **Skills** provide detailed procedures at task time rather than occupying
   always-on context.
-- **Coordinators and delegates** divide work by context cost and separability:
-  the coordinating agent owns decomposition, integration, synthesis, and
-  completion, while bounded delegates isolate independent evidence gathering,
-  domain-tool interaction, explicitly disjoint implementation, and independent
-  review roles.
-- **Role/model routing policy** classifies delegated work by purpose, risk,
-  execution surface, and demonstrated capability, then selects from an
-  evidence-backed mapping of acceptable models rather than treating every
-  worker as interchangeable.
+- **Circumstance-based skills** use instruction-injection hooks to detect a
+  problem-specific occurrence and deliver just-in-time guidance, as a last line
+  of defense when general upfront instructions and reactive skill selection
+  are insufficient. Fact acquisition, event-time evaluation and contextual
+  intervention remain distinct responsibilities.
+- **Delegated assignments** retain scoped authority, ownership, integration and
+  result verification when work is delegated. Generic guidance does not dictate
+  whether arbitrary work must or must not be delegated.
+- **Optional model configuration** offers inert, explicitly invoked mechanical
+  lookups without prescribing a driver/delegate hierarchy or requiring a model
+  chooser before work.
 - **Budget posture** combines finite allowance, consumption, reset horizon,
   recent pace, and projection into a sourced, freshness-bearing input that can
-  refine model-routing recommendations without becoming model eligibility.
+  inform optional monthly economy strategies without blocking requests or
+  becoming model/delegation selection.
 - **Budget adapters** obtain partial or complete posture from provider APIs,
   manual/static configuration, or explicitly configured external readers behind
   one portable contract. Each adapter remains attributable and reports
   unavailable or stale data honestly.
-- **Routing evidence** links model-purpose eligibility to reviewed outcomes,
-  including retries, discarded work, coordinator repair, and downstream
-  findings, so a cheap call is not mistaken for a cheap accepted result.
+- **Outcome economics** includes retries, discarded work and follow-up costs,
+  so a cheap call is not mistaken for an inexpensive accepted result.
 - **Operator policy** is personal ambient guidance that can follow an agent
   across target repositories. A plugin may explicitly delegate narrow
   configuration keys to a repository, but safety, publication, attribution,
@@ -83,21 +85,118 @@ Plugin-owned ambient policy should reach every applicable session as a concise
 kernel containing only what must remain active, with detailed mechanics
 available on demand. **`sessionStart` `additionalContext` composition across
 multiple hooks is empirically unreliable** — observed sessions deliver no
-contributor's output at all, not merely a last-writer-wins loss. Guidance a
-harness genuinely depends on should therefore reach the agent through a
-checked-in static pointer instruction plus a hook-written session-scoped file
+contributor's output at all, not merely a last-writer-wins loss. Ambient session
+guidance a harness depends on should therefore reach the agent through a
+creation/startup-projected pointer instruction plus a hook-written session-scoped file
 the agent is directed to read (see
 `docs/patterns/session-scoped-dynamic-guidance.md`), not through
 `additionalContext` aggregation alone. When the host natively composes every
 independent hook output and that behavior is proven at the supported version
 floor, direct plugin-owned `additionalContext` should become the preferred
-perfectly dynamic path. Until then, the checked-in pointer plus exact-session
-guidance file remains authoritative.
+perfectly dynamic path. Until then, projected pointers plus exact-session
+guidance files should provide the normal delivery path. Offline recovery
+should use periodically synchronized, non-automatically-loaded fallback bodies,
+not a second automatic copy of the same policy.
+
+### circumstance-based-intervention
+
+Problem-specific guidance should arrive when its circumstance is present.
+General startup guidance should not substitute for occurrence detection, and a
+blanket once-per-session acknowledgement should not silence later circumstances.
+A known rule should still be evaluated against a new target or changed condition.
+Advisory intervention should not require a blocking bounce merely to be visible.
+Acknowledgement should not grant permission or prove the underlying condition
+resolved; its scope and invalidation should follow the actual circumstance.
+
+### reusable-facts-current-decisions
+
+Computed discovery should be reusable through its existing authority, with
+complete input binding, freshness and completeness, or precomputed at startup
+when stable. Event facts and current controls should retain their source
+provenance and freshness. A complete empty result should remain meaningful, while
+unavailable or incomplete evidence should not become an invented allow decision.
+An unavailable-evaluation default should remain distinct from asserting that
+evidence authorized the action. Facts may be reused; final authorization and dynamic occurrences should not be
+memoized away. Optional discovery should not dominate the essential event path.
 
 ### portable-operator-policy
 
 An operator should be able to carry personal policy across target repositories
 without copying it into each repository or erasing repository-owned overrides.
+
+### charter-bounded-useful-autonomy
+
+An agent should continue ordinary investigation, source fixes, bounded
+validation and issue/PR publication within its established charter and
+designated destinations without asking permission to remain useful. Genuine
+decisions, explicit holds and independent review, security and ownership gates
+remain binding; a blocked effect should not stop independent authorized work.
+
+### persistent-effect-scope-preclearance
+
+Explicit operator approvals should retain their original evidence, allowed
+operations, targets, resource owners, effects, accepted blast radius, limits
+and later narrowing or revocation across efforts, checkpoints and handoffs.
+An ordinary revision or retry inside the approved scope should not require
+another permission ceremony.
+
+Deployment, personal or non-source-controlled content, disclosure and resources
+outside the operator's control need applicable explicit effect authority.
+Current scope and circumstances remain revalidated before action; confidence,
+convenience, a copied record or expected recoverability should never create a
+grant or bypass a product gate.
+
+### decision-ready-unattended-continuation
+
+An agent approaching a genuine effect boundary should use permitted
+investigation, planning and documentation to prepare the operator's decision
+before requesting blocking input. The proposal should explain the problem and
+its cause, current evidence and uncertainty, options and conditional future
+projections, a general-class framework and the precise scope and ramifications
+of acceptance.
+
+The affected action stays gated while another authorized avenue can progress.
+An adopted agenda can preserve the branch and a revisit point without turning
+time, Autopilot or inferred operator presence into authority. Explicit all-work
+holds, privacy/resource limits and unknown-effect reconciliation still govern;
+unattended operation should not mean presence polling or unrelated busywork.
+
+### configurable-attribution-signatures
+
+AI disclosure should have one authoritative policy owner. An adopting harness
+should express its attribution goals through configuration of that owner,
+rather than another decision matrix or competing signature convention.
+
+Sparse circumstance-based configuration should select header and footer
+signatures with useful defaults and trusted personal overrides. Templates and
+interpolation should remain data. Lightly formatted session guidance should
+help an agent choose and adapt the appropriate marker; an optional programmatic
+consumer should use the same effective configuration and avoid duplicate
+markers. Neither presentation path should invent human review, waive a required
+disclosure, authorize publication or change an already approved or published
+item.
+
+### maintenance-aware-tool-unavailability
+
+Normally projected `agent-conduct-guidance` should tell an agent to inspect the
+retained local maintenance banner when a command advertised by an `agent-*`
+catalog appears missing. An explained active hold means preserve work and
+obligations, report its responsible session, and refrain from self-repair,
+repeated missing-tool retries or replacement workers.
+
+The banner should be readable through native filesystem facilities even when
+noncritical supporting services, binstubs and plugin payloads are gone. Applicable
+guidance should remain available through that outage rather than requiring the
+missing tool to explain itself. A held agent should use one low-frequency native
+scheduled prompt to observe updates until applicable clearance and capability
+readiness; unavailable native scheduling is an explicit limitation, never a
+reason to invent another daemon. The maintenance owner continues only its
+separately authorized work. See
+[Disposable Supporting Runtimes](../plugin-services/disposable-runtimes/README.md).
+
+Critical machine-management connectivity remains outside that removal scope.
+Credential relays are disposable; their absence is not permission for an agent
+to rebuild the supporting suite or take over the retained transport.
 
 ### attributable-context-budget
 
@@ -161,14 +260,33 @@ projection engine, authoring/review framework, sibling runtime, service or
 network operation. The implementation should stay simple rather than inherit
 unrelated machinery merely to reuse code from a similar subject.
 
-### coordinator-first-task-routing
+Every worktree creation and session start should copy the selected plugins'
+current declared files. Content hashes, fingerprints, provenance envelopes,
+version comparisons and prepared-generation receipts should not gate copying
+or the use of these managed instruction copies. Existing plugin selection and
+harness trust boundaries should own instruction trust rather than a second
+runtime authentication layer.
 
-Harnesses should provide model-neutral guidance that helps a coordinating agent
-route work by expected context consumption and separability. Broad independent
-research, comparisons, evaluations, bulk analysis, and disjoint bulk edits
-should move into bounded delegate contexts before their source material floods
-the coordinator, while small lookups, genuinely continuous traces, and cohesive
-implementation remain direct when splitting them would cost more than it saves.
+Generated instructions may be overwritten while a session is running. An
+operator should be able to restart that session to load corrected upstream
+guidance; protecting a previously copied generation must not prevent refresh.
+Filesystem delivery should remain distinct from proving model admission.
+
+Automatically discovered full plugin instruction bodies should come from this
+creation/startup projection, not independently maintained checked-in copies.
+Periodically synchronized offline fallbacks should remain available on demand;
+their content-bearing filenames must not contain `.instructions.md` or otherwise
+match native instruction discovery. Thin recovery locators should not duplicate
+policy or cause an available projected body and its fallback to load together.
+
+### strategy-neutral-task-guidance
+
+Generic guidance should not impose coordinator-first, driver/worker,
+count-based delegation, cheap-driver/smart-delegate or direct-work defaults.
+Scoped domain-tool flows, explicit assignments and required independent review
+remain governed by their owners rather than expanding into rules for arbitrary
+work. Optional capabilities should remain inert until selected for their actual
+purpose.
 
 ### bounded-delegate-contracts
 
@@ -179,20 +297,19 @@ Domain-specific service catalogs and verbose tool payloads should remain with
 the delegate that owns that domain; compact shared research and orchestration
 signals may remain with the coordinator.
 
-### evidence-calibrated-model-routing
+### optional-model-configuration
 
-Harnesses should help a coordinator choose the least-expensive available model
-that has demonstrated the capability, tools, context, and reliability required
-for the delegated role. Model choice should follow task classification and the
-direct-versus-delegate decision rather than becoming a reason to fragment
-cohesive work.
+Inert model APIs may expose configured capability and execution-surface facts
+when explicitly invoked. Their availability should not inject a model chooser,
+discovery hook or delegation policy into unrelated work.
 
-### budget-aware-model-routing
+### advisory-monthly-economy
 
-Harnesses should refine otherwise-eligible model choices against a finite,
-current budget posture. A coordinator should be able to distinguish sustainable
-pace from projected exhaustion or unused balance before committing to a model
-class, while preserving operator choice and every product gate.
+Budget guidance should help users read current usage and quota and understand
+monthly pace, projected exhaustion and remaining balance. Economic suggestions
+may encourage valid-result reuse or consideration of budget before a prolonged
+speculative detour, but never require a lookup, block honoring a request, select
+models, or route drivers and delegates.
 
 ### adapter-based-budget-posture
 
@@ -207,13 +324,13 @@ surface.
 The current posture should reach an applicable decision-maker as a concise,
 attributable cue and through equivalent machine-readable status. Detailed
 history and accounting remain external; the harness carries only enough current
-state to make the next routing decision responsibly.
+state to understand current usage and monthly pace.
 
 ### purpose-to-model-grounding
 
-Current model eligibility should be supplied through attributable, configurable
+Optional model eligibility lookups should use attributable, configurable
 grounding that distinguishes demonstrated choices from candidates, holds, and
-known failures. The portable strategy should remain stable while repositories
+known failures. The optional mechanical contract should remain stable while repositories
 and operators can update the models that satisfy it as providers, costs,
 capabilities, and execution surfaces change.
 
@@ -253,26 +370,28 @@ should remain discoverable from the concise ambient kernel.
 
 ### resilient-safety-boundary
 
-Critical safety and publication constraints should retain a minimal static
-fallback when a launch path cannot load the richer plugin-owned guidance.
-Plugin setup should own any compatibility/fallback prose through a stable,
-idempotently reconciled marker or dedicated rule file. For worktree-scoped
-projected instruction content specifically, the lifecycle-hook-rendered,
-gitignored local cache is the **primary** delivery path -- it reflects the
-currently installed payload, not a sync-lagged approximation of it. The
-checked-in, scheduled-sync-worker-maintained copy is strictly the
-**fallback**: the floor a session falls back to only when no pre-session
-hook could render anything fresher (a fully hookless/headless/sandboxed
-launch) or hasn't yet had the chance to (a pre-sync gap on an otherwise
-hook-capable path). A fallback a stale leftover local artifact can
-silently outrank is not actually safe, so precedence between the two must
-be decided by stable content provenance (e.g. a declared version), never
-by the local artifact's mere existence or render recency.
+Critical safety and publication constraints should remain recoverable when a
+launch path cannot load richer plugin-owned guidance. Repository-owned
+invariants should stay with the repository; plugin-owned offline fallback
+content should be periodically synchronized and read only when needed, never
+automatically loaded beside its current projection. Thin recovery locators may
+remain discoverable without embedding another policy body.
+
+For worktree-scoped projected content, creation/startup-generated local guidance
+should be the normal automatic delivery path. A checked-in offline fallback
+should remain usable when no usable current projection exists, including
+hookless/headless or failed preparation. Content-bearing fallback filenames
+must not contain `.instructions.md` or otherwise trigger automatic discovery.
+The selected plugin and its declaration should determine the primary file;
+no separate version, content-provenance or fingerprint comparison should choose
+between it and the fallback. A failed copy should be reported explicitly, not
+hidden by a fallback read or mistaken for successful refresh.
 
 Applicable worktree and session-creation boundaries should establish that
 local guidance is available before the agent begins loading instructions. Session-start
-should repair missing or stale local guidance as a backup, not be the sole
-delivery opportunity on a path that can prepare it earlier.
+should copy the current plugin files again, including while another session is
+running, not be the sole delivery opportunity on a path that can prepare them
+earlier. A restart is sufficient to let that running session load the update.
 
 ### ambient-delivery-fails-open
 
@@ -285,6 +404,31 @@ otherwise-usable session start. A session-scoped dynamic guidance file that has
 not yet been written (or whose owning hook could not run, e.g. an untrusted
 repository-level hook path) is an explicit no-op for the reader, never a
 blocker.
+
+### bounded-actionable-hook-failures
+
+Circumstantial guidance, explicit policy enforcement and lifecycle work should
+have explicit, different failure outcomes. When an uninstalled, missing or
+broken backing suite prevents ordinary evaluation, hooks should default to fail
+open and preserve inspection, recovery and repair, rather than making every tool
+depend on suite infrastructure. Unavailable advisory guidance should likewise
+remain nonblocking and legible. A narrow exception should require a documented
+protected condition or installation prerequisite, positively applicable trusted
+inputs, a bounded actionable error and a reachable recovery path, without relying
+on the missing helper to select that default. Absence or validator failure should
+not prove applicability. Confirmed policy outcomes should retain their explicit
+scoped meaning without fabricated successful evaluation. Existing runtime
+fallback and recovery selection should remain usable. Errors should identify
+their owner, failed boundary, operation effect, supported next action and retry
+safety through a
+verified agent-readable channel. Unknown mutation effects should be reconciled
+by their owner rather than blindly replayed.
+
+Whole-path cost should include first attempt, retries, response delivery,
+cancellation and owned-descendant cleanup within the caller's deadline. A
+transition should preserve policy, error, lifecycle and cleanup behavior and
+keep one active implementation per event. Diagnostic deduplication should avoid
+loops without permanently concealing an unresolved or newly occurring failure.
 
 ### bounded-source-modules
 
@@ -350,19 +494,11 @@ causing routine unnecessary exploration.
 Context reporting should distinguish known static and metadata costs from
 dynamic contributions whose emitted size cannot be known without execution.
 
-### delegate-before-broad-ingestion
+### assignment-retains-the-goal
 
-When work contains separable evidence tracks whose direct ingestion would
-materially consume the coordinator's context, delegation should happen before
-the coordinator opens the broad source bodies. A coordinator should not repeat
-a delegated investigation without a concrete verification reason.
-
-### coordinator-retains-the-goal
-
-Delegation should not turn the coordinating agent into a passive dispatcher.
-The coordinator remains responsible for the prompt's goal, chooses and adjusts
-the decomposition, integrates evidence, directly drives cohesive implementation
-by default, and produces the final synthesis and completion judgment.
+Delegation should retain the original objective, current authority and named
+integration owner. Completion depends on the accepted artifact and verification,
+not an agent's presence, transport receipt or self-report.
 
 ### proportional-independent-review
 
@@ -370,27 +506,13 @@ Independent review should preserve distinct required roles without becoming an
 unbounded loop. An unchanged artifact should not receive repeated same-role
 review unless a concrete defect or materially changed evidence justifies it.
 
-### routing-policy-before-delegation
+### budget-information-not-work-admission
 
-A Task-capable decision-maker should receive the compact model-routing policy
-before its first delegation decision. A worker that cannot delegate should
-receive its bounded assignment rather than paying the context cost of the
-complete routing catalog.
-
-### least-expensive-demonstrated-choice
-
-Selection should prefer the least-expensive available choice that has
-demonstrated the required task capability and execution-surface support. An
-unavailable preferred model may fall through to another demonstrated choice;
-an unproven candidate runs only as an explicit trial and never becomes a silent
-default.
-
-### budget-refines-but-never-qualifies
-
-Budget posture may reorder or discourage choices that are already eligible, but
-it cannot make an unproven, held, failed, or unavailable model eligible. When no
-qualified choice fits the desired budget posture, the result is an explicit
-escalation or no-fit decision rather than a fabricated cheap option.
+Usage and quota acquisition should validate evidence availability, freshness,
+privacy and access independently of user-work admission. Missing or denied
+budget evidence withholds the reading, not unrelated requested work. Budget
+guidance should supply no upfront enforcement, model/delegation chooser,
+driver/delegate ranks or automatic worker-control behavior.
 
 ### unavailable-is-not-zero
 
@@ -403,24 +525,24 @@ allowance, or another optimistic success-shaped default.
 Quota guidance belongs to the account serving the requesting agent, not an
 unverified default account in a new runtime. Monthly entitlement and reset are
 period-specific facts; acquisition time does not establish provider freshness.
-Run-rate projections inform autonomous concurrency and warn on operator-directed
-launches without imposing a harness budget refusal. Provider enforcement and
-product safety gates remain authoritative. Cooperative sleeps or suspensions are
-sparing, explicit, owner-controlled actions, never side effects of quota reads.
+Run-rate projections describe conditional monthly pace, not worker counts or
+delegation strategy. Provider access validation and product safety gates remain
+authoritative. Worker mutations, sleeps and suspensions are never side effects
+of quota reads.
 
 ### one-posture-many-surfaces
 
-Injected guidance, CLI status, dashboards, and routing consumers should derive
+Injected guidance, CLI status and economy information should derive
 from the same resolved budget posture. A presenter may reshape the result for
 its audience, but it should not independently recalculate or reinterpret the
 underlying balance and freshness.
 
 ### accepted-outcome-economics
 
-Model-routing decisions should be evaluated against accepted work products, not
-isolated call prices. Retries, abandoned output, coordinator repair, review
-findings, and attributable follow-up work remain visible so apparent savings
-cannot be created by moving cost or failure outside the selected worker's call.
+Economic comparisons should consider accepted work products, not isolated call
+prices. Retries, abandoned output, repair, review findings and follow-up work
+remain visible; generic guidance does not turn these facts into a model or
+delegation hierarchy.
 
 ### independent-promotion
 
@@ -428,11 +550,11 @@ The agents and pairs being evaluated should not validate themselves. Promotion
 into ordinary routing should derive from durable trial evidence and a separate
 reviewed decision with explicit uncertainty and applicability boundaries.
 
-### product-gates-outrank-routing
+### product-gates-remain-independent
 
-Routing optimization must not lower the correctness, safety, review, or
-publication requirements of the work being routed. A cheaper pair that fails
-the product's ordinary acceptance gate is not an optimization.
+Economy advice and optional model APIs must not lower correctness, safety,
+review or publication requirements. A cheap result that fails ordinary
+acceptance is not an optimization.
 
 ### configuration-is-inert-data
 
@@ -455,7 +577,8 @@ not recreate a second composition runtime beside the host.
 ### Additional boundaries
 
 - This vision does not prescribe one configuration schema or hook script.
-- It does not maximize sub-agent count or require delegation for every lookup.
+- It does not dictate arbitrary delegation or non-delegation, set count-based
+  thresholds, require a model/budget lookup, or prescribe a driver/delegate hierarchy.
 - It does not delegate final synthesis, goal ownership, or completion judgment.
 - It does not prescribe one model, task API, agent runtime, or orchestration
   transport.

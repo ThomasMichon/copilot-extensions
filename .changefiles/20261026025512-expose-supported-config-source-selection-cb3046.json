@@ -1,0 +1,9 @@
+{
+  "comment": "Expose supported config, source selection, embedding lifecycle and task-worker injection seams for shared-engine consumers",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

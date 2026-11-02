@@ -19,7 +19,7 @@ FAMILY = "http50-retained-recovery-asgi-v1"
 AFFECTED = tuple(previous.PREFIX + name for name in (
     "protocol.py", "live_inbox_models.py", "live_inbox_runtime.py", "routes/live_inbox.py",
     "db_inbox_custody.py", "db_live_message_receipts.py", "inbox_custody.py",
-    "db_core.py", "db_schema.py", "inbox_consumer_schema.py",
+    "db_core.py", "db_schema.py", "inbox_consumer_schema.py", "session_lifecycle.py",
 ))
 TEST = "plugins/agent-bridge/tests/test_http50_capture_probes.py"
 EXTRA_PATHS = (

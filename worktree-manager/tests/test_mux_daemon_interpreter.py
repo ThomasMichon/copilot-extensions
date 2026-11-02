@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 import json
 import subprocess
 import stat
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -77,6 +79,67 @@ def test_posix_interpreter_selection_stays_unchanged(monkeypatch):
     )
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("relative_root", ["relative-root", "../relative-root"])
+def test_selected_root_anchors_relative_paths_without_resolving_links(
+    tmp_path, monkeypatch, explicit, relative_root,
+):
+    cwd = tmp_path / "caller" if relative_root.startswith("..") else tmp_path
+    cwd.mkdir(exist_ok=True)
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", relative_root)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "resolve", lambda *_a, **_k: pytest.fail("must retain path indirection"))
+        selected = mux_daemon_process.selected_root(Path(relative_root) if explicit else None)
+    assert selected == tmp_path / "relative-root"
+
+
+def test_ordinary_start_anchors_relative_cwd_before_instance_spec(tmp_path, monkeypatch):
+    (tmp_path / "relative-root").mkdir()
+    monkeypatch.chdir(tmp_path)
+    captured = {}
+    monkeypatch.setattr(mux_daemon_process, "direct_daemon_python", lambda source: (source, {}))
+    monkeypatch.setattr(
+        mux_daemon_process, "spawn_daemon",
+        lambda argv, **kwargs: captured.update(kwargs),
+    )
+    assert mux_daemon_process.spawn_detached(["python"], cwd=Path("relative-root"))
+    assert captured["cwd"] == str(tmp_path / "relative-root")
+    assert captured["instance"].runtime_root == tmp_path / "relative-root"
+
+
+@pytest.mark.parametrize("with_root", [False, True])
+def test_detached_child_uses_its_durable_external_cache(tmp_path, with_root):
+    root = tmp_path / "manager" if with_root else None
+    command = mux_daemon_process.detached_child_argv(root)
+    assert command[:2] == [sys.executable, "-X"]
+    assert command[3:] == [
+        "-m", "worktree_manager", "mux-daemon", "run",
+        *([f"--root={root}"] if root is not None else []),
+    ]
+    cache = Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+    assert cache.parent == mux_daemon_process.selected_root(root) / "cache" / "python"
+    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+    assert mux_daemon_process.detached_child_argv(root)[2] != command[2]
+
+
+def test_completed_application_start_retains_its_outer_slot_before_imports(tmp_path, monkeypatch):
+    root = tmp_path / "manager"
+    slot = root / "versions" / "1.2.3"
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.write_text("fixture retained bootstrap", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
+    command = mux_daemon_process.detached_child_argv(root)
+    assert command[:2] == [sys.executable, "-X"]
+    assert command[2].startswith("pycache_prefix=")
+    assert command[3:] == [
+        "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+        "-m", "worktree_manager", "mux-daemon", "run", f"--root={root}",
+    ]
+
+
 @pytest.mark.parametrize("gui_name", ["pythonw.exe", "gui-host.exe"], ids=["relocated", "renamed"])
 def test_linked_gui_keeps_console_and_venv_from_configured_home(tmp_path, monkeypatch, gui_name):
     base = tmp_path / "base"
@@ -116,7 +179,7 @@ def test_ordinary_start_uses_direct_interpreter_and_scrubs_credentials(monkeypat
         captured.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(pid=77)
 
-    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(mux_daemon_process, "spawn_daemon", popen)
     assert mux_daemon_process.spawn_detached(["venv-python", "-m", "worktree_manager"])
     assert captured["argv"] == ["base-pythonw", "-m", "worktree_manager"]
     env = captured["kwargs"]["env"]
@@ -139,7 +202,8 @@ def test_ordinary_start_reports_unsupported_interpreter_without_spawning(monkeyp
     assert "unsupported direct interpreter" in caplog.text
 
 
-def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, monkeypatch):
+@pytest.mark.parametrize("relative", [False, True])
+def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, monkeypatch, relative):
     root = tmp_path / "stable"
     root.mkdir()
     slot = root / "versions" / "candidate"
@@ -155,11 +219,16 @@ def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, m
         captured.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(pid=77)
 
-    monkeypatch.setattr(subprocess, "Popen", popen)
-    proc = mux_daemon_cutover.spawn_passive(slot, root=root, port=54321)
+    monkeypatch.setattr(mux_daemon_cutover, "spawn_daemon", popen)
+    monkeypatch.chdir(tmp_path)
+    proc = mux_daemon_cutover.spawn_passive(
+        slot, root=Path("stable") if relative else root, port=54321,
+    )
     assert proc.pid == 77
     assert captured["argv"][0] == "base-pythonw"
-    assert captured["kwargs"]["cwd"] == str(root)
+    assert captured["kwargs"]["cwd"] == root
+    assert captured["kwargs"]["instance"].runtime_root == root
+    assert f"--root={root}" in captured["argv"]
     env = captured["kwargs"]["env"]
     assert env["__PYVENV_LAUNCHER__"] == str(target_python)
     assert "PYTHONPATH" not in env
@@ -176,13 +245,17 @@ def test_real_windows_venv_runtime_pid_matches_spawn_and_routing(tmp_path):
     root = tmp_path / "stable"
     root.mkdir()
     slot = synthetic_runtime(root, "probe", program="""import json, os, pathlib, sys, time
+import work_coalescing_singleton
 from work_coalescing_singleton import CoalescingServer
 root = pathlib.Path(next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--root=')))
 port = int(next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--listen-port=')))
 server = CoalescingServer(lambda kind, payload: {'pid': os.getpid()}, bind_port=port, token='probe-token')
 server.start()
 try:
-    (root / 'runtime.json').write_text(json.dumps({'pid': os.getpid(), 'prefix': sys.prefix}), encoding='utf-8')
+    (root / 'runtime.json').write_text(json.dumps({
+        'pid': os.getpid(), 'prefix': sys.prefix, 'module': __file__,
+        'wcs_module': work_coalescing_singleton.__file__,
+    }), encoding='utf-8')
     while not (root / 'stop').exists():
         time.sleep(0.02)
 finally:
@@ -199,6 +272,7 @@ finally:
         data = json.loads(result_path.read_text(encoding="utf-8"))
         assert data["pid"] == proc.pid
         assert os.path.normcase(data["prefix"]) == os.path.normcase(str(slot))
+        assert all(Path(data[key]).is_relative_to(slot) for key in ("module", "wcs_module"))
         from work_coalescing_singleton import client
         client_id = client.new_client_id()
         try:

@@ -1,0 +1,13 @@
+{
+  "comment": "Keep all shared agent-procutil consumers in the compiler-free SDK release.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

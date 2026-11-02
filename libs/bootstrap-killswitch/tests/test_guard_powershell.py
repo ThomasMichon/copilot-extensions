@@ -37,13 +37,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess:
+def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess[str]:
     # Inherit the real environment (needed on Windows for e.g. SYSTEMROOT,
     # without which powershell.exe/pwsh often fail to start at all) and only
     # override what the guard actually reads; HOME/USERPROFILE don't matter
     # here since every call passes an explicit state-file override.
     env = dict(os.environ)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(state_file)
+    assert PWSH is not None
     return subprocess.run(
         [PWSH, "-NoProfile", "-File", str(GUARD), *args],
         capture_output=True,
@@ -52,20 +53,20 @@ def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_check_exits_nonzero_when_no_state_file(tmp_path) -> None:
+def test_check_exits_nonzero_when_no_state_file(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     result = _run(["check"], state_file)
     assert result.returncode == 1
 
 
-def test_status_reports_inactive_when_no_state_file(tmp_path) -> None:
+def test_status_reports_inactive_when_no_state_file(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     result = _run(["status"], state_file)
     assert result.returncode == 0
     assert json.loads(result.stdout)["active"] is False
 
 
-def test_on_writes_bom_free_utf8_json(tmp_path) -> None:
+def test_on_writes_bom_free_utf8_json(tmp_path: Path) -> None:
     """The specific bug this guard must never regress: Windows PowerShell
     5.1's `Set-Content -Encoding utf8` prepends a UTF-8 BOM, which Python's
     `json.load` (used by both the Bash guard and the agent-machines CLI)
@@ -84,7 +85,7 @@ def test_on_writes_bom_free_utf8_json(tmp_path) -> None:
     assert data["reason"] == "diagnosing a venv"
 
 
-def test_on_then_check_reports_active(tmp_path) -> None:
+def test_on_then_check_reports_active(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     _run(["on", "diagnosing a venv"], state_file)
     check_result = _run(["check"], state_file)
@@ -93,7 +94,7 @@ def test_on_then_check_reports_active(tmp_path) -> None:
     assert check_result.stdout == ""
 
 
-def test_on_then_off_then_check_reports_inactive(tmp_path) -> None:
+def test_on_then_off_then_check_reports_inactive(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     _run(["on", "temporary"], state_file)
     off_result = _run(["off"], state_file)
@@ -104,14 +105,14 @@ def test_on_then_off_then_check_reports_inactive(tmp_path) -> None:
     assert check_result.returncode == 1
 
 
-def test_malformed_state_file_fails_open(tmp_path) -> None:
+def test_malformed_state_file_fails_open(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     state_file.write_text("not json", encoding="utf-8")
     result = _run(["check"], state_file)
     assert result.returncode == 1
 
 
-def test_cross_reader_python_can_parse_powershell_written_state(tmp_path) -> None:
+def test_cross_reader_python_can_parse_powershell_written_state(tmp_path: Path) -> None:
     """The real integration contract: the Bash guard (and the Python CLI)
     read this exact file with Python's `json.load`. Write via PowerShell,
     read via plain Python -- the two independently-implemented guards must
@@ -124,10 +125,11 @@ def test_cross_reader_python_can_parse_powershell_written_state(tmp_path) -> Non
     assert data["reason"] == "cross-reader check"
 
 
-def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
+def test_on_detects_live_in_flight_reconcile(tmp_path: Path) -> None:
     """The switch only prevents a NEW reconcile; it warns, rather than
     silently overclaiming success, when one is already running."""
     fake_home = tmp_path / "home"
+    assert PWSH is not None
     lock_dir = fake_home / ".fake-plugin"
     lock_dir.mkdir(parents=True)
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -155,8 +157,9 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
     assert "fake-plugin" in result.stdout
 
 
-def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
+def test_on_reports_no_warning_when_no_lock_present(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
+    assert PWSH is not None
     fake_home.mkdir()
     env = dict(os.environ)
     env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
@@ -171,7 +174,7 @@ def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
     assert "WARNING" not in result.stdout
 
 
-def test_unknown_subcommand_errors(tmp_path) -> None:
+def test_unknown_subcommand_errors(tmp_path: Path) -> None:
     state_file = tmp_path / "ks.json"
     result = _run(["bogus"], state_file)
     assert result.returncode == 2

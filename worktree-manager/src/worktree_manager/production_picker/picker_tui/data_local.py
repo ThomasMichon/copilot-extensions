@@ -73,6 +73,9 @@ def is_local(machine: str, env: str) -> bool:
     registry for exactly this reason; this is the equivalent check for a
     single ``(machine, env)`` pair rather than the whole roster.
 
+    Attributable bootstrap provenance uses the shared local context; a missing
+    map is absence, while invalid declarations refuse. Older bootstraps retain
+    the historical path below without treating detection as a configured grant.
     The ``env``-gate and hostname tuple fast path stay Picker-specific.
     Every readable roster uses the shared platform-aware lookup through
     ``roster``, including unscoped native/guest pairs. Registry outages retain
@@ -104,11 +107,31 @@ def is_local(machine: str, env: str) -> bool:
         return False
     except RuntimeError as exc:
         raise RuntimeError("Locality is not ready; refresh the machine registry before launching") from exc
-    except (FileNotFoundError, ValueError, KeyError) as exc:
+    except FileNotFoundError:
+        entries = {}
+    except (ValueError, KeyError) as exc:
         entries = {}
         registry_error = exc
     if revision is not None and cfg.ConfigCacheSession(ttl=60).revision is not revision:
         raise RuntimeError("Locality is not ready; configuration changed")
+    if getattr(config, "machine_binding_known", False):
+        if registry_error is not None:
+            raise RuntimeError("Locality is not ready; the machine registry is unavailable") from registry_error
+        actual = local_execution_platform()
+        try:
+            current = roster.local_context(config, entries, LOCAL[0], actual)
+            if machine.casefold() == current.execution_machine.casefold():
+                return True
+            selection = resolve_machine_selection(entries, machine, actual)
+        except ValueError:
+            return False
+        target = selection.entry
+        if target is not None:
+            return target.key == current.customization_key
+        return (
+            selection.target.logical_machine.casefold() == current.execution_machine.casefold()
+            or machine.casefold() == LOCAL[0].casefold()
+        )
     if entries:
         actual = local_execution_platform()
         try:
@@ -176,9 +199,19 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def local_source_key() -> tuple[str, str]:
+    """Selected source identity; ``LOCAL`` remains the legacy OS observation."""
+    try:
+        cfg.project_name()
+    except RuntimeError:
+        return LOCAL
+    config = cfg.load_config()
+    return roster.local_host() if getattr(config, "machine_binding_known", False) else LOCAL
+
+
 def machines():
     """Machine-tab descriptors. Slice 1: the local machine only."""
-    m, e = LOCAL
+    m, e = local_source_key()
     return [(f"{m} {e}", m, e, True)]
 
 
@@ -318,7 +351,7 @@ def load(
 ):
     """Normalized records for this machine's worktrees (tracking + classify).
 
-    *machine*/*env* default to this host's identity (``LOCAL``). The SSH source
+    *machine*/*env* default to this host's selected source identity. The SSH source
     overrides them so the local machine's rows carry its ``machines.yaml``
     display name and env label, matching the multi-machine tab descriptors.
 
@@ -327,8 +360,9 @@ def load(
     competing caller-side answer.
     """
     derive.NOW = _dt.datetime.now()
-    machine = machine if machine is not None else LOCAL[0]
-    env = env if env is not None else LOCAL[1]
+    local = local_source_key() if machine is None or env is None else (machine, env)
+    machine = machine if machine is not None else local[0]
+    env = env if env is not None else local[1]
     norm_source = {
         "source_kind": source_kind,
         "source_id": source_id,
@@ -362,8 +396,9 @@ def refresh_one(worktree_id: str, machine: str | None = None,
                 env: str | None = None, *, runner=None):
     """Read ONE current slot -- the picker's per-row Refresh."""
     derive.NOW = _dt.datetime.now()
-    machine = machine if machine is not None else LOCAL[0]
-    env = env if env is not None else LOCAL[1]
+    local = local_source_key() if machine is None or env is None else (machine, env)
+    machine = machine if machine is not None else local[0]
+    env = env if env is not None else local[1]
     rows = list(
         engine_client.list_worktree_rows(
             context.project(),

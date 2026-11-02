@@ -17,6 +17,13 @@ from agent_bridge.spawn_target import PluginRef, SpawnTarget
 from plugin_resolve.registration import atomic_json
 
 
+@pytest.fixture(autouse=True)
+def admitted_target(monkeypatch):
+    # These preparation tests start after owner admission; exact-path policy
+    # still runs against each disposable checkout after allocation.
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
+
+
 def checkout(root):
     subprocess.run(
         ["git", "init", "--quiet", str(root)], check=True, timeout=10,

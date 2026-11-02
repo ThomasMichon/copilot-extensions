@@ -40,6 +40,8 @@ class Slot:
 
 
 class WarmPickerPool:
+    """Prepare spares after admitted Picker demand, never during daemon startup."""
+
     def __init__(self, root: Path) -> None:
         self.directory = root / "picker-sessions" / secrets.token_hex(12)
         self.owner_start = process_start_time(os.getpid())
@@ -50,7 +52,8 @@ class WarmPickerPool:
             self.engine = None
         self.environment = worker_environment(dict(os.environ))
         self.context = invocation_context(self.environment, manager_root=root)
-        self.mux = shutil.which("psmux" if os.name == "nt" else "tmux")
+        self.mux: str | None = None
+        self._mux_resolved = False
         self.mux_args = mux_arguments(self.environment)
         self._lock = threading.RLock()
         self._slots: list[Slot] = []
@@ -232,6 +235,9 @@ class WarmPickerPool:
                 return {"available": False, "reason": "draining"}
             if sum(slot.claimed is not None for slot in self._slots) >= MAX_ACTIVE:
                 return {"available": False, "reason": "capacity"}
+            if not self._mux_resolved:
+                self.mux = shutil.which("psmux" if os.name == "nt" else "tmux")
+                self._mux_resolved = True
             mismatched = False
             for slot in self._slots:
                 if slot.claimed is None and self._worker_ready(slot):

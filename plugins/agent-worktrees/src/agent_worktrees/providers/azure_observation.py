@@ -87,12 +87,29 @@ def thread_evidence(rows, author_id) -> tuple[tuple[Discussion, ...], tuple[Appr
         if property_value(props, "CodeReviewThreadType") == "VoteUpdate":
             value = property_value(props, "CodeReviewVoteResult")
             actor = property_value(props, "CodeReviewVotedByTfId")
+            reference = property_value(props, "CodeReviewVotedByIdentity")
+            if "CodeReviewVotedByIdentity" in props:
+                identities = row.get("identities")
+                native = (identities.get(reference) if isinstance(reference, str)
+                          and reference and reference == reference.strip()
+                          and isinstance(identities, dict) else None)
+                resolved = native.get("id") if isinstance(native, dict) else None
+                if (not isinstance(resolved, str) or not resolved.strip()
+                        or resolved != resolved.strip()
+                        or (actor is not None and identity(actor) != identity(resolved))):
+                    raise ValueError("vote event identity reference is unavailable or conflicting")
+                actor = resolved
             try:
+                if type(value) is not int and not (
+                    isinstance(value, str) and value in ("-10", "-5", "0", "5", "10")
+                ):
+                    raise ValueError("unsupported native vote value")
                 vote = int(value)
             except (ValueError, TypeError) as exc:
                 raise ValueError("vote event is invalid") from exc
             if (vote not in (-10, -5, 0, 5, 10) or not isinstance(actor, str)
-                    or not actor or type(row.get("id")) is not int or not instant(row.get("publishedDate"))):
+                    or not actor.strip() or actor != actor.strip()
+                    or type(row.get("id")) is not int or not instant(row.get("publishedDate"))):
                 raise ValueError("vote event identity or timestamp is unavailable")
             events.append(ApprovalEvent(str(row["id"]), identity(actor), vote, row["publishedDate"]))
             continue
@@ -434,6 +451,15 @@ def get_snapshot(
             errors.append(str(exc))
     elif config.policies:
         errors.extend(error for error in (statuses.error, evaluations.error, configurations.error) if error)
+    approved_candidates = {}
+    if policies_known:
+        for row in current_evaluations(evaluations.records):
+            context = row.get("context") or {}
+            if (str(row.get("status", "")).casefold() == "approved"
+                    and context.get("lastMergeSourceCommitId") == head
+                    and context.get("isExpired") is False
+                    and context.get("lastMergeCommitId")):
+                approved_candidates[str(row["configuration"]["id"])] = context["lastMergeCommitId"]
     enriched = []
     for policy in policies:
         if policy.build_id and policy.required and config.builds and not policy.stale:
@@ -441,7 +467,7 @@ def get_snapshot(
                 build = reader.build(policy.build_id)
                 source = str(build.get("sourceVersion") or "")
                 current_merge = str((pr.get("lastMergeCommit") or {}).get("commitId") or "")
-                if source and source not in (head, current_merge):
+                if source and source not in (head, current_merge, approved_candidates.get(policy.id)):
                     policy = replace(policy, stale=True)
                 if policy.state in ("rejected", "broken"):
                     policy = replace(policy, failed_tasks=reader.failed_tasks(policy.build_id))

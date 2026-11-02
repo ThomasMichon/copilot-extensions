@@ -13,7 +13,9 @@ from pathlib import Path
 import pytest
 
 from tests.test_install_sh_activation_guard import _BASH
+from tests.test_install_sh_activation_guard import _assert_cutover_lock_released
 from tests.test_install_sh_activation_guard import _extract_function_block as sh_function
+from tests.test_install_sh_activation_guard import _native_bash_environment
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PWSH = shutil.which("pwsh")
@@ -22,19 +24,38 @@ _PWSH = shutil.which("pwsh")
 def ps_function(name: str) -> str:
     text = (_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
     start = text.index(f"function {name} {{")
-    return text[start:text.index("\n}\n", start) + 2]
+    admission = (
+        ps_function("Assert-DispatchActions")
+        if name in {
+            "Invoke-CoordinatorCutover", "Invoke-VersionedActivate", "Invoke-Update",
+            "Install-RetainedRuntime", "Install-Runtime",
+        }
+        else ""
+    )
+    return admission + "\n" + text[start:text.index("\n}\n", start) + 2]
 
 
 def _run(tmp_path: Path, shell: str, script: str, *args: str) -> subprocess.CompletedProcess[str]:
     executable = _BASH if shell == "sh" else _PWSH
     if not executable:
         pytest.skip(f"{shell} is unavailable")
+    if shell == "sh":
+        policy = tmp_path / "action-controls.json"
+        if not policy.exists():
+            policy.write_text("{}", encoding="utf-8")
+        script = "\n".join([
+            f"SCRIPT_DIR={shlex.quote((_ROOT / 'scripts').as_posix())}",
+            f"_bootstrap_python() {{ printf '%s\\n' {shlex.quote(Path(sys.executable).as_posix())}; }}",
+            '_fail() { printf \'%s\\n\' "$*" >&2; }',
+            script,
+        ])
     path = tmp_path / f"exercise.{shell if shell == 'sh' else 'ps1'}"
     path.write_text(script, encoding="utf-8")
     prefix = [] if shell == "sh" else ["-NoProfile", "-NonInteractive", "-File"]
     return subprocess.run(
         [executable, *prefix, str(path), *args],
         capture_output=True, text=True, timeout=30,
+        env=_native_bash_environment() if shell == "sh" else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -68,7 +89,7 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
     if shell == "sh":
         return "\n".join([
             "set -euo pipefail",
-            f'INSTALL_DIR={shlex.quote(str(tmp_path))}',
+            f'INSTALL_DIR={shlex.quote(tmp_path.as_posix())}',
             "NO_SERVICE=0",
             f"REQUIRE_GRACEFUL_CUTOVER={int(strict)}",
             'SUPERVISOR_UNIT=test; SUPERVISOR_ENV_FILE=test',
@@ -139,11 +160,34 @@ def test_update_never_falls_back_or_reconciles_after_required_cutover_failure(
         assert expected in output
     if shell == "sh":
         # A failure must release the actual cross-version activation lock too.
-        probe = _run(tmp_path, shell, f'exec 8>"{tmp_path}/.activate.lock"\nflock -n 8\n')
-        assert probe.returncode == 0, probe.stderr
+        _assert_cutover_lock_released(tmp_path)
 
 
-def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
+def test_shell_harness_rechecks_real_policy_before_maintenance(tmp_path: Path) -> None:
+    script = _update_script(tmp_path, "sh", strict=False, outcome="success")
+    allowed = _run(tmp_path, "sh", script)
+    assert allowed.returncode == 0, allowed.stdout + allowed.stderr
+    assert "selected" in allowed.stdout.splitlines()
+    policy = tmp_path / "action-controls.json"
+    assert json.loads(policy.read_text(encoding="utf-8")) == {}
+    policy.write_text(json.dumps({
+        "runtime-activation": {"disabled": True},
+    }), encoding="utf-8")
+    denied = _run(tmp_path, "sh", script)
+    assert denied.returncode == 3, denied.stdout + denied.stderr
+    assert "runtime-activation" in denied.stdout + denied.stderr
+    assert not any(line in {"selected", "supervisor"} or line.startswith("service:")
+                   for line in denied.stdout.splitlines())
+    policy.write_text("{}", encoding="utf-8")
+    cleared = _run(tmp_path, "sh", script)
+    assert cleared.returncode == 0, cleared.stdout + cleared.stderr
+    assert "selected" in cleared.stdout.splitlines()
+    assert "supervisor" in cleared.stdout.splitlines()
+
+
+def _fake_python(
+    tmp_path: Path, output: str, rc: int, routed: bool, *, shell: str,
+) -> Path:
     implementation = tmp_path / "fake_python.py"
     implementation.write_text(
         "import sys\n"
@@ -156,13 +200,15 @@ def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
         "    exec(sys.argv[2])\n",
         encoding="utf-8",
     )
-    path = tmp_path / ("python.cmd" if os.name == "nt" else "python")
+    native_cmd = os.name == "nt" and shell == "ps1"
+    path = tmp_path / ("python.cmd" if native_cmd else "python")
     wrapper = (
         f'@echo off\r\n"{sys.executable}" "{implementation}" %*\r\nexit /b %errorlevel%\r\n'
-        if os.name == "nt" else
-        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(implementation))} "$@"\n'
+        if native_cmd else
+        f'#!/bin/sh\nexec {shlex.quote(Path(sys.executable).as_posix())} '
+        f'{shlex.quote(implementation.as_posix())} "$@"\n'
     )
-    path.write_text(wrapper, encoding="utf-8")
+    path.write_text(wrapper, encoding="utf-8", newline="\n")
     path.chmod(0o755)
     return path
 
@@ -185,12 +231,13 @@ def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
 def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     tmp_path: Path, shell: str, output: str, rc: int, accepted: bool,
 ) -> None:
-    python = _fake_python(tmp_path, output, rc, routed=True)
+    python = _fake_python(tmp_path, output, rc, routed=True, shell=shell)
     if shell == "sh":
         script = "\n".join([
             "set -euo pipefail",
+            f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}",
             "NO_SERVICE=0; REQUIRE_GRACEFUL_CUTOVER=1",
-            f'VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON="$VENV_PYTHON"',
+            f'VENV_PYTHON={shlex.quote(python.as_posix())}; LINK_PYTHON="$VENV_PYTHON"',
             '_step() { :; }; _ok() { :; }; _warn() { echo "$1" >&2; }',
             # Only the availability check is stubbed, never a real systemd call.
             'systemctl() { return 0; }',
@@ -200,6 +247,7 @@ def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     else:
         script = "\n".join([
             "$ErrorActionPreference = 'Stop'",
+            f"$InstallDir = '{tmp_path}'",
             "$RequireGracefulCutover = $true",
             f"$VenvPython = '{python}'; $LinkPython = $VenvPython",
             "function Write-Step { param($m) }; function Write-Ok { param($m) }",
@@ -215,11 +263,12 @@ def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
 
 
 def test_posix_required_cutover_rejects_missing_route_without_start(tmp_path: Path) -> None:
-    python = _fake_python(tmp_path, json.dumps({"ok": True}), 0, routed=False)
+    python = _fake_python(tmp_path, json.dumps({"ok": True}), 0, routed=False, shell="sh")
     script = "\n".join([
         "set -euo pipefail",
+        f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}",
         "NO_SERVICE=0; REQUIRE_GRACEFUL_CUTOVER=1",
-        f'VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON="$VENV_PYTHON"',
+        f'VENV_PYTHON={shlex.quote(python.as_posix())}; LINK_PYTHON="$VENV_PYTHON"',
         'systemctl() { return 0; }',
         sh_function("_coordinator_cutover"),
         "if _coordinator_cutover; then exit 99; fi",

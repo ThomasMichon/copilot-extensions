@@ -218,7 +218,8 @@ def _revalidate_cleanup_safety(
     shares (cleanup-toctou-revalidation effort, replacing the narrower
     ``_revalidate_before_reap``).
 
-    Reloads the tracking record fresh, rebuilds a single-worktree
+    Takes the per-worktree lifecycle lease, reloads the tracking record
+    fresh, rebuilds a single-worktree
     ``active_paths``, re-classifies git state fresh (no network fetch),
     re-derives ``turn_count``, and runs the complete (ordering-fixed)
     :func:`prune.cleanup_disposition` -- never a narrowed dirty/active-only
@@ -243,7 +244,7 @@ def _revalidate_cleanup_safety(
       contention **fails closed** (raises ``TimeoutError``, reported as the
       ``"locked"`` bucket) rather than degrading to the in-process-only
       lock. Callers must already hold ``FinalizeLock`` before calling this
-      (lock order: ``FinalizeLock`` then ``_RecordLock`` -- never reversed).
+      (lock order: ``FinalizeLock``, lifecycle lease, then ``_RecordLock``).
     - **Forced** (`force=True`): mirrors ``reap_one --force``'s documented,
       narrower escape hatch -- skips ``cleanup_disposition`` entirely (dirty/
       WIP/follow-ups/branch-merge are NOT re-checked), but still
@@ -308,7 +309,11 @@ def _revalidate_cleanup_safety(
         )
 
     try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
+        from . import worktree_lifecycle
+
+        with worktree_lifecycle.guard(yaml_path), tracking._RecordLock(
+            yaml_path, require_sidecar=True,
+        ):
             latest = tracking.load_record(yaml_path)
             if automatic and (
                 latest.dispatch_attempt is not None or latest.dispatch_attempt_opaque

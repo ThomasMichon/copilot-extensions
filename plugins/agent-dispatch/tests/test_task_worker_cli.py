@@ -143,6 +143,8 @@ def test_task_worker_client_import_keeps_server_stack_out_of_native_process():
     ["_ensure-coordinator"], ["focus"], ["federation", "status"],
     ["show", "another-task"], ["start", "another-task"],
     ["show", "TASK", "--history"],
+    ["start", "TASK", "--pool-generation", "1"],
+    ["start", "TASK", "--pool-generation", "0"],
     ["progress", "TASK", "wrong", "--summary", "bad"],
     ["complete", "TASK", "wrong"],
     ["abandon", "TASK"], ["abandon", "TASK", "--permit", "--duplicate-of", "other"],

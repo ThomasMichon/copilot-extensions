@@ -252,7 +252,29 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
-    exec "$AGENT_RT_PY" -m agent_worktrees "$@"
+    local nonce python_cache selected_cache
+    nonce="$(LC_ALL=C od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    [[ "$nonce" =~ ^[0-9a-f]{32}$ ]] || return 126
+    python_cache="$RUNTIME_ROOT/cache/python/unsealed-$nonce"
+    if [[ "$AGENT_RT_PY" == *.exe ]]; then
+        python_cache="$(cygpath -aw "$python_cache")"
+        case "$python_cache" in
+            '\\?\'*) ;;
+            '\\'*) python_cache='\\?\UNC\'"${python_cache#'\\'}" ;;
+            *) python_cache='\\?\'"$python_cache" ;;
+        esac
+    fi
+    selected_cache="$("$AGENT_RT_PY" -I -B -X "pycache_prefix=$python_cache" -c '
+import sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    print(sys.pycache_prefix)
+else:
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
+' "$RUNTIME_ROOT")" || return 126
+    [[ -n "$selected_cache" && "$selected_cache" != *$'\n'* ]] || return 126
+    exec "$AGENT_RT_PY" -X "pycache_prefix=$selected_cache" -m agent_worktrees "$@"
 }
 
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&
@@ -461,7 +483,8 @@ assert_plugin_runtime_publication() {
 }
 
 resolve_runtime
-if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" &&
+      "${_aw_update_diagnostic:-0}" != 1 ]]; then
     assert_plugin_runtime_publication
 fi
 # Commit to self-provisioning (and, in doing so, permit boot_trace_log to
@@ -471,7 +494,8 @@ fi
 # strictly before `provision-start`'s own `mkdir -p`, are captured on a
 # genuine first-ever launch instead of silently dropped (Copilot review
 # follow-up, PR #3310).
-if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" &&
+      "${_aw_update_diagnostic:-0}" != 1 ]]; then
     WILL_PROVISION=1
 fi
 boot_trace resolver-loaded
@@ -488,6 +512,10 @@ fi
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     boot_trace dispatch fast
     run_runtime "$@"
+fi
+if [[ "${_aw_update_diagnostic:-0}" == 1 ]]; then
+    printf '%s\n' '[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.' >&2
+    exit 127
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-worktrees] runtime not provisioned (AGENT_WORKTREES_NO_SELFPROVISION set).\n' >&2

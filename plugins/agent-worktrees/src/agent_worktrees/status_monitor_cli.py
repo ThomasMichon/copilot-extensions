@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import os
 import sys
 
 from . import config as cfg
-from .sessions_pane_args import sweep_mux_pane_args
+from .sessions_pane_args import sweep_registered_mux_pane_args as sweep_mux_pane_args
+from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
+
+_DEFAULT_SWEEP_INTERVAL_S = 30
 
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
@@ -18,26 +23,8 @@ from .sessions_pane_args import sweep_mux_pane_args
 #: block a shutdown indefinitely (2026-09-26 PR review finding).
 _TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
 
-#: Same bounded-grace discipline, applied to the self-retire path itself.
-#: Once this daemon observes a live, strictly-newer generation has taken over
-#: (self_retire.is_superseded), it stops admitting new work and should exit
-#: within one or two sweep cycles -- but the pre-existing gate required TWO
-#: *consecutive* iterations of "superseded AND every busy_reasons() channel
-#: clear" (sweep/hook/classify/tracking-write) before breaking, resetting the
-#: counter to zero on any single busy tick in between. On a machine with
-#: frequent concurrent CLI traffic (hook/classify/tracking-write calls arrive
-#: often enough that some channel is near-always busy at the exact instant
-#: checked), that AND-of-every-channel gate can go unsatisfied indefinitely --
-#: a demoted daemon confirmed-superseded on every single iteration, yet never
-#: accumulating two clean confirms in a row, observed lingering for *days*
-#: (ThomasMichon/copilot-extensions#5326's follow-up: the drain_timeout fix
-#: there covers the orchestrator-driven drain RPC; this covers the daemon's
-#: own independent self-retire loop, which must never depend on a clean
-#: confirm that can be perpetually denied by unrelated traffic). Fix: once
-#: superseded is first observed, start a bounded deadline; reaching it forces
-#: the break regardless of busy_reasons, so self-retire is always upper
-#: bounded, same as the tracking-write shutdown grace above -- never the
-#: multi-day lingering this constant replaces.
+# Explicit shutdown grace. Supersession closes admission and waits for all
+# accepted work independently; this deadline cannot force predecessor retirement.
 _SELF_RETIRE_MAX_GRACE_S = 120.0
 
 
@@ -75,49 +62,6 @@ def _wait_for_tracking_write_idle(
         sleep(poll_interval_s)
 
 
-def _wake_interruptible_wait(wake_event, seconds: float) -> None:
-    """Sleep up to ``seconds``, but return immediately (and clear the event)
-    if :func:`resident_push.notify` sets ``wake_event`` first.
-
-    This is what turns the periodic sweep interval into a mere **backstop**:
-    an explicit status push (or any ``postToolUse`` mutation observed via the
-    hook-IPC path) wakes the loop early instead of waiting out the full
-    interval, while the interval itself still fires unconditionally for
-    every other source of staleness (external git activity, a stale mux
-    session, etc.) that has no explicit push of its own.
-    """
-    if wake_event.wait(timeout=seconds):
-        wake_event.clear()
-
-
-def _kind_wakes_sweep(kind: str, targets: list[str] | None) -> bool:
-    """Whether a hook-IPC ``kind`` actually invalidated something and should
-    therefore wake the sweep loop early.
-
-    ``postToolUse`` fires for EVERY tool call, but
-    ``_ResidentHookPolicy.mutation_targets`` returns an empty list for a
-    read-only one (e.g. ``git status``) -- waking the loop for those would
-    turn the periodic backstop into a high-frequency render path for zero
-    benefit (2026-09-27 Copilot review finding). ``targets is None`` means
-    "invalidate everything" (a real, unbounded-scope mutation); a non-empty
-    list means "invalidate these specific paths" (also real); an empty list
-    means nothing was invalidated at all -- no wake. Pulled out as its own
-    pure predicate so the "which kinds push" policy is directly unit-testable
-    without needing a live ``HookIpcServer``/``_ResidentHookPolicy.ready()``
-    to drive ``_decide`` end-to-end.
-
-    ``handoffWake`` (sent by ``cmd_note_handoff`` via
-    ``hook_ipc.send_best_effort`` after it persists a pending handoff) always
-    wakes, unconditionally -- it carries no ``targets`` of its own because
-    the thing that changed is a handoff record, not a cached status segment;
-    the whole point of this kind is "something actionable was just
-    registered, stop waiting out the backstop interval for it."
-    """
-    if kind == "handoffWake":
-        return True
-    return kind == "postToolUse" and (targets is None or bool(targets))
-
-
 def _core():
     from . import __main__ as core
 
@@ -138,11 +82,15 @@ def add_parsers(sub) -> None:
         "(one process instead of one per session; mandatory, always-on "
         "infrastructure -- not operator-configurable)",
     )
-    p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
+    p.add_argument(
+        "--interval", type=int, default=_DEFAULT_SWEEP_INTERVAL_S,
+        help="Correctness backstop in seconds (default 30, min 2); pushes wake immediately",
+    )
     p.add_argument("--passive", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--control-port", type=int, default=None, help=argparse.SUPPRESS)
 
 
+@daemon_entrypoint("agent-worktrees-status-monitor", source=__file__, purpose="production")
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
@@ -157,29 +105,38 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
-    from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
+    from . import resident_push, status_monitor_cutover, status_monitor_runtime, status_updater_cli
+    from .status_monitor_handover import MonitorHandover
+    from .runtime_monitor_completion import recover as complete_publication
+    from . import runtime_monitor_preparation as preparation
+    from .runtime_monitor_identity import publish_lock
     from . import repository_map, tracking_write
     from . import handoff_prompt_receipt_control as receipt_control
     from . import worktree_status_daemon
     from .status_monitor_drain import DrainTrace, drain_with_diagnostics
+    from .status_monitor_retirement import drain_observations, prune_retired_surfaces, surface_busy
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
     from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
     from .worktrees_producer import publish_active_project
+    from .allocation_link_runtime import AllocationLinkRuntime
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     core = _core()
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
-    interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
+    interval = (
+        args.interval
+        if getattr(args, "interval", None) and args.interval >= 2
+        else _DEFAULT_SWEEP_INTERVAL_S
+    )
     passive_mode = bool(getattr(args, "passive", False))
+    if passive_mode and not preparation.register(status_monitor_runtime._aw_runtime_home(), getattr(args, "control_port", None)):
+        return 0
 
-    # Stage D (agent-cli-lazy-dispatch): these six are owned by
-    # status_updater_cli/status_monitor_runtime (both already cluster-free);
-    # resolving them via `_core_helper` -- direct sibling import, falling back
-    # to a monkeypatched `__main__` override if one is present -- instead of
-    # `core.attr`, is what lets `status-monitor` stay cluster-free too.
+    # Resolve sibling helpers directly while preserving test entrypoint overrides.
     lock = _core_helper("_monitor_lock_path", status_monitor_runtime._monitor_lock_path)()
     my_prefix = os.path.realpath(sys.prefix)
+    my_slot = os.path.dirname(my_prefix) if os.path.basename(my_prefix) == ".venv" else my_prefix
     from .runtime_identity import PROCESS_GENERATION, PROCESS_VERSION
     token = str(os.getpid())
     activate_project_for_path = _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)
@@ -200,18 +157,21 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     shutdown_requested_since: float | None = None
     admission_closed = False
     published_lock = not passive_mode
+    discovery_published = False
     sweep_active = False
-    self_retire_generation = None
+    handover = MonitorHandover(passive=passive_mode)
     self_retire_confirms = 0
     self_retire_confirmations = 2
-    self_retire_first_detected: float | None = None
+    from .runtime_monitor_retirements import ResidentRetirements
+
+    retirements = ResidentRetirements(status_monitor_runtime._aw_runtime_home())
 
     def _other_current_monitor() -> bool:
         """A *different*, live monitor on a non-superseded runtime owns the host."""
         if passive_mode:
             return False
         d = _locks.read_lock(lock)
-        if not (_locks.lock_is_live(d) and isinstance(d, dict)):
+        if not (_locks.lock_is_running(d) and isinstance(d, dict)):
             return False
         if d.get("pid") == os.getpid():
             return False
@@ -221,26 +181,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         identity = {"generation": d["runtime_generation"]} if d.get("runtime_generation") else {}
         return not (op and runtime_superseded(prefix=op, **identity))
 
-    # Atomic exclusivity gate -- MUST run before the lock-file check below,
-    # not instead of it. The lock file remains the metadata channel other
-    # tooling reads (pid/prefix/mux, supersession comparisons); it was never
-    # sufficient alone for exclusivity, because "read the file, decide it's
-    # not live, then write it" has a real gap between the read and the
-    # write. Any number of monitors launched in the same narrow window (many
-    # sessions' lifecycle hooks firing close together, which is exactly what
-    # a burst of `agent-worktrees create`/`resume` calls or several mux panes
-    # restarting in quick succession produces) could all pass that check
-    # before any of them committed a write, and each surviving duplicate then
-    # ran indefinitely until a periodic re-check happened to notice a sibling
-    # -- observed in the wild as 100+ live `status-monitor` processes eating
-    # double-digit percent CPU. A
-    # :class:`single_instance_lease.SingleInstance` (the same proven,
-    # OS-level flock/msvcrt primitive already used for the `classify`
-    # coalescing lock and the cutover orchestrator elsewhere in this plugin)
-    # closes the gap: acquisition is one atomic kernel call, so of any
-    # number of concurrent callers racing the same name, exactly one ever
-    # wins -- every loser raises immediately here, never reaching the
-    # expensive setup below, let alone running to completion.
+    # Acquire atomic kernel exclusivity BEFORE checking lock-file metadata.
+    # A read/check/write alone races concurrent cold starts, letting duplicate
+    # residents survive until a periodic recheck; losers must exit before setup.
     #
     # Deliberately a SEPARATE file from `lock` (`status-monitor.lock`, the
     # metadata channel written below): `SingleInstance.acquire()` writes its
@@ -252,27 +195,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # for the next contender that opens the replacement (review finding,
     # PR #5412).
     #
-    # Scope: this claim protects only an ORDINARY cold start (the reported
-    # bug -- a burst of session-lifecycle hooks each independently deciding
-    # to spawn, with no existing owner or an existing non-superseding one).
-    # It deliberately does NOT extend to the muxless/superseded-runtime
-    # replacement path (`_other_current_monitor()`'s own two exceptions,
-    # already pre-existing code this PR doesn't touch) or the cutover/
-    # promotion lifecycle -- several attempts to extend atomic exclusivity
-    # into those paths each surfaced new, genuine concurrency/lifecycle bugs
-    # under review (dead-replacement-metadata false-positive self-retire, a
-    # second unsynchronized publish point, an abrupt exit skipping drain of
-    # in-flight work, predecessor/successor overlap far longer than any
-    # bounded wait, concurrent-handler races, and more). A replacement
-    # candidate now simply contests this SAME hard lease like any other
-    # starter: since the still-live incumbent already holds it, the
-    # replacement backs off and the incumbent keeps running until it exits
-    # on its own for an unrelated reason -- a known, disclosed regression
-    # (the muxless/superseded-runtime replacement no longer completes
-    # promptly) tracked as follow-up, not a safety bug (no duplication).
-    # Properly restoring prompt replacement needs a holistic redesign of
-    # that whole lifecycle, not incremental patches here (review findings,
-    # PR #5412; follow-up: #5453).
+    # This lease covers ordinary cold starts. Installer replacement starts a
+    # passive successor, then promotes its separately serialized route; it
+    # never force-stops the incumbent to acquire this cold-start lease.
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
 
     def _acquire_ownership_lease():
@@ -349,6 +274,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         status_monitor_runtime._aw_runtime_home() / "worktrees-current.sqlite3",
         wake=wake_event,
         elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
+        admitted=handover.read_admitted,
     )
     resident_push.bind(wake_event, segment_cache)
     published: dict[tuple[str, str], str] = {}
@@ -360,6 +286,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     lifecycle_count = 0
     lifecycle_claims: dict[str, float] = {}
     governance = loop_governance.LoopGovernance()
+
+    def _allocation_owner_elected() -> bool:
+        core._status_monitor_recheck(governance, "pre-mutation:allocation-link")
+        return status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
+
+    allocation_linker = AllocationLinkRuntime(
+        elected=_allocation_owner_elected, context_lock=state_lock, wake=wake_event,
+    )
     hook_client = load_hook_client_module()
     hook_policy = resident_hook_policy_type(hook_client)
     if hook_policy.ready():
@@ -380,9 +314,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if delay_s > 0:
                 time.sleep(delay_s)
                 return {"delayed": True}
-        return classify_daemon_compute(kind, payload)
+        return classify_daemon_compute(
+            kind, payload,
+            **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
+        )
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
+        if admission_closed and core.git_ops._windows_observation():
+            if kind == "snapshot":
+                return {"segment": segment_cache.pending_segment()}
+            raise HookUnavailable
         nonlocal lifecycle_count
         is_lifecycle = kind == "sessionStart"
         provisioning_start_event = threading.Event() if is_lifecycle else None
@@ -462,14 +403,20 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     def _start_request_surfaces() -> bool:
         nonlocal hook_server, classify_server, tracking_write_server
-        if admission_closed or not published_lock or shutdown_requested.is_set():
+        if admission_closed or not published_lock or shutdown_requested.is_set() or not handover.promotion_requested:
             return False
+        if handover.generation is None:
+            handover.generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+        if handover.generation is None:
+            return False
+        retirements.refresh(cleanup=False)
         try:
             worktrees_runtime.activate()
         except (ProjectionError, ProjectionUnavailable, OSError) as exc:
             print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
             return False
         repositories_runtime.activate()
+        allocation_linker.activate()
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)
@@ -513,26 +460,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             tracking_write_server = None
 
     def _close_request_surface_admission(reason: str = "superseded") -> None:
-        """Soft-close counterpart to :func:`_close_request_surfaces`: stops
-        admitting new requests on each live request surface while leaving
-        its socket open (see ``CoalescingServer.close_admission``'s own
-        docstring for the full rationale) -- a single-shot RPC caller
-        reaching this daemon during the bounded drain-only grace window
-        (``_SELF_RETIRE_MAX_GRACE_S`` / an explicit shutdown's own grace)
-        gets a structured ``{"fallback": true, "reason": reason}`` response
-        instead of a bare OS-level connection-refused. The server objects
-        stay the live ``hook_server``/``classify_server``/
-        ``tracking_write_server`` references (never moved into the
-        ``retired_*`` lists, never set to ``None``), so the existing
-        ``_hook_busy``/``_classify_busy``/``_tracking_write_busy`` checks
-        keep seeing their in-flight handler counts unchanged. Actual socket
-        teardown happens once, unconditionally, in ``_close_request_surfaces``
-        at real process exit (this function's own callers never close a
-        socket).
-        """
-        if hook_server is not None:
+        """Keep degraded read routes and handler counts until custody settles."""
+        keep_cleanup_reads = segment_cache.observation_busy(worktree_status_runtime)
+        if hook_server is not None and not keep_cleanup_reads:
             hook_server.close_admission(reason)
-        if classify_server is not None:
+        if classify_server is not None and not keep_cleanup_reads:
             classify_server.close_admission(reason)
         if tracking_write_server is not None:
             tracking_write_server.close_admission(reason)
@@ -541,9 +473,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal admission_closed, published_lock
         admission_closed = True
         published_lock = False
+        if core.git_ops._windows_observation():
+            segment_cache.close_observation_admission()
         receipts.close_admission()
         worktrees_runtime.close_admission("draining")
         repositories_runtime.close_admission("draining")
+        allocation_linker.close_admission()
         _close_request_surface_admission()
         # Stop admitting new managed-mux push observations too (a genuine
         # "new source" admission vector, distinct from worktree_status_runtime's
@@ -555,6 +490,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     worktree_status_runtime.start(
         _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "worktree-status-cache.sqlite3",
         worktree_status_compute,
+        **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
     )
 
     managed_mux_runtime = mux_link.InProcessRuntime()
@@ -567,7 +503,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             "prefix": my_prefix, "mux": bool(mux_bin),
             "runtime_generation": PROCESS_GENERATION,
             "version": PROCESS_VERSION,
-            "runtime_slot": os.path.basename(my_prefix),
+            "runtime_slot": os.path.basename(my_slot),
         }
         if isinstance(installation_context, dict):
             extra.update(
@@ -588,40 +524,28 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(managed_mux_runtime.lock_extra())
         return extra
 
+    def _publish_lock(*, routing_held: bool = False) -> bool:
+        nonlocal discovery_published
+        discovery_published = publish_lock(lock, extra=_lock_extra(), routing_held=routing_held)
+        return discovery_published
+
     def _hook_busy() -> bool:
-        return any(
-            server.active_handler_count() > 0
-            for server in ([hook_server] if hook_server is not None else []) + retired_hook_servers
-        )
+        return surface_busy(hook_server, retired_hook_servers)
 
     def _classify_busy() -> bool:
-        return any(
-            server.active_handler_count() > 0
-            for server in ([classify_server] if classify_server is not None else [])
-            + retired_classify_servers
-        )
+        return surface_busy(classify_server, retired_classify_servers)
 
     def _tracking_write_busy() -> bool:
-        return any(
-            server.active_handler_count() > 0
-            for server in ([tracking_write_server] if tracking_write_server is not None else [])
-            + retired_tracking_write_servers
+        return surface_busy(
+            tracking_write_server, retired_tracking_write_servers,
         ) or tracking_write.has_inflight_write()
 
     def _cleanup_retired_request_surfaces() -> None:
         with state_lock:
-            retired_hook_servers[:] = [
-                server for server in retired_hook_servers if server.active_handler_count() > 0
-            ]
-            retired_classify_servers[:] = [
-                server for server in retired_classify_servers if server.active_handler_count() > 0
-            ]
-            if not tracking_write.has_inflight_write():
-                retired_tracking_write_servers[:] = [
-                    server
-                    for server in retired_tracking_write_servers
-                    if server.active_handler_count() > 0
-                ]
+            prune_retired_surfaces(
+                retired_hook_servers, retired_classify_servers, retired_tracking_write_servers,
+                tracking_write.has_inflight_write,
+            )
 
     def _drain_busy_reasons() -> list[str]:
         reasons: list[str] = []
@@ -633,8 +557,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("classify")
         if _tracking_write_busy():
             reasons.append("tracking-write")
+        if allocation_linker.active_count():
+            reasons.append("allocation-link")
         if worktrees_runtime.feed.active_count():
             reasons.append("worktrees-feed")
+        reasons.extend(worktrees_runtime.agenda_busy(control_server))
         if control_server.current_read_count():
             reasons.append("worktrees-read")
         if control_server.current_read_count(repository_map.READ_ACTION):
@@ -643,74 +570,63 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("repos-map-producer")
         if receipts.active_count():
             reasons.append("prompt-receipt")
+        reasons.extend(segment_cache.custody_busy_reasons(worktree_status_runtime))
         return reasons
 
     def _drain_observations() -> dict[str, int]:
-        return {
-            "sweep": int(sweep_active),
-            "hook": sum(server.active_handler_count() for server in
-                        ([hook_server] if hook_server is not None else []) + retired_hook_servers),
-            "classify": sum(server.active_handler_count() for server in
-                            ([classify_server] if classify_server is not None else [])
-                            + retired_classify_servers),
-            "tracking-write": sum(server.active_handler_count() for server in
-                                  ([tracking_write_server] if tracking_write_server is not None else [])
-                                  + retired_tracking_write_servers),
-            "tracking-write-compute": int(tracking_write.has_inflight_write()),
-            "worktrees-feed": worktrees_runtime.feed.active_count(),
-            "worktrees-read": control_server.current_read_count(),
-            "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
-            "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
-            "prompt-receipt": receipts.active_count(),
-            "lifecycle": lifecycle_count,
-        }
+        return drain_observations(
+            sweep_active=sweep_active,
+            hooks=([hook_server] if hook_server is not None else []) + retired_hook_servers,
+            classifiers=([classify_server] if classify_server is not None else []) + retired_classify_servers,
+            writers=([tracking_write_server] if tracking_write_server is not None else []) + retired_tracking_write_servers,
+            tracking_write=tracking_write, allocation_linker=allocation_linker,
+            worktrees_runtime=worktrees_runtime, control_server=control_server,
+            repositories_runtime=repositories_runtime, receipts=receipts, lifecycle_count=lifecycle_count,
+            segment_cache=segment_cache, worktree_status_runtime=worktree_status_runtime,
+        )
 
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
         port=getattr(args, "control_port", None),
-        stream_handle=lambda action, payload, disconnected: worktrees_runtime.feed.stream(
-            payload, disconnected
-        ),
+        stream_handle=worktrees_runtime.stream,
     )
     empty_strikes = 0
+    idle_guard = None
     max_empty_strikes = 3
 
-    def _handle_control(action: str, payload: dict) -> dict:
+    from . import status_monitor_recovery_contract as guarded_recovery
+
+    def _handle_control(action: str, payload: dict, *, routing_held: bool = False) -> dict:
         nonlocal admission_closed, published_lock
+        if action == preparation.ACTION:
+            with state_lock:
+                if published_lock or not preparation.cancel(
+                    payload, root=status_monitor_runtime._aw_runtime_home(), port=control_server.port, passive=passive_mode,
+                ):
+                    return {"shutdown": False}
+                return _handle_control("shutdown", {})
         if action == "health":
-            roster_health = worktrees_runtime.health()
-            receipt_health = receipts.health()
-            repository_health = repositories_runtime.health()
-            roster_health["capabilities"] = [
-                *roster_health["capabilities"], *receipt_health["capabilities"],
-                *repository_health["capabilities"],
-            ]
-            if shutdown_requested.is_set():
-                roster_health["worktrees"]["status"] = "shutdown"
-            roster_ready = roster_health["worktrees"]["status"] in {"ready", "unready"}
-            return {
-                "status": "draining" if admission_closed else (
-                    "ready" if roster_ready else "unavailable"
-                ),
-                "published": published_lock,
-                "pid": os.getpid(),
-                **roster_health,
-                "promptReceipt": receipt_health["promptReceipt"],
-                "repositories": repository_health["repositories"],
-                "runtime_generation": PROCESS_GENERATION,
-                "version": PROCESS_VERSION,
-                "runtime_slot": os.path.basename(my_prefix),
-            }
+            health = guarded_recovery.monitor_health(
+                worktrees_runtime, receipts, repositories_runtime, allocations=allocation_linker,
+                shutdown=shutdown_requested.is_set(), draining=admission_closed,
+                published=published_lock and discovery_published,
+            )
+            health["predecessorRetirement"] = retirements.health()
+            health["drain"] = _drain_observations()
+            health["capabilities"].append(preparation.CAPABILITY)
+            return health
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
+        if action in {"agenda-read", "agenda-publish"}:
+            return worktrees_runtime.agenda_handle(action, payload)
         if action == "picker-bootstrap":
             return worktrees_runtime.picker_bootstrap(payload)
         if action == READ_ACTION:
-            if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+            if not handover.read_admitted():
                 worktrees_runtime.close_admission("superseded")
             return worktrees_runtime.handle(payload)
         if action == repository_map.READ_ACTION:
-            if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+            if not handover.read_admitted():
                 repositories_runtime.close_admission("superseded")
             return repositories_runtime.read(payload)
         if action == "promote":
@@ -722,6 +638,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     if shutdown_requested.is_set():
                         return {"adopted": False, "error": "monitor is shutting down"}
+                    handover.promotion_requested = True
+                    if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+                        return {"adopted": False, "error": "current-roster authority unavailable"}
+                    handover.reopen()
+                    admission_closed = False
                     with trace.stage("retired-cleanup"):
                         _cleanup_retired_request_surfaces()
                     published_lock = True
@@ -732,8 +653,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         wake_event.set()
                         return {"adopted": False, "error": "current-roster authority unavailable"}
                     receipts.open_admission()
+                    if core.git_ops._windows_observation():
+                        segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
-                        _locks.write_lock(lock, extra=_lock_extra())
+                        if not _publish_lock():
+                            _enter_drain_only_state()
+                            return {"adopted": False, "error": "monitor discovery publication refused"}
             trace.emit("complete", "ok")
             wake_event.set()
             return {"adopted": True}
@@ -745,6 +670,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 repositories_runtime.close_admission("shutdown")
             wake_event.set()
             return {"shutdown": True}
+        if action == guarded_recovery.ACTION:
+            with state_lock:
+                return guarded_recovery.handle(
+                    payload, directory=status_monitor_cutover.routing_dir(),
+                    generation=PROCESS_GENERATION, port=control_server.port,
+                    reopen=lambda: _handle_control("undrain", {}, routing_held=True),
+                    close_on_failure=_enter_drain_only_state,
+                    lock_timeout=status_monitor_cutover._READ_TIMEOUT_S,
+                )
         if action == "undrain":
             trace = DrainTrace(
                 status_monitor_cutover.routing_dir(), role="daemon",
@@ -755,18 +689,24 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     if shutdown_requested.is_set():
                         return {"draining": True, "error": "monitor is shutting down"}
                     admission_closed = False
+                    handover.reopen()
                     with trace.stage("retired-cleanup"):
                         _cleanup_retired_request_surfaces()
                     published_lock = True
                     with trace.stage("activate-publisher"):
                         published_lock = _start_request_surfaces()
                     if not published_lock:
+                        _enter_drain_only_state()
                         trace.emit("undrain-refused", "fail")
                         wake_event.set()
                         return {"draining": True, "error": "current-roster authority unavailable"}
                     receipts.open_admission()
+                    if core.git_ops._windows_observation():
+                        segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
-                        _locks.write_lock(lock, extra=_lock_extra())
+                        if not _publish_lock(routing_held=routing_held):
+                            _enter_drain_only_state()
+                            return {"draining": True, "error": "monitor discovery publication refused"}
             trace.emit("complete", "ok")
             wake_event.set()
             return {"draining": False}
@@ -774,7 +714,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return {"ok": False, "error": f"unsupported action {action!r}"}
         timeout = float(payload.get("timeout") or 0.0)
         poll = float(payload.get("poll") or 0.1)
-        force = bool(payload.get("force"))
+        with state_lock:
+            if core.git_ops._windows_observation():
+                segment_cache.close_observation_admission()
+            force = bool(payload.get("force")) and not (
+                core.git_ops._windows_observation() and any(segment_cache.observation_counts())
+            )
         return drain_with_diagnostics(
             state_lock=state_lock, enter=_enter_drain_only_state,
             cleanup=_cleanup_retired_request_surfaces, busy=_drain_busy_reasons,
@@ -782,67 +727,91 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             port=control_server.port, timeout=timeout, poll=poll, force=force,
         )
 
+    from . import guarded_anchors
+
+    guarded_anchors.prepare_resident()
     control_server.start()
     if not passive_mode:
         status_monitor_cutover.publish_route(control_server.port, pid=os.getpid(), version=None)
     published_lock = _start_request_surfaces()
     if published_lock:
-        _locks.write_lock(lock, extra=_lock_extra())
+        _publish_lock()
+
+    def _idle_candidate_still_empty() -> bool:
+        retirements.refresh(cleanup=False)
+        return (
+            status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
+            and published_lock and not admission_closed and not shutdown_requested.is_set()
+            and not monitor_roots.live_picker_projects()
+            and not core.list_cache.recent_demand_projects()
+            and not reconciler.has_live_worktree_mux
+            and not worktree_status_runtime.has_active_demand()
+            and not managed_mux_runtime.has_active_demand()
+            and not worktrees_runtime.demand_projects()
+            and not repositories_runtime.has_active_demand()
+            and not _drain_busy_reasons()
+            and not allocation_linker.has_demand()
+            and not retirements.pending
+        )
 
     try:
         repositories_runtime.start(interval)
         while True:
+            complete_publication(
+                status_monitor_runtime._aw_runtime_home(),
+                promote=lambda: _handle_control("promote", {}),
+                ready=lambda: guarded_recovery.serving_ready(_handle_control("health", {})),
+            )
+            if core.git_ops._windows_observation():
+                segment_cache.settle_pending_once()
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+            retirements.refresh(cleanup=active_generation is not None)
             readers_ready = (
                 worktrees_runtime.health()["worktrees"]["status"] == "ready"
                 and repositories_runtime.health()["repositories"]["admitting"]
             )
-            if active_generation is not None and (not published_lock or not readers_ready):
+            if handover.promotion_requested and active_generation is not None and (not published_lock or not readers_ready or not discovery_published):
                 with state_lock:
                     if (
                         not admission_closed and not shutdown_requested.is_set()
-                        and (not published_lock or not readers_ready)
+                        and (not published_lock or not readers_ready or not discovery_published)
                     ):
                         published_lock = True
                         published_lock = _start_request_surfaces()
                         if published_lock:
-                            _locks.write_lock(lock, extra=_lock_extra())
-            if self_retire_generation is None:
-                self_retire_generation = active_generation
-                if self_retire_generation is None and runtime_superseded():
-                    break
+                            _publish_lock()
+            if handover.generation is None:
+                handover.generation = active_generation if handover.promotion_requested else None
+                if handover.promotion_requested and handover.generation is None and runtime_superseded():
+                    if not core.git_ops._windows_observation():
+                        break
+                    with state_lock:
+                        _enter_drain_only_state()
+                    if not any(segment_cache.observation_counts()):
+                        break
             if shutdown_requested.is_set():
                 if shutdown_requested_since is None:
                     shutdown_requested_since = time.monotonic()
                 if (
                     not _drain_busy_reasons()
-                    or time.monotonic() - shutdown_requested_since >= _SELF_RETIRE_MAX_GRACE_S
-                ):
-                    # Same bounded-upper-bound discipline as self-retire below:
-                    # an explicit shutdown request must never wait on
-                    # busy_reasons() forever either.
-                    break
-            if self_retire_generation is not None:
-                try:
-                    superseded = self_retire.is_superseded(
-                        status_monitor_cutover.routing_dir(),
-                        os.getpid(),
-                        self_retire_generation,
+                    or (
+                        time.monotonic() - shutdown_requested_since >= _SELF_RETIRE_MAX_GRACE_S
+                        and not segment_cache.observation_busy(worktree_status_runtime)
                     )
+                ):
+                    # The bounded request may report blocked; native custody stays owned.
+                    break
+            if handover.generation is not None:
+                try:
+                    superseded = handover.observe(status_monitor_cutover.routing_dir(), os.getpid())
                 except Exception:
                     superseded = False
                 if superseded:
                     with state_lock:
                         _enter_drain_only_state()
-                    if self_retire_first_detected is None:
-                        self_retire_first_detected = time.monotonic()
-                else:
-                    self_retire_first_detected = None
-                grace_expired = (
-                    self_retire_first_detected is not None
-                    and time.monotonic() - self_retire_first_detected
-                    >= _SELF_RETIRE_MAX_GRACE_S
+                _lease = handover.release_cold_lease(
+                    _lease, status_monitor_cutover.routing_dir(), os.getpid(),
                 )
                 if superseded and not _drain_busy_reasons():
                     self_retire_confirms += 1
@@ -850,13 +819,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         break
                 else:
                     self_retire_confirms = 0
-                if grace_expired:
-                    # Bounded upper bound: a confirmed-superseded daemon must
-                    # never linger past this regardless of busy_reasons()
-                    # never going quiet on its own (see _SELF_RETIRE_MAX_GRACE_S).
-                    break
             with state_lock:
-                can_sweep = published_lock and not admission_closed
+                can_sweep = published_lock and not admission_closed and active_generation is not None
                 if can_sweep:
                     sweep_active = True
             if not can_sweep:
@@ -865,9 +829,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
-                _locks.write_lock(lock, extra=_lock_extra())
+                _publish_lock()
 
                 sweep_mux_pane_args()
+                with state_lock:
+                    allocation_linker.discover()
+                allocation_linker.tick()
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
                 external_projects = picker_projects | demand_projects | worktrees_runtime.demand_projects()
@@ -889,7 +856,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     governance=governance,
                     managed_mux_cache=managed_mux_runtime.cache,
                     config_cache_for_project=_config_cache_for_project,
-                    roster_publisher=lambda: publish_active_project(worktrees_runtime),
+                    roster_publisher=lambda: publish_active_project(
+                        worktrees_runtime, observe_records=allocation_linker.observe,
+                        **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
+                    ),
                     roster_failure=worktrees_runtime.producer_failed,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
@@ -926,12 +896,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if (
                 served == 0
                 and not external_projects
-                and not reconciler.has_live_worktree_mux
-                and not worktree_status_runtime.has_active_demand()
-                and not managed_mux_runtime.has_active_demand()
-                and not worktrees_runtime.demand_projects()
-                and not repositories_runtime.has_active_demand()
-                and not _tracking_write_busy()
+                and _idle_candidate_still_empty()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -941,39 +906,51 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     )
                     if retry_wt:
                         reconciler.observe_mux(set(retry_mux))
-                    if (
-                        retry_wt
-                        or monitor_roots.live_picker_projects()
-                        or core.list_cache.recent_demand_projects()
-                        or worktree_status_runtime.has_active_demand()
-                        or managed_mux_runtime.has_active_demand()
-                        or worktrees_runtime.demand_projects()
-                        or repositories_runtime.has_active_demand()
-                        or _tracking_write_busy()
-                    ):
+                    if retry_wt or not _idle_candidate_still_empty():
                         empty_strikes = 0
                     else:
-                        break
+                        idle_guard = handover.idle_guard(status_monitor_cutover.routing_dir())
+                        if idle_guard is not None:
+                            with state_lock:
+                                if _idle_candidate_still_empty():
+                                    _enter_drain_only_state()
+                                    handover.retiring = True
+                                else:
+                                    idle_guard.release()
+                                    idle_guard = None
+                            if idle_guard is not None:
+                                if not _drain_busy_reasons():
+                                    break
+                                # Accepted work drains under resident custody, not
+                                # the installer gate; admission stays closed.
+                                idle_guard.release()
+                                idle_guard = None
+                        empty_strikes = 0
             else:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
-        with state_lock:
-            shutdown_requested.set()
-            _enter_drain_only_state()
-            worktrees_runtime.close_admission("shutdown")
-            repositories_runtime.close_admission("shutdown")
-        repositories_runtime.shutdown()
-        worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
-        _close_request_surfaces()
-        control_server.close()
-        receipts.wait_idle()
-        resident_push.reset()
-        worktrees_runtime.shutdown()
-        worktree_status_runtime.shutdown()
-        managed_mux_runtime.shutdown()
-        status_monitor_cutover.clear_route_if_owner(os.getpid())
-        d = _locks.read_lock(lock)
-        if isinstance(d, dict) and d.get("pid") == os.getpid():
-            _locks.remove_lock(lock)
+        from .status_monitor_retirement import retire_monitor
+
+        def _close_monitor_admission():
+            if core.git_ops._windows_observation():
+                segment_cache.close_observation_admission()
+            with state_lock:
+                shutdown_requested.set()
+                _enter_drain_only_state()
+                worktrees_runtime.close_admission("shutdown")
+                repositories_runtime.close_admission("shutdown")
+
+        retire_monitor(
+            close_admission=_close_monitor_admission, repositories_runtime=repositories_runtime,
+            worktrees_runtime=worktrees_runtime, close_request_surfaces=_close_request_surfaces,
+            control_server=control_server, receipts=receipts,
+            worktree_status_runtime=worktree_status_runtime, managed_mux_runtime=managed_mux_runtime,
+            lock=lock, original_error=sys.exc_info()[1],
+            allocation_linker=allocation_linker,
+            retirement_guard=idle_guard,
+            finish_observation_custody=lambda: segment_cache.finish_custody(
+                worktree_status_runtime, lambda: _wake_interruptible_wait(wake_event, interval),
+            ),
+        )
     return 0

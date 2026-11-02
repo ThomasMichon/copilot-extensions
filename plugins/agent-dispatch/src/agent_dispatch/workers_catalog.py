@@ -117,6 +117,13 @@ def _code_span(value: str) -> str:
 
 
 def _cards(row: dict, body: str) -> dict:
+    if row.get("operator_unsupported_reason"):
+        body += "\n\nOperator controls unavailable: " + row["operator_unsupported_reason"]
+    body += (
+        "\n\nAgent guidance and executable structure remain source-owned. "
+        "Operator controls never accept declaration JSON. "
+        "Use the advanced owning CLI for unsupported configuration."
+    )
     if row.get("component_errors"):
         row.update(validity="metadata-error", pool_toggleable="false")
         body += "\n\nComponent metadata requires repair: " + "; ".join(row["component_errors"])
@@ -227,6 +234,7 @@ def _catalog_components(
 
 
 def builtin_template_rows() -> list[dict]:
+    from .worker_operator_inputs import builtin_fields, project
     rows = []
     for name, fragment in templates().items():
         kind = fragment["kind"]
@@ -240,7 +248,12 @@ def builtin_template_rows() -> list[dict]:
                if kind == "reviewer-loop" else
                "Choose watched labels, placement/filter, capacity and worker body.")
         )
-        rows.append(_cards({
+        if name == "worker-pool":
+            prerequisite = (
+                "Supply a unique local instance name, watched task label, repository scope "
+                "and worker capacity. The headless worker body remains source-owned."
+            )
+        row = _cards({
             "id": f"template:{name}", "name": name, "title": title, "group": "Available templates",
             "description": description,
             "provenance": "agent-dispatch built-in recipe",
@@ -251,7 +264,11 @@ def builtin_template_rows() -> list[dict]:
             "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
             "kind": kind, "components": [], "components_basis": "template",
         }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
-           "before saving or publishing. The template/source remains unchanged."))
+           "before saving or publishing. The template/source remains unchanged.")
+        project(row, builtin_fields(name))
+        if row.get("operator_unsupported_reason"):
+            row["card"]["body"] += "\n\nOperator controls unavailable: " + row["operator_unsupported_reason"]
+        rows.append(row)
     return rows
 
 
@@ -261,6 +278,8 @@ def catalog() -> dict:
     from plugin_activation import resolve_active_plugins
     from .overrides import load_overrides
     from .worker_templates import discover_templates
+    from .worker_operator_inputs import project
+    from .repository_resources import RepositoryResourceSnapshot
 
     activation = cache(resolve_active_plugins)
     errors = []
@@ -271,6 +290,11 @@ def catalog() -> dict:
         errors.append(report.trusted_error)
     overrides = overridden_off_ids(load_overrides(overrides_path()))
     observed = _observation()
+    definitions = {}
+    resources = RepositoryResourceSnapshot(execution=False)
+    provider_rows, template_discovery = discover_templates(
+        activation(), _definitions=definitions, snapshot=resources,
+    )
     rows = []
     for index, error in enumerate(errors):
         rows.append(_cards({
@@ -287,10 +311,13 @@ def catalog() -> dict:
         draft_errors = []
         declarations = ()
         try:
-            _, declarations = validate_configuration(record["name"], conf["declaration"], conf["repo_root"])
+            _, declarations = validate_configuration(
+                record["name"], conf["declaration"], conf["repo_root"], snapshot=resources,
+            )
             _validate_dependencies(
                 declarations, conf["repo_root"],
                 available_declarations=report.combined.declarations,
+                snapshot=resources,
             )
         except RegistrarError as exc:
             draft_errors.append(str(exc))
@@ -310,6 +337,7 @@ def catalog() -> dict:
                 )
                 _, active_declarations = validate_configuration(
                     record["name"], loaded_conf["declaration"], loaded_conf["repo_root"],
+                    snapshot=resources,
                 )
                 active_conf = loaded_conf
         except (RegistrarError, OSError, UnicodeError) as exc:
@@ -394,6 +422,9 @@ def catalog() -> dict:
                 "runtime readiness are unknown here; the existing FleetSpawner probes "
                 "them at dispatch time. An all-asleep fleet defers without reserving tasks."
             )
+        project(
+            row, None, record=record, definitions=definitions, activation=activation(), snapshot=resources,
+        )
         rows.append(_cards(row, body))
     for declaration in report.combined.declarations:
         if declaration.owner == OWNER and declaration.name in local_names:
@@ -420,6 +451,7 @@ def catalog() -> dict:
         try:
             _validate_dependencies(
                 (declaration,), "", available_declarations=report.combined.declarations,
+                snapshot=resources,
             )
         except RegistrarError as exc:
             row.update(dependency_status="invalid-or-missing", dependency_errors=[str(exc)])
@@ -434,12 +466,14 @@ def catalog() -> dict:
         for row in rows:
             if "pool_toggleable" in row:
                 row["pool_toggleable"] = "false"
-    provider_rows, template_discovery = discover_templates(activation())
     for row in provider_rows:
         if row["instantiable"] == "true":
             row["fields"] = _fields("", {}, row["source"]["root"])
             row["fields"][1]["label"] = "Declaration overrides JSON (recipe params supported)"
             _cards(row, row["card"]["body"])
+        project(row, row.get("operator_parameters"))
+        if row.get("operator_unsupported_reason"):
+            row["card"]["body"] += "\n\nOperator controls unavailable: " + row["operator_unsupported_reason"]
     rows.extend(provider_rows)
     for index, finding in enumerate(template_discovery["findings"]):
         detail = f"{finding['source']}: {finding['reason']}: {finding['detail']}"
@@ -484,6 +518,7 @@ def command(args: argparse.Namespace) -> int:
             result = save_instance(
                 args.id, args.revision, fields,
                 activate=args.activate, consent=args.consent,
+                operator_inputs=getattr(args, "operator_inputs", False),
             )
         print(json.dumps(result, indent=2))
         return 1 if result.get("activation") == "failed" else 0
@@ -502,6 +537,8 @@ def register_commands(sub) -> None:
     save.add_argument("id")
     save.add_argument("--revision", required=True)
     save.add_argument("--field", action="append", default=[])
+    save.add_argument("--operator-inputs", action="store_true",
+                      help="accept only source-declared operator controls, never declaration overrides")
     save.add_argument("--activate", action="store_true")
     save.add_argument("--consent", choices=[ACTIVATION_CONSENT])
     save.set_defaults(func=command)

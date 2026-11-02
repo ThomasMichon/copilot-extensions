@@ -1,0 +1,9 @@
+{
+  "comment": "Use the canonical independently owned Windows daemon launch and cleanup contract.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

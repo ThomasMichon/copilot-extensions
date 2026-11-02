@@ -1,0 +1,9 @@
+{
+  "comment": "Expose a pure content-store repo SQL policy while retaining guarded FTS execution",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

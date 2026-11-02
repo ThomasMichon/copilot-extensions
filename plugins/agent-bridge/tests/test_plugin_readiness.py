@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -127,6 +128,80 @@ async def test_timeout_and_expected_native_mismatch_fail_without_prompt(tmp_db, 
     with pytest.raises(PluginReadinessError, match="readiness-timeout"):
         await wait_plugin_readiness(tmp_db, "native", expectation(tmp_path, timeout_seconds=0.02))
     assert not tmp_db.execute_read("SELECT id FROM live_messages WHERE kind NOT LIKE 'control:%'")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claim", [False, True])
+async def test_readiness_timeout_logs_only_last_observed_stage(tmp_db, tmp_path, caplog, claim):
+    register(tmp_db, tmp_path)
+    with caplog.at_level(logging.WARNING, logger="agent_bridge.plugin_readiness"):
+        task = asyncio.create_task(wait_plugin_readiness(
+            tmp_db, "native", expectation(tmp_path, timeout_seconds=0.1),
+        ))
+        if claim:
+            await claimed(tmp_db, "native")
+        with pytest.raises(PluginReadinessError, match="readiness-timeout"):
+            await task
+    stage = "claimed" if claim else "queued"
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert f"last_observed_stage={stage}" in message
+    assert "code=readiness-timeout" in message
+    assert "missing_count=0" in message
+    assert "helper@" not in message and str(tmp_path) not in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad,code", [
+    ("sid", "readiness-result-context-changed"),
+    ("json", "malformed-readiness-result"),
+    ("control", "readiness-control-rejected"),
+    ("reason", "unrecognized-readiness-reason"),
+])
+async def test_readiness_diagnostics_exclude_peer_supplied_text(tmp_db, tmp_path, caplog, bad, code):
+    register(tmp_db, tmp_path)
+    with caplog.at_level(logging.WARNING, logger="agent_bridge.plugin_readiness"):
+        task = asyncio.create_task(wait_plugin_readiness(tmp_db, "native", expectation(tmp_path)))
+        control = await claimed(tmp_db, "native")
+        value = observation(control, status="failed", missing=["private-loadout"]).model_dump()
+        value["reason"] = "private-peer-detail"
+        if bad == "sid":
+            value["session_id"] = "private-other-session"
+        outcome = "{private-malformed" if bad == "json" else (
+            "private-control-outcome" if bad == "control" else json.dumps(value)
+        )
+        tmp_db.ack_live_messages("native", [control["id"]], time.time(), controls=True, outcome=outcome)
+        with pytest.raises(PluginReadinessError):
+            await task
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert f"control_id={control['id']}" in message
+    assert "last_observed_stage=outcome" in message
+    assert f"code={code}" in message
+    assert "private-" not in message and str(tmp_path) not in message
+
+
+@pytest.mark.asyncio
+async def test_success_is_silent_and_cancellation_logs_without_changing_settlement(tmp_db, tmp_path, caplog):
+    register(tmp_db, tmp_path)
+    with caplog.at_level(logging.WARNING, logger="agent_bridge.plugin_readiness"):
+        success = asyncio.create_task(wait_plugin_readiness(tmp_db, "native", expectation(tmp_path)))
+        first = await claimed(tmp_db, "native")
+        reply(tmp_db, "native", first)
+        assert (await success).status == "ready"
+        assert not caplog.records
+        cancelled = asyncio.create_task(wait_plugin_readiness(tmp_db, "native", expectation(tmp_path)))
+        second = await claimed(tmp_db, "native")
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+    assert len(caplog.records) == 1
+    assert "code=cancelled" in caplog.records[0].getMessage()
+    assert tmp_db.live_control_state("native", second["id"])["outcome"] == "cancelled"
+    assert tmp_db.ack_live_messages(
+        "native", [second["id"]], time.time(), controls=True,
+        outcome=observation(second).model_dump_json(),
+    ) == 0
 
 
 @pytest.mark.asyncio

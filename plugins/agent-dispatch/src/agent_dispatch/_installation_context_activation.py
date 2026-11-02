@@ -15,7 +15,7 @@ def _activation_result(
     activation_present = os.path.lexists(activation_entry)
     activation_is_file = activation_entry.is_file() and not activation_entry.is_symlink()
     activation_path = canonical_path(activation_entry)
-    missing = {
+    missing: dict[str, Any] = {
         "state": "missing",
         "path": None,
         "actualMode": "legacy",

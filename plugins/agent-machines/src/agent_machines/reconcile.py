@@ -68,6 +68,7 @@ class Plan:
     removals: list[dict[str, Any]] = field(default_factory=list)
     authority_decisions: list[dict[str, Any]] = field(default_factory=list)
     managed_keys: dict[str, list[str]] = field(default_factory=dict)
+    ordinary_defaults: dict[str, Any] | None = None
 
 
 _RUNTIME_CHECK_TIMEOUT = 60
@@ -335,6 +336,11 @@ def manifest_hash(resolved: list[RequirementPackage]) -> str:
         }
         for pkg in sorted(resolved, key=lambda p: (p.source_repo, p.name))
     ]
+    from .configuration import selected_defaults
+
+    ordinary = selected_defaults(resolved)
+    if ordinary is not None:
+        payload.append({"ordinary_defaults": ordinary})
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
 
@@ -543,11 +549,18 @@ def plan(
         ],
         authority_decisions=authority_decisions,
         managed_keys={"copilot.settings": sorted(settings_keys)},
+        ordinary_defaults=next(
+            (
+                {key: copy.deepcopy(pkg.ordinary_defaults[key]) for key in ("values", "provenance", "layers")}
+                for pkg in resolved if pkg.ordinary_defaults
+            ),
+            None,
+        ),
     )
 
 
 def plan_to_dict(p: Plan) -> dict[str, Any]:
-    return {
+    result = {
         "machine": p.machine,
         "drift_key": p.drift_key,
         "provenance_hash": p.provenance_hash,
@@ -561,6 +574,9 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "authority_decisions": p.authority_decisions,
         "managed_keys": p.managed_keys,
     }
+    if p.ordinary_defaults is not None:
+        result["ordinary_defaults"] = copy.deepcopy(p.ordinary_defaults)
+    return result
 
 
 @dataclass
@@ -603,6 +619,8 @@ def restore(
     only: list[str] | None = None,
     maintenance_safe: bool = False,
     accepted_machines: tuple[str, ...] | None = None,
+    git_config_plan_sha256: str | None = None,
+    resource_types: frozenset[str] | None = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
@@ -622,16 +640,20 @@ def restore(
     if _validator.has_errors(findings):
         raise RestoreValidationError(findings)
     p = plan(packages, machine, plat, accepted_machines)
-    surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
+    surfaces = (
+        apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
+        if resource_types is None else []
+    )
 
     resource_names = _resources.resource_only_names(resolved, machine, plat)
     resource_results: list[_resources.ResourceResult] = []
-    if _want_resources(only, resource_names):
+    if resource_types is not None or _want_resources(only, resource_names):
         home_path = Path(home) if home is not None else Path.home()
         ctx = _resources.ResourceContext(
-            home=home_path, repo_paths=_repo_paths(resolved), platform=plat
+            home=home_path, repo_paths=_repo_paths(resolved), platform=plat,
+            git_config_plan_sha256=git_config_plan_sha256,
         )
-        if maintenance_safe:
+        if maintenance_safe and resource_types is None:
             resource_results.extend(
                 runtime_spot_check_results(home=home_path, plat=plat, dry_run=dry_run)
             )
@@ -644,11 +666,12 @@ def restore(
             dry_run=dry_run,
             only=only,
             maintenance_safe=maintenance_safe,
+            resource_types=resource_types,
             )
         )
 
     all_modules: list[_modules.ModuleResult] = []
-    if _want_modules(only, resource_names):
+    if resource_types is None and _want_modules(only, resource_names):
         all_modules = _modules.run_modules(
             resolved, machine, plat, dry_run=dry_run,
             only=only, maintenance_safe=maintenance_safe,
@@ -695,6 +718,8 @@ def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
     resources = []
     for resource in result.resource_results:
         payload = dataclasses.asdict(resource)
+        if payload["change_plan"] is None:
+            del payload["change_plan"]
         payload["status"] = resource.status
         resources.append(payload)
     return {

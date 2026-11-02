@@ -275,7 +275,8 @@ def test_catalog_includes_collaboration_in_its_verified_closure(installation, da
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_publication.py", "versioned_runtime_source.py",
     "installer_engine.py", "installer_engine_process.py",
-    "installer_dependency_policy.py", "installer_dependency_config.py",
+    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+    "installer_source_wheel_cache.py", "installer_source_build.py",
     "installer_wheel_inputs.py", "installer_wheel_snapshot.py",
     "construction.py", "runtime_launcher.py",
 ])

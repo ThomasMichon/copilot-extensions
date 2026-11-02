@@ -47,6 +47,8 @@ handler rather than imported at module load, so the light paths -- above all
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import json
 import logging
@@ -604,11 +606,6 @@ def _cmd_source_digest(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    import asyncio
-
-    from . import __version__, ipc
-    from . import serve as _serve
-
     if args.passive and not args.socket:
         # --passive is an internal cutover seam, never a user-facing entry
         # point. Without an explicit generation-specific --socket it would
@@ -622,13 +619,28 @@ def _cmd_serve(args: argparse.Namespace) -> int:
               "fixed client-facing handle", file=sys.stderr)
         return 2
 
+    from . import ipc
+
     socket_path = args.socket or str(ipc.default_socket_path())
     # Make it absolute BEFORE the chdir below, in case a caller ever passes a
     # relative --socket -- it must still mean "relative to the caller's cwd",
     # not to the daemon's own (about to change) cwd. Lexically, never
     # dereferenced: the fixed handle is a symlink that cutover repoints, and a
     # host bound to its current target would be pinned to that generation.
-    socket_path = str(Path(socket_path).absolute())
+    socket_path = os.path.abspath(socket_path)
+    return _serve_at_socket(args, socket_path)
+
+
+@daemon_entrypoint(
+    "agent-mcp", source=__file__, purpose="production",
+    runtime_root=lambda args, socket_path: os.path.dirname(socket_path),
+)
+def _serve_at_socket(args: argparse.Namespace, socket_path: str) -> int:
+    import asyncio
+
+    from . import __version__, ipc
+    from . import serve as _serve
+
     control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
 
     # Pin the resident daemon's CWD to the stable AGENT_MCP_HOME directory

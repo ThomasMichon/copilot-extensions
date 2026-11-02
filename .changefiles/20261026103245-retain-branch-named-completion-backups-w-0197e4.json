@@ -1,0 +1,9 @@
+{
+  "comment": "Retain branch-named completion backups without overwriting recovery tips from linked worktrees or earlier operations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

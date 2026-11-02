@@ -176,7 +176,7 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
 
     script = "\n".join([
         "$ErrorActionPreference='Stop'; $NoSupervisor=$false; $NoService=$false; $env:OS='Windows_NT'",
-        "$SupervisorTaskName='agent-dispatch-supervisor'; $InstallDir='fixture'; $SupervisorProfileDir='fixture'",
+        f"$SupervisorTaskName='agent-dispatch-supervisor'; $InstallDir='{tmp_path}'; $SupervisorProfileDir='fixture'",
         "$script:Started=@(); $script:Stopped=@(); $script:Retired=0",
         f"$script:MasterState='{master_state}'",
         "if($script:MasterState -eq 'OptOut'){$NoSupervisor=$true}",
@@ -198,7 +198,7 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
         "function Get-ScheduledTask { param($TaskName) if($TaskName -eq 'agent-dispatch-supervisor-disabled'){return Get-ScheduledTaskDisabled}; if($TaskName -eq 'agent-dispatch-supervisor-enabled'){return [pscustomobject]@{TaskName=$TaskName;State='Ready'}}; if($TaskName -eq 'agent-dispatch-supervisor-*'){return @([pscustomobject]@{TaskName='agent-dispatch-supervisor-enabled';State='Running'},(Get-ScheduledTaskDisabled))}; if($script:MasterState -eq 'Absent'){return $null}; return [pscustomobject]@{TaskName=$TaskName;State=$script:MasterState} }",
         "function Remove-ProfileSupervisorTasks { throw 'must preserve profiles' }",
         "function Invoke-SupervisorTaskAction { param($Operation,$Name,$Reason) if($Operation -eq 'start'){$script:Started+=$Name}; if($Operation -eq 'stop'){$script:Stopped+=$Name} }",
-        *(function(name) for name in ("Install-SupervisorTask", "Invoke-SupervisorStart", "Invoke-SupervisorsStart", "Invoke-SupervisorsStop")),
+        *(function(name) for name in ("Assert-DispatchActions", "Install-SupervisorTask", "Invoke-SupervisorStart", "Invoke-SupervisorsStart", "Invoke-SupervisorsStop")),
         "Install-SupervisorTask",
         "@{started=$script:Started;stopped=$script:Stopped;retired=$script:Retired;reasons=$script:AuditReasons}|ConvertTo-Json -Compress",
     ])

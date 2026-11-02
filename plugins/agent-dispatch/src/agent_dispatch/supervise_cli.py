@@ -22,6 +22,8 @@ pattern instead of duplicating the resolution logic.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import json
 import os
@@ -35,6 +37,7 @@ from .client_authority import (
     supervisor_authority_target as _supervisor_authority_target,
 )
 from .loop_commands import _resolve_cli_module
+from .logging_setup import configure_file_logging
 
 
 def _proxy(name: str):
@@ -418,6 +421,7 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
 
 
+@daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
 def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     """``supervise serve`` -- run the singleton supervisor daemon (foreground).
 
@@ -429,7 +433,6 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
     from . import procutil
-    from .logging_setup import configure_file_logging
     from .supervisor_daemon import SupervisorDaemon, supervisor_lease_scope
 
     procutil.relocate_off_payload()
@@ -458,16 +461,12 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     declared_source = None
     if not getattr(args, "no_declared", False):
         from . import registrar_discovery
+        from .pool_source_snapshot import read_supervisor_declarations
 
         registrar_sources = registrar_discovery.RegistrarSources()
-        if getattr(args, "legacy_env", False):
-            # Back-compat bridge: pointer-discovered declarations PLUS the host's
-            # legacy supervisor.env / supervisors/*.env profiles, deduped by name
-            # (a first-class declaration wins). Lets a host switch its supervisor
-            # unit to `serve` without dropping its existing profiles mid-migration.
-            declared_source = registrar_sources.discover_with_legacy
-        else:
-            declared_source = registrar_sources.discover
+        declared_source = lambda: read_supervisor_declarations(
+            registrar_sources, legacy=getattr(args, "legacy_env", False),
+        )
     elif getattr(args, "legacy_env", False):
         # --no-declared drops pointer discovery but --legacy-env still bridges the
         # legacy env profiles.
@@ -477,6 +476,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 
     from .supervisor_daemon import _self_update_settings
     from .client_authority import target_cli_args
+    from .config import load_config
 
     _su_enabled, _su_poll, _su_cooldown = _self_update_settings()
 
@@ -487,6 +487,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             env,
             poll_interval=getattr(args, "interval", 5.0),
             declared_source=declared_source,
+            pool_publication_enabled=load_config().pool_publication_enabled,
             # Rebuild the client by re-resolving the coordinator endpoint after a
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
@@ -657,21 +658,21 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     the singleton daemon subsumes it.
     """
     sub = getattr(args, "supervise_command", None)
-    if sub == "register":
-        return _cmd_supervise_register(args)
-    if sub == "status":
-        return _cmd_supervise_status(args)
-    if sub == "list":
-        return _cmd_supervise_list(args)
-    if sub == "remove":
-        return _cmd_supervise_remove(args)
-    if sub == "serve":
-        return _cmd_supervise_serve(args)
-    if sub == "daemon-status":
-        return _cmd_supervise_daemon_status(args)
-    if sub == "override":
-        return _cmd_supervise_override(args)
+    handlers = {
+        "register": _cmd_supervise_register, "status": _cmd_supervise_status,
+        "list": _cmd_supervise_list, "remove": _cmd_supervise_remove,
+        "serve": _cmd_supervise_serve, "daemon-status": _cmd_supervise_daemon_status,
+        "override": _cmd_supervise_override,
+    }
+    if handler := handlers.get(sub):
+        return handler(args)
 
+    return _run_supervise(args)
+
+
+@daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
+def _run_supervise(args: argparse.Namespace) -> int:
+    configure_file_logging("supervisor")
     from .supervisor import (
         Supervisor,
         make_embody_spawn,

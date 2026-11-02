@@ -24,7 +24,10 @@ REPO = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--contract", choices=("runtime", "callbacks", "updater"), default="runtime")
+    parser.add_argument(
+        "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall"),
+        default="runtime",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
     if root == REPO or not root.is_relative_to(REPO):
@@ -43,12 +46,18 @@ def main() -> int:
         "runtime": "test_manager_runtime_install.py",
         "callbacks": "test_manager_mux_callbacks.py",
         "updater": "test_manager_updater_recovery.py",
+        "source": "test_manager_source_install.py",
+        "engine-source": "test_manager_engine_source.py",
+        "uninstall": "test_manager_runtime_uninstall.py",
     }[args.contract]
     native = REPO / "worktree-manager" / "tests" / "native" / filename
     with ExitStack() as ownership:
         lease = acquire(0, python.parent.parent)
         ownership.callback(lease.release)
-        raw = ownership.enter_context(tempfile.TemporaryDirectory(prefix="manager-acceptance-", dir=root))
+        # Source + repair identities are longer than release-only slots. Keep
+        # their default-home fixture below OS temp, not a deep source checkout.
+        storage = {} if args.contract in {"source", "engine-source"} else {"dir": root}
+        raw = ownership.enter_context(tempfile.TemporaryDirectory(prefix="manager-acceptance-", **storage))
         sandbox = Path(raw)
         env = isolated_environment(os.environ, sandbox)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
@@ -63,7 +72,13 @@ def main() -> int:
              ("recovery admission and concurrent caller", [
                  [str(python), "-I", "-B", str(native), "--safety", str(sandbox)], assertions,
              ])]
-            if args.contract == "updater" else [("construction and assertions", [prepare_command, assertions])]
+            if args.contract == "updater" else
+            [("installed Manager preparation", [prepare_command]),
+             ("removal, reinstall and assertions", [
+                 [str(python), "-I", "-B", str(native), "--exercise", str(sandbox)], assertions,
+             ])]
+            if args.contract == "uninstall" else
+            [("construction and assertions", [prepare_command, assertions])]
         )
         for label, commands in groups:
             started = time.monotonic()

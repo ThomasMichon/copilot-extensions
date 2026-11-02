@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -83,10 +84,12 @@ def _register_project(
     remote: str,
     *,
     actual_remote: str | None = None,
+    bare: bool = False,
 ) -> None:
     repo.mkdir(parents=True, exist_ok=True)
-    _git(repo, "init", "-q")
-    _git(repo, "remote", "add", "origin", actual_remote or remote)
+    _git(repo, "init", "-q", *(["--bare"] if bare else []))
+    _git(repo, *(["--git-dir", str(repo)] if bare else []),
+         "remote", "add", "origin", actual_remote or remote)
     aw = home / ".agent-worktrees"
     aw.mkdir(parents=True, exist_ok=True)
     projects_path = aw / "projects.yaml"
@@ -1138,3 +1141,554 @@ def test_duplicate_local_plugin_entries_are_ambiguous(tmp_path):
     report = resolve_active_plugins(home=tmp_path)
     assert "demo@local" not in report.active
     assert any(f.reason == "root-ambiguous" for f in report.findings)
+
+
+@pytest.mark.parametrize("bare", [False, True])
+def test_registered_identity_memo_survives_processes_and_invalidates_config(tmp_path, bare):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git", bare=bare)
+    root = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    program = """
+import json, sys
+from plugin_activation import resolve_active_plugins, resolver
+original = resolver._git
+calls = []
+def counted(*args):
+    calls.append(args[1:])
+    return original(*args)
+resolver._git = counted
+report = resolve_active_plugins(home=sys.argv[1])
+print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sys.path))}
+
+    def scan():
+        completed = subprocess.run(
+            [sys.executable, "-c", program, str(tmp_path)],
+            capture_output=True, text=True, check=True, env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return json.loads(completed.stdout)
+
+    cold, warm = scan(), scan()
+    assert root.is_dir()
+    assert cold["active"] == warm["active"] == ["demo@local"]
+    assert cold["calls"] > 0
+    assert warm["calls"] == 0, (cold, warm)
+    _git(repo, *(["--git-dir", str(repo)] if bare else []),
+         "remote", "set-url", "origin", "https://github.com/other/demo.git")
+    changed = scan()
+    assert changed["calls"] > 0
+    assert changed["active"] == []
+
+
+def test_registered_identity_memo_keeps_registry_and_settings_live(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    settings = _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    _write_json(settings, {"enabledPlugins": {"demo@local": False}})
+    assert resolve_active_plugins(home=tmp_path).active == {}
+    assert calls == []
+    registry = tmp_path / ".agent-worktrees" / "repos.yaml"
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    data["repos"]["demo"]["remote"] = "https://github.com/other/demo.git"
+    registry.write_text(yaml.safe_dump(data), encoding="utf-8")
+    report = resolve_active_plugins(home=tmp_path)
+    assert calls
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("indirection", ["include", "includeIf", "worktree"])
+def test_registered_identity_memo_reprobes_indirect_git_config(tmp_path, monkeypatch, indirection):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    if indirection == "worktree":
+        _git(repo, "config", "core.worktree", str(repo))
+    else:
+        key = "include.path" if indirection == "include" else "includeIf.gitdir:/**.path"
+        _git(repo, "config", key, str(tmp_path / "optional.gitconfig"))
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert calls
+
+
+def test_registered_identity_memo_invalidates_new_worktree_config(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    _git(repo, "config", "extensions.worktreeConfig", "true")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    _git(repo, "config", "--worktree", "url.https://github.com/other/.insteadOf", "https://github.com/example/")
+    report = resolve_active_plugins(home=tmp_path)
+    assert calls
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_registered_identity_memo_does_not_publish_changed_probe_inputs(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    original = resolver._git
+    calls = []
+
+    def change_after_probe(root, *args):
+        calls.append(args)
+        result = original(root, *args)
+        if args == ("remote", "get-url", "origin"):
+            _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
+        return result
+
+    monkeypatch.setattr(resolver, "_git", change_after_probe)
+    resolve_active_plugins(home=tmp_path)
+    calls.clear()
+    report = resolve_active_plugins(home=tmp_path)
+    assert calls
+    assert report.active == {}
+
+
+@pytest.mark.parametrize("entry", ["HEAD", "objects", "refs"])
+def test_registered_identity_memo_reprobes_lost_repository_structure(tmp_path, monkeypatch, entry):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    path = repo / ".git" / entry
+    path.rename(path.with_name(entry + ".removed"))
+    assert resolve_active_plugins(home=tmp_path).active == {}
+    assert calls
+
+
+@pytest.mark.parametrize("raw", ["not-json", '{"version":1,"verified":[]}', None])
+def test_registered_identity_memo_missing_or_invalid_is_not_replayed(tmp_path, monkeypatch, raw):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    memo = tmp_path / ".agent-worktrees" / "cache" / "project-identities.json"
+    if raw is None:
+        memo.unlink()
+    else:
+        memo.write_text(raw, encoding="utf-8")
+    _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert resolve_active_plugins(home=tmp_path).active == {}
+    assert calls
+
+
+def test_registered_identity_memo_write_failure_keeps_fresh_probes(tmp_path, monkeypatch, caplog):
+    from plugin_activation import _project_identity
+
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    def denied(*_args, **_kwargs):
+        raise PermissionError("test memo publication refusal")
+
+    monkeypatch.setattr(_project_identity, "write_json_object_atomic", denied)
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    cold_count = len(calls)
+    assert cold_count > 0
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert len(calls) == 2 * cold_count
+    assert "could not be published" in caplog.text
+
+
+def test_registered_identity_memo_reprobes_linked_gitfile(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial")
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "--detach", str(linked), "HEAD")
+    registry = tmp_path / ".agent-worktrees" / "repos.yaml"
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    from plugin_activation._project_roots import _platform_key
+    data["repos"]["demo"][_platform_key()] = str(linked)
+    registry.write_text(yaml.safe_dump(data), encoding="utf-8")
+    _plugin(linked, "local", "demo")
+    _settings(linked, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert calls
+    _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
+    assert resolve_active_plugins(home=tmp_path).active == {}
+
+
+@pytest.mark.parametrize("owner_result", [False, "unavailable"])
+def test_registered_identity_memo_reprobes_when_owner_eligibility_changes(tmp_path, monkeypatch, owner_result):
+    from plugin_activation import _project_identity
+
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+
+    def no_owner_evidence(*_args):
+        if owner_result == "unavailable":
+            raise PermissionError("test ownership query refusal")
+        return owner_result
+
+    monkeypatch.setattr(_project_identity, "_owned_directory", no_owner_evidence)
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert calls
+
+
+@pytest.mark.parametrize("memo", ["cold", "warm", "changed"])
+def test_project_identity_memo_unit_work_counts(tmp_path, monkeypatch, memo):
+    from plugin_activation import _project_roots
+
+    monkeypatch.setattr(_project_roots, "_platform_key", lambda: "synthetic")
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    documents = {
+        "projects.yaml": {"projects": {"demo": {}}},
+        "repos.yaml": {"repos": {"demo": {
+            _project_roots._platform_key(): str(root),
+            "remote": "https://github.com/example/demo.git",
+        }}},
+    }
+    monkeypatch.setattr(_project_roots, "_load_yaml_object", lambda path: (
+        ScanAuthority.COMPLETE, documents[path.name], [],
+    ))
+    monkeypatch.setattr(_project_roots, "identity_inputs", lambda *_: "a" * 64)
+    previous = {} if memo == "cold" else {str(root): ("a" if memo == "warm" else "b") * 64}
+    monkeypatch.setattr(_project_roots, "read_identities", lambda _: previous)
+    written = []
+    monkeypatch.setattr(_project_roots, "write_identities", lambda path, value: written.append(value))
+    monkeypatch.setattr(resolver, "_git_executable", lambda: "synthetic-git")
+    calls = []
+
+    def git(_root, *args):
+        calls.append(args)
+        return str(root) if args == ("rev-parse", "--show-toplevel") else "https://github.com/example/demo.git"
+
+    monkeypatch.setattr(resolver, "_git", git)
+    roots, findings, authority = _project_roots._verified_project_roots(tmp_path)
+    assert roots == [("demo", root)]
+    assert findings == []
+    assert authority is ScanAuthority.COMPLETE
+    assert calls == ([] if memo == "warm" else [
+        ("rev-parse", "--show-toplevel"), ("remote", "get-url", "origin"),
+    ])
+    assert written == ([] if memo == "warm" else [{str(root): "a" * 64}])
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout):
+    from plugin_activation import _project_roots
+
+    monkeypatch.setattr(_project_roots, "_platform_key", lambda: "synthetic")
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    documents = {
+        "projects.yaml": {"projects": {"demo": {}}},
+        "repos.yaml": {"repos": {"demo": {
+            _project_roots._platform_key(): str(root),
+            "remote": "https://github.com/example/demo.git",
+        }}},
+    }
+    monkeypatch.setattr(_project_roots, "_load_yaml_object", lambda path: (
+        ScanAuthority.COMPLETE, documents[path.name], [],
+    ))
+    monkeypatch.setattr(_project_roots, "identity_inputs", lambda *_: "a" * 64)
+    monkeypatch.setattr(_project_roots, "read_identities", lambda _: {str(root): "b" * 64})
+    written = []
+    monkeypatch.setattr(_project_roots, "write_identities", lambda path, value: written.append(value))
+    monkeypatch.setattr(resolver, "_git_executable", lambda: "synthetic-git")
+
+    def refused(*_args):
+        if timeout:
+            raise subprocess.TimeoutExpired("synthetic-git", 10)
+        raise subprocess.CalledProcessError(128, "synthetic-git")
+
+    monkeypatch.setattr(resolver, "_git", refused)
+    roots, findings, authority = _project_roots._verified_project_roots(tmp_path)
+    assert roots == []
+    assert written == [{}]
+    assert authority is (ScanAuthority.INDETERMINATE if timeout else ScanAuthority.COMPLETE)
+    assert [finding.reason for finding in findings] == [
+        "registry-indeterminate" if timeout else "identity-mismatch",
+    ]
+
+
+
+@pytest.mark.parametrize("rewrite", ["replace", "in-place-restored-mtime"])
+def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypatch, rewrite):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    config = repo / ".git" / "config"
+    initial = config.read_bytes()
+    initial_time = config.stat().st_mtime_ns
+    original = resolver._git
+
+    def transient_match(root, *args):
+        if args != ("remote", "get-url", "origin"):
+            return original(root, *args)
+        if rewrite == "replace":
+            _git(repo, "remote", "set-url", "origin", expected)
+        else:
+            config.write_bytes(initial.replace(wrong.encode(), expected.encode()))
+        try:
+            return original(root, *args)
+        finally:
+            config.write_bytes(initial)
+            final_time = initial_time if rewrite == "in-place-restored-mtime" else initial_time + 1_000_000_000
+            os.utime(config, ns=(config.stat().st_atime_ns, final_time))
+
+    monkeypatch.setattr(resolver, "_git", transient_match)
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert config.read_bytes() == initial
+    monkeypatch.setattr(resolver, "_git", original)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def _synthetic_identity_input_files(tmp_path, monkeypatch):
+    from plugin_activation import _project_identity
+
+    root = tmp_path / "synthetic-root"
+    root.mkdir()
+    config = tmp_path / "synthetic-config.txt"
+    config.write_bytes(b"original source bytes")
+    executable = tmp_path / "synthetic-git"
+    executable.write_bytes(b"not executed")
+    lstat, read_bytes = Path.lstat, Path.read_bytes
+
+    def synthetic_stat(path, *args, **kwargs):
+        if path in root.parents:
+            return lstat(root.parent)
+        if path in (root / "objects", root / "refs"):
+            return lstat(root)
+        if path in (root / "HEAD", root / "config"):
+            return lstat(config)
+        return lstat(path, *args, **kwargs)
+
+    def synthetic_read(path):
+        if path == root / "HEAD":
+            return b"synthetic head input"
+        if path == root / "config":
+            return read_bytes(config)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "lstat", synthetic_stat)
+    monkeypatch.setattr(Path, "read_bytes", synthetic_read)
+    monkeypatch.setattr(_project_identity, "_owned_directory", lambda *_: True)
+    monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: ())
+    return root, config, executable
+
+
+@pytest.mark.parametrize("changed", ["file", "directory", "ancestor"])
+def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch, changed):
+    from plugin_activation import _project_identity
+
+    root, config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    original = config.read_bytes()
+    target = config if changed == "file" else root if changed == "directory" else root.parent
+    initial_time = target.stat().st_mtime_ns
+    before = _project_identity.identity_inputs(root, "expected", str(executable))
+    if changed == "file":
+        config.write_bytes(b"different intermediate bytes")
+        config.write_bytes(original)
+    os.utime(target, ns=(target.stat().st_atime_ns, initial_time + 1_000_000_000))
+    after = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert config.read_bytes() == original
+    assert before is not None and after is not None
+    assert before != after
+
+
+@pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
+def test_project_identity_memo_unit_rejects_legacy_origin(tmp_path, monkeypatch, legacy_dir):
+    from plugin_activation import _project_identity
+
+    root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    legacy = root / legacy_dir / "origin"
+    legacy.parent.mkdir()
+    legacy.write_bytes(b"synthetic legacy source")
+    assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
+
+
+@pytest.mark.parametrize("mutation", ["worktree-config", "gitdir-swap", "root-swap", "ancestor-swap"])
+def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkeypatch, mutation):
+    container = tmp_path / "container" if mutation == "ancestor-swap" else tmp_path
+    container.mkdir(exist_ok=True)
+    repo = container / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    gitdir = repo / ".git"
+    if mutation == "worktree-config":
+        _git(repo, "config", "extensions.worktreeConfig", "true")
+        directory = gitdir
+    else:
+        matching = tmp_path / "matching"
+        matching.mkdir()
+        matching_repo = matching / "repo" if mutation == "ancestor-swap" else matching
+        matching_repo.mkdir(exist_ok=True)
+        _git(matching_repo, "init", "-q")
+        _git(matching_repo, "remote", "add", "origin", expected)
+        directory = repo if mutation == "gitdir-swap" else tmp_path
+    initial_time = directory.stat().st_mtime_ns
+    root_mtime = repo.stat().st_mtime_ns
+    container_mtime = container.stat().st_mtime_ns
+    original = resolver._git
+
+    def transient_match(root, *args):
+        if args != ("remote", "get-url", "origin"):
+            return original(root, *args)
+        if mutation == "worktree-config":
+            volatile = gitdir / "config.worktree"
+            volatile.write_text('[url "https://github.com/example/"]\n    insteadOf = https://github.com/other/\n', encoding="utf-8")
+        elif mutation == "gitdir-swap":
+            gitdir.rename(repo / ".git-saved")
+            (matching / ".git").rename(gitdir)
+        elif mutation == "root-swap":
+            repo.rename(repo.with_name("repo-saved"))
+            matching.rename(repo)
+        else:
+            container.rename(container.with_name("container-saved"))
+            matching.rename(container)
+        try:
+            return original(root, *args)
+        finally:
+            if mutation == "worktree-config":
+                volatile.unlink()
+            elif mutation == "gitdir-swap":
+                gitdir.rename(matching / ".git")
+                (repo / ".git-saved").rename(gitdir)
+            elif mutation == "root-swap":
+                repo.rename(matching)
+                repo.with_name("repo-saved").rename(repo)
+                os.utime(repo, ns=(repo.stat().st_atime_ns, root_mtime))
+            else:
+                container.rename(matching)
+                container.with_name("container-saved").rename(container)
+                os.utime(container, ns=(container.stat().st_atime_ns, container_mtime))
+            os.utime(directory, ns=(directory.stat().st_atime_ns, initial_time + 1_000_000_000))
+
+    monkeypatch.setattr(resolver, "_git", transient_match)
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    monkeypatch.setattr(resolver, "_git", original)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
+def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legacy_dir):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected)
+    _git(repo, "remote", "remove", "origin")
+    legacy = repo / ".git" / legacy_dir / "origin"
+    legacy.parent.mkdir(exist_ok=True)
+
+    def set_legacy(url):
+        text = f"URL: {url}\nPull: refs/heads/main:refs/heads/main\n" if legacy_dir == "remotes" else f"{url}#main\n"
+        legacy.write_text(text, encoding="utf-8")
+
+    set_legacy(expected)
+    try:
+        actual = _git(repo, "remote", "get-url", "origin")
+    except subprocess.CalledProcessError:
+        pytest.skip("selected Git has no legacy origin reader")
+    if actual != expected:
+        pytest.skip("selected Git does not expose this legacy URL form")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    set_legacy(wrong)
+    assert resolve_active_plugins(home=tmp_path).active == {}
+
+
+def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
+    from plugin_activation import _project_identity
+
+    root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    state = [1]
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(_project_identity, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: (state[0],))
+    before = _project_identity.identity_inputs(root, "expected", str(executable))
+    state[0] += 1
+    after = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert before is not None and after is not None and before != after
+
+    def unavailable(_):
+        raise PermissionError("synthetic native change-stamp refusal")
+
+    monkeypatch.setattr(_project_identity, "_windows_write_version", unavailable)
+    assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
+
+
+@pytest.mark.parametrize("failure", ["none", "open", "query", "close"])
+def test_project_identity_memo_unit_windows_handle_cleanup(monkeypatch, failure):
+    from plugin_activation import _project_identity
+
+    closed = []
+
+    def open_file(_path):
+        if failure == "open":
+            raise OSError("synthetic open refusal")
+        return 42
+
+    def read_version(handle):
+        assert handle == 42
+        if failure == "query":
+            raise OSError("synthetic native change-stamp refusal")
+        return 5, 7, 123
+
+    def close(handle):
+        closed.append(handle)
+        return failure != "close"
+
+    monkeypatch.setattr(_project_identity, "_windows_file_api", lambda: (open_file, read_version, close))
+    if failure == "none":
+        assert _project_identity._windows_write_version(Path("synthetic")) == (5, 7, 123)
+    else:
+        with pytest.raises(OSError):
+            _project_identity._windows_write_version(Path("synthetic"))
+    assert closed == ([] if failure == "open" else [42])

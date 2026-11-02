@@ -1,5 +1,6 @@
 """Native discovery retains revision, tombstone and incarnation fences."""
 
+import os
 import subprocess
 
 import pytest
@@ -70,6 +71,31 @@ def test_connected_mapping_is_admitted_and_survives_daemon_restart(monkeypatch, 
     second = mux_discovery.discover_mapping(MuxMappingRegistry(registry._path), _payload())
     assert second["applied"]
     assert second["entry"]["mapping_revision"] == 1
+
+
+@pytest.mark.parametrize("alias_kind", ["dotdot", "case", "different"])
+def test_discovery_recognizes_logical_worktree_path(monkeypatch, tmp_path, alias_kind):
+    if alias_kind == "case" and os.name != "nt":
+        pytest.skip("Case aliases require Windows path semantics")
+    (tmp_path / "sub").mkdir()
+    path = {
+        "dotdot": str(tmp_path / "sub" / ".."),
+        "case": str(tmp_path).swapcase(),
+        "different": str(tmp_path / "sub"),
+    }[alias_kind]
+    registry = MuxMappingRegistry(tmp_path / "mapping.json")
+    initial = _payload(worktree_path=str(tmp_path))
+    _probe(monkeypatch, f"wt-one\t1\t$1:100\t{tmp_path}\n")
+    assert mux_discovery.discover_mapping(registry, initial)["applied"]
+    before = registry.get("project", "one")
+    _probe(monkeypatch, f"wt-one\t2\t$1:100\t{path}\n")
+    result = mux_discovery.discover_mapping(registry, _payload(worktree_path=path))
+    if alias_kind == "different":
+        assert result == {"applied": False, "reason": "incumbent-mapping"}
+        assert registry.get("project", "one") == before
+    else:
+        assert result["applied"]
+        assert result["entry"] == dict(before, attached_clients=2)
 
 
 @pytest.mark.parametrize("stdout,code", [

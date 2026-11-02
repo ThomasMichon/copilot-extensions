@@ -99,6 +99,15 @@ gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rat
 than cry wolf; feed its findings into the design critique, don't treat a clean
 scan as a full review.
 
+The scan also checks native command-hook `timeoutSec` declarations without
+executing hooks. Explicit values must be finite positive numbers, excluding
+booleans: invalid owned declarations are BLOCKING in offline review, external
+findings stay WARNING with source/version attribution. Missing timeouts warn
+and preserve legacy host defaults; no universal ceiling or runtime allow/deny
+change is imposed. Unreadable hook documents warn that review is incomplete.
+Compatibility matcher groups and their `timeout` fields are outside this native
+check. Actual deadline margin, cleanup and semantic correctness still require review.
+
 The ordinary scan also validates checked-in static instruction projections and
 `.github/copilot/context-projections.json` offline. With `--from-settings`, it
 uses the same enabled-plugin payload resolution as the rest of the scan to
@@ -109,20 +118,20 @@ ownership, safely detectable `applyTo` overlap, orphaned lock/file entries,
 legacy marked `AGENTS.md` regions, 4 KiB per-file and 12 KiB aggregate budgets,
 and dynamic/session-specific content that cannot be checked in safely.
 New enabled sources with neither reviewed artifacts nor a verified complete
-enabled canonical local body block as `projection-missing`; required inline
-control floors cannot be replaced by a cache. Once valid guidance is available,
+enabled canonical local body block as `projection-missing`. Former inline and
+cache-free declarations use the same selector/offline-body pair. Once valid guidance is available,
 stale reviewed freshness remains advisory `projection-source-update`, owned by
 adopted maintenance rather than per-session resync. Missing locked artifacts,
 foreign ownership and unsafe paths remain blocking.
 
 ### Static fail-safe projection sync
 
-Until the supported Copilot CLI version floor proves native composition of every
-plugin-owned `sessionStart` `additionalContext` value, checked-in projections
-plus exact-session guidance files are the reliable ambient-policy path. A plugin
-declares a bounded, data-only pointer or fallback template and, when guidance is
-dynamic, uses an output-free `sessionStart` hook to write the exact session's
-file. Synchronize enabled declarations with the companion manager:
+Creation/startup copies are the normal automatic full-body delivery path.
+Periodically maintained checked-in fallbacks remain available for offline
+recovery, not a second automatically loaded policy copy. A plugin declares its
+canonical template and, when guidance is dynamic, uses an output-free
+`sessionStart` hook to write the exact session's file.
+Synchronize enabled declarations with the companion manager:
 
 ```bash
 python3 <skill-dir>/scripts/manage-instruction-projections.py sync <repo-root>
@@ -136,8 +145,9 @@ trust, then reads only the explicit declaration and canonical template from
 each enabled payload (personal activation does not change a shared checked-in
 projection). Malformed settings and unavailable enabled payloads block the
 operation. It creates or updates only the declared
-`.github/instructions/<plugin>/` destination, writes deterministic UTF-8/LF
-bytes with machine-readable provenance, and commits all changed projections and
+`.github/instructions/<plugin>/` thin selector and its derived ordinary `.md`
+body under `.github/copilot/context-fallbacks/`, writes deterministic UTF-8/LF
+bytes with machine-readable provenance, and commits both artifacts and
 the deterministic lock as one serialized, compare-before-replace,
 rollback-protected transaction. It refuses
 unmarked files, malformed or missing ownership, different owners, local body
@@ -145,7 +155,11 @@ edits, nonportable or case-conflicting destinations, path escape, and
 symlink/reparse indirection. Scheduled adopters may explicitly consent to
 repairing content edits on valid, already-owned generated artifacts with
 `overwriteExistingManaged`; ordinary sync preserves edits by default.
-See `docs/patterns/worktree-scoped-dynamic-guidance.md` for that narrow
+Full fallback paths exclude `.instructions.md` anywhere, case-insensitively,
+and native instruction filenames. Legacy inline declarations are accepted but
+normalize to selector/body output; they cannot reintroduce a duplicate automatic
+body. See `docs/patterns/worktree-scoped-dynamic-guidance.md` for the
+provider-first reader/writer upgrade and rollback window and narrow
 transactional repair boundary. It never deletes repository-owned files; orphaned
 projections and old managed regions are review findings for a human or ordinary
 repository change to remove.
@@ -243,17 +257,21 @@ callback run once before the pass (never retried mid-pass).
 
 ### Worktree-scoped local cache -- the consent-free, permissionless read path
 
-Source declarations now choose inline decision kernels or local-first selectors.
-Selectors own reviewed full bodies outside automatic instruction discovery;
-full caches/bodies carry per-source completeness receipts, never loaded-state.
-The catch-all remains inline to recover bodies written after discovery.
-Read `docs/patterns/worktree-scoped-dynamic-guidance.md` for authority,
-compatibility, inline exceptions and the model-admission evidence boundary.
+Enabled plugins' declared instructions are copied verbatim into
+`.github/instructions/agent-worktrees-generated/<marketplace>/...`.
+Prefer the applicable current managed copy without comparing instruction hashes,
+fingerprints, versions, provenance markers or receipts. Read the full body unless
+it is already directly visible in this context. Files may be replaced during a
+live session; restart or begin a fresh context to load corrected instructions.
+Copying does not prove model admission. The catch-all covers late copies.
+The owning pattern is `docs/patterns/worktree-scoped-dynamic-guidance.md`.
 The manager's read-only `resolve-source <repo-root> <destination> --json`
-operation supplies exact ownership/version/hash/scope selection; add
-`--from-settings` to authenticate paired or unpaired locals against enabled
-canonical payloads. Without that proof, paired resolution retains reviewed
-fallback authority.
+operation uses enabled declarations and safe paths to find the managed copy.
+Add `--from-settings` for effective user, repository and local activation.
+It does not authenticate instruction content. An available declared copy is
+selected before checked-in selector, fallback or lock validation; a stale or
+damaged reviewed artifact cannot block that copy. Without an available copy,
+the existing offline reviewed fallback remains usable.
 `resolve-source` is not an executable: invoke the script at this loaded skill's
 returned base with an absolute Python interpreter, using argv
 `["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>","<destination>","--from-settings","--json"]`.
@@ -261,23 +279,18 @@ This skill-loading path is the existing payload-only discovery mechanism; it
 does not add a global command, runtime or PATH entry. Preserve the owning base
 and pass the catalog `--agent-worktrees-path` when repository settings require it.
 
-`sync`/`scan`/`run_sync_pass()` above mutate the checked-in projection and
-its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).
+`sync`/`run_sync_pass()` above mutate the checked-in projection and its lock;
+`scan` audits them. Their authoring checks remain separate from runtime reading.
 `instruction_projections.render_local_cache(repo_root, discover_sources)` is
-a deliberately **un**privileged sibling: it renders each enabled source's
-*current* full body into gitignored
-`.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
-available for automatic instruction discovery (nested paths preserved).
-`local_sibling_destination()` computes the sibling path. Checked-in selectors
-remain pointers; reviewed fallback bodies stay outside automatic discovery.
-Legacy local reads remain canonically authenticated; after new publication only
-verified canonical untracked legacy files are retired. Edited/foreign/tracked
-files remain with visible findings. There is no consent check and no
-mutation of any checked-in file, lock, or git history. It *does* hold its
-own dedicated lock (`_local_cache_lock`, separate from `sync`'s own) so
-concurrent callers for the same repository can't interleave their
-render/write/cleanup passes -- distinct from the checked-in sync's lock in
-purpose and lifetime. A caller must handle contention: a locked-out call
+a deliberately **un**privileged compatibility publisher. It copies each enabled
+source's current template bytes into the same managed namespace as startup,
+preserving nested paths and copying even `skipLocalCache` sources. Every call
+replaces the selected files, including edited or identical copies, without
+rendering envelopes, comparing instruction content or consulting reviewed locks.
+There is no consent check or mutation of checked-in files or git history.
+Its `_local_cache_lock` uses the startup publisher's workspace lease, separate
+from checked-in `sync`'s lock, so the two publication paths cannot interleave.
+A caller must handle contention: a locked-out call
 returns a blocking `projection-local-cache-lock` finding and refreshes
 nothing at all, rather than assuming every call updates the cache: report
 the degraded outcome and retry at a later lifecycle boundary.
@@ -285,15 +298,18 @@ the degraded outcome and retry at a later lifecycle boundary.
 the lock is acquired -- never a precomputed list -- so no call can act on a
 source set a more recent call has already superseded. See
 `docs/patterns/worktree-scoped-dynamic-guidance.md`: any session, regardless
-of push rights or scheduled-worker opt-in, can always see a fresh render of
+of push rights or scheduled-worker opt-in, can always see a fresh copy of
 what's currently installed without a privileged sync. Call it
 only as the compatibility renderer when no managed startup publisher owns the
 boundary. Managed worktree create/resume and local Bridge preparation publish
-the final complete static set before discovery and reuse a verified unchanged
-generation. SessionStart is a bounded backup, not another unconditional render;
-ordinary same-generation reads do not regenerate files. A failure on one source
+the final complete static set before discovery on every preparation. SessionStart
+always requests its existing bounded backup when the hook budget permits.
+A failure on one source
 must remain visible without withholding independently safe guidance, and no
 compatibility operation mutates checked-in files or git history.
+Failed refreshes retain earlier files with explicit failure findings. Incomplete
+discovery does not authorize stale cleanup. Files outside the reserved namespace
+are retained and reported for explicit migration, not authenticated or deleted.
 
 Local delivery never withholds safe guidance because of a context-budget excess.
 Template, per-file and aggregate excess, and invalid budget configuration, are
@@ -557,6 +573,22 @@ blindly. And **never edit an external plugin's installed payload in place** — 
 is overwritten on update; fix it in-repo or upstream.
 
 ### 1. Design critique (rubber-duck)
+
+For hooks, read the plugin-owned portable
+[circumstantial hook contract](../authoring-skills/references/circumstantial-hooks.md).
+Review fact acquisition, cheap event-time evaluation and contextual intervention
+separately. Require the per-hook purpose, five exposure mechanisms, input-bound
+freshness/completeness, acknowledgement invalidation, violation versus dependency
+errors, actionable response visibility, retry safety and total deadline/cleanup
+cost. Startup guidance or blanket session acknowledgement cannot replace
+circumstantial detection. Default to fail open when an absent/uninstalled/broken
+backing suite prevents ordinary evaluation, preserving inspection and recovery.
+Any required-installation exception needs positive applicability to its documented
+protected action from available trusted inputs, bounded diagnostics and reachable
+recovery, independent of the missing helper. Absence or validator failure cannot
+prove that exception. Preserve confirmed policy outcomes and unknown lifecycle
+effects without fabricating success or replaying unknown mutations. Match behavioral claims to focused tests and supported host evidence,
+not keyword presence or a clean timeout scan.
 
 Hand the gathered files to a **reviewer** — the Copilot CLI **`/rubber-duck`**
 critique command where available, a harness-provided review sub-agent, or an

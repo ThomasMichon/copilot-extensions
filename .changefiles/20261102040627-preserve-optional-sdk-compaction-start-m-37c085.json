@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve optional SDK compaction-start metadata and provide bounded unknown-capacity evidence",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate versioned acquisition-hint intake and gate queue execution on the selected indexing callable.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

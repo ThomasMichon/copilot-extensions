@@ -14,6 +14,7 @@ from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import TaskError
 from agent_dispatch.spawn_factories import make_headless_spawn
 from agent_dispatch.supervisor import Supervisor
+from tests._hosting_owner import admission_owner as admission_owner
 from tests.test_ordinary_bridge_startup import startup as startup
 from tests.test_supervisor import QueueBackedClient
 

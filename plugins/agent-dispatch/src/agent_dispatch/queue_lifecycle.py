@@ -15,6 +15,7 @@ standalone.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import json
 import sqlite3
@@ -32,6 +33,7 @@ from .queue_common import (
 from .queue_progress import QueueProgressMixin
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import SpawnState, Status, TaskError
+from .queue_task_recovery import RESET_FIELDS, require_task_recovery_safe
 
 # marketplace-isolation: allow release-verb (a business verb, "release from
 # suspension" -- coincidentally matches the guard's lease/mutex keyword scan
@@ -60,6 +62,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         owner_session_id: str | None = None,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
+        require_pool_assignment: bool = False,
         now: float | None = None,
     ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match)."""
@@ -86,6 +89,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             start_acquisition_authority=authority,
             expected_owner_session_id=expected_owner_session_id,
             expected_generation=expected_generation,
+            require_pool_assignment=require_pool_assignment,
         )
 
     def complete(
@@ -553,18 +557,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             require_owner=False,
             now=now,
             note=f"reset: {reason}" if reason else "reset",
-            extra={
-                "owner": None,
-                "owner_session_id": None,
-                "lease_expires_at": None,
-                "claimed_at": None,
-                "started_at": None,
-                "last_liveness": None,
-                "card": None,
-                "card_draft": None,
-                "awaiting_steer": 0,
-                "resume_requested": 0,
-            },
+            extra=RESET_FIELDS,
             expected_generation=expected_generation,
             expected_owner_session_id=expected_owner_session_id,
             expected_status=expected_status,
@@ -720,6 +713,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         idempotent_replay: bool = False,
         report_replay: bool = False,
         start_acquisition_authority: dict | None = None,
+        require_pool_assignment: bool = False,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -737,10 +731,38 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            from .queue_pool_placement import pool_assignment
+            if require_pool_assignment and pool_assignment(conn, task_id) is None:
+                raise TaskError("explicit pool start requires an allocator-owned pool assignment")
+            if (
+                note != "start" and task.status == Status.CLAIMED and task.owner is None
+                and worker_id is not None and pool_assignment(conn, task_id) is not None
+            ):
+                raise TaskError("allocator claim has no accepted worker to perform this transition")
+            if note == "start":
+                from .queue_pool_placement import require_pool_start
+                from .queue_pool_startup import require_pool_decision
+                ts = self._now(now)
+                require_pool_decision(conn, task, ts)
+                if require_pool_start(
+                    conn, task, worker_id, (extra or {}).get("owner_session_id"),
+                    expected_generation,
+                ):
+                    if (
+                        task.status == Status.STARTED
+                        and expected_owner_session_id is None
+                        and task.owner_session_id == (extra or {}).get("owner_session_id")
+                    ):
+                        expected_owner_session_id = task.owner_session_id
+                    extra = {**(extra or {}), "owner": worker_id}
+                    task = replace(task, owner=worker_id)
             if note == "start" or note == "resume" and (extra or {}).get("owner_session_id"):
                 from .acquisition_receipts import validate_start
+                native_id = (extra or {}).get("owner_session_id")
+                if native_id is not None and not isinstance(native_id, str):
+                    raise TaskError("owner session identity must be a string")
                 validate_start(
-                    conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
+                    conn, task, native_id, start_acquisition_authority,
                 )
             try:
                 _check_expected_status(task, expected_status)
@@ -805,6 +827,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if expected_updated_at is not None and task.updated_at != expected_updated_at:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} changed while the transition was in flight")
+            if release_spawn_detail == _RESET_TO_PROPOSED:
+                require_task_recovery_safe(self, conn, task_id)
             if (release_spawn or to == Status.STARTED) and conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
                 (task_id,),
@@ -847,6 +871,9 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 params.append(val)
             params.append(task_id)
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
+            if note == "start" and to == Status.STARTED:
+                from .queue_pool_startup import reset_pool_startup
+                reset_pool_startup(conn, task_id)
             if "owner_session_id" in (extra or {}):
                 attach_machine, attach_worktree = _claimant_worktree_machine(task)
                 self._record_attachment(

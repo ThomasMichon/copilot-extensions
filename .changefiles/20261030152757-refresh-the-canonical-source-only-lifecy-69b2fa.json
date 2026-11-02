@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical source-only lifecycle archive after the shared process helper update.",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

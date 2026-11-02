@@ -108,7 +108,8 @@ def test_reopen_rejects_a_replaced_receipt_without_appending_to_it(tmp_path, mon
         nonlocal foreign
         original(source, destination)
         peer = tmp_path / "foreign"
-        peer.write_bytes(b"foreign replacement\n")
+        with os.fdopen(proof._created_file(peer), "wb") as stream:
+            stream.write(b"foreign replacement\n")
         foreign = peer.stat().st_ino
         os.replace(peer, destination)
 
@@ -123,7 +124,8 @@ def test_reopen_rejects_a_replaced_receipt_without_appending_to_it(tmp_path, mon
 @pytest.mark.parametrize("refuse", [False, True])
 def test_before_effects_observes_complete_header_and_unchanged_targets(tmp_path, kind, refuse):
     target = tmp_path / ("command" if kind == "copy" else "current-version")
-    target.write_bytes(b"previous\n")
+    with os.fdopen(proof._created_file(target), "wb") as stream:
+        stream.write(b"previous\n")
     target.chmod(0o600)
     before = proof.state_path(target)
     workspace = tmp_path / "workspace"
@@ -146,7 +148,8 @@ def test_before_effects_observes_complete_header_and_unchanged_targets(tmp_path,
     def invoke():
         if kind == "copy":
             source = workspace / "source"
-            source.write_bytes(b"new\n")
+            with os.fdopen(proof._created_file(source), "wb") as stream:
+                stream.write(b"new\n")
             return proof.CopyPublication(
                 tmp_path, workspace,
                 [proof.CopyBinding(source, target, proof.state_path(source).digest)],

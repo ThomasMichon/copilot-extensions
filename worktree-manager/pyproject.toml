@@ -72,6 +72,7 @@ dependencies = [
     # ``machine_transport``). Used by the production Picker's
     # local-vs-remote dispatch decisions (data_local.is_local/data_ssh.is_local).
     "agent-machine-transport",
+    "agent-ssh-manager",
     # Shared update-run telemetry: JSONL events, folded status file, and the
     # update exit-code table (module ``update_telemetry``). Used by
     # ``worktree-manager update``, which owns the run the engine joins.
@@ -81,6 +82,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-ssh-manager = { path = "../libs/ssh-manager", editable = true }
 agent-process-telemetry = { path = "../libs/process-telemetry", editable = true }
 # TODO: REMOVE ON 2026-10-28 OR LATER, once native UV accepts dbus-next==0.2.3
 # from the affected mirror with exclude-newer="7 days". Remove the bundled

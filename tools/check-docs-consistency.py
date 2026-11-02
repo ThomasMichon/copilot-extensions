@@ -369,7 +369,7 @@ def _raise_walk_error(error: OSError) -> None:
 
 def _markdown_paths() -> Iterator[Path]:
     """Keep glob candidates, but never descend into already-excluded trees."""
-    excluded = {".worktrees", "node_modules"}
+    excluded = {".worktrees", "node_modules", ".test-runs"}
     if excluded.intersection(REPO.parts):
         return
     for root, dirs, files in os.walk(REPO, onerror=_raise_walk_error):

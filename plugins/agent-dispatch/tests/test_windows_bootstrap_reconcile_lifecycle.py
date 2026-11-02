@@ -20,6 +20,16 @@ HOOK = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-check.ps1"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
+def stage_action_policy_payload(plugin: Path) -> None:
+    scripts = plugin / "scripts"
+    for name in ("action_controls.py", "versioned_runtime_native.ps1"):
+        shutil.copyfile(HOOK.with_name(name), scripts / name)
+    shutil.copytree(
+        HOOK.parents[1] / "src", plugin / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+
+
 def alive(pid: int) -> bool:
     from ctypes import wintypes
 
@@ -64,6 +74,7 @@ def reconcile(tmp_path):
     (plugin / "plugin.json").write_text('{"name":"agent-dispatch"}', encoding="utf-8")
     (plugin / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
     shutil.copyfile(HOOK, scripts / HOOK.name)
+    stage_action_policy_payload(plugin)
     (scripts / "install.ps1").write_text(
         r"""
 param([string]$Action)
@@ -91,6 +102,7 @@ exit 9
     )
     env = dict(os.environ)
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    env.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
     env.update(
         USERPROFILE=str(home),
         HOME=str(home),

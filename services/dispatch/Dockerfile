@@ -40,6 +40,7 @@ ENV PIP_INDEX_URL=${PYTHON_INDEX_URL} \
     UV_DEFAULT_INDEX=${PYTHON_INDEX_URL}
 
 RUN pip install --no-cache-dir uv
+RUN ! command -v cc && ! command -v gcc
 
 WORKDIR /src
 # Only the sources agent-dispatch's own pyproject.toml [tool.uv.sources]
@@ -53,9 +54,10 @@ COPY libs/single-instance-lease libs/single-instance-lease
 COPY plugins/agent-dispatch plugins/agent-dispatch
 COPY services/dispatch services/dispatch
 
-RUN uv venv /opt/venv \
+RUN uv build --no-cache --exclude-newer "7 days" --wheel --out-dir /wheels /src/libs/agent-procutil \
+    && uv venv /opt/venv \
     && uv pip install --no-editable --python /opt/venv/bin/python \
-         /src/plugins/agent-dispatch /src/services/dispatch
+         /wheels/agent_procutil-*.whl /src/plugins/agent-dispatch /src/services/dispatch
 
 FROM python:3.12-slim
 

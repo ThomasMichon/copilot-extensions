@@ -14,23 +14,30 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
-if __name__ == "__main__":
-    import sys as _entry_sys
+import sys
+from . import terminal_launch as _terminal_launch
 
-    if _entry_sys.argv[1:2] == ["--resident-picker"]:
+if __name__ == "__main__":
+    if _terminal_launch.answer_query():
+        raise SystemExit(0)
+    _terminal_launch.validate_or_exit()
+    if sys.argv[1:2] == ["--resident-picker"]:
         from .resident_picker import main as _resident_picker_main
 
-        raise SystemExit(_resident_picker_main(_entry_sys.argv[2:]))
-    if _entry_sys.argv[1:2] == ["--resident-result"]:
+        raise SystemExit(_resident_picker_main(sys.argv[2:]))
+    if sys.argv[1:2] == ["--resident-result"]:
         from .resident_picker import finish as _resident_picker_finish
 
-        raise SystemExit(_resident_picker_finish(_entry_sys.argv[2:]))
+        raise SystemExit(_resident_picker_finish(sys.argv[2:]))
 
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .runtime_source import ResolvedSource
 
 from . import __version__
 from .catalog import load_catalog
@@ -806,6 +813,18 @@ def _cmd_companion(rest: list[str]) -> int:
     return run_companion()
 
 
+def _cmd_companion_pane(rest: list[str]) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="worktree-manager companion-pane")
+    parser.add_argument("--action", required=True, choices=("show", "return"))
+    parser.add_argument("--cwd")
+    options = parser.parse_args(rest)
+    from .companion_pane import run
+
+    return run(action=options.action, cwd=options.cwd)
+
+
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
     if rest and rest[0] == "review":
@@ -1233,6 +1252,7 @@ def _run_launch(req) -> int:
 
 def _execute_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
+    _terminal_launch.validate()
     from . import engine_client, launch_observations, launcher
 
     attempt_id = getattr(req, "attempt_id", None)
@@ -1323,6 +1343,13 @@ def _execute_launch(req) -> int:
         )
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:
+            if (
+                _is_windows() and _terminal_launch.available()
+                and not new_window and not getattr(req, "no_mux", False)
+                and os.environ.get("WORKTREE_NO_MUX") != "1"
+            ):
+                # The shell owns launch/return observations after Python exits.
+                return _run_relocated_mux_launch(req, plan, script)
             return launch_observations.launch(
                 attempt_id, lambda: _run_relocated_mux_launch(req, plan, script),
             )
@@ -1334,6 +1361,14 @@ def _execute_launch(req) -> int:
     )
 
 def _cmd_self_install(rest: list[str]) -> int:
+    if "--apply" in rest and os.name == "nt":
+        from .update_driver_cli import self_install_request
+
+        return self_install_request(lambda: _render_self_install(rest))
+    return _render_self_install(rest)
+
+
+def _render_self_install(rest: list[str]) -> int:
     do_apply = "--apply" in rest
     st = self_status()
     res = self_install(dry_run=not do_apply)
@@ -1450,44 +1485,69 @@ def _cmd_update(rest: list[str]) -> int:
     The run is recorded through ``update_events``; the exit code follows the
     shared update table (0 success, non-zero failure classes).
     """
+    if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
+        from .installation_updates import run_targeted_update
+
+        return run_targeted_update(rest)
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source
+    from .runtime_source import SourceAcquisitionError
+    from .runtime_source_update import repair_selection
 
-    if not preflight_runtime_source():
+    if not preflight_runtime_source(suite=True):
         return 1
-    prepared = prepare_update(rest)
-    if prepared.exit_code:
-        return prepared.exit_code
-    run = UpdateRun()
+    run = None
     try:
-        return run.finish(_cmd_update_steps(
-            prepared.arguments, run, fresh_manager=prepared.fresh_manager,
-            environment=prepared.environment,
-        ))
+        with repair_selection(rest) as runtime_source:
+            source_arguments = (
+                {"runtime_source": runtime_source} if runtime_source is not None else {}
+            )
+            prepared = prepare_update(rest, **source_arguments)
+            if prepared.exit_code:
+                return prepared.exit_code
+            run = UpdateRun()
+            rc = _cmd_update_steps(
+                prepared.arguments, run, fresh_manager=prepared.fresh_manager,
+                environment=prepared.environment, **source_arguments,
+            )
+        return run.finish(rc)
+    except (OSError, ValueError, SourceAcquisitionError) as error:
+        if run is None:
+            print(f"Runtime source: {error}", file=sys.stderr)
+            return 1
+        run.say(f"Runtime source: {error}", state="failed")
+        run.record_engine_error(str(error), missing=False)
+        return run.finish(1)
     except BaseException as exc:
-        run.abort(exc)
+        if run is not None:
+            run.abort(exc)
         raise
 
 
 def _cmd_update_steps(
     rest: list[str], run, *, fresh_manager: bool = False,
     environment: dict[str, str] | None = None,
+    runtime_source: ResolvedSource | None = None,
 ) -> int:
     from .update_orchestration import run_update_steps
 
     return run_update_steps(
         rest, run, version=__version__, fresh_manager=fresh_manager, environment=environment,
+        **({"runtime_source": runtime_source} if runtime_source is not None else {}),
     )
 
 
 def main(argv: list[str] | None = None) -> int:
+    _terminal_launch.validate_or_exit()
     inherited_warning = accept_inherited_engine_command()
     if inherited_warning:
         print(f"worktree-manager: ignoring invalid provider handoff: "
               f"{inherited_warning}", file=sys.stderr)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
+        if _terminal_launch.answer_query(args):
+            return 0
         print(f"worktree-manager {__version__}")
         return 0
     if args and args[0] in ("--help", "-h"):
@@ -1502,7 +1562,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("    [--repository HTTPS_URL] [--repository-target ABSOLUTE_PATH]")
-        print("    [--trust-repository-setup]  optional engine-owned repository setup after core readiness")
+        print("    [--repository-commit FULL_COMMIT_ID] [--trust-repository-setup]")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  source                 show the self-update source (git repo + ref/branch)")
         print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")
@@ -1520,6 +1580,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  launch-attempts [ID] [--json] [--include-input] [--sweep-project NAME --source-machine ID]")
+        print("                         read local intent/receipts or explicit configured SSH metadata; never retry")
         print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
         print("                         preview the Windows Terminal fragment a project would emit")
         print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
@@ -1539,6 +1601,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
+        print("  companion-pane --action show|return [--cwd PATH]  same-window Companion navigation")
         print("  mux-daemon <run|ensure|register|remove|show|status|recovery-evidence>  (managed mux)")
         print()
         print("A bare invocation reads current installation state without changing it.")
@@ -1551,6 +1614,9 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "launch-attempts":
+        from .launch_history_cli import main as launch_history
+        return launch_history(args[1:])
     if args and args[0] == "terminal-fragment":
         return _cmd_terminal_fragment(args[1:])
     if args and args[0] == "profiles":
@@ -1564,6 +1630,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_picker(args[1:])
     if args and args[0] == "companion":
         return _cmd_companion(args[1:])
+    if args and args[0] == "companion-pane":
+        return _cmd_companion_pane(args[1:])
     if args and args[0] == "mux-daemon":
         return _cmd_mux_daemon(args[1:])
     if args and args[0] == "daemons":

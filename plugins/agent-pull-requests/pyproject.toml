@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-update-driver",
     "agent-work-coalescing-singleton",
     "agent-procutil",
     "agent-single-instance-lease",

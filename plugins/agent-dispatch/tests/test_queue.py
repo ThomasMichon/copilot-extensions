@@ -788,7 +788,7 @@ def test_reset_discards_embodiment_state_preserves_goal(q):
         "task", goal="ship the thing", done_criteria="tests pass"
     )
     q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
-    q.start(t.id, "m/wt", owner_session_id="s1")
+    q.start(t.id, "m/wt")
     q.record_progress(t.id, "m/wt", phase="impl", summary="did a thing")
     back = q.reset(t.id, reason="wrong approach")
     assert back.status == Status.PROPOSED
@@ -802,12 +802,7 @@ def test_reset_discards_embodiment_state_preserves_goal(q):
     assert len(q.progress_log(t.id)) == 1
 
 
-def test_reset_releases_active_spawn_reservation(q):
-    """PR #2913 review: resetting a task with an active spawn reservation
-    must release it -- otherwise the old attempt's session/reservation
-    stays live with no task owning it, free to keep running and race a
-    fresh attempt. Reuses the same `release_spawn` mechanism
-    `yield_task`/`release_suspended` already rely on."""
+def test_reset_preserves_active_spawn_until_qualified_retirement(q):
     t = q.create("task")
     reservation, _ = q.reserve_spawn(t.id)
     q.record_spawn(reservation.key, session_handle="s1", worktree="wt")
@@ -815,12 +810,15 @@ def test_reset_releases_active_spawn_reservation(q):
     q.start(t.id, "m/wt", owner_session_id="s1")
     assert q.latest_reservation(t.id).state == "spawned"
 
-    q.reset(t.id, reason="not like this")
+    before = q.get(t.id)
+    with pytest.raises(TaskError, match="retained reservation still owns execution"):
+        q.reset(t.id, reason="not like this")
 
-    released = q.latest_reservation(t.id)
-    assert released.key == reservation.key
-    assert released.state == "releasing"
-    assert released.release_requested is True
+    retained = q.latest_reservation(t.id)
+    assert retained.key == reservation.key
+    assert retained.state == "spawned"
+    assert retained.release_requested is False
+    assert q.get(t.id) == before
 
 
 @pytest.mark.parametrize(
@@ -875,9 +873,10 @@ def test_reset_honors_expected_generation_fencing(q):
     gen = q.get(t.id).generation
     with pytest.raises(TaskError, match="ownership incarnation changed"):
         q.reset(t.id, expected_generation=gen - 1, expected_owner_session_id="s2")
-    assert q.reset(
-        t.id, expected_generation=gen, expected_owner_session_id="s2"
-    ).status == Status.PROPOSED
+    before = q.get(t.id)
+    with pytest.raises(TaskError, match="native assignment has no qualified retirement"):
+        q.reset(t.id, expected_generation=gen, expected_owner_session_id="s2")
+    assert q.get(t.id) == before
 
 
 def test_suspended_successor_adopts_session_and_advances_generation(q):

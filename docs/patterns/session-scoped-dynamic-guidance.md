@@ -223,7 +223,7 @@ review mechanism is needed -- only a documented content convention.
   [`context-handoff`](../../plugins/context-handoff/) use the same writer shape
   for repository-aware publication policy and the continuity contract.
 - Static-only plugins such as
-  [`delegation-guidance`](../../plugins/delegation-guidance/) and
+  [`agent-conduct-guidance`](../../plugins/agent-conduct-guidance/) and
   [`copilot-extensions-harness`](../../plugins/copilot-extensions-harness/)
   project reviewed fallback policy without a dynamic writer.
 

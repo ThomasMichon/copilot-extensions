@@ -13,16 +13,21 @@ import argparse
 import os
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import NoReturn, TextIO, TypedDict, cast
 
 from .human import HumanLineBuffer, HumanOperation, native_output
 from .redact import redact
 
 
 class ShellProgress:
-    def __init__(self, log: TextIO, terminal: TextIO, *, interactive=False, wall=None, monotonic=None):
+    def __init__(
+        self, log: TextIO, terminal: TextIO, *, interactive: bool = False,
+        wall: Callable[[], datetime] | None = None,
+        monotonic: Callable[[], float] | None = None,
+    ) -> None:
         self.log = log
         self.terminal = terminal
         self.interactive = interactive
@@ -96,7 +101,13 @@ class _ParentExited(RuntimeError):
     pass
 
 
-def _records(events: Path, parent: int, stopped: threading.Event):
+class _ProcessOptions(TypedDict, total=False):
+    creationflags: int
+
+
+def _records(
+    events: Path, parent: int, stopped: threading.Event,
+) -> Iterator[tuple[int, tuple[bytes, bytes, bytes], bytes]]:
     with events.open("rb") as source:
         pending = b""
         number = 0
@@ -125,7 +136,7 @@ def render(
     completed: dict[int, float] = {}
     clock_error: BaseException | None = None
 
-    def sample():
+    def sample() -> None:
         nonlocal clock_error
         try:
             for number, fields, _pending in _records(events, parent, stopped):
@@ -137,7 +148,7 @@ def render(
                                 raise _ParentExited("launch parent exited before admitting its action")
                         started.discard(number)
                 elif fields[0] == b"end":
-                    boundary = progress.root.monotonic()
+                    boundary = cast(Callable[[], float], progress.root.monotonic)()
                     with changed:
                         completed[number] = boundary
                         changed.notify_all()
@@ -174,7 +185,7 @@ def render(
                         # Admit only after earlier output and the start line
                         # drain; end sampling never waits for that sink.
                         assert progress.action is not None
-                        progress.action.started = progress.root.monotonic()
+                        progress.action.started = cast(Callable[[], float], progress.root.monotonic)()
                         with changed:
                             started.add(number)
                             changed.notify_all()
@@ -196,13 +207,16 @@ def observe_command(log: TextIO, argv: list[str]) -> int:
     """Observe one native invocation without acquiring installation ownership."""
     import subprocess
 
+    options: _ProcessOptions = {}
+    if sys.platform == "win32":
+        options["creationflags"] = subprocess.CREATE_NO_WINDOW
     with HumanOperation("launch/installer", stream=log) as progress:
         try:
             with native_output() as output:
                 result = subprocess.run(
                     argv, stdin=subprocess.DEVNULL, stdout=output,
                     stderr=subprocess.STDOUT, check=False,
-                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+                    **options,
                 )
         except OSError as exc:
             progress.complete("failed", f"Installer observation failed: {exc}")
@@ -246,7 +260,7 @@ def main() -> int:
     parser.add_argument("--interactive", choices=("0", "1"), required=True)
     args = parser.parse_args()
 
-    def parent_loss():
+    def parent_loss() -> NoReturn:
         try:
             args.ready.with_name(args.ready.name + ".failure").write_text(
                 "parent-exited\n", encoding="ascii",

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+from typing import TYPE_CHECKING
 
 from agent_procutil import no_window_kwargs
 from repository_policy import AgentHostingError
 
 from . import agent_policy, git_ops, output
+
+if TYPE_CHECKING:
+    from .repos import RepoEntry
 
 
 def admit_cli(
@@ -25,19 +29,10 @@ def admit_cli(
     return True
 
 
-def prepare_namespaced_project_state(
-    project: str,
-    repo_dir: Path,
-    platform_name: str,
-) -> bool:
-    """Publish repository identity before the first cell-local state lookup."""
-    from . import project_state
-
-    if not project_state.namespaced():
-        return True
+def _repository_registration(project: str, repo_dir: Path) -> tuple[RepoEntry | None, str]:
     from . import repos as repos_mod
 
-    existing = repos_mod.find_repo(project)
+    existing = repos_mod.read_registry(strict=True).repos.get(project)
     remote = ""
     try:
         result = subprocess.run(
@@ -54,7 +49,31 @@ def prepare_namespaced_project_state(
         pass
     if not remote and existing is not None:
         remote = existing.remote
+    return existing, remote
+
+
+def existing_project_state(project: str, repo_dir: Path) -> Path | None:
+    """Resolve only already-owned target state before adoption writes."""
+    from . import config, project_state
+
+    if not project_state.namespaced():
+        return config.project_dir(project)
+    _, remote = _repository_registration(project, repo_dir)
+    return project_state.existing_adoption_state(project, remote)
+
+
+def prepare_namespaced_project_state(
+    project: str,
+    repo_dir: Path,
+    platform_name: str,
+) -> bool:
+    """Publish repository identity before the first cell-local state lookup."""
+    from . import project_state, repos as repos_mod
+
+    if not project_state.namespaced():
+        return True
     try:
+        existing, remote = _repository_registration(project, repo_dir)
         repos_mod.add_repo(
             project,
             str(repo_dir),

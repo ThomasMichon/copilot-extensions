@@ -20,7 +20,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision')]
+    [ValidateSet('install', 'init', 'uninstall', 'stamp', 'provision')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [ValidateSet('base', 'provider-exec')]
@@ -36,6 +36,11 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ((Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) -and $Action -notin @('stamp', 'uninstall') -and
+    -not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET)) {
+    throw 'Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction.'
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -62,9 +67,16 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
+. (Join-Path $PSScriptRoot 'legacy-transaction.ps1')
+if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-containers' }
+$InstallDir = Resolve-LegacyTransactionRoot $InstallDir
 if ($InstallDir) {
-    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
     $PSBoundParameters['InstallDir'] = $InstallDir
+}
+if ($Action -eq 'uninstall') {
+    if ($Force -or $Profile) { throw 'Legacy uninstall does not accept Force or Profile' }
+    & (Join-Path $PSScriptRoot 'legacy-uninstall.ps1') -InstallDir $InstallDir
+    exit $LASTEXITCODE
 }
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
@@ -344,7 +356,7 @@ function Get-SourceRuntimeVersion {
         '--format', $Format)
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime validation failed (exit ${code}): $result$nativeError" }
     return $result.Trim()
@@ -356,6 +368,7 @@ try {
 } catch [IO.FileNotFoundException] {
 } catch [IO.DirectoryNotFoundException] {
 }
+$SourceSelected = $SourceSelected -or (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
 if ($SourceSelected) {
     $SourceRuntimeIdentity = Get-SourceRuntimeVersion -Format json
     $SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
@@ -627,7 +640,7 @@ function Invoke-Stamp {
             '--root', $InstallDir, '--payload', $PluginDir, '--stamp-source',
             '--expected-source-version', $SrcVersion,
             '--expected-source-identity', $SourceRuntimeIdentity
-        ) -ErrorOutput ([ref]$nativeError)
+        ) -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
         if ($LASTEXITCODE -ne 0) {
             throw "Source snapshot validation failed; redirects were not published: $snapshot$nativeError"
         }
@@ -734,6 +747,10 @@ if (-not (Enter-InstallLock)) {
 
 try {
 Assert-SourceRuntimeIdentity
+if ($Action -in @('install', 'init', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') {
     if ($Profile) { throw 'Select a runtime profile with provision, not stamp' }
     Invoke-Stamp

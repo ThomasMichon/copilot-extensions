@@ -9,6 +9,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 
@@ -24,6 +25,16 @@ POWERSHELL_HOSTS = list(
 )
 POWERSHELL = POWERSHELL_HOSTS[0] if POWERSHELL_HOSTS else None
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
+
+
+class _SourceVector(TypedDict):
+    name: str
+    descriptor: dict[str, str | None]
+    marketplaceKey: str
+    normalized: dict[str, str]
+    record: str
+    sha256: str
+    marketplaceId: str
 
 
 def _record(kind: str, canonical: str, ref: str) -> str:
@@ -51,8 +62,8 @@ def _slug(value: str) -> str:
     return "".join(result).strip("-") or "marketplace"
 
 
-def _vectors() -> list[dict[str, object]]:
-    return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
+def _vectors() -> list[_SourceVector]:
+    return cast(list[_SourceVector], json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"])
 
 
 def _run_ps(
@@ -81,6 +92,8 @@ def _run_ps(
         encoding="utf-8",
         env=process_env,
         check=False,
+        timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     if check and result.returncode:
         raise AssertionError(
@@ -520,7 +533,8 @@ def test_stamp_rejects_string_typed_lock_version(tmp_path: Path) -> None:
     )
     rejected = _run_ps(*arguments, check=False)
     assert rejected.returncode != 0
-    assert "owner receipt is invalid" in rejected.stderr
+    assert "Installation lock owner receipt" in rejected.stderr
+    assert "is invalid." in rejected.stderr
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
@@ -541,6 +555,7 @@ def test_concurrent_first_stamp_leaves_one_untorn_receipt(tmp_path: Path) -> Non
             text=True,
             encoding="utf-8",
             env=environment,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         for _ in range(2)
     ]
@@ -1013,13 +1028,14 @@ def test_expected_payload_plugin_and_cell_mismatches_are_rejected(
     message: str,
 ) -> None:
     layout = _receipt_layout(tmp_path)
-    values = {
+    values: dict[str, str | Path] = {
         "wrong_payload": tmp_path / "other-payload",
         "wrong_plugin": "other-plugin",
         "wrong_cell": tmp_path / "other-cell",
     }
-    if isinstance(values[value_name], Path):
-        values[value_name].mkdir()
+    value = values[value_name]
+    if isinstance(value, Path):
+        value.mkdir()
     result = _run_ps(
         "validate",
         "-Context",
@@ -1151,7 +1167,10 @@ def test_existing_junction_root_cannot_escape_plugin_root(tmp_path: Path) -> Non
     outside.mkdir()
     state = Path(layout["plugin_root"]) / "state"
     command = ["cmd.exe", "/d", "/c", "mklink", "/J", str(state), str(outside)]
-    created = subprocess.run(command, capture_output=True, text=True, check=False)
+    created = subprocess.run(
+        command, capture_output=True, text=True, check=False, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+    )
     if created.returncode != 0:
         pytest.skip(f"cannot create junction: {created.stderr or created.stdout}")
     result = _run_ps(

@@ -1,0 +1,9 @@
+{
+  "comment": "Return a failing exit status when the explicit status-monitor restart command cannot spawn a monitor.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

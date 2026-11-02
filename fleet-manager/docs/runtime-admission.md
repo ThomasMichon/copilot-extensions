@@ -9,6 +9,10 @@ The [resident Gateway](gateway-runtime.md) has its own existing static
 index/credential enrollment API; this library does not replace or wire it.
 An owner-agreed current-snapshot adapter remains necessary before advertising
 these observation/operation permits on that serving plane.
+The separate [service Gateway SDK](gateway-service-profile.md#in-process-deployment-owners)
+binds its original retained verified caller to local operation admission.
+That opt-in bridge still requires independent current operation policy and
+effect-owner custody; it does not adopt the legacy serving plane or a live fleet.
 
 ## Trusted owner and currentness
 
@@ -42,6 +46,15 @@ all old permits. The trusted integer clock is sampled under its lock before and
 after callback/decision work. Expiry at the final checkpoint and clock rollback
 refuse; completion order cannot fabricate time order.
 
+`AuthoritySnapshot.identity_profile` defaults to the original `jwt-pop-v1`.
+An adopter may separately select `enrolled-pop-v1` to consume an actual verified
+`EnrolledIdentity` of kind `caller` from the existing enrolled-key serving
+boundary. Both Gateway and operation policy must explicitly admit that profile.
+An enrolled service identity cannot become an operator, and default operation
+policy does not silently accept another identity profile. Profile replacement,
+like issuer/audience replacement, requires a new admission owner. No token
+rewriting, identity reconstruction, provider login or new verifier is supplied.
+
 ## Supported requests and exact branches
 
 `ObservationRead(fleet, scopes=None)` means the enrolled principal's authorized
@@ -56,7 +69,8 @@ the store's internal global cursor, unrelated row metadata or unselected fields.
 Broad query/pagination/subscriptions and protected wire cursors remain unimplemented.
 
 Immutable `OperationIntent` values support their original three commands and
-the fixed [`runner.converge`](arc-owner.md) operation. The verified
+the fixed [`runner.converge`](arc-owner.md) and
+[`manager.converge`](komodo-owner.md) operations. The verified
 principal/account and snapshot authority must match the
 original intent before operation-ID or result lookup. Target, command and
 generation require an exact `OperationGrant`; enrollment generations and
@@ -66,12 +80,14 @@ resource parameters, current source policy, routing/installation/offer binding,
 backend delegation, accepted-work fences and effect-side policy still belong to
 their existing owners. A permit is not permission to skip those checks.
 
-`runner.converge` additionally requires the fourth `OperationGrant` field,
-`request_digest`, to equal the complete original intent's canonical digest.
-Command/target/generation-only runner grants refuse. The request contains the
-exact prepared proposal and selected deployment digest, so changing an image,
-chart, resolved scope, support receipt, duration, operation ID or selected
-configuration cannot reuse the grant. The original three commands retain their
+Both fixed convergence commands additionally require the fourth
+`OperationGrant` field, `request_digest`, to equal the complete original
+intent's canonical digest. Command/target/generation-only grants refuse.
+The runner request binds its prepared proposal and selected deployment;
+the manager request binds its complete selected deployment through the single
+`deployment` parameter. Changing an image, resolved scope, duration,
+operation ID or selected configuration cannot reuse the grant.
+The original three commands retain their
 existing grant shape; supplying a digest for them is unsupported. The current
 policy owner must independently admit that exact deployment. A preparation
 review does not create such an enrollment/grant.
@@ -92,6 +108,15 @@ uses a fresh proof and verification result with the original operation ID and
 content, not a human check-in, cached allow or evidence rollback.
 
 ## Permit checkpoints, renewal and bounds
+
+A trusted in-process embedding can supply `checkpoint=...` to `authorize`.
+This is a short I/O-free scope/lifetime check, not a policy or identity
+authenticator, and must return `None` or raise. It runs before and after
+admission and remains attached to every renewed handle's revalidation and
+completion. Its refusal consumes a retained handle without refunding proof
+evidence. Cleanup via `discard` never calls it or turns failure into authority.
+The service Gateway uses this seam for its original retained caller/route and
+local request custody; wire requests cannot supply a callback.
 
 The immutable `Permit` retains actor/enrollment, authority/fleet, action,
 canonical digest, exact effective resources, issuing policy revision and finite

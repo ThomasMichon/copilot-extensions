@@ -6,7 +6,6 @@ import dataclasses
 import json
 import os
 import re
-import shlex
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -14,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ._git_credential_route import (
+    router_helper,
     NON_INTERACTIVE,
     NATIVE_KEY,
     SECRET_KEY,
@@ -22,8 +22,8 @@ from ._git_credential_route import (
     original_environment,
     parse_attributes,
 )
-from .repo_accounts import remote_host
-from .update_auth_process import run
+from .repo_urls import remote_host
+from .update_auth_process import module_argv, run
 
 
 class ResolverUnavailable(RuntimeError):
@@ -150,14 +150,6 @@ def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) ->
     return result
 
 
-def router_helper(python: str = sys.executable) -> str:
-    return (
-        "!"
-        + shlex.quote(python.replace("\\", "/"))
-        + (" -I -X utf8 -m agent_worktrees._git_credential_route")
-    )
-
-
 def non_repository_environment(env: Mapping[str, str], cwd: Path) -> dict[str, str]:
     """Keep global/command credentials without discovering a caller's checkout."""
     from . import git_ops
@@ -280,7 +272,7 @@ def _check_native(
     credential: Mapping[str, str], src: Source, expected: str | None, env, runner,
 ) -> dict[str, str]:
     identity = runner(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent_worktrees.update_auth_probe"],
+        module_argv("agent_worktrees.update_auth_probe"),
         input=json.dumps({"host": src.host, **credential}), env=env,
     )
     if identity.timed_out:

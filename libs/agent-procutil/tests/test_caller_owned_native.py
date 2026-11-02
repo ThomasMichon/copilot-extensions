@@ -106,7 +106,9 @@ class PinnedProcess:
             return
         if self.handle is not None:
             if not self.kernel.TerminateProcess(self.handle, 137):
-                raise ctypes.WinError(ctypes.get_last_error())
+                error = ctypes.get_last_error()
+                if self.kernel.WaitForSingleObject(self.handle, 3000) != 0:
+                    raise ctypes.WinError(error)
         else:
             fixture.signal_pidfd(self.fd, signal.SIGKILL if signum is None else signum)
 
@@ -275,7 +277,10 @@ def test_installed_console_faults_settle_before_observer_cleanup(
                         else "timeout" if mode in ("timeout", "blocked-input") else mode
                     )
                     assert outcome["kind"] == expected
-                    assert outcome["settled_before_result"], "API returned before descendant exit"
+                    assert outcome["settled_before_result"], (
+                        f"API returned before descendant exit: {outcome}; "
+                        f"gone_now={[(pid, pins[pid].gone()) for pid in outcome.get('unsettled', [])]}"
+                    )
                     if expected == "output-limit":
                         assert outcome["stream"] == mode
                         assert outcome["limit"] == 32

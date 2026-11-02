@@ -36,6 +36,29 @@ development workspace merely to obtain tracking.
 - Preserve #6076 dispatch acquisition, #3443 orphan adoption and #6934
   authoritative head-resume ownership. Do not replace their state machines.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Coordination -->
+
+### Continuing source-specific #4016/#4028
+
+#### Source #4016
+
+- **C.4016.complete-retention:** Existing peer/Host/SSH carrier, discovery/auth,
+  credential/environment, target-workspace and native owners keep authority. Originating
+  managed relationship and remote peer execution stay distinct. The ROOT
+  coordinator/author is not appointed source executor. Retained-transfer
+  writer/lifecycle/explicit claim-handoff conditions still apply ONLY at their original
+  consequential boundary, not a universal ACK or finite-diagnostic veto.
+
+#### Source #4028
+
+- **C.4028.complete-retention:** Existing checkpoint/terminal-event/CLI-error and
+  selected SSH/ACP startup/transport owners keep authority. Originating managed
+  relationship and remote peer execution stay distinct. The ROOT coordinator/author is
+  not appointed source executor. Retained-transfer writer/lifecycle/explicit
+  claim-handoff conditions still apply ONLY at their original consequential boundary,
+  not a universal ACK or finite-diagnostic veto.
+
 ## Context
 
 The normal bridge CLI/client carries `caller_owner_ref`. The remote session
@@ -180,6 +203,170 @@ production-deadline change, containment/review/CI waiver or invented perf pass.
 - [ ] Transfer release/rollout or live acceptance to named tracked objectives
   where separately authorized; do not equate a merge with deployment.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Plan -->
+
+### Direct retained contract proposal from #4016/#4028
+
+_Agent-recommended additive tracking proposal; the original finite
+requirements, alternatives, evidence tiers and custody remain binding._
+
+These rows retain work, not completion credit. All incumbent Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact, including prior receiving amendments.
+Reviewed document intake is not implementation, native/installed proof,
+owner reassignment, source disposition or claim/resource release.
+
+#### Source #4016
+
+- [ ] **P.4016.peer-owned-profile:** Preserve the complete peer-to-peer machine + agent
+  + worktree execution outcome under the actual remote owning Bridge. Keep originating
+  relationship ownership, target-native session/process/workspace and external-server
+  client-only profiles distinct; a reachable URL does not confer any
+  peer/process/workspace/credential custody.
+
+- [ ] **P.4016.credential-env-stdin-prompt-fidelity:** Retain selected
+  machine/agent/worktree identity, credential and environment authority, working context
+  and literal stdin/prompt fidelity through host -> peer -> Copilot. Preserve
+  request/callback identity, permissions/answers, streams/progress/results,
+  stdout/stderr isolation, cancellation/disconnect/errors and owned cleanup, not only a
+  status RPC.
+
+- [ ] **P.4016.cold-tier1-OR-equivalent:** Preserve cold/no-HTTP SSH-stdio to the
+  authorized owning peer OR an explicitly accepted, qualified current carrier/Host
+  equivalent with the SAME original ownership/control/ACP/failure outcomes. Do not
+  require an obsolete command/class name or relabel RPC as a transparent byte pump.
+
+- [ ] **P.4016.warm-tier2-OR-equivalent:** Preserve the current advertised remote
+  endpoint through an owned ephemeral SSH forward and HTTP/SSE client OR an explicitly
+  accepted qualified replacement. Retain warm-peer preference/cold policy only where
+  negotiated semantics permit; never override the selected external profile's
+  no-automatic-fallback rule.
+
+- [ ] **P.4016.uncertainty-and-peer-lifetime:** Keep accepted peer work/Host
+  responsibility across link churn; stop/disconnect/reconnect do not silently release
+  claims or recreate unknown conversations. Only permitted pre-admission alternatives
+  may be tried; no parallel outreach, forced ownership change or blind consequential
+  replay.
+
+- [ ] **P.4016.full-matrix-and-CodeSpace-sleep:** Qualify the original complete
+  target/agent/worktree, warm/cold, missing/malformed/mixed capability,
+  interruption/failure and peer-owned matrix through actual selected consumers,
+  including ACP double-hop fidelity AND the separately named CodeSpace
+  bootstrap/sleep/resume outcome. No new every-host or unrelated full-parent programme.
+
+- [ ] **P.4016.retained-union:** Retain the complete current #4016 original, BOTH
+  current refinements and directly inherited #4017/#4018/#4019 acceptance, all 13 direct
+  checklist clauses, exact AND/OR/equivalence choices, source/resource custodians and
+  historical-vs-current credit. Closed children are provenance, not replacement live
+  claim tokens; a previous child-intake gate is not an invented forever-open #4016
+  condition.
+
+- [ ] **P.4016.inherited-01:** Before launch/admission, establish whether the selected
+  machine + agent + worktree and chosen transport can uphold the requested operation and
+  semantics. Retain exact target/source/workspace authority; do not substitute another
+  workspace, agent or peer on ambiguity.
+
+- [ ] **P.4016.inherited-02:** Use the governing protocol's existing
+  handshake/advertised capabilities and per-operation compatibility floors. Preserve
+  mixed-version caller/peer behavior, unsupported-combination and
+  malformed/missing-capability cases; package versions alone do not prove negotiated
+  semantics.
+
+- [ ] **P.4016.inherited-03:** Return a structured unsupported/fallback outcome with the
+  reason and permitted alternative. Retain the reviewed distinction between unavailable
+  local carrier configuration/protocol and a remote authorization refusal, operation
+  failure or consequential unknown outcome.
+
+- [ ] **P.4016.inherited-04:** Execute only permitted pre-admission fallback. No
+  parallel outreach, silent transport/profile switch, forced ownership change or blind
+  mutation replay follows from failure. Qualify the actual selected routing consumer,
+  not only a capability helper.
+
+- [ ] **P.4016.inherited-05:** Preserve the original cold/no-HTTP alternative: SSH to
+  the authorized target and a remote owning Bridge process carrying bidirectional
+  control/ACP outcomes. The original agent --stdio passthrough may be replaced only by
+  an explicitly accepted equivalent using the current shared carrier/host boundary.
+
+- [ ] **P.4016.inherited-06:** Map and qualify framing, stdout/stderr isolation,
+  request/callback identity, streaming progress/results, permissions/answers,
+  cancellation, disconnect and structured errors. A narrow status/event operation is not
+  all ACP fidelity, and an RPC carrier must not be mislabeled a transparent ACP byte
+  pump.
+
+- [ ] **P.4016.inherited-07:** Keep the hosting peer responsible for remote
+  process/session lifetime and preserve ownership across host-link churn. Reuse selected
+  SSH/installation authority, bounded connection ownership and safe late-create cleanup;
+  no new credential store or competing native owner.
+
+- [ ] **P.4016.inherited-08:** Preserve an authorized route from the remote Bridge's
+  advertised endpoint through an owned local ephemeral SSH forward and the standard
+  HTTP/SSE client, or explicitly approve and qualify a replacement with the same
+  user-visible ownership/control/stream/failure outcomes.
+
+- [ ] **P.4016.inherited-09:** Resolve the advertised current endpoint rather than a
+  stale/fixed port. Keep forwarding, auth, endpoint identity, stream/backpressure,
+  cancellation and owned cleanup bound to the selected peer and caller.
+
+- [ ] **P.4016.inherited-10:** Resolve the original running-peer preference and cold
+  Tier1 fallback against the accepted current architecture. Do not silently alter an
+  explicitly selected remote-ACP HTTP/WebSocket profile, whose own contract prohibits
+  automatic transport fallback and uncertain prompt replay.
+
+- [ ] **P.4016.inherited-11:** Distinguish an already-running external ACP
+  server/client-only relationship from Bridge-owned machine/worktree execution. No
+  server/workspace/credential custody is acquired merely from a reachable URL or
+  transport negotiation.
+
+- [ ] **P.4016.inherited-12:** Reconcile the complete machine/agent/worktree, warm/cold,
+  unsupported/mixed-version, interruption/failure and peer-owned lifetime matrix through
+  actual selected consumers. Qualify ACP fidelity across the chosen host/peer/agent
+  boundary and the original CodeSpace bootstrap/sleep/resume case separately.
+
+- [ ] **P.4016.inherited-13:** Do not substitute a successful proxy, socket, Owner
+  beacon or relay availability warning for those outcomes. Source/unit/synthetic
+  evidence and any separately authorized native/installed evidence remain clearly
+  distinguished.
+
+#### Source #4028
+
+- [ ] **P.4028.bounded-measured-phase-output:** For the supported cold SSH send failure,
+  surface one attributable structured LAUNCH_ACP phase/stage and actual MEASURED elapsed
+  duration at the caller; a configured handshake/session-new timeout is not measured
+  elapsed.
+
+- [ ] **P.4028.checkpoint-terminal-CLI-chain:** Carry actual checkpoint elapsed/stage
+  through the terminal connect_failed/error record and supported CLI/terminal detail
+  consumer, retaining original failed-attempt correlation. Source field presence or a
+  diagnostic formatter alone is not the whole caller-facing outcome.
+
+- [ ] **P.4028.before-outer-deadline-and-honest-transport:** Preserve reviewed
+  inner/outer startup/SSH/venue/Host-ready/initialize/session-new budget composition and
+  bounded fresh/resume/fallback paths so an earlier raw outer TCP timeout does not mask
+  an available LAUNCH_ACP diagnostic. Genuine lost transport or unreachable target stays
+  distinct; do not fabricate a stage or elapsed observation.
+
+- [ ] **P.4028.independent-finite-diagnostic-not-perf-gate:** Keep this measured-output
+  leaf independent of whole cold-runtime repair, a five-second or other benchmark
+  target, complete retained-transfer/writer activation or all native hosts. No larger
+  production deadline, automatic retry, kill/restart or non-idempotent replay follows
+  from diagnostic failure.
+
+- [ ] **P.4028.credited-producers-and-consumer-tier:** Credit #1048 phase/stage/budget
+  repairs, measured checkpoint progress and #7002 continuity at their actual admitted
+  tiers. Any historical terminal/CLI propagation gap is a historical source observation,
+  not absence from current source; no reimplementation is assumed until existing owner
+  checks its finite consumer.
+
+- [ ] **P.4028.retained-union:** Retain the complete current #4028 original and BOTH
+  refinements, actual measured elapsed/stage-before-outer-deadline duty,
+  transport-loss/unreachable and fresh/resume/fallback distinctions, all original bounds
+  and source/resource holds. Zero original checkboxes does not mean zero requirements;
+  no unrelated dispatch/container/local incident is made a duplicate or shared-cause
+  proof.
+
+The peer-owned #4016 execution contract remains distinct from this effort's external-server client-only relationship. Existing relationship-authority, writer-qualification and lifecycle-compatibility amendments continue to govern only their actual consequential boundaries. #4028's finite measured diagnostic does not wait for whole retained-transfer activation or a cold-performance baseline. Keep the operator's separate protocol/performance flows; historical five-second discussion is not a new production deadline.
+
 ## Validation Plan
 
 All detail below is **agent-recommended**.
@@ -213,6 +400,229 @@ All detail below is **agent-recommended**.
   reasons. No unauthorized endpoint, grant, deployment or restart is a test.
 - [ ] Public artifacts contain generic fixtures and masked source attribution;
   documentation-impact review covers the final implementation diff.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Validation -->
+
+### Global validation of retained #4016/#4028
+
+#### Source #4016
+
+- [ ] **V.4016.peer-owned-profile:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Preserve the complete peer-to-peer
+  machine + agent + worktree execution outcome under the actual remote owning Bridge.
+  Keep originating relationship ownership, target-native session/process/workspace and
+  external-server client-only profiles distinct; a reachable URL does not confer any
+  peer/process/workspace/credential custody.
+
+- [ ] **V.4016.credential-env-stdin-prompt-fidelity:** Verify this COMPLETE
+  original/refined clause at its ORIGINAL finite scope/venue, alternatives and custody;
+  preserve already delivered credit without new all-host/full-parent/ACK gates: Retain
+  selected machine/agent/worktree identity, credential and environment authority,
+  working context and literal stdin/prompt fidelity through host -> peer -> Copilot.
+  Preserve request/callback identity, permissions/answers, streams/progress/results,
+  stdout/stderr isolation, cancellation/disconnect/errors and owned cleanup, not only a
+  status RPC.
+
+- [ ] **V.4016.cold-tier1-OR-equivalent:** Verify this COMPLETE original/refined clause
+  at its ORIGINAL finite scope/venue, alternatives and custody; preserve already
+  delivered credit without new all-host/full-parent/ACK gates: Preserve cold/no-HTTP
+  SSH-stdio to the authorized owning peer OR an explicitly accepted, qualified current
+  carrier/Host equivalent with the SAME original ownership/control/ACP/failure outcomes.
+  Do not require an obsolete command/class name or relabel RPC as a transparent byte
+  pump.
+
+- [ ] **V.4016.warm-tier2-OR-equivalent:** Verify this COMPLETE original/refined clause
+  at its ORIGINAL finite scope/venue, alternatives and custody; preserve already
+  delivered credit without new all-host/full-parent/ACK gates: Preserve the current
+  advertised remote endpoint through an owned ephemeral SSH forward and HTTP/SSE client
+  OR an explicitly accepted qualified replacement. Retain warm-peer preference/cold
+  policy only where negotiated semantics permit; never override the selected external
+  profile's no-automatic-fallback rule.
+
+- [ ] **V.4016.uncertainty-and-peer-lifetime:** Verify this COMPLETE original/refined
+  clause at its ORIGINAL finite scope/venue, alternatives and custody; preserve already
+  delivered credit without new all-host/full-parent/ACK gates: Keep accepted peer
+  work/Host responsibility across link churn; stop/disconnect/reconnect do not silently
+  release claims or recreate unknown conversations. Only permitted pre-admission
+  alternatives may be tried; no parallel outreach, forced ownership change or blind
+  consequential replay.
+
+- [ ] **V.4016.full-matrix-and-CodeSpace-sleep:** Verify this COMPLETE original/refined
+  clause at its ORIGINAL finite scope/venue, alternatives and custody; preserve already
+  delivered credit without new all-host/full-parent/ACK gates: Qualify the original
+  complete target/agent/worktree, warm/cold, missing/malformed/mixed capability,
+  interruption/failure and peer-owned matrix through actual selected consumers,
+  including ACP double-hop fidelity AND the separately named CodeSpace
+  bootstrap/sleep/resume outcome. No new every-host or unrelated full-parent programme.
+
+- [ ] **V.4016.retained-union:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Retain the complete current #4016
+  original, BOTH current refinements and directly inherited #4017/#4018/#4019 acceptance,
+  all 13 direct checklist clauses, exact AND/OR/equivalence choices, source/resource
+  custodians and historical-vs-current credit. Closed children are provenance, not
+  replacement live claim tokens; a previous child-intake gate is not an invented
+  forever-open #4016 condition.
+
+- [ ] **V.4016.inherited-01:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Before launch/admission, establish
+  whether the selected machine + agent + worktree and chosen transport can uphold the
+  requested operation and semantics. Retain exact target/source/workspace authority; do
+  not substitute another workspace, agent or peer on ambiguity.
+
+- [ ] **V.4016.inherited-02:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Use the governing protocol's
+  existing handshake/advertised capabilities and per-operation compatibility floors.
+  Preserve mixed-version caller/peer behavior, unsupported-combination and
+  malformed/missing-capability cases; package versions alone do not prove negotiated
+  semantics.
+
+- [ ] **V.4016.inherited-03:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Return a structured
+  unsupported/fallback outcome with the reason and permitted alternative. Retain the
+  reviewed distinction between unavailable local carrier configuration/protocol and a
+  remote authorization refusal, operation failure or consequential unknown outcome.
+
+- [ ] **V.4016.inherited-04:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Execute only permitted
+  pre-admission fallback. No parallel outreach, silent transport/profile switch, forced
+  ownership change or blind mutation replay follows from failure. Qualify the actual
+  selected routing consumer, not only a capability helper.
+
+- [ ] **V.4016.inherited-05:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Preserve the original cold/no-HTTP
+  alternative: SSH to the authorized target and a remote owning Bridge process carrying
+  bidirectional control/ACP outcomes. The original agent --stdio passthrough may be
+  replaced only by an explicitly accepted equivalent using the current shared
+  carrier/host boundary.
+
+- [ ] **V.4016.inherited-06:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Map and qualify framing,
+  stdout/stderr isolation, request/callback identity, streaming progress/results,
+  permissions/answers, cancellation, disconnect and structured errors. A narrow
+  status/event operation is not all ACP fidelity, and an RPC carrier must not be
+  mislabeled a transparent ACP byte pump.
+
+- [ ] **V.4016.inherited-07:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Keep the hosting peer responsible
+  for remote process/session lifetime and preserve ownership across host-link churn.
+  Reuse selected SSH/installation authority, bounded connection ownership and safe
+  late-create cleanup; no new credential store or competing native owner.
+
+- [ ] **V.4016.inherited-08:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Preserve an authorized route from
+  the remote Bridge's advertised endpoint through an owned local ephemeral SSH forward
+  and the standard HTTP/SSE client, or explicitly approve and qualify a replacement with
+  the same user-visible ownership/control/stream/failure outcomes.
+
+- [ ] **V.4016.inherited-09:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Resolve the advertised current
+  endpoint rather than a stale/fixed port. Keep forwarding, auth, endpoint identity,
+  stream/backpressure, cancellation and owned cleanup bound to the selected peer and
+  caller.
+
+- [ ] **V.4016.inherited-10:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Resolve the original running-peer
+  preference and cold Tier1 fallback against the accepted current architecture. Do not
+  silently alter an explicitly selected remote-ACP HTTP/WebSocket profile, whose own
+  contract prohibits automatic transport fallback and uncertain prompt replay.
+
+- [ ] **V.4016.inherited-11:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Distinguish an already-running
+  external ACP server/client-only relationship from Bridge-owned machine/worktree
+  execution. No server/workspace/credential custody is acquired merely from a reachable
+  URL or transport negotiation.
+
+- [ ] **V.4016.inherited-12:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Reconcile the complete
+  machine/agent/worktree, warm/cold, unsupported/mixed-version, interruption/failure and
+  peer-owned lifetime matrix through actual selected consumers. Qualify ACP fidelity
+  across the chosen host/peer/agent boundary and the original CodeSpace
+  bootstrap/sleep/resume case separately.
+
+- [ ] **V.4016.inherited-13:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Do not substitute a successful
+  proxy, socket, Owner beacon or relay availability warning for those outcomes.
+  Source/unit/synthetic evidence and any separately authorized native/installed evidence
+  remain clearly distinguished.
+
+- [ ] **GV.4016.complete-retention:** Preserve and qualify EVERY retained #4016
+  Plan/Validation clause and whole original/refined/inherited union at its ORIGINAL
+  scope, alternatives, finite metrics/venues and same source/resource custody. Keep all
+  incumbent ROOT Plan/global Validation/checked
+  credit/Participants/Coordination/Journal. This paper intake proves no implementation,
+  transfer, native/release/installed outcome or source disposition.
+
+#### Source #4028
+
+- [ ] **V.4028.bounded-measured-phase-output:** Verify this COMPLETE original/refined
+  clause at its ORIGINAL finite scope/venue, alternatives and custody; preserve already
+  delivered credit without new all-host/full-parent/ACK gates: For the supported cold
+  SSH send failure, surface one attributable structured LAUNCH_ACP phase/stage and
+  actual MEASURED elapsed duration at the caller; a configured handshake/session-new
+  timeout is not measured elapsed.
+
+- [ ] **V.4028.checkpoint-terminal-CLI-chain:** Verify this COMPLETE original/refined
+  clause at its ORIGINAL finite scope/venue, alternatives and custody; preserve already
+  delivered credit without new all-host/full-parent/ACK gates: Carry actual checkpoint
+  elapsed/stage through the terminal connect_failed/error record and supported
+  CLI/terminal detail consumer, retaining original failed-attempt correlation. Source
+  field presence or a diagnostic formatter alone is not the whole caller-facing outcome.
+
+- [ ] **V.4028.before-outer-deadline-and-honest-transport:** Verify this COMPLETE
+  original/refined clause at its ORIGINAL finite scope/venue, alternatives and custody;
+  preserve already delivered credit without new all-host/full-parent/ACK gates: Preserve
+  reviewed inner/outer startup/SSH/venue/Host-ready/initialize/session-new budget
+  composition and bounded fresh/resume/fallback paths so an earlier raw outer TCP
+  timeout does not mask an available LAUNCH_ACP diagnostic. Genuine lost transport or
+  unreachable target stays distinct; do not fabricate a stage or elapsed observation.
+
+- [ ] **V.4028.independent-finite-diagnostic-not-perf-gate:** Verify this COMPLETE
+  original/refined clause at its ORIGINAL finite scope/venue, alternatives and custody;
+  preserve already delivered credit without new all-host/full-parent/ACK gates: Keep
+  this measured-output leaf independent of whole cold-runtime repair, a five-second or
+  other benchmark target, complete retained-transfer/writer activation or all native
+  hosts. No larger production deadline, automatic retry, kill/restart or non-idempotent
+  replay follows from diagnostic failure.
+
+- [ ] **V.4028.credited-producers-and-consumer-tier:** Verify this COMPLETE
+  original/refined clause at its ORIGINAL finite scope/venue, alternatives and custody;
+  preserve already delivered credit without new all-host/full-parent/ACK gates: Credit
+  #1048 phase/stage/budget repairs, measured checkpoint progress and #7002 continuity at
+  their actual admitted tiers. Any historical terminal/CLI propagation gap is a
+  historical source observation, not absence from current source; no reimplementation is
+  assumed until existing owner checks its finite consumer.
+
+- [ ] **V.4028.retained-union:** Verify this COMPLETE original/refined clause at its
+  ORIGINAL finite scope/venue, alternatives and custody; preserve already delivered
+  credit without new all-host/full-parent/ACK gates: Retain the complete current #4028
+  original and BOTH refinements, actual measured elapsed/stage-before-outer-deadline
+  duty, transport-loss/unreachable and fresh/resume/fallback distinctions, all original
+  bounds and source/resource holds. Zero original checkboxes does not mean zero
+  requirements; no unrelated dispatch/container/local incident is made a duplicate or
+  shared-cause proof.
+
+- [ ] **GV.4028.complete-retention:** Preserve and qualify EVERY retained #4028
+  Plan/Validation clause and whole original/refined/inherited union at its ORIGINAL
+  scope, alternatives, finite metrics/venues and same source/resource custody. Keep all
+  incumbent ROOT Plan/global Validation/checked
+  credit/Participants/Coordination/Journal. This paper intake proves no implementation,
+  transfer, native/release/installed outcome or source disposition.
 
 ## Proposal
 
@@ -735,3 +1145,10 @@ before the proposal clears review.
   resource deletion and peer-service ownership.
 - Prepared the plan and focused vision clarification before implementation.
   No runtime, deployment, grant or live external request is part of this delta.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Journal -->
+
+### 2026-10-28 - Additive retained #4016/#4028 contract proposal
+
+Authored direct per-source Plan, actual global Validation and continuing custody rows from complete original/refined requirements and admitted receiving-document evidence. This entry records a tracking proposal, not a future review, merge, acceptance or source judgment. Existing checked credit and all prior receiving amendments remain at their actual tiers. Normal publication and complete receiving readback precede separate source-specific judgments. No implementation, native experiment, runtime change, owner appointment or claim/resource release is authorized.

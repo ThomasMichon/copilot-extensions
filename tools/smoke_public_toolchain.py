@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import hashlib
 import os
 import shutil
 import sys
@@ -10,12 +11,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from build_python_artifacts import build_plugin_artifacts
+import build_python_artifacts as builder
 from build_toolchain_lock import resolve_toolchain_lock
 from promotion_python_artifacts import (
     INDEX_NAME, SCHEMA, _run, bundle_wheels, candidate_projects, export_artifacts, validate_artifacts,
 )
-from standalone_python_artifacts import COMPONENTS, artifact_label, build_standalone_artifacts, project_key
+from standalone_python_artifacts import (
+    COMPONENTS, artifact_label, build_standalone_artifacts, injected_resources,
+    project_key, source_closure,
+)
 
 
 def nested_standalone_export(directory: Path) -> dict:
@@ -23,10 +27,15 @@ def nested_standalone_export(directory: Path) -> dict:
     source = Path(__file__).resolve().parent.parent
     fixture = directory / "nested-export-repository"
     fixture.mkdir()
-    paths = _run([
-        "git", "ls-files", "--", ".gitattributes", "fleet-manager", "services/pr",
-        "libs/versioned-runtime", "libs/installer-engine", "libs/agent-procutil",
-    ], cwd=source).splitlines()
+    components = ("fleet-manager", "pr-service")
+    inputs = {".gitattributes"}
+    for component in components:
+        project, dependencies, resources = source_closure(component, source, builder)
+        inputs.update(
+            path.relative_to(source).as_posix()
+            for path in (project, *(path for _name, path in dependencies), *resources)
+        )
+    paths = _run(["git", "ls-files", "--", *sorted(inputs)], cwd=source).splitlines()
     for relative in paths:
         destination = fixture / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -55,7 +64,7 @@ def nested_standalone_export(directory: Path) -> dict:
         projects=candidate_projects(fixture), candidate_root=fixture,
         source_policy="seasoned-public",
     )
-    assert {entry["component"] for entry in index["artifacts"]} == set(COMPONENTS)
+    assert {entry["component"] for entry in index["artifacts"]} == set(components)
     assert index["admission"] == {
         "signer_digest": commit, "source_digest": commit, "source_ref": "refs/heads/main",
     }
@@ -71,7 +80,7 @@ def main(*, standalone: bool = False) -> None:
             directory / "toolchain", source_policy="seasoned-public"
         )
         manifests = [
-            build_plugin_artifacts(
+            builder.build_plugin_artifacts(
                 plugin, out_dir=directory / plugin, toolchain=toolchain
             )
             for plugin in ("agent-mcp", "agent-ssh")
@@ -111,31 +120,45 @@ def main(*, standalone: bool = False) -> None:
             candidate_root=Path(__file__).resolve().parent.parent,
         )
         if standalone:
-            environment = directory / "consumer"
-            _run(["uv", "venv", "--python", sys.executable, str(environment)], cwd=directory)
-            python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-            wheels = [
-                str(directory / artifact_label(manifest) / wheel["filename"])
-                for manifest in manifests if "component" in manifest for wheel in manifest["wheels"]
-            ]
-            # Only our built wheels, offline and dependency-free: not runtime closure admission.
-            _run(
-                ["uv", "pip", "install", "--python", str(python), "--no-deps", "--no-index", *wheels],
-                cwd=directory,
-            )
-            _run([
-                str(python), "-I", "-c",
-                "import fleet_manager, agent_pull_requests_service; "
-                "from importlib.resources import files; "
-                "from importlib.metadata import version; "
-                "assert version('fleet-manager'); assert version('agent-pull-requests-service'); "
-                "root=files('fleet_manager'); "
-                "names=['_versioned_runtime.py','versioned_runtime_leases.py',"
-                "'versioned_runtime_construction.py','versioned_runtime_publication.py',"
-                "'versioned_runtime_source.py','_runtime_launcher.py','_installer_process.py',"
-                "'_construction_procutil.py']; "
-                "assert all(root.joinpath(name).is_file() for name in names)",
-            ], cwd=directory)
+            for manifest in (item for item in manifests if "component" in item):
+                component = manifest["component"]
+                environment = directory / ("consumer-" + component)
+                _run(["uv", "venv", "--python", sys.executable, str(environment)], cwd=directory)
+                python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+                wheels = [
+                    str(directory / artifact_label(manifest) / wheel["filename"])
+                    for wheel in manifest["wheels"]
+                ]
+                # Component sets are not an approved consolidated runtime closure.
+                _run(
+                    ["uv", "pip", "install", "--python", str(python), "--no-deps", "--no-index", *wheels],
+                    cwd=directory,
+                )
+                versions = {
+                    wheel["name"]: builder.parse_wheel_filename(Path(wheel["filename"]))["version"]
+                    for wheel in manifest["wheels"]
+                }
+                resources = {
+                    name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for name, path in injected_resources(component, builder.REPO).items()
+                }
+                primary = next(wheel["name"] for wheel in manifest["wheels"] if wheel["role"] == "standalone")
+                _run([
+                    str(python), "-I", "-c",
+                    "import hashlib,importlib,json,pathlib,sys; "
+                    "from importlib.metadata import distribution; "
+                    "versions,resources=json.loads(sys.argv[1]),json.loads(sys.argv[2]); "
+                    "root=pathlib.Path(sys.prefix).resolve(); "
+                    "assert all(distribution(n).version==v and "
+                    "pathlib.Path(distribution(n).locate_file('')).resolve().is_relative_to(root) "
+                    "for n,v in versions.items()); "
+                    "selected=distribution(sys.argv[3]); "
+                    "assert all(hashlib.sha256(selected.locate_file(n).read_bytes()).hexdigest()==v "
+                    "for n,v in resources.items()); "
+                    "module={'fleet-manager':'fleet_manager','pr-service':'agent_pull_requests_service'}.get(sys.argv[4]); "
+                    "assert module is None or importlib.import_module(module)",
+                    json.dumps(versions), json.dumps(resources), primary, component,
+                ], cwd=directory)
         nested = nested_standalone_export(directory) if standalone else None
         print(json.dumps({
             "plugins": [manifest["plugin"] for manifest in manifests if "plugin" in manifest],

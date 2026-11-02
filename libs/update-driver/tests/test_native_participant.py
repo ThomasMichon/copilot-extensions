@@ -98,6 +98,54 @@ def test_native_witness_joins_consumes_transport_and_excludes_python(area, monke
             lock.assert_owned()
 
 
+def test_native_witness_tracks_nested_execution_through_actual_owner(area):
+    with owner(area) as (root, child):
+        transport = line(child)
+        with participant(root=root, witness=transport) as custody:
+            with custody.execution_scope():
+                with custody.execution_scope():
+                    custody.assert_owned()
+            custody.assert_owned()
+
+
+def test_abandoned_execution_is_not_successfully_disposed_or_reissued(area):
+    with owner(area, expected_death=True) as (root, child):
+        transport = line(child)
+        with participant(root=root, witness=transport) as custody:
+            custody._exchange("begin")
+        deadline = time.monotonic() + 3
+        while True:
+            try:
+                joined = participant(root=root, witness=transport)
+            except ParticipantError:
+                break
+            joined.close()
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+
+
+def test_native_broker_adoption_uses_same_witness_execution_contract(area, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from agent_procutil import windows_broker_installation as installation
+    from agent_procutil import windows_task_broker as broker
+    from update_driver.windows_broker import adopt
+
+    runtime = area / "installation"
+    runtime.mkdir()
+    desired = SimpleNamespace(config_path=runtime / "windows-launch-broker.json")
+    monkeypatch.setattr(installation, "registration", Mock(return_value=desired))
+    monkeypatch.setattr(broker, "recover", Mock())
+    reconciled = Mock()
+    monkeypatch.setattr(broker, "reconcile", reconciled)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    with owner(area) as (root, child):
+        monkeypatch.setenv(KEY, line(child))
+        assert adopt(runtime, runtime / "versions/1.0.0", root=root) is desired
+        reconciled.assert_called_once_with(desired, previous=None)
+
+
 def test_forged_and_mismatched_witnesses_refuse_without_retiring_owner(area):
     with owner(area) as (root, child):
         transport = line(child)

@@ -9,6 +9,19 @@ from typing import Any, Callable
 _Request = Callable[..., dict[str, Any] | None]
 
 
+def negotiate_http_protocol(
+    peer_version: int, peer_minimum: int, *, required: int = 1,
+) -> int | None:
+    """Select the highest shared HTTP contract supporting the required feature."""
+    from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+
+    if peer_version < 1 or peer_minimum < 0 or peer_minimum > peer_version:
+        return None
+    low = max(HTTP_PROTOCOL_MIN_SUPPORTED, peer_minimum, required)
+    high = min(HTTP_PROTOCOL_VERSION, peer_version)
+    return high if low <= high else None
+
+
 def connection_refused(exc: BaseException) -> bool:
     """Distinguish a refused connection from an ambiguously delivered request."""
     seen: set[int] = set()
@@ -46,9 +59,11 @@ def _request_with_floor(
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     from .client import BridgeClientError, BridgeConnectionError
+    from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 
     resolve = getattr(client, "_reresolve", None)
     deadline = time.monotonic() + getattr(client, "_connect_grace", 0.0)
+    allow_retry = kwargs.get("allow_retry", True)
 
     def attempt(*a: Any, **k: Any) -> dict[str, Any] | None:
         # Native retries cannot bypass the fresh protocol check between attempts.
@@ -67,6 +82,7 @@ def _request_with_floor(
         try:
             health = attempt("GET", "/health") or {}
             version = int(health.get("protocol_version") or 0)
+            peer_minimum = int(health.get("min_protocol_version") or 0)
         except (BridgeConnectionError, OSError, TypeError, ValueError):
             unanswered = BridgeConnectionError(
                 f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
@@ -80,6 +96,13 @@ def _request_with_floor(
             raise BridgeClientError(
                 426, f"the bridge daemon now at {client._base} predates protocol "
                 f"{floor}; not sending the request there",
+            )
+        if negotiate_http_protocol(version, peer_minimum, required=floor) is None:
+            raise BridgeClientError(
+                426, "no compatible agent-bridge HTTP contract range "
+                f"(client {HTTP_PROTOCOL_MIN_SUPPORTED}-{HTTP_PROTOCOL_VERSION}, "
+                f"daemon {peer_minimum}-{version}, required {floor}); "
+                "the request was not sent",
             )
         advertised = health.get("capabilities")
         for name, minimum in capabilities.items():
@@ -95,7 +118,7 @@ def _request_with_floor(
         try:
             return attempt(method, path, *args, **kwargs)
         except BridgeConnectionError as exc:
-            if time.monotonic() >= deadline or (
+            if not allow_retry or time.monotonic() >= deadline or (
                 method not in ("GET", "HEAD") and not connection_refused(exc)
             ):
                 raise
@@ -106,7 +129,7 @@ def _request_with_floor(
                 "drain" in detail or "initializing" in detail
                 or (method in ("GET", "HEAD") and "merging" in detail)
             )
-            if exc.status != 503 or not retryable \
+            if not allow_retry or exc.status != 503 or not retryable \
                     or time.monotonic() >= deadline:
                 raise
             retrying, last_error = True, exc

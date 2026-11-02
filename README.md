@@ -76,7 +76,7 @@ that every feature or platform is supported by every component.
 | [agent-mcp](plugins/agent-mcp/) | Upstream HTTP/stdio MCP transport, host credential injection, catalog reshaping, and materialization |
 | [agent-ssh](plugins/agent-ssh/) | Registry-based SSH profiles and connectivity verification |
 | [agent-remote-driver](plugins/agent-remote-driver/) | Opt-in SDK extension for live session attach/send/steer/abort; not default-enabled |
-| [efforts](plugins/efforts/) | Adopt and coordinate durable planned work |
+| [efforts](plugins/efforts/) | Adopt and coordinate durable planned work; read and update opt-in agendas |
 | [visions](plugins/visions/) | Maintain standing intent separately from implementation progress |
 | [agent-logger](plugins/agent-logger/) | Structured session logs, digests, and configured session synchronization |
 | [context-handoff](plugins/context-handoff/) | Continuity policy, context awareness, and successor-session handoffs |
@@ -89,7 +89,6 @@ that every feature or platform is supported by every component.
 | [wsl-setup](plugins/wsl-setup/) | Windows WSL2 setup and troubleshooting |
 | [harness-knowledge](plugins/harness-knowledge/) | Bind a stateless harness to a separately selected private knowledge repo |
 | [ai-attribution](plugins/ai-attribution/) | Publication-policy guidance and attribution workflows |
-| [delegation-guidance](plugins/delegation-guidance/) | Deprecated compatibility pointer; use agent-conduct-guidance |
 | [budget-guidance](plugins/budget-guidance/) | Attributable budget posture and bounded exact-session cues |
 | [agent-conduct-guidance](plugins/agent-conduct-guidance/) | Modular delegation, headless-process, scratch-space, and secret-masking guidance |
 

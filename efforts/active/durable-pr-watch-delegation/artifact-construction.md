@@ -71,8 +71,15 @@ from this proposal.
   artifact path, initially scoped to the PR service's required distributions.
   Preserve existing release consumers and optional artifact/source fallback
   (source confirmed by #8293; Linux/Windows packaging acceptance `40026242589`).
+- [x] Deliver the canonical retained hashed compile/export prerequisite for
+  candidate dependency locks, with unchanged installer seasoning and resolver
+  equivalence (confirmed by #8327; exact-head Linux/Windows acceptance
+  `40039790134`). This is not approved profile or exact acquisition acceptance.
 - [ ] Deliver approved target-specific runtime closure and offline-context
   construction through existing authority/installer contracts.
+  The repository-only PR context consumer inspects retained exact-profile
+  wheels and stages the existing recipe and hash lock; profile/feed approval
+  and real image acceptance remain open.
 - [ ] Build and exercise the real isolated image through an available
   source-validation lane. Keep subprocess-heavy/container acceptance in the
   bounded manual portfolio, not required unit-only PR/promotion CI.

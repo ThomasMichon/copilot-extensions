@@ -37,11 +37,16 @@ def _lock_mutation_guard(path: Path, *, deadline: float) -> Iterator[None]:
                     import msvcrt
 
                     os.lseek(descriptor, 1 << 30, os.SEEK_SET)
-                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                    locking = cast(Callable[[int, int, int], None], getattr(msvcrt, "locking"))
+                    locking(descriptor, cast(int, getattr(msvcrt, "LK_NBLCK")), 1)
                 else:
                     import fcntl
 
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    flock = cast(Callable[[int, int], None], getattr(fcntl, "flock"))
+                    flock(
+                        descriptor,
+                        cast(int, getattr(fcntl, "LOCK_EX")) | cast(int, getattr(fcntl, "LOCK_NB")),
+                    )
                 acquired = True
                 break
             except OSError as error:
@@ -58,9 +63,9 @@ def _lock_mutation_guard(path: Path, *, deadline: float) -> Iterator[None]:
             if acquired:
                 if os.name == "nt":
                     os.lseek(descriptor, 1 << 30, os.SEEK_SET)
-                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                    locking(descriptor, cast(int, getattr(msvcrt, "LK_UNLCK")), 1)
                 else:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    flock(descriptor, cast(int, getattr(fcntl, "LOCK_UN")))
         finally:
             os.close(descriptor)
 

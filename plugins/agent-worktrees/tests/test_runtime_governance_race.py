@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -181,13 +181,23 @@ def test_fixture_worktree_deletion_handles_readonly_git_objects(tmp_path):
     assert (published / "marker").read_bytes() == b"original"
 
 
-def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["namespaced", "legacy-source", "legacy-retained"])
+def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path, mode):
     monkeypatch.syspath_prepend(str(PLUGIN / "scripts"))
     driver = _load(PLUGIN / "scripts" / "runtime_install.py", "race_budget_driver")
     owner = object.__new__(driver.Governance)
+    owner.root = tmp_path / "runtime"
+    owner.payload = tmp_path / "payload"
+    owner.project_root = None
     owner.durable_home = tmp_path
-    owner.initial = ({}, {"marketplaceId": "test", "cellRoot": str(tmp_path / "cell")})
+    owner.initial = ({}, (
+        {"marketplaceId": "test", "cellRoot": str(tmp_path / "cell")}
+        if mode == "namespaced" else None
+    ))
     owner.publication_locks = ()
+    owner.command_lock = None
+    owner.retained_binding = None
+    owner._retained_bootstrap = lambda: mode == "legacy-retained"
     observed = []
 
     class Lock:
@@ -204,11 +214,35 @@ def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
         _DirectoryLock=Lock, RUNTIME_PUBLICATION_ENV="COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
     )
     owner.recheck = lambda: None
+    binding = _load(PLUGIN / "scripts/command_binding.py", "budget_command_binding")
+    monkeypatch.setitem(sys.modules, "command_binding", binding)
+
+    def command_lock(_primitive, arguments, *, timeout_seconds):
+        return Lock(
+            arguments["legacy_root"], kind="command-binding-publication",
+            timeout_seconds=timeout_seconds,
+        )
+
+    @contextmanager
+    def legacy_lifecycle(_binding, primitive, *, lock_timeout, **arguments):
+        with command_lock(primitive, arguments, timeout_seconds=lock_timeout) as lock:
+            yield SimpleNamespace(lock=lock)
+
+    monkeypatch.setattr(binding, "_load_lifecycle", lambda: SimpleNamespace(
+        _lock=command_lock, legacy_lifecycle=legacy_lifecycle,
+    ))
+    monkeypatch.setattr(binding, "retained_legacy_binding", lambda *_args, **_kwargs: {})
     moments = iter((100, 101, 104))
-    monkeypatch.setattr(driver.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(sys.modules[driver.Governance.__module__], "time", SimpleNamespace(
+        monotonic=lambda: next(moments),
+    ))
     with owner.held(timeout=23):
-        assert [item[1]["kind"] for item in observed] == ["genesis", "install"]
-        assert [item[1]["timeout_seconds"] for item in observed] == [22, 19]
+        assert [item[1]["kind"] for item in observed] == (
+            ["genesis", "install"] if mode == "namespaced" else ["command-binding-publication"]
+        )
+        assert [item[1]["timeout_seconds"] for item in observed] == (
+            [22, 19] if mode == "namespaced" else [22]
+        )
 
 
 @pytest.mark.timeout(1000)

@@ -15,6 +15,7 @@ from time import monotonic
 
 from .gateway_service_channel import CONTROL_RATE, REQUEST_RATE, TransportError
 from .gateway_service_handler import CallerContext, HandlerBinding, ServiceRequest, ServiceResponse
+from .gateway_local_handler import settled as _settled
 from .loadout_preparation import (
     PLAN_CHUNK, InvalidPlanRange, PreparationStore, PreparedPlanChanged,
 )
@@ -40,25 +41,6 @@ class ReviewScope:
         identifier(self.policy_revision, "review policy revision")
         if type(self.can_confirm) is not bool:
             raise PlanError("review confirmation permission must be explicit")
-
-
-async def _settled(function):
-    """Cancellation joins the finite, owner-contained source worker before returning."""
-    task = asyncio.create_task(asyncio.to_thread(function))
-    cancelled = None
-    while True:
-        try:
-            result = await asyncio.shield(task)
-            break
-        except asyncio.CancelledError as error:
-            cancelled = error
-            if task.done():
-                # A worker-side cancellation is not a reason to spin forever.
-                result = task.result()
-                break
-    if cancelled is not None:
-        raise cancelled
-    return result
 
 
 class PreparedLoadoutService:

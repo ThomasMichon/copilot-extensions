@@ -22,13 +22,8 @@ function hex_value(character) {
     return index("abcdef", character) + 9
 }
 
-function byte_value(character, candidate) {
-    for (candidate = 1; candidate < 256; candidate++) {
-        if (sprintf("%c", candidate) == character) {
-            return candidate
-        }
-    }
-    return 0
+function byte_value(character) {
+    return byte_values[character] + 0
 }
 
 function continuation(position_value, value) {
@@ -392,6 +387,9 @@ function directory_entries(root, name, source, index_value, entry, requested) {
 }
 
 BEGIN {
+    for (byte_index = 1; byte_index < 256; byte_index++) {
+        byte_values[sprintf("%c", byte_index)] = byte_index
+    }
     separator = sprintf("%c", 28)
     position = 1
 }

@@ -1,0 +1,9 @@
+{
+  "comment": "Distinguish operational SSH profile resolution failures without masking programming errors",
+  "changes": [
+    {
+      "plugin": "libs/ssh-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Make scratch folders attributable to their owning worktree with dated names, discovery breadcrumbs and explicit cleanup boundaries.",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

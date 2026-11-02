@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import argparse
+import subprocess
 import types
 from unittest.mock import patch
 
@@ -10,6 +12,46 @@ import pytest
 from ssh_manager import SSHConfig
 
 from agent_containers.__main__ import main
+from agent_containers.config import ContainersConfig
+
+
+@pytest.mark.parametrize("detached", [False, True])
+def test_no_plugin_flags_keep_empty_preparation_selection(detached):
+    from agent_containers.copilot_venue import add_copilot_subparser
+    from agent_containers.plugin_preparation import prepare_plugins
+
+    parser = argparse.ArgumentParser()
+    add_copilot_subparser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["copilot", "synthetic", *(["--detach"] if detached else [])])
+    assert args.stage_plugins == []
+    target = types.SimpleNamespace(actual_profile="trusted", workspace_folder="/workspaces/example")
+    assert prepare_plugins(
+        args, target, run_input=lambda *a, **k: (0, "__VENUE_PLUGINS__{}", ""),
+    ) == []
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_namespace_list_empty_inventory_is_not_a_failed_query(capsys, available):
+    with (
+        patch("agent_containers.resolver.load_config", return_value=ContainersConfig()),
+        patch(
+            "agent_containers.lifecycle._docker",
+            return_value=subprocess.CompletedProcess(
+                ["docker", "ps"], 0 if available else 1, "", "" if available else "access denied"
+            ),
+        ) as docker,
+    ):
+        assert main(["namespace-list"]) == (0 if available else 1)
+    captured = capsys.readouterr()
+    assert docker.call_count == 1
+    assert docker.call_args.args[0][0] == "ps"
+    if available:
+        assert json.loads(captured.out) == []
+        assert captured.err == ""
+    else:
+        assert captured.out == ""
+        assert "docker ps failed: access denied" in captured.err
+        assert "daemon is running and accessible" in captured.err
 
 
 def test_namespace_list_json(capsys):
@@ -82,10 +124,12 @@ def test_namespace_resolve_preserves_disabled_and_literal_sources(capsys):
         assert main([
             "namespace-resolve", "synthetic", "--stage-plugin-disabled", "sample@synthetic",
             "--stage-plugin", "/plain source=false",
+            "--stage-plugin-spec", '{"source":"retired@local","allow_missing":true}',
         ]) == 0
     assert json.loads(capsys.readouterr().out)["container"]["related_plugins"] == [
         {"source": "sample@synthetic", "enable": False},
         {"source": "/plain source=false", "enable": True},
+        {"source": "retired@local", "enable": True, "allow_missing": True},
     ]
 
 
@@ -151,7 +195,8 @@ def test_namespace_recreate_reports_post_removal_failure(capsys):
 
 
 @pytest.mark.parametrize("wrapper", [False, True])
-def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrapper):
+def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrapper, monkeypatch):
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", lambda *a, **k: None)
     from agent_containers.session_host_context import TrustedContext
 
     command = ("{{target_preference_launcher}} " if wrapper else "") + "copilot --acp --stdio"
@@ -206,7 +251,8 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     result = json.loads(capsys.readouterr().out)
     assert result["reverse_forwards"] == ["9857:127.0.0.1:61234"]
     assert result["remote_command"].startswith("source /tmp/")
-    assert result["acp_command"] == command
+    assert command in result["acp_command"]
+    assert result["acp_command"].endswith("repository_policy_launch")
     assert result["execution_instance"] == "instance-fixture"
     assert write_env.call_args.args[0] == "instance-fixture"
     assert result["preference_wrapper"] == (
@@ -223,7 +269,8 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     deploy.assert_called_once_with("instance-fixture", ado=True)
 
 
-def test_session_host_prepare_uses_process_auth_not_host_environment(capsys):
+def test_session_host_prepare_uses_process_auth_not_host_environment(capsys, monkeypatch):
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", lambda *a, **k: None)
     from agent_containers.session_host_context import TrustedContext
 
     config = types.SimpleNamespace(
@@ -294,7 +341,8 @@ def test_session_host_prepare_uses_process_auth_not_host_environment(capsys):
     )
 
 
-def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys):
+def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys, monkeypatch):
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", lambda *a, **k: None)
     """A configured copilot_cli_account with no live host login must abort
     the launch entirely -- never silently fall back to GH_TOKEN's identity."""
     from agent_containers.session_host_context import TrustedContext

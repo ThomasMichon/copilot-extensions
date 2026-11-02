@@ -20,6 +20,100 @@ from agent_worktrees.repos_configuration_sources import ConfigurationError
 SECRET = "github_pat_SENTINEL_DO_NOT_RENDER"
 
 
+@pytest.mark.parametrize("outcome", ["absent", "disappeared", "empty"])
+def test_mapping_acquisition_owner_distinguishes_empty_without_replay(tmp_path, monkeypatch, outcome):
+    """Strict acquisition distinguishes empty values without repeating native reads."""
+    from agent_worktrees import repos_configuration_sources as sources
+
+    path = tmp_path / "strict.yaml"
+    if outcome != "absent":
+        path.write_text("", encoding="utf-8")
+    original_read, original_parse, original_exists = Path.read_bytes, sources.parse_mapping, Path.exists
+    reads, parses = [], []
+
+    def read(candidate):
+        if candidate == path:
+            reads.append(candidate)
+            if outcome == "disappeared":
+                raise FileNotFoundError("synthetic disappearance after selection")
+        return original_read(candidate)
+
+    def parse(text):
+        parses.append(text)
+        return original_parse(text)
+
+    def exists(candidate):
+        if candidate == path:
+            pytest.fail("strict owner must use its original read, not add a presence probe")
+        return original_exists(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(sources, "parse_mapping", parse)
+    assert sources.mapping(path) == {}
+    assert reads == [path]
+    assert parses == ([""] if outcome == "empty" else [])
+    reads.clear()
+    parses.clear()
+    report = sources.mapping_report(path)
+    assert report.value == {}
+    assert reads == [path]
+    assert parses == ([""] if outcome == "empty" else [])
+    assert report.authority.value == ("complete" if outcome == "empty" else "absent")
+    assert any(o.source == str(path) for o in report.observations)
+    assert report.reusable is False
+    assert "stable-owner-input-frontier" in report.missing_coverage
+
+
+def test_mapping_acquisition_owner_preserves_invalid_composition(tmp_path, monkeypatch):
+    """The strict report keeps the parser's fatal sanitized failure."""
+    from agent_worktrees import config_acquisition, repos_configuration_sources as sources
+
+    path = tmp_path / "strict.yaml"
+    path.write_text("private_setting: [\n", encoding="utf-8")
+    original = Path.read_bytes
+    reads = []
+
+    def read(candidate):
+        if candidate == path:
+            reads.append(candidate)
+        return original(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    for load in (sources.mapping, lambda candidate: sources.mapping_report(candidate)):
+        reads.clear()
+        with pytest.raises(ConfigurationError) as caught:
+            load(path)
+        assert caught.value.code == "invalid-composition"
+        assert "private_setting" not in str(caught.value)
+        assert reads == [path]
+        assert config_acquisition.current_observations() is None
+
+
+def test_mapping_acquisition_owner_preserves_nonabsence_exception_identity(tmp_path, monkeypatch):
+    """A raw non-absence failure must not become an optional empty mapping."""
+    import errno
+    from agent_worktrees import config_acquisition, repos_configuration_sources as sources
+
+    path = tmp_path / "strict.yaml"
+    failure = OSError(errno.ELOOP, "synthetic non-absence read failure")
+    reads = []
+
+    def read(candidate):
+        assert candidate == path
+        reads.append(candidate)
+        raise failure
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    for load in (sources.mapping, lambda candidate: sources.mapping_report(candidate)):
+        reads.clear()
+        with pytest.raises(OSError) as caught:
+            load(path)
+        assert caught.value is failure
+        assert reads == [path]
+        assert config_acquisition.current_observations() is None
+
+
 @pytest.fixture
 def native(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
@@ -637,3 +731,43 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
             records["knowledge"].unlink()
         elif expected == "stale":
             records["sample"].unlink()
+
+
+@pytest.mark.parametrize("mode", ["empty", "populated", "bytes-only"])
+def test_mapping_report_replacement_is_opaque_without_reacquisition(tmp_path, monkeypatch, mode):
+    from agent_worktrees import repos_configuration_sources as sources
+
+    path = tmp_path / "strict.yaml"
+    path.write_text("marker: disk\n", encoding="utf-8")
+    value = {} if mode == "empty" else {"marker": "available"}
+    calls = []
+    original_read, original_exists = Path.read_bytes, Path.exists
+
+    def read(selected):
+        if selected == path:
+            calls.append("native-read")
+        return original_read(selected)
+
+    def exists(selected):
+        if selected == path:
+            pytest.fail("report added a presence probe")
+        return original_exists(selected)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "exists", exists)
+
+    def replacement(selected):
+        assert selected == path
+        calls.append("mapping")
+        if mode == "bytes-only":
+            sources.read_bytes(selected)
+            calls.append("original-bytes")
+        return value
+
+    monkeypatch.setattr(sources, "mapping", replacement)
+    monkeypatch.setattr(sources, "parse_mapping", lambda *a: pytest.fail("report replayed the parser"))
+    report = sources.mapping_report(path)
+    assert report.value is value
+    assert calls == (["mapping", "native-read", "original-bytes"] if mode == "bytes-only" else ["mapping"])
+    assert report.authority.value == "indeterminate"
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)

@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-configuration-layers",
     "pyyaml>=6.0.3",
     "packaging>=23",
     "cryptography>=50.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
@@ -37,6 +38,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # Always resolve the vendored config-schema-migration lib from the local path,
@@ -61,7 +63,7 @@ agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``), vendored byte-identically per consumer.
-agent-zdd = { path = "libs/zdd" }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 # Single-instance lease (module ``single_instance_lease``). Guards "one active
 # classify pass per project per host" (plugin-process-hygiene Phase 4c,
 # #2315): a losing caller waits for the winner's pass to finish, then reads
@@ -132,7 +134,7 @@ dev = [
 testpaths = ["tests"]
 norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "native"]
 markers = [
-    "guard: fast structural/contract guard tests (marketplace + picker integrity) run automatically in the pre-push hook; the full suite runs in CI",
+    "guard: fast structural/contract guard tests (marketplace + picker integrity); run explicitly or in CI",
     "real_installer_processes: run installers as real process trees (no subprocess.run adapter)",
     "installer_receipts: judge faked installers by their receipt, not exit 0 alone",
     "contract(name): behavioral contract attribution",
@@ -147,3 +149,6 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agent_worktrees = ["pre_push.sh"]

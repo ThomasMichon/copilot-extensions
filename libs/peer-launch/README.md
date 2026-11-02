@@ -8,7 +8,8 @@ byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
-`agent-containers`, `agent-dispatch`, `agent-ssh`, and `agent-pull-requests` -- each a canonical
+`agent-containers`, `agent-dispatch`, `agent-ssh`, `agent-machines`, and
+`agent-pull-requests` -- each a canonical
 `libs/installation-context` adopter in its own right. Adding a peer requires
 three coordinated steps, not just a `PEERS` mapping entry: (1) the mapping
 entry itself; (2) target-specific environment rebinding in
@@ -107,6 +108,12 @@ this call is optional (not every machine runs a dtssh mesh): a validated
 owner with no same-cell agent-ssh installation returns `None` (reported
 `skipped`, matching legacy behavior); only a malformed/refused context
 raises `ContextRefused`.
+
+Worktrees consumes Machines' declared Git-policy preview/apply/rollback CLI
+through this boundary. Machines needs only the canonical receipt, payload and
+runtime-root rebinding; foreign `AGENT_MACHINES_*` overrides are scrubbed.
+Legacy peer consumers can use `legacy_peer_environment()` for the same
+caller-routing scrub without manufacturing a namespaced receipt.
 
 Bridge uses this boundary for `handoff-check`'s `agent-worktrees
 handoffs-check` call. Because `--execute` mutates predecessor state, a

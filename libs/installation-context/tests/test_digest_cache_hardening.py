@@ -2,16 +2,45 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import os
 import shlex
 import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event, Thread
+from types import ModuleType, SimpleNamespace, TracebackType
+from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, cast
 
 import pytest
+
+from _powershell_fixture import _run_owner_probe
+
+if TYPE_CHECKING:
+    from typing_extensions import assert_type
+    from installation_context import _validation_scope
+
+    def _typed_validation(value: int, /) -> str:
+        return str(value)
+
+    assert_type(_validation_scope(_typed_validation), Callable[[int], str])
+
+_Parameters = ParamSpec("_Parameters")
+_Result = TypeVar("_Result")
+
+
+class _ValidationScope(Protocol):
+    def __call__(
+        self, function: Callable[_Parameters, _Result],
+    ) -> Callable[_Parameters, _Result]: ...
+
+
+def _validation_scope_for(module: ModuleType) -> _ValidationScope:
+    return cast(_ValidationScope, module._validation_scope)
+
 
 LIB = Path(__file__).resolve().parents[1]
 POSIX_SCRIPT = LIB / "installation-context.sh"
@@ -25,7 +54,7 @@ EXEMPLAR_SCRIPTS = (
 )
 
 
-def _load_python_module():
+def _load_python_module() -> ModuleType:
     path = LIB / "installation_context.py"
     spec = importlib.util.spec_from_file_location("digest_cache_installation_context", path)
     assert spec and spec.loader
@@ -49,17 +78,11 @@ def _assembled_python_source() -> str:
 
 def _posix_source() -> str:
     source = POSIX_SCRIPT.read_text(encoding="utf-8")
-    assignment = 'SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"'
-    assert source.count(assignment) == 1
-    return source.replace(assignment, f"SCRIPT_DIR={shlex.quote(str(LIB))}", 1)
-
-
-def _powershell_source() -> str:
-    source = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
-    companion = ". (Join-Path $PSScriptRoot 'guest-environment.ps1')"
-    assert source.count(companion) == 1
-    path = str(LIB / "guest-environment.ps1").replace("'", "''")
-    return source.replace(companion, f". '{path}'", 1)
+    initialization = 'dirname_into SCRIPT_DIR "${BASH_SOURCE[0]}"\n'
+    assert source.count(initialization) == 1
+    start = source.index(initialization)
+    end = source.index("JSON_QUERY=", start)
+    return source[:start] + f"SCRIPT_DIR={shlex.quote(str(LIB))}\n" + source[end:]
 
 
 def _run_canonical_shell_digest(
@@ -89,22 +112,12 @@ def _run_canonical_shell_digest(
         probe.chmod(0o755)
         command = (str(probe), str(root))
     else:
-        source = _powershell_source()
-        prefix, marker, _ = source.partition("\ntry {\n    Assert-ExactChoice")
-        assert marker
-        probe = work_root / "digest.ps1"
-        quoted_root = str(root).replace("'", "''")
-        probe.write_text(
-            prefix
-            + "\n"
-            + (
-                "Get-SnapshotContentSha256 "
-                f"'{quoted_root}' "
-                f"{max_entries} {max_path_bytes} {max_content_bytes}\n"
-            ),
-            encoding="utf-8-sig",
+        return _run_owner_probe(
+            work_root,
+            f"print(_snapshot_content_sha256(Path({str(root)!r}), "
+            f"max_entries={max_entries}, max_path_bytes={max_path_bytes}, "
+            f"max_content_bytes={max_content_bytes}))",
         )
-        command = (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe")
     return subprocess.run(
         command,
         capture_output=True,
@@ -115,41 +128,198 @@ def _run_canonical_shell_digest(
     )
 
 
-def test_powershell_darwin_stat_abi_selects_by_process_architecture() -> None:
+def test_powershell_uses_python_owned_native_identity_and_publication() -> None:
     script = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+    python = _assembled_python_source()
+    worker = (LIB / "_installation_context_worker.py").read_text(encoding="utf-8")
+    assert "'installation_context.py'" in script
+    assert "'_installation_context_worker.py'" in script
+    assert 'runpy.run_path(request["sdk"]' in worker
+    assert 'sdk["_powershell_main"]' in worker
+    for forbidden in ("Add-Type", "Reflection.Emit", "DllImport", "fstat$INODE64"):
+        assert forbidden not in script
+    reader = python.split("def _read_regular_file(", 1)[1].split(
+        "def _read_regular_file_bytes(", 1,
+    )[0]
+    assert "os.fstat(descriptor)" in reader
+    assert "os.lstat(path)" in reader
+    assert "_stat_identity(named_stat) == _stat_identity(opened_stat)" in reader
+    publication = python.split("def _publish_json_no_replace(", 1)[1]
+    assert "os.link(temporary, path)" in publication
+    assert "except FileExistsError:" in publication
 
-    assert 'EntryPoint = "fstat$INODE64"' in script
-    assert 'EntryPoint = "lstat$INODE64"' in script
-    assert 'EntryPoint = "fstat"' in script
-    assert 'EntryPoint = "lstat"' in script
-    assert "RuntimeInformation.ProcessArchitecture == Architecture.X64" in script
-    assert "RuntimeInformation.ProcessArchitecture == Architecture.Arm64" in script
-    assert "DarwinX64Fstat(descriptor, out information)" in script
-    assert "DarwinArm64Fstat(descriptor, out information)" in script
-    assert "DarwinX64Lstat(path, out information)" in script
-    assert "DarwinArm64Lstat(path, out information)" in script
-    publication = script.split("function Publish-RuntimeSlotCompletion", 1)[1]
-    publication = publication.split("function Invoke-SlotComplete", 1)[0]
-    assert "[CeAtomicDirectory]::MoveWindows" in publication
-    assert "[CeAtomicDirectory]::MoveLinux" in publication
-    assert "[CeAtomicDirectory]::MoveDarwin" in publication
-    assert "[IO.File]::Move" not in publication
+
+@pytest.mark.parametrize("occupied", (False, True))
+def test_python_completion_publication_never_replaces_existing_identity(
+    occupied: bool, tmp_path: Path,
+) -> None:
+    module = _load_python_module()
+    target = tmp_path / "completion.json"
+    if occupied:
+        target.write_bytes(b'{"existing":true}\n')
+        before = target.stat(), target.read_bytes()
+    assert module._publish_json_no_replace(target, {"new": True}, locks=()) is (not occupied)
+    if occupied:
+        assert target.read_bytes() == before[1]
+        assert module._stat_identity(target.stat()) == module._stat_identity(before[0])
+    else:
+        assert module.read_json(target) == {"new": True}
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows path comparison")
+@pytest.mark.parametrize(("left", "right", "equivalent"), (
+    (r"C:\example\receipt", r"\\?\C:\example\receipt", True),
+    (r"\\example.invalid\share\receipt", r"\\?\UNC\example.invalid\share\receipt", True),
+    (r"C:\example\receipt", r"\\?\C:\other\receipt", False),
+    (r"C:\example\receipt", r"\\?\GLOBALROOT\Device\C:\example\receipt", False),
+))
+def test_windows_path_comparison_retains_extended_io_paths(
+    left: str, right: str, equivalent: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_python_module()
+    resolved = []
+
+    def physical_path(path: Path) -> Path:
+        resolved.append(path)
+        return path
+
+    monkeypatch.setattr(module, "canonical_path", physical_path)
+    assert module.paths_equal(left, right) is equivalent
+    assert resolved == [Path(left), Path(right)]
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (259, 260, 280))
+def test_powershell_safe_open_preserves_extended_length_file_reads(
+    tmp_path: Path, path_units: int,
+) -> None:
+    directory = tmp_path / "long-open"
+    prefix_units: Callable[[Path], int] = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(directory) - 1 > 240:
+        directory /= "component"
+    filename_units = path_units - prefix_units(directory) - 1
+    assert 5 <= filename_units <= 255
+    filename = ("x" * (filename_units - 4)) + ".txt"
+    directory.mkdir(parents=True)
+    target = directory / filename
+    target.write_text("native long-path contents\n", encoding="utf-8")
+    assert prefix_units(target) == path_units
+    result = _run_owner_probe(
+        tmp_path / "long-open-probe",
+        f"contents, identity = _read_regular_file(Path({str(target)!r}), "
+        "label='Long-path contents', require_stable_identity=True)\n"
+        "sys.stdout.buffer.write(contents)",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "native long-path contents\n"
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (247, 248, 260, 280))
+def test_powershell_atomic_directory_preserves_extended_length_paths(
+    tmp_path: Path, path_units: int,
+) -> None:
+    parent = tmp_path / "atomic-directory"
+    prefix_units: Callable[[Path], int] = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(parent) - 1 > 240:
+        parent /= "component"
+    parent.mkdir(parents=True)
+    target = parent / ("d" * (path_units - prefix_units(parent) - 1))
+    assert prefix_units(target) == path_units
+    result = _run_owner_probe(
+        tmp_path / "atomic-directory-probe",
+        f"path = Path({str(target)!r})\n"
+        "lock = _DirectoryLock(path, kind='installation', marketplace_id='example')\n"
+        "lock._create(time.monotonic() + 5)\n"
+        "try:\n"
+        "    assert path.is_dir()\n"
+        "    identity = _stat_identity(path.stat())\n"
+        "    before = lock.owner_path.read_bytes()\n"
+        "    try:\n"
+        "        lock._create(time.monotonic() + 5)\n"
+        "    except FileExistsError:\n"
+        "        pass\n"
+        "    else:\n"
+        "        raise AssertionError('Directory replaced')\n"
+        "    assert _stat_identity(path.stat()) == identity\n"
+        "    assert lock.owner_path.read_bytes() == before\n"
+        "finally:\n"
+        "    lock.release()",
+    )
+    assert result.returncode == 0, result.stderr
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (259, 260, 280))
+def test_powershell_atomic_publication_preserves_long_paths_without_replacement(
+    tmp_path: Path, path_units: int,
+) -> None:
+    parent = tmp_path / "atomic-move"
+    prefix_units: Callable[[Path], int] = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(parent) - 1 > 240:
+        parent /= "component"
+    parent.mkdir(parents=True)
+    filename_units = path_units - prefix_units(parent) - 1
+    original = parent / ("s" * filename_units)
+    destination = parent / ("d" * filename_units)
+    original.write_bytes(b"original completion\n")
+    assert prefix_units(original) == prefix_units(destination) == path_units
+    result = _run_owner_probe(
+        tmp_path / "atomic-publication-probe",
+        f"source = Path({str(original)!r})\n"
+        f"destination = Path({str(destination)!r})\n"
+        "assert _publish_json_no_replace(destination, "
+        "{'contents': source.read_text(encoding='utf-8')}, locks=())\n"
+        "identity = _stat_identity(destination.stat())\n"
+        "before = destination.read_bytes()\n"
+        "source.write_bytes(b'must not replace')\n"
+        "assert not _publish_json_no_replace(destination, {'replaced': True}, locks=())\n"
+        "assert _stat_identity(destination.stat()) == identity\n"
+        "assert destination.read_bytes() == before",
+    )
+    assert result.returncode == 0, result.stderr
+    assert original.read_bytes() == b"must not replace"
+    assert _load_python_module().read_json(destination) == {"contents": "original completion\n"}
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+def test_powershell_long_snapshot_directory_matches_reference(tmp_path: Path) -> None:
+    root = tmp_path / "snapshot"
+    while len(str(root).encode("utf-16le")) // 2 < 280:
+        root /= "component"
+    root.mkdir(parents=True)
+    (root / "a").write_bytes(b"x")
+    expected = _load_python_module()._snapshot_content_sha256(
+        root, max_entries=1, max_path_bytes=1, max_content_bytes=1,
+    )
+    result = _run_canonical_shell_digest(
+        "powershell", root, tmp_path / "digest",
+        max_entries=1, max_path_bytes=1, max_content_bytes=1,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
 
 
 def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+    module = _load_python_module()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
 
-    assert powershell.count("information.Modified.Nanoseconds") >= 2
-    assert powershell.count("information.Changed.Nanoseconds") >= 2
-    assert "linuxInformation.Modified.Nanoseconds" in powershell
-    assert "linuxInformation.Changed.Nanoseconds" in powershell
+    first = SimpleNamespace(
+        st_mode=0o100600, st_size=8,
+        st_mtime_ns=1_000_000_001, st_ctime_ns=2_000_000_001,
+    )
+    for field in ("st_mtime_ns", "st_ctime_ns"):
+        changed = SimpleNamespace(**{**vars(first), field: getattr(first, field) + 1})
+        assert module._stat_metadata(first) != module._stat_metadata(changed)
     assert "%F|%d|%i|%s|%y|%z" in posix
     assert "ensure_kernel_name" in posix
     assert 'if [[ "$KERNEL_NAME" == Darwin ]]; then' in posix
     assert "digest_safe_file_fd_into verification_digest" in posix
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX executable probe")
 def test_posix_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
@@ -196,13 +366,38 @@ digest_file "$path" >/dev/null
     assert "changed after it was validated" in result.stderr.lower()
 
 
+def test_python_validation_scope_preserves_callable_contract() -> None:
+    module = _load_python_module()
+
+    def local(value: int, *, enabled: bool = False) -> str:
+        """A keyword-only validated operation."""
+        assert module._VALIDATION_SCOPE_DEPTH.get() == 1
+        assert module._VALIDATED_FILE_SHA256.get() == {}
+        if not enabled:
+            raise ValueError("disabled")
+        return str(value)
+
+    wrapped = module._validation_scope(local)
+    assert wrapped.__wrapped__ is local
+    assert wrapped.__name__ == local.__name__
+    assert wrapped.__doc__ == local.__doc__
+    assert inspect.signature(wrapped) == inspect.signature(local)
+    assert wrapped(3, enabled=True) == "3"
+    assert module._VALIDATED_FILE_SHA256.get() is None
+    assert module._VALIDATION_SCOPE_DEPTH.get() == 0
+    with pytest.raises(ValueError, match="disabled"):
+        wrapped(3)
+    assert module._VALIDATED_FILE_SHA256.get() is None
+    assert module._VALIDATION_SCOPE_DEPTH.get() == 0
+
+
 def test_python_cache_hit_rehashes_same_metadata_rewrite(tmp_path: Path) -> None:
     module = _load_python_module()
     path = tmp_path / "receipt.json"
     path.write_bytes(b'{"value":"first"}\n')
     original = path.stat()
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def probe() -> None:
         module.read_json(path)
         path.write_bytes(b'{"value":"other"}\n')
@@ -245,19 +440,19 @@ def test_python_validation_cache_is_isolated_between_threads(
     release_second = Event()
     outcomes: dict[str, object] = {}
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def nested_cache_identity() -> int:
         cache = module._VALIDATED_FILE_SHA256.get()
         assert cache is not None
         return id(cache)
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def first_validation() -> None:
         module.read_json(path)
         first_cached.set()
         assert second_cached.wait(5)
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def second_validation() -> None:
         assert first_cached.wait(5)
         module.read_json(path)
@@ -295,7 +490,6 @@ def test_python_validation_cache_is_isolated_between_threads(
 def test_completion_read_stability_matches_marker_mutability() -> None:
     python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
 
     reader = python.split("def _read_regular_json_object(", 1)[1].split(
         "def _validated_build_completion",
@@ -323,29 +517,13 @@ def test_completion_read_stability_matches_marker_mutability() -> None:
         'capture_json_for_validation actual_document "$actual" "Runtime slot completion"'
         in posix
     )
-    build_ps = powershell.split("function Read-BuildCompletion(", 1)[1].split(
-        "function New-RuntimeSlotCompletion",
-        1,
-    )[0]
-    assert "Read-RegularFileBytes $actual 'Build completion evidence'" in build_ps
-    assert "-RequireSameIdentity" not in build_ps
-    completion_ps = powershell.split(
-        "function Validate-RuntimeSlotCompletionCore(",
-        1,
-    )[1].split("function Invoke-SlotCompletionValidate", 1)[0]
-    assert "$receipt = Read-Json $actual" in completion_ps
 
 
 def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
     python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
     python_digest = python.split("def _snapshot_content_sha256(", 1)[1].split(
         "def _atomic_write_json(",
-        1,
-    )[0]
-    powershell_tree = powershell.split("function Get-SnapshotTreeState(", 1)[1].split(
-        "function Assert-SnapshotTreeStateEqual",
         1,
     )[0]
 
@@ -358,14 +536,9 @@ def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
     assert "MAX_SNAPSHOT_ENTRIES=100000" in posix
     assert "MAX_SNAPSHOT_PATH_BYTES=4096" in posix
     assert "MAX_SNAPSHOT_CONTENT_BYTES=4294967296" in posix
-    assert "$script:SnapshotMaxEntries = 100000" in powershell
-    assert "$script:SnapshotMaxPathBytes = 4096" in powershell
-    assert "$script:SnapshotMaxContentBytes = 4294967296" in powershell
     assert "sort -t $'\\t' -k1,1" in posix
-    assert "SortedDictionary[string, object]" in powershell
-    assert "[IO.Directory]::EnumerateFileSystemEntries(" in powershell_tree
-    assert "@(Get-ChildItem" not in powershell_tree
-    assert "for ($index = 1; $index -lt $files.Count; $index++)" not in powershell
+    assert "with os.scandir(" in python_digest
+    assert "sorted(records, key=lambda item: item[0])" in python_digest
 
     for script in EXEMPLAR_SCRIPTS:
         source = script.read_text(encoding="utf-8")
@@ -389,7 +562,6 @@ def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
 def test_slot_complete_reconfirms_digest_immediately_before_publication() -> None:
     python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
 
     python_publish = python.split(
         "desired = _runtime_slot_completion_value(",
@@ -406,14 +578,6 @@ def test_slot_complete_reconfirms_digest_immediately_before_publication() -> Non
     assert 'confirmed_snapshot_content_sha256="$(digest_snapshot_contents' in posix_publish
     assert posix_publish.index("confirmed_snapshot_content_sha256") < posix_publish.index(
         "publish_completion_json_no_replace"
-    )
-    powershell_publish = powershell.split(
-        "$receipt = New-RuntimeSlotCompletion",
-        1,
-    )[1].split("$result = Validate-RuntimeSlotCompletionCore", 1)[0]
-    assert "$confirmedSnapshotContentSha256 = Get-SnapshotContentSha256" in powershell_publish
-    assert powershell_publish.index("$confirmedSnapshotContentSha256") < powershell_publish.index(
-        "Publish-RuntimeSlotCompletion"
     )
 
 
@@ -480,30 +644,33 @@ def test_python_wide_directory_stops_on_first_over_limit_entry(
     root.mkdir()
     for index in range(32):
         (root / f"{index:02d}").write_bytes(b"x")
-    real_scandir = module.os.scandir
+    real_scandir = os.scandir
 
     class GuardedScandir:
-        def __init__(self, source: object) -> None:
+        def __init__(self, source: int | str | os.PathLike[str]) -> None:
             self._iterator = real_scandir(source)
             self._consumed = 0
 
-        def __enter__(self):
+        def __enter__(self) -> GuardedScandir:
             self._iterator.__enter__()
             return self
 
-        def __exit__(self, *args: object) -> object:
-            return self._iterator.__exit__(*args)
+        def __exit__(
+            self, exc_type: type[BaseException] | None,
+            exc_value: BaseException | None, traceback: TracebackType | None,
+        ) -> None:
+            return self._iterator.__exit__(exc_type, exc_value, traceback)
 
-        def __iter__(self):
+        def __iter__(self) -> GuardedScandir:
             return self
 
-        def __next__(self):
+        def __next__(self) -> os.DirEntry[str]:
             self._consumed += 1
             if self._consumed > 4:
                 raise AssertionError("enumeration continued beyond max_entries + 1")
             return next(self._iterator)
 
-    def guarded_scandir(source: object) -> GuardedScandir:
+    def guarded_scandir(source: int | str | os.PathLike[str]) -> GuardedScandir:
         return GuardedScandir(source)
 
     monkeypatch.setattr(module.os, "scandir", guarded_scandir)
@@ -529,32 +696,37 @@ def test_python_final_membership_scan_is_bounded(
     root = tmp_path / "snapshot"
     root.mkdir()
     (root / "original").write_bytes(b"x")
-    real_scandir = module.os.scandir
+    real_scandir = os.scandir
     scan_count = 0
 
     class GuardedScandir:
-        def __init__(self, source: object, limit: int | None) -> None:
+        def __init__(
+            self, source: int | str | os.PathLike[str], limit: int | None,
+        ) -> None:
             self._iterator = real_scandir(source)
             self._limit = limit
             self._consumed = 0
 
-        def __enter__(self):
+        def __enter__(self) -> GuardedScandir:
             self._iterator.__enter__()
             return self
 
-        def __exit__(self, *args: object) -> object:
-            return self._iterator.__exit__(*args)
+        def __exit__(
+            self, exc_type: type[BaseException] | None,
+            exc_value: BaseException | None, traceback: TracebackType | None,
+        ) -> None:
+            return self._iterator.__exit__(exc_type, exc_value, traceback)
 
-        def __iter__(self):
+        def __iter__(self) -> GuardedScandir:
             return self
 
-        def __next__(self):
+        def __next__(self) -> os.DirEntry[str]:
             self._consumed += 1
             if self._limit is not None and self._consumed > self._limit:
                 raise AssertionError("final comparison scan was not bounded")
             return next(self._iterator)
 
-    def guarded_scandir(source: object) -> GuardedScandir:
+    def guarded_scandir(source: int | str | os.PathLike[str]) -> GuardedScandir:
         nonlocal scan_count
         scan_count += 1
         if scan_count == 2:
@@ -595,14 +767,17 @@ def test_python_deep_snapshot_tree_exceeds_default_recursion_limit(
         leaf.write_bytes(b"x")
         max_entries = depth + 1
         max_path_bytes = len(("d/" * depth + "f").encode("utf-8"))
-        real_open = module.os.open
-        real_close = module.os.close
+        real_open = os.open
+        real_close = os.close
         live_descriptors: set[int] = set()
         descriptor_high_water = 0
 
-        def tracking_open(*args: object, **kwargs: object) -> int:
+        def tracking_open(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+        ) -> int:
             nonlocal descriptor_high_water
-            descriptor = real_open(*args, **kwargs)
+            descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
             live_descriptors.add(descriptor)
             descriptor_high_water = max(
                 descriptor_high_water,
@@ -678,9 +853,8 @@ def test_deep_snapshot_tree_cross_runner_parity_under_recursion_limit(
         )
 
         shells = (
-            ("posix",)
-            if os.name != "nt"
-            else (("powershell",) if POWERSHELL is not None else ())
+            *(("posix",) if os.name != "nt" else ()),
+            *(("powershell",) if POWERSHELL is not None else ()),
         )
         for shell in shells:
             result = _run_canonical_shell_digest(
@@ -744,17 +918,28 @@ def test_posix_safe_open_rejects_fifo_without_blocking(tmp_path: Path, bash: str
         prefix
         + r'''
 shift
+REAPED_TIMER="$3"
+kill() {
+    if [[ -n "${open_timer:-}" && "${1:-}" == "$open_timer" ]] &&
+       ! jobs -pr | grep -Fxq -- "$open_timer"; then
+        printf '%s' "$open_timer" >"$REAPED_TIMER"
+        return 1
+    fi
+    builtin kill "$@"
+}
 capture_regular_file "$1" "Probe file" "$2" true true
 ''',
         encoding="utf-8",
     )
     probe.chmod(0o755)
     fifo = tmp_path / "receipt.fifo"
-    os.mkfifo(fifo)
+    if sys.platform != "win32":
+        os.mkfifo(fifo)
+    reaped_timer = tmp_path / "reaped-timer"
     started = time.monotonic()
 
     result = subprocess.run(
-        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture")),
+        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture"), str(reaped_timer)),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -766,38 +951,47 @@ capture_regular_file "$1" "Probe file" "$2" true true
     assert time.monotonic() - started < 5
     assert result.returncode != 0
     assert "without blocking" in result.stderr.lower()
+    assert not reaped_timer.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX file descriptors")
+def test_posix_regular_captures_settle_watchdogs_without_waiting_for_deadlines(
+    tmp_path: Path,
+) -> None:
+    prefix, marker, _ = _posix_source().partition('\nACTION="${1:-}"')
+    assert marker
+    probe = tmp_path / "capture-probe.sh"
+    probe.write_text(
+        prefix
+        + r'''
+shift
+for ((index = 0; index < 6; index++)); do
+    captured="$(capture_regular_file "$1" "Probe file" "$2" true true; cat "$2"; printf x)"
+    printf '%s' "${captured%x}"
+done
+''',
+        encoding="utf-8",
+    )
+    target = tmp_path / "receipt"
+    target.write_bytes(b"receipt\n\n")
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(
+        (bash, str(probe), "status", str(target), str(tmp_path / "capture")),
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == target.read_bytes() * 6
+    assert result.stderr == b""
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_powershell_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
-    script = _powershell_source()
-    prefix, marker, _ = script.partition("\ntry {\n    Assert-ExactChoice")
-    assert marker
-    probe = tmp_path / "digest-cache-probe.ps1"
-    probe.write_text(
-        prefix
-        + r'''
-$path = $env:CE_DIGEST_CACHE_PATH
-$replacement = $env:CE_DIGEST_CACHE_REPLACEMENT
-[void](Get-FileSha256 $path -RequireSameIdentity)
-$originalWriteTime = (Get-Item -LiteralPath $path).LastWriteTimeUtc
-[IO.File]::WriteAllBytes($path, [IO.File]::ReadAllBytes($replacement))
-(Get-Item -LiteralPath $path).LastWriteTimeUtc = $originalWriteTime
-$cacheKey = [IO.Path]::GetFullPath($path)
-$current = Open-RegularFileHandle $path 'File' -RequireExactPath
-try {
-    $script:ValidatedFileSha256[$cacheKey].identity = $current.identity
-    $script:ValidatedFileSha256[$cacheKey].metadata = $current.metadata
-}
-finally {
-    $current.value.Dispose()
-}
-[void](Get-FileSha256 $path -RequireSameIdentity)
-''',
-        encoding="utf-8-sig",
-    )
     target = tmp_path / "target.txt"
     replacement = tmp_path / "replacement.txt"
     target.write_bytes(b"original")
@@ -807,14 +1001,27 @@ finally {
     environment["CE_DIGEST_CACHE_PATH"] = str(target)
     environment["CE_DIGEST_CACHE_REPLACEMENT"] = str(replacement)
 
-    result = subprocess.run(
-        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    result = _run_owner_probe(
+        tmp_path,
+        """@_validation_scope
+def probe():
+    path = Path(os.environ['CE_DIGEST_CACHE_PATH'])
+    replacement = Path(os.environ['CE_DIGEST_CACHE_REPLACEMENT'])
+    _sha256_file(path)
+    original = path.stat()
+    path.write_bytes(replacement.read_bytes())
+    os.utime(path, ns=(original.st_atime_ns, original.st_mtime_ns))
+    current = path.stat()
+    cache = _VALIDATED_FILE_SHA256.get()
+    assert cache is not None
+    key = _file_cache_key(path)
+    cached = cache[key]
+    cache[key] = _ValidatedFileDigest(
+        digest=cached.digest, identity=_stat_identity(current), metadata=_stat_metadata(current),
+    )
+    _sha256_file(path)
+probe()""",
+        environment=environment,
     )
 
     assert result.returncode != 0

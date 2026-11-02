@@ -1,0 +1,9 @@
+{
+  "comment": "Use pinned Git revision deltas with explicit tombstones and bounded commit acquisition",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

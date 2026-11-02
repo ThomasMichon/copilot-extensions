@@ -11,6 +11,32 @@ from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.session_host_context import resolve_context
 
 
+@pytest.mark.parametrize(("configured", "observed"), [
+    ("external", None), ("agent-containers", "external"),
+])
+def test_session_host_ownership_mismatch_precedes_projection(monkeypatch, configured, observed):
+    selected = "a" * 64
+    config = ContainersConfig(fleets={
+        "example": FleetConfig(lifecycle_owner=configured, security_profile="trusted"),
+    })
+    labels = {"agent-containers.security-profile": "trusted"}
+    if observed is not None:
+        labels["agent-containers.lifecycle-owner"] = observed
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr("agent_containers.lifecycle.get_container", lambda *args: SimpleNamespace(
+        fleet="example", state="running", container_id=selected,
+    ))
+    monkeypatch.setattr("agent_containers.lifecycle.inspect_container", lambda target: {
+        "Id": selected, "Config": {"Labels": labels},
+    })
+    for effect in ("prepare_ssh_config", "container_environment", "host_gh_token", "write_remote_env"):
+        monkeypatch.setattr(cli, effect, lambda *a, **kw: pytest.fail("projection before ownership"))
+    with pytest.raises(RuntimeError, match="lifecycle owner does not match"):
+        cli._cmd_session_host_prepare(SimpleNamespace(
+            name="example-1", expected_instance=selected, host_relay_port=None,
+        ))
+
+
 @pytest.mark.parametrize("replacement_phase", ["discovery", "inspection"])
 def test_replaced_instance_refuses_before_any_projection(monkeypatch, replacement_phase):
     config = ContainersConfig()

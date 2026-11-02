@@ -8,6 +8,8 @@ the Manager never imports ``agent_worktrees`` in-process.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import hashlib
 import json
 import os
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
+from zdd import routing
 from zdd.diagnostics import process_start_time
 
 from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process, mux_discovery
@@ -28,17 +31,16 @@ from .mux_attached_clients import AttachedClientObserver
 from .mux_mapping_registry import (
     MuxMappingRegistry,
     LIVE_MAPPING_BACKSTOP_INTERVAL_S,
-    get_mapping,
-    live_mapping_republish_due,
+    get_mapping, live_mapping_republish_due,
     registry_path,
-    register_mapping,
-    register_next_mapping,
+    register_mapping, register_next_mapping,
     remove_mapping,
 )
 from .self_install import default_root
 from .runtime_identity import route_version, running_generation
 from .restart_observer import RestartObserver
 from .restart_notification_runtime import RestartNotificationRuntime
+from .mux_handler_lifetime import ActiveHandlerTracker as _ActiveHandlerTracker, MuxHandlerLifetime
 
 __all__ = [
     "get_mapping",
@@ -72,9 +74,7 @@ LIVE_KIND = "mux-live-v1"
 
 LINGER_SECONDS = 5.0
 SUBSCRIBER_TTL_SECONDS = 20.0
-#: How long the resident daemon lingers with no live mapping and no active
-#: subscriber before idle-exiting (mirrors the resident status-monitor's own
-#: idle-strike discipline, scaled for a much lower-traffic daemon).
+#: Resident idle grace; selected passive successors await the work lease instead.
 IDLE_LINGER_S = 60.0
 
 
@@ -84,9 +84,7 @@ IDLE_LINGER_S = 60.0
 
 
 def lock_path(root: Path | None = None) -> Path:
-    """The Manager mux-daemon's own lock/rendezvous file, mirroring
-    ``agent-worktrees``' ``status-monitor.lock`` convention: sits directly
-    under the runtime root, one instance per machine/installation cell."""
+    """Manager's rendezvous file, one per machine/installation cell."""
     return (root if root is not None else default_root()) / "mux-daemon.lock"
 
 
@@ -563,47 +561,10 @@ def start_server(
 # ---------------------------------------------------------------------------
 
 
-class _ActiveHandlerTracker:
-    """Tracks ``mux-status-v1`` handlers currently past the point of no
-    return (i.e. actually running ``apply_status_options``), so shutdown
-    can fence them before releasing this daemon's single-instance lease
-    (Copilot review finding): ``CoalescingServer.close()`` stops accepting
-    new connections but does not join already-running handler threads -- a
-    handler that had already passed its liveness/revision checks could
-    still be mid-apply when ``close()`` returns. Without fencing,
-    ``run_daemon_foreground`` would then release the lease and let a
-    replacement daemon start while that stale handler is still writing,
-    letting it overwrite the replacement's own newer status."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._count = 0
-        self._drained = threading.Event()
-        self._drained.set()
-
-    def enter(self) -> None:
-        with self._lock:
-            self._count += 1
-            self._drained.clear()
-
-    def exit(self) -> None:
-        with self._lock:
-            self._count -= 1
-            if self._count <= 0:
-                self._drained.set()
-
-    def wait_for_drain(self, timeout: float) -> bool:
-        return self._drained.wait(timeout=timeout)
-
-
 class MuxDaemonRuntime:
-    """Owns the mux-companion daemon's whole in-process lifecycle: the
-    coalescing server plus its registry handle -- mirrors
-    ``agent_worktrees.mux_link.InProcessRuntime`` structurally."""
+    """Owns the mux-companion server, registry and retained handler custody."""
 
-    #: Bound on how long shutdown waits for an in-flight handler to finish
-    #: its apply before closing the server anyway (never hang shutdown
-    #: forever on a stuck subprocess call).
+    #: Bounds the apply fence and native-close observation, not retained custody.
     SHUTDOWN_DRAIN_TIMEOUT_S = 20.0
 
     def __init__(
@@ -615,6 +576,8 @@ class MuxDaemonRuntime:
         listen_port: int | None = None,
     ) -> None:
         self.server: CoalescingServer | None = None
+        self._lifecycle_lock = threading.RLock()
+        self._handler_lifetime: MuxHandlerLifetime | None = None
         self.registry = MuxMappingRegistry(registry_path_)
         self.handler_tracker = _ActiveHandlerTracker()
         self.root = root if root is not None else default_root()
@@ -652,16 +615,25 @@ class MuxDaemonRuntime:
                 self.restart_notifications.activate()
 
     def start(self) -> None:
-        try:
-            server = start_server(
-                build_compute(self.registry, self.handler_tracker, self),
-                port=self.listen_port,
-                token=mux_daemon_cutover.load_or_create_control_token(self.root),
+        with self._lifecycle_lock:
+            if self._handler_lifetime is not None and not self._handler_lifetime.settled.is_set():
+                raise RuntimeError("mux runtime has not retired")
+            self._handler_lifetime = MuxHandlerLifetime(
+                mux_daemon_process.selected_root(self.root), __file__, self._close_owned_work,
+                self.handler_tracker,
             )
-            self.server = server
-            server.start()
-        except Exception:
-            self.shutdown()
+            try:
+                server = start_server(
+                    build_compute(self.registry, self.handler_tracker, self),
+                    port=self.listen_port,
+                    token=mux_daemon_cutover.load_or_create_control_token(self.root),
+                )
+                self._handler_lifetime.server = self.server = server
+                server.start()
+            except BaseException as error:
+                self.shutdown()
+                if not isinstance(error, Exception):
+                    raise
 
     @property
     def port(self) -> int | None:
@@ -746,12 +718,15 @@ class MuxDaemonRuntime:
             "status": "draining" if self.draining else "ready",
             "version": __version__,
             "runtime_generation": running_generation(),
+            "active": not self.passive and self.accepting_requests(),
             "attached_clients": attached_clients,
             "busy": active_handlers > 0 or self.picker_sessions.busy,
             "restart_recovery": self.restart_notifications.status,
         }
 
     def promote(self) -> dict:
+        if self.passive:
+            return {"adopted": False, "reason": "resident-lease-pending"}
         self.admissions_open = True
         self.picker_sessions.resume()
         return {"adopted": True}
@@ -818,17 +793,32 @@ class MuxDaemonRuntime:
             return True
         return self.registry.has_any_live()
 
-    def shutdown(self) -> None:
-        self.picker_sessions.close()
+    def _close_owned_work(self) -> None:
         try:
-            self.restart_notifications.close()
+            self.picker_sessions.close()
         finally:
-            if self.server is not None:
-                self.handler_tracker.wait_for_drain(self.SHUTDOWN_DRAIN_TIMEOUT_S)
-                self.server.close()
-            self.server = None
+            self.restart_notifications.close()
+        self.handler_tracker.wait_for_drain(self.SHUTDOWN_DRAIN_TIMEOUT_S)
+
+    def shutdown(self) -> None:
+        with self._lifecycle_lock:
+            try:
+                if self._handler_lifetime is not None:
+                    self._handler_lifetime.close_owned_work()
+                else:
+                    self._close_owned_work()
+            finally:
+                try:
+                    if self._handler_lifetime is not None:
+                        self._handler_lifetime.shutdown(self.SHUTDOWN_DRAIN_TIMEOUT_S)
+                finally:
+                    self.server = None
 
 
+@daemon_entrypoint(
+    "worktree-manager-mux", source=__file__, purpose="production",
+    runtime_root=lambda root=None, **kwargs: mux_daemon_process.selected_root(root),
+)
 def run_daemon_foreground(
     root: Path | None = None,
     *,
@@ -839,25 +829,16 @@ def run_daemon_foreground(
     max_iterations: int | None = None,
     backstop_interval_s: float = LIVE_MAPPING_BACKSTOP_INTERVAL_S,
 ) -> int:
-    """The resident daemon's own loop: acquire this daemon's single-
-    instance lease, start the server, publish the lock file, then
-    idle-exit after ``idle_after_s`` seconds with no live mapping and no
-    active subscriber. ``max_iterations`` is test-only (bounds the loop
-    instead of relying on the idle timer alone).
-
-    A *passive* generation (spawned only by the cutover orchestrator) is the one
-    sanctioned exception to the single-active lease: it starts beside the active
-    daemon without taking the lease or publishing the lock, becomes routed active
-    through the ZDD routing table, then self-promotes by claiming the lease once
-    the old active retires.
+    """Await predecessor drain; revalidate publication before work admission.
+    ``max_iterations`` bounds tests; handler custody outlives bounded shutdown.
     """
-    resolved_root = root if root is not None else default_root()
+    resolved_root = mux_daemon_process.selected_root(root)
     lock = lock_path(resolved_root)
     lease = None if passive else _acquire_daemon_lease(resolved_root)
     if not passive and lease is None:
-        # Another instance already holds the single-instance lease --
-        # stand down rather than starting a second daemon.
+        # Never start a second resident while the work lease is held.
         return 0
+    runtime = None
     try:
         runtime = MuxDaemonRuntime(
             registry_path(resolved_root),
@@ -871,6 +852,7 @@ def run_daemon_foreground(
         if runtime.server is None or runtime.port is None:
             return 1
         active_version = route_version()
+        own_start_time = process_start_time(os.getpid())
         if lease is not None:
             active_endpoint = mux_daemon_cutover.publish_route(
                 runtime.port,
@@ -890,18 +872,47 @@ def run_daemon_foreground(
                         os.getpid(), root=resolved_root
                     )
                     if generation is not None:
+                        runtime._self_retire_generation = generation
                         promoted = _acquire_daemon_lease(resolved_root)
                         if promoted is not None:
-                            lease = promoted
-                            runtime.passive = False
-                            runtime._self_retire_generation = generation
-                            runtime.activate_restart_recovery()
+                            try:
+                                with routing.routing_lock(
+                                    mux_daemon_cutover.routing_dir(resolved_root),
+                                    deadline=time.monotonic() + 0.25,
+                                ):
+                                    table = json.loads(routing.routing_table_path(
+                                        mux_daemon_cutover.routing_dir(resolved_root),
+                                    ).read_text(encoding="utf-8"))
+                                    raw = table.get("active") if isinstance(table, dict) else None
+                                    selected = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                                    if own_start_time is not None and selected is not None and (
+                                        selected.pid, selected.generation, selected.bind, selected.port,
+                                        selected.version, selected.process_start_time,
+                                    ) == (
+                                        os.getpid(), generation, "127.0.0.1", runtime.port,
+                                        active_version, own_start_time,
+                                    ) and not runtime.draining and not runtime.shutdown_requested:
+                                        runtime.passive = False
+                                        runtime.promote()
+                                        lease = promoted
+                                        idle_since = None
+                            except (OSError, ValueError, TypeError, RecursionError):
+                                pass  # Remain passive and retry without synchronous diagnostics.
+                            finally:
+                                if lease is None:
+                                    runtime.passive = True
+                                    runtime.admissions_open = False
+                                    runtime.picker_sessions.pause()
+                                    _release_daemon_lease(promoted)
+                            if lease is not None:
+                                # Evidence/configuration I/O never holds routing authority.
+                                runtime.activate_restart_recovery()
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()
                 if lease is not None:
                     runtime.picker_sessions.pump()
-                if runtime.republish_enabled:
+                if lease is not None and runtime.republish_enabled:
                     with runtime.loop_mutation():
                         if runtime.republish_enabled:
                             runtime.restart_notifications.pump(admitted=lease is not None and runtime.accepting_requests())
@@ -919,7 +930,7 @@ def run_daemon_foreground(
                 status_monitor_generation = _status_monitor_generation(status_monitor_data)
                 now = time.monotonic()  # immune to clock steps; diffed only against itself
                 if (
-                    runtime.republish_enabled
+                    lease is not None and runtime.republish_enabled
                     and
                     live_mapping_republish_due(
                         status_monitor_generation, published_monitor_generation,
@@ -937,7 +948,9 @@ def run_daemon_foreground(
                         published_monitor_generation = status_monitor_generation
                 if runtime.should_exit():
                     break
-                if runtime.has_active_demand():
+                if lease is None and runtime._self_retire_generation is not None:
+                    pass  # Selection, not elapsed idle time, owns this wait.
+                elif runtime.has_active_demand():
                     idle_since = None
                 elif idle_since is None:
                     idle_since = time.time()
@@ -959,32 +972,22 @@ def run_daemon_foreground(
                         pass
         return 0
     finally:
-        if lease is not None:
-            _release_daemon_lease(lease)
+        try:
+            if runtime is not None:
+                runtime.shutdown()
+        finally:
+            if lease is not None:
+                _release_daemon_lease(lease)
 
 def ensure_daemon_running(
     root: Path | None = None, *, boot_wait_s: float = BOOT_WAIT_S
 ) -> bool:
-    """Start the resident Manager mux daemon unless one is already live.
-    Returns whether a current daemon is believed running (already live, or
-    freshly spawned within ``boot_wait_s``). Idempotent + cheap: a live
-    daemon is a no-op.
-
-    Does not itself hold any lock around the check-then-spawn sequence --
-    correctness no longer depends on that (see
-    :func:`run_daemon_foreground`'s own docstring): if two callers race
-    here and both spawn a child, both children race for the SAME
-    single-instance lease and only one actually starts a server, so this
-    function stays simple and never risks deadlocking against the very
-    child it just spawned."""
-    resolved_root = Path(root if root is not None else default_root()).absolute()
+    """Reuse or await a resident; concurrent children contend for its work lease."""
+    resolved_root = mux_daemon_process.selected_root(root)
     lock = lock_path(resolved_root)
     if _daemon_is_live(read_lock_data(lock)):
         return True
-    # Propagate the resolved root to the child (Copilot review finding): a
-    # caller-supplied `root` (e.g. a test's scratch directory) must be the one
-    # the child publishes its lock under. Absolute, because the child runs
-    # from that root and a relative one would resolve against its new cwd.
+    # Propagate the absolute rendezvous root, independent of the child's cwd.
     argv = mux_daemon_process.detached_child_argv(resolved_root)
     if not _spawn_detached(argv, cwd=resolved_root):
         return False

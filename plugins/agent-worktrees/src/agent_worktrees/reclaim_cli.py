@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import time
 
 from . import output, reclaim, sessions, tracking, worktree_identity
 from . import config as cfg
@@ -23,6 +24,50 @@ def _core_helper(name: str, local):
 
 
 def _infer_worktree_id_from_cwd(*args, **kwargs): return _core()._infer_worktree_id_from_cwd(*args, **kwargs)
+
+
+def _confirm_clear_publication(worktree_id: str, *, after: float, timeout: float = 35.0) -> dict:
+    """Wait for the existing resident producer; reads never recompute the roster."""
+    from . import worktrees_client
+    from .worktrees_projection_index import ProjectionUnavailable
+
+    request = {
+        "contract_version": 1, "project": cfg.project_name(),
+        "worktree_id": worktree_id, "include_missing": True,
+    }
+    deadline = time.monotonic() + timeout
+    reason = "resident has not published the cleared process state"
+    while True:
+        try:
+            result = worktrees_client.read_current(request, recover=False)
+            rows, head = result.get("worktrees", []), result.get("projection", {})
+            if (
+                not result.get("availability")
+                and len(rows) == 1 and rows[0].get("id") == worktree_id
+                and head.get("quality") == "current"
+                and head.get("observed_at", 0) >= after
+            ):
+                row = rows[0]
+                facts = row.get("fact_provenance") or {}
+                if (
+                    facts.get("session", {}).get("quality") == "current"
+                    and facts.get("mux", {}).get("quality") == "current"
+                    and not any(row.get(name) for name in (
+                        "mux_session", "session_lock_live", "session_bound_live",
+                        "session_bridge_live", "session_bare_orphan", "live_session_ids",
+                        "session_lock_stale", "stale_lock_pids",
+                    ))
+                ):
+                    return {"confirmed": True, "projection": head}
+        except (OSError, ValueError, ProjectionUnavailable) as error:
+            reason = str(error)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {
+                "confirmed": False,
+                "reason": "process reclaimed; roster confirmation pending: " + reason,
+            }
+        time.sleep(min(0.25, remaining))
 
 
 def add_parsers(sub) -> None:
@@ -139,7 +184,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     do_kill = getattr(args, "yes", False)
     reaped: list[dict] = []
     if do_kill and targets:
-        reaped = reclaim.reap_bound_copilots(targets, table=table)
+        reaped = reclaim.reap_bound_copilots(targets, table=table, exit_timeout=3.0)
 
     # Clear residual inuse.<pid>.lock files (parity with reclaim_one, the local
     # picker path): force-remove the pids we just terminated plus any stale-pid
@@ -152,7 +197,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         cleared = reclaim.clear_lock_residue(
             worktree_id=wt_id,
             worktree_path=wt_path,
-            force_pids={r["pid"] for r in reaped if r.get("killed")},
+            force_pids=set(),
             table=table,
         )
 
@@ -220,6 +265,7 @@ def _perform_remux(
     worktree_path: str | None,
     force_sudo: bool | None,
     apply_windows: bool,
+    session_ids: list[str] | None = None,
 ) -> dict:
     """Run the platform remux primitive and return its structured result."""
     from . import remux as _remux
@@ -251,6 +297,7 @@ def _perform_remux(
         worktree_id=worktree_id,
         worktree_path=worktree_path,
         table=table,
+        **({"session_ids": session_ids} if session_ids is not None else {}),
     )
     seen_pids = {item["pid"] for item in found}
     for bound in reclaim.resolve_bridge_bound(worktree_id, table=table):
@@ -266,6 +313,17 @@ def _perform_remux(
         if me not in ({item["pid"]} | reclaim.descendants_of(item["pid"], table))
     ]
     if not targets:
+        if apply_windows and session_ids is not None and not found:
+            settled = _core_helper("reclaim_one", reclaim_one)(
+                worktree_id, bare_only=True, target_pids=set(), session_ids=session_ids,
+            )
+            if settled.get("state_clear") is True:
+                return {
+                    "ok": True, "worktree_id": worktree_id, "session_id": None,
+                    "action": "reclaimed", "already_clear": True,
+                    "requires_resume": True, "reclaim": settled,
+                }
+            return _fail(settled.get("reason", "worktree ownership remains unconfirmed"))
         return _fail("no Stop-unreachable bound Copilot found for the target")
     if len(targets) > 1:
         pids = ", ".join(str(item["pid"]) for item in targets)
@@ -292,19 +350,25 @@ def _perform_remux(
     if not apply_windows:
         return preview
 
+    if not target.get("start_time"):
+        return _fail("the unreachable owner's native birth identity is unavailable")
     reclaimed = _core_helper("reclaim_one", reclaim_one)(
         worktree_id,
         bare_only=True,
         target_pids={int(target["pid"])},
+        target_start_times={int(target["pid"]): str(target["start_time"])},
+        **({"session_ids": session_ids} if session_ids is not None else {}),
     )
+    ready = bool(reclaimed.get("ok")) and reclaimed.get("state_clear") is True
     return {
         **preview,
-        "ok": bool(reclaimed.get("ok")) and bool(reclaimed.get("targets")),
+        "ok": ready,
+        "requires_resume": ready,
         "reason": (
             "unreachable owner reclaimed; resume the persisted session through "
             "the normal mux launcher"
-            if reclaimed.get("ok") and reclaimed.get("targets")
-            else "the unreachable owner could not be reclaimed"
+            if ready
+            else reclaimed.get("reason", "the unreachable owner could not be reclaimed")
         ),
         "action": "reclaimed",
         "reclaim": reclaimed,
@@ -344,12 +408,20 @@ def cmd_remux(args: argparse.Namespace) -> int:
             )
         wt_path = _wt_path(wt_id)
 
+    registry = None
+    if platform.system() == "Windows" and wt_id:
+        record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if record_path.exists():
+            record = tracking.load_record(record_path)
+            registry = [entry.session_id for entry in (record.sessions or ())]
+        wt_path = None
     result = _core_helper("_perform_remux", _perform_remux)(
         worktree_id=wt_id,
         session_id=session_id,
         worktree_path=wt_path,
         force_sudo=getattr(args, "force_sudo", None),
         apply_windows=getattr(args, "yes", False),
+        **({"session_ids": registry} if registry is not None else {}),
     )
 
     if as_json:
@@ -389,6 +461,8 @@ def reclaim_one(
     *,
     bare_only: bool = True,
     target_pids: set[int] | None = None,
+    target_start_times: dict[int, str] | None = None,
+    session_ids: list[str] | None = None,
 ) -> dict:
     """Reap the bound Copilot process(es) for one worktree (Picker "Reclaim").
 
@@ -408,8 +482,23 @@ def reclaim_one(
     Windows remux flow uses it so the apply step cannot re-resolve and kill a
     different owner that appeared after the guard pass.
     """
+    record_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    discover_orphans = session_ids is None
+    if session_ids is None and record_path.exists():
+        record = tracking.load_record(record_path)
+        session_ids = [entry.session_id for entry in (record.sessions or ())] or None
+
+    def bound(*, table=None):
+        found = reclaim.resolve_bound_copilots(
+            worktree_id=worktree_id, table=table,
+            **({"session_ids": session_ids} if session_ids is not None else {}),
+        )
+        if discover_orphans and session_ids is not None:
+            found += reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
+        return list({item["pid"]: item for item in found}.values())
+
     table = reclaim.build_process_table()
-    found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
+    found = bound(table=table)
     # #4272/#1416: a bare-resumed / bridge-owned session (cwd=home) is invisible
     # to the cwd-keyed resolve above, so an ACTIVE-via-bridge worktree would
     # offer Reclaim (see engine._reclaimable) but reap NOTHING -- stranding the
@@ -420,36 +509,59 @@ def reclaim_one(
         if b["pid"] not in seen_pids:
             found.append(b)
             seen_pids.add(b["pid"])
+    protected = set()
     if bare_only:
         # Reachability-aware: keep a mux-homed target when its wt-<id> mux is
         # unreachable by Stop (a detached psmux server -- dotfiles #1447), so
         # Reclaim isn't a no-op on it; preserve only a live, Stop-able mux.
-        found = reclaim.filter_stop_unreachable(found, table=table)
+        unreachable = reclaim.filter_stop_unreachable(found, table=table)
+        unreachable_pids = {item["pid"] for item in unreachable}
+        protected = {
+            (item["pid"], str(item["start_time"]))
+            for item in found
+            if item["pid"] not in unreachable_pids and item.get("start_time")
+        }
+        found = unreachable
     if target_pids is not None:
         found = [item for item in found if item["pid"] in target_pids]
+    if target_start_times is not None:
+        found = [
+            item for item in found
+            if item.get("start_time") is not None
+            and str(item["start_time"]) == target_start_times.get(item["pid"])
+        ]
     me = os.getpid()
     targets = [
         f for f in found if me not in ({f["pid"]} | reclaim.descendants_of(f["pid"], table))
     ]
-    reaped = reclaim.reap_bound_copilots(targets, table=table) if targets else []
-    ok = all(r["killed"] for r in reaped) if reaped else True
-    # Clear residual inuse.<pid>.lock files so the worktree ends with ZERO
-    # residue -- "to the point where the pid lock file is removed". Force-remove
-    # the pids we just terminated (the OS may not have reaped them yet, so a
-    # liveness re-check could still read them alive) plus any pre-existing
-    # stale-pid residue; a live muxed sibling's lock is preserved.
+    reaped = reclaim.reap_bound_copilots(
+        targets, table=table, exit_timeout=3.0,
+    ) if targets else []
+    selected_complete = target_start_times is None or set(target_start_times) <= {
+        item["pid"] for item in targets
+    }
+    ok = selected_complete and all(
+        r["killed"] and not r.get("children_unconfirmed") and not r.get("children_identity_mismatch")
+        for r in reaped
+    )
+    # Native exit is confirmed before cleanup. Never force by numeric PID:
+    # a new owner may already have reused it.
     killed_pids = {r["pid"] for r in reaped if r.get("killed")}
+    cleanup_sessions = None if session_ids is None else sorted(
+        set(session_ids) | {item["session_id"] for item in targets if item.get("session_id")}
+    )
     cleared = reclaim.clear_lock_residue(
         worktree_id=worktree_id,
-        force_pids=killed_pids,
+        force_pids=set(),
         table=table,
+        **({"session_ids": cleanup_sessions} if cleanup_sessions is not None else {}),
     )
     # A bridge Copilot reaped out from under agent-bridge can't run the bridge's
     # on-exit lock cleanup, so unlink the now-dead bridge.lock too -- otherwise
     # the file-first bridge scan keeps reading the worktree ACTIVE.
     bridge_cleared = reclaim.clear_bridge_locks(
         worktree_id,
-        force_pids=killed_pids,
+        force_pids=set(),
         table=table,
     )
     # A reaped mux-homed target in a DETACHED (Stop-unreachable) psmux server
@@ -462,43 +574,54 @@ def reclaim_one(
     mux_torn_down = (
         reclaim.teardown_detached_mux(killed_targets, table=table) if killed_targets else []
     )
-    # Update the worktree's cached liveness authoritatively so the automatic
-    # post-action refresh renders the TRUE post-reclaim state instead of
-    # re-reading the pre-reclaim cache (the "Reclaim ran but the row stayed
-    # ACTIVE" bug). Reclaim's own reload path only ever *reads* the bound_live/
-    # mux_live hints, so unless the executor writes them here they stay stale
-    # until the off-hot-path reconcile or the freshness TTL. Race-safe: a pid we
-    # just terminated may not be OS-reaped yet, so re-resolve the remaining
-    # binding EXCLUDING ``killed_pids`` (mirrors ``clear_lock_residue``). A
-    # preserved live, Stop-able mux-homed sibling still counts as bound, so
-    # ``bound_live`` only clears when nothing bound remains. Reuses the already-
-    # built process ``table`` (resolve does LIVE pid checks for liveness
-    # regardless of table age, and the ``killed_pids`` exclusion is what guards
-    # the just-killed race -- a fresh table would add cost without changing the
-    # outcome). Best-effort.
+    remaining_bound = []
+    mux_live = None
+    observation_error = None
     try:
-        remaining_bound = [
-            b
-            for b in reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
-            if b["pid"] not in killed_pids
-        ]
-        remaining_bound += [
-            b
-            for b in reclaim.resolve_bridge_bound(worktree_id, table=table)
-            if b["pid"] not in killed_pids
-        ]
+        if session_ids is not None:
+            record = tracking.load_record(record_path)
+            session_ids = [entry.session_id for entry in (record.sessions or ())] or (
+                None if discover_orphans else []
+            )
+        remaining_bound = bound()
+        remaining_bound += reclaim.resolve_bridge_bound(worktree_id)
+        mux_live = sessions.has_mux_session(worktree_id)
         tracking.stamp_bound_live(worktree_id, bool(remaining_bound))
         tracking.stamp_mux_live(
             worktree_id,
-            sessions.has_mux_session(worktree_id),
+            mux_live,
             sync=True,
         )
-    except Exception:
-        pass
+    except Exception as error:
+        observation_error = f"post-reclaim observation failed: {error}"
+    unexpected = [
+        item for item in remaining_bound
+        if not (
+            mux_live is True and item.get("homing") == "mux"
+            and (item["pid"], str(item.get("start_time"))) in protected
+        )
+    ]
+    ok = ok and observation_error is None and not unexpected
+    native_clear = ok and not remaining_bound and mux_live is False
+    publication = None
+    if native_clear and record_path.exists():
+        publication = _confirm_clear_publication(worktree_id, after=time.time())
+        ok = publication["confirmed"]
     return {
         "ok": ok, "worktree_id": worktree_id, "targets": len(targets), "reaped": reaped,
         "locks_cleared": cleared, "bridge_locks_cleared": bridge_cleared,
         "mux_servers_torn_down": mux_torn_down,
+        "state_clear": ok and native_clear,
+        "native_state_clear": native_clear,
+        "publication": publication,
+        "remaining_pids": sorted({item["pid"] for item in remaining_bound}),
+        "reason": observation_error or (
+            publication["reason"] if publication and not publication["confirmed"]
+            else
+            "a bound Copilot still owns the worktree" if unexpected
+            else "process retirement unconfirmed" if not ok
+            else "protected mux owner preserved" if remaining_bound else "reclaimed"
+        ),
     }
 
 
@@ -529,5 +652,3 @@ def cmd_restart(args: argparse.Namespace) -> int:
     else:
         print(f"{wt}: failed to stop the interactive Copilot.")
     return 0 if payload["ok"] else 1
-
-

@@ -19,8 +19,9 @@ class FakeRunner:
     def start(self, *, interval: float) -> None:
         self.started_with = interval
 
-    def stop(self, **_kwargs) -> None:
+    def stop(self, **_kwargs) -> bool:
         self.stopped = True
+        return True
 
 
 def test_none_when_federation_disabled(monkeypatch):

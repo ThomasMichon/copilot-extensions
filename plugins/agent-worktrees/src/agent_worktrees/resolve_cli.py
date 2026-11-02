@@ -9,10 +9,11 @@ import platform
 import sys
 import threading
 
-from machine_transport import split_machine_environment, resolve_machine_selection
+from machine_transport import resolve_machine_selection
 
 from . import activity, agent_policy, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
-from . import codename_tracking, config as cfg, machine_identity
+from . import codename_tracking, config as cfg
+from . import machine_identity as machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
@@ -21,53 +22,13 @@ from .worktree_creation import LaunchSeedStagingFailure
 from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 from .resolve_machine_cli import remote_selector_args as _remote_selector_args
+from .resolve_target import target_is_local as _target_is_local
 
 
 def _core():
     from . import __main__ as core
 
     return core
-
-
-def _target_is_local(
-    config: cfg.Config, name: str | None, environment: str | None = None,
-) -> bool:
-    if not name:
-        return False
-    if not environment and config.machine and name.casefold() == config.machine.casefold():
-        return machine_identity.is_local_machine(name, config)
-    from .execution_spaces import registry_for_config
-
-    entries = registry_for_config(config)
-    selected = resolve_machine_selection(entries, name, environment, allow_physical_context=True)
-    target = selected.target
-    if entries:
-        entry = selected.entry
-        if entry is not None:
-            if target.environment and target.environment != cfg.detect_platform():
-                return False
-            if machine_identity.is_local_machine(entry.key, config):
-                return True
-            if entry.execution_platform:
-                return False
-            target = split_machine_environment(entry.key, target.environment)
-    if target.environment and target.environment != cfg.detect_platform():
-        return False
-    if selected.entry is None:
-        from machine_transport import is_observed_local_name
-
-        if is_observed_local_name(
-            name, config_machine=config.machine, entries=entries,
-            environment=cfg.detect_platform(),
-        ):
-            return machine_identity.is_local_machine(config.machine, config)
-    if target.environment and config.machine:
-        current = resolve_machine_selection(entries, config.machine, cfg.detect_platform()).target
-        if target.machine.casefold() == current.machine.casefold():
-            return target.environment == current.environment
-    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
-        return True
-    return False
 
 
 def _apply_assignment_env(*args, **kwargs):
@@ -552,14 +513,15 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
                 target_is_local = _target_is_local(
                     config, state.requested_machine, getattr(args, "environment", None),
                 )
+                requested_environment = (
+                    cfg.detect_platform() if target_is_local else resolve_machine_selection(
+                        registry_for_config(config), state.requested_machine,
+                        getattr(args, "environment", None), allow_physical_context=True,
+                    ).target.environment
+                )
             except (ValueError, ExecutionSpaceError) as exc:
                 output.err(str(exc))
                 return 1
-            from .execution_spaces import registry_for_config
-            requested_environment = resolve_machine_selection(
-                registry_for_config(config), state.requested_machine,
-                getattr(args, "environment", None), allow_physical_context=True,
-            ).target.environment
             remote_args: list[str] = []
             if not target_is_local or (
                 requested_environment and requested_environment != cfg.detect_platform()
@@ -685,14 +647,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         same_machine = _target_is_local(
             config, state.requested_machine, getattr(state.args, "environment", None),
         )
+        requested_environment = (
+            cfg.detect_platform() if same_machine else resolve_machine_selection(
+                registry_for_config(config), state.requested_machine,
+                getattr(state.args, "environment", None), allow_physical_context=True,
+            ).target.environment if state.requested_machine else ""
+        )
     except (ValueError, ExecutionSpaceError) as exc:
         return output._json_error(str(exc))
-    requested_environment = (
-        resolve_machine_selection(
-            registry_for_config(config), state.requested_machine,
-            getattr(state.args, "environment", None), allow_physical_context=True,
-        ).target.environment if state.requested_machine else ""
-    )
     same_environment = True
     if requested_environment:
         same_environment = requested_environment == cfg.detect_platform()
@@ -733,10 +695,13 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
             return output._json_error(launch_preflight.error, exit_code=3)
-        if not getattr(state.args, "defer_projections", False):
-            local_cache_refresh.prepare_for_launch(
-                work_dir, dry_run=getattr(state.args, "dry_run", False)
+        try:
+            local_cache_refresh.prepare_admitted_launch(
+                work_dir, dry_run=getattr(state.args, "dry_run", False),
+                defer_projections=getattr(state.args, "defer_projections", False), config=config,
             )
+        except local_cache_refresh.ToolRosterAdmissionError as exc:
+            return output._json_error(str(exc), exit_code=3)
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -771,12 +736,13 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 recovery=getattr(state.args, "recovery", False),
                 pending_seed=getattr(state.args, "seed", None),
                 defer_projections=getattr(state.args, "defer_projections", False),
+                identity_mode="tuple-v1",
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
         except LaunchSeedStagingFailure as exc:
             return exc.emit(json_out=True)
-        except RuntimeError as exc:
+        except (ValueError, RuntimeError) as exc:
             return output._json_error(str(exc))
         output._json_output(result)
         return 0
@@ -911,15 +877,23 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             worktree_trust.prepare_for_launch(
                 record, config, defer_projections=getattr(state.args, "defer_projections", False),
             )
-        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+        except (permissions.FolderTrustError, ExecutionSpaceError, local_cache_refresh.ToolRosterAdmissionError) as exc:
             return output._json_error(str(exc), exit_code=3)
     if seed_pending:
-        launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
+        launch_cmd = deferred_command(
+            launch_cmd, yaml_path, seed_id=staged_seed.seed_id,
+            prepare_native=not getattr(state.args, "dry_run", False),
+            environment=env,
+            mux=False,
+        )
     else:
         launch_cmd = deferred_command(
             launch_cmd, yaml_path, admission_only=True,
+            prepare_native=not getattr(state.args, "dry_run", False),
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
+            environment=env,
+            mux=False,
         )
 
     launch = {
@@ -928,6 +902,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         "cmd": launch_cmd,
         "env": env,
         "worktree_id": record.worktree_id,
+        "record_path": str(yaml_path),
+        "pane_shell_version": 1,
         "post_exit": True,
         "no_mux": True,
         # The delegated hop carries the exact staged identity, never text

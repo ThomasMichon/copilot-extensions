@@ -1,0 +1,13 @@
+{
+  "comment": "Support explicit peer-approved SSH enrollment with separately confirmed recovery and version-skew-safe clients.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

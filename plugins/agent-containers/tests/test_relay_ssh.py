@@ -36,6 +36,7 @@ def _patch_cmd_context(monkeypatch, *, profile: str = "trusted"):
     import agent_containers.lifecycle as lifecycle
 
     config, fleet = _config()
+    monkeypatch.setattr(cli.hosting_policy, "require_container_hosting", lambda *a, **k: None)
     fleet.security_profile = profile
     if profile == "restricted":
         fleet.acp_command = "minimal-agent --stdio"
@@ -273,7 +274,10 @@ def test_restricted_launch_never_enters_credential_or_relay_paths(monkeypatch):
         "agent",
         "minimal-agent --stdio",
     ) == 0
-    assert seen["spawn"] == ["repo-1", "agent", "minimal-agent --stdio"]
+    assert seen["spawn"] == [
+        "repo-1", "agent",
+        cli.hosting_policy.guarded_launch("minimal-agent --stdio", fleet.workspace_folder),
+    ]
     assert seen["fleet"] is fleet
 
 

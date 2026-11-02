@@ -126,6 +126,7 @@ function Ensure-InstallDir($Path) {{ [void][IO.Directory]::CreateDirectory($Path
 function Write-ServiceHeader {{ }}
 function Write-ServiceOk {{ }}
 function Deploy-GlobalBinstub {{ [IO.File]::WriteAllText((Join-Path $LocalBin 'agent-worktrees.cmd'), 'fixture') }}
+{_function('Write-Step', 'ps1')}
 {_function('Invoke-Stamp', 'ps1')}
 Initialize-SourceRuntime
 """
@@ -498,6 +499,7 @@ $ServiceName = 'fixture'
 $InstallDir = {_ps(tmp_path / 'install')}
 $BinDir = {_ps(tmp_path / 'bin')}
 $LocalBin = {_ps(tmp_path / 'local-bin')}
+{_function('Write-Step', 'ps1')}
 function Write-ServiceHeader {{ }}
 function Ensure-Uv {{ return $true }}
 function Ensure-UvIndex {{ }}

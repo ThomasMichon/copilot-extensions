@@ -42,10 +42,13 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Sequence
+import errno
 import json
 import logging
+import math
 import os
 import re
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -90,27 +93,53 @@ def trace_path(project: str, worktree_id: str) -> Path:
 
 
 @contextmanager
-def _append_lock(lock_path: Path) -> Iterator[None]:
+def _append_lock(lock_path: Path, *, deadline: float | None = None) -> Iterator[None]:
     """Cross-process exclusive lock guarding one trace file's append.
 
     Same POSIX/Windows split as ``installer.py``'s ``_binstub_lock``:
     ``fcntl.flock`` on POSIX, ``msvcrt.locking`` on Windows, both blocking
     (waits for the current holder rather than failing closed) since a
-    handoff-stage append is infrequent and cheap -- there is no contention
-    hazard worth a non-blocking fast path here.
+    handoff-stage append is infrequent and cheap. An optional absolute monotonic
+    deadline bounds contention admission in this caller's thread, not body I/O.
     """
+    if deadline is not None:
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+            raise ValueError("append lock deadline must be finite")
+        if time.monotonic() >= deadline:
+            raise TimeoutError("append lock admission expired")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+b") as stream:
         if os.name == "nt":
             import msvcrt
 
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+            def acquire():
+                stream.seek(0)
+                msvcrt.locking(
+                    stream.fileno(), msvcrt.LK_LOCK if deadline is None else msvcrt.LK_NBLCK, 1,
+                )
         else:
             import fcntl
 
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            def acquire():
+                fcntl.flock(
+                    stream.fileno(), fcntl.LOCK_EX | (fcntl.LOCK_NB if deadline is not None else 0),
+                )
+        while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("append lock admission expired")
+            try:
+                acquire()
+                break
+            except OSError as error:
+                if deadline is None or error.errno not in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("append lock admission expired") from error
+                time.sleep(min(0.01, remaining))
         try:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("append lock admission expired")
             # Windows permits locking past EOF. Initialize only after locking:
             # writing byte zero before acquisition can conflict with a new
             # holder's byte lock and silently lose the first concurrent append.

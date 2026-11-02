@@ -1,0 +1,9 @@
+{
+  "comment": "Record selected startup and retry budgets with successful STARTED resetting cooldown escalation and attempt count before implementation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}

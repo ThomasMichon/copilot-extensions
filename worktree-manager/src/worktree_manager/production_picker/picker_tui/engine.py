@@ -201,6 +201,7 @@ class PickerScreen(
 ):
     can_focus = True
     BINDINGS = [
+        Binding("ctrl+shift+h", "launch_history", "launch history", show=False),
         Binding("ctrl+shift+r", "recover_forms", "retained responses", show=False),
         Binding("ctrl+shift+right", "pivot_next", "next pivot", show=False),
         Binding("ctrl+shift+left", "pivot_prev", "prev pivot", show=False),
@@ -208,6 +209,7 @@ class PickerScreen(
         Binding("ctrl+left", "machine_prev", "prev machine", show=False),
     ]
     BINDING_KEYS = frozenset({
+        "ctrl+shift+h",
         "ctrl+shift+r",
         "ctrl+shift+right", "ctrl+shift+left", "ctrl+right", "ctrl+left",
     })

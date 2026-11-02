@@ -1,0 +1,9 @@
+{
+  "comment": "Integrate finite reviewer workspaces through existing service and native/Fleet clients",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

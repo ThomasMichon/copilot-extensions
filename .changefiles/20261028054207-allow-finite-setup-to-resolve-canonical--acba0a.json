@@ -1,0 +1,9 @@
+{
+  "comment": "Allow finite setup to resolve canonical process birth without a caller-side ABI and record changed-owner preparation as unknown.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

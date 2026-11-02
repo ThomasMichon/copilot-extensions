@@ -12,18 +12,10 @@ the relay ``-R`` bind (dotfiles#561) and the exclusive claim (dotfiles#897). The
 fix is to give those a single durable **Connection Owner** and make the three
 consumers non-owning **tenants**.
 
-This module is **increment 1** of that design (dotfiles#1333): the registry +
-lease / ref-count lifecycle *only*. It records, per (machine, CodeSpace), which
-tenants currently need the durable connection and whether the relay is *pinned*,
-and answers :func:`should_hold` ("keep the connection up?"). It does **not** open
-or own a connection yet -- a later increment attaches the self-healing
-``SupervisedRelayForward`` under this registry. Because nothing consumes it yet,
-this module is purely additive and safe to land without a daemon cutover.
-
-State of record mirrors :mod:`agent_codespaces.lease`: a host-side JSON file
-(``~/.agent-codespaces/connection-owner.json``) guarded by an exclusive lock file
-for race-safety across parallel worktree agents on the same machine, written
-atomically.
+The registry records which tenants need the durable connection and whether its
+relay is pinned. Its host-side JSON file (``~/.agent-codespaces/connection-owner.json``)
+is guarded by an exclusive lock and written atomically. The reconciler below
+owns the channels that realize that intent.
 
 Model
 -----
@@ -42,6 +34,8 @@ may a later increment tear the connection down.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import json
 import logging
@@ -49,6 +43,7 @@ import os
 import platform
 import time
 import uuid
+from pathlib import Path
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
@@ -58,8 +53,11 @@ from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
-from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, wait_for_owner_startup
+from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, spawn_owner_process, wait_for_owner_startup
+from .owner_liveness import OwnerLiveness, _LIVE_STALE_FLOOR as _LIVE_STALE_FLOOR
 from . import owner_session_records
+from . import __version__ as _PROCESS_VERSION
+from .source_build import capture_owner_runtime
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -142,6 +140,12 @@ def _owner_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
         try:
             fd = os.open(str(_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
+        except PermissionError:
+            # Windows can expose an unlinking lock as access-denied until the
+            # last handle closes. Never steal it or hide a persistent I/O error.
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(poll)
         except FileExistsError:
             if time.monotonic() >= deadline:
                 # Stale lock recovery: if older than timeout*3, steal it.
@@ -369,12 +373,13 @@ def get_pending_delivery(codespace: str, tenant: str) -> dict | None:
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,
+    *, generation: str | None = None,
 ) -> OwnerHold | None:
     """Refresh ``tenant``'s heartbeat. Returns the hold, or ``None`` if absent.
 
-    Unlike :func:`hold`, does not create a missing hold or a missing tenant --
-    heartbeating a tenant that was already reclaimed is a no-op (returns the hold
-    if it still exists for other reasons, else ``None``).
+    Unlike :func:`hold`, does not create missing holds or tenants. A reclaimed
+    tenant returns the hold if it still exists for other reasons, else ``None``.
+    A supplied generation atomically fences renewal against replacement.
     """
     now = time.time()
     with _owner_lock():
@@ -382,6 +387,8 @@ def heartbeat(
         existing = holds.get(codespace)
         if existing is None:
             return None
+        if generation is not None and (existing.sessions.get(tenant) or {}).get("generation") != generation:
+            return existing
         if tenant in existing.tenants:
             existing.tenants[tenant] = now
             existing.heartbeat_at = now
@@ -447,47 +454,16 @@ def release(
 
 LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 
-# Treat the Owner as live only if its beacon was refreshed within this many
-# reconcile intervals (with a floor so a very fast interval can't make liveness
-# flap on scheduler jitter).
-_LIVE_STALE_INTERVALS = 3
-_LIVE_STALE_FLOOR = 45.0
 _PROCESS_STARTED_AT = time.time()
-# A future heartbeat (bogus beacon / backward clock jump) is NOT fresh, beyond a
-# sub-second-ish skew, so a tenant fails safe to owning its own relay.
-_LIVE_FUTURE_TOLERANCE = 5.0
-
-
-@dataclass
-class OwnerLiveness:
-    """A snapshot of the running Connection Owner daemon's liveness beacon."""
-
-    pid: int
-    host: str
-    heartbeat_at: float
-    interval: float
-    process_started_at: float = 0.0
-    process_identity: str | None = None  # OS birth identity of ``pid`` (beacon writer)
-    active: tuple[str, ...] = ()  # CodeSpaces with live relay channels (tenants defer)
-    bridge_forwards: tuple[str, ...] = ()  # CodeSpaces with a live host-bridge forward
-
-    def staleness_threshold(self) -> float:
-        return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))
-
-    def is_fresh(self, now: float | None = None) -> bool:
-        now = time.time() if now is None else now
-        age = now - self.heartbeat_at
-        if age < 0:
-            # Future heartbeat (bogus beacon / backward clock jump): fail safe --
-            # only a sub-second skew within tolerance still counts as fresh.
-            return age >= -_LIVE_FUTURE_TOLERANCE
-        return age <= self.staleness_threshold()
+_PROCESS_SELECTION = capture_owner_runtime(RUNTIME_DIR)
 
 
 def _write_liveness(
     interval: float,
     active: Iterable[str] | None = None,
     bridge_forwards: Iterable[str] | None = None,
+    *,
+    state: str = "active",
 ) -> None:
     """Refresh the daemon liveness beacon (best-effort; never raises).
 
@@ -498,14 +474,19 @@ def _write_liveness(
         ensure_runtime_dir()
         payload = {
             "pid": os.getpid(),
+            "version": _PROCESS_VERSION,
             "host": _this_host(),
             "process_started_at": _PROCESS_STARTED_AT,
             "process_identity": owner_process_identity(os.getpid()),
             "heartbeat_at": time.time(),
             "interval": float(interval),
-            "active": sorted(active or ()),
-            "bridge_forwards": sorted(bridge_forwards or ()),
+            "active": sorted(active or ()) if state == "active" else [],
+            "bridge_forwards": sorted(bridge_forwards or ()) if state == "active" else [],
             "heals": ["bridge-serving", "single-owner"],  # what this Owner repairs itself
+            "owner_control_version": 1,
+            "runtime_identity": _PROCESS_SELECTION.identity if _PROCESS_SELECTION else "",
+            "state": state,
+            "work_lease_version": 1,
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -517,8 +498,9 @@ def _write_liveness(
 def _clear_liveness() -> None:
     """Remove this daemon's own liveness beacon (never another Owner's; never raises)."""
     try:
-        if (current := read_liveness()) is None or current.pid == os.getpid():
-            LIVE_FILE.unlink(missing_ok=True)
+        with _owner_lock():
+            if (current := read_liveness()) is not None and current.pid == os.getpid():
+                LIVE_FILE.unlink(missing_ok=True)
     except Exception as exc:
         log.debug("Connection Owner liveness beacon clear failed: %s", exc)
 
@@ -549,6 +531,20 @@ def read_liveness() -> OwnerLiveness | None:
             process_identity=beacon_identity(raw),
             active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
             bridge_forwards=tuple(str(cs) for cs in bridge_raw if isinstance(cs, str)),
+            version=raw["version"] if isinstance(raw.get("version"), str) else "",
+            owner_control_version=(
+                raw["owner_control_version"] if type(raw.get("owner_control_version")) is int else 0
+            ),
+            runtime_identity=(
+                raw["runtime_identity"] if isinstance(raw.get("runtime_identity"), str) else ""
+            ),
+            state=(
+                raw.get("state", "active") if raw.get("state", "active") in ("active", "passive")
+                else "unknown"
+            ),
+            work_lease_version=(
+                raw["work_lease_version"] if type(raw.get("work_lease_version")) is int else 0
+            ),
         )
     except (TypeError, ValueError):
         return None
@@ -602,6 +598,30 @@ def is_owner_live(now: float | None = None) -> bool:
     return _live_snapshot(now) is not None
 
 
+def verified_owner_beacon(live: OwnerLiveness | None) -> bool:
+    """Authenticate process readiness, not merely a selected slot's installation."""
+    if (live is None or live.pid <= 0 or live.host != _this_host()
+            or not live.process_identity or live.state not in ("active", "passive")):
+        return False
+    try:
+        from agent_procutil._daemon_instance_store import _plain
+
+        info = _plain(LIVE_FILE)
+        return bool(info.st_nlink == 1 and (os.name == "nt" or not info.st_mode & 0o022)
+                    and live.is_fresh() and owner_process_identity(live.pid) == live.process_identity)
+    except (OSError, ValueError):
+        return False
+
+
+def selected_successor_ready(live: OwnerLiveness | None) -> bool:
+    """Selection inequality permits retirement only after the incoming process is ready."""
+    return bool(
+        _PROCESS_SELECTION and live and live.pid != os.getpid() and verified_owner_beacon(live)
+        and (selected := _PROCESS_SELECTION.selected_identity())
+        and selected != _PROCESS_SELECTION.identity and live.runtime_identity == selected
+    )
+
+
 def owner_active_codespaces(now: float | None = None) -> set[str]:
     """CodeSpaces the live Owner currently has a relay channel for.
 
@@ -609,7 +629,7 @@ def owner_active_codespaces(now: float | None = None) -> set[str]:
     meaningless), so callers fail safe. Reads the beacon once.
     """
     live = _live_snapshot(now)
-    return set(live.active) if live else set()
+    return set(live.active) if live and live.state == "active" else set()
 
 
 def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
@@ -625,17 +645,22 @@ def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
 def claim_owner_singleton(interval: float) -> bool:
     """Atomically become the machine's only Connection Owner daemon.
 
-    Two tenants may call :func:`ensure_owner_running` at nearly the same moment
-    (e.g. two detached launches fanned out in parallel), spawning two daemons
-    that would each open a competing ``-R`` bind. Under the registry lock, a
-    starting daemon refuses when another live Owner's beacon is present, and
-    otherwise publishes its own beacon immediately so a racing sibling sees it.
+    Concurrent starts of the same installed identity share one beacon winner.
+    A selected different identity may publish passive readiness immediately;
+    its separate native work lease, not beacon metadata, admits channel work.
+    Unattributed legacy/source callers retain the original discovery singleton.
     """
     with _owner_lock():
+        if _PROCESS_SELECTION and _PROCESS_SELECTION.superseded():
+            return False
         live = _live_snapshot()
         if live is not None and live.pid != os.getpid():
-            return False
-        _write_liveness(interval)
+            if not _PROCESS_SELECTION or live.runtime_identity == _PROCESS_SELECTION.identity:
+                return False
+        from .owner_identity import retain_legacy_exclusion
+
+        retain_legacy_exclusion(read_liveness())
+        _write_liveness(interval, state="passive")
         return True
 
 
@@ -662,8 +687,6 @@ def should_defer_to_owner(
     co = getattr(config, "connection_owner", None)
     if not (co and getattr(co, "enabled", False)):
         return False
-    if is_owner_live():
-        return True
     return ensure_owner_running(config)
 
 
@@ -685,17 +708,7 @@ async def await_owner_relay(
         await asyncio.sleep(poll)
 
 
-# ---------------------------------------------------------------------------
-# Connection Owner reconciler (increment 2)
-# ---------------------------------------------------------------------------
-#
-# The registry above records *intent* (which CodeSpaces should be held). The
-# reconciler below turns that intent into *live* credential-relay channels: it
-# keeps exactly one relay channel per held CodeSpace and tears down channels for
-# CodeSpaces no longer held. The relay transport is supplied by an injected
-# ``factory`` so this stays additive + unit-testable; a later increment wires the
-# real ``ssh_manager.SupervisedRelayForward`` and a daemon loop that periodically
-# (and on hold/release) calls :meth:`ConnectionOwner.reconcile`.
+# The reconciler realizes registry intent using injected, unstarted relay channels.
 
 
 class RelayChannel(Protocol):
@@ -743,6 +756,7 @@ class ConnectionOwner:
         self._ttl = ttl
         self._channels: dict[str, RelayChannel] = {}
         self._sessions = sessions
+        self._shutdown_task: asyncio.Task[None] | None = None
 
     def idle_limit(self, idle: float) -> float:
         """How long it stays up with no hold: longer while a transcript push is owed."""
@@ -770,27 +784,30 @@ class ConnectionOwner:
             return False
         channel = self._channels.get(codespace)
         if channel is None:
-            channel = await asyncio.to_thread(self._factory, codespace)  # runs gh: off the loop
-            self._channels[codespace] = channel
+            from .owner_beacon import build_owner_channel
+
+            channel = await build_owner_channel(
+                self._factory, codespace, retain=lambda ch: self._channels.__setitem__(codespace, ch),
+            )
         if not channel.is_alive:
             try:
                 await channel.start()
-            except Exception:
-                # start() may have spawned the ssh process before failing; stop it
-                # best-effort so we don't leak a relay we've stopped tracking.
-                try:
-                    await channel.stop()
-                except Exception:
-                    log.debug("relay stop after failed start also failed for %s", codespace)
+            except BaseException:
+                from .owner_beacon import stop_owner_channel
+
+                await stop_owner_channel(channel)
                 self._channels.pop(codespace, None)
                 raise
         return True
 
     async def drop(self, codespace: str) -> None:
         """Stop and forget the relay channel for ``codespace`` (idempotent)."""
-        channel = self._channels.pop(codespace, None)
+        from .owner_beacon import stop_owner_channel
+
+        channel = self._channels.get(codespace)
         if channel is not None:
-            await channel.stop()
+            await stop_owner_channel(channel)
+            self._channels.pop(codespace, None)
 
     async def reconcile(self) -> None:
         """Bring live channels in line with the registry: start held, stop unheld.
@@ -816,28 +833,37 @@ class ConnectionOwner:
                     "Connection Owner: failed to ensure relay for %s: %s",
                     codespace, exc,
                 )
-                self._channels.pop(codespace, None)
         if self._sessions is not None:
             await self._sessions.reconcile(holds)
 
     async def shutdown(self) -> None:
         """Stop all relay and daemon channels (daemon shutdown). Registry untouched."""
+        from .owner_beacon import settle_owner_task
+
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(self._shutdown())
+        cancelled = await settle_owner_task(self._shutdown_task)
+        self._shutdown_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _shutdown(self) -> None:
+        errors: list[Exception] = []
         for codespace in list(self._channels):
-            await self.drop(codespace)
+            try:
+                await self.drop(codespace)
+            except Exception as exc:
+                errors.append(exc)
         if self._sessions is not None:
-            await self._sessions.shutdown()
+            try:
+                await self._sessions.shutdown()
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
 
-# ---------------------------------------------------------------------------
-# Real transport factory + daemon runner (increment 3)
-# ---------------------------------------------------------------------------
-#
-# Increment 2 left the relay transport injected. Here we supply the real factory
-# (backed by ssh_manager.SupervisedRelayForward) and the reconcile loop a
-# persistent daemon runs. Both are additive + opt-in: nothing starts the daemon
-# by default. Wiring a CLI entrypoint and actually running it on a machine
-# (making the ssh/dispatch paths defer to the Owner) is the deploy-gated
-# increment that follows (dotfiles#1345).
+# Real transport factory + admitted daemon runner.
 
 
 def make_supervised_relay_factory(
@@ -892,6 +918,10 @@ def _bridge_forwards_of(owner: Any) -> dict[str, int]:
     return method() if callable(method) else {}
 
 
+@daemon_entrypoint(
+    "agent-codespaces-owner", source=__file__, purpose="production",
+    runtime_root=lambda owner, **kwargs: Path(os.path.abspath(RUNTIME_DIR)),
+)
 async def run_owner_daemon(
     owner: ConnectionOwner,
     *,
@@ -915,46 +945,18 @@ async def run_owner_daemon(
     indefinitely. A tenant that needs it again later starts it back up
     on-demand (:func:`ensure_owner_running`). ``None`` disables idle shutdown.
 
-    Refuses to start (returns immediately, touching nothing) when another
-    live Owner already holds the machine -- see :func:`claim_owner_singleton`.
+    A selected incoming build starts passively alongside an incumbent, then
+    acquires the shared work lease before admitting any channel mutations.
+    Selection changes end new work admission; verified incoming readiness
+    then permits incumbent cleanup and self-retirement. Its lease stays held
+    through native cleanup. Same-build contenders do not duplicate it.
     """
-    if not claim_owner_singleton(interval):
-        log.info("Connection Owner already live on this machine; not starting a second one.")
-        return
-    stop = stop_event if stop_event is not None else asyncio.Event()
-    idle_since: float | None = None
-    from .owner_beacon import BeaconKeeper  # it builds on this module
-    loop = asyncio.get_running_loop()
-    (keeper := BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))).start()
-    try:
-        keeper.beat()
-        while not stop.is_set():
-            try:
-                await owner.reconcile()
-            except Exception as exc:  # a bad cycle must not kill the daemon
-                log.warning("Connection Owner reconcile cycle failed: %s", exc)
-            # Refresh the beacon (live channels, so tenants can defer to them), or
-            # stand down if another Owner took the machine over (BeaconKeeper).
-            if keeper.yielded or not keeper.beat():
-                break
-            if idle_shutdown_after is not None:
-                if list_holds():
-                    idle_since = None
-                else:
-                    if idle_since is None:
-                        idle_since = time.monotonic()
-                    elif time.monotonic() - idle_since >= owner.idle_limit(idle_shutdown_after):
-                        log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
-                                 " a tenant starts it back up on demand.")
-                        break
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=interval)
-            except (TimeoutError, asyncio.TimeoutError):
-                pass
-    finally:
-        keeper.stop()
-        _clear_liveness()
-        await owner.shutdown()
+    from .owner_beacon import run_owner_loop
+
+    await run_owner_loop(
+        owner, interval=interval, stop_event=stop_event,
+        idle_shutdown_after=idle_shutdown_after,
+    )
 
 
 def ensure_owner_running(
@@ -962,7 +964,8 @@ def ensure_owner_running(
 ) -> bool:
     """Best-effort on-demand start of the Connection Owner daemon.
 
-    Returns ``True`` once the Owner is live -- already running, or freshly
+    Returns ``True`` once this installed identity is live (possibly passive) --
+    already running, or freshly
     spawned (detached, surviving this caller's own exit) and observed to become
     live within ``spawn_timeout`` (30 seconds by default, including cold imports
     and configuration loading). Returns ``False`` on spawn failure, child exit
@@ -971,27 +974,22 @@ def ensure_owner_running(
     on-demand half of "spins up when needed, exits when idle" -- the daemon is
     never assumed to already be running as a permanent background service.
     """
-    if is_owner_live():
+    def selected_is_live() -> bool:
+        if _PROCESS_SELECTION is None:
+            return is_owner_live()
+        live = _live_snapshot()
+        return bool(live and live.runtime_identity == _PROCESS_SELECTION.identity)
+
+    if selected_is_live():
         return True
     try:
-        import sys
-
-        from agent_procutil import spawn_daemon
-
-        # Relay/SSH children inherit its hidden console; stdio is appended to a
-        # log beside its state so a startup crash leaves a traceback.
-        stdio_log = OWNER_FILE.parent.absolute() / "logs" / "owner-stdio.log"
-        child = spawn_daemon(
-            [sys.executable, "-m", "agent_codespaces", "owner"],
-            cwd=os.path.expanduser("~"),  # never the caller's cwd
-            log_path=stdio_log,
-            console_children=True,
-            display="agent_codespaces owner",
+        child, stdio_log = spawn_owner_process(
+            RUNTIME_DIR, source=__file__, installed=_PROCESS_SELECTION is not None,
         )
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
     return wait_for_owner_startup(
-        child, is_owner_live, timeout=spawn_timeout, poll=poll,
+        child, selected_is_live, timeout=spawn_timeout, poll=poll,
         log_path=stdio_log,
     )

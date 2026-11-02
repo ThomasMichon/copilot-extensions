@@ -151,7 +151,11 @@ def test_actual_acp_launch_uses_profile_without_host_auth(monkeypatch, stdio):
         "agent", fleet.acp_command, container_id="instance-id",
     ) == 0
     assert seen == [resolver.build_restricted_inference_spawn_command(
-        "instance-id", "agent", fleet.acp_command, PROFILE,
+        "instance-id", "agent",
+        cli.hosting_policy.guarded_launch(
+            fleet.acp_command, fleet.workspace_folder or config.workspace_folder,
+        ),
+        PROFILE,
     )]
 
 

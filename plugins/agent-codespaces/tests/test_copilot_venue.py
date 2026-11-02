@@ -330,9 +330,11 @@ def test_disabled_plugin_cli_is_unambiguous(monkeypatch, verb, dest):
     assert cli.main([
         verb, "synthetic", "--stage-plugin", "literal=false",
         "--stage-plugin-disabled", "path with spaces",
+        "--stage-plugin-spec", '{"source":"retired@local","enable":false,"allow_missing":true}',
     ]) == 0
     assert getattr(observed[0], dest) == [
         "literal=false", {"source": "path with spaces", "enable": False},
+        {"source": "retired@local", "enable": False, "allow_missing": True},
     ]
 
 

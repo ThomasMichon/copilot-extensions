@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile original owned-worktree allocations in the elected resident with restart discovery and drain custody",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

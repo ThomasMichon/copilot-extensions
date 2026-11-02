@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -411,6 +412,50 @@ class TestResolveBoundCopilotsReadCache:
 
 # ── reap_bound_copilots (termination boundary mocked) ──────────────────────
 class TestReapBoundCopilots:
+    @pytest.mark.parametrize("confirmed", [True, False])
+    def test_native_exit_confirmation_not_termination_request_controls_reclaim(
+        self, monkeypatch, confirmed,
+    ):
+        calls = []
+        monkeypatch.setattr(procs, "terminate_pid_if_identity", lambda pid, birth, **kw: (
+            calls.append((pid, birth, kw)) or {
+                "killed": True, "identity_verified": True,
+                "exit_confirmed": confirmed, "method": "test",
+            }
+        ))
+        result = reclaim.reap_bound_copilots(
+            [{"pid": 77777, "start_time": "original", "session_id": "s"}],
+            table={}, exit_timeout=3,
+        )
+        assert calls == [(77777, "original", {"exit_timeout": 3})]
+        assert result[0]["killed"] is confirmed
+        assert result[0]["exit_confirmed"] is confirmed
+
+    @pytest.mark.skipif(os.name != "nt", reason="Native Windows retained-handle exit")
+    def test_reclaim_waits_for_actual_owned_process_exit(self):
+        import subprocess
+        import sys
+        from agent_procutil import no_window_kwargs
+
+        process = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
+        )
+        try:
+            birth = reclaim.locks.process_start_time(process.pid)
+            assert birth is not None
+            result = reclaim.reap_bound_copilots(
+                [{"pid": process.pid, "start_time": birth, "session_id": "owned-fixture"}],
+                table={}, exit_timeout=3,
+            )
+            assert result[0]["killed"] and result[0]["exit_confirmed"]
+            assert process.poll() is not None
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+
     def test_kills_target_and_copilot_children(self, monkeypatch):
         table = {
             100: {
@@ -503,6 +548,150 @@ class TestReapBoundCopilots:
         assert attempts[0] == (101, "old-child")
         assert out[0]["children_killed"] == 0
         assert out[0]["killed"] is True
+
+
+@pytest.mark.parametrize("outcome", [
+    "clear", "timeout", "new-owner", "probe-error", "reused-pid", "protected-owner", "lost-lock",
+    "unregistered-orphan",
+])
+def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tmp_path, outcome):
+    from agent_worktrees import reclaim_cli
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(reclaim_cli.cfg, "tracking_dir", lambda: tmp_path)
+    (tmp_path / "wtA.yaml").write_text("fixture")
+    monkeypatch.setattr(reclaim_cli.tracking, "load_record", lambda *a: SimpleNamespace(
+        sessions=[SimpleNamespace(session_id="registered")] if outcome == "unregistered-orphan" else [],
+    ))
+    monkeypatch.setattr(reclaim_cli, "_confirm_clear_publication", lambda *a, **k: {"confirmed": True})
+    original = {"session_id": "original", "pid": 77777, "start_time": "100", "homing": "bare"}
+    if outcome == "reused-pid":
+        original["start_time"] = "200"
+    replacement = {"session_id": "replacement", "pid": 77778, "start_time": "200", "homing": "bare"}
+    protected = {"session_id": "protected", "pid": 77779, "start_time": "300", "homing": "mux"}
+    live = [original, protected] if outcome == "protected-owner" else [original]
+    if outcome == "lost-lock":
+        live = []
+    monkeypatch.setattr(reclaim, "build_process_table", lambda: {})
+    monkeypatch.setattr(reclaim, "descendants_of", lambda *a: set())
+    monkeypatch.setattr(reclaim, "resolve_bridge_bound", lambda *a, **k: [])
+    monkeypatch.setattr(
+        reclaim, "filter_stop_unreachable",
+        lambda found, **k: [item for item in found if item["homing"] != "mux"],
+    )
+
+    def resolve(**kwargs):
+        if outcome == "unregistered-orphan" and kwargs.get("session_ids") is not None:
+            assert kwargs["session_ids"] == ["registered"]
+            return []
+        assert kwargs.get("session_ids") is None, "empty registry must not skip orphan discovery"
+        if outcome == "probe-error" and not live:
+            raise OSError("fixture observation failed")
+        return list(live)
+
+    def reap(targets, **kwargs):
+        assert targets == [original]
+        assert kwargs["exit_timeout"] == 3.0
+        live[:] = (
+            [original] if outcome == "timeout" else [replacement] if outcome == "new-owner"
+            else [protected] if outcome == "protected-owner" else []
+        )
+        return [{"pid": original["pid"], "killed": outcome != "timeout"}]
+
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", resolve)
+    monkeypatch.setattr(reclaim, "reap_bound_copilots", reap)
+    cleanup_calls = []
+    monkeypatch.setattr(reclaim, "clear_lock_residue", lambda **kw: cleanup_calls.append(kw) or [])
+    monkeypatch.setattr(reclaim, "clear_bridge_locks", lambda *a, **kw: cleanup_calls.append(kw) or [])
+    monkeypatch.setattr(reclaim, "teardown_detached_mux", lambda *a, **k: [])
+    monkeypatch.setattr(reclaim_cli.sessions, "has_mux_session", lambda *a: outcome == "protected-owner")
+    monkeypatch.setattr(reclaim_cli.tracking, "stamp_bound_live", lambda *a, **k: None)
+    monkeypatch.setattr(reclaim_cli.tracking, "stamp_mux_live", lambda *a, **k: None)
+    result = reclaim_cli.reclaim_one("wtA", target_start_times={77777: "100"})
+    assert result["ok"] is (outcome in {"clear", "protected-owner", "unregistered-orphan"})
+    assert result["state_clear"] is (outcome in {"clear", "unregistered-orphan"})
+    assert all(call["force_pids"] == set() for call in cleanup_calls)
+    if outcome == "new-owner":
+        assert result["remaining_pids"] == [replacement["pid"]]
+    elif outcome == "probe-error":
+        assert "observation failed" in result["reason"]
+    elif outcome == "reused-pid":
+        assert result["targets"] == 0
+        assert result["remaining_pids"] == [original["pid"]]
+    elif outcome == "protected-owner":
+        assert result["remaining_pids"] == [protected["pid"]]
+        assert result["reason"] == "protected mux owner preserved"
+    elif outcome == "lost-lock":
+        assert result["targets"] == 0
+        assert result["reason"] == "process retirement unconfirmed"
+    elif outcome == "unregistered-orphan":
+        assert cleanup_calls[0]["session_ids"] == ["original", "registered"]
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_registered_residue_cleanup_uses_binding_not_foreign_cwd(monkeypatch, tmp_path, live):
+    sid = "a18ec4d3-7288-4567-8444-123456789012"
+    entry = tmp_path / sid
+    entry.mkdir()
+    lock = entry / "inuse.77777.lock"
+    lock.write_text("fixture")
+    monkeypatch.setattr(reclaim.sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(reclaim, "_session_cwd", lambda *a: r"C:\worktrees\other")
+    monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd", lambda *a: "other")
+    monkeypatch.setattr(reclaim.sessions, "_is_process_alive", lambda *a: live)
+    monkeypatch.setattr(reclaim.sessions, "_is_copilot_process", lambda *a: True)
+    result = reclaim.clear_lock_residue(worktree_id="wtA", session_ids=[sid])
+    assert lock.exists() is live
+    assert len(result) == (0 if live else 1)
+
+
+def test_reclaim_completion_waits_for_current_clear_publication(monkeypatch):
+    from agent_worktrees import reclaim_cli, worktrees_client
+
+    monkeypatch.setattr(reclaim_cli.cfg, "project_name", lambda: "fixture")
+    clock = [0.0]
+    monkeypatch.setattr(reclaim_cli.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(reclaim_cli.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    responses = iter([
+        (99, False, False, None), (101, True, False, None),
+        (101, False, False, {"status": "stale"}), (102, False, True, None),
+        (103, False, False, None),
+    ])
+    calls = []
+
+    def read(request, *, recover):
+        assert not recover
+        assert request["worktree_id"] == "wtA" and request["project"] == "fixture"
+        observed, live, mux, availability = next(responses)
+        calls.append(observed)
+        return {
+            "worktrees": [{
+                "id": "wtA", "session_lock_live": live, "mux_session": mux,
+                "fact_provenance": {
+                    "session": {"quality": "current"}, "mux": {"quality": "current"},
+                },
+            }],
+            "projection": {"quality": "current", "observed_at": observed, "revision": len(calls)},
+            "availability": availability,
+        }
+
+    monkeypatch.setattr(worktrees_client, "read_current", read)
+    result = reclaim_cli._confirm_clear_publication("wtA", after=100, timeout=1)
+    assert result["confirmed"]
+    assert result["projection"]["revision"] == 5
+    assert len(calls) == 5
+
+
+def test_reclaim_publication_timeout_retains_pending_outcome(monkeypatch):
+    from agent_worktrees import reclaim_cli, worktrees_client
+
+    monkeypatch.setattr(reclaim_cli.cfg, "project_name", lambda: "fixture")
+    monkeypatch.setattr(worktrees_client, "read_current", lambda *a, **k: {
+        "worktrees": [], "projection": {"quality": "current", "observed_at": 200},
+    })
+    result = reclaim_cli._confirm_clear_publication("wtA", after=100, timeout=0)
+    assert not result["confirmed"]
+    assert "reclaimed; roster confirmation pending" in result["reason"]
 
 
 # ── cmd_reclaim control flow ───────────────────────────────────────────────

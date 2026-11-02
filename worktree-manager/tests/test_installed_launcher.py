@@ -3,24 +3,104 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
 import venv
+import zipfile
 from contextlib import contextmanager
+from email import message_from_bytes
 from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
 
 from worktree_manager import self_install as si
+from _manager_process_fixture import synthetic_runtime
 
 
-def _run(argv, *, env, cwd):
+def _run(argv, *, env, cwd, timeout=20):
     return subprocess.run(
         argv, env=env, cwd=cwd, capture_output=True, text=True,
-        encoding="utf-8", timeout=20, **no_window_kwargs(),
+        encoding="utf-8", timeout=timeout, **no_window_kwargs(),
     )
+
+
+@pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
+    tmp_path, monkeypatch, shell, nested,
+):
+    source = tmp_path / "wheel-source"
+    si._copy_payload(si.running_payload_dir(), source)
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    result = _run(
+        [sys.executable, "-I", "-c",
+         "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
+         str(wheels)], env=dict(os.environ), cwd=source, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    wheel, = wheels.glob("*.whl")
+    repository = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(repository / "tools"))
+    from promotion_python_artifacts import validate_wheel_sources
+
+    with zipfile.ZipFile(wheel) as bundle:
+        metadata_name, = (name for name in bundle.namelist() if name.endswith(".dist-info/METADATA"))
+        validate_wheel_sources(
+            bundle, {name: hashlib.sha256(bundle.read(name)).hexdigest() for name in bundle.namelist()},
+            source_dir=repository / "worktree-manager",
+            prefix=metadata_name.rsplit("/", 1)[0] + "/",
+            metadata=message_from_bytes(bundle.read(metadata_name)),
+            component="worktree-manager", candidate_root=repository,
+        )
+    root = tmp_path / "Manager root with spaces"
+    slot = synthetic_runtime(root, "1.2.3", nested=nested)
+    prefix = slot / ".venv" if nested else slot
+    python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    uv = shutil.which("uv")
+    assert uv
+    installed = _run(
+        [uv, "pip", "install", "--python", str(python), "--offline", "--no-deps", str(wheel)],
+        env=dict(os.environ), cwd=tmp_path,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    shutil.rmtree(source)
+    if (slot / "payload").exists():
+        shutil.rmtree(slot / "payload")
+    located = _run([
+        str(python), "-I", "-B", "-c",
+        "import json;from worktree_manager.relocated_launch import _relocated_launch_script;"
+        "print(json.dumps(str(_relocated_launch_script())))",
+    ], env=dict(os.environ), cwd=tmp_path)
+    assert located.returncode == 0, located.stdout + located.stderr
+    payload = Path(json.loads(located.stdout)).parents[1]
+    assert payload.is_relative_to(prefix)
+    assert not (slot / "payload").exists()
+    for name in ("pane-args.ps1", "pane-wrapper.ps1", "pane-wrapper.sh", "pane-launch.ps1",
+                 "session-options.ps1", "session-options.sh", "psmux-passthrough.conf"):
+        assert (payload / "bin" / name).is_file()
+    policy = _run([
+        getattr(sys, "_base_executable", sys.executable), "-I", "-B",
+        str(payload / "bin" / "check-automatic-maintenance.py"),
+    ], env=dict(os.environ, WORKTREE_MANAGER_ROOT=str(root)), cwd=tmp_path)
+    assert policy.returncode == 0, policy.stdout + policy.stderr
+    warmed = _run([
+        str(python), "-I", "-S", "-B", "-X", "utf8",
+        str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+        "-m", "worktree_manager", "--version",
+    ], env=dict(os.environ, WORKTREE_MANAGER_ROOT=str(root)), cwd=tmp_path)
+    assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    (root / "current-version").write_text(slot.name + "\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
+    from test_manager_mux_callbacks import exercise_retained_callbacks
+
+    exercise_retained_callbacks({
+        "directory": str(tmp_path), "root": str(root), "slot": str(slot), "payload": str(payload),
+    }, tmp_path, monkeypatch, shell)
 
 
 @pytest.fixture(params=["cmd", "ps1", "sh"] if os.name == "nt" else ["sh"])
@@ -29,6 +109,9 @@ def launcher(request, tmp_path):
     path = tmp_path / f"manager.{kind}"
     path.write_text(getattr(si, f"_{kind}_binstub")(), encoding="utf-8", newline="")
     if kind == "cmd":
+        (tmp_path / "worktree-manager.ps1").write_text(
+            si._ps1_binstub(), encoding="utf-8",
+        )
         argv = [os.environ["COMSPEC"], "/d", "/c", str(path)]
     elif kind == "ps1":
         shell = shutil.which("pwsh") or shutil.which("powershell")
@@ -61,7 +144,8 @@ def _payload(slot, version="1.2.3"):
     (pkg / "__main__.py").write_text(
         "import json, sys, worktree_manager\n"
         "print(json.dumps(dict(version=worktree_manager.__version__, "
-        "file=worktree_manager.__file__, args=sys.argv[1:])))\n"
+        "file=worktree_manager.__file__, cached=worktree_manager.__cached__, "
+        "isolated=sys.flags.isolated, no_bytecode=sys.dont_write_bytecode, args=sys.argv[1:])))\n"
         "raise SystemExit(7 if '--fail' in sys.argv else 0)\n",
         encoding="utf-8",
     )
@@ -75,6 +159,30 @@ def _payload(slot, version="1.2.3"):
         '[tool.uv]\nexclude-newer = "7 days"\n',
         encoding="utf-8",
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native CMD compatibility")
+@pytest.mark.parametrize("launcher", ["cmd"], indirect=True)
+def test_cmd_without_powershell_keeps_the_legacy_picker_entry(launcher, tmp_path):
+    argv, env, slot = launcher
+    _payload(slot)
+    runtime = slot / ".venv"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    python = runtime / "Scripts" / "python.exe"
+    uv = shutil.which("uv")
+    assert uv, "the contained runner requires uv"
+    installed = _run(
+        [uv, "pip", "install", "--python", str(python), "--no-deps", str(slot)],
+        env=env, cwd=slot,
+    )
+    assert installed.returncode == 0, installed.stderr
+    env["PATH"] = str(Path(os.environ["SYSTEMROOT"]) / "System32")
+    assert shutil.which("pwsh.exe", path=env["PATH"]) is None
+
+    result = _run(argv, env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["args"] == []
 
 
 def test_constructed_slot_runs_installed_package_without_resolution(launcher, tmp_path):
@@ -103,15 +211,55 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
     _payload(tmp_path)
     env["PYTHONPATH"] = str(tmp_path / "src")
     env["UV_PROJECT_ENVIRONMENT"] = str(tmp_path / "foreign-env")
+    before = {
+        str(path.relative_to(slot)): (
+            path.read_bytes() if path.is_file() else None,
+            path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+        )
+        for path in (slot, *slot.rglob("*"))
+    }
     result = _run(argv + ["argument with spaces", "\u2713"], env=env, cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
     assert output["version"] == "1.2.3"
     assert Path(output["file"]).is_relative_to(runtime)
     assert output["args"] == ["argument with spaces", "\u2713"]
+    assert output["isolated"] == 1 and output["no_bytecode"] is False
+    cache = Path(output["cached"])
+    assert cache.is_relative_to(Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python") or (
+        os.name == "nt" and cache.is_relative_to(
+            Path("\\\\?\\" + env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
+        )
+    )
+    assert cache.is_file()
+    cached_before = (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino)
     assert not Path(env["UV_PROJECT_ENVIRONMENT"]).exists()
     failed = _run(argv + ["--fail"], env=env, cwd=tmp_path)
     assert failed.returncode == 7, failed.stderr
+    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+    assert {
+        str(path.relative_to(slot)): (
+            path.read_bytes() if path.is_file() else None,
+            path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+        )
+        for path in (slot, *slot.rglob("*"))
+    } == before
+    installed_module = Path(output["file"])
+    module_stat = installed_module.stat()
+    installed_module.write_bytes(
+        installed_module.read_bytes().replace(b'"1.2.3"', b'"1.2.4"')
+    )
+    os.utime(installed_module, ns=(module_stat.st_atime_ns, module_stat.st_mtime_ns))
+    (slot / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "1.2.4"\n', encoding="utf-8",
+    )
+    replaced = _run(argv, env=env, cwd=tmp_path)
+    assert replaced.returncode == 0, replaced.stderr
+    replacement = json.loads(replaced.stdout)
+    assert replacement["version"] == "1.2.4"
+    assert replacement["file"] == output["file"]
+    assert Path(replacement["cached"]) != cache
+    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
 
 
 def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_path, monkeypatch):
@@ -319,6 +467,7 @@ def test_missing_selected_slot_is_not_another_project(launcher, tmp_path):
 def test_cmd_does_not_resume_replaced_launcher(tmp_path, exit_code, runtime_kind):
     launcher = tmp_path / "manager.cmd"
     launcher.write_text(si._cmd_binstub(), encoding="utf-8", newline="")
+    (tmp_path / "worktree-manager.ps1").write_text(si._ps1_binstub(), encoding="utf-8")
     root = tmp_path / "manager root"
     slot = root / "versions" / "1.2.3"
     runtime = slot if runtime_kind == "retained" else slot / ".venv"
@@ -332,7 +481,10 @@ def test_cmd_does_not_resume_replaced_launcher(tmp_path, exit_code, runtime_kind
         "print('fixture session exited')\n"
         f"raise SystemExit({exit_code})\n"
     )
-    env = dict(os.environ, WORKTREE_MANAGER_ROOT=str(root), FIXTURE_LAUNCHER=str(launcher))
+    env = dict(
+        os.environ, WORKTREE_MANAGER_ROOT=str(root), FIXTURE_LAUNCHER=str(launcher),
+        ERRORLEVEL="0",
+    )
     if runtime_kind == "retained":
         bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
         bootstrap.parent.mkdir()

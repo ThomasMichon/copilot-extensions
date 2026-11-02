@@ -32,8 +32,12 @@ root=Path(CONFIG["root"])
 report=Path(CONFIG["observations"])
 marker=Path(CONFIG["marker"])
 SyncProcessLaunchError=procutil.SyncProcessLaunchError
+__path__=procutil.__path__
 no_window_kwargs=procutil.no_window_kwargs
 original=procutil.JobHandle.terminate_and_wait
+
+def __getattr__(name):
+    return getattr(procutil,name)
 
 def terminate_and_wait(job,timeout):
     entries=json.loads(report.read_text()) if report.exists() else []
@@ -71,14 +75,17 @@ def terminate_and_wait(job,timeout):
     entries.append(entry)
     report.write_text(json.dumps(entries))
 
-procutil.JobHandle.terminate_and_wait=terminate_and_wait
-
 def spawn_sync_in_kill_on_close_job(argv,**kwargs):
-    return procutil.spawn_sync_in_kill_on_close_job(
-        [sys.executable,"-I","-c",CONFIG["writer"]],**kwargs,
-    )
+    if list(argv[1:4]) != ["-I","-m","venv"]:
+        return procutil.spawn_sync_in_kill_on_close_job(argv,**kwargs)
+    process,job=procutil.spawn_sync_in_kill_on_close_job(
+        [sys.executable,"-I","-c",CONFIG["writer"]],**kwargs)
+    job.terminate_and_wait=lambda timeout: terminate_and_wait(job,timeout)
+    return process,job
 '''
     destination.write_text(
         "CONFIG = " + repr(configuration) + "\n" + textwrap.dedent(program),
         encoding="utf-8",
     )
+    for name in ("_job_scopes.py", "_windows_job_types.py", "streaming.py", "_output_relay.py"):
+        destination.with_name(name).write_bytes(procutil.with_name(name).read_bytes())

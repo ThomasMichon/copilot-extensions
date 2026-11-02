@@ -1,8 +1,10 @@
 """Read native UTF-8 JSON without relaxing byte or duplicate-key validation."""
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -44,6 +46,25 @@ def test_json_reader_still_refuses_invalid_native_documents(
     module = _load_module()
     path = tmp_path / "deploy-manifest.json"
     path.write_bytes(content)
-    with pytest.raises(module.InstallationContextError):
+    with pytest.raises(module.MalformedDeploymentManifest):
         module.read_deployment_manifest(path)
     assert path.read_bytes() == content
+
+
+def test_deployment_storage_failure_is_not_malformed_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    path = tmp_path / "deploy-manifest.json"
+    path.write_text("{}")
+
+    def unreadable(
+        path: Path, *, label: str, require_stable_identity: bool = False,
+        consume_chunk: Callable[[bytes], object] | None = None,
+    ) -> NoReturn:
+        raise PermissionError("fixture storage failure")
+
+    monkeypatch.setattr(module, "_read_regular_file", unreadable)
+    with pytest.raises(module.InstallationContextError, match="storage failure") as raised:
+        module.read_deployment_manifest(path)
+    assert not isinstance(raised.value, module.MalformedDeploymentManifest)

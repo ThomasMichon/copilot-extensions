@@ -14,11 +14,58 @@ import subprocess
 import sys
 import tempfile
 import time as clock
+import types
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 _WINDOWS = os.name == "nt"
+
+
+def argument_pairs(arguments, value_options, *, error_type):
+    """Distinguish UV option values from source operands."""
+    iterator = iter(arguments)
+    positional = False
+    for argument in iterator:
+        if positional or not argument.startswith("-"):
+            yield "", argument
+        elif argument == "--":
+            positional = True
+        else:
+            option, separator, value = argument.partition("=")
+            if (not argument.startswith("--") and len(argument) > 2
+                    and argument[:2] in value_options):
+                option, separator, value = argument[:2], "=", argument[2:]
+            if option in value_options:
+                if not separator:
+                    value = next(iterator, "")
+                if not value or value.startswith("--"):
+                    raise error_type("dependency installation option has no value")
+                yield option, value
+            else:
+                yield option, value
+
+
+def immutable_install_arguments(arguments, pairs, *, error_type):
+    if any(option in ("-e", "--editable") for option, _ in pairs):
+        raise error_type("deployed runtimes require non-editable immutable versioned slots")
+    if any(option == "--link-mode" and value != "copy" for option, value in pairs):
+        raise error_type("deployed runtimes require copied installation artifacts")
+    result = list(arguments)
+    if not any(option == "--link-mode" for option, _ in pairs):
+        result.extend(["--link-mode", "copy"])
+    return result
+
+
+_content_path = Path(__file__).with_name("installer_retained_content.py")
+_content = types.ModuleType(__name__ + "_content")
+_content.__file__ = str(_content_path)
+exec(compile(_content_path.read_bytes(), str(_content_path), "exec"), _content.__dict__)
+bounded_content_map = _content.bounded_content_map
+retained_source_hashes = _content.retained_source_hashes
+verify_retained_sources = retained_source_hashes
+
+
 
 
 def remaining_timeout(deadline, *, error_type, cap=None):
@@ -32,20 +79,26 @@ def remaining_timeout(deadline, *, error_type, cap=None):
     return remaining if cap is None else min(remaining, cap)
 
 
-def copy_retained_file(source, destination, *, native_path, deadline, error_type):
+def copy_retained_file(source, destination, *, native_path, deadline, error_type, on_progress=None):
     remaining_timeout(deadline, error_type=error_type)
     if deadline is None:
-        return shutil.copy2(native_path(source), native_path(destination))
-    with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
-        while True:
-            remaining_timeout(deadline, error_type=error_type)
-            chunk = incoming.read(1 << 20)
-            if not chunk:
-                break
-            output.write(chunk)
-    shutil.copystat(native_path(source), native_path(destination))
+        result = shutil.copy2(native_path(source), native_path(destination))
+    else:
+        with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
+            while True:
+                remaining_timeout(deadline, error_type=error_type)
+                chunk = incoming.read(1 << 20)
+                if not chunk:
+                    break
+                output.write(chunk)
+        shutil.copystat(native_path(source), native_path(destination))
+        result = destination
     remaining_timeout(deadline, error_type=error_type)
-    return destination
+    if on_progress is not None:
+        on_progress()
+    return result
+
+
 
 
 def prepare_uv_install(
@@ -199,6 +252,14 @@ def native_retained_path(path):
     return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
 
 
+def file_uri(path):
+    """Keep extended Windows filesystem spelling out of file URI authorities."""
+    if isinstance(path, PureWindowsPath) and str(path).startswith("\\\\?\\"):
+        value = str(path)
+        path = PureWindowsPath("\\\\" + value[8:] if value[:8].lower() == "\\\\?\\unc\\" else value[4:])
+    return path.as_uri()
+
+
 @contextmanager
 def retain_closed_wheels(
     uv, snapshot, *, python, env, captured_environment, select_uv,
@@ -233,7 +294,7 @@ def retain_closed_wheels(
         requirements = root / "wheels.txt"
         requirements.write_text("".join(
             f"{name.split('-', 1)[0]} @ "
-            f"{path.as_uri()}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
+            f"{file_uri(path)}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
             f"--hash={snapshot.digests[name]}\n"
             for name, path in sorted(snapshot.paths.items())
         ), encoding="utf-8")
@@ -289,8 +350,9 @@ def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, e
         constraint.write_text(
             "".join(f"{name}<0,>=0\n" for name in sorted(names)), encoding="utf-8",
         )
+        option = "--constraints" if options.get("_operation") in ("compile", "source-compile") else "--constraint"
         with retain(
-            uv, [*arguments, "--constraint", str(constraint)],
+            uv, [*arguments, option, str(constraint)],
             _generated_constraints=(constraint,), **options,
         ) as transaction:
             yield transaction
@@ -414,6 +476,14 @@ def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_t
                 break
         candidates.append((system, False))
     return [(path, project) for path, project in candidates if path.is_file()]
+
+
+def freeze_source_editables(data):
+    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    for entries in sources.values():
+        for source in entries if isinstance(entries, list) else [entries]:
+            if source.get("editable") is True:
+                source["editable"] = False
 
 
 def retain_editable_metadata(project, *, error_type):
@@ -605,10 +675,11 @@ def source_compile_arguments(
         packages = source_compile_packages(projects, toml=toml, identity=identity, error_type=error_type)
     return compile_arguments(
         arguments, argument_pairs=argument_pairs, error_type=error_type, source_packages=packages,
+        source_graph=operation == "source-compile",
     )
 
 
-def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=()):
+def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=(), source_graph=False):
     """Bounded requirements export, never an implicit incremental lock update."""
     values = {
         "--constraints", "-c", "--overrides", "--excludes", "--build-constraints", "-b",
@@ -628,6 +699,7 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
     }
     result = []
     omissions = []
+    output_format = "requirements.txt"
     for option, value in argument_pairs(arguments):
         if not option:
             if value == "-" or not value:
@@ -635,8 +707,10 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             result.append(value)
         elif option == "--no-emit-package":
             omissions.append(value)
-        elif option == "--format" and value != "requirements.txt":
-            raise error_type("lock export supports only hashed requirements.txt output")
+        elif option == "--format":
+            if value not in ("requirements.txt", "pylock.toml"):
+                raise error_type("lock export format is unsupported for this transaction")
+            output_format = value
         elif option in ("--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate") and value:
             raise error_type("lock export boolean options cannot carry values")
         elif option in ("--format", "--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate"):
@@ -651,7 +725,7 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             raise error_type("unsupported lock export option")
     if omissions and tuple(omissions) != source_packages:
         raise error_type("lock export omissions must match the retained source graph")
-    return [*result, "--format", "requirements.txt", "--generate-hashes", "--upgrade", "--no-header", "--no-annotate",
+    return [*result, "--format", output_format, "--generate-hashes", "--upgrade", "--no-header", "--no-annotate",
             *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
@@ -659,6 +733,10 @@ def check_compile_projection(
     projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False, native_target=False,
 ):
     """Output policy is effective configuration, not merely a CLI intention."""
+    if dict(argument_pairs(arguments)).get("--format") == "pylock.toml" and not re.search(
+        r"(?m)^\s*format:\s*Some\(\s*PylockToml,\s*\),\s*$", projection,
+    ):
+        raise error_type("UV wheel-lock format differs from the selected output")
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
         ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),
@@ -790,8 +868,10 @@ def write_toml(path, data, *, error_type):
         stream.write(text + "\n")
 
 
-def private_retained_root(parent, *, error_type):
-    root = parent / "inputs"
+def private_retained_root(parent, *, error_type, name="inputs"):
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) is None:
+        raise error_type("private dependency-input directory requires one ordinary name")
+    root = parent / name
     if os.name != "nt":
         root.mkdir(mode=0o700)
         return root
@@ -820,7 +900,7 @@ def private_retained_root(parent, *, error_type):
         raise error_type("private dependency-input permissions could not be constructed")
     try:
         attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
-        if not create(str(root), ctypes.byref(attributes)):
+        if not create(native_retained_path(root), ctypes.byref(attributes)):
             raise error_type("private dependency-input directory could not be created")
     finally:
         kernel.LocalFree(descriptor)

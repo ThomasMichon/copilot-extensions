@@ -10,6 +10,7 @@ import sys
 from agent_procutil import no_window_kwargs
 
 from .source_layout import SourceLayoutError
+from .content_fts_coverage import _ContentFtsCoverageMixin
 
 
 def fts_retryable(message: str) -> bool:
@@ -18,7 +19,7 @@ def fts_retryable(message: str) -> bool:
     return "retryable" in message or "commit conflict" in message
 
 
-class _ContentFtsWorkerMixin:
+class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
     """Own child-process execution and file-lock lifetime; state stays on the store."""
 
     @contextlib.contextmanager
@@ -97,15 +98,25 @@ class _ContentFtsWorkerMixin:
         silently went stale. So the incremental path lets ``optimize()``
         raise, causing the subprocess to exit non-zero and the caller's
         existing retry/backoff logic to treat it as a genuine failure.
+
+        Source-aware incremental builds instead append only the named FTS
+        index's delta through the native SDK. They do not compact data, prune
+        versions, consolidate scalar indices or prepare missing scalar coverage.
+        Full source-aware builds and the legacy path retain their behavior.
         """
+        if not full and self.fts_current():
+            return
         if self._source_domain is not None:
-            with self._source_domain.fts_handoff() as nonce:
+            with self._source_domain.fts_handoff(table_name=self._table_name) as nonce:
                 code = (
                     "import sys,lancedb; "
                     "from agent_index.store.source_layout import child_fts_owner; "
+                    "from agent_index.store.fts_index_update import update_fts_index; "
                     "\nwith child_fts_owner(sys.argv[1],sys.argv[3]):"
-                    "\n t=lancedb.connect(sys.argv[1]).open_table(sys.argv[2]); t.optimize()"
-                    "\n if sys.argv[4]=='1': t.create_fts_index('content',replace=True)"
+                    "\n t=lancedb.connect(sys.argv[1]).open_table(sys.argv[2])"
+                    "\n if sys.argv[4]=='1':"
+                    "\n  t.optimize(); t.create_fts_index('content',replace=True)"
+                    "\n else: update_fts_index(t)"
                 )
                 proc = subprocess.run(
                     [sys.executable, "-I", "-B", "-c", code,

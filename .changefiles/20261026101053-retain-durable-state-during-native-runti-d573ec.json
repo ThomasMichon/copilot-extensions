@@ -1,0 +1,21 @@
+{
+  "comment": "Retain durable state during native runtime-only uninstall and refuse unverified ownership",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

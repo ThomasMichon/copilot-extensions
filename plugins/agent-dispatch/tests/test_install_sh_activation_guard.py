@@ -20,6 +20,7 @@ printed.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -58,13 +59,37 @@ _BASH = _resolve_bash()
 pytestmark = pytest.mark.skipif(_BASH is None, reason="a real bash is not available")
 
 
+def _native_bash_environment() -> dict[str, str]:
+    # Git Bash must create real symlinks for deliberately missing numeric PID targets.
+    return {**os.environ, "MSYS": "winsymlinks:nativestrict"}
+
+
+def _assert_cutover_lock_released(install_dir: Path) -> None:
+    probe = subprocess.run(
+        [_BASH, "-c", "\n".join([
+            "set -eu",
+            f"INSTALL_DIR={shlex.quote(str(install_dir))}",
+            'if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then',
+            '    exec 8>"$INSTALL_DIR/.activate.lock"; flock -n 8',
+            "else",
+            '    [[ ! -e "$INSTALL_DIR/.activate.lock.pid" && ! -L "$INSTALL_DIR/.activate.lock.pid" ]]',
+            "fi",
+        ])],
+        capture_output=True, text=True, timeout=5,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+
+
 def _extract_function_block(name: str) -> str:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     start = text.index(f"{name}() {{")
     end = text.index("\n}\n", start) + len("\n}")
     source = (_PLUGIN_ROOT / "scripts" / "source-runtime.sh").as_posix()
     engine = (_PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh").as_posix()
-    return f". '{engine}'\n. '{source}'\n" + text[start:end]
+    preflight = ""
+    if name == "do_stamp":
+        preflight = _extract_function_block("_runtime_admission_preflight") + "\n"
+    return f". '{engine}'\n. '{source}'\n" + preflight + text[start:end]
 
 
 def _run_activate_harness(
@@ -111,6 +136,8 @@ def _run_activate_harness(
         f'_versioned_current() {{ printf \'%s\' "{current_active or ""}"; }}',
         _extract_function_block("_version_lt"),
         _extract_function_block("_versioned_activate"),
+        # Ordering tests do not exercise installation policy admission.
+        '_require_actions() { return 0; }',
         "VERSIONED_RUNTIME=1",
         f'SRC_VERSION="{src_version}"',
         f"FORCE={1 if force else 0}",
@@ -127,13 +154,7 @@ def _run_activate_harness(
     try:
         with os.fdopen(fd, "w", newline="\n", encoding="utf-8") as f:
             f.write(script + "\n")
-        env = dict(os.environ)
-        # git-bash's `ln -s` otherwise fails outright ("No such file or
-        # directory") on Windows without this -- it needs an explicit
-        # request for a real, native symlink rather than its default
-        # emulation. Irrelevant on a genuine POSIX bash (Linux/macOS CI),
-        # where `ln -s` always creates a real symlink.
-        env["MSYS"] = "winsymlinks:nativestrict"
+        env = _native_bash_environment()
         result = subprocess.run(
             [_BASH, os.path.basename(script_path)],
             cwd=str(_INSTALL_SH.parent),
@@ -350,6 +371,7 @@ def _run_do_stamp_harness(
         f'deploy_binstub() {{ : > "{deployed_marker}"; }}',
         _extract_function_block("_version_lt"),
         _extract_function_block("do_stamp"),
+        '_require_actions() { return 0; }',
         f'INSTALL_DIR="{install_dir.as_posix()}"',
         'LINK_DIR="$INSTALL_DIR/.venv"',
         f'LOCAL_BIN="{(tmp_path / "localbin").as_posix()}"',
@@ -363,8 +385,7 @@ def _run_do_stamp_harness(
     try:
         with os.fdopen(fd, "w", newline="\n", encoding="utf-8") as f:
             f.write(script + "\n")
-        env = dict(os.environ)
-        env["MSYS"] = "winsymlinks:nativestrict"
+        env = _native_bash_environment()
         result = subprocess.run(
             [_BASH, os.path.basename(script_path)],
             cwd=str(_INSTALL_SH.parent),

@@ -14,9 +14,11 @@ Two tiers, per the routing-foundation architecture's own proof requirement
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
@@ -34,34 +36,32 @@ from fleet_contracts import (
 from fleet_index_adapter import BackendUnavailable, route
 
 
-def registration(adapter="index-v1", operations=("health", "index.search")):
+def registration(
+    adapter: str = "index-v1", operations: tuple[str, ...] = ("health", "index.search"),
+) -> ConnectorRegistration:
     return ConnectorRegistration(
         "lab", TargetRef("static-ssh", "ssh-a", "worker-a"), "connector-a", 4, 9999999999,
         (ServiceOffer("index", "index-install-a", adapter, operations),),
     )
 
 
-def search_request(**overrides):
+def search_request() -> RouteRequest:
     reg = registration()
-    base = dict(
+    return RouteRequest(
         fleet_id=reg.fleet_id, target=reg.target, connector_id=reg.connector_id,
         generation=reg.generation, service_id="index", installation_id="index-install-a",
         request_id="request-a", operation="index.search",
         parameters=SearchParameters("needle", limit=5, source="docs"),
     )
-    base.update(overrides)
-    return RouteRequest(**base)
 
 
-def health_request(**overrides):
+def health_request() -> RouteRequest:
     reg = registration()
-    base = dict(
+    return RouteRequest(
         fleet_id=reg.fleet_id, target=reg.target, connector_id=reg.connector_id,
         generation=reg.generation, service_id="index", installation_id="index-install-a",
         request_id="request-b", operation="health", parameters=None,
     )
-    base.update(overrides)
-    return RouteRequest(**base)
 
 
 class _FakeBackend(BaseHTTPRequestHandler):
@@ -83,7 +83,7 @@ class _FakeBackend(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def fake_backend():
+def fake_backend() -> Iterator[tuple[HTTPServer, str]]:
     _FakeBackend.seen_paths = []
     _FakeBackend.response_status = 200
     _FakeBackend.response_body = b"{}"
@@ -102,24 +102,26 @@ def _set_response(status: int, body: object) -> None:
     _FakeBackend.response_body = json.dumps(body).encode()
 
 
-def test_health_route_maps_ok_status(fake_backend):
+def test_health_route_maps_ok_status(fake_backend: tuple[HTTPServer, str]) -> None:
     _server, base_url = fake_backend
     _set_response(200, {"status": "ok", "plugin": "agent-index"})
     response = route(health_request(), registration().services[0], base_url=base_url)
+    assert response.health is not None
     assert response.health.available is True
     assert response.operation == "health"
     assert response.request_id == "request-b"
 
 
-def test_health_route_maps_non_ok_status(fake_backend):
+def test_health_route_maps_non_ok_status(fake_backend: tuple[HTTPServer, str]) -> None:
     _server, base_url = fake_backend
     _set_response(200, {"status": "passive"})
     response = route(health_request(), registration().services[0], base_url=base_url)
+    assert response.health is not None
     assert response.health.available is False
     assert response.health.detail == "passive"
 
 
-def test_search_route_maps_existing_hit_shape(fake_backend):
+def test_search_route_maps_existing_hit_shape(fake_backend: tuple[HTTPServer, str]) -> None:
     _server, base_url = fake_backend
     _set_response(200, {
         "query": "needle", "available": True,
@@ -132,12 +134,15 @@ def test_search_route_maps_existing_hit_shape(fake_backend):
     })
     response = route(search_request(), registration().services[0], base_url=base_url)
     assert response.operation == "index.search"
+    assert response.hits is not None
     assert len(response.hits) == 1
     assert response.hits[0].chunk_id == "chunk-1"
     assert response.hits[0].score == 0.75
 
 
-def test_search_route_sends_existing_query_parameters(fake_backend):
+def test_search_route_sends_existing_query_parameters(
+    fake_backend: tuple[HTTPServer, str],
+) -> None:
     _server, base_url = fake_backend
     _set_response(200, {"query": "needle", "available": True, "hits": []})
     route(search_request(), registration().services[0], base_url=base_url)
@@ -152,21 +157,23 @@ def test_search_route_sends_existing_query_parameters(fake_backend):
     assert "repo" not in params
 
 
-def test_search_route_rejects_oversized_or_malformed_hit(fake_backend):
+def test_search_route_rejects_oversized_or_malformed_hit(
+    fake_backend: tuple[HTTPServer, str],
+) -> None:
     _server, base_url = fake_backend
     _set_response(200, {"available": True, "hits": [{"content": "x" * 5000}]})
     with pytest.raises(BackendUnavailable):
         route(search_request(), registration().services[0], base_url=base_url)
 
 
-def test_search_route_rejects_missing_hit_list(fake_backend):
+def test_search_route_rejects_missing_hit_list(fake_backend: tuple[HTTPServer, str]) -> None:
     _server, base_url = fake_backend
     _set_response(200, {"available": True})
     with pytest.raises(BackendUnavailable):
         route(search_request(), registration().services[0], base_url=base_url)
 
 
-def test_backend_unreachable_raises_backend_unavailable():
+def test_backend_unreachable_raises_backend_unavailable() -> None:
     with pytest.raises(BackendUnavailable):
         route(
             health_request(), registration().services[0],
@@ -174,7 +181,9 @@ def test_backend_unreachable_raises_backend_unavailable():
         )
 
 
-def test_malformed_json_response_raises_backend_unavailable(fake_backend):
+def test_malformed_json_response_raises_backend_unavailable(
+    fake_backend: tuple[HTTPServer, str],
+) -> None:
     _server, base_url = fake_backend
     _FakeBackend.response_status = 200
     _FakeBackend.response_body = b"not json"
@@ -182,14 +191,16 @@ def test_malformed_json_response_raises_backend_unavailable(fake_backend):
         route(health_request(), registration().services[0], base_url=base_url)
 
 
-def test_route_rejects_offer_not_matching_adapter_kind(fake_backend):
+def test_route_rejects_offer_not_matching_adapter_kind(
+    fake_backend: tuple[HTTPServer, str],
+) -> None:
     _server, base_url = fake_backend
     offer = ServiceOffer("index", "index-install-a", "health-v1", ("health",))
     with pytest.raises(ContractError):
         route(health_request(), offer, base_url=base_url)
 
 
-def test_route_rejects_operation_not_in_offer(fake_backend):
+def test_route_rejects_operation_not_in_offer(fake_backend: tuple[HTTPServer, str]) -> None:
     _server, base_url = fake_backend
     offer = ServiceOffer("index", "index-install-a", "index-v1", ("health",))
     with pytest.raises(ContractError):
@@ -205,7 +216,7 @@ pytest.importorskip("agent_index")
 
 
 @pytest.fixture
-def live_agent_index(monkeypatch, tmp_path):
+def live_agent_index(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[str]:
     # Isolate every runtime path (data/run/routing/cache/log dirs all derive
     # from install_dir()) under tmp_path -- without this, build_app()'s
     # lifespan creates data_dir() under the real ~/.agent-index and may start
@@ -252,7 +263,7 @@ def _live_registration() -> ConnectorRegistration:
     )
 
 
-def test_real_agent_index_search_round_trip(live_agent_index):
+def test_real_agent_index_search_round_trip(live_agent_index: str) -> None:
     reg = _live_registration()
     request = RouteRequest(
         reg.fleet_id, reg.target, reg.connector_id, reg.generation, "index", "index-install-a",
@@ -260,12 +271,13 @@ def test_real_agent_index_search_round_trip(live_agent_index):
     )
     response = route(request, reg.services[0], base_url=live_agent_index)
     assert response.operation == "index.search"
+    assert response.hits is not None
     assert len(response.hits) == 1
     assert response.hits[0].chunk_id == "chunk-live"
     assert response.hits[0].content == "real backend content"
 
 
-def test_real_agent_index_health_round_trip(live_agent_index):
+def test_real_agent_index_health_round_trip(live_agent_index: str) -> None:
     reg = _live_registration()
     request = RouteRequest(
         reg.fleet_id, reg.target, reg.connector_id, reg.generation, "index", "index-install-a",
@@ -273,4 +285,5 @@ def test_real_agent_index_health_round_trip(live_agent_index):
     )
     response = route(request, reg.services[0], base_url=live_agent_index)
     assert response.operation == "health"
+    assert response.health is not None
     assert response.health.available is True

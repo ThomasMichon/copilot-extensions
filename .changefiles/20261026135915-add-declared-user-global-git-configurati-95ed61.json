@@ -1,0 +1,9 @@
+{
+  "comment": "Add declared user-global Git configuration with exact-preview consent, verified backups and byte-exact rollback.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "minor"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in operator-owned raw client request capture through a one-shot loopback fake provider.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

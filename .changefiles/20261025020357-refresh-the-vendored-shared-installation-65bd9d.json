@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the vendored shared installation driver with bounded Bridge recipe support.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

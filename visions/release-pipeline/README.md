@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -83,6 +83,26 @@ representation of a source release. Version state, materialization and approved
 control inputs are explicit where they affect the result. Re-reading mutable
 release state at another stage must not make the same admitted artifact appear
 to belong to a different release.
+
+### complete-copyable-application-release
+
+Canonical version seeding, eligible changefiles and source materialization
+produce complete buildable application projects before dependency locking,
+artifact construction and authoritative qualification. Each selected application
+has a copyable immutable installation representation and an associated complete
+first-party wheel closure; a top-level wheel alone is not the application closure.
+Optional capability profiles and native compatibility remain separately declared.
+
+The development source release owns these assets through the existing release
+identity, integrity and approval contract, not a new per-installer fingerprint
+scheme or an unknowable future Main merge identifier. Publication completion
+includes readback of the complete source/installation/artifact set. Wheel binaries
+are distribution artifacts rather than source-control inputs.
+
+Controlled local promotion can produce the same complete installation inputs
+for source-change/install/reinstall validation without first creating a public
+PR, tag or release. That result is explicit local evidence, never a claim of
+public release availability or production admission.
 
 ### complete-before-promotion-pr
 

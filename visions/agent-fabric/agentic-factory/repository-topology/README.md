@@ -3,7 +3,7 @@
 - **Subject:** Independently composable harness, knowledge, and product repositories
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-10
+- **Last revised:** 2026-10-31
 
 ## Purpose & Intent
 
@@ -47,6 +47,20 @@ references let agents compose that ownership without copying authoritative inten
 or creating rival task and history stores. A location change preserves identity,
 responsibility, and traceability.
 
+### layered-plugin-configuration
+
+Agent plugins should compose ordinary configuration consistently across
+built-in defaults, repository policy, machine-wide preferences and
+repository+machine overrides. At the repository tier, an explicitly bound
+knowledge repository should graft over the reusable base harness, allowing
+private choices to travel without editing shared harness configuration.
+Standalone and converged repositories should retain useful default behavior.
+
+The effective values should retain their source and scope. Relative paths,
+lists, schema validation and explicit invocation selectors should have
+documented deterministic semantics rather than depending on incidental working
+directories or the first unrelated repository discovered.
+
 ## Behaviors
 
 ### privacy-preserving-composition
@@ -62,6 +76,14 @@ An agent distinguishes role, editing model, ownership, provider, and its own
 effective access before acting. Missing or inaccessible relationships remain
 explicitly unavailable, not an invitation to create duplicate repositories,
 invent owners, or broaden credentials.
+
+### configuration-is-not-authority
+
+Ordinary configuration precedence should not weaken protected repository
+policy, credential custody, installation ownership or resource admission.
+Knowledge binding should select an eligible configuration source, not launch
+services, install dependencies, publish private data or transfer work ownership.
+Missing optional layers and invalid explicit bindings should remain distinct.
 
 ## Non-Goals / Boundaries
 

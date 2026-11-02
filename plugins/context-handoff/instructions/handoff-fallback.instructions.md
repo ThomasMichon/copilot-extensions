@@ -10,7 +10,8 @@ Loads without `context-handoff`; needs only a shell.
 
 For native-selected context-only rollover, use the skill's verified current-owner
 checkpoint/terminal `new_context` flow, not custom pickup. Preserve the parent
-gate, unresolved work, live obligations and one next action. The sequence below
+gate, original approval evidence/limits, current holds, unresolved work, live
+obligations and one next action. The sequence below
 is only for actual new-owner/process transfer or diagnosed unavailable-native
 recovery; do not turn policy caps or partial-clear errors into alternate sessions.
 
@@ -27,10 +28,12 @@ guard); non-`synced` isn't fatal, note why. Self-audit: re-scan turns for
 open-ended self-flags, confirm each resolved -- empty means checked, not
 assumed. Compose **Original Request/Continuing
 Objective/Progress/Successor Work Roster/Outstanding Background Flows &
-External State/Completion Gates/Re-Handoff Instructions** (or if
+External State/Authorization Evidence & Limits/Completion Gates/Re-Handoff Instructions** (or if
 effort-backed, **Active Effort/Next Slice/Immediate Session Delta**) --
 route an open hit into Next Slice, else active effort if outside this
-leg. Never drop an open flow/state -- name it. Prefer
+leg. Carry original approval references/wording, applicable scope/exclusions,
+limits and later holds/revocation; recover missing evidence before affected
+effects, never infer permission from the baton. Never drop an open flow/state -- name it. Prefer
 `generate_handoff_prompt` -> compose -> `save_handoff_prompt` ->
 `trigger_handoff`; else the CLI below.
 

@@ -9,12 +9,15 @@ from agent_codespaces import hosting_policy
 
 
 @pytest.mark.asyncio
-async def test_invalid_explicit_installation_context_precedes_guest_transport(monkeypatch):
+@pytest.mark.parametrize("preflight", [False, True])
+async def test_invalid_explicit_installation_context_precedes_guest_transport(monkeypatch, preflight):
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", " ")
     execute = AsyncMock(side_effect=AssertionError("invalid context must not reach a guest"))
     monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
     with pytest.raises(RuntimeError, match="installation context refused"):
-        await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/product", preflight=preflight,
+        )
     execute.assert_not_awaited()
 
 
@@ -25,7 +28,9 @@ async def test_denial_uses_actual_guest_checkout_without_fallback(monkeypatch):
     ))
     monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
     with pytest.raises(RuntimeError, match="expose_agent: false"):
-        await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/product", preflight=True,
+        )
     assert execute.await_count == 1
     command = execute.call_args.args[2]
     assert "/workspaces/product" in command
@@ -42,6 +47,170 @@ async def test_unsupported_receiver_is_visible(monkeypatch):
     with pytest.raises(RuntimeError, match="receiver unsupported"):
         await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/harness")
     assert execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_absent_receiver_uses_fresh_canonical_reader_before_any_provisioning(monkeypatch):
+    import json
+
+    execute = AsyncMock(side_effect=[
+        SimpleNamespace(exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n", stderr=""),
+        SimpleNamespace(exit_code=0, stderr="", stdout=json.dumps({
+            "version": 1, "allowed": True, "repository": "/workspaces/product",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        })),
+    ])
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    await hosting_policy.require_guest_hosting(
+        object(), "venue", "/workspaces/product", preflight=True,
+    )
+    assert execute.await_count == 2
+    probe = execute.call_args_list[1]
+    assert "python3 -I -S -c" in probe.args[2]
+    assert "/workspaces/product" in probe.args[2]
+    assert probe.kwargs["input_bytes"].startswith(b"PK")
+    assert "plugin install" not in probe.args[2] and "/scripts/install" not in probe.args[2]
+
+
+@pytest.mark.asyncio
+async def test_fresh_reader_denial_remains_a_terminal_preflight_refusal(monkeypatch):
+    execute = AsyncMock(side_effect=[
+        SimpleNamespace(exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n", stderr=""),
+        SimpleNamespace(exit_code=3, stdout='{"error":"expose_agent: false"}', stderr=""),
+    ])
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    with pytest.raises(RuntimeError, match="expose_agent: false"):
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/product", preflight=True,
+        )
+    assert execute.await_count == 2
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_fresh_policy_reader_gates_actual_preparation_boundary(monkeypatch, tmp_path, allowed):
+    import os
+    import shlex
+    import subprocess
+    import sys
+
+    from agent_codespaces.plugin_preparation import prepare_plugins
+
+    policy = tmp_path / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text("expose_agent: " + ("true" if allowed else "false") + "\n")
+    monkeypatch.setattr(
+        "agent_codespaces.plugin_preparation.plugin_plan",
+        lambda *args, **kwargs: {"plugins": [], "marketplaces": {}},
+    )
+    commands = []
+
+    async def execute(_manager, _name, command, **kwargs):
+        commands.append(command)
+        if len(commands) == 1:
+            return SimpleNamespace(exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n", stderr="")
+        if len(commands) == 2:
+            words = shlex.split(command)
+            assert words[:2] == ["bash", "-lc"]
+            words = shlex.split(words[2])
+            assert words[:4] == ["python3", "-I", "-S", "-c"]
+            environment = dict(os.environ)
+            environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+            result = subprocess.run(
+                [sys.executable, *words[1:5], str(tmp_path)],
+                input=kwargs["input_bytes"], capture_output=True, timeout=10, env=environment,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            return SimpleNamespace(
+                exit_code=result.returncode, stdout=result.stdout.decode(), stderr=result.stderr.decode(),
+            )
+        assert allowed and command == "bash -ls", "policy refusal reached plugin preparation"
+        return SimpleNamespace(exit_code=0, stdout="__VENUE_PLUGINS__{}", stderr="")
+
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    if allowed:
+        assert await prepare_plugins(
+            object(), "synthetic", None, object(), "/workspaces/product",
+        ) == []
+        assert len(commands) == 3
+    else:
+        with pytest.raises(RuntimeError, match="expose_agent: false"):
+            await prepare_plugins(object(), "synthetic", None, object(), "/workspaces/product")
+        assert len(commands) == 2
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.asyncio
+async def test_login_context_refuses_absent_receiver_before_preparation(monkeypatch, tmp_path):
+    import os
+    from pathlib import Path
+    import shlex
+    import shutil
+    import subprocess
+    import sys
+
+    from agent_codespaces.plugin_preparation import prepare_plugins
+
+    if os.name == "nt":
+        bash = Path(os.environ["ProgramFiles"]) / "Git" / "bin" / "bash.exe"
+        if not bash.is_file():
+            pytest.skip("requires Git Bash, not a WSL launcher")
+    else:
+        bash = shutil.which("bash")
+        if bash is None:
+            pytest.skip("requires bash")
+    bash = str(bash).replace("\\", "/")
+    python = sys.executable.replace("\\", "/")
+    workspace = tmp_path.as_posix()
+    if os.name == "nt":
+        workspace = "/" + workspace[0].lower() + workspace[2:]
+    (tmp_path / ".git").mkdir()
+    profile = tmp_path / "guest-login.sh"
+    # Supply login-only initialization without loading real host profiles.
+    profile.write_text(
+        'if shopt -q login_shell; then\n'
+        '  export COPILOT_EXTENSIONS_CONTEXT=fixture-explicit-context\n'
+        'fi\n'
+        f'bash() {{ {shlex.quote(bash)} --noprofile --norc "$@"; }}\n'
+        f'python3() {{ {shlex.quote(python)} "$@"; }}\n'
+        'command() {\n'
+        '  if [ "$1" = -v ] && [ "$2" = agent-worktrees ]; then return 1; fi\n'
+        '  builtin command "$@"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    environment = dict(os.environ, BASH_ENV=profile.as_posix())
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    monkeypatch.setattr(
+        "agent_codespaces.plugin_preparation.plugin_plan",
+        lambda *args, **kwargs: {"plugins": [], "marketplaces": {}},
+    )
+    results = []
+
+    async def execute(_manager, _name, command, **kwargs):
+        assert len(results) < 2, "explicit guest context reached plugin preparation"
+        result = subprocess.run(
+            [bash, "--noprofile", "--norc", "-c", command],
+            input=kwargs.get("input_bytes"), capture_output=True, timeout=15, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        results.append(result)
+        return SimpleNamespace(
+            exit_code=result.returncode, stdout=result.stdout.decode(), stderr=result.stderr.decode(),
+        )
+
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    with pytest.raises(RuntimeError, match="cannot validate an explicit installation context"):
+        await prepare_plugins(object(), "synthetic", None, object(), workspace)
+    assert len(results) == 2
+    assert results[0].returncode == 127
+    assert results[0].stdout.strip() == b"__HOSTING_RECEIVER_ABSENT__"
+    assert results[1].returncode == 3
 
 
 def test_launch_guard_precedes_native_effects_and_keeps_caller_flags():

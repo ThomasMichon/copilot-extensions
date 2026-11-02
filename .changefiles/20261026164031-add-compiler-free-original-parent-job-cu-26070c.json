@@ -1,0 +1,9 @@
+{
+  "comment": "Add compiler-free original-parent Job custody for qualified Windows startup helpers; existing bootstrap callers remain unchanged",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

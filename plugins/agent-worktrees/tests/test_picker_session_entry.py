@@ -112,7 +112,7 @@ def test_fast_entry_uses_provider_session_without_launching_a_manager_front_door
     handoff, _, directory, _, _, _ = session
     monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_CMD", raising=False)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
-    monkeypatch.setattr(picker_fast_entry.registry_paths, "registry_root", lambda: directory)
+    monkeypatch.setattr(picker_fast_entry.registry_paths, "registry_root", lambda *_args: directory)
     monkeypatch.setattr(picker_fast_entry, "_request", lambda *_args: handoff)
     monkeypatch.setattr(
         entry, "open_session",
@@ -143,16 +143,21 @@ def test_launch_carries_caller_cwd_but_no_environment_values(session, monkeypatc
 
 
 def test_launch_identity_is_carried_separately_from_reusable_environment_scope(session):
-    handoff, _, _, requests, _, _ = session
+    handoff, _, _, requests, commands, _ = session
     environment = {
         "PYTHONUTF8": "1", "AGENT_WORKTREES_LAUNCH_ID": "sample-fresh-launch",
         "AGENT_WORKTREES_BINSTUB_STARTED": "fixture-start",
+        "CE_TERMINAL_LAUNCH": "per-terminal-request",
     }
     assert entry.invocation_context(environment) == entry.invocation_context({})
     entry.open_session(handoff, ["selected-engine"], environment)
     payload = requests[0][1]["payload"]
     assert payload["launch_id"] == "sample-fresh-launch"
     assert payload["binstub_started"] == "fixture-start"
+    assert all(
+        command_env["CE_TERMINAL_LAUNCH"] == environment["CE_TERMINAL_LAUNCH"]
+        for _, command_env in commands
+    )
 
 
 def test_selected_provider_root_normalizes_only_the_missing_launcher_default(session):

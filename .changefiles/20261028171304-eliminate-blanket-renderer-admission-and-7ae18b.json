@@ -1,0 +1,13 @@
+{
+  "comment": "Eliminate blanket renderer admission and qualify literal Manager input through native setup",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

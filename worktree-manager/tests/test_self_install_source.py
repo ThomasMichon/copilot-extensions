@@ -1,0 +1,250 @@
+"""Read-only Manager source selection; construction has a separate native lane."""
+
+from __future__ import annotations
+
+import json
+import hashlib
+import shutil
+from contextlib import contextmanager
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from worktree_manager import self_install as si
+
+
+def _payload(directory: Path, commit: str, version: str = "1.2.3") -> tuple[Path, object]:
+    directory.mkdir()
+    package = directory / "src" / "worktree_manager"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(f'__version__ = "{version}"\n')
+    (package / "__main__.py").write_text("")
+    (directory / "pyproject.toml").write_text(
+        f'[project]\nname = "copilot-extensions-worktree-manager"\nversion = "{version}"\n',
+    )
+    source = si._runtime_installer().runtime_source
+    digest = source.assembly_hash(directory)
+    identity = source.SourceIdentity(
+        "worktree-manager", version, commit, "c" * 40, digest,
+        source.runtime_version(version, commit, digest),
+    )
+    (directory / source.SOURCE_FILE).write_text(json.dumps(identity.document()))
+    return directory, identity
+
+
+@pytest.fixture
+def selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = tmp_path / "root"
+    monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "bin")
+    monkeypatch.setattr(si, "control_plane_providers_dir", lambda: tmp_path / "providers")
+    return root
+
+
+def _select(root: Path, payload: Path, identity, *, repair: bool = False, profile: bool = False) -> Path:
+    adapter = si._runtime_installer()
+    generation = identity.runtime_version
+    receipt = None
+    local = ("copilot-extensions-worktree-manager",)
+    if profile:
+        binding = {
+            "component": "worktree-manager", "mode": "source",
+            "release": {
+                "identity": "source:" + identity.source_commit,
+                "sha256": "sha256:" + identity.assembly_hash,
+            },
+        }
+        lock = "sha256:" + hashlib.sha256(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")).encode(),
+        ).hexdigest()
+        receipt = {
+            "construction": "closed-wheels", "lock_id": lock, "binding": binding,
+            "distributions": {local[0]: {
+                "version": identity.package_version,
+                "filename": f"copilot_extensions_worktree_manager-{identity.package_version}-py3-none-any.whl",
+                "sha256": "sha256:" + "1" * 64,
+            }},
+        }
+        generation += ".profile." + lock[7:23]
+    if repair:
+        generation += ".repair." + "f" * 32
+    slot = si.version_slot(generation, root)
+    shutil.copytree(payload, slot / "payload")
+    python = slot / ("Scripts/python.exe" if si.os.name == "nt" else "bin/python")
+    python.parent.mkdir(exist_ok=True)
+    python.write_text("fixture interpreter")
+    payload_hash = "a" * 64
+    if receipt is not None:
+        (slot / ".runtime-input-origins.json").write_text(json.dumps({
+            "schema": "installer-engine.frozen-input-origins", "version": 2,
+            "wheel_inputs": receipt, "local_packages": list(local),
+        }))
+        reuse = adapter.engine.WheelReuseInputs(
+            generation, json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            time.monotonic() + 30,
+        )
+        payload_hash = adapter.engine._wheel_construction_hash(
+            adapter.engine._construction_hash(
+                adapter.engine._source_files(adapter.engine._package_roots(payload)), (), local,
+            ), reuse,
+        )
+    adapter.runtime.mark_complete(root, generation, payload_hash=payload_hash)
+    si._write_marker(root, generation)
+    si._deploy_binstubs()
+    si._write_control_plane_provider_manifest(payload, root=root)
+    return slot
+
+
+def _bytes(root: Path) -> dict[Path, bytes]:
+    return {path: path.read_bytes() for path in root.parent.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_exact_source_plan_reports_actual_selected_generation(selection, tmp_path, repair):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, repair=repair)
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "already-current", result
+    assert result.version == "1.2.3"
+    assert result.slot == str(slot)
+    assert result.marker == slot.name
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_profile_source_plan_reuses_bound_selected_generation(selection, tmp_path, repair):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, profile=True, repair=repair)
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "already-current", result
+    assert result.slot == str(slot) and result.marker == slot.name
+    reused, local = si._runtime_installer()._source_profile_reuse(payload, identity, slot)
+    assert reused.generation == slot.name
+    assert local == ("copilot-extensions-worktree-manager",)
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("fault", ["binding", "locals", "completion-hash"])
+def test_profile_source_plan_refuses_changed_constructor_binding(selection, tmp_path, fault):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity, profile=True)
+    if fault == "completion-hash":
+        marker = slot / ".install-complete.json"
+        data = json.loads(marker.read_text())
+        data["payload_hash"] = "b" * 64
+        marker.write_text(json.dumps(data))
+    else:
+        path = slot / ".runtime-input-origins.json"
+        data = json.loads(path.read_text())
+        if fault == "binding":
+            data["wheel_inputs"]["binding"]["release"]["identity"] = "source:" + "b" * 40
+        else:
+            data["local_packages"] = []
+        path.write_text(json.dumps(data))
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "error", result
+    assert "source-profile evidence is invalid" in result.reason
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("version", ["1.2.3", "2.0.0"])
+def test_different_source_is_planned_even_with_matching_package(selection, tmp_path, version):
+    previous, identity = _payload(tmp_path / "previous", "a" * 40, version)
+    _select(selection, previous, identity)
+    payload, desired = _payload(tmp_path / "payload", "b" * 40)
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "planned", result
+    assert result.slot == str(si.version_slot(desired.runtime_version, selection))
+    assert result.marker is None
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("field", ["version", "completed_at"])
+def test_source_selection_requires_valid_completion(selection, tmp_path, field):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity)
+    marker = slot / ".install-complete.json"
+    document = json.loads(marker.read_text())
+    document.pop(field)
+    marker.write_text(json.dumps(document))
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "planned", result
+    assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_invalid_source_bytes_are_explicit_errors_without_publication(selection, tmp_path, selected):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    slot = _select(selection, payload, identity)
+    damaged = slot / "payload" if selected else payload
+    (damaged / "src" / "worktree_manager" / "__main__.py").write_text("changed bytes\n")
+    before = _bytes(selection)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "error", result
+    assert "bytes do not match" in result.reason
+    assert _bytes(selection) == before
+
+
+def test_first_source_plan_names_immutable_target_without_creating_root(selection, tmp_path):
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    result = si.self_install(payload, root=selection, dry_run=True)
+    assert result.action == "planned", result
+    assert result.slot == str(si.version_slot(identity.runtime_version, selection))
+    assert not selection.exists()
+
+
+@pytest.mark.parametrize("failure", ["content", "health", "io"])
+def test_candidate_selects_distinct_generation_for_repair_not_io_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    adapter = si._runtime_installer()
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.2.3"\n',
+        encoding="utf-8",
+    )
+    root = tmp_path / "root"
+    previous = root / "versions" / "1.2.3"
+    previous.mkdir(parents=True)
+    sentinel = previous / "retained-code"
+    sentinel.write_bytes(b"untouched predecessor")
+    (root / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    uv = tmp_path / "uv"
+    uv.touch()
+    monkeypatch.setattr(adapter.engine, "_select_uv_executable", lambda _: str(uv))
+    monkeypatch.setattr(adapter.runtime, "is_complete", lambda *a, **kw: True)
+    entries = []
+
+    @contextmanager
+    def candidate(actual_root: Path, generation: str, **kwargs: object):
+        assert actual_root == root
+        entries.append(generation)
+        if len(entries) == 1:
+            if failure == "content":
+                adapter.engine._refuse(adapter.runtime.ADMIT_CONTENT_CONFLICT, generation)
+            if failure == "health":
+                raise adapter.engine.HealthRepairRequired("fixture installed health failure")
+            raise OSError("fixture write denied")
+        assert kwargs["reuse_generations"] is False
+        assert generation.startswith("1.2.3+repair.")
+        yield SimpleNamespace(slot=root / "versions" / generation)
+
+    monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
+    if failure == "io":
+        with pytest.raises(OSError, match="write denied"):
+            with adapter.candidate(payload, root, assemble=shutil.copytree, uv=uv):
+                pytest.fail("No constructed candidate")
+        assert entries == ["1.2.3"]
+    else:
+        with adapter.candidate(payload, root, assemble=shutil.copytree, uv=uv) as ready:
+            assert ready.slot.name == entries[-1] != previous.name
+        assert len(entries) == 2
+    assert sentinel.read_bytes() == b"untouched predecessor"
+    assert (root / "current-version").read_text(encoding="utf-8") == "1.2.3\n"

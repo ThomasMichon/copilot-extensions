@@ -173,11 +173,16 @@ def test_new_creation_prompt_is_not_reclassified_as_resume(monkeypatch):
 @pytest.mark.parametrize("selector", [
     {"worktree_id": "wt-a"}, {"base": True}, {"new": True},
 ])
-def test_ordinary_launches_do_not_require_new_flag_on_older_engine(monkeypatch, selector):
+def test_ordinary_launches_do_not_require_new_flag_on_older_engine(monkeypatch, tmp_path, selector):
     from worktree_manager import engine_client
 
     seen = []
     def older_engine(project, args, **kwargs):
+        if args[:2] == ["agent-policy", "check"]:
+            return {
+                "version": 1, "repository": str(tmp_path), "expose_agent": True,
+                "sources": [], "denied_by": [], "allowed": True,
+            }
         seen.append(args)
         assert "--stage-launch-seed" not in args
         return {"action": "exec", "cmd": ["copilot"]}
@@ -188,11 +193,18 @@ def test_ordinary_launches_do_not_require_new_flag_on_older_engine(monkeypatch, 
 
 @pytest.mark.parametrize("selector", [{"new": True}, {"worktree_id": "wt-a"}])
 @pytest.mark.parametrize("missing", ["--stage-launch-seed", "--require-native-seed"])
-def test_prompted_new_and_resume_require_staged_owner_on_older_engine(monkeypatch, selector, missing):
+def test_prompted_new_and_resume_require_staged_owner_on_older_engine(
+    monkeypatch, tmp_path, selector, missing,
+):
     from worktree_manager import engine_client
 
     seen = []
     def older_engine(project, args, **kwargs):
+        if args[:2] == ["agent-policy", "check"]:
+            return {
+                "version": 1, "repository": str(tmp_path), "expose_agent": True,
+                "sources": [], "denied_by": [], "allowed": True,
+            }
         seen.append(args)
         assert "--stage-launch-seed" in args
         assert "--require-native-seed" in args

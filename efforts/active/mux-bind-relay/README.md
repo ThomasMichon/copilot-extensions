@@ -129,6 +129,21 @@ diagnostics`.
       design constraint, promote Status Draft -> Active.
 - [x] This effort doc.
 
+### Purpose-first keyboard-guide continuation (#8811)
+
+- [ ] Deliver the Companion continuation's permanent second Claims row and
+      visible hotkey guides for switching CLI/Summary modes through this
+      existing relay. The operator's 2026-10-25 revision selects guides
+      instead of required clickable mode tabs; the same-window pane layout
+      remains required.
+- [ ] Name actual keyboard actions supported by the selected backend and view.
+      Preserve Ctrl+K's existing popup contract, truthful persistent-pane
+      navigation and the original CLI process/answer boundary. Do not
+      invent a direct-toggle label for a popup-only binding.
+- [ ] Preserve per-session PSMux versus shared-server tmux scope and the
+      historical Step 2 click deferral. This continuation does not enable
+      withheld mouse binds or select an unreleased backend/runtime update.
+
 ### Direct wrapper, quoting and popup-lifetime acceptance from #2696
 
 <!-- backlog-reconciliation:7556:transfer:2696:to:efforts/active/mux-bind-relay/README.md -->
@@ -181,6 +196,12 @@ No native/mux/popup/process/installer/runtime/configuration operation is authori
 
 ## Validation Plan
 
+- [ ] Purpose-first continuation: qualify the permanent two-row status and
+      advertised mode-switch keys at their actual source/native tiers,
+      including narrow terminals and unrelated sessions. Registration or
+      pane `send-keys` is not real mux-client key dispatch. This does not
+      close the complementary app/manual/head acceptance below.
+
 - [ ] Complete every direct #2696 Plan/Validation clause above at its original supported evidence tier. Preserve the complementary root's separate lane and all original owners/holds; administrative consolidation is not implemented popup acceptance.
 
 - [x] Registration proof (automatable): `list-keys -T root` on a real psmux
@@ -207,6 +228,19 @@ _Pending — submitted for review per the repo's `pr-self-merge` profile before
 implementation begins._
 
 ## Journal
+
+### 2026-10-25 - Purpose-first mode guides selected
+
+- The operator chose visible hotkey guides instead of required clickable
+  CLI/Summary mode tabs in #8811. Retain this root's relay ownership and
+  existing click deferral while adding the finite two-row/keyboard-guide
+  continuation; no source or operational custody transfers.
+- The Companion root retains its complete app/manual/head acceptance and
+  same-window pane requirement. Guides must describe actual controls, not
+  imply that the existing popup hotkey is a persistent-pane toggle.
+- No live binding, native client, runtime installation, update or rollout
+  follows from this intent revision. Current input/quoting/popup and
+  platform qualification still needs its own evidence and normal review.
 
 ### 2026-10-22 - Direct retained #2696 acceptance
 

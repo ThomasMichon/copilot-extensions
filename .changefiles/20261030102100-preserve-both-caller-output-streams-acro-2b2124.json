@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve both caller output streams across scoped no-window engine handoffs",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

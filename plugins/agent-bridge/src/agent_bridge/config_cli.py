@@ -4,6 +4,35 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+import yaml
+
+def _cmd_config_session_mode(args: argparse.Namespace) -> None:
+    from .session_modes import current_repo_root, resolve_session_mode, write_session_mode
+
+    try:
+        options = {
+            "operator_repo": args.operator_repo, "repo": args.repo, "venue": args.venue,
+            "default": args.default, "repo_root": current_repo_root(),
+        }
+        result = resolve_session_mode(**options)
+        written = None
+        if args.set is not None or args.unset:
+            written = write_session_mode(
+                operator_repo=args.operator_repo, machine_local=args.machine_local,
+                repo=args.repo, venue=args.venue, mode=args.set, unset=args.unset,
+            )
+        if written is not None:
+            result = resolve_session_mode(**options)
+            result["written"] = written
+    except (ValueError, OSError, yaml.YAMLError) as exc:
+        print(f"[FAIL] session-mode preference: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        _core()._json_out(result)
+    else:
+        print(f"{result['mode']} ({result['source']})")
 
 
 def _core():
@@ -144,6 +173,22 @@ def register_config_commands(sub: argparse._SubParsersAction) -> None:
 
     config_p = sub.add_parser("config", help="Manage configuration and topology profiles")
     config_sub = config_p.add_subparsers(dest="config_command")
+
+    mode_p = config_sub.add_parser(
+        "session-mode", help="Read or explicitly set new-session mode preferences",
+        description="Offline agent-bridge.session-mode/v1 preference contract",
+    )
+    destination = mode_p.add_mutually_exclusive_group()
+    destination.add_argument("--operator-repo", type=Path, help="Absolute operator config repository root")
+    destination.add_argument("--machine-local", action="store_true", help="Explicitly write the active service config")
+    mode_p.add_argument("--repo", help="Exact, case-sensitive target repository name")
+    mode_p.add_argument("--venue", choices=("codespace", "container", "ssh", "local"))
+    mode_p.add_argument("--default", choices=("acp", "cli"), default="acp", help="Adopter fallback only")
+    mutation = mode_p.add_mutually_exclusive_group()
+    mutation.add_argument("--set", choices=("acp", "cli"))
+    mutation.add_argument("--unset", action="store_true")
+    mode_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    mode_p.set_defaults(func=_cmd_config_session_mode)
 
     config_show_p = config_sub.add_parser("show", help="Show current config")
     config_show_p.set_defaults(func=_cmd_config_show)

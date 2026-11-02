@@ -1697,10 +1697,13 @@ def test_relocate_off_payload_is_best_effort(monkeypatch):
 # -- resolve_runtime_python (the standardized versioned-runtime resolver) -----
 
 
-def _make_slot(root: Path, version: str, *, complete: bool = False) -> Path:
+def _make_slot(
+    root: Path, version: str, *, complete: bool = False, nested: bool = False,
+) -> Path:
     """Create a ``versions/<version>`` slot with a fake interpreter; return it."""
     sub = "Scripts/python.exe" if procutil.os.name == "nt" else "bin/python"
-    py = root / "versions" / version / sub
+    slot = root / "versions" / version
+    py = (slot / ".venv" if nested else slot) / sub
     py.parent.mkdir(parents=True)
     py.write_text("")
     if complete:
@@ -1716,25 +1719,29 @@ def _make_slot(root: Path, version: str, *, complete: bool = False) -> Path:
     return py
 
 
-def test_resolve_runtime_python_tier1_current_version_marker(tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_resolve_runtime_python_tier1_current_version_marker(tmp_path, nested, encoding):
     root = tmp_path / ".agent-bridge"
-    py = _make_slot(root, "0.1.0-dev9")
+    py = _make_slot(root, "0.1.0-dev9", nested=nested)
     _make_slot(root, "0.1.0-dev99")  # newer slot exists but marker wins
-    (root / "current-version").write_text("0.1.0-dev9")
+    (root / "current-version").write_text("0.1.0-dev9", encoding=encoding)
     assert procutil.resolve_runtime_python(root) == py
 
 
-def test_resolve_runtime_python_tier2_last_known_good(tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+def test_resolve_runtime_python_tier2_last_known_good(tmp_path, nested):
     root = tmp_path / ".agent-bridge"
-    py = _make_slot(root, "0.1.0-dev9")
+    py = _make_slot(root, "0.1.0-dev9", nested=nested)
     (root / "last-known-good").write_text("0.1.0-dev9")  # marker absent -> LKG
     assert procutil.resolve_runtime_python(root) == py
 
 
-def test_resolve_runtime_python_tier3_prefers_newest_complete_slot(tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+def test_resolve_runtime_python_tier3_prefers_newest_complete_slot(tmp_path, nested):
     root = tmp_path / ".agent-worktrees"
     _make_slot(root, "1.5.3-dev50", complete=True)
-    py_new = _make_slot(root, "1.5.3-dev185", complete=True)
+    py_new = _make_slot(root, "1.5.3-dev185", complete=True, nested=nested)
     _make_slot(root, "1.5.3-dev200")  # newest but INCOMPLETE -> not preferred
     # No marker, no LKG: newest *complete* slot wins, numeric-aware (185 > 50).
     assert procutil.resolve_runtime_python(root) == py_new
@@ -1742,6 +1749,71 @@ def test_resolve_runtime_python_tier3_prefers_newest_complete_slot(tmp_path):
 
 def test_resolve_runtime_python_none_when_no_runtime(tmp_path):
     assert procutil.resolve_runtime_python(tmp_path / ".agent-bridge") is None
+
+
+def test_resolve_runtime_python_prefers_nested_environment_in_selected_slot(tmp_path):
+    root = tmp_path / ".agent-bridge"
+    _make_slot(root, "1.0.0")
+    nested = _make_slot(root, "1.0.0", nested=True)
+    (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    assert procutil.resolve_runtime_python(root) == nested
+
+
+@pytest.mark.parametrize("redirect", ["slot", "environment"])
+def test_resolve_runtime_python_refuses_redirected_slot(tmp_path, redirect):
+    root = tmp_path / ".agent-bridge"
+    slot = root / "versions" / "1.0.0"
+    _make_slot(tmp_path / "outside", "1.0.0")
+    target = tmp_path / "outside" / "versions" / "1.0.0"
+    link = slot if redirect == "slot" else slot / ".venv"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory links are unavailable: {error}")
+    (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    assert procutil.resolve_runtime_python(root) is None
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_sibling_launch_executes_selected_physical_environment(tmp_path, monkeypatch, nested):
+    root = tmp_path / ".agent-bridge"
+    slot = root / "versions" / "1.0.0"
+    prefix = slot / ".venv" if nested else slot
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(prefix)
+    python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        capture_output=True, text=True, timeout=15, **procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    module = Path(result.stdout.strip()) / "agent_bridge"
+    module.mkdir()
+    (module / "__init__.py").write_text("", encoding="utf-8")
+    (module / "__main__.py").write_text(
+        "import json, sys\n"
+        "print(json.dumps({'prefix': sys.prefix, 'args': sys.argv[1:]}))\n",
+        encoding="utf-8",
+    )
+    (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    _make_slot(root, "9.0.0")
+    sentinel = root / "retained-data.json"
+    sentinel.write_text('{"keep": true}', encoding="utf-8")
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    for _ in range(2):
+        command = procutil.agent_bridge_launch_prefix()
+        assert command == [str(python), "-m", "agent_bridge"]
+        launched = subprocess.run(
+            [*command, "probe", "literal argument"], capture_output=True,
+            text=True, timeout=15, **procutil.no_window_kwargs(),
+        )
+        assert launched.returncode == 0, launched.stderr
+        assert json.loads(launched.stdout) == {
+            "prefix": str(prefix), "args": ["probe", "literal argument"],
+        }
+    assert sentinel.read_text(encoding="utf-8") == '{"keep": true}'
+    assert (root / "current-version").read_text(encoding="utf-8") == "1.0.0"
 
 
 def test_resolve_runtime_python_ignores_venv_junction_layout(tmp_path):
@@ -1756,13 +1828,14 @@ def test_resolve_runtime_python_ignores_venv_junction_layout(tmp_path):
 # -- resolve_own_runtime_python (this plugin's own canonical spawn target) ----
 
 
-def test_resolve_own_runtime_python_uses_installed_slot(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_resolve_own_runtime_python_uses_installed_slot(tmp_path, monkeypatch, nested):
     """The canonical resolver's result must win over sys.executable: this is the
     exact fix for the production incident where a self-relaunch site fell back
     to whatever interpreter happened to be running instead of the installed
     current-version slot."""
     root = tmp_path / ".agent-dispatch"
-    py = _make_slot(root, "0.1.2-dev49")
+    py = _make_slot(root, "0.1.2-dev49", nested=nested)
     (root / "current-version").write_text("0.1.2-dev49")
     monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: root)
     assert procutil.resolve_own_runtime_python() == str(py)

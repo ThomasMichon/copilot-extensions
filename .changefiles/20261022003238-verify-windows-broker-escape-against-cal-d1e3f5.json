@@ -1,0 +1,65 @@
+{
+  "comment": "Correct Windows retirement and CPU sample custody; route broker-required Python daemon launches through the explicitly adopted finite native-pipe broker without legacy WMI fallback, preserving direct and contained launch behavior. Retain crash-surviving generations and driver-owned foundation, Manager, Worktrees, Bridge, Codespaces, Dispatch, PullRequests, Vault, MCP and Index primary-runtime native adoption, including shared native installation custody before publication, immutable helper retention and owned removal. Bind Dispatch retained restoration to its admitted record bytes and existing retention before adoption or selection. Qualify the Index embedded foreground entry separately from detached management. Add work-in-progress cell-qualified completion, identity, generation, retention and execution-owner integration; qualification remains held. Enforce copied non-editable deployment graphs, including development generations, materialize complete nested library closures, and refuse mutable installed environments at completion and immutable reuse without rewriting published slots.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -601,8 +601,42 @@ function Get-HostProcess {
     return @()
 }
 
+function Get-DaemonInstanceHelperRoot {
+    $payloadScripts = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\scripts'))
+    $roots = @($PSScriptRoot)
+    $manifest = Join-Path (Split-Path $payloadScripts -Parent) 'plugin.json'
+    $expectedSource = Join-Path (Split-Path $payloadScripts -Parent) 'transports\dtssh\scripts'
+    if ([IO.Path]::GetFullPath($expectedSource) -eq [IO.Path]::GetFullPath($PSScriptRoot) -and
+        (Test-Path -LiteralPath $manifest -PathType Leaf) -and
+        -not ([IO.File]::GetAttributes($manifest) -band [IO.FileAttributes]::ReparsePoint) -and
+        ((Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).name -ceq 'agent-ssh')) {
+        $roots += $payloadScripts
+    }
+    foreach ($root in $roots) {
+        $valid = $true
+        foreach ($name in @('daemon_instances.ps1', 'daemon_instance_runtime.pyz', 'installer-instance-reconcile.ps1')) {
+            $path = Join-Path $root $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+                ([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint)) {
+                $valid = $false
+                break
+            }
+        }
+        if ($valid) { return $root }
+    }
+    throw 'Native daemon-instance helpers are unavailable; update the owning payload.'
+}
+
 function Install-Shortcut {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $helperRoot = Get-DaemonInstanceHelperRoot
+    foreach ($name in @('daemon_instances.ps1', 'daemon_instance_runtime.pyz', 'installer-instance-reconcile.ps1')) {
+        $source = Join-Path $helperRoot $name
+        $destination = Join-Path $InstallDir $name
+        if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+    }
     Copy-Item $LauncherSrc $LauncherDst -Force
     if ([System.IO.Path]::GetFullPath($InstallerSrc) -ne
         [System.IO.Path]::GetFullPath($InstallerDst)) {
@@ -668,9 +702,24 @@ function Start-DetachedHostLauncher {
     return $null
 }
 
+function Assert-HostLauncherPython {
+    # The launcher runs a Python daemon-instance helper. Check up front so a box
+    # without Python fails here with the remedy, not as a host that exits before
+    # writing any log. The Microsoft Store alias stub is not an interpreter.
+    $python = Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } | Select-Object -First 1
+    if ($python) {
+        # Same isolation flags as the daemon-instance helper, so a stale PYTHONHOME can't fail a usable interpreter.
+        & $python.Source -I -S -B -X utf8 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    throw 'The dtssh host launcher needs Python 3.10+ available as python on PATH (the Microsoft Store alias stub does not count). Install Python for this user, then rerun.'
+}
+
 function Start-HostLauncher {
     param([switch]$Foreground)
     if (Get-HostProcess) { Write-Host "dtssh host already running"; return }
+    Assert-HostLauncherPython
     if (-not (Test-Path $LauncherDst)) { throw "Launcher not installed: $LauncherDst" }
     $args = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $args += @('-Tunnel', $Tunnel) }
@@ -768,6 +817,9 @@ function Stop-Launcher {
 
 switch ($Action) {
     { $_ -in @('install', 'update') } {
+        $helperRoot = Get-DaemonInstanceHelperRoot
+        . (Join-Path $helperRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $helperRoot
         # Validation requires ssh-keygen. Provision it while the existing host
         # is still running so a rebuilt machine can restore before any outage.
         Install-HostIdentityValidationTools

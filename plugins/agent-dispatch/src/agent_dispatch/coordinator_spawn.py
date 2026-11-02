@@ -6,12 +6,18 @@ from dataclasses import asdict
 import logging
 import sqlite3
 import subprocess
+from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
 from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
+from .queue_records import WorkerAdmissionInhibited
+from .queue_pool_placement import (
+    ConfiguredPoolPlacementRequired, POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION,
+    pool_placement_contract,
+)
 
 
 class ReserveSpawnBody(BaseModel):
@@ -20,6 +26,16 @@ class ReserveSpawnBody(BaseModel):
     allow_suspended_reembodiment: bool = False
     driver: str | None = None
     allocation_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
+
+
+class PoolPlacementBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    version: int = Field(default=1, ge=1, le=1, strict=True)
+    reserved_by: str = Field(min_length=1)
+    catalog_revision: int = Field(ge=0, strict=True)
+    driver: Literal["cli"] = "cli"
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -63,6 +79,7 @@ class RecordSpawnBody(BaseModel):
     session_info: dict | None = None
     startup_complete: bool | None = Field(default=None, strict=True)
     startup_revision: int | None = Field(default=None, ge=1, strict=True)
+    ordinary_redrive: dict | None = None
 
 class FenceSpawnStartupBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -81,6 +98,7 @@ class RecordSpawnWorktreeBody(BaseModel):
     worktree: str
     ownership: str = "unknown"
     creating_host: str | None = None
+    execution_machine: str | None = None
     driver: str | None = None
     allocation_project: str | None = None
     worktree_path: str | None = None
@@ -220,6 +238,44 @@ def register_spawn_routes(
             status = 404 if msg.startswith("no such") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
 
+    pool_control = _make_control_auth(
+        control_token or None, rejected, operation="pool-placement",
+        code_prefix="pool_placement_control",
+        unavailable_message="pool placement requires configured control authority",
+        forbidden_message="pool placement requires control authority",
+    )
+    from .coordinator_pool_startup import register as register_pool_startup
+    register_pool_startup(app, queue, bus, pool_control)
+
+    @app.get("/pool-placements/contract", dependencies=[Depends(pool_control)])
+    def placement_contract() -> dict:
+        return pool_placement_contract()
+
+    @app.post("/pool-placements", dependencies=[Depends(pool_control)])
+    def place_pool_task(body: PoolPlacementBody, request: Request) -> dict:
+        gate = request.app.state.drain_gate
+        with gate.track_claim():
+            if gate.draining:
+                raise HTTPException(409, detail="pool placement is inhibited while draining")
+            try:
+                placement = queue.place_pool_task(
+                    body.task_id, reserved_by=body.reserved_by, driver=body.driver,
+                    catalog_revision=body.catalog_revision,
+                )
+            except WorkerAdmissionInhibited as exc:
+                raise HTTPException(409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(409, detail=str(exc)) from exc
+        reservation, reserved, assignment = placement.reservation, placement.reserved, placement.assignment
+        if reserved:
+            bus.publish({"type": "task.claimed", "task_id": body.task_id})
+            bus.publish({"type": "spawn.reserved", "reservation": asdict(reservation)})
+        return {
+            "protocol": POOL_PLACEMENT_PROTOCOL, "version": POOL_PLACEMENT_VERSION,
+            "reserved": reserved, "reservation": asdict(reservation),
+            "assignment": asdict(assignment),
+        }
+
     @app.post("/spawn-reservations")
     @app.post("/spawn-reservations/revisions")
     def reserve_spawn(body: ReserveSpawnBody, request: Request) -> dict:
@@ -234,6 +290,10 @@ def register_spawn_routes(
                 driver=body.driver,
                 allocation_revision=body.allocation_revision,
             )
+        except WorkerAdmissionInhibited as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
+        except ConfiguredPoolPlacementRequired as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
@@ -413,6 +473,8 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations/{key}/spawned")
     def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+        if body.ordinary_redrive is not None and body.session_info is not None:
+            raise HTTPException(status_code=409, detail="redrive cannot replace original startup evidence")
         if body.session_info is not None:
             from .ordinary_bridge import record_session_info
             _reservation_guard(lambda: record_session_info(queue, key, body.session_info))
@@ -430,6 +492,7 @@ def register_spawn_routes(
                 key, session_handle=body.session_handle, worktree=body.worktree,
                 startup_complete=body.startup_complete,
                 startup_revision=body.startup_revision,
+                ordinary_redrive=body.ordinary_redrive,
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
@@ -472,6 +535,7 @@ def register_spawn_routes(
                 body.worktree,
                 ownership=body.ownership,
                 creating_host=body.creating_host,
+                execution_machine=body.execution_machine,
                 driver=body.driver,
                 allocation_project=body.allocation_project,
                 worktree_path=body.worktree_path,
@@ -628,11 +692,14 @@ def register_spawn_routes(
 
     @app.get("/spawn-reservations")
     def list_reservations(
+        response: Response,
         task_id: str | None = None,
         state: str | None = None,
         repo: str | None = None,
         label: str | None = None,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -646,14 +713,20 @@ def register_spawn_routes(
             if task_status
             else None
         )
+        if native_release_pending is not None:
+            response.headers["X-Dispatch-Reservation-Query"] = "native-release-pending/v1"
+        if pool_accountable:
+            response.headers["X-Dispatch-Pool-Accountability"] = "pool-accountable/v1"
         return [
-            _reservation_dict(r)
+            {**_reservation_dict(r), **({"pool_accountable": True} if pool_accountable else {})}
             for r in queue.list_reservations(
                 task_id=task_id,
                 state=states,
                 repo=repo,
                 label=label,
                 conclusion_state=conclusion_state,
+                native_release_pending=native_release_pending,
+                pool_accountable=pool_accountable,
                 resume_requested=resume_requested,
                 task_status=task_statuses,
                 latest_only=latest_only,

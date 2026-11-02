@@ -232,17 +232,36 @@ async def _preview(app, pilot, value="chosen"):
     return app.screen
 
 
-def test_production_ui_real_owner_set_reset_cancel_and_unchanged_sources(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stage", ["cancel", "set", "reset"])
+def test_production_ui_real_owner_set_reset_cancel_and_unchanged_sources(tmp_path, monkeypatch, stage):
     root = _owner(tmp_path, monkeypatch)
+    override = str(Path("local") / "override.json")
+    if stage == "reset":
+        (root / override).write_text(json.dumps({"mode": "literal-{configuration_preview}"}))
     original = _tree(root)
 
     async def run():
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             engine = await _ready(app, pilot)
-            engine._pivot_runtime(engine._reg_pivot()).repoll("")
-            await _wait(pilot, lambda: engine._task_state()[0] == "ready")
+            if stage == "cancel":
+                engine._pivot_runtime(engine._reg_pivot()).repoll("")
+                await _wait(pilot, lambda: engine._task_state()[0] == "ready")
             assert _tree(root) == original
+            if stage == "reset":
+                source = root / "preset" / "config.json"
+                source.write_text(json.dumps({"mode": "changed-inheritance", "secret": "SENTINEL-DO-NOT-RENDER"}))
+                expected = _tree(root)
+                expected.pop(override)
+                _edit(engine, "reset")
+                await _preview(app, pilot)
+                await pilot.click("#config-preview-apply")
+                await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                            and not app.screen.pending)
+                assert _tree(root) == expected
+                app.screen.action_close()
+                await _wait(pilot, lambda: engine._task_rows()[0]["effective"] == "changed-inheritance")
+                return
             _edit(engine)
             preview = await _preview(app, pilot)
             assert preview.preview and not preview.preview.blocked
@@ -251,12 +270,12 @@ def test_production_ui_real_owner_set_reset_cancel_and_unchanged_sources(tmp_pat
             assert "chosen" in str(preview.query_one("#config-preview").render())
             assert "SENTINEL" not in str(preview.query_one("#config-preview").render())
             assert _tree(root) == original
-            await pilot.press("enter")
-            await pilot.pause()
-            assert not isinstance(app.screen, ConfigurationPreviewScreen)
-            assert _tree(root) == original
-            _edit(engine)
-            preview = await _preview(app, pilot)
+            if stage == "cancel":
+                await pilot.press("enter")
+                await pilot.pause()
+                assert not isinstance(app.screen, ConfigurationPreviewScreen)
+                assert _tree(root) == original
+                return
             await pilot.click("#config-preview-edit")
             await pilot.pause()
             assert app.screen._collect()["value"] == "chosen"
@@ -268,22 +287,9 @@ def test_production_ui_real_owner_set_reset_cancel_and_unchanged_sources(tmp_pat
             assert "set completed" in receipt and "owner diagnostic" in receipt
             assert "SENTINEL" not in receipt
             after_set = _tree(root)
-            override = str(Path("local") / "override.json")
             assert after_set == {**original, override: after_set[override]}
             app.screen.action_close()
             await _wait(pilot, lambda: engine._task_rows()[0]["effective"] == "literal-{configuration_preview}")
-            source = root / "preset" / "config.json"
-            source.write_text(json.dumps({"mode": "changed-inheritance", "secret": "SENTINEL-DO-NOT-RENDER"}))
-            expected = _tree(root)
-            expected.pop(str(Path("local") / "override.json"))
-            _edit(engine, "reset")
-            await _preview(app, pilot)
-            await pilot.click("#config-preview-apply")
-            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
-                        and not app.screen.pending)
-            assert _tree(root) == expected
-            app.screen.action_close()
-            await _wait(pilot, lambda: engine._task_rows()[0]["effective"] == "changed-inheritance")
 
     asyncio.run(run())
 

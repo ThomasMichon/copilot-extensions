@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint, spawn_instance
+from functools import partial
+
 import argparse
 import base64
 import hashlib
@@ -501,6 +504,14 @@ def ensure_keeper(
                 "holds": holds,
                 "instance_token": instance_token,
             },
+            popen=partial(
+                spawn_instance,
+                instance=DaemonInstanceSpec(
+                    "agent-ssh-forward-keeper",
+                    Path(os.path.abspath(_STORE.state_path(_state_key(target)))).parent,
+                    Path(__file__).resolve(),
+                ),
+            ),
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),
         )
         current_holds = holds_store.read_holds(read_keeper_state(target) or {})
@@ -870,6 +881,7 @@ async def _run_forward_keeper(args: argparse.Namespace) -> int:
     )
 
 
+@daemon_entrypoint("agent-ssh-forward-keeper", source=__file__, purpose="production")
 def cmd_forward_keeper(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -890,6 +902,10 @@ def add_copilot_subparser(sub) -> None:
     p.add_argument("--seed")
     p.add_argument("--seed-file", dest="seed_file")
     p.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    from plugin_resolve.reflection import selection_json
+    p.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     from .copilot_plugins import disabled_plugin
     p.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,

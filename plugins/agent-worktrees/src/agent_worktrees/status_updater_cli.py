@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from agent_procutil import spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import config as cfg
@@ -246,7 +250,7 @@ def _runtime_superseded(
             arguments["generation"] = generation
         return override(**arguments)
     try:
-        root = install_root if install_root is not None else cfg.install_dir()
+        root = install_root if install_root is not None else cfg.runtime_install_dir()
         versions_root = os.path.realpath(os.path.join(str(root), "versions"))
         try:
             ver = (Path(str(root)) / "current-version").read_text("utf-8").strip()
@@ -256,6 +260,8 @@ def _runtime_superseded(
             return False  # no marker -> cannot determine; keep serving
         active = os.path.realpath(os.path.join(str(root), "versions", ver))
         mine = os.path.realpath(prefix if prefix is not None else sys.prefix)
+        if os.path.basename(mine) == ".venv":
+            mine = os.path.dirname(mine)
     except Exception:
         return False
     if _slot_superseded(active, mine, versions_root):
@@ -279,7 +285,8 @@ _BACKGROUND_AUTH_ENV_KEYS = {
 def _background_environment() -> dict[str, str]:
     """Environment for resident helpers, excluding session credentials."""
     return {
-        key: value for key, value in os.environ.items()
+        key: os.path.abspath(value.strip()) if key.upper() == "AGENT_HOME" and value.strip()
+        else value for key, value in os.environ.items()
         if key.upper() not in _BACKGROUND_AUTH_ENV_KEYS
     }
 
@@ -342,28 +349,125 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         if path:
             argv += ["--path", path]
 
-        kwargs: dict = {
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-            # Never inherit the spawner's cwd.  Both spawn seams -- the launcher
-            # and the sessionStart reseed hook -- run FROM the plugin payload
-            # dir, and a detached child that keeps that dir as its cwd holds an
-            # open directory handle that blocks ``copilot plugin update`` from
-            # replacing the payload on Windows (``os error 32``: the file/dir is
-            # in use).  The updater locates its worktree via ``--path``, so its
-            # cwd is irrelevant to its work -- root it at HOME.
-            "cwd": os.path.expanduser("~"),
-            "env": _background_environment(),
-        }
-        kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
-
-        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
+        root = Path(os.path.abspath(cfg.install_dir()))
+        spawn_daemon(
+            argv, cwd=os.path.expanduser("~"), env=_background_environment(),
+            log_path=root / "logs" / "status-updater.log", console_children=True,
+            instance=DaemonInstanceSpec(
+                "agent-worktrees-status-updater", root, Path(__file__).resolve(),
+            ),
+        )
         return True
     except Exception:
         return False
 
 
+def _with_updater_lease(session, compute, *, still_needed=None):
+    from . import git_ops
+    if not git_ops._windows_observation():
+        return compute()
+    import hashlib
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+    from .status_monitor_runtime import _aw_runtime_home
+
+    name = hashlib.sha256(session.encode("utf-8")).hexdigest()
+    lease = SingleInstance(
+        _aw_runtime_home(), service="status-updater", lock_name=f"status-updater-{name}.lock",
+    )
+    contended = False
+    while True:
+        if contended and still_needed is not None and not still_needed():
+            return 0
+        try:
+            lease.acquire()
+            break
+        except AlreadyRunningError:
+            contended = True
+            time.sleep(1.0)
+    try:
+        if contended and still_needed is not None and not still_needed():
+            return 0
+        return compute()
+    finally:
+        lease.release()
+
+
+def _run_status_updater_loop(path, interval, session_state, owns, runtime_superseded, set_option):
+    from .push_timeout import ObservationCleanupError
+
+    pending = None
+    retiring = False
+    interrupted = None
+    strikes = 0
+
+    def settle():
+        try:
+            return pending.try_settle()
+        except Exception:
+            return False
+
+    try:
+        while True:
+            if pending is not None:
+                if settle():
+                    pending = None
+                else:
+                    time.sleep(interval)
+                    continue
+            if retiring:
+                break
+            state = "gone" if retiring else session_state()
+            if not retiring:
+                if state == "gone":
+                    retiring = True
+                elif state == "unknown":
+                    strikes += 1
+                    retiring = strikes >= 20
+                else:
+                    strikes = 0
+                    retiring = not owns() or runtime_superseded()
+            if retiring:
+                break
+            if state == "unknown":
+                time.sleep(interval)
+                continue
+            try:
+                segment = _render_status_segment(
+                    path, fetch=False, plain=False, no_title=False, persist_title=True,
+                )
+            except ObservationCleanupError as error:
+                pending = error
+                cause = getattr(error, "operation_error", None)
+                if isinstance(cause, (KeyboardInterrupt, SystemExit)):
+                    interrupted, retiring = cause, True
+                segment = "UNKNOWN (cleanup pending)"
+            except Exception:
+                segment = ""
+            set_option("@aw_seg", segment)
+            time.sleep(interval)
+    except BaseException as error:
+        if interrupted is None:
+            interrupted = error
+    finally:
+        while pending is not None:
+            try:
+                if settle():
+                    pending = None
+            except BaseException as error:
+                if interrupted is None:
+                    interrupted = error
+            if pending is not None:
+                try:
+                    time.sleep(interval)
+                except BaseException as error:
+                    if interrupted is None:
+                        interrupted = error
+    if interrupted is not None:
+        raise interrupted
+    return 0
+
+
+@daemon_entrypoint("agent-worktrees-status-updater", source=__file__, purpose="production")
 def cmd_status_updater(args: argparse.Namespace) -> int:
     """Keep a session's status-bar vars fresh without per-render spawns.
 
@@ -385,7 +489,6 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     """
     import shutil
     import subprocess
-    import time
 
     sess = args.session
     if not sess:
@@ -411,8 +514,13 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # status-updater is a no-project command, so main() never resolved a
     # project for us -- but the status renderers need one to find the
     # worktree's tracking record (repo:id locus + session title).  Resolve it
-    # git-like from --path before rendering anything.
-    _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
+    # git-like from --path before rendering anything. Windows discovery also
+    # observes Git, so its native custody lease must already be held.
+    from . import git_ops
+
+    bounded_windows = git_ops._windows_observation()
+    if not bounded_windows:
+        _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
 
     def _mux(*a: str) -> subprocess.CompletedProcess[str] | None:
         try:
@@ -473,16 +581,21 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # a dark bar.
     from . import update_stage as _upd
 
-    _owner = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
-    if _owner is not None and _owner.returncode == 0:
-        _tok = (_owner.stdout or "").strip()
-        if _tok.isdigit() and int(_tok) != os.getpid() and _upd._pid_alive(int(_tok)):
-            _op = _mux("display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
-            _owner_prefix = (
-                (_op.stdout or "").strip() if (_op is not None and _op.returncode == 0) else ""
-            )
-            if _owner_prefix and not _runtime_superseded(prefix=_owner_prefix):
-                return 0
+    def _current_owner_live() -> bool:
+        owner = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
+        if owner is not None and owner.returncode == 0:
+            token = (owner.stdout or "").strip()
+            if token.isdigit() and int(token) != os.getpid() and _upd._pid_alive(int(token)):
+                prefix = _mux("display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
+                value = (prefix.stdout or "").strip() if prefix is not None and prefix.returncode == 0 else ""
+                return bool(value and not _runtime_superseded(prefix=value))
+        return False
+
+    if _current_owner_live():
+        return 0
+
+    def _still_needed() -> bool:
+        return not _runtime_superseded() and _session_state() != "gone" and not _current_owner_live()
 
     # Single-instance guard.  The launcher may (re)spawn an updater on every
     # attach/join, so each updater claims @aw_updater with its own token; a
@@ -497,59 +610,20 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
             return True  # can't read the token -> assume ownership, keep serving
         return r.stdout.strip() == token
 
-    _set("@aw_updater", token)
-    # Publish this updater's runtime slot (``sys.prefix``) alongside the pid
-    # token so a later spawn can distinguish a live *current* owner (defer to it)
-    # from a live but superseded one (replace it) -- see the debounce above.
-    _set("@aw_updater_prefix", os.path.realpath(sys.prefix))
-
-    # Identity (machine | env | repo:id4) is static for the session's life:
-    # render once, push to @aw_ctx, never poll it again.
-    try:
-        _set("@aw_ctx", _render_status_context(path, plain=False))
-    except Exception:
-        pass
-
-    # Disposition (DIRTY/FINAL/WIP/CONVO/...) changes as work happens: refresh
-    # @aw_seg on the interval until the session ends, a newer updater takes
-    # over, or a newer runtime supersedes this one (dotfiles #911).  The bar
-    # itself does zero process work between updates -- the mux only re-runs the
-    # strftime %H:%M clock.
-    #
-    # Transient mux failures (``_session_state() == "unknown"``) are tolerated:
-    # they do NOT retire the updater, they only skip that tick's liveness proof.
-    # The loop exits only on a definitive ``gone``, a lost ownership token, a
-    # superseding runtime, or ``_MAX_TRANSIENT_STRIKES`` consecutive unknowns
-    # (a genuinely wedged mux -- ~strikes*interval seconds of silence), so a
-    # busy-TUI timeout can no longer silently kill the bar (dotfiles #915).
-    _MAX_TRANSIENT_STRIKES = 20
-    strikes = 0
-    while True:
-        state = _session_state()
-        if state == "gone":
-            break
-        if state == "unknown":
-            strikes += 1
-            if strikes >= _MAX_TRANSIENT_STRIKES:
-                break
-            time.sleep(interval)
-            continue
-        strikes = 0  # a live answer resets the transient run
-        if not _owns() or _runtime_superseded():
-            break
+    def publish_and_run():
+        if bounded_windows:
+            _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
+        _set("@aw_updater", token)
+        _set("@aw_updater_prefix", os.path.realpath(sys.prefix))
         try:
-            seg = _render_status_segment(
-                path,
-                fetch=False,
-                plain=False,
-                no_title=False,
-                persist_title=True,
-            )
+            _set("@aw_ctx", _render_status_context(path, plain=False))
         except Exception:
-            seg = ""
-        _set("@aw_seg", seg)
-        time.sleep(interval)
-    return 0
+            pass
+        return _run_status_updater_loop(
+            path, interval, _session_state, _owns, _runtime_superseded, _set,
+        )
+
+    return _with_updater_lease(sess, publish_and_run, still_needed=_still_needed)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

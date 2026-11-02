@@ -4,8 +4,24 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent_worktrees import anchor_hygiene
+
+
+def test_resolve_toplevel_uses_headless_git_helper_with_existing_deadline(tmp_path, monkeypatch):
+    calls = []
+
+    def git(*args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout=str(tmp_path) + "\n")
+
+    monkeypatch.setattr(anchor_hygiene.git_ops, "git", git)
+    assert anchor_hygiene._resolve_toplevel(tmp_path) == tmp_path
+    assert calls == [
+        (("rev-parse", "--show-toplevel"),
+         {"cwd": tmp_path, "check": False, "timeout": 5}),
+    ]
 
 
 def _git(*args: str, cwd: Path) -> None:

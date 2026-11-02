@@ -8,10 +8,12 @@ import os
 import subprocess
 import sys
 import io
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import _git_credential_route as router
 from agent_worktrees import (
@@ -25,6 +27,171 @@ from agent_worktrees import update_auth_sources as sources
 from agent_worktrees import update_events, update_runtime
 
 pytestmark = pytest.mark.guard
+
+
+@pytest.mark.parametrize("phase", ["preflight", "runtimes", "integration", "prune"])
+def test_local_selected_phase_does_not_eagerly_discover_network_auth(monkeypatch, phase):
+    from contextlib import nullcontext
+
+    selected = SimpleNamespace(unresolved=False, anchor_failed=False)
+    monkeypatch.setattr(context, "session", lambda: nullcontext(selected))
+    monkeypatch.setattr(context, "_marketplace_context",
+                        lambda: pytest.fail("unselected marketplace context discovery"))
+    assert context.run_update(argparse.Namespace(phase=phase), lambda args: 0) == 0
+
+
+def test_anchor_phase_prepares_only_anchor_auth(monkeypatch):
+    from contextlib import nullcontext
+
+    prepared = []
+    selected = SimpleNamespace(
+        unresolved=False, anchor_failed=False,
+        prepare_anchors=lambda: prepared.append("anchors"),
+    )
+    monkeypatch.setattr(context, "session", lambda: nullcontext(selected))
+    monkeypatch.setattr(context, "_marketplace_context",
+                        lambda: pytest.fail("anchor phase discovered marketplace auth"))
+    assert context.run_update(argparse.Namespace(phase="anchors"), lambda args: 0) == 0
+    assert prepared == ["anchors"]
+
+
+def test_payload_phase_does_not_prepare_anchor_auth(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+
+    prepared = []
+    selected = SimpleNamespace(
+        unresolved=False, anchor_failed=False,
+        prepare=lambda root, **kw: prepared.append((root, kw)),
+    )
+    monkeypatch.setattr(context, "session", lambda: nullcontext(selected))
+    monkeypatch.setattr(context, "_marketplace_context", lambda: tmp_path)
+    assert context.run_update(argparse.Namespace(phase="payloads"), lambda args: 0) == 0
+    assert prepared == [(tmp_path, {"include_anchors": False})]
+
+
+@pytest.mark.parametrize("selected_status", ["ok", "auth_required"])
+def test_filtered_payload_auth_prepares_only_its_selected_context(monkeypatch, tmp_path, selected_status):
+    invocation, selected = tmp_path / "invocation", tmp_path / "selected"
+    observed = []
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    monkeypatch.setattr(context, "_marketplace_context", lambda: invocation)
+
+    def marketplaces(cwd):
+        observed.append(cwd)
+        return [_source(id="marketplace:copilot-extensions", cwd=cwd)]
+
+    def report(items):
+        return auth.AuthReport([
+            auth.SourceAuth(
+                item, [], status=selected_status if item.cwd == selected else "auth_required",
+            )
+            for item in items
+        ])
+
+    monkeypatch.setattr(sources, "marketplaces", marketplaces)
+    monkeypatch.setattr(auth, "report", report)
+    monkeypatch.setattr(update_events, "enter", lambda *a, **kw: None)
+    monkeypatch.setattr(update_events, "auth_result", lambda *a, **kw: None)
+
+    def acquire(args):
+        context.child_environment(selected)
+        return 0
+
+    result = context.run_update(
+        argparse.Namespace(phase="payloads", plugin=["agent-example"]), acquire,
+    )
+    assert result == (0 if selected_status == "ok" else 4)
+    assert observed == [selected]
+
+
+def test_unknown_filtered_payload_rejects_before_auth_discovery(monkeypatch):
+    from agent_worktrees import update_cli
+
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    monkeypatch.setattr(update_cli, "_core_helper", lambda name, fallback: fallback)
+    monkeypatch.setattr(update_cli, "_registered_plugin_targets", lambda: {})
+    monkeypatch.setattr(
+        context.Session, "prepare", lambda *a, **kw: pytest.fail("unselected auth preparation"),
+    )
+    monkeypatch.setattr(
+        context, "_marketplace_context", lambda: pytest.fail("unselected marketplace discovery"),
+    )
+    monkeypatch.setattr(update_events, "record", lambda *a, **kw: None)
+    assert context.run_update(
+        argparse.Namespace(phase="payloads", plugin=["unknown"]),
+        update_cli._update_in_plugin_steps,
+    ) == 1
+
+
+def test_router_import_does_not_load_installer_cleanup_or_command_rendering():
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-X", "utf8", "-c",
+            "import sys; import agent_worktrees._git_credential_route; "
+            "assert not {'agent_worktrees.installer_run', 'agent_worktrees.push_timeout', "
+            "'shlex'} & sys.modules.keys()",
+        ],
+        capture_output=True, text=True, timeout=5, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_rendered_router_helper_preserves_isolated_bootstrap():
+    argv = shlex.split(auth.router_helper()[1:])
+    index = argv.index("-c") + 1
+    argv[index] = (
+        "import sys; assert sys.flags.no_site and sys.flags.isolated "
+        "and sys.dont_write_bytecode; assert 'site' not in sys.modules; " + argv[index]
+    )
+    result = process.run(
+        [*argv, "get"],
+        env={
+            **os.environ,
+            "CE_UPDATE_AUTH_ROUTES": json.dumps({"example.test/team/repo": {"method": "env"}}),
+            "GH_TOKEN_TEAM": "test-helper-value",
+            "GH_HOST": "example.test",
+        },
+        input="protocol=https\nhost=example.test\npath=team/repo\n\n",
+        timeout=5,
+    )
+    assert result.status == 0, result.stderr
+    assert auth.parse_attributes(result.stdout)[router.SECRET_KEY] == "test-helper-value"
+
+
+def test_auth_process_result_retains_immutable_named_fields_and_defaults():
+    result = process.Result(0)
+    assert result.status == 0
+    assert result.stdout == result.stderr == ""
+    assert not result.timed_out and not result.missing and not result.truncated
+    assert result == process.Result(status=0)
+    with pytest.raises(AttributeError):
+        result.status = 1
+
+
+def test_auth_timeout_cannot_report_success_after_zero_exit(monkeypatch):
+    waits = []
+    closed = []
+
+    def wait(**kwargs):
+        waits.append(kwargs)
+        if len(waits) == 1:
+            raise subprocess.TimeoutExpired(["fixture"], kwargs["timeout"])
+        return 0
+
+    child = SimpleNamespace(
+        returncode=0, stdin=io.BytesIO(), stdout=io.BytesIO(b"partial"),
+        stderr=io.BytesIO(), wait=wait,
+    )
+    monkeypatch.setattr(process, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        process, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: (child, SimpleNamespace(close=lambda: closed.append(True))),
+    )
+    result = process.run(["fixture"], env={})
+    assert result.timed_out
+    assert result.status is None
+    assert result.stdout == "partial"
+    assert closed == [True, True]
 
 
 def _source(owner="team", *, id="marketplace:example", required=True, cwd=None):
@@ -207,7 +374,7 @@ def test_no_incomplete_command_config_is_manufactured():
 
 
 def test_router_deny_and_readonly_store_never_execute(monkeypatch):
-    monkeypatch.setattr(router, "run", lambda *a, **k: pytest.fail("unexpected child"))
+    monkeypatch.setattr(process, "run", lambda *a, **k: pytest.fail("unexpected child"))
     env = {
         "CE_UPDATE_AUTH_ROUTES": json.dumps({"example.test/team/repo": {"method": "deny"}}),
         "CE_UPDATE_AUTH_READONLY": "1",
@@ -234,7 +401,7 @@ def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(tmp_
     config = _clean_git_env(monkeypatch, tmp_path)
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    subprocess.run(["git", "init", "-q", str(checkout)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True, **no_window_kwargs())
     helper = "!f() { printf '%s\\n' username=original " + router.SECRET_KEY + "=fixture; }; f"
     for key, value in [
         ("credential.helper", "!exit 71"),
@@ -244,7 +411,7 @@ def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(tmp_
         subprocess.run(
             ["git", "-C", str(checkout), "config", "--add", key, value],
             check=True,
-            **git_ops.no_window_kwargs(),
+            **no_window_kwargs(),
         )
     local = checkout / ".git" / "config"
     before = config.read_bytes(), local.read_bytes()
@@ -363,6 +530,171 @@ def test_bounded_auth_child_caps_both_streams_and_reports_timeout():
         [sys.executable, "-c", "import time; time.sleep(60)"], env=environment, timeout=0.2
     )
     assert stalled.timed_out
+
+
+def test_exited_auth_root_with_unfinished_pipes_is_not_success(monkeypatch):
+    import threading
+
+    released = threading.Event()
+
+    class Pipe:
+        def read(self, size):
+            assert released.wait(5)
+            return b""
+
+        def close(self):
+            pass
+
+    child = SimpleNamespace(
+        stdin=io.BytesIO(), stdout=Pipe(), stderr=Pipe(), returncode=0,
+        wait=lambda **kw: 0, poll=lambda: 0,
+    )
+    job = SimpleNamespace(close=released.set)
+    monkeypatch.setattr(process, "spawn_sync_in_kill_on_close_job",
+                        lambda *a, **kw: (child, job))
+    result = process.run(["owned-auth-child"], env={}, timeout=0)
+    assert result.timed_out
+    assert result.status is None
+
+
+@pytest.mark.parametrize("size", [512, 1024 * 1024])
+def test_nonreading_auth_child_keeps_deadline_for_small_and_large_input(size):
+    result = process.run(
+        [sys.executable, "-I", "-S", "-B", "-c", "import time; time.sleep(60)"],
+        env=dict(os.environ), input="x" * size, timeout=0.2,
+    )
+    assert result.timed_out
+    assert result.status is None
+
+
+def test_auth_helper_bootstrap_excludes_site_and_bytecode_writes():
+    argv = process.module_argv("timeit")
+    result = process.run([
+        *argv, "-n", "1", "-r", "1", "-s", "import sys",
+        "assert sys.flags.no_site and sys.flags.isolated and sys.dont_write_bytecode; "
+        "assert 'site' not in sys.modules",
+    ], env=dict(os.environ), timeout=5)
+    assert result.status == 0, result.stderr
+    assert not result.timed_out
+
+
+def test_helper_bootstrap_keeps_the_selected_interpreter_identity(tmp_path):
+    expected = (getattr(sys, "_base_executable", None) or sys.executable) if os.name == "nt" else sys.executable
+    assert process.module_argv("timeit")[0] == expected
+    custom = str(tmp_path / "explicit-python")
+    assert process.module_argv("timeit", python=custom)[0] == custom
+
+
+@pytest.mark.parametrize("method", ["deny", "env"])
+def test_native_fast_route_does_not_import_repository_or_process_machinery(method):
+    argv = process.module_argv("agent_worktrees._git_credential_route")
+    index = argv.index("-c") + 1
+    argv[index] = (
+        "try:\n " + argv[index] + "\n"
+        "except SystemExit as error:\n assert error.code == 0\n"
+        "assert not any(name in sys.modules for name in "
+        "('agent_worktrees.repo_accounts', 'agent_worktrees.update_auth_process', "
+        "'agent_procutil', 'dataclasses', 'typing', 'inspect', 'urllib.parse'))\n"
+    )
+    result = process.run(
+        argv,
+        env={
+            **os.environ,
+            "GH_TOKEN": "fixture-secret",
+            "CE_UPDATE_AUTH_ROUTES": json.dumps({"github.com/team/repo": {"method": method}}),
+        },
+        input="protocol=https\nhost=github.com\npath=team/repo\n\n",
+        timeout=5,
+    )
+    assert result.status == 0, result.stderr
+    assert not result.timed_out
+    if method == "env":
+        assert router.parse_attributes(result.stdout)[router.SECRET_KEY] == "fixture-secret"
+    else:
+        assert result.stdout == ""
+
+
+@pytest.mark.parametrize("scheme", ["http", "https", "ssh", "git", "HTTPS", "custom"])
+def test_fast_authority_normalization_matches_url_parser(scheme):
+    from urllib.parse import urlsplit
+    from agent_worktrees.repo_urls import remote_host
+
+    def reference(authority):
+        parsed = urlsplit(scheme + "://" + authority)
+        if (
+            not parsed.hostname or parsed.username or parsed.password
+            or parsed.path or parsed.query or parsed.fragment
+        ):
+            raise ValueError("invalid authority")
+        host = parsed.hostname.casefold()
+        if ":" in host:
+            host = "[" + host + "]"
+        default = {"http": 80, "https": 443, "ssh": 22, "git": 9418}.get(scheme.casefold())
+        return host + (
+            ":" + str(parsed.port) if parsed.port is not None and parsed.port != default else ""
+        )
+
+    for authority in (
+        "Example.TEST", "github.com:443", "host:22", "HOST:00080", "host:0", "host:65535",
+        "host:65536", "host:", "host:-1", "host:word", "[::1]", "[::1]:443", "::1",
+        "user@host", "user:password@host", "host/path", "host?query", "host#fragment",
+        "", ".", "-host", "host..name", "host.", "caf\u00e9.test", "host\n",
+    ):
+        try:
+            expected = reference(authority)
+        except ValueError:
+            with pytest.raises(ValueError):
+                remote_host(authority, scheme)
+        else:
+            assert remote_host(authority, scheme) == expected, (scheme, authority)
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_credential_request_stops_at_blank_line_without_reading_the_next_request(ending):
+    request = ending.join(["protocol=https", "host=example.test", "", ""])
+    stream = io.StringIO(request + "unrelated-next-request")
+    assert router.read_request(stream) == request
+    assert stream.read() == "unrelated-next-request"
+
+
+def test_credential_request_refuses_oversized_input():
+    with pytest.raises(ValueError, match="exceeds"):
+        router.read_request(io.StringIO("x" * (1024 * 1024 + 1)))
+
+
+def test_native_credential_helper_does_not_wait_for_stdin_eof(monkeypatch):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setenv(
+        "CE_UPDATE_AUTH_ROUTES", json.dumps({"example.test/team/repo": {"method": "deny"}}),
+    )
+    child, job = process.spawn_sync_in_kill_on_close_job(
+        process.module_argv("agent_worktrees._git_credential_route"),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        require_job=os.name == "nt", allow_breakaway=False, **no_window_kwargs(),
+    )
+    readers = ThreadPoolExecutor(max_workers=2)
+    stdout = readers.submit(child.stdout.read, 1024 * 1024 + 1)
+    stderr = readers.submit(child.stderr.read, 1024 * 1024 + 1)
+    expires = time.monotonic() + 5
+    try:
+        child.stdin.write(b"protocol=https\nhost=example.test\npath=team/repo\n\n")
+        child.stdin.flush()
+        assert child.wait(timeout=max(0, expires - time.monotonic())) == 0
+        # Keep stdin open until both readers prove that the helper finished.
+        assert stdout.result(timeout=max(0, expires - time.monotonic())) == b""
+        assert stderr.result(timeout=max(0, expires - time.monotonic())) == b""
+    finally:
+        try:
+            if job is not None:
+                job.terminate_and_wait(5)
+            elif child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+        finally:
+            child.stdin.close()
+            readers.shutdown(wait=True)
 
 
 def test_report_only_is_readonly_and_never_calls_update_steps(monkeypatch, capsys):
@@ -498,33 +830,33 @@ def test_skipped_anchor_does_not_create_an_auth_requirement(
     anchor = tmp_path / "anchor"
     subprocess.run(
         ["git", "init", "-q", "-b", branch or "main", str(anchor)],
-        check=True, **git_ops.no_window_kwargs(),
+        check=True, **no_window_kwargs(),
     )
     if branch is None:
         subprocess.run(
             ["git", "-C", str(anchor), "-c", "user.name=Test", "-c",
              "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
         subprocess.run(
             ["git", "-C", str(anchor), "checkout", "--detach", "-q"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
     if bare:
         subprocess.run(
             ["git", "-C", str(anchor), "config", "core.bare", "true"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
     if inherited:
         caller = tmp_path / "caller"
         subprocess.run(
             ["git", "init", "-q", "-b", "main", str(caller)],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
         subprocess.run(
             ["git", "-C", str(caller), "-c", "user.name=Test", "-c",
              "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
         monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
         monkeypatch.setenv("GIT_WORK_TREE", str(caller))
@@ -566,7 +898,7 @@ def test_failing_repo_does_not_route_another_repo_of_the_same_owner(monkeypatch)
     def delegate(argv, **kwargs):
         return process.Result(0, "username=original\n" + router.SECRET_KEY + "=fixture\n")
 
-    monkeypatch.setattr(router, "run", delegate)
+    monkeypatch.setattr(process, "run", delegate)
     item = auth.SourceAuth(_source(), [], status="auth_required")
     env = auth.fallback(auth.AuthReport([item])).environment({})
     answer = router.route("get", "protocol=https\nhost=example.test\npath=team/other\n\n", env)
@@ -604,7 +936,7 @@ def test_real_router_does_not_execute_checkout_local_python(tmp_path, monkeypatc
 def test_real_git_ops_isolation_retains_only_the_scoped_auth_overlay(tmp_path, monkeypatch):
     _clean_git_env(monkeypatch, tmp_path)
     subprocess.run(
-        ["git", "init", "-q", str(tmp_path / "checkout")], check=True, **git_ops.no_window_kwargs()
+        ["git", "init", "-q", str(tmp_path / "checkout")], check=True, **no_window_kwargs()
     )
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.bare")
@@ -744,7 +1076,7 @@ def test_real_configured_router_preserves_non_password_credentials(tmp_path, mon
     )
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.helper", helper],
-        check=True, **git_ops.no_window_kwargs(),
+        check=True, **no_window_kwargs(),
     )
     item = auth.SourceAuth(_source(cwd=tmp_path), [])
     request = (
@@ -790,7 +1122,7 @@ def test_native_credentials_are_discovered_validated_and_replayed(
     ):
         subprocess.run(
             ["git", "config", "--file", str(config), key, value],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
     before = config.read_bytes()
     item = _source(cwd=tmp_path)
@@ -1041,11 +1373,13 @@ def test_managed_anchor_does_not_inject_legacy_header_even_without_fallback(monk
 
 
 def test_success_sweeps_owned_posix_session_without_touching_inherited_sessions(monkeypatch):
+    from agent_worktrees import installer_run
+
     captured = []
     monkeypatch.setattr(process, "os", SimpleNamespace(name="posix", getpgrp=lambda: 123))
     monkeypatch.setattr(process, "contained_test_mode", lambda: False)
     monkeypatch.setattr(
-        process.installer_run, "_sweep_exited_session", lambda child: captured.append(child.pid)
+        installer_run, "_sweep_exited_session", lambda child: captured.append(child.pid)
     )
 
     def spawn(*args, **kwargs):
@@ -1470,7 +1804,7 @@ def test_reachable_remote_with_unborn_head_is_not_an_auth_failure(tmp_path, monk
     _clean_git_env(monkeypatch, tmp_path)
     remote = tmp_path / "unborn.git"
     subprocess.run(
-        ["git", "init", "--bare", "-q", str(remote)], check=True, **git_ops.no_window_kwargs()
+        ["git", "init", "--bare", "-q", str(remote)], check=True, **no_window_kwargs()
     )
     item = auth.SourceAuth(_source(), [])
 
@@ -1526,7 +1860,7 @@ def test_git_returned_error_http_auth_status_is_not_a_generic_failure(monkeypatc
 def test_local_only_anchor_does_not_abort_auth_source_discovery(tmp_path, monkeypatch):
     _clean_git_env(monkeypatch, tmp_path)
     anchor = tmp_path / "local-only"
-    subprocess.run(["git", "init", "-q", str(anchor)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(anchor)], check=True, **no_window_kwargs())
     repo = cfg.RepoConfig(
         anchor=str(anchor), worktree_root=str(tmp_path / "worktrees"), default_branch="main"
     )
@@ -1546,11 +1880,11 @@ def test_first_clone_report_ignores_caller_repository_helper_reset(tmp_path, mon
     config = _clean_git_env(monkeypatch, tmp_path)
     config.write_text("[credential]\n    helper = global-fixture\n", encoding="utf-8")
     caller = tmp_path / "caller"
-    subprocess.run(["git", "init", "-q", str(caller)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(caller)], check=True, **no_window_kwargs())
     subprocess.run(
         ["git", "-C", str(caller), "config", "--add", "credential.helper", ""],
         check=True,
-        **git_ops.no_window_kwargs(),
+        **no_window_kwargs(),
     )
     staging = caller / "manager" / "staging"
     staging.mkdir(parents=True)
@@ -1583,10 +1917,10 @@ def test_helper_diagnostics_preserve_a_trailing_empty_reset():
     assert chain == []
 
 
-def test_unsupported_explicit_source_reports_a_structured_decline(capsys):
+def test_unsupported_explicit_source_reports_a_structured_decline(capsys, tmp_path):
     args = argparse.Namespace(
         auth_source=["https://git.example.test/team/repo%20name"],
-        auth_cwd=None,
+        auth_cwd=str(tmp_path),
         auth_non_repository=False,
         no_anchor_sync=True,
         auth_environment=True,
@@ -1626,12 +1960,12 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.helper", helper],
         check=True,
-        **git_ops.no_window_kwargs(),
+        **no_window_kwargs(),
     )
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.useHttpPath", "true"],
         check=True,
-        **git_ops.no_window_kwargs(),
+        **no_window_kwargs(),
     )
     before = config.read_bytes()
     probe = Probe(gh=False)
@@ -1667,7 +2001,7 @@ def test_public_source_header_fallback_is_failure_only_and_source_scoped(
     subprocess.run(
         ["git", "config", "--file", str(config),
          "http.https://example.test/.extraHeader", configured_header],
-        check=True, **git_ops.no_window_kwargs(),
+        check=True, **no_window_kwargs(),
     )
     before = config.read_bytes()
     item = _source(cwd=tmp_path)

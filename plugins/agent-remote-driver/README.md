@@ -1,5 +1,7 @@
 # agent-remote-driver
 
+[Configuration and generated-state reference](docs/configuration.md)
+
 > A user-global Copilot CLI SDK extension that gives any `copilot` session
 > baseline drivability -- attach to its live event stream, send/steer it, and
 > abort its current turn -- from the moment it launches, with no dependency on

@@ -82,6 +82,7 @@ def build(payload: dict) -> dict:
         "default_live": live, "headless": config.headless,
         "project_config": {
             "config_dir": str(config_dir), "repo_dir": str(anchor), "machine": config.machine,
+            "configured_machine": config.configured_machine,
         },
     }
     if config.headless:

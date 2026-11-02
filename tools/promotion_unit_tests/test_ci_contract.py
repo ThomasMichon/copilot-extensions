@@ -98,6 +98,12 @@ def declarations():
         "id": "code-impact", "timeout-minutes": 2,
         "env": GUARD.CODE_IMPACT_ENV, "run": GUARD.CODE_IMPACT_SCRIPT,
     })
+    ci["jobs"]["checks"]["steps"].extend({
+        "run": command, "if": GUARD.CODE_CONDITION, "timeout-minutes": 6,
+    } for command in (
+        "python tools/typecheck.py --prepare",
+        "python tools/typecheck.py --enforced",
+    ))
     ci["jobs"]["checks"]["steps"].append({
         "run": "python tools/check-changefile-presence.py --base base --head head",
         "if": GUARD.CHANGEFILE_CONDITION,
@@ -110,6 +116,18 @@ def validate(tmp_path, routing, ci):
     path.write_text(yaml.safe_dump(routing), encoding="utf-8")
     (tmp_path / "ci.yml").write_text(yaml.safe_dump(ci), encoding="utf-8")
     return GUARD.validate_workflow(path)
+
+
+@pytest.mark.parametrize("fallback", [False, True], ids=["accelerated", "fallback"])
+def test_workflow_loader_preserves_scalar_strings_and_rejects_malformed_input(tmp_path, monkeypatch, fallback):
+    if fallback:
+        monkeypatch.delattr(yaml, "CBaseLoader", raising=False)
+    path = tmp_path / "workflow.yml"
+    path.write_text("on: true\ncount: 7\nstamp: 2026-01-01\n", encoding="utf-8")
+    assert GUARD._load(path) == ({"on": "true", "count": "7", "stamp": "2026-01-01"}, [])
+    path.write_text("{", encoding="utf-8")
+    value, errors = GUARD._load(path)
+    assert value is None and errors and "cannot load" in errors[0]
 
 
 def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
@@ -367,6 +385,42 @@ def test_source_ast_selector_omits_only_closed_packet_inputs(tmp_path, event, pa
     assert ci_requires_units(event, "a" * 40, "b" * 40, lambda _argv: raw) is (
         event != "push"
     )
+
+
+@pytest.mark.parametrize("path", [
+    "tools/daemon-coverage.json",
+    "tools/check-daemon-coverage.py",
+    "worktree-manager/bin/manager-runtime.ps1",
+    "fleet-manager/src/fleet_manager/gateway_server.py",
+    "services/pr/src/agent_pull_requests_service/hosting.py",
+    "libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py",
+    "tools/clean-room/scenarios/example/fixtures/worker.py",
+    "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1",
+])
+def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(tmp_path, path):
+    from promotion_unit_contract import ci_requires_code_checks, ci_requires_source_ast_guards
+
+    raw = (path + "\0").encode()
+    read_diff = lambda _argv: raw
+    assert ci_requires_code_checks("pull_request", "a" * 40, "b" * 40, read_diff)
+    assert ci_requires_source_ast_guards("pull_request", "a" * 40, "b" * 40, read_diff)
+    output = tmp_path / "guard-output"
+    execute_source_ast_selector(output, "pull_request", read_diff)
+    assert output.read_text() == "run=true\n"
+
+
+def test_daemon_checker_is_in_the_existing_required_source_guard_step():
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    scans = [
+        step for step in workflow["jobs"]["checks"]["steps"]
+        if step.get("run") == "python tools/run-source-ast-guards.py"
+    ]
+    assert len(scans) == 1
+    assert scans[0]["if"] == GUARD.SOURCE_AST_CONDITION
+    assert "continue-on-error" not in scans[0]
+    runner = (root / "tools/run-source-ast-guards.py").read_text(encoding="utf-8")
+    assert '"check-daemon-coverage.py",' in runner
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "encoding", "path"])

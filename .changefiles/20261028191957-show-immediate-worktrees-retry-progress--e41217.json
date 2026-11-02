@@ -1,0 +1,9 @@
+{
+  "comment": "Show immediate Worktrees retry progress, scoped initial error panes and quiet cached-data staleness.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -37,6 +37,7 @@ from .coordinator_task_models import (
     ResumeBody,
     SteerBody,
     SteerTakeBody,
+    StartBody,
     SuspendBody,
     UnexcludeBody,
     UnholdBody,
@@ -45,6 +46,7 @@ from .coordinator_task_models import (
 )
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
+from .queue_records import WorkerAdmissionInhibited
 from .lease import FencingGuard
 from .queue import (
     CompletionOutcome,
@@ -57,7 +59,9 @@ from .queue import (
     TaskQueue,
     worker_id_for,
 )
-from .task_authority import mint_task_token, register_task_grant_route, resolve_task_authority
+from .task_authority import (
+    mint_task_token, register_task_grant_route, resolve_task_authority, start_incarnation,
+)
 from .queue_dedup import DedupConflictError
 from .steering import SteeringError, steer_request_fingerprint, steer_wake_message
 
@@ -138,6 +142,8 @@ def register_task_routes(
     fencing_guard: FencingGuard | None = None,
 ) -> None:
     register_task_grant_route(app, queue, control_token, fencing_guard, bus)
+    from .coordinator_task_recovery import register_task_recovery_routes
+    register_task_recovery_routes(app, queue, bus, control_token=control_token)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
     register_category_routes(app, queue, control_token=control_token,
@@ -297,6 +303,8 @@ def register_task_routes(
                 status_code=status, detail=exc.detail(operation="create")
             ) from exc
         except DedupConflictError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
+        except WorkerAdmissionInhibited as exc:
             raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -480,16 +488,21 @@ def register_task_routes(
         with gate.track_claim():
             if gate.draining:
                 return None
-            outcome = queue.claim_outcome(
-                owner,
-                body.capabilities,
-                repo=None if body.all_repos else body.repo,
-                machine=body.machine,
-                worktree=body.worktree,
-                task_id=body.task_id,
-                lease_seconds=body.lease_seconds,
-                evaluation=body.evaluation,
-            )
+            try:
+                outcome = queue.claim_outcome(
+                    owner,
+                    body.capabilities,
+                    repo=None if body.all_repos else body.repo,
+                    machine=body.machine,
+                    worktree=body.worktree,
+                    task_id=body.task_id,
+                    lease_seconds=body.lease_seconds,
+                    evaluation=body.evaluation,
+                )
+            except WorkerAdmissionInhibited as exc:
+                raise HTTPException(status_code=409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         for rejection in outcome.producer_rejections:
             _emit_producer_event("producer.claim_rejected", rejection)
         task = outcome.task
@@ -534,18 +547,20 @@ def register_task_routes(
         return {"adopted": False, "reason": "agent-dispatch has no relay"}
 
     @app.post("/tasks/{task_id}/start")
-    def start(task_id: str, body: WorkerBody, request: Request) -> dict:
+    @app.post("/tasks/{task_id}/pool-start")
+    def start(task_id: str, body: StartBody, request: Request) -> dict:
+        if request.url.path.endswith("/pool-start") and body.pool_placement_version is None:
+            raise HTTPException(422, detail="explicit pool start requires pool_placement_version")
         worker_id, owner_session_id = _resolve_task_authority(
             request, task_id, body.worker_id, body.owner_session_id
         )
         owner_session_id = owner_session_id or resolve_owner_session_id(worker_id)
+        generation, expected_owner = start_incarnation(request, body, owner_session_id)
         result = _guard(
             lambda: queue.start(
                 task_id, worker_id, owner_session_id=owner_session_id,
-                expected_owner_session_id=(
-                    owner_session_id if getattr(request.state, "task_scope", None) is not None else None
-                ),
-                expected_generation=_scoped_generation(request),
+                expected_owner_session_id=expected_owner, expected_generation=generation,
+                require_pool_assignment=body.pool_placement_version is not None,
             ),
             "task.started",
         )

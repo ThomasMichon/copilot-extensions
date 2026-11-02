@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import subprocess
 from collections.abc import Iterable
+from typing import Any
 
 from .redact import redact
 
@@ -18,7 +19,7 @@ TIMEOUT = "timeout"
 COMMAND_FAILED = "command_failed"
 SKIPPED = "skipped"
 
-# Higher is worse. ``skipped`` has no severity: it never affects a fold.
+# Higher is worse. Target skips are neutral; an explicit final skip retains scope.
 SEVERITY = {
     VERIFIED_CURRENT: 0,
     REQUIRES_RESTART: 1,
@@ -52,6 +53,7 @@ EXIT_INTERRUPTED = 130
 EXIT_CODES = {
     VERIFIED_CURRENT: 0,
     REQUIRES_RESTART: 0,
+    SKIPPED: 0,
     COMMAND_FAILED: 1,
     CONFIGURATION_LIMITATION: 3,
     AUTH_REQUIRED: 4,
@@ -113,9 +115,11 @@ def outcome_for_installer_exit(code: int) -> tuple[str, str | None]:
     return COMMAND_FAILED, f"exit_{code}"
 
 
-def classify_exception(exc: BaseException, *, op: str | None = None) -> tuple[str, dict]:
+def classify_exception(
+    exc: BaseException, *, op: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Map an exception raised inside a phase to ``(outcome, error)``."""
-    error: dict = {"message": redact(str(exc))[:2048]}
+    error: dict[str, Any] = {"message": redact(str(exc))[:2048]}
     if op:
         error["op"] = op
     if isinstance(exc, subprocess.TimeoutExpired):

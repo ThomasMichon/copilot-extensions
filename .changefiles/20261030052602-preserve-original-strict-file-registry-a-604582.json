@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve original strict-file, registry and lazy-migration acquisition provenance without replay.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -261,12 +261,16 @@ class TestPRPublication(PRWorkflowSetup):
         the PR head is the fork owner's (so a not-yet-opened PR opens from it)."""
         _stub_remote_target(monkeypatch, "fork", "alice/ext")
         config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(fork_pr_repo)
+        config = self._refspec_config(config)
+        published = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").pr.head_sha
+        _git("branch", "-f", branch, published, cwd=wt_path)
         result = pr_ops.create_pr(wid, config, title="Add feature")
         assert result.get("success"), result
         assert result["remote"] == "fork"
         assert result["pr_head"] == f"alice:{branch}"
         on_fork = git_ops.git("--git-dir", str(fork_dir), "rev-parse", f"refs/heads/{branch}")
         assert on_fork.stdout.strip() == result["head_sha"]
+        assert _git("rev-parse", f"refs/heads/{branch}", cwd=wt_path) == result["head_sha"]
         assert not _git("ls-remote", "--heads", "origin", branch, cwd=wt_path)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert (rec.pr.remote, rec.pr.head_repo) == ("fork", "alice/ext")

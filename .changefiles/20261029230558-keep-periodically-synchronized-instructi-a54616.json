@@ -1,0 +1,9 @@
+{
+  "comment": "Keep periodically synchronized instruction fallback bodies outside automatic discovery, including legacy inline declarations.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

@@ -7,12 +7,12 @@ import pytest
 
 @pytest.fixture
 def native_file_symlink():
-    def create(path, target):
+    def create(path, target, *, target_is_directory=False):
         try:
-            path.symlink_to(target)
+            path.symlink_to(target, target_is_directory=target_is_directory)
         except OSError as error:
             if os.name == "nt" and getattr(error, "winerror", None) == 1314:
-                pytest.skip("native file symlink creation requires Windows privilege")
+                pytest.skip("native symlink creation requires Windows privilege")
             raise
 
     return create

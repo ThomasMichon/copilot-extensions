@@ -116,7 +116,7 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 
 ### 4. Prove headroom and continue the parent
 
-- [ ] Rebuild isolated native fixtures from the actual final source; record
+- [x] Rebuild isolated native fixtures from the actual final source; record
   executing code and command provenance, complete outputs and raw failures.
 - [ ] Exercise five fresh command processes and five warm reads, then the actual
   Bridge namespace reader and native accounting boundary at its unchanged
@@ -194,8 +194,9 @@ its own measured trace, ownership check and separate reviewed plan.
 
 ## Next proposed slice: one Docker inventory query
 
-This is an **agent-recommended, plan-only** follow-up, not implemented behavior
-or an eight-second qualification. The retained normal-runtime profile used the
+This is an **agent-recommended** follow-up, reviewed in #8837 and merged as
+`4c67a5596f081595b2a0b0fed3167f3aab890f83` before implementation. It is not an
+eight-second qualification. The retained normal-runtime profile used the
 actual global legacy Worktrees command. Its 3.521-second peer wait dominates the
 Containers config read; that wait already contains the peer's startup and work
 and must not be added to a separate Worktrees profile. The latter attributes
@@ -208,16 +209,16 @@ at 0.197/0.199 seconds. The inventory query already contacts the daemon. Removin
 the preflight can eliminate one process/daemon round trip, but cannot by itself
 prove meaningful headroom or close the retained 1.378-second overrun.
 
-- [ ] Land this bounded proposal through review and required CI before code.
-- [ ] Refresh ownership and open PR files before implementation. Coordination
+- [x] Land this bounded proposal through review and required CI before code.
+- [x] Refresh ownership and open PR files before implementation. Coordination
   on #5761 and #8805 preserves #8805's mutation admission, exact-ID pinning and
   lifecycle work. Do not modify `_docker`, lifecycle policy, configuration
   precedence, Worktrees routing, launchers, SDKs or runtime ownership.
-- [ ] Remove only the version preflight from `list_containers`. Retain the
+- [x] Remove only the version preflight from `list_containers`. Retain the
   actual `docker ps` format, stopped-member inclusion, membership filtering,
   security fields and complete empty/nonempty inventory behavior. Keep
   `_check_docker` for its other callers.
-- [ ] Preserve explicit, actionable missing-CLI, unreachable-daemon, nonzero
+- [x] Preserve explicit, actionable missing-CLI, unreachable-daemon, nonzero
   query, timeout and malformed-response behavior. Keep the existing subprocess
   deadlines and error propagation; never convert a failed query into `[]`.
   A query failure must retain its operation and original diagnostic, with the
@@ -226,7 +227,7 @@ prove meaningful headroom or close the retained 1.378-second overrun.
   call without a version call, complete result parity and failure propagation.
   Run the focused contained packet, relevant source/unit gates, and the normal
   install-contract/lint checks. Keep effectful native tests out of unit CI.
-- [ ] Measure the changed real Docker-list boundary in fresh processes against
+- [x] Measure the changed real Docker-list boundary in fresh processes against
   a matching baseline, including a successful empty inventory and a disposable
   member when practical. Test unavailable CLI/daemon behavior through isolated
   command fixtures, not by stopping the shared daemon.
@@ -237,6 +238,42 @@ prove meaningful headroom or close the retained 1.378-second overrun.
   Reject the slice as a latency optimization if it has no meaningful measured
   benefit; even a useful component saving leaves unmet whole, first-touch,
   release/control and authorized installed-consumption gates open.
+
+The candidate's matched normal installed-process controls return equal complete
+inventories, with three component savings of 0.204/0.202/0.234 seconds and one
+query instead of two. Five fresh actual provider commands take
+6.840/5.079/5.244/5.371/5.664 seconds with the real global legacy Worktrees peer.
+Five fresh real Bridge readers discover an owned stopped test member in
+7.844/6.234/5.812/5.500/6.328 seconds; each retains five warm cached reads,
+settled native/CPU holders and attributable CPU observations. The first reader
+has only 0.156 seconds of slack, so variability and further headroom remain
+explicit rather than claiming a comfortable margin. The first outer Bridge
+test-process wall time is 9.480 seconds, including interpreter/import startup
+outside the existing persistent-reader deadline; it is not an under-eight
+outer-process result.
+
+Actual private-environment CLI and missing-daemon controls exit nonzero with no
+stdout, preserving diagnostics. The exact production inventory bytes also pass
+six stdlib-only Linux compatibility checks in a read-only, networkless disposable
+container. The canonical Windows source unit packet passes all 1,702 cases with
+coverage and zero effects within its unchanged 300-second bound. These results do not waive source review/CI, first-touch/release or authorized
+running-consumption obligations. The owned native Docker fixture was removed;
+no image was pulled and no shared service or installed selector changed.
+
+#8805 subsequently merged as `c7b1cfca8624103272ba0ee4f846c922c42549c0`.
+The integrated broader regression packet now passes 130 tests with one platform
+skip, resolving the original-owner fixture dependency. Its exact-source canonical
+unit packet passes all 1,702 cases in 227.610 seconds under the unchanged
+300-second bound after retaining a failed unit run performed concurrently with
+fixture construction.
+
+The rebuilt combined source does **not** inherit the earlier native pass:
+its fresh provider cohort takes 7.799/5.632/5.502/6.752/**8.821** seconds,
+all with complete actual inventories and no stderr. The fifth exceeds eight
+seconds. Stop there: no integrated Bridge cohort or installed adoption is
+credited, and an unchanged retry or an average cannot erase the failure.
+The one-query component remains independently reviewable; the parent still
+needs a measured residual-startup repair and current-source native qualification.
 
 ## Validation plan
 

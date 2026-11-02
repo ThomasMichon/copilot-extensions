@@ -224,6 +224,13 @@ def test_first_v1_write_upgrades_without_replacing_prior_evidence(tmp_path, oper
     retained = store.detail(attempt_id, include_input=True)
     events = retained.pop("events")
     assert events[:1] == original.pop("events")
+    latest = retained.pop("last_manager_event")
+    prior = original.pop("last_manager_event")
+    assert latest == (
+        {"sequence": events[-1]["sequence"], "observed_at": events[-1]["observed_at"],
+         "phase": "unknown", "details": {}}
+        if operation == "append" else prior
+    )
     assert retained == original
 
 

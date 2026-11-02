@@ -56,6 +56,27 @@ the only thing each provider's own `copilot` command has to own.
   transport deadlines; plans without it retain their existing lease budget.
   The field is not part of a printed handle and changes no execution timeout.
 
+## Owned delivery refusal diagnostics
+
+Prepared Bridge sends retain the existing version-1 admission evidence. A
+confirmed refusal carries an optional `OwnedDelivery.reason`, also included in
+its recovery record. Only the fixed Bridge startup refusal codes
+`startup_input`, `startup_target`, `startup_protocol`, `unsupported_protocol`
+and `plugins_not_ready` are retained; raw diagnostic/error text is not copied.
+Older responses without a reason, unknown codes and non-string values keep the
+generic refusal with `reason: null`.
+
+The detached launch failure exposes that code as `refusal_reason` and includes
+it in the existing human-readable error. This is diagnostic information, not
+permission to retry or replace the session. A refusal after an uncertain earlier
+response remains `unknown`, with identical-input reconciliation and ownership
+retention unchanged. The typed/deferred/unconfirmed/lost pending-seed helper is
+unaffected.
+
+Run parser/recovery controls through the contained runner with
+`python tools/run-plugin-tests.py venue-copilot --test-file tests/test_refs.py`.
+Provider entry-point controls remain in each consumer's detached-launch tests.
+
 ## Vendoring
 
 Detached model flag injection defaults to caller settings. The explicit

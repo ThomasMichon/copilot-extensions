@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "root_entries": [
+    ".venv",
+    "current-version",
+    "last-known-good",
+    "payload-dir",
+    "payload-origin",
+    "stamped-version",
+    "deploy-manifest.json"
+  ],
+  "bin_entries": [
+    "bootstrap-check.ps1",
+    "bootstrap-check.sh",
+    "resolve-runtime.ps1",
+    "resolve-runtime.sh"
+  ],
+  "script_entries": [],
+  "local_bin_entries": [
+    "agent-containers",
+    "agent-containers.ps1",
+    "agent-containers.cmd"
+  ],
+  "module": "agent_containers",
+  "guard_module": "legacy_runtime_uninstall.py",
+  "guard_function": "check_under_custody"
+}

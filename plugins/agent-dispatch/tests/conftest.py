@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 # Force `single_instance`'s own module-level `if os.name == "nt": import
@@ -19,6 +21,15 @@ import pytest
 # not merely a hermeticity nicety. Importing it here, at collection time
 # before any test runs, makes every subsuite grouping safe.
 import agent_dispatch.single_instance  # noqa: F401
+
+
+@pytest.fixture
+def isolated_service_environment(monkeypatch):
+    original = os.environ
+    before = dict(original)
+    monkeypatch.setattr(os, "environ", before.copy())
+    yield
+    assert dict(original) == before
 
 
 @pytest.fixture(autouse=True)

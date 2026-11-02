@@ -10,6 +10,7 @@ import time
 import pytest
 
 from agent_worktrees import claim_providers, finalize, tracking
+from test_resource_producer_finalize import _final_owner_seed as _final_owner_seed
 from test_resource_producer_finalize import final_owner as final_owner
 from test_resource_relationship import call, retired
 

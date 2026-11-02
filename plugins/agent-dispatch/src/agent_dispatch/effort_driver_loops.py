@@ -133,6 +133,7 @@ def validate_config(
     *,
     cwd: str | Path | None = None,
     resolve_resources: bool = True,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override and
@@ -146,7 +147,7 @@ def validate_config(
         )
     if data.get("kind") != "effort-driver-loop":
         raise RegistrarError("effort-driver-loop kind must be 'effort-driver-loop'")
-    snapshot = RepositoryResourceSnapshot()
+    snapshot = snapshot or RepositoryResourceSnapshot()
     cwd = execution_root(
         data.get("execution_repo"), cwd, snapshot=snapshot, resolve_resources=resolve_resources,
     )

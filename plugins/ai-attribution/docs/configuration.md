@@ -11,6 +11,11 @@ Configuration is inert data. The Bash and PowerShell hooks parse it directly
 without sourcing, dot-sourcing, `eval`, command expansion, Python, jq, or YAML
 modules.
 
+Optional [JSON signature profiles](signature-profiles.md) add sparse
+domain/visibility/activity header/footer templates through the shared Python
+writer/helper. They do not change this legacy grammar or delegate disclosure
+exemptions to a target repository.
+
 ## Grammar
 
 - UTF-8 text, one setting per line.

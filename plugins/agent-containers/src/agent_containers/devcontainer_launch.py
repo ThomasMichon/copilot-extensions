@@ -25,6 +25,7 @@ from .config import (
     HarnessConfig,
 )
 from .lifecycle import _docker
+from .lifecycle_ownership import require_internal_fleet
 
 log = logging.getLogger("agent-containers")
 
@@ -47,6 +48,7 @@ def _devcontainer_up(
     ``harness.repo`` reproduces the control-plane harness checkout at its
     (distinct) ``target``.
     """
+    require_internal_fleet(fleet)
     devcontainer_exe = shutil.which("devcontainer")
     if not devcontainer_exe:
         raise RuntimeError(

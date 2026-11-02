@@ -266,7 +266,8 @@ function Resolve-PythonCommand {{ return {_ps(sys.executable)} }}
 function Ensure-UvIndex {{ }}
 function Ensure-Uv {{ return 'unused-retained-provider' }}
 function New-SignedVenv {{
-    param($VenvDir, $VenvPython, $PythonVersion, $UvCommand, $RequireSignedBase, $AllowExisting)
+    param($VenvDir, $VenvPython, $PythonVersion, $UvCommand, $RequireSignedBase, $AllowExisting, [switch]$WithoutPip)
+    if (-not $WithoutPip) {{ throw 'UV-owned Logger must not seed pip' }}
     if (-not $BuildCandidate) {{ throw 'A completed slot must not rebuild' }}
     Get-ChildItem -LiteralPath $CandidateTemplate -Force | ForEach-Object {{
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $VenvDir $_.Name) -Recurse -Force

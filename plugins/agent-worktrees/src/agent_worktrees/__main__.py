@@ -48,15 +48,18 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 
 from __future__ import annotations
 
+import sys
+from . import terminal_launch as _terminal_launch
+
 if __name__ == "__main__":
+    _terminal_launch.exit_for_query()
+    _terminal_launch.validate_or_exit()
     from .current_roster_entry import run_module_if_selected
     run_module_if_selected()
-    import sys as _entry_sys
-
-    if len(_entry_sys.argv) == 3 and _entry_sys.argv[1] == "--project":
+    if len(sys.argv) == 3 and sys.argv[1] == "--project":
         from .picker_fast_entry import dispatch as _dispatch_resident_picker
 
-        _resident_picker_result = _dispatch_resident_picker(_entry_sys.argv[1:])
+        _resident_picker_result = _dispatch_resident_picker(sys.argv[1:])
         if _resident_picker_result is not None:
             raise SystemExit(_resident_picker_result)
 
@@ -72,7 +75,6 @@ import shutil
 import signal
 import socket as _socket
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -240,6 +242,7 @@ def cmd_launch(argv: list[str]) -> int:
     Consumes ``--no-update``, ``--no-mux``, and ``--verbose`` and propagates
     them as environment variables so launch-session.sh can read them.
     """
+    _terminal_launch.validate_or_exit()
     passthrough: list[str] = []
     for arg in argv:
         if arg == "--no-update":
@@ -621,6 +624,7 @@ def _classify_records(
     session_ctx: sessions.SessionContext | None = None,
     *,
     daemon_filters: dict | None = None,
+    cleanup_owner=None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """Classify each worktree's git state, keyed by worktree id.
 
@@ -668,6 +672,8 @@ def _classify_records(
     advisory only: any lease-layer failure (not contention) degrades to
     classifying live, exactly as before this guard existed.
     """
+    if cleanup_owner is not None and git_ops._windows_observation():
+        return _classify_records_live(records, session_ctx, cleanup_owner=cleanup_owner)
     if daemon_filters is not None:
         try:
             project = cfg.project_name()
@@ -804,7 +810,7 @@ def _classify_records_lease_guarded(
         lease.release()
 
 
-def _classify_daemon_compute(kind: str, payload: dict) -> dict:
+def _classify_daemon_compute(kind: str, payload: dict, *, cleanup_owner=None) -> dict:
     """Resident classify daemon's ``compute`` callback (Phase 4d, #2323).
 
     Runs inside the resident status-monitor process. Resolves + classifies
@@ -839,16 +845,29 @@ def _classify_daemon_compute(kind: str, payload: dict) -> dict:
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
+    if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
+        return _serialize_classify_map({
+            rec.worktree_id: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNKNOWN)
+            for rec in records
+        })
     session_ctx = sessions.scan_sessions_fast(records)
     config = cfg.load_config(path=cfg.project_dir(project) / "config.yaml", project=project)
     repo = config.default_repo
-    active_paths = _build_active_paths(records, session_ctx)
-    state_map = {
-        rec.worktree_id: _classify_one_record(
-            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+    def observe():
+        return _classify_records_live(records, session_ctx, repo=repo)
+    from . import push_timeout
+    try:
+        state_map = (
+            cleanup_owner.run_observation(project, repo.anchor, None, observe)
+            if cleanup_owner is not None else observe()
         )
-        for rec in records
-    }
+    except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending):
+        if cleanup_owner is None:
+            raise
+        state_map = {
+            rec.worktree_id: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNKNOWN)
+            for rec in records
+        }
     return _serialize_classify_map(state_map)
 
 
@@ -865,12 +884,23 @@ def _classify_records_live(
     session_ctx: sessions.SessionContext | None = None,
     *,
     repo=None,
+    cleanup_owner=None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """The actual ~5-git-calls-per-worktree batch classification.
 
     Factored out of :func:`_classify_records` so the lease wrapper can call it
     only when it actually won the race; a losing caller never reaches this.
     """
+    if cleanup_owner is not None and git_ops._windows_observation():
+        from .push_timeout import ObservationCleanupPending
+        project = cfg.project_name()
+        if cleanup_owner.observation_blocked(project):
+            raise ObservationCleanupPending("classification cleanup pending")
+        selected_repo = repo if repo is not None else cfg.load_config().default_repo
+        return cleanup_owner.run_observation(
+            project, selected_repo.anchor, None,
+            lambda: _classify_records_live(records, session_ctx, repo=selected_repo),
+        )
     if repo is None:
         repo = cfg.load_config().default_repo
     active_paths = _build_active_paths(records, session_ctx)
@@ -988,8 +1018,9 @@ def _make_pr_lookup(config):
     def lookup(repo, number):
         try:
             token = providers.account_token_for_slug(repo, prcfg)
-        except Exception:
-            token = None
+        except providers.ProviderError as exc:
+            output.warn(str(exc))
+            return None
         try:
             provider = providers.get_provider(prcfg.provider)
             return provider.get_pull(repo, number, api_base=api_base, token=token)
@@ -1275,7 +1306,10 @@ def _worktree_to_dict(
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=_turns, repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
-            finalized_checkout_current=finalized_checkout.matches(rec),
+            finalized_checkout_current=(
+                (not git_ops._windows_observation() or state_info.state != git_ops.WorktreeState.UNKNOWN)
+                and finalized_checkout.matches(rec)
+            ),
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
@@ -3120,6 +3154,10 @@ def _monitor_sweep(
                 project = managed_entry.get("project")
                 if (not isinstance(project, str) or not project) and session_projects is not None:
                     project = session_projects.get(path_key)
+                if not project and segment_cache is not None and git_ops._windows_observation():
+                    project = segment_cache.project_for_observation_path(path)
+                    if not project and (segment_cache.observation_busy() or segment_cache.observation_blocked("", path)):
+                        continue
                 if project:
                     cfg.set_active_project(project)
                 else:
@@ -3133,7 +3171,12 @@ def _monitor_sweep(
                 pass
             config_scope = _config_cache.project_scope(config_cache_for_project, project)
             with config_scope:
-                if sess not in ctx_done:
+                cleanup_blocked = (
+                    segment_cache is not None
+                    and git_ops._windows_observation()
+                    and segment_cache.observation_blocked(project or "", path)
+                )
+                if sess not in ctx_done and not cleanup_blocked:
                     try:
                         context_value = _render_status_context(path, plain=False)
                     except Exception:
@@ -3148,9 +3191,22 @@ def _monitor_sweep(
                         )
                 except _StatusMonitorGovernanceDeferred:
                     raise
+                except git_ops.push_timeout.ObservationCleanupError as error:
+                    if segment_cache is None:
+                        raise
+                    segment_cache.retain_unclaimed_cleanup(project or "", path, error)
+                    segment_value = segment_cache.pending_segment()
+                except git_ops.push_timeout.ObservationCleanupPending:
+                    if segment_cache is None:
+                        raise
+                    segment_value = segment_cache.pending_segment()
                 except Exception:
                     pass
-                if mux_bin:
+                cleanup_blocked = (
+                    segment_cache is not None and git_ops._windows_observation()
+                    and segment_cache.observation_blocked(project or "", path)
+                )
+                if mux_bin and not cleanup_blocked:
                     try:
                         _monitor_maybe_trigger_handoff_cutover(path, governance=governance)
                     except _StatusMonitorGovernanceDeferred:
@@ -3217,6 +3273,9 @@ def _monitor_sweep(
             _wait_for_lifecycle_priority(lifecycle_priority)
             with project_lock if project_lock is not None else contextlib.nullcontext():
                 try:
+                    if (segment_cache is not None and git_ops._windows_observation()
+                            and segment_cache.observation_blocked(project)):
+                        continue
                     cfg.set_active_project(project)
                     config_scope = _config_cache.project_scope(config_cache_for_project, project)
                     # One per-project config cache for the listing AND the handoff
@@ -3243,6 +3302,9 @@ def _monitor_sweep(
                                     continue
                             except Exception:
                                 continue
+                            if (segment_cache is not None and git_ops._windows_observation()
+                                    and segment_cache.observation_blocked(project, worktree_path)):
+                                continue
                             _monitor_maybe_process_handoff_record(record, governance=governance)
                 except _StatusMonitorGovernanceDeferred:
                     raise
@@ -3259,9 +3321,19 @@ def _monitor_sweep(
                     if roster_publisher is not None:
                         roster_publisher()
                     else:
-                        _warm_list_cache_for_active_project(interval=interval)
+                        _warm_list_cache_for_active_project(
+                            interval=interval,
+                            **({"cleanup_owner": segment_cache}
+                               if segment_cache is not None and git_ops._windows_observation() else {}),
+                        )
             except _StatusMonitorGovernanceDeferred:
                 raise
+            except git_ops.push_timeout.ObservationCleanupError as exc:
+                if segment_cache is None:
+                    raise
+                segment_cache.retain_unclaimed_cleanup(project, None, exc)
+                if roster_publisher is not None:
+                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
             except Exception as exc:
                 if roster_publisher is not None:
                     print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
@@ -3286,77 +3358,7 @@ def _status_monitor_recheck(governance, checkpoint: str) -> dict | None:
     return result
 
 
-class _StatusSegmentCache:
-    """Share throttled Git classification across monitor and IPC consumers.
-
-    Callers establish the target's active project before ``get`` so record
-    resolution and rendering share one activation.
-    """
-
-    def __init__(self, ttl: float = 60.0):
-        self.ttl = max(15.0, float(ttl))
-        self._entries: dict[str, tuple[float, str]] = {}
-        self._aliases: dict[str, str] = {}
-        self._lock = threading.RLock()
-
-    @staticmethod
-    def _key(path: str) -> str:
-        return os.path.normcase(os.path.realpath(path))
-
-    def get(self, path: str) -> str:
-        # Stage D (cluster-free): via _self_override -- unset on fast path (#4341).
-        from . import status_bar_cli as _sbc
-        input_key = self._key(path)
-        with self._lock:
-            now = time.monotonic()
-            key = self._aliases.get(input_key, input_key)
-            cached = self._entries.get(key)
-            if cached and now - cached[0] < self.ttl:
-                return cached[1]
-
-        record = _self_override("_find_record_for_path", _sbc._find_record_for_path)(path)
-        target = record.worktree_path if record and record.worktree_path else path
-        key = self._key(target)
-        with self._lock:
-            now = time.monotonic()
-            cached = self._entries.get(key)
-            if cached and now - cached[0] < self.ttl:
-                self._aliases[input_key] = key
-                return cached[1]
-        value = _self_override("_render_status_segment", _sbc._render_status_segment)(
-            target, fetch=False, plain=False, no_title=False, persist_title=True
-        )
-        with self._lock:
-            self._aliases[input_key] = key
-            self._entries[key] = (time.monotonic(), value)
-        return value
-
-    def invalidate(self, cwd: str | None) -> None:
-        if not cwd:
-            return
-        target = self._key(cwd)
-        with self._lock:
-            removed: set[str] = set()
-            for key in list(self._entries):
-                try:
-                    common = os.path.commonpath((target, key))
-                except (OSError, ValueError):
-                    continue
-                if common == key or common == target:
-                    self._entries.pop(key, None)
-                    removed.add(key)
-            for alias, key in list(self._aliases.items()):
-                try:
-                    common = os.path.commonpath((target, alias))
-                except (OSError, ValueError):
-                    common = ""
-                if key in removed or common == alias or common == target:
-                    self._aliases.pop(alias, None)
-
-    def invalidate_all(self) -> None:
-        with self._lock:
-            self._entries.clear()
-            self._aliases.clear()
+from .status_segment_cache import _StatusSegmentCache  # noqa: E402
 
 
 _HOOK_WRITE_TOOLS = frozenset(
@@ -4012,7 +4014,9 @@ def _run_session_lifecycle(
 def _load_hook_client_module():
     import importlib.util
 
-    candidates = []
+    candidates = [
+        Path(__file__).resolve().parent / "_runtime_assets" / "scripts" / "hook_client.py",
+    ]
     try:
         candidates.append(cfg.install_dir() / "bin" / "hook_client.py")
     except Exception:
@@ -4039,7 +4043,6 @@ class _ResidentHookPolicy:
         self.hook_client = hook_client
         self.ttl = ttl
         self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (0.0, None, [])
-        self._guarded: dict[str, tuple[float, list[dict]]] = {}
         self._plugin_related_anchors: list[str] | None = None
 
     def _module(self, name: str):
@@ -4085,44 +4088,15 @@ class _ResidentHookPolicy:
         return value
 
     def guarded_roots(self, cwd: str) -> list[dict]:
-        from . import related, repos
+        from . import registry_paths
 
         module = self._module("cross_repo_guard.py")
         root = module.find_repo_root(cwd) if module else None
         if root is None:
             return []
-        key = os.path.normcase(os.path.realpath(root))
-        now = time.monotonic()
-        cached = self._guarded.get(key)
-        if cached and now - cached[0] < self.ttl:
-            return cached[1]
-        try:
-            anchors = _related_config_source_anchors(
-                str(root),
-                installed_anchors=self.plugin_related_anchors(),
-            )
-            entries = related.list_related_grafted(anchors)
-            value = []
-            for entry in entries:
-                if not entry.delegate or entry.delegate == "none":
-                    continue
-                path = repos.resolve_path(entry.name)
-                if path:
-                    value.append(
-                        {
-                            "name": entry.name,
-                            "delegate": entry.delegate,
-                            "path": path,
-                            "locus": {
-                                "preferred": entry.locus.preferred,
-                                "machines": list(entry.locus.machines),
-                            },
-                        }
-                    )
-        except Exception:
-            value = []
-        self._guarded[key] = (now, value)
-        return value
+        return module.load_guarded_roots(
+            str(root), Path.home(), registry_root=registry_paths.registry_root(),
+        )
 
     def pre(self, payload: dict) -> dict:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
@@ -4133,11 +4107,7 @@ class _ResidentHookPolicy:
             if module is None:
                 continue
             kwargs = {}
-            if name == "cross_repo_guard.py":
-                kwargs["guarded_roots"] = (
-                    self.guarded_roots(_hook_payload_cwd(payload)) if may_write else []
-                )
-            elif name == "anchor_write_guard.py":
+            if name == "anchor_write_guard.py":
                 kwargs["anchors"] = self.anchors() if may_write else []
             try:
                 decision = module.decide(payload, home=Path.home(), **kwargs)
@@ -4156,7 +4126,6 @@ class _ResidentHookPolicy:
         cwd = _hook_payload_cwd(payload)
         found = None
         try:
-            _activate_project_for_path(cwd, force=True)
             wt_id = tracking.find_worktree_id_by_cwd(cwd)
             path = cfg.tracking_dir() / f"{wt_id}.yaml" if wt_id else None
             if wt_id and path and path.is_file():
@@ -4219,6 +4188,9 @@ def _resident_hook_decision(
     deadline: float | None = None,
     provisioning_start_event: threading.Event | None = None,
 ) -> dict:
+    if kind == "preToolUse":
+        return policy.pre(payload)
+
     # Stage D: status_updater_cli/session_binding_cli are cluster-free.
     from . import session_binding_cli as _session_binding_cli
     from . import status_updater_cli as _status_updater_cli
@@ -4227,11 +4199,13 @@ def _resident_hook_decision(
     _bind_nudge_decision = _self_override("_bind_nudge_decision", _session_binding_cli._bind_nudge_decision)
 
     cwd = _hook_payload_cwd(payload)
+    if kind == "snapshot" and git_ops._windows_observation():
+        retained = segment_cache.project_for_observation_path(cwd)
+        if segment_cache.observation_blocked(retained or "", cwd) or segment_cache.observation_busy():
+            return {"segment": segment_cache.pending_segment_for_path(cwd)}
     previous_project = cfg.active_project()
-    _activate_project_for_path(cwd, force=True)
+    segment_cache.activate_hook_project(cwd, _activate_project_for_path)
     try:
-        if kind == "preToolUse":
-            return policy.pre(payload)
         if kind == "postToolUse":
             targets = policy.mutation_targets(payload)
             if targets is None:
@@ -4240,7 +4214,9 @@ def _resident_hook_decision(
                 for target in targets:
                     segment_cache.invalidate(target)
             advisory = policy.post(payload, deadline)
-            binding = _bind_nudge_decision(cwd, deadline=deadline)
+            binding = _bind_nudge_decision(cwd, deadline=deadline) if (
+                cfg.active_project() or not git_ops._windows_observation()
+            ) else {}
             if advisory and binding:
                 a = str(advisory.get("additionalContext") or "")
                 b = str(binding.get("additionalContext") or "")
@@ -4996,13 +4972,14 @@ def _resolve_copilot() -> str | None:
 
 
 def _write_global_config(
-    machine: str,
+    machine: str | None,
     plat: str,
     srcroot: Path | str,
 ) -> None:
     """Scaffold the global machine-wide config (~/.agent-worktrees/config.yaml).
 
-    Carries machine-wide base settings (srcroot/machine/platform) plus
+    Carries machine-wide base settings (srcroot/platform and an explicit
+    machine binding, when supplied) plus
     user-authored copilot_profiles -- the lowest config tier. This file is
     **user-owned**: the installer scaffolds it once when missing, then **never**
     overwrites it -- not even with ``--force`` (which targets installer-owned
@@ -5015,6 +4992,7 @@ def _write_global_config(
         output.skipped(f"Global config exists at {path} (user-owned, left as-is)")
         return
     _p = "~/.agent-worktrees/config.yaml"  # marketplace-isolation: allow legacy-compatibility
+    machine_line = f"machine: {machine}\n" if machine is not None else ""
     content = f"""# {_p}
 # GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
 #
@@ -5023,8 +5001,7 @@ def _write_global_config(
 # config) then ~/.<project>/config.yaml (machine-local override).
 
 srcroot: {srcroot}
-machine: {machine}
-platform: {plat}
+{machine_line}platform: {plat}
 
 # Copilot backend profiles -- machine-wide (Tab to cycle in the picker).
 # User-authored; uncomment and edit. Example:
@@ -5131,9 +5108,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
-    from . import record_cli
+    from . import agenda_cli, record_cli
 
+    agenda_cli.add_parsers(sub)
     resolve_cli.add_parsers(sub)
+    from . import launch_attempt_inspection
+    launch_attempt_inspection.add_parsers(sub)
 
     p = sub.add_parser(
         "execution-leg",
@@ -5204,7 +5184,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr_cli.add_parsers(sub)
     # stage-update (background marketplace download; #1430 stage-then-join)
-    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)")
+    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)", allow_abbrev=False)
+    sp.add_argument("--auto", action="store_true", help="Automatic acquisition; honor the automatic-update hold")
     _sh_path = "~/.agent-worktrees/updater-status.json"  # marketplace-isolation: allow legacy
     sp.add_argument("--status", default=None, help=f"Status file path (defaults to {_sh_path})")
     sp.add_argument("--indicator-state", action="store_true",
@@ -5230,6 +5211,8 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_cancel_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
+    from . import session_observations_cli
+    session_observations_cli.add_parsers(sub)
     record_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
 
@@ -5329,6 +5312,10 @@ def _current_session_ids() -> set[str]:
 # fleet, reconcile, delegates, hook -- each of those is fixed to do its own
 # lazy `from . import <module>` at its own call site instead).
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'agenda-publish': ('agenda_cli', 'cmd_agenda'),
+    'agenda-read': ('agenda_cli', 'cmd_agenda'),
+    'agenda-feed': ('agenda_cli', 'cmd_agenda'),
+    'launch-attempts': ('launch_attempt_inspection', 'cmd_launch_attempts'),
     'dev-status': ('installation_cli', 'cmd_dev_status'),
     'dev-release': ('installation_cli', 'cmd_dev_release'),
     'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
@@ -5342,6 +5329,8 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'claims': ('claims_cli', 'cmd_claims'),
     'resource-producer': ('resource_producer_cli', 'cmd_resource_producer'),
     'resource-relationship': ('resource_producer_cli', 'cmd_resource_relationship'),
+    'worktree-allocation': ('resource_producer_cli', 'cmd_worktree_allocation'),
+    'worktree-allocation-receive': ('resource_producer_cli', 'cmd_worktree_allocation_receive'),
     'cleanup': ('cleanup_gc_cli', 'cmd_cleanup'),
     'codename-lookup': ('session_metadata_cli', 'cmd_codename_lookup'),
     'conclude-disposable': ('session_tracking_cli', 'cmd_conclude_disposable'),
@@ -5349,6 +5338,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'config-migrate': ('maintenance_cli', 'cmd_config_migrate'),
     'create': ('worktree_ops_cli', 'cmd_create'),
     'create-pr': ('finalize_cli', 'cmd_create_pr'),
+    'pr-publication-labels': ('finalize_cli', 'cmd_publication_labels'),
     'deploy-instructions': ('context_cli', 'cmd_deploy_instructions'),
     'deregister-session': ('session_binding_cli', 'cmd_deregister_session'),
     'dev': ('maintenance_cli', 'cmd_dev'),
@@ -5423,6 +5413,8 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'session-recovery': ('session_inspection_cli', 'cmd_session_recovery'),
     'session-role': ('session_metadata_cli', 'cmd_session_role'),
     'session-tail': ('session_tracking_cli', 'cmd_session_tail'),
+    'session-observations': ('session_observations_cli', 'cmd_session_observations'),
+    'session-attention': ('session_observations_cli', 'cmd_session_attention'),
     'session-transcript': ('session_tracking_cli', 'cmd_session_transcript'),
     'set-pr': ('pr_state_cli', 'cmd_set_pr'),
     'status': ('status_cli', 'cmd_status'),
@@ -5461,7 +5453,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
 _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | frozenset({
     "services", "repos", "accounts", "forks", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
-    "pr-watch", "pr-merge", "pr-research", "pr",
+    "pr-watch", "pr-merge", "pr-research", "pr", "pr-sweep",
     "activity", "activity-log", "activity-prune-worker", "register-launch", "stage-update",
     "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace", "identifiers",
@@ -6016,10 +6008,13 @@ def _load_full_command_surface() -> None:
             args, json_output=output._json_output, json_error=output._json_error
         )
     from .record_cli import cmd_record
+    from .launch_attempt_inspection import cmd_launch_attempts
 
     from . import update_launch_cli
 
+    from .session_observations_cli import cmd_session_attention, cmd_session_observations
     COMMAND_MAP = {
+        "launch-attempts": cmd_launch_attempts,
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
         "post-exit": cmd_post_exit,
@@ -6027,6 +6022,7 @@ def _load_full_command_surface() -> None:
         "finalize": cmd_finalize,
         "push-changes": cmd_push_changes,
         "create-pr": cmd_create_pr,
+        "pr-publication-labels": finalize_cli.cmd_publication_labels,
         "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
         "attribution-audit": cmd_attribution_audit,
         "attribution-prepare": __import__(f"{__package__}.attribution_prepare_cli", fromlist=["cmd_attribution_prepare"]).cmd_attribution_prepare,
@@ -6063,6 +6059,8 @@ def _load_full_command_surface() -> None:
         "claims": cmd_claims,
         "resource-producer": resource_producer_cli.cmd_resource_producer,
         "resource-relationship": resource_producer_cli.cmd_resource_relationship,
+        "worktree-allocation": resource_producer_cli.cmd_worktree_allocation,
+        "worktree-allocation-receive": resource_producer_cli.cmd_worktree_allocation_receive,
         "follow-ups": cmd_follow_ups,
         "claimant-liveness": cmd_claimant_liveness,
         "codename-lookup": cmd_codename_lookup,
@@ -6133,6 +6131,8 @@ def _load_full_command_surface() -> None:
         "link-succession": cmd_link_succession,
         "session-transcript": cmd_session_transcript,
         "session-tail": cmd_session_tail,
+        "session-observations": cmd_session_observations,
+        "session-attention": cmd_session_attention,
         "recent-messages": cmd_recent_messages,
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
@@ -6294,6 +6294,15 @@ def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
 
+    if args_list and args_list[0] in {"__source-setup", "__source-start"}:
+        parser = argparse.ArgumentParser(allow_abbrev=False)
+        parser.parse_args(args_list[1:])
+        if args_list[0] == "__source-setup":
+            return inst.setup_application()
+        from .status_monitor_cutover import start_application
+
+        return start_application()
+
     # Policy inspection must not resolve/adopt a project or prepare runtime state.
     policy_args = front_door_cli.policy_invocation(args_list)
     if policy_args is not None:
@@ -6363,14 +6372,7 @@ def main(argv: list[str] | None = None) -> int:
             _is_no_project_invocation,
         )
     except (OSError, ValueError, RuntimeError) as exc:
-        if not args_list or args_list[0] != "record":
-            raise
-        cfg.set_active_project(None)
-        output._json_output({
-            "ok": False, "worktree": None,
-            "error": {"code": "project-unavailable", "message": str(exc)},
-        })
-        return 1
+        return front_door_cli.project_resolution_failure(args_list, exc)
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path. The Manager now owns the transplanted
@@ -6389,10 +6391,15 @@ def main(argv: list[str] | None = None) -> int:
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
     if not has_project and not _is_no_project_invocation(args_list):
+        if args_list[0] in {"agenda-read", "agenda-publish", "agenda-feed"}:
+            return front_door_cli.agenda_project_unavailable(args_list, "no registered invocation project")
         if args_list[0] == "record":
             return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])
 
+    if args_list[0] == "pr-sweep":
+        from .pr_sweep_cli import run_pr_sweep
+        return run_pr_sweep(args_list[1:])
     # --version / -V → print version + build info + boot provenance
     if args_list[0] in ("--version", "-V"):
         try:
@@ -6426,6 +6433,8 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] in ("--help", "-h"):
         parser = build_parser()
         parser.print_help()
+        print("One-shot: pr-sweep <repo> --fleet --json")
+        print("Guard facts: refresh-guards [--repo PATH] [--json]")
         return 0
 
     # Fast path (checked before manual-dispatch verbs + the blanket
@@ -6449,7 +6458,7 @@ def main(argv: list[str] | None = None) -> int:
     # and the COMMAND_MAP fallback still need the cross-referencing cluster.
     if (
         args_list[0] not in {
-            "state-root", "coordination-readiness", "config-root", "knowledge",
+            "state-root", "coordination-readiness", "config-root", "knowledge", "refresh-guards",
         }
         and args_list[:2] not in (["repos", "list"], ["repos", "map"])
     ):
@@ -6518,6 +6527,11 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
+
+    if args_list[0] == "refresh-guards":
+        from . import guarded_anchors
+
+        return guarded_anchors.main(args_list[1:])
 
     # Related (per-project related repos) -- manual dispatch.
     if args_list[0] == "related":
@@ -6634,10 +6648,6 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # lease/fleet/reconcile/delegates -- self-contained argparse verbs manually
-    # dispatched here (each owns its own module) rather than growing this
-    # already-at-ceiling tree. fleet/reconcile/delegates are Phase 1/2/3 of
-    # #2740 (aggregate list, out-of-band PR reconcile, delegate graph/sweep).
     _manual_verb_modules = {
         "lease": ("lease_cli", "run_lease"),
         "fleet": ("list_views_cli", "run_fleet"),

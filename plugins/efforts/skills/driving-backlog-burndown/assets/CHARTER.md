@@ -19,6 +19,7 @@ reuse existing Request/Coordination text rather than maintaining a second copy.
 - Permitted repairs and ordinary publication/merge authority: `<explicit scope>`
 - Required review, CI, native/consumer evidence and unchanged limits: `<contracts>`
 - Human-only choices / vetoes / approvals already given: `<scope and current disposition>`
+- Canonical Scope Approvals: `<original decision reference, effect limits and later changes; do not duplicate the ledger>`
 - Not authorized: `<for example new workers, abandonment, runtime rollout, policy changes>`
 - Resource owners / claims / lease expiry and safe deadlines: `<owner records>`
 
@@ -40,6 +41,7 @@ reuse existing Request/Coordination text rather than maintaining a second copy.
 - Current dashboard / journal / optional structured snapshot: `<paths>`
 - Session SQL/todos: `<optional cache, not portable authority>`
 - Checkpoint: `<host-owned artifact and read-size bound>`
+- Approval evidence: `<canonical reference, applicable limits, exclusions and current holds/revocations>`
 - Native rollover: same owner; preserve live schedule/workers/obligations.
 - Actual transfer: supported handoff owner; stop own schedule, settle
   supervision/custody and provide exactly one next action.

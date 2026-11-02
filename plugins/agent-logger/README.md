@@ -64,6 +64,33 @@ session-to-log pipeline out of any single bespoke service:
 - **Three deployment topologies** from one plugin — see
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
+`install.ps1 uninstall` / `install.sh uninstall` removes the owned sync task or
+timer, compatibility commands, runtime generations, payload snapshots and
+generated dispatchers. Digests, configuration, session state, databases and
+unrecognized root content remain for reinstall. `-DryRun` / `--dry-run`
+previews removal without deleting those artifacts. The installer transaction
+lock remains in place; uninstall does not purge the runtime home.
+Removal requires the deployment manifest to identify Logger, or a Logger
+project snapshot addressed inside that runtime home's snapshot directory.
+Missing, malformed, foreign or externally redirected ownership refuses removal
+before changing the task or commands.
+Legacy removal also rejects installation-cell/managed metadata and a different
+command source or lifecycle owner. It disables new scheduled starts, refuses
+an active sync task/service or runtime process, and removes generations under
+construction/retention custody. Persistent snapshot coordination inodes remain.
+Validated stamped-only ownership is recorded in the existing deployment
+manifest before destructive cleanup; ownership metadata is removed last so a
+partial removal can be retried without requiring the deleted snapshot.
+Uninstall helpers/interpreters must be outside removable content (the retained
+installer staging area is allowed). Linux checks full current-user command
+lines and refuses ambiguously attributed Logger processes, including PATH
+launches through symlinked virtualenv interpreters; unavailable native process
+inspection refuses removal.
+Uninstall roots cannot contain `..` components. Relative selections are bound
+before installer staging (and against PowerShell's provider location on Windows).
+POSIX removal children use the shared finite-process supervisor so timeout
+settlement completes before the caller releases its install/generation custody.
+
 ## Source-qualified runtimes
 
 The legacy/default-root session bootstrap uses its packaged installation Driver
@@ -121,16 +148,36 @@ Legacy snapshots retain
 for fresh-process policy admission, including stamps made without Python.
 The live deployment policy is never cached as permission in that evidence.
 Generated compatibility wrappers and payload-local commands resolve a healthy
-runtime before considering publication. Cold misses defer durable resolver
-tracing until the live canonical deployment decision admits publication, before
-any provision status or orchestration-lock write. Payload-local commands check
-the validated selected installation root, including namespaced cells; they do
-not substitute legacy-root policy. Healthy managed runtimes remain callable
-without invoking an installer, and retain their normal resolution trace.
-An older deployed resolver without the deferred-trace contract, or a cold
-snapshot without the admission helper, returns an explicit readiness error
-without writing runtime state; update/re-enable the plugin or use explicit
-installation management rather than falling back to unguarded provisioning.
+runtime before considering publication. Cold legacy commands submit the same
+caller-independent Driver `provision` request and wait as observers; no outer
+provisioning lock, status writer or foreground installer remains. The primary
+and five auxiliary wrappers retain the exact selected snapshot, never an
+arbitrary installed-payload fallback. The snapshot dispatcher and packaged
+client must declare their queued-command support before cold invocation.
+Publication and exact source/root/project are revalidated by the existing
+canonical admission/execution owners.
+Fresh legacy deploy-manifest publication uses the canonical command-binding
+writer on both native paths, preserving the active lifecycle reservation
+without an intermediate unbound manifest.
+
+Healthy managed and installation-cell runtimes remain callable without
+installer work, preserving the command's module arguments and exit status.
+An auxiliary wrapper selecting an older dispatcher requires its existing
+no-self-provision control and delegates in that explicit mode: the dispatcher
+resolves its effective context/root, not the wrapper's global compatibility
+root. A healthy cell remains usable
+when the global runtime is absent; a healthy global runtime never authorizes
+construction at a cold custom root.
+Cold custom-root/cell construction remains explicitly unsupported through
+this Driver recipe rather than silently using legacy-root policy. An older
+resolver without the read-only contract or cold dispatcher/client without
+queued-command support returns an explicit readiness error before state
+writes; update/re-enable the plugin or use explicit installation management.
+The bootstrap's drift `install` still reconciles task/timer registration;
+command-side service-less `provision` does not register or start periodic
+session processing. The manual `logger-commands` Windows/Ubuntu portfolio
+qualifies actual emitted wrappers, caller loss, source independence and safe
+installed consumers separately from host rollout.
 Identical inputs reuse snapshots and completion evidence. Recovery requires an
 exact current or last-known-good selector rather than ordering source hashes.
 `agent-logger version` reports the selected source generation without changing
@@ -254,10 +301,15 @@ failures without echoing policy contents.
 
 ## Configuration
 
-Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml` → repo-local
+Complete files, options, scopes and protected boundaries:
+[configuration reference](docs/config-reference.md).
+
+Layered: built-in defaults → trusted repo-local
 organization config (`.agent-logger.yaml` / `.agent-logger.yml` /
 `.config/agent-logger.yaml` / `.config/agent-logger.yml`, `log:` block plus
 schema v3's single `sync.local_path` field)
+→ trusted bound knowledge organization → `$AGENT_LOGGER_HOME/config.yaml`
+→ owner-selected repository+machine organization
 → `AGENT_LOGGER_*` environment overrides. Repo-local config is only honored
 for a checkout that is both a project registered with `agent-worktrees` and
 currently on that project's registered default branch -- see

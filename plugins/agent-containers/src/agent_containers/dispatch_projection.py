@@ -217,19 +217,33 @@ def _facts(request: object) -> dict:
 
 def _read(container_id: str) -> dict | None:
     path = _path(container_id)
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("Duplicate container task binding field")
+            value[key] = item
+        return value
+
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        if path.is_symlink():
+            raise ValueError("Linked container task binding")
+        raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
     except FileNotFoundError:
         return None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         raise RuntimeError("Container task binding is unreadable; refusing admission") from None
     try:
         if (
             not isinstance(raw, dict)
-            or set(raw) - {"attempted_expires_at", "worker_admission_generation"} != _FACTS | {
+            or set(raw) - {"attempted_expires_at", "worker_admission_generation"}
+            - ({"creation"} if raw.get("version") == 2 else set()) != _FACTS | {
                 "version", "container_id", "binding_id", "owner_session_id", "expires_at"
             }
-            or type(raw["version"]) is not int or raw["version"] != 1
+            or type(raw["version"]) is not int or raw["version"] not in (1, 2)
+            or raw["version"] == 2 and not {
+                "creation", "worker_admission_generation", "attempted_expires_at",
+            }.issubset(raw)
             or raw["container_id"] != container_id
             or not _BINDING_ID.fullmatch(raw["binding_id"])
         ):
@@ -261,6 +275,10 @@ def _read(container_id: str) -> dict | None:
         admission_generation = raw.setdefault("worker_admission_generation", 0)
         if type(admission_generation) is not int or not 0 <= admission_generation < 2**53:
             raise ValueError
+        if raw["version"] == 2:
+            from .dispatch_creation import validate
+
+            validate(raw["creation"], raw)
     except (KeyError, TypeError, ValueError, RuntimeError):
         raise RuntimeError("Container task binding is invalid; refusing admission") from None
     return raw
@@ -270,17 +288,29 @@ def verify_binding(container_id: str, binding_id: str) -> dict:
     binding = _read(container_id)
     if binding is None or binding["binding_id"] != binding_id or binding["task_id"] is None:
         raise RuntimeError("Container task binding does not match this launch")
+    _require_ordinary_binding(binding)
     return binding
 
 
-def register_birth(container_id: str, binding_id: str) -> None:
+def _require_ordinary_binding(binding: dict) -> None:
+    if binding["version"] == 2:
+        raise RuntimeError("Retained provider creation cannot use ordinary worker admission")
+
+
+def register_birth(
+    container_id: str, binding_id: str, *, creation_custody: bool = False,
+) -> None:
     """Retain one provider birth; missing authority never means an unused slot."""
     if not isinstance(binding_id, str) or not _BINDING_ID.fullmatch(binding_id):
         raise RuntimeError("Invalid container dispatch birth identity")
+    if type(creation_custody) is not bool:
+        raise RuntimeError("Container creation custody selection must be a boolean")
     write_json_exclusive(_path(container_id), {
-        **dict.fromkeys(_FACTS), "version": 1, "container_id": container_id,
+        **dict.fromkeys(_FACTS), "version": 2 if creation_custody else 1,
+        "container_id": container_id,
         "binding_id": binding_id, "owner_session_id": None, "expires_at": None,
         "attempted_expires_at": None,
+        **({"creation": None, "worker_admission_generation": 0} if creation_custody else {}),
     })
 
 
@@ -342,6 +372,8 @@ def prepare(name: str, expected_container_id: str, request: object) -> dict:
         ):
             raise RuntimeError("Container dispatch birth identity does not match retained authority")
         if binding["task_id"] is not None:
+            if binding.get("creation") is not None:
+                raise RuntimeError("Retained provider creation cannot use ordinary preparation")
             if any(binding[key] != facts[key] for key in _FACTS):
                 raise RuntimeError("Physical container already belongs to another task incarnation; recreate it")
         else:
@@ -443,6 +475,7 @@ def build_spawn_command(
 ) -> list[str]:
     from . import lifecycle
 
+    _require_ordinary_binding(binding)
     inspected = lifecycle.inspect_container(target.container_id)
     if inspected.get("Id") != binding["container_id"]:
         raise RuntimeError("Container physical identity changed before task launch")
@@ -531,6 +564,7 @@ def _reserve_worker_admission(
             or (admission_token is None) == (hold_token is None)
         ):
             raise RuntimeError("Restricted worker admission authority is missing or mismatched")
+        _require_ordinary_binding(binding)
         holds = lease._read_live_records(
             lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
         )
@@ -611,6 +645,9 @@ def close_worker_admission(
 def probe_worker_liveness(container_id: str, inspected: dict) -> SessionLiveness:
     """Probe the guest-held lock, independent of host wrapper process lifetime."""
     try:
+        binding = _read(container_id)
+        if binding is not None:
+            _require_ordinary_binding(binding)
         if inspected.get("Id") != container_id:
             raise RuntimeError("Container physical identity changed before worker probe")
         _initialize_worker_lock(SimpleNamespace(container_id=container_id), inspected)

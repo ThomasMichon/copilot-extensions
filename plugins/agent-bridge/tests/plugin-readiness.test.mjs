@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { observePluginReadiness } from "../extensions/agent-bridge/plugin-readiness.mjs";
-import { controlPlan, drainControls, drainInbox, InFlightMessages } from "../extensions/agent-bridge/delivery.mjs";
+import { controlPlan, drainControls, drainInbox, InFlightMessages, renderDeliveredPrompt } from "../extensions/agent-bridge/delivery.mjs";
 
 function fixture(t, rows = [{ name: "hooks-only", marketplace: "alias", enabled: true }]) {
   const cwd = mkdtempSync(join(process.cwd(), ".plugin-readiness-"));
@@ -297,7 +297,9 @@ test("owned inbox send is held while pending without holding ordinary traffic", 
   f.session.send = async (options) => { sent.push(options); };
   const options = {
     getJson: async (path) => {
-      assert.ok(path.endsWith("?plugin_readiness=true"));
+      const query = new URL(path, "http://fixture").searchParams;
+      assert.equal(query.get("plugin_readiness"), "true");
+      assert.equal(query.get("exact_native"), "true");
       return { messages };
     },
     post: async (...args) => { posts.push(args); return { ok: true }; },
@@ -333,11 +335,58 @@ for (const changed of ["withdrawn", "cwd"]) {
           if (changed === "withdrawn") return { messages: [] };
           f.session.rpc.metadata.snapshot = async () => ({ sessionId: "native", workingDirectory: other });
         }
+
         return { messages: [startup] };
       },
       post: async () => { throw new Error("unsubmitted message must not be acknowledged"); },
       session: f.session, inFlight: new InFlightMessages(), pluginReadiness: true,
     });
     assert.equal(sends, 0);
+  });
+}
+
+for (const boundary of ["loadout", "retained-poll"]) {
+  test(`ACK failure startup redelivery fences consumption during ${boundary}`, async (t) => {
+    const f = fixture(t);
+    const startup = { id: 8, sender: "bridge", body: "owned task", kind: "startup:prompt:5",
+      plugin_readiness: f.request };
+    const inFlight = new InFlightMessages();
+    let failedAck = false, recovering = false, reads = 0, sends = 0;
+    const acknowledged = [];
+    const consume = () => {
+      for (const id of [8, ...Array.from({ length: 51 }, (_, index) => index + 100)]) {
+        inFlight.observe({ type: "user.message", data: {
+          source: "agent-bridge", transformedContent: renderDeliveredPrompt({ ...startup, id }),
+        } });
+      }
+      assert.equal(inFlight.consumed.has(8), false);
+    };
+    const list = f.session.rpc.plugins.list;
+    f.session.rpc.plugins.list = async () => {
+      if (recovering && boundary === "loadout") consume();
+      return list();
+    };
+    f.session.send = async () => { sends++; };
+    const options = {
+      getJson: async () => {
+        if (recovering && ++reads === 2 && boundary === "retained-poll") consume();
+        return { messages: [startup] };
+      },
+      post: async (_method, _path, body) => {
+        if (!failedAck) {
+          failedAck = true;
+          throw new Error("inbox ACK did not commit");
+        }
+        acknowledged.push(body.ids);
+      },
+      session: f.session, inFlight, pluginReadiness: true,
+    };
+    await assert.rejects(drainInbox("native", options), /ACK did not commit/);
+    recovering = true;
+    assert.deepEqual(await drainInbox("native", options), [8]);
+    assert.equal(sends, 1);
+    assert.deepEqual(acknowledged, [[8]]);
+    assert.equal(inFlight.pending.has(8), false);
+    assert.equal(inFlight.consumptionObservers.size, 0);
   });
 }

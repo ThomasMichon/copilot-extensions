@@ -1,0 +1,9 @@
+{
+  "comment": "Retain exact selected provider runtime slots through canonical kernel custody without enabling retained creation",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

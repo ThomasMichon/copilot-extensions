@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify hosted timestamp overlap acquisition through shared native engine matrices",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

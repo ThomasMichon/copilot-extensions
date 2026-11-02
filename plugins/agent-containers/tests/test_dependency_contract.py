@@ -54,8 +54,10 @@ def test_windows_management_binstub_resolves_powershell_without_path() -> None:
 
 def test_windows_installer_probes_docker_without_a_console() -> None:
     powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
+    native = (PLUGIN / "scripts" / "versioned_runtime_native.ps1").read_text(encoding="utf-8")
 
-    assert "$dockerStart.CreateNoWindow = $true" in powershell
-    assert "$dockerStart.RedirectStandardOutput = $true" in powershell
-    assert "$dockerStart.Arguments = '--version'" in powershell
+    assert "$psi.CreateNoWindow = $true" in native
+    assert "$psi.RedirectStandardOutput = $true" in native
+    assert "$psi.RedirectStandardError = $true" in native
+    assert "Invoke-Hidden -FilePath $dockerPath -ArgList @('--version')" in powershell
     assert "& docker --version" not in powershell

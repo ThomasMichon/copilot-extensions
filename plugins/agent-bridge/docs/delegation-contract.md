@@ -36,6 +36,8 @@ delegated-agent facade.
 | Create a fresh session | `create <agent> [prompt]` | `POST /api/v1/sessions` with `force_new` as needed | Bridge `session_id`, generated display name, session status |
 | Reuse or create for this caller | `send <agent> <prompt>` | Client-side resolve/reuse followed by session creation when absent | Existing or new bridge session |
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
+| Retry an exact native follow-up | Standard `send` with `--expected-native-session-id` and `--idempotency-key` | `POST .../turns/native-bound/send`, protocol 51 | Original native turn receipt; a stopped context is strictly resumed without recreation |
+| Observe an exact native follow-up without sending | Standard native `send` with `--receipt-only` | `POST .../turns/native-bound/send/receipt`, HTTP 51 plus `native_send_receipt: 1` | Historical admission only; missing evidence stays unproven, even for a stopped or busy session |
 | Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the hosted result as `delivered`, `queued`, or a `refused_*` with a distinct exit code. Represented sends use receipt stages `admitted`, `sdk_accepted`, or `consumed`, or `duplicate`; `steered`, `interrupted`, and `accepted` are legacy-daemon outcomes, not current receipt evidence. |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
@@ -56,6 +58,9 @@ delegated-agent facade.
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
 | Message a represented interactive session | `send <live-handle>`; optional `--wait-reply` | `POST /api/v1/live-sessions/{id}/messages` | Immediate admission receipt; SDK acceptance and consumption are distinct; optional bounded post-consumption reply evidence requires HTTP protocol 39 |
 | Observe a busy represented peer | `read <live-handle> --message-id N --json` | `GET .../result` plus `GET .../messages/{id}/receipt` | Bounded activity, pending inbox metadata, recent output, and a cursor-neutral message receipt (HTTP protocol 39) |
+| Admit an exact live CLI prompt | `send <exact-session-id> --live-exact` with the exact expected session, key, sender and stdin prompt | `POST .../messages/keyed-exact/v1`, capability `live_keyed_receipt: 1` | Original live inbox receipt; no alias, ACP, queue or native replacement |
+| Observe an exact keyed live CLI prompt | Same binding with `--live-receipt-only` | `POST .../messages/keyed-receipt/v1`, same capability | Read-only retained receipt; a miss is unproven, not permission to send |
+| Notify one exact live CLI native | `send <exact-session-id> --live-exact-notify --kind notify`, same exact binding | `POST .../messages/exact-notify/v1`, capability `live_exact_notify: 1` | Informational inbox admission only; no alias, work-bearing prompt, ACP or replacement |
 
 Against older daemons, receipt-only sends retain legacy outcomes without
 receipt evidence. Explicit reply waiting refuses before submitting a message
@@ -78,6 +83,158 @@ but cannot overwrite an idle boundary already observed after consumption.
 Migration retains historical SDK-acceptance evidence without inventing
 consumption or classifying old acknowledged history as newly pending work.
 Newly admitted inputs carry explicit consumption-tracking provenance.
+
+### Exact live CLI inbox admission and observation
+
+These opt-in operations address the **actual original CLI session ID**, not a
+worktree handle or an ACP Bridge/native pair. Both freshly negotiate
+`/health.capabilities.live_keyed_receipt: 1` and use distinct strict version-1
+routes. An older provider or rollback refuses without a general-send fallback.
+They never ensure a daemon, resume a native or retry an unknown request.
+
+```bash
+agent-bridge --json send <exact-session-id> --live-exact \
+  --expected-session-id <same-session-id> --idempotency-key <original-key> \
+  --sender <original-sender> --prompt-file - --no-wait
+```
+
+Admission uses the existing inbox transaction and checks the raw original
+session identity in its insert and persists `live_messages.exact_session`.
+Writable schema-40 preparation adds this provenance with a false default for
+legacy rows and upgrades the existing canonical inbox input guard. That guard
+retains the exact flag, raw native ID and original input, and its changed
+definition makes schema-38/39 cold writable readers refuse before opening the
+inbox. Intermediate migrations from pre-30 storage retain the legacy input
+guard at every committed version-30 through version-39 checkpoint; interrupted
+startup can reopen and resume until the atomic version-40 replacement.
+Rollback therefore requires the current schema owner, not merely refusing
+new exact endpoints; already-admitted inputs remain protected. Read-only
+adoption requires prepared storage. Exact rows stay at
+the original native during same-process conversation rollover. A successor's
+poll, acknowledgement or consumption cannot deliver or settle them. Original
+receipt reads and delayed original acknowledgement remain possible; an old
+alias poll does not inject the retained prompt into its successor. Legacy
+messages retain their alias-following behavior. Only an `exact_native=true` poll
+returns exact inputs, carrying the exact flag and original native ID; old
+extensions cannot ignore unfamiliar provenance and inject those inputs.
+The extension observes actual SDK metadata and checks
+the independent current native identity immediately before each exact SDK send,
+including replay after an interrupt and later messages in an awaited batch.
+An interrupt restores the whole acknowledged replay batch to tracking before
+any awaited metadata observation or SDK send. A rejection retains all
+unconsumed inputs for a later interrupt; only observed root `user.message`
+events remove them, without delivering exact inputs into a successor.
+Consumption is rechecked after each awaited metadata observation, immediately
+before replay, so a delayed root event cannot cause consumed input to be resent.
+The existing in-flight helper also observes consumption throughout the active
+poll, delivery and acknowledgement scope. If an acknowledgement failed,
+consumed polled redelivery retries that acknowledgement without another SDK
+send or interrupt. Active observations survive bounded history eviction and
+refresh the existing consumption cache for the polled inputs on exit; the
+observer always closes, including after fetch, send or acknowledgement failure.
+Rejected rollover registration cannot restore the previous native identity;
+held inputs are not acknowledged as delivered.
+The input is `prompt`-kind with `steer` delivery; there is no
+hosted pending-prompt queue, force, replacement or alternate transport.
+Idempotent replay returns only the already-admitted original message.
+
+Replace `--live-exact` with `--live-receipt-only` to inspect the original
+session/key/sender/prompt without writing, moving a cursor or following aliases.
+Both routes return `live-keyed-receipt/v1`, version 1, the exact binding and
+`receipt`. A retained receipt carries its original message ID and admission,
+SDK-acceptance or consumption stage. `receipt: null` means unproven, including
+after historical evidence was removed; it never means no effect or authorizes
+another send. A changed retained prompt or sender conflicts.
+Admission, consumption and semantic acceptance remain separate facts.
+
+The separate `--live-exact-notify --kind notify` operation uses the same exact
+session/key/sender/body binding but independently negotiates
+`/health.capabilities.live_exact_notify: 1`. It retains informational `notify`
+intent with `steer` delivery through the existing inbox owner and returns
+`live-exact-notify/v1`, version 1, the binding and original `admission`.
+It never resolves a worktree, follows an alias, ensures or resumes a daemon,
+queues hosted work or falls back to the prompt-only exact operation.
+Rollover between a liveness probe and admission refuses the old target;
+rollover after admission retains the original notification at its native.
+Missing support, malformed responses and transport loss are unproven and do
+not authorize a substitute send. Non-exact notifications keep their existing
+current-worktree semantics.
+
+### Exact native follow-ups through ordinary send
+
+The standard `send` command accepts a retained native conversation fence together
+with an idempotency key. Protocol 51 owns this combination. The caller supplies
+only the target, prompt and key; it does not construct an allocation/startup
+invocation or select an interactive inbox. Native aliases resolve to the actual
+hosted session and the daemon rechecks the native identity under its turn lock.
+
+The existing turn journal retains the key, exact prompt, native identity and
+original admission receipt. Repeating the same request returns that receipt,
+including after a lost reply; changed intent conflicts. A stopped context uses
+strict resume with recreation disabled and is checked again before admission.
+Failure never authorizes a different native conversation or an inbox fallback.
+The native turn receives the unchanged prompt text; Bridge retains the caller
+and `agent-bridge` source in its journal/event metadata, not an inbox envelope
+or a claim that the input came from a human.
+The receipt proves turn admission, not native consumption or semantic completion.
+
+This guarded combination currently refuses a busy target and does not support
+`--queue` or `--force`. Unkeyed sends and the ordinary hosted FIFO queue retain
+their previous behavior. An older daemon refuses the new combination before
+effects; package or payload freshness alone is not support evidence.
+
+#### Read-only ordinary-send receipt observation
+
+The optional `native_send_receipt` capability (version 1, HTTP baseline 51)
+adds an observation-only mode, separate from retrying admission:
+
+```bash
+agent-bridge --json send <bridge-session> \
+  --expected-native-session-id <native-session> --idempotency-key <original-key> \
+  --caller <original-caller> --prompt-file - --receipt-only --no-wait
+```
+
+Stdin must contain the exact original prompt. Use the original **Bridge session
+ID**, not an alias or worktree resolver. The route accepts the same
+`NativeSendPrompt` JSON as ordinary keyed send:
+`{"invocation_key":"original-key","expected_native_session_id":"native-session","prompt":"original prompt","caller_id":"original-caller"}`.
+The holder lock fences the Bridge/native identity and the turn journal checks
+the original key, prompt and caller. A stopped or busy session remains unchanged;
+no observation resumes, recreates, submits, queues, or falls back to another
+transport. This also applies during daemon draining.
+
+A found receipt returns HTTP 200:
+`{"version":1,"session_id":"bridge-session","native_session_id":"native-session","invocation_key":"original-key","turn_index":0,"queued":false,"admission":"accepted"}`.
+The CLI adds `"outcome":"accepted"` and exits 0. This proves only historical
+admission, not consumption, a current running turn, or completion.
+
+A missing receipt returns HTTP 404
+`{"detail":{"code":"native_receipt_missing"}}`. The CLI exits 69 with
+`"outcome":"refused_unavailable"`, `"reason":"native_receipt_missing"` and
+`"retryable":false`. This means **unproven**, never `not_sent` or no-effect
+evidence; do not turn an observation miss into a new send. Missing session
+history similarly returns 404 `native_session_unavailable`. Changed native
+identity, caller, prompt or Bridge binding refuses with 409; a different key
+without retained evidence remains a 404 miss. Malformed or corrupt retained
+history refuses with 409 rather than granting fresh admission.
+
+The CLI freshly checks the receiving daemon's advertised protocol and
+`/health.capabilities.native_send_receipt` before every request attempt.
+Providers below HTTP 51 or without integer capability version 1 or newer refuse
+before the receipt POST. The base HTTP generation stays 51: this optional
+capability does not invalidate existing ordinary-send generation evidence. Invalid
+native identity/key or mixed delivery options refuse before connecting.
+Ordinary and keyed-invocation receipt-only commands construct their client
+with daemon ensure disabled. An unavailable Bridge remains unavailable; the
+query cannot start it and trigger startup recovery or retained-host prompts.
+Malformed receipt replies or observation transport failures remain `"unknown"`
+(exit 70, reason `native_receipt_unproven`). Existing
+`--native-invocation-file ... --receipt-only` keeps its protocol-45 endpoint,
+binding checks, output and mixed-option restrictions.
+
+Only receipts actually retained by the original ordinary-send operation can be
+observed. This capability cannot retroactively qualify legacy or otherwise
+unknown historical sends, and no missing receipt proves that a send had no effect.
 
 Source anchors:
 
@@ -283,8 +440,9 @@ keys, so "unsupported" stays distinguishable from "no boundary".
 
 ## Target logical-message idempotency
 
-The current represented-session inbox supports an `idempotency_key`, but the
-ordinary hosted-session prompt queue does not. The current database index makes
+The current represented-session inbox supports an `idempotency_key`, and exact
+native follow-ups have the guarded turn-journal contract above. The ordinary
+hosted-session prompt queue does not yet support a key. The current database index makes
 that live-message key globally unique across the table. Repeating it with the
 same session, sender, body, reply target, and kind returns the original message
 (the response says `duplicate: true`); reusing it for different content or a

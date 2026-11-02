@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
@@ -65,9 +66,12 @@ def add_parsers(sub) -> None:
     p.add_argument(
         "--repo", default=None, help="Target repo 'owner/name' for the PR (default: tracked repo)"
     )
-    p.add_argument(
+    selector = p.add_mutually_exclusive_group()
+    selector.add_argument(
         "--pr", type=int, default=None, help="Select which tracked PR to abandon by number"
     )
+    selector.add_argument("--creation", default=None, help="Cancel one unpublished local attempt by immutable PR ID")
+    p.add_argument("--expected-revision", type=int, default=None, help="Exact creation revision being confirmed")
     p.add_argument(
         "--reason", default=None, required=True,
         help="Why this PR is being abandoned (required on every call, not "
@@ -274,9 +278,16 @@ def cmd_pr_abandon(args: argparse.Namespace) -> int:
         pr_number=getattr(args, "pr", None),
         reason=getattr(args, "reason", None) or "",
         confirm=getattr(args, "confirm", False),
+        creation_id=getattr(args, "creation", None),
+        expected_revision=getattr(args, "expected_revision", None),
     )
     if use_json:
         output._json_output(result)
+    elif result.get("creation_cancelled"):
+        output.ok(
+            f"Local PR creation {result['pr_id']} cancelled; no provider PR was closed. "
+            "Source, claims and ordinary finalization gates are unchanged."
+        )
     elif result.get("success"):
         n = result.get("number")
         repo = result.get("repo")
@@ -610,12 +621,12 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         return 0 if result.get("success") else 1
     if result.get("success"):
         output.ok(result.get("message", f"pr-complete: {result.get('action')}"))
-        if result.get("action") == "reset-past-squash" and result.get("backup_ref"):
-            print(
-                f"  recover the pre-complete state with: git reset --hard {result['backup_ref']}"
-            )
     else:
         output.err(result.get("error", "pr-complete failed."))
+    if result.get("backup_ref"):
+        print(
+            f"  revisit the pre-complete state with: git switch --detach {shlex.quote(result['backup_ref'])}"
+        )
     return 0 if result.get("success") else 1
 
 

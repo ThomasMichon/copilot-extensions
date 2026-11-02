@@ -14,8 +14,8 @@ class ExecutionSpaceConfigFields(PreferencePolicyFields):
 
     local_execution_space: str | None = Field(
         default=None,
-        description="Legacy standalone execution-space selector; must agree with "
-        "identity derived from authoritative source-project machine configuration.",
+        description="Optional canonical topology key for this daemon's actual platform; "
+        "otherwise use unambiguous hostname and platform discovery.",
     )
 
     @field_validator("local_execution_space")

@@ -24,6 +24,7 @@ from dropin_registry import Finding, ScanAuthority
 from ._config_io import _load_yaml_object
 from ._findings import _finding
 from ._remote_identity import normalize_remote
+from ._project_identity import identity_inputs, read_identities, write_identities
 from .bare_anchor import git_root
 
 
@@ -94,6 +95,9 @@ def _verified_project_roots(
         )
         return [], findings, ScanAuthority.INDETERMINATE
 
+    memo_path = agent_worktrees_home / "cache" / "project-identities.json"
+    previous = read_identities(memo_path)
+    verified: dict[str, str] = {}
     plat = _platform_key()
     roots: list[tuple[str, Path]] = []
     registry_indeterminate = False
@@ -162,6 +166,16 @@ def _verified_project_roots(
             )
             registry_indeterminate = True
             continue
+        expected_identity = normalize_remote(expected_remote)
+        inputs = (
+            identity_inputs(canonical, expected_identity, _resolver._git_executable())
+            if expected_identity is not None else None
+        )
+        key = str(canonical)
+        if inputs is not None and previous.get(key) == inputs:
+            verified[key] = inputs
+            roots.append((name, canonical))
+            continue
         try:
             top = git_root(canonical, _resolver._git, _same_file)  # a bare anchor counts as its own root
             actual_remote = _resolver._git(canonical, "remote", "get-url", "origin")
@@ -190,7 +204,6 @@ def _verified_project_roots(
             registry_indeterminate = True
             continue
         actual_identity = normalize_remote(actual_remote)
-        expected_identity = normalize_remote(expected_remote)
         if actual_identity is None or expected_identity is None:
             findings.append(
                 _finding(
@@ -216,7 +229,13 @@ def _verified_project_roots(
             )
             continue
         roots.append((name, canonical))
+        if inputs is not None and inputs == identity_inputs(
+            canonical, expected_identity, _resolver._git_executable()
+        ):
+            verified[key] = inputs
 
+    if verified != previous:
+        write_identities(memo_path, verified)
     authority = (
         ScanAuthority.INDETERMINATE
         if registry_indeterminate

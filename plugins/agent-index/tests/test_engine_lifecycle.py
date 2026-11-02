@@ -150,6 +150,9 @@ def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch, tmp_p
         return _FakeProc()
 
     monkeypatch.setattr(lifecycle.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        "agent_procutil._daemon_instance_store.bind_process", lambda receipt, pid: None,
+    )
     monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path))
 
     lifecycle._spawn_engine(_profile())

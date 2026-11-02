@@ -1,5 +1,7 @@
 # agent-ssh
 
+[Configuration reference](docs/configuration.md)
+
 The **SSH connectivity layer** for the agent fabric. It provides a standalone
 `agent-ssh` CLI that renders machine-name SSH profiles, verifies reachability,
 and defines the transport-provider contract used by direct and tunnel
@@ -34,8 +36,16 @@ provision lock, status writes or a foreground fallback. Explicit installers and
 network-backed retained-source qualification under #5379 remain separate.
 
 The installer's `uninstall` action serializes with install/update. It removes
-runtime/config contents but keeps transaction-lock files and `.install-stage`
-coordination, so the install directory may remain. Normal self-staging reap
+only explicitly named runtime code and selectors, retaining configuration,
+authentication, forward keepers, host/workspace settings, warning state, unknown
+entries, transaction locks and `.install-stage` coordination. It requires a
+matching deployment owner and an installer-engine with entry-list removal.
+Linked roots and configured SSH reconnect closures refuse before removal;
+unowned binstubs remain untouched. The canonical uninstall engine holds runtime, snapshot and
+redirect-publication custody throughout finite native cleanup. Persistent
+lease registries remain in place and do not imply contention; actual held
+leases refuse admission. These refusals do not disconnect SSH or stop keepers.
+Normal self-staging reap
 removes dead-owner stages on later invocations. Its preview takes no transaction lock and removes no contents;
 normal transient payload self-staging still applies.
 
@@ -65,6 +75,18 @@ agent-ssh copilot my-machine --stop
 The profile core manages SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+On Windows, `verify` and `refresh-mesh` resolve the selected client's profile and
+use the shared owned SSH launcher, including its jump/proxy chain. The transport
+wait is finite, and timeout/cancellation awaits the existing cleanup owner.
+Configuration and cleanup errors remain explicit rather than being classified
+as an unreachable target. An unpaired older shared library refuses before
+transport instead of falling back to the legacy launcher.
+Windows probe timeouts must be positive integers; zero does not request an
+unbounded subprocess.
+POSIX probe behavior is unchanged.
+See [native qualification](../../TESTING.md#optional-owned-windows-jump-probes);
+source changes do not silently replace an installed runtime.
 
 ### Session topology and profile evidence
 
@@ -123,6 +145,10 @@ selected by the same public directory and policy; forwarding remains disabled.
 It does not edit the user's ordinary key file, enroll a Gateway, fetch a secret,
 start a listener, or create a reconciliation loop. See the
 [native authorization contract](docs/gateway-transport.md#target-local-login-authorization).
+On Windows the directory remains current-account-owned with its protected
+user/SYSTEM DACL. Files may retain the OS's privileged default owner under an
+elevated token, but their closed user/SYSTEM grants are unchanged and still
+verified; foreign owners or extra grants are not adopted or repaired.
 
 The installed `agent_ssh.gateway_sshd` module is the native foreground listener
 entrypoint for an existing target-local lifecycle owner. It verifies the real

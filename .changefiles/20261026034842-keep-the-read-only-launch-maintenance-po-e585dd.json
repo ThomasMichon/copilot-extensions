@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the read-only launch maintenance policy probe from modifying sealed runtime payloads with bytecode caches.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

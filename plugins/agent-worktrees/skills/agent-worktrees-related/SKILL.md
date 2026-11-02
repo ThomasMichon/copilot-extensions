@@ -94,12 +94,26 @@ related:
     (often *not* the venue `repo` name).
 - **`delegate.via`** -- how to hand work to the agent that owns the repo:
   `agent-bridge`, `agent-codespaces`, `agent-containers`, or `none`.
+- **`pr`** -- the related repository's portable PR binding and observation
+  policy; see `docs/pr-observation.md` in this plugin. A higher entry that
+  omits `pr` inherits contributed PR defaults even when it replaces relationship
+  metadata. An explicit `pr` block replaces the lower related PR block, including
+  an empty block or disablement; explicit retargets never inherit old credentials
+  or hosting identity.
 - **`plugins`** -- plugins staged into the related repo's dispatched agent.
   For CodeSpace/container venues, the dispatch path copies each plugin from the
   host's installed payload and passes the extracted destination as
   `--plugin-dir` (no marketplace fetch in the venue). Git-backed and repo-local
   directory marketplaces are both supported, but every listed source must be
   enabled and installed on the machine that dispatches the work.
+  An individual mapping may additionally set `allow_missing: true`, for example
+  `{source: retired@example-local, allow_missing: true}`. This deliberate,
+  exact-source workaround omits only an absent entry in the target's declared
+  local marketplace and emits a warning; the controller need not declare that
+  marketplace. The default remains fail-closed. It neither changes the target's
+  settings nor bypasses invalid payloads, dependencies, or target disablement.
+  `enable: false` retains install-only semantics when the plugin is present.
+  See the [shared selection contract](../../../../libs/plugin-resolve/README.md#explicit-missing-local-selections).
 - **`ownership`** -- the operator's contribution/authority posture toward the
   repo (who maintains it, who reviews it) -- **not** the AI-attribution axis
   (see `audience` below for that): `owned` (the operator wholly owns it --

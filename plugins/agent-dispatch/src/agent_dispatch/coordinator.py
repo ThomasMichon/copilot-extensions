@@ -61,6 +61,7 @@ from .events import EventBus
 from .lease import FencingGuard
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
+from .registrar_discovery import RegistrarSources
 from .run_waiter_recovery import (
     recover_run_waiters,
 )
@@ -156,6 +157,8 @@ def create_app(
     wake_max_attempts: int = 8,
     wake_retry_base: float = 1.0,
     replay_consumer_factory=None,
+    cohort_sources: RegistrarSources | None = None,
+    pool_publication_enabled: bool = False,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -175,11 +178,25 @@ def create_app(
     An explicit ``replay_consumer_factory(queue, checkpoint)`` uses this owner's
     existing waiter cadence and drain boundary. It requires active-owner authority
     and enabled waiter maintenance; ordinary server/CLI construction omits it.
+
+    ``cohort_sources`` binds explicit projection to the coordinator's registrar.
+    It requires active-route authority. ``pool_publication_enabled`` additionally
+    selects whole-cohort maintenance on the existing GC cadence; it defaults off.
     """
     if replay_consumer_factory is not None and (
         not math.isfinite(wake_interval) or wake_interval <= 0 or not callable(wake_is_active)
     ):
         raise ValueError("replay consumer requires waiter maintenance and active-owner authority")
+    if cohort_sources is not None and not callable(wake_is_active):
+        raise ValueError("configured cohort source requires active-owner authority")
+    if pool_publication_enabled and (
+        cohort_sources is None or not control_token
+        or not math.isfinite(sweep_interval) or sweep_interval <= 0
+    ):
+        raise ValueError(
+            "pool publication requires the coordinator registrar, configured control authority "
+            "and enabled GC cadence"
+        )
     if (
         token is not None
         and control_token is not None
@@ -379,6 +396,7 @@ def create_app(
                 bus,
                 health=sweeper_health,
                 governance=governance,
+                **({"pool_source": cohort_source} if pool_publication_enabled else {}),
             )
         )
         orphan_reaper = (
@@ -661,6 +679,7 @@ def create_app(
 
                 from .config import routing_dir
                 from .runtime_version import install_dir
+                from .action_controls import action_inhibited
                 from .self_retire import is_superseded
                 from .self_update import stale_target
 
@@ -723,6 +742,12 @@ def create_app(
                     if not at_safe_point:
                         confirms = 0
                         continue
+                    if await asyncio.to_thread(
+                        action_inhibited, "coordinator-replacement", logger=log,
+                        automatic=True,
+                    ):
+                        confirms = 0
+                        continue
                     confirms += 1
                     if confirms < _su_confirmations:
                         continue
@@ -735,6 +760,11 @@ def create_app(
                             governance,
                             "pre-mutation:self-update",
                             loop_name="self-update",
+                        ):
+                            continue
+                        if await asyncio.to_thread(
+                            action_inhibited, "coordinator-replacement", logger=log,
+                            automatic=True,
                         ):
                             continue
                         _spawn_self_deploy(target)
@@ -838,6 +868,8 @@ def create_app(
                         await sweeper
                     except asyncio.CancelledError:
                         pass
+                if cohort_source is not None:
+                    await cohort_source.close()
                 if orphan_reaper is not None:
                     orphan_reaper.cancel()
                     try:
@@ -872,6 +904,16 @@ def create_app(
     app.state.worktree_status_relay = relay
     # Graceful-cutover drain gate (docs/patterns/graceful-daemon-cutover.md).
     app.state.drain_gate = DrainGate()
+    from .coordinator_pool_source import CoordinatorPoolSource
+
+    cohort_source = (
+        CoordinatorPoolSource(
+            queue, cohort_sources,
+            is_active=wake_is_active, gate=app.state.drain_gate,
+        )
+        if cohort_sources is not None and wake_is_active is not None else None
+    )
+    app.state.pool_cohort_source = cohort_source
 
     @app.middleware("http")
     async def deny_scoped_non_task_surfaces(request: Request, call_next):
@@ -918,7 +960,10 @@ def create_app(
         )
 
 
-    register_status_routes(app, queue, bus)
+    register_status_routes(
+        app, queue, bus, control_token=control_token,
+        cohort_source_owned=cohort_source is not None,
+    )
     register_directory_routes(app, directory)
     register_task_routes(
         app,
@@ -932,7 +977,9 @@ def create_app(
         app, queue, bus, control_token=control_token,
         restricted_ingress_authenticated=bool(token),
     )
-    register_registry_routes(app, queue, control_token=control_token)
+    register_registry_routes(
+        app, queue, control_token=control_token, cohort_source=cohort_source,
+    )
     register_execution_scope_routes(app, queue, bus, control_token=control_token)
     register_execution_runtime_routes(app, queue, bus, control_token=control_token)
     register_worktree_status_routes(app, relay)

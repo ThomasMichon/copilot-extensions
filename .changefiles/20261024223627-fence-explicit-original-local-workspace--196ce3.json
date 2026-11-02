@@ -1,0 +1,9 @@
+{
+  "comment": "Fence explicit original local workspace allocation at the existing subprocess owner and retain ambiguous outcomes without replay",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

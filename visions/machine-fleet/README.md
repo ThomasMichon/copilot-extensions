@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -460,6 +460,34 @@ Stale/conflicting copies remain visible and cannot roll back newer accepted
 intent. Credential custody, vault unlock authority and access stay with their
 existing owners; syncing encrypted material does not grant fleet membership
 or publish plaintext secrets.
+
+### continuity-backed-machine-bootstrap
+
+A new machine can discover its selected fleet and obtain scoped Gateway
+authentication through a user-owned continuity source declared by its harness
+context. The user has already established that source's authenticated pathway;
+where it carries delegated bootstrap authority, setup consumes that approval
+without inventing another mandatory presence or confirmation step.
+
+Gateway discovery, authority to enroll and authority to use particular fleet
+capabilities remain distinct. Public configuration, cloud arrival or a copied
+stale record cannot create enrollment or restore a revoked grant. The existing
+credential and enrollment owners provision the admitted machine's credentials;
+portable user state does not make machine-bound caches or live owner journals
+interchangeable between devices.
+
+An already authenticated device can approve a pending new-device request through
+a short-code experience when the selected policy requires confirmation.
+The code correlates the exact device and requested scope; it is not a credential
+or a substitute for current approval authority. The declared bootstrap path
+provides the initial authenticated configuration/authorization exchange without
+assuming anonymous registration or an existing Gateway session.
+
+Managed machines can establish outbound Gateway access before SSH exists.
+Already authorized direct-SSH provisioning remains an alternative, not the
+universal first-touch prerequisite. Storage, identity and transport providers
+stay replaceable, and selecting bootstrap does not bypass separately required
+peer, credential, capability or deployment decisions.
 
 ### operator-owned-whole-machine-lifecycle
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Add versioned in-process source deltas, bounded checkpoint reads, normal-round reuse and lazy embedding readiness",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

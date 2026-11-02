@@ -7,17 +7,33 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
 MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
+MAX_UNIT_EVIDENCE_FILE_BYTES = 192 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
+BUILD_SOURCE_DATA: frozenset[str] = frozenset()
 
 
 class UnitEvidenceError(ValueError):
     """The declared unit packet or its observed evidence is incomplete."""
+
+
+def bounded_bytes(stream: BinaryIO, maximum: int) -> bytes:
+    """Retain the overflow sentinel without allocating the whole limit per read."""
+    chunks: list[bytes] = []
+    remaining = maximum + 1
+    while remaining:
+        chunk = stream.read(min(64 * 1024, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
 
 
 def decode_json(text: str | bytes) -> object:
@@ -37,9 +53,11 @@ def relative_file(value: object) -> str:
         not isinstance(value, str) or "\\" in value
         or PurePosixPath(value).is_absolute()
         or any(part.casefold() in ("", ".", "..", ".git") for part in value.split("/"))
-        or not value.endswith(".py")
+        or (not value.endswith(".py") and not any(
+            value == name or value.endswith("/" + name) for name in BUILD_SOURCE_DATA
+        ))
     ):
-        raise UnitEvidenceError("unit source must be a canonical relative Python path")
+        raise UnitEvidenceError("unit source must be canonical Python or an explicit build-data input")
     return value
 
 
@@ -75,13 +93,13 @@ def admit_manifest(data: object) -> dict:
         path, separator, case = node.partition("::")
         relative_file(path)
         if (
-            not separator or not case or not path.startswith(_PACKET)
+            not separator or not case or not path.startswith(_PACKET) or not path.endswith(".py")
             or not Path(path).name.startswith("test_") or path not in sources
         ):
             raise UnitEvidenceError(f"node is outside the admitted unit packet: {node}")
     for path in targets:
         relative_file(path)
-        if path not in sources or path.startswith(_PACKET):
+        if path not in sources or path.startswith(_PACKET) or not path.endswith(".py"):
             raise UnitEvidenceError(f"coverage target is not admitted production source: {path}")
     if candidate:
         composition = data["composition"]
@@ -215,7 +233,7 @@ def ci_requires_units(
 def ci_requires_source_ast_guards(
     event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
 ) -> bool:
-    """Omit only PR inputs outside the three full scanners' source/policy roots."""
+    """Omit only PR inputs outside the full scanners' source/policy roots."""
     if event != "pull_request":
         return True
     paths = changed_paths(base, head, read_diff, merge_base=True)

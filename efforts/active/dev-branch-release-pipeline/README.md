@@ -69,6 +69,7 @@ composition; content integrity does not reduce to trusting a source marker.
 | Regression admission contributor | First bounded contributor-regression unit cohort; existing broad periodic ownership retained | Managed source `chugging-wrench`; #3336 |
 | Stamped-candidate contributor | Bounded Phase 9c ordering and coverage-provenance correction; other campaign and control owners retained | Managed source `faded-washer`; #8390 |
 | Composite-source contributor | Phase 9d complete source publication and late Main-control reconciliation; existing artifact/profile and runtime owners retained | Managed source `stubborn-lantern`; #8736 |
+| Release implementation coherence contributor | Phase 9e durable helper/controller coherence, bounded Main bootstrap and qualified release recovery | Managed source `buzzing-gauge`; #8983 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -90,6 +91,11 @@ rewrite)._
   Historical Phase 9c attribution does not transfer current implementation
   custody. #8367 retains its optional profile/index producer and API; coordinate
   shared publication or documentation interfaces rather than superseding it.
+- **Phase 9e:** the Release implementation coherence contributor owns the
+  [source-coherent implementation proposal](source-coherent-release-implementations.md)
+  and its explicitly authorized Main workflow repair. Preserve the Phase 9d
+  contributor's wider late-control work, #6237 portfolio ownership and all
+  runtime/lifecycle owners; coordinate shared publication interfaces.
 
 ## Context
 
@@ -116,6 +122,17 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-26 durable release recovery (verbatim):**
+
+> Focus on making a durable fix to unblock main releases, which doesn't require regularly updating version pins. Version pins produce brittleness. You have my full authorization to make direct-main workflow commits, drive PRs, and deploy locally to produce an unblocked release.
+
+The operator requires durable release recovery rather than repeated manual
+helper-pin updates and explicitly authorizes the bounded Main workflow repair,
+PR completion and local rollout. Phase 9e is the **agent-recommended**
+realization. It retains immutable per-run input identities and the source,
+review, signing, publication and actual Main-merge gates; permission to repair
+workflow control is not a generic source or integrity exemption.
 
 **2026-10-24 final promotion boundary and independently advancing Main controls
 (verbatim):**
@@ -981,7 +998,9 @@ broader effort and adopter acceptance remain separately owned.)_
 
 _(Agent-recommended realization of the 2026-10-24 operator direction.
 Participant: Composite-source contributor; bounded tracker: #8736.
-Status: Active; reviewed plan #8745 precedes implementation.)_
+Status: Active; plan #8745, source publication #8790 and retirement/classification
+support #8838 merged; equivalent build reuse, operational late-control
+reconciliation, Main activation and live acceptance remain open.)_
 
 - [x] Land this amendment through current-head review and required CI: #8745,
       `85c5d7a3fd8790886808c3fa571f947e1f0d64b1`.
@@ -993,6 +1012,29 @@ Status: Active; reviewed plan #8745 precedes implementation.)_
       promotion satisfies the complete pre-PR source/artifact contract,
       preserves late Main changes and remains under thirty minutes including
       queueing, publication, actual merge and tagging.
+
+### Phase 9e - Source-coherent release implementations
+
+_(Agent-recommended realization of the 2026-10-26 operator direction.
+Participant: Release implementation coherence contributor; bounded tracker:
+#8983. Status: Done for this bounded slice; plan #9054, source implementation
+#9061 and independent Main bootstrap #9078 merged; real release #9080 and
+authorized local selected/running-state proof passed. Wider phases retain
+their existing owners and open gates.)_
+
+- [x] Review the [source-coherent implementation plan](source-coherent-release-implementations.md)
+      before changing implementation authority or Main execution: #9054,
+      `c4868a1bbaab3f822aacc3a2b57d5ad5417a9851`.
+- [x] Implement coherent immutable source selection and PR-time compatibility
+      checks, preserving privilege isolation and the existing unit portfolio:
+      #9061, `3e1dba5cf3d84c9809eb74e1d99caaf89fb94637`.
+- [x] Drive the independently reviewed Main workflow transaction and one actual
+      frozen-source release through artifact publication, Main merge and tag:
+      #9078 and #9080, natural run `40315448433`.
+- [x] Complete the authorized local rollout and running-state proof, journal
+      any remaining gates under their existing owners: unified updater exit 0;
+      selected manager and live monitor `1.24.293-dev1`, live Bridge
+      `0.9.174.dev1`, coordinator `0.18.112-dev1` and MCP `0.2.96-dev1`.
 
 ## Validation Plan
 
@@ -1231,6 +1273,166 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-26 - Qualified release and local rollout; bounded Phase 9e complete
+
+Source implementation #9061 and workflow-only Main bootstrap #9078 passed
+current-head review and required CI. Natural run `40315448433` then completed
+all qualification, build, attestation and complete-source publication/readback
+gates before normal nonadministrator landing #9080 and immutable tagging,
+in twelve minutes including queueing. The queued manual run correctly
+skipped duplicate promotion.
+
+The authorized unified updater exited 0. Independent checks confirm selected
+manager/live monitor `1.24.293-dev1`, ready Bridge `0.9.174.dev1`, healthy
+coordinator `0.18.112-dev1` and actual MCP serving interpreter `0.2.96-dev1`.
+The [Phase 9e subplan and journal](source-coherent-release-implementations.md)
+retain the complete source, asset, landing and rollout evidence. All bounded
+Plan/Validation items are resolved; the wider effort remains Active under its
+existing Phase 7/9, control, portfolio and runtime owners.
+### 2026-10-25 - Early original-build retention support prepared
+
+The existing full-tree ZIP encoder/verifier now also supports original build
+inputs before qualification. A separate external build manifest binds the
+original candidate, complete Git tree, Main/controller and unchanged signed
+source index, with no qualification digest. The existing Dev publisher admits
+the two trusted-Main-attested subjects, preserves the shared 64-asset limit
+and independently reads their raw bytes. No second publisher, release identity,
+source-index rewrite or qualified landing receipt is introduced.
+
+The focused archive/publication cohort passed 149 cases in 13.16 seconds;
+the final early-build cohort passed 55 in 8.20 seconds, including prepare-CLI
+admission and fail-closed authority controls. Ruff passed. The required unit
+manifest retains all 1768 existing identities/order and adds these 55 cases
+under the unchanged 300-second/effect/coverage contract. Full observed packet,
+review and hosted actual-Git CLI witness remain publication gates. This is
+source support only; build/landing equivalence, Main activation and actual
+new-contract promotion remain open.
+
+#8899 opened after exact-head hosted CI `40170996003` passed 1829 units and
+the observed packet in 36.157 seconds, coverage recorded once; separate
+fresh-Git witness `40171009922` passed nine cases in 2.17 seconds. Review
+identified a real contract mismatch hidden by synthetic fixtures: schema-v2
+indexes forbid `main_before`. A regression through the actual index validator
+reproduced the failure. Preparation/publication now derive the external
+manifest's Main base from the pinned candidate's single-parent Git header,
+leaving source-index bytes unchanged. Fixtures and the real-Git witness use
+the valid index shape; malformed parent and wrong-generation controls cover
+both boundaries. All 161 coupled cases passed in 13.99 seconds. Corrected-head
+hosted packet, witness and review remain required; the old green head does not
+qualify this fix.
+
+### 2026-10-25 - Trusted retirement support merged; build/landing binding next
+
+#8838 merged as `010000e5c0cd3c557081c25d9e4341ee067b3d80` at
+`05:50:30Z`. Genuine Copilot approval `5641752786` covers exact final head
+`354961ccda41d4fbc6da7cdc1f655d24f99d8a0d`, with both findings resolved.
+Required CI `40166506567` passed 1768 units in 29.79 seconds and completed the
+unit/effect/coverage packet in 32.048 seconds, coverage recorded once. The
+separate manual actual-Git witness `40166637629` passed all seven cases in
+4.81 seconds under its unchanged 100-second bound. Managed completion used the
+configured Maintainer review/CODEOWNER exception after these gates, not a CI
+waiver.
+
+The review-driven controls cover type-preserving non-operator state comparison
+and refusal to downgrade recorded control history when Main removes the manifest.
+The source branch was clean at the actual published head. After terminal PR
+reconciliation, ordinary continuation sync safely aborted on the squash conflict;
+a retained backup and verified merged-range-only rebase advanced it onto pinned
+Dev without discarding unmerged work or using stash.
+
+Re-read this Phase 9d plan and its subplan after merge. They remain Active.
+Next is complete original build-source retention before qualification and an
+explicit external build-versus-landing binding: immutable index bytes keep their
+original signed content-tree meaning, while fresh landing generations prove
+complete input equivalence and current admission. Optional profile intent remains
+with #8367; unsupported profile refresh must refuse, not infer approval from an
+old index. No new Main controller, replacement cycle or live artifact-before-PR
+contract has been activated by this source milestone.
+
+### 2026-10-25 - Trusted control retirement and transition classification
+
+The next source slice authenticates previous preservation receipts against
+ancestor Main declarations and exact regular blob inventories. Main-deleted
+workflow paths retain bounded, revalidated tombstones so older Dev copies
+cannot reappear in later promotions. A path that Main retains but declassifies
+still follows ordinary Dev composition; explicit Main reintroduction clears
+its tombstone. All deletion destinations are preflighted before control writes.
+
+The companion transition classifier compares complete pinned Main trees.
+Only exact previously/currently declared controls and operator pause fields
+qualify as control-only. Payload, baselines, unknown governance, promotion or
+rollback lineage, and removal of the ownership contract refuse recomposition.
+Every changed snapshot requires fresh trusted execution; this helper is not
+artifact equivalence, new admission or permission for a stale controller.
+Existing frozen-publication and merge-base refusals remain unchanged.
+
+The first 59 in-process cases passed in 7.21 seconds; touched Python lint
+passed. The manual `promotion-controls` portfolio separately exercises actual
+Git composition under its original 100-second packet budget, without adding
+integration to required CI or promotion. Its execution and the final unit
+packet remain validation obligations, not inferred passes. Build/landing
+compatibility, current admission, independently governed Main activation and
+the actual complete promotion remain open.
+
+The first hosted branch proof correctly refused publication. Run `40157795196`
+passed all 1754 assertions but rejected the metadata-only workflow guard for
+having no production call coverage. That guard was moved intact to the optional
+integration packet; the required portfolio retains the 59 production-exercising
+new cases and its unchanged effect/coverage rules. Run `40157824781` exposed a
+fixture no-op: the first Dev edit changed only a preserved workflow, so the
+composer correctly returned no candidate. The fixture now changes ordinary
+payload too and asserts an actual first promotion before advancing fixture Main.
+Both hosted packets must pass the corrected immutable head before PR opening.
+
+The corrected head passed hosted CI `40158566781`: 1753 units, complete
+unit/effect/coverage packet in 27.554 seconds, coverage recorded once. Optional
+Git witness `40158586667` passed all six cases in 1.88 seconds. #8838 then opened.
+Its first current-head review found Python's boolean/number dictionary-equality
+alias in non-operator state. Seven regressions reproduced that class, including
+nested values and non-finite numbers. Canonical type-preserving comparison now
+rejects them; all 66 focused controls passed in 16.51 seconds. Fresh hosted
+qualification and re-review remain required for the corrected head.
+
+Re-review identified a second real boundary defect: a missing Main manifest
+could return early before checking recorded control provenance. Three downgrade
+controls reproduced it while three genuine legacy controls passed. The composer
+now refuses ownership removal when Main records prior controls/tombstones;
+malformed provenance cannot downgrade that refusal. All 72 focused cases passed
+in 12.82 seconds. The optional actual-Git portfolio adds this negative composition
+case under the same 100-second bound. No live ownership deactivation is enabled.
+
+### 2026-10-25 - Complete-source implementation merged; late controls remain
+
+#8790 merged as `28a0ff3911f02d457160dd856b448a8965204931` at
+`02:14:40Z`. Genuine Copilot approval `5641030342` covers exact published
+head `9bdc948ae58faf476f93878ad270df2315880ff3`, with no open findings or
+unresolved threads. Required PR CI passed: run `40152384443` executed all
+1694 admitted units in 24.20 seconds and completed the canonical unit/effect/
+coverage packet in 26.142 seconds, recording coverage once. The authorized
+Maintainer completion path merged after those gates; no failing CI was waived.
+
+The corrected archive contract resolves the full in-memory link graph rather
+than checking targets lexically. Ten controls first reproduced chained
+escapes/cycles at creation and readback; all 98 source/archive/publication/
+object cases then passed, including case aliases, safe repeated aliases and
+inclusive link bounds. Incoming unit selections and their relative order were
+preserved. New cases sit beside related evidence groups to avoid unrelated
+end-of-list conflicts.
+
+Re-read the Phase 9d Plan and Validation Plan after merge. Its source-delivery
+items are now recorded in the subplan, while the overall slice stays Active.
+The continuing worktree was pulled onto the actual merged Dev commit; only
+provider-confirmed merged commits were dropped after a safely aborted ordinary
+rebase, with recovery refs retained.
+
+Next is explicit build/landing compatibility and trusted Main-control
+reconciliation, retaining the existing signed index, lifecycle, publisher and
+strict server freshness gate. Main-only additions/deletions/renames and
+operator state must remain distinct from source/promotion lineage; changed
+authority needs current trusted execution. No new Main controller has been
+activated by this source PR, and no live complete-source asset, exact merged
+Main tree or under-thirty-minute new-contract release is claimed.
 
 ### 2026-10-24 - Complete-source implementation, not yet activated
 

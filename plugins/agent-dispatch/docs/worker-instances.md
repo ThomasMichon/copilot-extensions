@@ -32,12 +32,14 @@ commands and leading global options also retain their existing route.
 
 The table distinguishes:
 
-- **Configured**: user-local instance drafts, with **Edit** actions.
+- **Configured**: user-local instance drafts, with **Edit** actions only when
+  their original source and saved operator-input binding still verify.
 - **Source declarations**: discovered repository/plugin declarations, read-only
   here. Ownership/provenance identifies their configuration flow.
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
   and provider-owned fragments with owner-reported **Instantiate** capabilities.
-  Unsupported fragments retain Details and a reason, not a Save action.
+  Human Save actions require explicit operator-safe controls. Unsupported
+  fragments retain Details and a reason, not a raw declaration editor.
   Recipe fragments are not complete instances.
 
 ### Shared catalog metadata
@@ -146,8 +148,8 @@ document root. For a published instance,
 the row's title and description describe the published snapshot; a newer
 Save-only draft remains separate and does not relabel it. An unpublished
 instance displays its draft metadata. Details retain the technical name.
-This metadata change does not replace the existing advanced configuration
-form with a guidance editor or authorize any additional action.
+Display metadata alone does not authorize a guidance editor or any additional
+action.
 
 Upgrade the owning Dispatch runtime before adding `title` to active
 declaration documents. Older owners keep their strict unknown-field rejection;
@@ -156,10 +158,93 @@ older document contract for rollback. Existing documents need no migration,
 and existing catalog consumers continue reading `title` and `description`
 without a new command, schema version or capability probe.
 
-## Edit or instantiate
+## Operator controls
 
-Select **Edit — Save only**, **Edit — Save and Activate**, or the corresponding
-**Instantiate** action. The full-content form supplies:
+The native Workers forms use the source-owned
+`agent-dispatch.worker-operator-inputs` contract, version `1`. Rows advertise
+`operator_contract`, `operator_instantiable` / `operator_editable`, and
+`operator_fields` from the runtime that actually handles `workers save`.
+The scalar `operator_contract_version: "1"` projection lets native action
+filters enforce the same version without changing their ordinary `when` grammar.
+Absent capabilities mean unsupported, not permission to try new arguments.
+The advanced `editable` / `instantiable` facts and `fields` retain their
+previous CLI meanings; they do not authorize a human JSON editor.
+
+The built-in **Task worker pool** exposes a watched label, repository filter
+and positive whole-number worker capacity. Its headless worker body remains
+source-owned. Other built-in recipes remain advanced-only until their owners
+define equivalent bounded controls. Existing template IDs and fragment
+revisions are unchanged.
+
+Provider index entries may opt in with `operator_fields`, using the existing
+native form vocabulary's `text` / `choice` subset:
+
+```json
+"operator_fields": [
+  {
+    "name": "task_label",
+    "type": "choice",
+    "label": "Watched task label",
+    "description": "Choose which source-owned lane this worker watches.",
+    "options": ["work", "documentation"],
+    "default": "work"
+  }
+]
+```
+
+Each field binds **only** to that named existing recipe parameter. A provider
+uses `{task_label}` in its own declaration as usual; no implicit placeholder
+discovery, declaration override, path setter or second expansion engine is
+introduced. The source author is responsible for declaring only operator-safe
+parameters, not executable commands or agent instructions. Names are unique
+portable parameter identifiers, excluding `name` and `owner`. Labels and short
+descriptions are required; defaults are optional strings. Choice options are
+nonempty, unique strings. At most 32 fields and 64 options per choice are
+accepted. Text values are bounded to 4096 characters. Empty `operator_fields`
+explicitly offers a fixed template with only name/repository context controls;
+absence means that no human configuration contract was declared.
+Multichoice, free-form instruction textareas, dynamic option commands, arbitrary
+JSON and agent-authored addenda are not part of this contract.
+
+Forms show the owner's label and description literally. They submit
+`name`, `repo_root` and `param_<parameter>` fields through the existing
+`workers save ... --operator-inputs` operation. The owner rejects unknown
+parameters, undeclared choices and any `declaration` field before persistence.
+Save-only, explicit Save-and-Activate consent and partial-publication receipts
+remain unchanged. For example:
+
+```text
+agent-dispatch workers save template:worker-pool --revision <catalog-revision> --operator-inputs --field name=docs-workers --field param_label=documentation --field param_repos=all --field param_concurrency=2
+```
+
+Saved operator values and their contract/configuration binding live in the
+existing instance record, outside `configuration`; execution revision and
+draft/published comparison retain their existing meaning. Safe retries also
+fingerprint the exact input fields, not merely the template ID/revision.
+Editing re-resolves the **original exact** source revision and verifies that
+its old parameter values still produce the saved configuration. Catalog
+refresh shares one source discovery and one read-only resource snapshot/deadline
+across dependency and operator-binding checks. Execution admission is unchanged;
+Save source rechecks start fresh operations. Edits therefore
+depend on source availability. Source changes, including cosmetic index
+changes, missing providers and mismatched saved values make human editing
+unavailable rather than silently selecting a newer template. Save checks again
+under the existing write lock, rejecting binding-only drift even when execution
+bytes have not changed. Previously published execution is unaffected.
+An advanced declaration save always clears the operator binding, including
+when its execution bytes are unchanged. Legacy instances remain advanced-only;
+there is no inferred provenance or automatic migration.
+
+Upgrade the provider runtime before publishing `operator_fields` metadata:
+older strict template-index readers reject that optional key. Removing it
+restores the earlier index contract for rollback. New native contributions
+hide safe Save actions when an older selected runtime reports no capability;
+they never trial an effectful new argument or fall back to raw JSON.
+
+## Advanced CLI editing
+
+The existing `workers save` syntax without `--operator-inputs` remains an
+advanced owning CLI path, not a native human form. It accepts:
 
 | Field | Meaning |
 |---|---|
@@ -253,9 +338,10 @@ declaration path, requirements and revision. Raw commands/specs/environment
 values are not returned by this discovery projection.
 
 Resolvable provider rows report `resolution: recipe-resolved`,
-`dependency_status: inputs-required` and `instantiable: "true"`. Their form keeps
-the existing name, advanced declaration and repository-root fields. The
-declaration field starts as `{}`: supply overrides and the existing recipe's
+`dependency_status: inputs-required` and `instantiable: "true"`. Their advanced
+CLI `fields` projection keeps the existing name, declaration and repository-root
+fields; it is not the native operator form. The declaration field starts as
+`{}`: supply overrides and the existing recipe's
 `params`, rather than copying the source and accidentally overriding its path
 origins. The repository-root default is the selected provider root; an
 execution-repository selector remains an ordinary declaration field.

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the selected engine and complete caller environment during shell-delegated launch resolution.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

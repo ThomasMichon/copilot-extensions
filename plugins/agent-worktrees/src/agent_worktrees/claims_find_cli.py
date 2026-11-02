@@ -32,6 +32,17 @@ import argparse
 from . import claims_owner, output
 
 
+def cmd_sweep_observation(args: argparse.Namespace, target: list[str]) -> int:
+    if (
+        target != ["find", "pr"] or not args.json or not getattr(args, "claim_repo", None)
+        or getattr(args, "claim_state", None) != "all" or getattr(args, "claim_live", False)
+        or any(getattr(args, name, False) for name in ("apply", "remove", "released"))
+    ):
+        return output._json_error("sweep observation requires read-only find pr --repo --state all --json", 2)
+    from . import pr_sweep_cli
+    return pr_sweep_cli.run_pr_sweep([args.claim_repo, "--collect-only", "--json"])
+
+
 def _pr_number(pr) -> int | None:
     """The claim's PR number, falling back to parsing it out of ``url`` when
     unset -- some pre-existing records carry a stale/absent ``number`` even
@@ -47,8 +58,9 @@ def _pr_number(pr) -> int | None:
         return pr.number
     if pr.url:
         import re
+        from urllib.parse import urlparse
 
-        m = re.search(r"/pull(?:s|-?requests?)?/(\d+)", pr.url)
+        m = re.search(r"/pull(?:s|-?requests?)?/(\d+)/?$", urlparse(pr.url).path)
         if m:
             return int(m.group(1))
     return None
@@ -65,12 +77,16 @@ def _pr_repo(pr) -> str:
     from urllib.parse import urlparse
 
     parts = [p for p in urlparse(pr.url or "").path.split("/") if p]
-    if "_git" in parts:  # Azure DevOps: .../<project>/_git/<repo>/pullrequest/<n>
-        i = parts.index("_git")
-        if 1 <= i < len(parts) - 1:
-            return f"{parts[i - 1]}/{parts[i + 1]}"
+    if (
+        len(parts) >= 5 and parts[-4] == "_git"
+        and parts[-2].lower() == "pullrequest" and parts[-1].isdigit()
+    ):
+        return f"{parts[-5]}/{parts[-3]}"
     for i, part in enumerate(parts):
-        if re.fullmatch(r"pull(?:s|-?requests?)?", part) and i >= 2:
+        if (
+            re.fullmatch(r"pull(?:s|-?requests?)?", part)
+            and i >= 2 and i + 2 == len(parts) and parts[-1].isdigit()
+        ):
             return f"{parts[i - 2]}/{parts[i - 1]}"
     return ""
 

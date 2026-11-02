@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original provider creation native handoffs on existing rows without enabling provider effects",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

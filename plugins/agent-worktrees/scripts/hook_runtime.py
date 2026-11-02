@@ -8,11 +8,28 @@ import os
 import re
 import stat
 import struct
+import sys
 import tempfile
 import time
 from contextlib import contextmanager
 from collections.abc import Callable
 from pathlib import Path
+
+
+def update_driver_image(helper, pid: int) -> str | None:
+    image = helper._pid_image_path(pid)
+    if image or sys.platform != "darwin":
+        return image
+    import ctypes
+
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    probe = libproc.proc_pidpath
+    probe.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    probe.restype = ctypes.c_int
+    buffer = ctypes.create_string_buffer(4096)
+    if probe(pid, buffer, len(buffer)) <= 0:
+        return None
+    return os.fsdecode(buffer.value) or None
 
 
 def guidance_marker(payload: dict) -> str:

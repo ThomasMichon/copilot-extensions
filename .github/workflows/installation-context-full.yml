@@ -10,25 +10,949 @@ on:
         type: choice
         options:
           - context
+          - context-windows
+          - path-captures
           - foundation
+          - mux-companion
           - pull-requests-commands
           - pull-requests-bootstrap
           - ssh-recipes
           - ssh-bootstrap
           - ssh-commands
+          - pr-sweep
           - codespaces-recipes
           - codespaces-bootstrap
           - logger-recipes
           - logger-bootstrap
+          - logger-commands
+          - bridge-recipes
+          - bridge-bootstrap
+          - bridge-snapshots
+          - bridge-commands
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
+          - dispatch-publication
+          - dispatch-maintenance
+          - promotion-controls
+          - pane-argv
+          - manager-uninstall
+          - komodo-recovery
+          - manager-suite
+          - worktrees-git-probes
+          - codespaces-installer
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  codespaces-installer-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
+    name: CodeSpaces canonical and materialized installers (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 125
+    env: &codespaces-installer-env
+      UV_PYTHON: "3.12"
+    steps: &codespaces-installer-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify complete canonical and normally materialized installer contracts
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import sys
+          import tempfile
+          import time
+
+          source = pathlib.Path.cwd()
+          sys.path.insert(0, str(source / "libs" / "agent-procutil" / "src"))
+          from agent_procutil.owned_process import run_caller_owned
+
+          started = time.monotonic()
+          deadline = started + 7200
+          def run(arguments, *, cwd=source, limit):
+              remaining = min(limit, deadline - time.monotonic())
+              if remaining <= 0:
+                  raise TimeoutError("7200-second combined functional envelope exhausted")
+              print(f"START elapsed={time.monotonic() - started:.1f}s argv={arguments}", flush=True)
+              result = run_caller_owned(
+                  arguments, cwd=cwd, timeout=remaining,
+                  max_stdout_bytes=16 * 1024 * 1024, max_stderr_bytes=16 * 1024 * 1024,
+              )
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", file=sys.stderr, flush=True)
+              result.check_returncode()
+              return result.stdout.strip()
+
+          head = run(["git", "rev-parse", "HEAD"], limit=30)
+          assert head == os.environ["GITHUB_SHA"]
+          print(f"qualification-source={head}; profile=busy-host-functional", flush=True)
+          run([
+              sys.executable, "tools/seasoned_uv.py", "--uv", "uv", "--",
+              "--system", "pytest", "pytest-timeout", "packaging", "pyyaml", "coverage>=7.7",
+          ], limit=300)
+          run([
+              sys.executable, "-m", "pytest", "-q", "--timeout=120",
+              "tools/test_materialize_installer_engine.py", "tools/test_run_plugin_tests.py",
+              "tools/test_run_tests_in_devcontainer.py",
+          ], limit=900)
+          runner = [sys.executable, "tools/run-plugin-tests.py", "agent-codespaces",
+                    "--test-profile", "busy-host-functional"]
+          run([*runner, "--test-file", "tests/test_snapshot_copy_contract.py",
+               "--test-file", "tests/test_installer_test_support.py"], limit=2700)
+          run([*runner, "--test-file", "tests/test_installer_engine_adoption.py"], limit=2700)
+          with tempfile.TemporaryDirectory(prefix="codespaces-installer-") as directory:
+              materialized = pathlib.Path(directory) / "materialized"
+              run([sys.executable, "tools/materialize_main.py", "--candidate",
+                   "--dest", str(materialized)], limit=600)
+              run([*runner, "--test-file", "tests/test_installer_engine_adoption.py"],
+                  cwd=materialized, limit=2700)
+          assert not pathlib.Path(directory).exists()
+          assert not run(["git", "status", "--porcelain", "--untracked-files=no"], limit=30)
+          print(f"PASS cleanup=confirmed source={head} elapsed={time.monotonic() - started:.1f}s",
+                flush=True)
+  codespaces-installer-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
+    name: CodeSpaces canonical and materialized installers (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 125
+    env: *codespaces-installer-env
+    steps: *codespaces-installer-steps
+  worktrees-git-probes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
+    name: Worktrees Git probe packet (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: &worktrees-git-probes-env
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-n 2 --max-worker-restart=0"
+    steps: &worktrees-git-probes-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        run: >-
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Qualify the complete Git and credential probe packet
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_bounded_process.py
+          --test-file tests/test_git_ops.py
+          --test-file tests/test_pr_remote_evidence.py
+          --test-file tests/test_pr_target_probes.py
+          --test-file tests/test_registered_repo_resolution.py
+          --test-file tests/test_update_auth.py
+          --test-file tests/test_update_auth_cleanup.py
+          --test-file tests/test_update_auth_probe.py
+          --test-file tests/test_update_auth_usage.py
+          --test-file tests/test_git_observation_deadline.py
+          --test-file tests/test_windows_observation_custody.py
+          --test-file tests/test_atomic_observation_process.py
+          --max-files-per-sub-suite 1
+          --subsuite-timeout 240 --plugin-timeout 900
+  worktrees-git-probes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
+    name: Worktrees Git probe packet (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env: *worktrees-git-probes-env
+    steps: *worktrees-git-probes-steps
+  dispatch-publication-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-publication'
+    name: Dispatch admission publication (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Qualify required admission files and owned publication rollback
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_conditional_runtime_publication.py
+          --test-file tests/test_install_sh_activation_guard.py
+  exhaustive-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'context-windows'
+    name: exhaustive adapters (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-xdist==3.8.0
+      - name: Run exhaustive installation-context portfolio
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short --durations=50 -n 2 --dist=load
+          libs/installation-context/tests
+  path-captures:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'path-captures'
+    name: Path and exemplar diagnostics (ubuntu-latest, ${{ matrix.phase }})
+    runs-on: ubuntu-latest
+    strategy: &path-capture-strategy
+      fail-fast: false
+      matrix:
+        phase: [paths, producers, slots]
+    timeout-minutes: 20
+    steps: &path-capture-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-xdist==3.8.0
+      - name: Compare POSIX validation cost with the contribution base
+        if: matrix.phase == 'paths' && runner.os == 'Linux'
+        shell: bash
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: |
+          baseline="$(git merge-base HEAD origin/dev)"
+          baseline_root="$(mktemp -d "$RUNNER_TEMP/context-base.XXXXXXXX")"
+          git archive "$baseline" | tar -x -C "$baseline_root"
+          printf 'baseline=%s current=%s\n' "$baseline" "$(git rev-parse HEAD)"
+          node='libs/installation-context/tests/test_snapshot_provenance.py::test_runtime_slot_completion_rejects_invalid_immutable_receipt_pid[boolean-True-posix]'
+          status=0
+          for tree in "$baseline_root" "$GITHUB_WORKSPACE"; do
+            if ! (cd "$tree" && python -m pytest -q --tb=short --durations=1 "$node"); then
+              status=1
+            fi
+          done
+          exit "$status"
+      - name: Qualify native path bytes against the reference
+        if: always() && matrix.phase == 'paths'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_json_query_bytes.py
+          libs/installation-context/tests/test_posix_path_capture.py
+          libs/installation-context/tests/test_installation_context_posix.py
+          libs/installation-context/tests/test_directory_evidence_cost.py
+          libs/installation-context/tests/test_vendoring.py
+          libs/installation-context/tests/test_snapshot_provenance.py::test_runtime_slot_serializes_concurrent_publishers
+      - name: Diagnose the earliest exhaustive bootstrap failures
+        if: always() && matrix.phase == 'paths'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_bootstrap_context_selection.py
+      - name: Qualify native digest and exemplar failure families
+        if: always() && matrix.phase == 'producers'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_digest_cache_hardening.py
+          libs/installation-context/tests/test_snapshot_provenance.py::test_agent_machines_snapshot_publication_failure_is_retryable
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_completion_writer_gates_activation_tail
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_producer_evidence_is_accepted_without_activation_mutation
+          libs/installation-context/tests/test_snapshot_provenance.py::test_agent_machines_fixed_identity_cutover_adapter
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_producer_hash_failure_does_not_omit_payload_hash
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_payload_hash_rejects_tree_membership_change
+      - name: Qualify native installed-payload slot families
+        if: always() && matrix.phase == 'slots'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_release_installed_payload_cwd_without_legacy_staging
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_do_not_adopt_ambient_context
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_reject_foreign_snapshot_payload
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_reject_spoofed_staging_payload_identity
+          libs/installation-context/tests/test_snapshot_provenance.py::test_agent_machines_powershell_watchdog_bounds_cell_lock_wait
+  path-captures-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'path-captures'
+    name: Path and exemplar diagnostics (windows-latest, ${{ matrix.phase }})
+    runs-on: windows-latest
+    strategy: *path-capture-strategy
+    timeout-minutes: 20
+    steps: *path-capture-steps
+  komodo-recovery-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'komodo-recovery'
+    name: Komodo original recovery (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify exact source through the standalone containment owner
+        run: |
+          git rev-parse HEAD
+          python - <<'PY'
+          import importlib.util
+          import os
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          spec = importlib.util.spec_from_file_location("runner", root / "tools/run-standalone-tests.py")
+          runner = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(runner)
+          python = runner.default_python("fleet-manager")
+          environment = python.parent.parent
+          environment.mkdir(parents=True, exist_ok=True)
+          lease = runner.acquire(0, environment)
+          temporary = None
+          try:
+              temporary = runner.TestSandbox(prefix="komodo-recovery-")
+              if not python.is_file():
+                  print("Selected test interpreter is missing; preparing its declared dependencies.", flush=True)
+                  runner.prepare("fleet-manager", python)
+              sandbox = Path(temporary.name)
+              report = sandbox / "results.xml"
+              tests = root / "fleet-manager/tests"
+              selection = (
+                  "failed-retained-health or lost-failure-publication or lost-terminal-receipt or adoption-incumbent or "
+                  "native-failure-to-repair or repair-failure-to-native or physical_state or "
+                  "state_retains_failed or original_pending_prefix or komodo_incumbent or node_journal_legacy"
+              )
+              result = runner.run_contained(
+                  [str(python), "-I", "-m", "pytest", "-q", "--tb=short",
+                   str(tests / "test_komodo_owner.py"), str(tests / "test_komodo_repair.py"),
+                   str(tests / "test_komodo_health_state.py"),
+                   str(tests / "test_komodo_incumbent.py"),
+                   str(tests / "test_node_journal_legacy.py"), "-k", selection,
+                   "--basetemp", str(sandbox / "pytest"), "--junitxml", str(report)],
+                  cwd=root / "fleet-manager",
+                  env=runner.isolated_environment(os.environ, sandbox),
+                  sandbox=sandbox, limits=runner.Limits(wall_seconds=900),
+              )
+              if result == 0:
+                  suites = ET.parse(report).getroot().iter("testsuite")
+                  counts = [(int(item.get("tests", "0")), int(item.get("skipped", "0"))) for item in suites]
+                  if not counts or sum(item[0] for item in counts) == 0 or any(item[1] for item in counts):
+                      raise RuntimeError("Native recovery requires executed tests without skipped cases")
+          except runner.UnreapedProcessError:
+              if temporary is not None:
+                  temporary.retain()
+              raise
+          finally:
+              try:
+                  if temporary is not None and not temporary.retained:
+                      runner.cleanup_sandbox(temporary)
+              finally:
+                  lease.release()
+          raise SystemExit(result)
+          PY
+  bridge-commands-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge commands (Ubuntu, ${{ matrix.packet.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        packet: &bridge-command-packets
+          - name: refusal-driver
+            select: refusal and (missing-driver or old-driver or old-resolver or old-dispatcher)
+          - name: refusal-policy
+            select: refusal and (managed or malformed-policy or no-self or nested)
+          - name: refusal-source
+            select: refusal and (unselected or unavailable or missing-provenance or malformed-provenance)
+          - name: refusal-context
+            select: refusal and (pinned or custom-root or cell or ordinary-copy)
+          - {name: payload, select: original_operation and payload}
+          - {name: primary, select: original_operation and primary}
+          - {name: ordinary, select: original_operation and ordinary}
+          - {name: concurrent, select: concurrent}
+          - {name: failed, select: failed}
+          - {name: transport, select: cold_wait}
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify one bounded real command packet
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_command.py
+          -k "${{ matrix.packet.select }}" --test-timeout 900 --timeout 1080
+  bridge-commands-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge commands (Windows, ${{ matrix.packet.name }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        packet: *bridge-command-packets
+        include:
+          - packet: {name: cmd, select: original_operation and cmd}
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-steps
+  bridge-command-publication-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge publication (Ubuntu, ${{ matrix.packet }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy: &bridge-command-publication-packets
+      fail-fast: false
+      matrix:
+        packet:
+          - "cell_stamp and available"
+          - "cell_stamp and pointer and not publisher"
+          - "cell_stamp and publisher and not pointer"
+          - "cell_stamp and publisher-and-pointer and not deactivated"
+          - "cell_stamp and deactivated"
+          - "actual and legacy and payload"
+          - "actual and selected-cell and payload"
+          - "actual and catalog"
+          - "actual and stamped-global"
+          - "actual and stamped-unavailable"
+          - "actual and stamped-no-pointer"
+    env:
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-publication-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Preserve one bounded publication and selected-cell packet
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "${{ matrix.packet }}" --test-timeout 60 --timeout 900
+  bridge-command-publication-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge publication (Windows, ${{ matrix.packet }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy: *bridge-command-publication-packets
+    env:
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-publication-steps
+  bridge-command-controls-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge command controls (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-control-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Preserve native binary, prompt and exit contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 120 --timeout 600
+      - name: Preserve canonical bootstrap and source recipe admission
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py -k "not actual"
+          --test-timeout 90 --timeout 600
+  bridge-command-controls-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge command controls (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-control-steps
+  bridge-snapshots-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
+    name: Bridge selected snapshots (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-snapshots-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify selected-source admission and frozen-input refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k "not actual" --test-timeout 90 --timeout 600
+      - name: Qualify actual source preparation, caller loss and native consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k "actual and not actual_stamp" --test-timeout 900 --timeout 1080
+      - name: Preserve canonical source archive and immutable preparation
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_prepare_runtime_source.py
+          --test-file tests/test_source_snapshot_publication.py
+          --test-timeout 120 --timeout 600
+      - name: Preserve native waitable owner exit status
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_daemon_shell.py
+          -k waitable --test-timeout 90 --timeout 180
+      - name: Qualify source-qualified native stamp in its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k actual_stamp --test-timeout 900 --timeout 1080
+      - name: Preserve installed-source fixed recipes and native lifecycle
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss" --test-timeout 900 --timeout 900
+      - name: Preserve shared Logger selected-source refusal behavior
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_snapshot.py
+          -k "not actual" --test-timeout 90 --timeout 600
+      - name: Preserve canonical-installed-only bootstrap publication
+        env:
+          UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_driver.py
+          --test-timeout 60 --timeout 180
+  bridge-snapshots-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
+    name: Bridge selected snapshots (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-snapshots-steps
+  bridge-bootstrap-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
+    name: Bridge bootstrap (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-bootstrap-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual materialization, refusal and independent guidance
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_bootstrap.py
+          -k "not hook_deadline" --test-timeout 900 --timeout 900
+      - name: Qualify actual cold hooks within their own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_bootstrap.py
+          -k hook_deadline --test-timeout 900 --timeout 1080
+      - name: Preserve fixed recipes, native lifecycle and hook contracts
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss" --test-timeout 900 --timeout 900
+      - name: Prepare bounded readiness test tooling
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging
+      - name: Qualify source-aware selected readiness
+        run: >-
+          python -m pytest -q libs/versioned-runtime/tests/test_bootstrap_selected_readiness.py
+      - name: Preserve bootstrap and unattended repair boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_install_ps1_s4u_recovery.py
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-timeout 60 --timeout 360
+      - name: Preserve Bridge bootstrap publication admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_bootstrap_publication.py -k agent-bridge
+          --test-timeout 120 --timeout 600
+  bridge-bootstrap-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
+    name: Bridge bootstrap (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-bootstrap-steps
+  manager-suite-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
+    name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [normal, repair]
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact native source
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE) {
+            throw 'Suite replacement source does not match the dispatch SHA'
+          }
+      - name: Qualify installed V1 to V2 through the real Manager
+        shell: pwsh
+        run: >-
+          python tools\run-manager-suite-acceptance.py
+          --root .v --mode ${{ matrix.mode }}
+      - name: Retain synthetic qualification diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-suite-${{ matrix.mode }}
+          path: |
+            .v/*-runner.json
+            .v/*-process-trace.json
+            .v/*/result.json
+            .v/*/preparation-error.json
+            .v/*/settlement.json
+            .v/*/commands.jsonl
+            .v/*/task-inventory.json
+            .v/*/driver-diagnostics.json
+            .v/*/driver-logs/*.log
+            .v/*/resident-logs/agent-bridge/*.log
+            .v/*/resident-logs/agent-codespaces/logs/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  manager-uninstall-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-uninstall'
+    name: Manager installed uninstall (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact native source
+        env:
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE']; print('Source:',actual); print('Python:',sys.version)"
+      - name: Qualify actual installed removal and reinstall
+        run: >-
+          python tools\run-manager-runtime-acceptance.py --root .validation --contract uninstall
+
+  mux-companion-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mux-companion'
+    name: Mux Companion native tmux 3.4 (isolated session)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record immutable source and native prerequisite
+        run: |
+          git show --no-patch --format='source=%H parents=%P'
+          tmux -V
+          case "$(tmux -V)" in "tmux 3.4"*) ;; *) exit 1 ;; esac
+      - name: Qualify real tmux observer navigation
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers
+          --test-file tests/native/test_companion_pane_tmux.py
+          --test-file tests/test_companion_topology.py
+          --test-file tests/test_companion_observations.py
+          --test-file tests/test_companion_attention.py
+          --test-file tests/test_companion_attention_ui.py
+          --test-file tests/test_companion_topology_ui.py --test-timeout 120
+      - name: Qualify bounded root attention process contract
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_session_attention.py
+          --test-file tests/test_session_attention_cli.py --test-timeout 120
+
+  bridge-recipes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-recipes'
+    name: Bridge fixed native recipes (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify Bridge admission and materialized stamp
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss"
+          --test-timeout 900 --timeout 900
+      - name: Qualify Bridge cold provision within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and provision"
+          --test-timeout 900 --timeout 1080
+      - name: Qualify Bridge cold install within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and install"
+          --test-timeout 900 --timeout 1080
+      - name: Preserve native lifecycle and unattended repair boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_install_ps1_s4u_recovery.py
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-timeout 60 --timeout 180
+  bridge-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-recipes'
+    name: Bridge fixed native recipes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify Bridge admission and materialized stamp
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss"
+          --test-timeout 900 --timeout 900
+      - name: Qualify Bridge cold provision within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and provision"
+          --test-timeout 900 --timeout 1080
+      - name: Qualify Bridge cold install within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and install"
+          --test-timeout 900 --timeout 1080
+      - name: Preserve native lifecycle and unattended repair boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_install_ps1_s4u_recovery.py
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-timeout 60 --timeout 180
+  promotion-controls:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
+    name: Promotion controls and source retention (actual Git)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Install seasoned integration tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest packaging pyyaml
+      - name: Record immutable integration source
+        run: git show --no-patch --format='source=%H parents=%P'
+      - name: Exercise real composition and repeated retirement
+        env:
+          PYTHONPATH: tools
+          COPILOT_EXTENSIONS_SOURCE_ARCHIVE_INTEGRATION: "1"
+        run: >-
+          timeout --signal=TERM --kill-after=10s 100s python -m pytest -q
+          tools/test_promotion_control.py::test_main_deleted_control_stays_deleted_across_promotions
+          tools/test_promotion_control.py::test_explicit_retirement_returns_path_to_dev_composition
+          tools/test_promotion_control.py::test_preservation_uses_pinned_main_not_live_main_or_dev
+          tools/test_promotion_control.py::test_trusted_artifact_recomposition_uses_same_control_tree
+          tools/test_promotion_control.py::test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci
+          tools/test_promotion_control.py::test_manifest_removal_cannot_reactivate_deleted_dev_workflow
+          tools/test_complete_source_native.py
+
+  logger-commands-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'
+    name: Logger command publishers (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real command admission, caller loss and installed consumers
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_command.py
+          --test-timeout 900 --timeout 1800
+      - name: Preserve healthy dispatch and native wrapper publication
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_runtime_gate.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 120 --timeout 600
+  logger-commands-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'
+    name: Logger command publishers (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real command admission, caller loss and installed consumers
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_command.py
+          --test-timeout 900 --timeout 1800
+      - name: Preserve healthy dispatch and native wrapper publication
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_runtime_gate.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 120 --timeout 600
   dispatch-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-binding'
     name: Dispatch scoped-stamp binding (Ubuntu)
@@ -71,14 +995,18 @@ jobs:
           --test-file tests/test_dispatch_scoped_publication.py
           --allow-explicit-tiers --test-timeout 60 --timeout 540
 
-  bridge-binding-linux:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
-    name: Bridge scoped-stamp binding (Ubuntu)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  dispatch-maintenance-policy-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
+    name: Dispatch maintenance policy (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-ra"
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -86,16 +1014,83 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - name: Qualify actual scoped stamps and ordinary retained commands
+      - &dispatch-maintenance-preflight
+        name: Verify native Windows and immutable qualification source
+        shell: pwsh
+        run: |
+          if (-not $IsWindows) { throw 'Native Windows qualification requires Windows' }
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) { throw 'PowerShell is required' }
+          $actual = git rev-parse HEAD
+          if ($actual -cne $env:GITHUB_SHA) { throw 'Qualification source differs from dispatch SHA' }
+      - name: Qualify real policy refusal and captured cutover environment
         run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bridge_first_use_publication.py
-          -k test_bridge_cell_stamp_preserves_global_ownership
-          --allow-explicit-tiers --test-timeout 60 --timeout 540
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_action_native_ps1.py
+          --test-file tests/test_action_native_policy.py
+          --test-file tests/test_cutover_spawn_env.py
+          --test-file tests/test_conditional_deploy.py
+          --timeout 300 --plugin-timeout 360 --test-timeout 45
 
-  bridge-binding-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
-    name: Bridge scoped-stamp binding (Windows)
+  dispatch-maintenance-installer-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
+    name: Dispatch preparation, cleanup and retained runtime (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-ra"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - *dispatch-maintenance-preflight
+      - name: Qualify actual cleanup, refusal propagation and retained-runtime assertions
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-file tests/test_installer_required_cutover.py
+          --test-file tests/test_retained_runtime.py
+          --test-file tests/test_runtime_preparation.py
+          --test-file tests/test_installer_engine_adoption.py
+          --timeout 300 --plugin-timeout 360 --test-timeout 45
+
+  dispatch-maintenance-worker-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
+    name: Dispatch native bootstrap worker lifecycle (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-ra"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - *dispatch-maintenance-preflight
+      - name: Qualify native background-worker identity, completion and owned cleanup
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_windows_bootstrap_reconcile_lifecycle.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --timeout 300 --plugin-timeout 360 --test-timeout 60
+
+  pane-argv-windows:
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')
+    name: Native PSMux 3.3.6 (isolated session)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -108,11 +1103,94 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Prepare pinned disposable PSMux
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $null = Get-Command pwsh -CommandType Application -ErrorAction Stop
+          $root = Join-Path $env:RUNNER_TEMP 'pane-argv-psmux'
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.6/psmux-v3.3.6-windows-x64.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947') {
+            throw 'Pinned PSMux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+      - name: Qualify actual pane producers and owned teardown
+        if: inputs.portfolio == 'pane-argv'
+        env:
+          PSMUX_FILE_LAUNCH_E2E: "1"
+          UV_PYTHON: "3.12"
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/test_pane_args_file.py -k real_psmux --allow-explicit-tiers
+      - name: Qualify native Companion attention and navigation
+        if: inputs.portfolio == 'mux-companion'
+        env:
+          UV_PYTHON: "3.12"
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_companion_pane_native.py
+          --test-file tests/test_companion_attention.py
+          --test-file tests/test_companion_attention_ui.py
+          --allow-explicit-tiers --test-timeout 120
+
+  bridge-binding-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
+    name: Bridge scoped-stamp binding (Ubuntu, ${{ matrix.packet }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy: &bridge-binding-packets
+      fail-fast: false
+      matrix:
+        packet:
+          - available
+          - pointer and not publisher
+          - publisher and not pointer
+          - publisher-and-pointer and not deactivated
+          - deactivated
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
       - name: Qualify actual scoped stamps and ordinary retained commands
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_first_use_publication.py
-          -k test_bridge_cell_stamp_preserves_global_ownership
+          -k "test_bridge_cell_stamp_preserves_global_ownership and (${{ matrix.packet }})"
+          --allow-explicit-tiers --test-timeout 60 --timeout 540
+
+  bridge-binding-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
+    name: Bridge scoped-stamp binding (Windows, ${{ matrix.packet }})
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy: *bridge-binding-packets
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual scoped stamps and ordinary retained commands
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "test_bridge_cell_stamp_preserves_global_ownership and (${{ matrix.packet }})"
           --allow-explicit-tiers --test-timeout 60 --timeout 540
 
   logger-bootstrap-linux:
@@ -136,9 +1214,20 @@ jobs:
       - name: Qualify actual Logger hook, packaged foundation and fixed recipe regressions
         run: >-
           python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_logger_bootstrap.py
           --test-file tests/test_first_use_logger.py
+          -k "not test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers"
           --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
+      - name: Qualify actual cold hooks in their own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_bootstrap.py
+          --test-timeout 900 --timeout 1200
+      - name: Qualify concurrent cold installation in its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger.py
+          -k test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers
+          --test-timeout 900 --timeout 1200
       - name: Qualify retained bootstrap and independent hooks
         run: >-
           python tools/run-plugin-tests.py agent-logger
@@ -167,9 +1256,22 @@ jobs:
       - name: Qualify actual Logger hook, packaged foundation and fixed recipe regressions
         run: >-
           python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_logger_bootstrap.py
           --test-file tests/test_first_use_logger.py
+          -k "not test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers"
           --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
+      - name: Qualify actual cold hooks in their own storage boundary
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_bootstrap.py
+          --test-timeout 900 --timeout 1200
+      - name: Qualify concurrent cold installation in its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger.py
+          -k test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers
+          --test-timeout 900 --timeout 1200
       - name: Qualify retained bootstrap and independent hooks
         run: >-
           python tools/run-plugin-tests.py agent-logger
@@ -743,12 +1845,12 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - run: python tools/seasoned_uv.py --uv uv -- --system pytest
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-xdist==3.8.0
       - name: Run exhaustive installation-context portfolio
         env:
           INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
         run: >-
-          python -m pytest -q --durations=50
+          python -m pytest -v --tb=short --durations=50 -n 2 --dist=load
           libs/installation-context/tests
   foundation-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
@@ -848,6 +1950,43 @@ jobs:
           --test-file tests/test_bridge_first_use_publication.py
           -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
           --allow-explicit-tiers --test-timeout 120 --timeout 540
+
+  pr-sweep-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pr-sweep'
+    name: Repository PR sweep contracts (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify isolated provider, selection, claim and native POSIX boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_inventory.py
+          --test-file tests/test_pr_sweep.py
+          --test-file tests/test_pr_sweep_transport.py
+          --test-file tests/test_pr_sweep_process.py
+          --test-file tests/test_claims_transitive.py
+          --test-file tests/test_claims_find.py
+          --allow-explicit-tiers --test-timeout 60 --timeout 540
+      - name: Install seasoned guard tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml
+      - name: Qualify publication guards and native finite-reader boundary
+        env:
+          PYTHONPATH: tools
+        run: >-
+          timeout --signal=TERM --kill-after=10s 120s
+          python -m pytest -q tools/test_check_large_files.py
+          tools/test_check_no_internal_identifiers.py
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)

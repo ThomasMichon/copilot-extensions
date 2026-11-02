@@ -4,7 +4,7 @@
   "projections": [
     {
       "id": "publication-safety",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/publication-safety.instructions.md",
       "destination": ".github/instructions/ai-attribution/publication-safety.instructions.md",
       "customizationKind": "instructions",

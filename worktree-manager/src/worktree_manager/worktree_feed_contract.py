@@ -11,9 +11,10 @@ from .worktree_observation_contract import (
 
 
 class FeedUnavailable(ValueError):
-    def __init__(self, message: str, *, retry: bool = True) -> None:
+    def __init__(self, message: str, *, retry: bool = True, connected: bool = False) -> None:
         super().__init__(message)
         self.retry = retry
+        self.connected = connected
 
 
 class CurrentFeed:
@@ -23,6 +24,7 @@ class CurrentFeed:
         self.rows: list[dict] | None = None
         self.head: dict | None = None
         self.notice: str | None = None
+        self.availability: dict | None = None
         self._snapshot = CurrentSnapshot()
         self._begin: dict | None = None
         self._pending: dict | None = None
@@ -59,7 +61,9 @@ class CurrentFeed:
                 or "update the engine" in message
                 or "unrecognized arguments" in message
             )
-            raise FeedUnavailable(message, retry=not fatal and error.get("retry", True))
+            raise FeedUnavailable(
+                message, retry=not fatal and error.get("retry", True), connected=True,
+            )
         if kind == "going-away":
             generation, cursor = frame.get("generation"), frame.get("cursor")
             if (
@@ -95,6 +99,7 @@ class CurrentFeed:
                 complete=False,
             )
             self.rows = self._metadata(self.rows, frame)
+            self.availability = frame.get("availability")
             return self.rows
         if kind in {"begin", "update"}:
             if self._begin is not None:
@@ -214,6 +219,7 @@ class CurrentFeed:
         ):
             raise ValueError("current-roster feed did not complete its declared roster")
         self.rows = rows
+        self.availability = self._begin.get("availability")
         self.head = dict(self._begin["projection"])
         self._begin = None
         self._pending = None

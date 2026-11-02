@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from . import tracking
+    from .receiving_allocation import ReceivingAllocation
     from .worktree_machine_identity import WorktreeMachineIdentity
 
 
@@ -582,6 +583,8 @@ def create_new_record(
     bound_agent: str | None = None,
     pending_seed: str | None = None,
     machine_identity: WorktreeMachineIdentity | None = None,
+    receiving_allocation: ReceivingAllocation | None = None,
+    creation_nonce: str | None = None,
 ) -> tracking.WorktreeRecord:
     tracking = _tracking()
     from .tracking_controller_relations import (
@@ -638,13 +641,25 @@ def create_new_record(
         codename_source=codename_source or None,
         bound_agent=normalized_bound_agent,
         pending_seed=pending_seed or None,
-        creation_nonce=secrets.token_hex(8),
+        creation_nonce=creation_nonce if creation_nonce is not None else secrets.token_hex(8),
     )
     _mark_controller_projection_dirty(
         record, *(relation.controller_session_id for relation in controllers)
     )
     path = tracking_path / f"{worktree_id}.yaml"
-    tracking.save_record(record, path)
+    if receiving_allocation is not None:
+        from .execution_spaces import project_record_config
+        from .receiving_allocation import ReceivingAllocation, require_record, transaction
+
+        if not isinstance(receiving_allocation, ReceivingAllocation):
+            raise ValueError("receiving creation requires an admitted allocation")
+        record.receiving_allocation = receiving_allocation.receipt(record)
+        record.receiving_allocation_present = True
+        require_record(record, project_record_config(record))
+        with transaction(path):
+            tracking.save_record(record, path)
+    else:
+        tracking.save_record(record, path)
     return record
 
 

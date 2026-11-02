@@ -10,7 +10,8 @@ from .queue_records import TaskError
 
 
 def create_replay_consumer(queue, caller, *, route_prefix: str, target: str,
-                           repo: str, caller_scope: str, checkpoint=None):
+                           repo: str, caller_scope: str, checkpoint=None,
+                           service_binding: dict | None = None):
     """Explicit optional composition, never imported by ordinary Dispatch startup.
 
     caller_scope is the embedding's stable authenticated principal/namespace
@@ -21,7 +22,14 @@ def create_replay_consumer(queue, caller, *, route_prefix: str, target: str,
 
     binding = {"gateway": caller.gateway, "route_prefix": route_prefix,
                "target": target, "repo": repo, "caller_scope": caller_scope}
-    client = ReplayClient(caller, route_prefix=route_prefix, target=target, repo=repo)
+    options = {}
+    if service_binding is not None:
+        from agent_pull_requests.watch_replay_binding import SCOPED_PROTOCOL, ReplayBinding
+
+        expected = ReplayBinding.from_document(service_binding)
+        binding.update(protocol=SCOPED_PROTOCOL, service_binding=expected.document())
+        options["binding"] = expected
+    client = ReplayClient(caller, route_prefix=route_prefix, target=target, repo=repo, **options)
     return ReplayConsumer(
         queue, binding=binding, client=client, request_factory=ReplayRequest,
         binding_current=lambda: caller.gateway == binding["gateway"],

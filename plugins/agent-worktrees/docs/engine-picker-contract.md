@@ -7,6 +7,10 @@ contract below, never `import agent_worktrees`. That boundary keeps the coupling
 one-way and dependency-free (the Picker owns no worktree logic or state), and
 keeps the TUI framework (Textual) entirely out of the plugin engine.
 
+The independent optional [current-head agenda contract](worktree-agendas.md)
+uses the same resident owner and process boundary, not fields added to roster
+rows or a dependency on a planning runtime.
+
 ## Optional resident Picker bootstrap
 
 The elected monitor advertises `picker-bootstrap-v1` on its existing control
@@ -165,7 +169,7 @@ verified target request receipt described below. Structured target admission
 uses that existing durable version-2 receipt and requires a non-null attempt
 when the new fence is present. No resolution receipt proves process start,
 native conversation identity, prompt acceptance or retry eligibility. Native
-acceptance integration, joined history readers and sweeps remain separate work.
+acceptance integration, interactive history and sweeps remain separate work.
 
 The explicit source integration lane is
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_attempt_native.py`.
@@ -226,10 +230,44 @@ never manufactures success or grants automatic replay.
 
 Record-backed seedless/custom launchers expose only the wrapper process unless
 their backend boundary supplies its own evidence. Base plans without a record
-retain resolution evidence only. Joined Manager history, retention, sweeps and
+retain resolution evidence only. Interactive Manager history, retention, sweeps and
 accepted-turn evidence remain separate work. In particular,
 the optional resident prompt-receipt adapter's missing qualified backend is
 unavailable, not evidence that a prompt was absent or accepted.
+
+### Read-only launch-attempt inspection
+
+`<project> launch-attempts <attempt-id> --json [--limit 1..100] [--after <cursor>]`
+returns `worktree-launch-attempt-inspection` version 1 for this machine's local
+project tracking directory. It does not resolve a launch, contact a target,
+read seed text, boot a monitor or mutate state. Manager consumes it over the
+existing CLI process boundary, not by importing the plugin.
+
+The envelope binds `attempt_id` and `scope: local-project`, with `receipts`,
+`admissions`, `errors`, `has_more`, `next_after` and
+`prompt_acceptance: unknown`. Receipt rows identify their `source`
+(`resolution`, `execution`, or `native`), exact `operation_id` and validated
+`evidence`. Native evidence uses the historical identity/epoch/ancestry join,
+not a new liveness probe or prompt-acceptance inference. Missing, corrupt,
+oversized or indirect sources report fixed error codes without echoing bytes.
+
+The reader visits one exact attempt directory, at most 1001 directory entries,
+and at most 100 receipt rows per page. Each file retains its owner's 16 KiB
+budget. An over-budget directory returns an explicit error with no arbitrary
+partial listing. Names are ordered lexically; when `has_more` is true, pass
+`next_after` unchanged as `--after`. Pagination is a live read, not a frozen
+snapshot: late writes may require a fresh first page. Files are never repaired.
+
+Up to 16 distinct admission references (explicit `--request-id` hints plus IDs
+from the current resolution-receipt page) can add projected target-admission
+evidence, only when the stored version-2 receipt binds the same attempt.
+Excess references produce an explicit error rather than unbounded reads.
+The projection excludes fingerprints, allocation paths and arbitrary fields.
+`admission_accepted` means request admission, not accepted Copilot input.
+Historical inspection does not require the checkout still to exist and does
+not read pending seed state. Missing references remain per-source errors.
+No envelope or individual event authorizes replay or claims whole-attempt
+success; absence of receipts and incomplete pages remain unknown.
 
 The explicit source lane
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_execution_native.py`
@@ -545,6 +583,19 @@ uses the existing owner token. It never silently removes `--follow` or
 `--current` on capability skew. The Manager's local and machine-SSH loaders
 use this path by default; `AGENT_WORKTREES_PICKER_STREAM=0` explicitly selects
 the current one-shot compatibility path instead.
+
+One-shot reads and held-feed admission check a retained route's recorded
+process identity before dialing it. A confirmed exited owner or PID/birth
+mismatch enters the existing missing-owner recovery path; this avoids a short
+Windows connect timeout hiding a dead endpoint as a slow live peer. Legacy
+routes without a PID and owners whose birth cannot be read retain the existing
+transport behavior. Ensure, restart and candidate incumbent admission use the
+same exit-aware liveness predicate, so a retained exited Windows process object
+cannot veto that recovery. Unsupported native-exit platforms retain the existing
+PID/birth check. A live-peer timeout never authorizes replacement.
+The `machine-ssh:` source-ID namespace is stable for both local and remote
+machine sources; it is not transport evidence. Local Manager failure notices
+explicitly identify local execution (no SSH) and the resident current-roster read.
 
 An admitted feed registers its project notification before reading its initial
 publication. Its `begin` includes the complete projection, `selected_count`,
@@ -1093,6 +1144,26 @@ The registry anchor used for bootstrap is not an effective `repo-dir` substitute
 a machine-local repo anchor override can legitimately differ. Compatible
 consumers retain their existing effective repo-dir and machine queries, while
 older consumers may ignore the additive field.
+
+The existing `picker-bootstrap --project-config --json` form loads and validates
+the effective configuration once, then also returns `repo_dir`, the legacy
+`machine` scalar, and optional `configured_machine`. The resident
+`picker-bootstrap-v1` response carries the same fields. `configured_machine`
+is either the explicit binding selected by the real project/global/drop-in
+loader or JSON `null` for detected naming. It is not a new setting.
+Its presence distinguishes known absence of a binding from an older response
+that supplies no provenance; a plain `machine` scalar cannot establish that
+distinction. Non-null values must be nonempty strings.
+
+These additive fields keep bootstrap contract version 1. Older consumers ignore
+them; newer Manager consumers retain the historical strict roster path when
+`configured_machine` is absent, including after provider rollback. When present,
+Manager combines that provenance with its own observed OS hostname/environment
+and the actual optional machine map to derive its local source. This is naming
+and routing context, not receiving-project or actual-record mutation authority.
+Malformed/conflicting maps refuse, but missing local customization does not
+require a new registry entry. No additional RPC, CLI flag or enrollment mode is
+introduced, and existing effect-side admission remains required.
 
 ## Pinned action verbs (the Picker's control plane)
 

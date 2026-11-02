@@ -29,10 +29,15 @@ def _relocated_launch_script():
     Source and legacy src-layout invocations keep their existing payload root.
     Missing optional assets retain the graceful non-muxed fallback.
     """
+    from pathlib import Path
+    import worktree_manager
     from .self_install import running_payload_dir
 
-    root = running_payload_dir()
     name = "launch-session.ps1" if _core()._is_windows() else "launch-session.sh"
+    asset = Path(worktree_manager.__file__).resolve().parent / "_runtime_assets" / "bin" / name
+    if asset.is_file():
+        return asset
+    root = running_payload_dir()
     script = root / "bin" / name
     return script if script.exists() else None
 
@@ -111,6 +116,11 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
     if no_mux:
         os.environ["WORKTREE_NO_MUX"] = "1"
     if is_windows:
+        if not no_mux and os.environ.get("WORKTREE_NO_MUX") != "1":
+            from .terminal_launch import prepare
+
+            if prepare(script, args, attempt_id):
+                return 0
         argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(script), *args]
         proc = subprocess.Popen(argv)
         try:

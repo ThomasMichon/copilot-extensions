@@ -10,6 +10,7 @@ component owns its command and support contract.
 | Need | Start with | Boundary |
 |------|------------|----------|
 | Customize an agent's working context | [customizing-copilot](../plugins/customizing-copilot/README.md) | Skills for authoring/diagnosis; no supplied operator topology |
+| Inspect the raw request your CLI assembles | [capturing-client-requests](../plugins/customizing-copilot/skills/capturing-client-requests/SKILL.md) | Current-model private capture plus local instruction/metadata/tool interpretation and byte accounting, never a shared-service logger |
 | Work in isolated local git sessions | [agent-worktrees](../plugins/agent-worktrees/docs/getting-started.md) | Standalone local worktrees are supported without mesh siblings |
 | Query/create/merge/wait for a PR by explicit repo address | [agent-pull-requests](../plugins/agent-pull-requests/README.md) | Implemented API-first verbs without a local checkout; current account resolution uses agent-worktrees |
 | Message live agents | [agent-bridge](../plugins/agent-bridge/README.md) | Persistent session transport; not the durable task queue |
@@ -27,9 +28,6 @@ component owns its command and support contract.
 | Separate portable harness and private state | [harness-knowledge](../plugins/harness-knowledge/README.md) | An explicitly selected private knowledge repo, not a fixed name |
 | Apply general conduct/publication guidance | [agent-conduct-guidance](../plugins/agent-conduct-guidance/README.md), [ai-attribution](../plugins/ai-attribution/README.md) | General policy and task-time procedures; host-specific policy remains host-owned |
 | Contribute to this toolkit | [copilot-extensions-harness](../plugins/copilot-extensions-harness/README.md) | Toolkit contribution/diagnosis guidance, not your complete harness |
-
-[delegation-guidance](../plugins/delegation-guidance/README.md) is a deprecated
-compatibility pointer, not an additional independent capability.
 
 ## Support and dependencies
 

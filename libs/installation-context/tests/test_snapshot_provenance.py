@@ -10,11 +10,13 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal, TypedDict, cast
 
 import pytest
 from powershell_test_host import PowerShellTestHost
@@ -35,6 +37,71 @@ IMMUTABLE_PID_ERROR = (
 )
 Runner = tuple[str, tuple[str, ...], str]
 _POWERSHELL_HOST: PowerShellTestHost | None = None
+
+
+class ReceiptLayout(TypedDict):
+    marketplace_id: str
+    plugin_id: str
+    durable: Path
+    cell: Path
+    plugin_root: Path
+    snapshots: Path
+    snapshot_root: Path
+    payload: Path
+    namespace: Path
+    install: Path
+
+
+class _PayloadIdentity(TypedDict):
+    root: str
+    version: str
+    origin: str
+    originReceipt: str | None
+
+
+class _SnapshotStampResult(TypedDict):
+    action: str
+    status: str
+    reason: str
+    provenance: str
+    snapshotRoot: str
+    snapshotId: str
+    marketplaceId: str
+    pluginId: str
+    sourceFingerprint: str
+    namespaceReceipt: str
+    installReceipt: str
+    namespaceGeneration: int
+    installGeneration: int
+    payload: _PayloadIdentity
+    operative: bool
+    snapshotChanged: bool
+    pluginRoot: str
+
+
+class _SlotProvisionResult(TypedDict):
+    action: str
+    status: str
+    reason: str
+    slotRoot: str
+    runtimeVersion: str
+    ownership: str
+    snapshotId: str
+    snapshotProvenance: str
+    marketplaceId: str
+    pluginId: str
+    sourceFingerprint: str
+    namespaceReceipt: str
+    installReceipt: str
+    namespaceGeneration: int
+    installGeneration: int
+    namespaceState: str
+    installState: str
+    slotEmpty: bool
+    activated: bool
+    operative: bool
+    slotChanged: bool
+
 
 def _supported_bash() -> str | None:
     if os.name == "nt":
@@ -164,7 +231,7 @@ INTEROPERABILITY_PAIRS = _interoperability_pairs()
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _bounded_powershell_host() -> None:
+def _bounded_powershell_host() -> Iterator[None]:
     yield
     global _POWERSHELL_HOST
     if _POWERSHELL_HOST is not None:
@@ -182,12 +249,19 @@ def _load_python_module() -> Any:
 
 
 def _vectors() -> list[dict[str, object]]:
-    return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
+    return cast(
+        list[dict[str, object]],
+        json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"],
+    )
 
 
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _make_fifo(path: Path) -> None:
+    cast(Callable[[Path], None], getattr(os, "mkfifo"))(path)
 
 
 def test_private_json_write_syncs_file_and_posix_directory(
@@ -213,7 +287,7 @@ def _receipt_layout(
     payload_version: str = "1.0.0",
     snapshot_id: str = "1.0.0",
     payload_root: Path | None = None,
-) -> dict[str, Path | str]:
+) -> ReceiptLayout:
     vector = _vectors()[vector_index]
     normalized = vector["normalized"]
     assert isinstance(normalized, dict)
@@ -302,7 +376,7 @@ def _flag(style: str, name: str) -> str:
 def _command(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     snapshot_id: str = "1.0.0",
     runtime_version: str = "3.4.5",
@@ -380,7 +454,7 @@ def _command(
 def _run(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     snapshot_id: str = "1.0.0",
     runtime_version: str = "3.4.5",
@@ -447,7 +521,7 @@ def _run(
 def _run_slot(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_payload_root: Path | None = None,
@@ -471,7 +545,7 @@ def _run_slot(
 
 def _run_context_validate(
     runner: Runner,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
 ) -> subprocess.CompletedProcess[str]:
     _, prefix, style = runner
     arguments = (
@@ -510,49 +584,52 @@ def _run_context_validate(
 
 
 def _stamp_with_python(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     snapshot_id: str = "1.0.0",
-) -> dict[str, object]:
+) -> _SnapshotStampResult:
     result = _run(
         REFERENCE_RUNNERS[0],
         "snapshot-stamp",
         layout,
         snapshot_id=snapshot_id,
     )
-    return json.loads(result.stdout)
+    return cast(_SnapshotStampResult, json.loads(result.stdout))
 
 
 def _provenance_path(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     snapshot_id: str = "1.0.0",
 ) -> Path:
     return Path(layout["snapshots"]) / snapshot_id / "snapshot-provenance.json"
 
 
 def _provision_slot_with_python(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_payload_root: Path | None = None,
     expected_payload_version: str | None = None,
     module: Any | None = None,
-) -> dict[str, object]:
+) -> _SlotProvisionResult:
     module = module or _load_python_module()
-    return module.provision_runtime_slot(
-        context=layout["install"],
-        expected_marketplace_id=layout["marketplace_id"],
-        expected_plugin_id=layout["plugin_id"],
-        snapshot_id="1.0.0",
-        runtime_version=runtime_version,
-        expected_payload_root=expected_payload_root,
-        expected_payload_version=expected_payload_version,
-        durable_home=layout["durable"],
-        environment={},
+    return cast(
+        _SlotProvisionResult,
+        module.provision_runtime_slot(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            snapshot_id="1.0.0",
+            runtime_version=runtime_version,
+            expected_payload_root=expected_payload_root,
+            expected_payload_version=expected_payload_version,
+            durable_home=layout["durable"],
+            environment={},
+        ),
     )
 
 
-def _payload_version(layout: dict[str, Path | str]) -> str:
+def _payload_version(layout: ReceiptLayout) -> str:
     install = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
     return str(install["payload"]["version"])
 
@@ -578,9 +655,9 @@ def _snapshot_content_digest(snapshot_root: Path) -> str:
                 )
             )
     digest = hashlib.sha256()
-    for relative, file_digest in sorted(records):
+    for encoded_relative, file_digest in sorted(records):
         digest.update(b"F\0")
-        digest.update(relative)
+        digest.update(encoded_relative)
         digest.update(b"\0")
         digest.update(file_digest.encode("ascii"))
         digest.update(b"\n")
@@ -588,7 +665,7 @@ def _snapshot_content_digest(snapshot_root: Path) -> str:
 
 
 def _build_receipt(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     completed_at: str = "2026-01-02T03:04:05Z",
@@ -623,7 +700,7 @@ def _build_receipt(
 def _run_completion(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_payload_root: Path | None = None,
@@ -647,7 +724,7 @@ def _run_completion(
 
 def _run_cutover(
     runner: Runner,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_namespace_generation: int | str = 1,
@@ -674,7 +751,7 @@ def _run_cutover(
 
 
 def _prepare_completion_slot(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
 ) -> Path:
@@ -804,7 +881,7 @@ SECURITY_EXEMPLAR_INSTALLERS = (
 def _run_exemplar_slot_action(
     exemplar: tuple[str, tuple[str, ...], str],
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     tmp_path: Path,
     *,
     include_context: bool = True,
@@ -872,6 +949,15 @@ def _run_exemplar_slot_action(
     )
 
 
+def _release_materializer() -> Any:
+    source = LIB.parents[1] / "tools" / "materialize_main.py"
+    spec = importlib.util.spec_from_file_location("snapshot_fixture_materializer", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _installed_exemplar(
     exemplar: tuple[str, tuple[str, ...], str],
     tmp_path: Path,
@@ -899,6 +985,21 @@ def _installed_exemplar(
                 "dist",
             ),
         )
+        materializer = _release_materializer()
+        entries = materializer.materialize_file_pointers(
+            installed_plugin, canonical_root=LIB.parents[1],
+        )
+        for operation in (
+            materializer.materialize_uv_editable_ref_into,
+            materializer.materialize_installer_engine_ref_into,
+            materializer.materialize_launch_wrapper_assets_into,
+        ):
+            entries.extend(operation(
+                source_consumer_dir=source_plugin,
+                dest_consumer_dir=installed_plugin,
+                canonical_root=LIB.parents[1],
+            ))
+        assert not any(entry.startswith("SKIP ") for entry in entries), entries
     installed_script = installed_plugin / source_script.relative_to(source_plugin)
     return (*prefix[:-1], str(installed_script)), installed_plugin, home
 
@@ -974,13 +1075,26 @@ def _function_source(
     return source[begin:end].rstrip() + "\n"
 
 
+def _source_runtime_functions(script: Path, style: str) -> str:
+    if script.parent.parent.name == "agent-index":
+        return script.with_name(
+            "source-runtime.ps1" if style == "powershell" else "source-runtime.sh"
+        ).read_text(encoding="utf-8")
+    if style == "powershell":
+        return _function_source(
+            script, "function Get-SourceRuntimeIdentity {", "\nfunction Get-GitInfo",
+        )
+    return _function_source(script, "_source_python() {", '\nPACKAGE_VERSION="$SRC_VERSION"')
+
+
 def _run_agent_machines_snapshot_harness(
     exemplar: tuple[str, tuple[str, ...], str],
     installed_plugin: Path,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     tmp_path: Path,
     *,
     fail_before_stamp: bool = False,
+    mutate_copy: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     _, _, style = exemplar
     version = next(
@@ -1009,6 +1123,8 @@ def _run_agent_machines_snapshot_harness(
             None,
         )
     if style == "powershell":
+        for component in source_script.parent.glob("versioned_runtime*.py"):
+            shutil.copyfile(component, harness_root / component.name)
         fake_runner = harness_root / "fake-context.ps1"
         fake_runner.write_text(
             """param(
@@ -1043,8 +1159,15 @@ exit 1
                     "Set-StrictMode -Version 2.0",
                     "$ErrorActionPreference = 'Stop'",
                     f"$PluginDir = '{ps(installed_plugin)}'",
+                    f"$InstallDir = '{ps(layout['plugin_root'])}'",
                     f"$snapshotsRoot = '{ps(layout['snapshots'])}'",
                     f"$SrcVersion = '{ps(version)}'",
+                    "$PackageVersion = $SrcVersion",
+                    "$script:SourceRuntimeIdentity = $null",
+                    f". '{ps(source_script.with_name('versioned_runtime_native.ps1'))}'",
+                    _source_runtime_functions(source_script, style),
+                    "Initialize-SourceRuntime",
+                    "$env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = Get-CellPayloadIdentity",
                     f"$ExpectedMarketplaceId = '{ps(layout['marketplace_id'])}'",
                     f"$Context = '{ps(layout['install'])}'",
                     "$cellNamespaceGeneration = '1'",
@@ -1057,6 +1180,16 @@ exit 1
                         "function Get-CellSnapshotOwnerText {",
                         "\n# -- Paths",
                     ).rstrip(),
+                    (
+                        """function Copy-Item {
+    param($LiteralPath, $Destination, [switch]$Recurse, [switch]$Force, $ErrorAction)
+    Microsoft.PowerShell.Management\\Copy-Item @PSBoundParameters
+    if ([IO.Path]::GetFileName($LiteralPath) -ceq 'source.py') {
+        [IO.File]::WriteAllText($Destination, 'changed during copy')
+    }
+}"""
+                        if mutate_copy else ""
+                    ),
                     "try {",
                     f"    Ensure-CellSnapshot -SnapshotRoot '{ps(layout['snapshot_root'])}'",
                     "    exit 0",
@@ -1101,8 +1234,12 @@ esac
                     "#!/usr/bin/env bash",
                     "set -u",
                     f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
+                    f"INSTALL_DIR={shlex.quote(str(layout['plugin_root']))}",
                     f"SNAPSHOTS_ROOT={shlex.quote(str(layout['snapshots']))}",
                     f"SRC_VERSION={shlex.quote(version)}",
+                    'PACKAGE_VERSION="$SRC_VERSION"',
+                    'SOURCE_RUNTIME_IDENTITY=""',
+                    f"SCRIPT_DIR={shlex.quote(str(source_script.parent))}",
                     f"EXPECTED_MARKETPLACE_ID={shlex.quote(str(layout['marketplace_id']))}",
                     f"CONTEXT={shlex.quote(str(layout['install']))}",
                     "CELL_NAMESPACE_GENERATION=1",
@@ -1110,11 +1247,21 @@ esac
                     f"DURABLE_HOME={shlex.quote(str(layout['durable']))}",
                     f"SLOT_RUNNER={shlex.quote(str(fake_runner))}",
                     "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                    _source_runtime_functions(source_script, style),
+                    "_initialize_source_runtime",
+                    'export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$(_cell_payload_identity)"',
                     _function_source(
                         source_script,
                         "_cell_snapshot_owner_text() {",
                         "\nFORCE=0",
                     ).rstrip(),
+                    (
+                        """cp() {
+    command cp "$@" || return
+    printf 'changed during copy' >"${@: -1}/source.py"
+}"""
+                        if mutate_copy else ""
+                    ),
                     f"_ensure_cell_snapshot {shlex.quote(str(layout['snapshot_root']))}",
                     "",
                 )
@@ -1131,6 +1278,206 @@ esac
         env=environment,
         check=False,
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX kernel lock and native adapter qualification")
+@pytest.mark.parametrize("mutation", ("content", "version"))
+def test_agent_machines_refuses_payload_replaced_during_lock_wait(
+    tmp_path: Path, mutation: str,
+) -> None:
+    import fcntl
+
+    flock = cast(Callable[[int, int], None], getattr(fcntl, "flock"))
+    exemplar = next(
+        item for item in EXEMPLAR_INSTALLERS
+        if item[0] == "agent-machines" and item[2] != "powershell"
+    )
+    _, installed, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed,
+    )
+    ready = tmp_path / "selected"
+    witness = tmp_path / "entered"
+    script = installed / "scripts/init.sh"
+    marker = 'export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$SELECTED_PAYLOAD_HASH"'
+    script.write_text(script.read_text().replace(
+        marker, marker + f"\n    printf selected > {shlex.quote(str(ready))}", 1,
+    ))
+    lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
+    with lock_path.open("w") as lock, ThreadPoolExecutor(max_workers=1) as pool:
+        flock(lock.fileno(), getattr(fcntl, "LOCK_EX"))
+        future = pool.submit(
+            _run_exemplar_slot_action, exemplar, "cell-provision", layout, tmp_path,
+            environment_overrides={"AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness)},
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists() and not future.done() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert ready.exists(), future.result() if future.done() else "selection timed out"
+            if mutation == "content":
+                (installed / "changed.py").write_text("replaced = True\n")
+            else:
+                for name in ("plugin.json", "pyproject.toml"):
+                    path = installed / name
+                    path.write_text(path.read_text().replace(version, "9.9.9"))
+        finally:
+            flock(lock.fileno(), getattr(fcntl, "LOCK_UN"))
+        result = future.result(timeout=15)
+    assert result.returncode != 0, result.stdout
+    assert "changed" in result.stderr.lower()
+    assert not witness.exists()
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX kernel lock and native PowerShell qualification")
+def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path: Path) -> None:
+    import fcntl
+
+    flock = cast(Callable[[int, int], None], getattr(fcntl, "flock"))
+    exemplar = next(
+        item for item in EXEMPLAR_INSTALLERS
+        if item[0] == "agent-machines" and item[2] == "powershell"
+    )
+    _, installed, home = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed,
+    )
+    witness = tmp_path / "entered"
+    waiting = tmp_path / "waiting"
+    script = installed / "scripts/init.ps1"
+    probe = installed / "scripts/lock-watchdog-probe.ps1"
+    marker = "    while (-not $lock) {"
+    lock_wait = _function_source(
+        script, "    $lockPath = Join-Path $lockPluginRoot", "    $lockForward = @()",
+    ).replace(
+        marker, f"    [IO.File]::WriteAllText('{str(waiting).replace(chr(39), chr(39) * 2)}', 'waiting')\n" + marker, 1,
+    )
+    watchdog = _function_source(
+        script, "if ($cellSlotAction) {", "\n# Review finding (round 10)",
+    )
+    probe.write_text(
+        "\n".join((
+            "param([string]$Action, [string]$Context, [string]$ExpectedMarketplaceId,",
+            "      [string]$DurableHome, [switch]$CellWatchdogChild)",
+            "Set-StrictMode -Version 2.0",
+            "$ErrorActionPreference = 'Stop'",
+            "$probeHost = (Get-Process -Id $PID).Path",
+            "$cellSlotAction = $true",
+            watchdog,
+            "$lockPluginRoot = '" + str(layout["plugin_root"]).replace("'", "''") + "'",
+            lock_wait,
+            "try {",
+            "    [IO.File]::WriteAllText('" + str(witness).replace("'", "''") + "', 'entered')",
+            "} finally { $lock.Dispose() }",
+        )),
+        encoding="utf-8",
+    )
+    _reserve_exemplar_completion_slot(installed, layout, version)
+    inspected = _run_exemplar_slot_action(exemplar, "slot-validate", layout, tmp_path)
+    assert inspected.returncode == 0, inspected.stderr
+    assert json.loads(inspected.stdout)["reason"] == "runtime-slot-ownership-valid"
+    assert not waiting.exists()
+    assert not witness.exists()
+    lock_exemplar = (exemplar[0], (*exemplar[1][:-1], str(probe)), exemplar[2])
+    lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
+    with lock_path.open("w") as lock:
+        flock(lock.fileno(), getattr(fcntl, "LOCK_EX"))
+        started = time.monotonic()
+        result = _run_exemplar_slot_action(
+            lock_exemplar, "cell-provision", layout, tmp_path,
+            environment_overrides={
+                "AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness),
+                "AGENT_MACHINES_INSTALL_DEADLINE_SEC": "4",
+            },
+        )
+        elapsed = time.monotonic() - started
+    assert result.returncode == 124, result.stderr
+    assert "WATCHDOG" in result.stderr
+    assert elapsed < 12
+    assert waiting.exists()
+    assert not witness.exists()
+    assert not (home / ".agent-machines").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_rejects_changed_copy_before_snapshot_publication(
+    exemplar: Runner, tmp_path: Path,
+) -> None:
+    _, installed, home = _installed_exemplar(exemplar, tmp_path)
+    (installed / "source.py").write_text("original = True\n")
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed,
+    )
+    snapshot = Path(layout["snapshot_root"])
+    shutil.rmtree(snapshot)
+    result = _run_agent_machines_snapshot_harness(
+        exemplar, installed, layout, tmp_path, mutate_copy=True,
+    )
+    assert result.returncode != 0, result.stdout
+    assert "Payload content changed after selection" in result.stderr
+    assert not snapshot.exists()
+    assert not list(Path(layout["snapshots"]).glob(".agent-machines-snapshot-*"))
+    assert not (home / ".agent-machines/.install-stage").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_preserves_source_managed_snapshot_identity(
+    exemplar: Runner, tmp_path: Path,
+) -> None:
+    _, installed, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    spec = importlib.util.spec_from_file_location(
+        "snapshot_source_identity_fixture", installed / "scripts/versioned_runtime_source.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    digest = module.assembly_hash(installed)
+    source = module.SourceIdentity(
+        "agent-machines", version, "a" * 40, "b" * 40, digest,
+        module.runtime_version(version, "a" * 40, digest),
+    )
+    metadata = installed / "runtime-source.json"
+    metadata.write_text(json.dumps(source.document()))
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=source.runtime_version, payload_root=installed,
+    )
+    snapshot = Path(layout["snapshot_root"])
+    shutil.rmtree(snapshot)
+    result = _run_agent_machines_snapshot_harness(exemplar, installed, layout, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (snapshot / "runtime-source.json").read_bytes() == metadata.read_bytes()
+    assert (snapshot / "snapshot-provenance.json").is_file()
+    assert not (snapshot / ".agent-machines-snapshot-publish-owner").exists()
 
 
 @pytest.mark.parametrize(
@@ -1246,34 +1593,51 @@ def test_agent_machines_snapshot_publication_preserves_unowned_final_state(
     ).exists()
 
 
+def _reserve_exemplar_completion_slot(
+    installed_plugin: Path,
+    layout: ReceiptLayout,
+    version: str,
+) -> None:
+    snapshot_root = Path(layout["snapshot_root"])
+    (snapshot_root / "payload-content.txt").unlink()
+    shutil.copytree(installed_plugin, snapshot_root, dirs_exist_ok=True)
+    module = _load_python_module()
+    module.stamp_snapshot_provenance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        expected_namespace_generation=1, expected_install_generation=2,
+        snapshot_id=version, durable_home=layout["durable"], environment={},
+    )
+    module.provision_runtime_slot(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        snapshot_id=version, runtime_version=version,
+        expected_payload_root=installed_plugin, expected_payload_version=version,
+        durable_home=layout["durable"], environment={},
+    )
+
+
 def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
+    """Keep the real completion guard before the fixture's activation witness."""
     source = script.read_text(encoding="utf-8")
-    if style == "powershell":
-        call = source.rindex("Invoke-VersionedMarkComplete\n")
-        following = (
-            "\n    Write-Ok "
-            if plugin_id == "agent-machines"
-            else "\n    Write-Manifest"
-        )
-    else:
-        call = source.rindex("_versioned_mark_complete\n")
-        following = (
-            "\n    _ok "
-            if plugin_id == "agent-machines"
-            else "\n    _write_manifest"
-        )
-    start = source.rfind("\n", 0, call) + 1
-    return source[start : source.index(following, start)].rstrip() + "\n"
+    guard = (
+        "if (-not (Invoke-VersionedMarkComplete)) { exit 1 }"
+        if style == "powershell" else "_versioned_mark_complete || exit 1"
+    )
+    assert source.count(guard) == 1, (plugin_id, guard)
+    return guard + "\n"
 
 
 def _run_exemplar_mark_complete(
     exemplar: tuple[str, tuple[str, ...], str],
     installed_plugin: Path,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     tmp_path: Path,
     *,
     runtime_version: str,
-    python_executable: str | None = None,
+    marker_failure_witness: Path | None = None,
     activation_sentinel: Path | None = None,
     environment_overrides: dict[str, str] | None = None,
     powershell_preamble: str = "",
@@ -1281,6 +1645,32 @@ def _run_exemplar_mark_complete(
     _, _, style = exemplar
     producer = tmp_path / f"producer-{installed_plugin.name}-{style}"
     producer.mkdir()
+    shutil.copytree(
+        installed_plugin / "scripts", producer, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    if marker_failure_witness is not None:
+        helper = producer / "versioned_runtime.py"
+        source = helper.read_text(encoding="utf-8")
+        marker = '\nif __name__ == "__main__":'
+        assert source.count(marker) == 1
+        hook = (
+            "\ndef mark_complete(*args, **kwargs):\n"
+            f"    Path({str(marker_failure_witness)!r}).write_text('attempted', encoding='utf-8')\n"
+            "    raise OSError('injected completion writer failure')\n"
+        )
+        helper.write_text(source.replace(marker, hook + marker, 1), encoding="utf-8")
+    helpers = subprocess.check_output(
+        [
+            sys.executable, "-I", "-B", str(producer / "versioned_runtime.py"),
+            "--root", str(layout["plugin_root"]), "construction-shell",
+            "--shell", "ps1" if style == "powershell" else "sh",
+        ],
+        text=True,
+        encoding="utf-8",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=20,
+    )
     source_script = installed_plugin / "scripts" / (
         ("init.ps1" if style == "powershell" else "init.sh")
         if installed_plugin.name == "agent-machines"
@@ -1293,10 +1683,6 @@ def _run_exemplar_mark_complete(
     )
     if style == "powershell":
         harness = producer / "producer.ps1"
-        shutil.copyfile(
-            installed_plugin / "scripts" / "versioned_runtime.py",
-            producer / "versioned_runtime.py",
-        )
         harness.write_text(
             "\n".join(
                 (
@@ -1312,20 +1698,19 @@ def _run_exemplar_mark_complete(
                     "$InstallDir = $RuntimeRoot",
                     "$LinkDir = Join-Path $InstallDir '.venv'",
                     "$SrcVersion = $RuntimeVersion",
+                    "$PackageVersion = $SrcVersion",
+                    "$ScriptDir = $PSScriptRoot",
+                    "$script:SourceRuntimeIdentity = $null",
                     "$VersionedRuntime = $true",
                     "$VenvPython = $Python",
                     "$VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'",
                     "function Get-BootstrapPython { return $Python }",
                     "function Write-Fail([string]$Message) { throw $Message }",
                     "function Write-Ok([string]$Message) {}",
-                    (
-                        "function Invoke-VersionedActivate { "
-                        f"[IO.File]::WriteAllText('{powershell_sentinel}', 'activated'); "
-                        "return $true }"
-                        if activation_sentinel is not None
-                        and installed_plugin.name == "agent-index"
-                        else ""
-                    ),
+                    ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')",
+                    _source_runtime_functions(source_script, style),
+                    "Initialize-SourceRuntime",
+                    helpers,
                     _function_source(
                         source_script,
                         "function Get-PayloadHash(",
@@ -1333,9 +1718,12 @@ def _run_exemplar_mark_complete(
                     ).rstrip(),
                     _function_source(
                         source_script,
-                        "function Invoke-VersionedMarkComplete {",
+                        "function Invoke-VersionedSlotClean {",
                         "\n# === end install-contract:v4 marker/toss helpers",
                     ).rstrip(),
+                    "$primaryFailure = $null",
+                    "try {",
+                    "Invoke-VersionedSlotClean",
                     powershell_preamble,
                     (
                         _activation_tail_source(
@@ -1346,6 +1734,21 @@ def _run_exemplar_mark_complete(
                         if activation_sentinel is not None
                         else "Invoke-VersionedMarkComplete"
                     ),
+                    (
+                        f"[IO.File]::WriteAllText('{powershell_sentinel}', 'activated')"
+                        if activation_sentinel is not None else ""
+                    ),
+                    "} catch {",
+                    "    $primaryFailure = $_",
+                    "    throw",
+                    "} finally {",
+                    "    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {",
+                    "        try { Stop-RuntimeConstruction } catch {",
+                    "            if (-not $primaryFailure) { throw }",
+                    "            [Console]::Error.WriteLine($_.ToString())",
+                    "        }",
+                    "    }",
+                    "}",
                     "",
                 )
             ),
@@ -1363,7 +1766,7 @@ def _run_exemplar_mark_complete(
             "-RuntimeVersion",
             runtime_version,
             "-Python",
-            python_executable or sys.executable,
+            sys.executable,
         ]
     else:
         harness = producer / "producer.sh"
@@ -1373,24 +1776,22 @@ def _run_exemplar_mark_complete(
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
                     f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
-                    f"SCRIPT_DIR={shlex.quote(str(installed_plugin / 'scripts'))}",
+                    f"SCRIPT_DIR={shlex.quote(str(producer))}",
                     f"INSTALL_DIR={shlex.quote(str(layout['plugin_root']))}",
                     'LINK_DIR="$INSTALL_DIR/.venv"',
                     f"SRC_VERSION={shlex.quote(runtime_version)}",
+                    'PACKAGE_VERSION="$SRC_VERSION"',
+                    'SOURCE_RUNTIME_IDENTITY=""',
                     "VERSIONED_RUNTIME=1",
-                    f"PYTHON={shlex.quote(python_executable or sys.executable)}",
+                    f"PYTHON={shlex.quote(sys.executable)}",
                     'VENV_PYTHON="$PYTHON"',
                     'VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"',
                     "_fail() { printf '%s\\n' \"$1\" >&2; }",
                     "_ok() { :; }",
                     "_bootstrap_python() { printf '%s\\n' \"$PYTHON\"; }",
-                    (
-                        "_versioned_activate() { "
-                        f"printf activated >{shlex.quote(str(activation_sentinel))}; }}"
-                        if activation_sentinel is not None
-                        and installed_plugin.name == "agent-index"
-                        else ""
-                    ),
+                    _source_runtime_functions(source_script, style),
+                    "_initialize_source_runtime",
+                    helpers,
                     _function_source(
                         source_script,
                         "_payload_hash() {",
@@ -1398,15 +1799,16 @@ def _run_exemplar_mark_complete(
                     ).rstrip(),
                     _function_source(
                         source_script,
-                        "_versioned_mark_complete() {",
-                        "\necho ''",
+                        "_versioned_slot_clean() {",
+                        "\n# --- self-provisioning",
                     ).rstrip()
                     if installed_plugin.name == "agent-machines"
                     else _function_source(
                         source_script,
-                        "_versioned_mark_complete() {",
+                        "_versioned_slot_clean() {",
                         "\n# === install-contract:v4 source-kind",
                     ).rstrip(),
+                    "_versioned_slot_clean",
                     (
                         _activation_tail_source(
                             source_script,
@@ -1416,13 +1818,17 @@ def _run_exemplar_mark_complete(
                         if activation_sentinel is not None
                         else "_versioned_mark_complete"
                     ),
+                    (
+                        f"printf activated >{shlex.quote(str(activation_sentinel))}"
+                        if activation_sentinel is not None else ""
+                    ),
                     "",
                 )
             ),
             encoding="utf-8",
         )
         harness.chmod(0o755)
-        command = ("bash", str(harness))
+        command = ["bash", str(harness)]
     environment = os.environ.copy()
     if environment_overrides:
         environment.update(environment_overrides)
@@ -1433,6 +1839,7 @@ def _run_exemplar_mark_complete(
         encoding="utf-8",
         env=environment,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -1457,6 +1864,12 @@ def _run_exemplar_payload_hash(
                     "param([string]$PayloadRoot)",
                     "$ErrorActionPreference = 'Stop'",
                     "$PluginDir = $PayloadRoot",
+                    "$SrcVersion = '1.0.0'",
+                    "$PackageVersion = $SrcVersion",
+                    "$script:SourceRuntimeIdentity = $null",
+                    f". '{str(source_script.with_name('versioned_runtime_native.ps1')).replace(chr(39), chr(39) * 2)}'",
+                    _source_runtime_functions(source_script, style),
+                    "Initialize-SourceRuntime",
                     _function_source(
                         source_script,
                         "function Get-PayloadHash(",
@@ -1473,7 +1886,7 @@ def _run_exemplar_payload_hash(
             ),
             encoding="utf-8",
         )
-        command = (
+        command: tuple[str, ...] = (
             str(POWERSHELL),
             "-NoProfile",
             "-File",
@@ -1489,7 +1902,14 @@ def _run_exemplar_payload_hash(
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
                     f"PLUGIN_DIR={shlex.quote(str(payload_root))}",
+                    "SRC_VERSION=1.0.0",
+                    'PACKAGE_VERSION="$SRC_VERSION"',
+                    'SOURCE_RUNTIME_IDENTITY=""',
+                    f"SCRIPT_DIR={shlex.quote(str(source_script.parent))}",
                     "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                    "_bootstrap_python() { command -v python3; }",
+                    _source_runtime_functions(source_script, style),
+                    "_initialize_source_runtime",
                     _function_source(
                         source_script,
                         "_payload_hash() {",
@@ -1528,8 +1948,10 @@ def _payload_file_bytes(root: Path) -> dict[str, bytes]:
     EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
-def test_exemplar_marker_writer_failure_prevents_activation_tail(
+@pytest.mark.parametrize("fail_mark_complete", (False, True))
+def test_exemplar_completion_writer_gates_activation_tail(
     exemplar: tuple[str, tuple[str, ...], str],
+    fail_mark_complete: bool,
     tmp_path: Path,
 ) -> None:
     plugin_id, prefix, _ = exemplar
@@ -1548,40 +1970,9 @@ def test_exemplar_marker_writer_failure_prevents_activation_tail(
         payload_root=installed_plugin,
     )
     slot = Path(layout["plugin_root"]) / "versions" / version
-    slot.mkdir(parents=True)
+    _reserve_exemplar_completion_slot(installed_plugin, layout, version)
     activation_sentinel = tmp_path / "activation-reached"
-    dispatcher_source = tmp_path / "completion-writer-dispatch.py"
-    dispatcher_source.write_text(
-        "\n".join(
-            (
-                "from pathlib import Path",
-                "import sys",
-                f"sentinel = Path({str(activation_sentinel)!r})",
-                "if 'activate' in sys.argv:",
-                "    sentinel.write_text('activated', encoding='utf-8')",
-                "    raise SystemExit(0)",
-                "if 'mark-complete' in sys.argv:",
-                "    raise SystemExit(23)",
-                "raise SystemExit(0)",
-                "",
-            )
-        ),
-        encoding="utf-8",
-    )
-    if os.name == "nt":
-        failing_writer = tmp_path / "completion-writer.cmd"
-        failing_writer.write_text(
-            f'@"{sys.executable}" "{dispatcher_source}" %*\r\n',
-            encoding="utf-8",
-        )
-    else:
-        failing_writer = tmp_path / "completion-writer"
-        failing_writer.write_text(
-            f"#!{sys.executable}\n"
-            + dispatcher_source.read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
-        failing_writer.chmod(0o755)
+    failure_witness = tmp_path / "completion-write-attempted"
 
     result = _run_exemplar_mark_complete(
         exemplar,
@@ -1589,16 +1980,52 @@ def test_exemplar_marker_writer_failure_prevents_activation_tail(
         layout,
         tmp_path,
         runtime_version=version,
-        python_executable=str(failing_writer),
+        marker_failure_witness=failure_witness if fail_mark_complete else None,
         activation_sentinel=activation_sentinel,
     )
 
-    assert result.returncode != 0
-    assert not activation_sentinel.exists()
-    assert not (slot / ".install-complete.json").exists()
+    if fail_mark_complete:
+        assert result.returncode != 0
+        assert failure_witness.read_text(encoding="utf-8") == "attempted", result.stderr
+        assert not activation_sentinel.exists()
+        assert not (slot / ".install-complete.json").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert activation_sentinel.read_text(encoding="utf-8") == "activated"
+        assert (slot / ".install-complete.json").is_file()
     assert not (Path(layout["plugin_root"]) / "current-version").exists()
     assert not (Path(layout["plugin_root"]) / "last-known-good").exists()
     assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_slot_actions_do_not_stage_into_legacy_state(
+    exemplar: tuple[str, tuple[str, ...], str], tmp_path: Path,
+) -> None:
+    _, installed_plugin, home = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1]
+        for line in (installed_plugin / "pyproject.toml").read_text("utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed_plugin,
+    )
+    snapshot = Path(layout["snapshot_root"])
+    (snapshot / "payload-content.txt").unlink()
+    shutil.copytree(installed_plugin, snapshot, dirs_exist_ok=True)
+    _stamp_with_python(layout, snapshot_id=version)
+    for action in ("slot-provision", "slot-validate"):
+        result = _run_exemplar_slot_action(exemplar, action, layout, tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["action"] == action
+        assert not (home / ".agent-machines").exists()
+    assert not (Path(layout["plugin_root"]) / "current-version").exists()
 
 
 @pytest.mark.parametrize(
@@ -1630,7 +2057,8 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested payload\n")
     (nested / "\u00e9.txt").write_bytes(b"unicode path\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    payload_name = "space name.txt" if os.name == "nt" else "line\nbreak.txt"
+    (nested / payload_name).write_bytes(b"platform filename\n")
     (nested / "empty").mkdir()
     snapshot_root = Path(layout["snapshot_root"])
     (snapshot_root / "payload-content.txt").unlink()
@@ -1928,7 +2356,7 @@ def test_exemplar_producer_hash_failure_does_not_omit_payload_hash(
     else:
         if os.name == "nt":
             pytest.skip("non-regular filesystem payload entries require POSIX")
-        os.mkfifo(installed_plugin / "!payload-pipe")
+        _make_fifo(installed_plugin / "!payload-pipe")
 
     produced = _run_exemplar_mark_complete(
         exemplar,
@@ -2161,9 +2589,11 @@ def test_powershell_exemplar_wide_payload_rejects_small_limit(
     "action",
     ("slot-provision", "slot-validate", "slot-complete", "slot-completion-validate"),
 )
-def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
+@pytest.mark.parametrize("prestaged", (False, True))
+def test_exemplar_slot_actions_release_installed_payload_cwd_without_legacy_staging(
     exemplar: tuple[str, tuple[str, ...], str],
     action: str,
+    prestaged: bool,
     tmp_path: Path,
 ) -> None:
     _, _, style = exemplar
@@ -2204,7 +2634,7 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
         action,
         layout,
         tmp_path,
-        environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"},
+        environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"} if prestaged else {},
     )
 
     assert result.returncode == 0, result.stderr
@@ -2214,6 +2644,7 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
         assert Path(cwd["process"]) == home
     else:
         assert Path(cwd["cwd"]) == home
+    assert not (home / ".agent-machines").exists()
 
 
 @pytest.mark.parametrize(
@@ -2560,7 +2991,7 @@ def test_runtime_slot_preserves_markerless_or_malformed_existing_slot(
     if marker_kind == "malformed":
         expected = (
             "unsupported schema or version"
-            if runner[0] == "python"
+            if runner[0] in {"python", "powershell"}
             else "unknown or missing fields"
         )
     assert expected in result.stderr
@@ -2623,16 +3054,18 @@ def test_runtime_slot_validation_rejects_unknown_ownership_fields(
     ownership = json.loads(marker.read_text(encoding="utf-8"))
     ownership["unexpected"] = "value"
     _write_json(marker, ownership)
+    before = marker.read_bytes()
 
     result = _run_slot(runner, "slot-validate", layout, check=False)
 
     assert result.returncode != 0
     expected = (
         "does not match the validated snapshot"
-        if runner[0] == "python"
+        if runner[0] in {"python", "powershell"}
         else "unknown or missing fields"
     )
     assert expected in result.stderr
+    assert marker.read_bytes() == before
 
 
 @pytest.mark.parametrize(
@@ -2913,11 +3346,19 @@ def test_runtime_slot_serializes_concurrent_publishers(
                     "slot-provision",
                     layout,
                     direct=True,
+                    check=False,
                 ),
                 range(2),
             )
         )
-    results = [json.loads(result.stdout) for result in completed]
+    assert any(result.returncode == 0 for result in completed)
+    results = []
+    for result in completed:
+        if result.returncode != 0:
+            assert result.returncode == 1
+            assert "Installation lock" in result.stderr and "remained busy" in result.stderr
+            result = _run_slot(runner, "slot-provision", layout, direct=True)
+        results.append(json.loads(result.stdout))
 
     assert sorted(result["slotChanged"] for result in results) == [False, True]
     assert len({result["ownership"] for result in results}) == 1
@@ -3698,7 +4139,8 @@ def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
     nested = snapshot_root / "nested"
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested sidecar name\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    payload_name = "space name.txt" if os.name == "nt" else "line\nbreak.txt"
+    (nested / payload_name).write_bytes(b"platform filename\n")
     (nested / "z.txt").write_bytes(b"last\n")
     (snapshot_root / "\u03a9.txt").write_bytes(b"unicode path\n")
     (snapshot_root / "empty").mkdir()
@@ -3756,7 +4198,7 @@ def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
         target.write_text("outside\n", encoding="utf-8")
         (snapshot_root / "linked-content").symlink_to(target)
     else:
-        os.mkfifo(snapshot_root / "named-pipe")
+        _make_fifo(snapshot_root / "named-pipe")
     _stamp_with_python(layout)
     _provision_slot_with_python(layout)
     _build_receipt(layout, payload_hash="a" * 64)
@@ -3776,6 +4218,7 @@ def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
     ).exists()
 
 
+@pytest.mark.skipif(BASH is None, reason="supported POSIX Bash required")
 def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     tmp_path: Path,
 ) -> None:
@@ -3803,7 +4246,7 @@ def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     fake_find.chmod(0o755)
 
     result = _run_completion(
-        ALL_RUNNERS[1],
+        next(runner for runner in ALL_RUNNERS if runner[0] == "posix"),
         "slot-complete",
         layout,
         environment_overrides={
@@ -3832,7 +4275,7 @@ def test_python_build_receipt_open_rejects_replacement_to_unsafe_object(
     layout = _receipt_layout(tmp_path)
     build_path = _prepare_completion_slot(layout)
     module = _load_python_module()
-    original_open = module.os.open
+    original_open = os.open
     replaced = False
 
     def racing_open(
@@ -3869,7 +4312,7 @@ def test_python_build_receipt_open_rejects_replacement_to_unsafe_object(
                 )
                 build_path.symlink_to(target)
             else:
-                os.mkfifo(build_path)
+                _make_fifo(build_path)
         if dir_fd is None:
             return original_open(path, flags, mode)
         return original_open(path, flags, mode, dir_fd=dir_fd)
@@ -3901,7 +4344,7 @@ def test_python_snapshot_hash_open_rejects_replacement_to_unsafe_object(
     layout = _receipt_layout(tmp_path)
     snapshot_file = Path(layout["snapshot_root"]) / "payload-content.txt"
     module = _load_python_module()
-    original_open = module.os.open
+    original_open = os.open
     replaced = False
 
     def racing_open(
@@ -3926,7 +4369,7 @@ def test_python_snapshot_hash_open_rejects_replacement_to_unsafe_object(
                 target.write_text("outside\n", encoding="utf-8")
                 snapshot_file.symlink_to(target)
             else:
-                os.mkfifo(snapshot_file)
+                _make_fifo(snapshot_file)
         if dir_fd is None:
             return original_open(path, flags, mode)
         return original_open(path, flags, mode, dir_fd=dir_fd)
@@ -3956,7 +4399,7 @@ def test_python_completion_rejects_atomic_regular_replacement_after_validation(
             / ".runtime-slot-ownership.json"
         )
     )
-    original_sha256_file = module._sha256_file
+    original_sha256_file = cast(Callable[[Path], str], module._sha256_file)
     replaced = False
 
     def replace_before_digest(path: Path) -> str:
@@ -4013,13 +4456,15 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
         environment={},
     )
     marker = Path(published["completion"])
+    original_bytes = marker.read_bytes()
     replacement = marker.with_name(".replacement-completion.json")
     replacement_bytes = b'{"replaced":true}\n'
     replacement.write_bytes(replacement_bytes)
-    original_open = module.os.open
-    original_read = module.os.read
+    original_open = os.open
+    original_read = os.read
     marker_descriptor: int | None = None
     replaced = False
+    replacement_error: PermissionError | None = None
 
     def racing_open(
         path: str | os.PathLike[str],
@@ -4038,19 +4483,21 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
         return descriptor
 
     def racing_read(descriptor: int, length: int) -> bytes:
-        nonlocal replaced
+        nonlocal replaced, replacement_error
         if descriptor == marker_descriptor and not replaced:
             replaced = True
-            os.replace(replacement, marker)
+            try:
+                os.replace(replacement, marker)
+            except PermissionError as error:
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32):
+                    raise
+                replacement_error = error
         return original_read(descriptor, length)
 
     monkeypatch.setattr(module.os, "open", racing_open)
     monkeypatch.setattr(module.os, "read", racing_read)
-    with pytest.raises(
-        module.InstallationContextError,
-        match="changed while it was being read",
-    ):
-        module.validate_runtime_slot_completion(
+    def validate() -> dict[str, object]:
+        return cast(dict[str, object], module.validate_runtime_slot_completion(
             context=layout["install"],
             expected_marketplace_id=layout["marketplace_id"],
             expected_plugin_id=layout["plugin_id"],
@@ -4060,8 +4507,21 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
             runtime_version="3.4.5",
             durable_home=layout["durable"],
             environment={},
-        )
+        ))
 
+    if os.name == "nt":
+        assert validate()["receipt"] == published["receipt"]
+        assert replacement_error is not None
+        assert marker.read_bytes() == original_bytes
+        assert replacement.read_bytes() == replacement_bytes
+        os.replace(replacement, marker)
+    else:
+        with pytest.raises(
+            module.InstallationContextError,
+            match="changed while it was being read",
+        ):
+            validate()
+        assert replacement_error is None
     assert replaced
     assert marker.read_bytes() == replacement_bytes
 
@@ -4079,7 +4539,7 @@ def test_python_slot_completion_reconfirms_tree_before_publication(
     snapshot_root = Path(layout["snapshot_root"])
     calls = 0
 
-    def racing_digest(root: Path, **kwargs: object) -> str:
+    def racing_digest(root: Path, **kwargs: int) -> str:
         nonlocal calls
         digest = original_digest(root, **kwargs)
         calls += 1
@@ -4094,7 +4554,7 @@ def test_python_slot_completion_reconfirms_tree_before_publication(
                 target.unlink()
             else:
                 target.rename(snapshot_root / "renamed-content.txt")
-        return digest
+        return cast(str, digest)
 
     monkeypatch.setattr(module, "_snapshot_content_sha256", racing_digest)
     with pytest.raises(
@@ -4469,7 +4929,7 @@ def test_runtime_slot_completion_rejects_non_strict_nested_shapes(
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_runtime_slot_completion_requires_current_receipts_for_first_publication(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
@@ -4799,25 +5259,47 @@ def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receip
     )
     build_path.write_bytes(candidate_bytes[0])
     stop = Event()
+    first_replacement = Event()
+    replacements = 0
 
     def rewrite() -> None:
+        nonlocal replacements
         index = 1
         staging = build_path.with_name(".install-complete.next")
         while not stop.is_set():
             staging.write_bytes(candidate_bytes[index])
-            os.replace(staging, build_path)
+            try:
+                os.replace(staging, build_path)
+            except PermissionError as error:
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32):
+                    raise
+                stop.wait(0.001)
+                continue
+            replacements += 1
+            first_replacement.set()
             index = 1 - index
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(rewrite)
         try:
-            published = json.loads(
-                _run_completion(runner, "slot-complete", layout).stdout
-            )
+            assert first_replacement.wait(timeout=5)
+            result = _run_completion(runner, "slot-complete", layout, check=False)
         finally:
             stop.set()
             future.result(timeout=10)
 
+    assert replacements > 0
+    if os.name == "nt" and result.returncode != 0:
+        assert result.returncode == 1
+        assert "Cannot read build completion evidence" in result.stderr
+        assert any(
+            code in result.stderr
+            for code in ("[Errno 13]", "[WinError 5]", "[WinError 32]")
+        )
+        assert not (build_path.parent / ".runtime-slot-completion.json").exists()
+        result = _run_completion(runner, "slot-complete", layout)
+    assert result.returncode == 0, result.stdout + result.stderr
+    published = json.loads(result.stdout)
     recorded = published["receipt"]["build"]
     matched = [
         candidate
@@ -4998,7 +5480,9 @@ def test_runtime_slot_cutover_cas_mismatch_does_not_mutate_markers(
     layout = _receipt_layout(tmp_path)
     plugin_root = Path(layout["plugin_root"])
     _prepare_completion_slot(layout, runtime_version="1.0.0")
-    _run_completion(runner, "slot-complete", layout, runtime_version="1.0.0")
+    # Native completion/cutover composition remains in the rollback tests;
+    # this negative control spends its native work on both actual cutovers.
+    _run_completion(REFERENCE_RUNNERS[0], "slot-complete", layout, runtime_version="1.0.0")
     _run_cutover(
         runner,
         layout,
@@ -5010,7 +5494,7 @@ def test_runtime_slot_cutover_cas_mismatch_does_not_mutate_markers(
         for name in ("current-version", "last-known-good")
     }
     _prepare_completion_slot(layout, runtime_version="2.0.0")
-    _run_completion(runner, "slot-complete", layout, runtime_version="2.0.0")
+    _run_completion(REFERENCE_RUNNERS[0], "slot-complete", layout, runtime_version="2.0.0")
 
     result = json.loads(
         _run_cutover(
@@ -5492,7 +5976,7 @@ def test_python_reparse_detection_supports_pre_312_pathlib(
         module.os,
         "lstat",
         lambda _path: SimpleNamespace(
-            st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT
+            st_file_attributes=getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
         ),
     )
     assert module._is_link_or_junction(path) is True
@@ -5727,7 +6211,7 @@ def test_snapshot_validation_rejects_sidecar_only_snapshot(
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_stale_receipt_generation_rejects_republication_without_overwrite(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
@@ -5749,7 +6233,7 @@ def test_stale_receipt_generation_rejects_republication_without_overwrite(
 @pytest.mark.parametrize("state", ("inactive", "orphaned"))
 def test_inactive_or_orphaned_receipts_reject_snapshot_validation(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     state: str,
     tmp_path: Path,
 ) -> None:
@@ -5897,7 +6381,7 @@ def test_context_validation_rejects_linked_physical_ownership_chain(
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_context_validation_rejects_linked_receipt_files(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
@@ -5976,17 +6460,17 @@ def test_powershell_rejects_non_decimal_int64_generation_arguments(
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
-    generations: dict[str, int | str] = {
-        "expected_namespace_generation": 1,
-        "expected_install_generation": 2,
-    }
-    generations[argument] = value
     result = _run(
         next(runner for runner in ALL_RUNNERS if runner[0] == "powershell"),
         "snapshot-stamp",
         layout,
         check=False,
-        **generations,
+        expected_namespace_generation=(
+            value if argument == "expected_namespace_generation" else 1
+        ),
+        expected_install_generation=(
+            value if argument == "expected_install_generation" else 2
+        ),
     )
     assert result.returncode != 0
     assert message in result.stderr.lower()
@@ -6098,9 +6582,22 @@ def test_powershell_lock_owner_invalid_utf8_is_classified(tmp_path: Path) -> Non
     runner = next(
         candidate for candidate in ALL_RUNNERS if candidate[0] == "powershell"
     )
+    reference_runner = next(
+        candidate for candidate in ALL_RUNNERS if candidate[0] == "python"
+    )
+    before = _tree_snapshot(lock)
+    snapshot_before = _tree_snapshot(Path(layout["snapshot_root"]))
 
+    reference = _run(reference_runner, "snapshot-stamp", layout, check=False)
     result = _run(runner, "snapshot-stamp", layout, check=False)
 
+    assert reference.returncode != 0
     assert result.returncode != 0
-    assert "invalid utf-8 in installation lock owner receipt" in result.stderr.lower()
+    assert not reference.stdout and not result.stdout
+    assert result.stderr.strip() == reference.stderr.strip()
+    assert f"invalid json in '{lock / 'owner.json'}'".lower() in result.stderr.lower()
+    assert "utf-8" in result.stderr.lower()
     assert "decoderfallbackexception" not in result.stderr.lower()
+    assert "traceback" not in result.stderr.lower()
+    assert _tree_snapshot(lock) == before
+    assert _tree_snapshot(Path(layout["snapshot_root"])) == snapshot_before

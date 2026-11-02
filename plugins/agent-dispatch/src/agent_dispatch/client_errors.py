@@ -12,6 +12,25 @@ class DispatchError(RuntimeError):
         self.status_code = status_code
         self.detail = detail
 
+    def is_action_inhibited(self, action: str) -> bool:
+        """Only an explicit structured denial is safe to retry as inhibition."""
+        return (
+            self.status_code == 409 and isinstance(self.detail, dict)
+            and self.detail.get("code") == "action_inhibited"
+            and self.detail.get("action") == action
+            and self.detail.get("retryable") is True
+        )
+
+    def is_pool_catalog_rejection(self, operation: str) -> bool:
+        """Recognize the catalog handler's explicit rejection, not a proxy status."""
+        return (
+            self.status_code in (400, 409) and isinstance(self.detail, dict)
+            and self.detail.get("code") == "pool_catalog_rejected"
+            and self.detail.get("operation") == operation
+            and isinstance(self.detail.get("reason"), str)
+            and self.detail.get("retryable") is False
+        )
+
     def as_dict(self) -> dict[str, object]:
         if isinstance(self.detail, dict):
             return self.detail

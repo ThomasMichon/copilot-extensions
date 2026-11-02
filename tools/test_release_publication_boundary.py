@@ -606,9 +606,22 @@ class BoundaryTests(_ShellFixture):
         self.unmerged(provider)
         self.assertFalse(provider.calls)
 
-    def test_zero_helper_pin_is_refused_before_any_checkout_or_publication(self) -> None:
+    def test_helper_selection_preserves_immutable_source_or_explicit_legacy_pin(self) -> None:
         gate = self.jobs["gate"]
         identifier = "Require an immutable reviewed release-helper pin"
+        if "RELEASE_HELPERS_SHA" not in gate:
+            self.assertIn("ref: ${{ github.workflow_sha }}", gate)
+            for name in (
+                "compose-candidate", "source-units", "build-python-artifacts", "python-artifacts",
+                "promote", "qualify-candidate", "publish-python-artifacts", "record-promotion",
+            ):
+                with self.subTest(job=name):
+                    helper = self.jobs[name].split("path: reviewed-helpers", 1)
+                    self.assertEqual(len(helper), 2)
+                    self.assertIn("ref: ${{ needs.gate.outputs.sha }}", helper[0])
+                    self.assertTrue(helper[1].lstrip().startswith("persist-credentials: false"))
+                    self.assertIn("gate", needs(self.jobs[name]))
+            return
         self.assertLess(gate.index(identifier), gate.index("uses: actions/checkout@"))
         body = script(step(gate, identifier))
         self.assertNotEqual(self.shell(body, {"RELEASE_HELPERS_SHA": "0" * 40}).returncode, 0)

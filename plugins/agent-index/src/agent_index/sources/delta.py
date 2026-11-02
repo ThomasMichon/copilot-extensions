@@ -1,0 +1,124 @@
+"""Optional, versioned connector output for complete changed-item acquisition."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from agent_index.sources.base import FileEntry
+
+
+@dataclass
+class DeletedFile:
+    """An explicit tombstone in the canonical stored source namespace."""
+
+    source: str
+    path: str
+
+
+@dataclass
+class SourceDelta:
+    """A completed delta, never an implicit complete corpus path listing.
+
+    A connector may implement ``discover_delta(last_commit, cancel_check=None)``
+    to return this contract. It owns the base-to-target change coverage and
+    target checkpoint. Incomplete pages must return ``complete=False`` or raise,
+    not omit unseen items and let the engine infer deletions.
+    """
+
+    upserts: list[FileEntry] = field(default_factory=list)
+    deletions: list[DeletedFile] = field(default_factory=list)
+    commit: str | None = None
+    complete: bool = True
+    version: int = 1
+
+    def validate(self, family: str) -> None:
+        """Reject incompatible/incomplete results before any indexing mutation."""
+        if type(self.version) is not int or self.version != 1:
+            raise ValueError(f"Unsupported connector delta version: {self.version!r}")
+        if self.complete is not True:
+            raise ValueError("Connector delta acquisition is incomplete")
+        if self.commit is not None and not isinstance(self.commit, str):
+            raise ValueError("Connector delta checkpoint must be a string or None")
+        if not isinstance(family, str) or not family:
+            raise ValueError("Connector delta has no canonical source family")
+        upserts: set[tuple[str, str]] = set()
+        deleted: set[tuple[str, str]] = set()
+        for entries, expected, identities in (
+            (self.upserts, FileEntry, upserts),
+            (self.deletions, DeletedFile, deleted),
+        ):
+            if not isinstance(entries, list):
+                raise ValueError("Connector delta entries must be lists")
+            for entry in entries:
+                if not isinstance(entry, expected):
+                    raise ValueError("Connector delta contains an invalid entry")
+                if not isinstance(entry.source, str) or not (
+                    entry.source == family or entry.source.startswith(family + ":")
+                ):
+                    raise ValueError("Connector delta entry is outside its source family")
+                if not isinstance(entry.path, str) or not entry.path:
+                    raise ValueError("Connector delta entry has no path")
+                identity = (entry.source, entry.path)
+                if identity in identities:
+                    raise ValueError("Connector delta repeats an item identity")
+                identities.add(identity)
+        if upserts & deleted:
+            raise ValueError("Connector delta both upserts and deletes an item")
+
+
+@dataclass
+class AcquisitionPage:
+    """One complete acquisition unit; only a terminal cursor completes the delta.
+
+    Opt-in connectors advertise ``acquisition_page_versions = (1,)`` on their
+    ``discover_delta_page`` method. Cursors are opaque nonsecret strings bound
+    to the effective recovery scope; all pages retain the same target commit.
+    """
+
+    delta: SourceDelta
+    cursor: str | None = None
+    version: int = 1
+
+    def validate(self, family: str) -> None:
+        if type(self.version) is not int or self.version != 1:
+            raise ValueError("Unsupported connector acquisition-page version")
+        if not isinstance(self.delta, SourceDelta):
+            raise ValueError("Connector acquisition page requires a SourceDelta")
+        self.delta.validate(family)
+        if self.cursor is not None and (
+            not isinstance(self.cursor, str) or not self.cursor
+            or len(self.cursor.encode()) > 65536
+        ):
+            raise ValueError("Connector acquisition cursor must be a bounded nonempty string")
+
+
+@dataclass
+class SnapshotPage:
+    """One unit of an immutable, complete source-family snapshot.
+
+    ``discover_snapshot_page(snapshot, cursor, cancel_check=None)`` opts in with
+    ``snapshot_page_versions = (1,)``. The first call selects a nonsecret snapshot
+    token; continuations must read that same snapshot, including every descendant
+    stream. A terminal cursor certifies complete coverage, not just an API page
+    ending. Mutable offset pagination cannot implement this contract.
+    """
+
+    snapshot: str
+    upserts: list[FileEntry] = field(default_factory=list)
+    commit: str | None = None
+    cursor: str | None = None
+    version: int = 1
+
+    def validate(self, family: str) -> None:
+        if type(self.version) is not int or self.version != 1:
+            raise ValueError("Unsupported connector snapshot-page version")
+        if (
+            not isinstance(self.snapshot, str) or not self.snapshot
+            or len(self.snapshot.encode()) > 65536
+        ):
+            raise ValueError("Connector snapshot token must be a bounded nonempty string")
+        if not isinstance(self.upserts, list) or len(self.upserts) > 256:
+            raise ValueError("Connector snapshot page must contain at most 256 items")
+        AcquisitionPage(
+            SourceDelta(upserts=self.upserts, commit=self.commit), self.cursor,
+        ).validate(family)

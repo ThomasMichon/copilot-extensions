@@ -11,6 +11,8 @@ from __future__ import annotations
 import io
 import time
 
+import pytest
+
 from agent_vault import cutover
 from agent_vault.service import VaultService
 
@@ -54,6 +56,64 @@ def test_roundtrip_warms_new_generation_without_reunlock(tmp_path):
     assert new.cli.get_password(kpdb) == "master-pw"
     assert kpdb in new._password_set_at
     assert new.ttl_override == 0
+
+
+@pytest.mark.parametrize("incoming_ttl", (0, 600))
+def test_versioned_auth_handoff_preserves_expiration_across_policy_changes(
+    tmp_path, monkeypatch, incoming_ttl,
+):
+    from agent_vault import service
+
+    now = time.time()
+    kpdb = str(tmp_path / "v.kdbx")
+    old = _unlocked_service(kpdb, "fixture-master")
+    old._password_set_at[kpdb] = now - 100
+    monkeypatch.setattr(service, "PASSWORD_TTL", 300)
+    payload = cutover.build_auth_state(old)
+    assert payload["passwords"][kpdb]["expires_at"] == now + 200
+    monkeypatch.setattr(service, "PASSWORD_TTL", incoming_ttl)
+    new = VaultService()
+    assert cutover.apply_auth_state(new, payload) == 1
+    assert new.cli.get_password(kpdb) == "fixture-master"
+    assert new._password_set_at[kpdb] == now - 100
+    assert new._password_handoff_deadlines[kpdb] == now + 200
+    monkeypatch.setattr(time, "time", lambda: now + 201)
+    new._check_password_ttl()
+    assert not new.cli.has_password(kpdb)
+
+
+def test_versioned_auth_handoff_does_not_export_or_revive_expired_state(tmp_path, monkeypatch):
+    from agent_vault import service
+
+    now = time.time()
+    kpdb = str(tmp_path / "v.kdbx")
+    old = _unlocked_service(kpdb, "fixture-master")
+    old._password_set_at[kpdb] = now - 100
+    monkeypatch.setattr(service, "PASSWORD_TTL", 1)
+    assert cutover.build_auth_state(old)["passwords"] == {}
+    monkeypatch.setattr(service, "PASSWORD_TTL", 300)
+    payload = cutover.build_auth_state(old)
+    monkeypatch.setattr(time, "time", lambda: now + 201)
+    new = VaultService()
+    assert cutover.apply_auth_state(new, payload) == 0
+    assert not new.cli.has_password(kpdb)
+
+
+@pytest.mark.parametrize("version", (None, 0, 2, True, "1"))
+def test_versioned_auth_handoff_refuses_a_nonoverlapping_contract(version):
+    new = VaultService()
+    assert cutover.apply_auth_state(new, {
+        "contract": cutover.AUTH_STATE_CONTRACT, "version": version,
+        "passwords": {"/fixture.kdbx": {
+            "password": "fixture-master", "set_at": time.time() - 1, "expires_at": None,
+        }},
+    }) == 0
+    assert new.cli.unlocked_vaults() == []
+
+
+@pytest.mark.parametrize("versions,expected", (([1], 1), ([0, 1, 2], 1), ([2], None), ([True], None)))
+def test_auth_handoff_negotiates_only_a_common_typed_version(versions, expected):
+    assert cutover.negotiate_auth_state(versions) == expected
 
 
 def test_apply_is_defensive_against_malformed():

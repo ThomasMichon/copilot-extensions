@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Windows physical-path comparisons in the shared installation-context SDK",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

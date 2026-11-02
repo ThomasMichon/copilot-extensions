@@ -1,0 +1,13 @@
+{
+  "comment": "Expose bounded read-only launch attempt inspection",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

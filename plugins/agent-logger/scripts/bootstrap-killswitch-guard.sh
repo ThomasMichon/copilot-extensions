@@ -9,7 +9,7 @@
 #
 # State lives in ONE shared, cross-plugin file -- not per-plugin -- so a
 # single on/off affects every plugin's hook uniformly:
-#   ~/.copilot-extensions/bootstrap-killswitch.json
+#   ~/.copilot-extensions/killSwitches/bootstrap-killswitch.json
 #   {"active": true, "reason": "...", "set_by": "...", "set_at": "..."}
 #
 # Primary usage -- as a subprocess, from the FIRST lines of any
@@ -41,7 +41,15 @@
 # though the switch was (or was about to be) active.
 set -euo pipefail
 
-StateFile="${BOOTSTRAP_KILLSWITCH_STATE_FILE:-$HOME/.copilot-extensions/bootstrap-killswitch.json}"
+StateFile="${BOOTSTRAP_KILLSWITCH_STATE_FILE:-$HOME/.copilot-extensions/killSwitches/bootstrap-killswitch.json}"
+LegacyStateFile=""
+if [ -z "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" ]; then
+  LegacyStateFile="$HOME/.copilot-extensions/bootstrap-killswitch.json"
+fi
+ReadStateFile="$StateFile"
+if [ ! -e "$StateFile" ] && [ -n "$LegacyStateFile" ] && [ -f "$LegacyStateFile" ]; then
+  ReadStateFile="$LegacyStateFile"
+fi
 
 _py() { command -v python3 2>/dev/null || command -v python 2>/dev/null || true; }
 
@@ -56,7 +64,7 @@ try:
     print("true" if data.get("active") is True else "false")
 except Exception:
     print("false")
-' "$StateFile" 2>/dev/null || echo "false"
+' "$ReadStateFile" 2>/dev/null || echo "false"
 }
 
 _reason() {
@@ -69,7 +77,7 @@ try:
         print(json.load(fh).get("reason", "") or "")
 except Exception:
     print("")
-' "$StateFile" 2>/dev/null || echo ""
+' "$ReadStateFile" 2>/dev/null || echo ""
 }
 
 _live_reconciling_plugins() {
@@ -97,7 +105,7 @@ _live_reconciling_plugins() {
 cmd="${1:-check}"
 case "$cmd" in
   check)
-    if [ -f "$StateFile" ] && [ "$(_is_active)" = "true" ]; then
+    if [ -f "$ReadStateFile" ] && [ "$(_is_active)" = "true" ]; then
       r="$(_reason)"
       echo "[bootstrap-killswitch] ACTIVE${r:+ -- $r}; skipping automatic reconcile." >&2
       exit 0
@@ -105,7 +113,7 @@ case "$cmd" in
     exit 1
     ;;
   status)
-    if [ -f "$StateFile" ]; then cat "$StateFile"; else printf '{"active": false}\n'; fi
+    if [ -f "$ReadStateFile" ]; then cat "$ReadStateFile"; else printf '{"active": false}\n'; fi
     ;;
   on)
     reason="${2:-}"
@@ -145,7 +153,8 @@ os.replace(tmp, target)  # same-filesystem rename -- atomic, no torn reads
     echo "Reset with: agent-machines bootstrap-killswitch off"
     ;;
   off)
-    rm -f "$StateFile"
+    rm -f -- "$StateFile"
+    if [ -n "$LegacyStateFile" ]; then rm -f -- "$LegacyStateFile"; fi
     echo "[bootstrap-killswitch] cleared. Plugins resume normal sessionStart reconcile."
     ;;
   *)

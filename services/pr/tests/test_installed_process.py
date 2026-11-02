@@ -144,7 +144,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                 assert ready(status)
 
                 async def send(operation, payload=None):
-                    for _ in range(100 if operation == "pending" else 1):
+                    for _ in range(100):
                         rig.h.clock.value = int(time.time())
                         target = "/api/v1/watch/project/" + operation
                         async with rig.session.post(
@@ -153,15 +153,16 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                         ) as response:
                             value = await response.json()
                             if not (
-                                operation == "pending" and response.status == 503
+                                response.status == 503
                                 and value == {"error": "watch_store_busy"}
                             ):
                                 assert response.status == 200, value
                                 return value
                         # The real nonblocking store lock can be held by observation.
-                        # Retry only this bounded read, never an ambiguous mutation.
+                        # This exact response precedes store entry; retain the
+                        # original request identity and never retry uncertainty.
                         await asyncio.sleep(0.05)
-                    raise AssertionError("pending read remained busy")
+                    raise AssertionError(f"{operation} remained busy")
 
                 original = {
                     "request_id": "original", "issued_at": time.time(),

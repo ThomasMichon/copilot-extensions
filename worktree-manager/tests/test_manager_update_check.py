@@ -114,7 +114,7 @@ def test_invalidate_is_a_no_op_when_nothing_was_persisted(tmp_path):
     assert muc.read_status(tmp_path) == {}
 
 
-@pytest.mark.parametrize("kind", ["repair", "source", "source-repair"])
+@pytest.mark.parametrize("kind", ["repair", "source", "source-repair", "source-profile", "source-profile-repair"])
 @pytest.mark.parametrize("remote", ["1.2.3", "1.2.4"])
 def test_qualified_selector_compares_package_version(tmp_path, monkeypatch, kind, remote):
     source = self_install._runtime_installer().runtime_source
@@ -122,7 +122,9 @@ def test_qualified_selector_compares_package_version(tmp_path, monkeypatch, kind
         "1.2.3+repair." + "c" * 32 if kind == "repair"
         else source.runtime_version("1.2.3", "a" * 40, "b" * 64)
     )
-    if kind == "source-repair":
+    if "profile" in kind:
+        generation += ".profile." + "d" * 16
+    if kind.endswith("-repair"):
         generation += ".repair." + "c" * 32
     (tmp_path / "current-version").write_text(generation + "\n")
     monkeypatch.setattr(self_install, "fetch_remote_version", lambda root=None: remote)

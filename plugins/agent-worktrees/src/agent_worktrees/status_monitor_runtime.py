@@ -32,7 +32,8 @@ def _core():
 
 
 def _core_helper(name: str, local):
-    candidate = vars(_core()).get(name)
+    core = sys.modules.get(f"{__package__}.__main__")
+    candidate = vars(core).get(name) if core is not None else None
     if callable(candidate) and candidate is not local:
         return candidate
     return local
@@ -630,7 +631,7 @@ def _ensure_status_monitor() -> bool:
         from . import locks as _locks
 
         data = _locks.read_lock(_monitor_lock_path())
-        if _locks.lock_is_live(data) and isinstance(data, dict):
+        if _locks.lock_is_running(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
             superseded_fn = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
             identity = {"generation": data["runtime_generation"]} if data.get("runtime_generation") else {}
@@ -679,7 +680,7 @@ def _restart_status_monitor(
 
         lock = _monitor_lock_path()
         data = _locks.read_lock(lock)
-        if _locks.lock_is_live(data) and isinstance(data, dict):
+        if _locks.lock_is_running(data) and isinstance(data, dict):
             pid = data.get("pid")
             prefix = data.get("prefix")
             identity = {"generation": data["runtime_generation"]} if data.get("runtime_generation") else {}
@@ -717,8 +718,8 @@ def _restart_status_monitor(
 def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     """``status-monitor-restart`` -- reap+respawn the resident monitor.
 
-    The auto-update cutover seam (installer-invoked from the new slot). Prints a
-    one-line summary; always exits 0 (advisory, never fails a deploy)."""
+    Prints a one-line summary and exits nonzero when spawning fails. The
+    installer's separate cutover failure handling is unchanged."""
     r = _restart_status_monitor()
     if not r.get("enabled"):
         print("status-monitor: disabled for this test run -- skipped")
@@ -732,7 +733,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     bits.append("spawned current monitor" if r.get("spawned") else "spawn failed")
     bits.extend(stale_runtime_reap.summary_bits(r.get("stale_runtime_reaped")))
     print("status-monitor: " + ", ".join(bits))
-    return 0
+    return 0 if r.get("spawned") else 1
 
 
 def cmd_reconcile_sessions(args: argparse.Namespace) -> int:

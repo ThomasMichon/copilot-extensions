@@ -496,7 +496,7 @@ def cmd_request(args) -> int:
         config = cfg.load_config()
         # Creation helpers have human-readable output; stdout is this protocol only.
         with contextlib.redirect_stdout(sys.stderr):
-            result = execute(config, request)
+            result = execute(config, request, identity_mode="tuple-v1")
         print(json.dumps(result))
         return 0
     except (ValueError, OSError, RuntimeError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:

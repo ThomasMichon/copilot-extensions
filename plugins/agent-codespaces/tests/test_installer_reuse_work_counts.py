@@ -20,7 +20,7 @@ from .test_installer_engine_adoption import (
     launch_runtime,  # noqa: F401 - shared real-venv fixture
 )
 
-pytestmark = pytest.mark.timeout(60)
+pytestmark = [pytest.mark.timeout(60), pytest.mark.installer_only]
 
 
 def _powershell_functions(tmp_path):

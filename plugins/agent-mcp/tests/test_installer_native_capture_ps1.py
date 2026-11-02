@@ -37,7 +37,7 @@ def _producer_setup(directory: Path) -> str:
     text = INSTALLER.read_text(encoding="utf-8")
     start = text.index("Set-StrictMode -Version 2.0")
     end = text.index("# === install-contract:test-persistent-environment", start)
-    return text[start:end]
+    return "$Action = 'stamp'\n$InstallDir = $null\n" + text[start:end]
 
 
 def _cleanup_diagnostic_readback(directory: Path) -> str:
@@ -210,7 +210,8 @@ def test_construction_shell_stderr_uses_requested_producer_encoding(
         "json.dumps([sys.flags.isolated,sys.argv[1:]]), encoding='utf-8')\n"
         "sys.stderr.buffer.write(b'native detail caf\\xe9\\n')\n"
         "print(\"function Start-RuntimeConstruction { "
-        "param($Python,$Helper,$Root,$Version,$PayloadHash,$LinkName) "
+        "param($Python,$Helper,$Root,$Version,$PayloadHash,$LinkName,$Footprint,$Plugin) "
+        "$script:RuntimeConstructionSession = [pscustomobject]@{Version=$Version}; "
         "[IO.File]::WriteAllText($env:MCP_NATIVE_CALLED,'called'); return $true }\")\n"
         f"sys.exit({native_exit})\n",
         encoding="ascii",

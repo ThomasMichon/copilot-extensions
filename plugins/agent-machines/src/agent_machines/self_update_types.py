@@ -25,6 +25,14 @@ log = logging.getLogger("agent-machines.self-update")
 TIMEOUT_RETURNCODE = 124
 
 
+def update_was_inhibited(returncode: int, output: str) -> bool:
+    # Exit 3 also reports configuration failures; require the owner's no-work marker.
+    return returncode == 3 and any(
+        line.strip() == "automatic-update KillSwitch active; nothing ran"
+        for line in output.splitlines()
+    )
+
+
 @dataclass
 class CommandResult:
     argv: list[str]
@@ -178,4 +186,3 @@ def default_command_runner(
     finally:
         if job_handle is not None:
             job_handle.close()
-

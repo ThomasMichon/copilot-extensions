@@ -1,0 +1,9 @@
+{
+  "comment": "Accept native privileged default file ownership under unchanged closed user/System authorization grants, retaining current-account directory custody and foreign-owner/grant refusal.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

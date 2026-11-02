@@ -33,6 +33,7 @@ import {
 } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
+import { observeResidentReceipt } from "./resident-receipt-client.mjs";
 import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
@@ -3078,6 +3079,15 @@ export function logHandoffPromptReceived(
   }
 }
 
+// Prompt observation has no command/runtime fallback. Missing resident readiness
+// retains the exact pending identity for the next authorized lifecycle event.
+export async function observeHandoffPromptReceived(input) {
+  if (!input.sid) return { status: "unavailable", reason: "session-unavailable" };
+  return observeResidentReceipt({
+    ...input, sessionDir: input.sessionDir || sessionStateDirFor(input.sid),
+  });
+}
+
 // Predecessor-side read: has the successor's own extension already confirmed
 // receipt of exactly this handoff's recovery locator as a real submitted
 // prompt? A stronger, more direct signal than `worktreeSpawnInFlight` (which
@@ -3093,6 +3103,7 @@ function worktreePromptReceived(cwd, stored, execute = runCli) {
       "agent-worktrees",
       [
         "activity", "--worktree-id", worktreeId,
+        "--receipt-locator", expected,
         "--event", "context_handoff_prompt_received", "--json",
       ],
       { cwd, timeout: 10000 },
@@ -3108,7 +3119,7 @@ function worktreePromptReceived(cwd, stored, execute = runCli) {
     } catch {
       continue;
     }
-    if (String(event?.locator || "") === expected) {
+    if (event?.received === true || String(event?.locator || "") === expected) {
       return { received: true, worktreeId, event };
     }
   }

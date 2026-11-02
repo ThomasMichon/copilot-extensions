@@ -16,7 +16,7 @@ from . import config as cfg
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
-from .worktree_naming import session_worktree_id
+from .worktree_naming import prospective_session_worktree_id
 
 if TYPE_CHECKING:
     from .__main__ import LaunchPreflight
@@ -358,8 +358,14 @@ def _resolve_base_repo(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
-    if not getattr(args, "defer_projections", False):
-        local_cache_refresh.prepare_for_launch(repo.anchor)
+    try:
+        local_cache_refresh.prepare_admitted_launch(
+            repo.anchor, defer_projections=getattr(args, "defer_projections", False), config=config,
+        )
+    except local_cache_refresh.ToolRosterAdmissionError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     _emit_plan(
         {
             "action": "exec",
@@ -632,20 +638,24 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             worktree_trust.prepare_for_launch(
                 record, config, defer_projections=getattr(args, "defer_projections", False),
             )
-        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+        except (permissions.FolderTrustError, ExecutionSpaceError, local_cache_refresh.ToolRosterAdmissionError) as exc:
             output.err(str(exc))
             _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
             return 3
     if seed_pending:
         launch_cmd = deferred_command(
-            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
+            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id, prepare_native=not args.dry_run,
+            environment=merged_env,
+            mux=not getattr(args, "no_mux", False),
         )
         print("   Launch prompt staged until Copilot handoff.")
     else:
         launch_cmd = deferred_command(
-            launch_cmd, record.yaml_path, admission_only=True,
+            launch_cmd, record.yaml_path, admission_only=True, prepare_native=not args.dry_run,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
+            environment=merged_env,
+            mux=not getattr(args, "no_mux", False),
         )
 
     print()
@@ -665,6 +675,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         "cmd": launch_cmd,
         "env": merged_env,
         "worktree_id": record.worktree_id,
+        "record_path": str(record.yaml_path),
+        "pane_shell_version": 1,
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
         "seed_claimed": False,
@@ -707,10 +719,18 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     repo = config.default_repo
-    platform_name = cfg.detect_platform()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
-    worktree_id = session_worktree_id(config.machine, platform_name, timestamp, suffix)
+    from .creation_identity import new_machine_identity
+
+    try:
+        identity = new_machine_identity(config, "tuple-v1")
+        assert identity is not None
+        worktree_id = prospective_session_worktree_id(identity, timestamp, suffix)
+    except (ValueError, RuntimeError) as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
@@ -766,6 +786,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             recovery=getattr(args, "recovery", False),
             pending_seed=getattr(args, "seed", None),
             defer_projections=getattr(args, "defer_projections", False),
+            identity_mode="tuple-v1",
         )
     except LaunchSeedStagingFailure as exc:
         output.err(str(exc))
@@ -783,6 +804,10 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         )
         return 3
     except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
+    except (ValueError, RuntimeError) as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3

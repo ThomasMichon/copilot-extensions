@@ -23,13 +23,15 @@ reservation behind.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .client import DispatchClient
+from .client import DispatchClient, DispatchError
 from .config import client_token, client_url, shared_token, shared_url
 
 ENV_TASK_ID = "AGENT_DISPATCH_SCRIPT_TASK_ID"  # marketplace-isolation: allow legacy-compatibility
@@ -41,6 +43,7 @@ ENV_TASK_FILE = (
     "AGENT_DISPATCH_SCRIPT_TASK_FILE"  # marketplace-isolation: allow legacy-compatibility
 )
 ENV_HEARTBEAT_SECONDS = "AGENT_DISPATCH_SCRIPT_HEARTBEAT_SECONDS"
+log = logging.getLogger(__name__)
 
 
 class ScriptTaskProtocolError(RuntimeError):
@@ -72,9 +75,11 @@ class ScriptTaskRuntime:
     heartbeat_seconds: int = 60
     task: dict[str, Any] | None = None
     task_file: str | None = None
+    admission_retry_seconds: float = 1.0
 
     _terminal: bool = False
     _started: bool = False
+    _admission_pending: bool = False
     _closed: bool = False
     _generation: int | None = None
     _owner_session_id: str | None = None
@@ -123,6 +128,9 @@ class ScriptTaskRuntime:
         return self
 
     def __exit__(self, exc_type, exc, _tb) -> bool:
+        if self._admission_pending and not self._started:
+            self.close()
+            return False
         if exc is not None and not self._terminal:
             self.report_failure(f"{exc_type.__name__}: {exc}")
         if exc is None and not self._terminal:
@@ -150,14 +158,24 @@ class ScriptTaskRuntime:
         return value if isinstance(value, dict) else None
 
     def announce_start(self) -> dict[str, Any]:
-        claim = self.client.claim(
-            worker_id=self.worker_id,
-            repo=self.repo,
-            all_repos=self.all_repos,
-            task_id=self.task_id,
-        )
+        while True:
+            try:
+                claim = self.client.claim(
+                    worker_id=self.worker_id,
+                    repo=self.repo,
+                    all_repos=self.all_repos,
+                    task_id=self.task_id,
+                )
+                break
+            except DispatchError as exc:
+                if not exc.is_action_inhibited("worker-admission"):
+                    raise
+                self._admission_pending = True
+                log.info("script task %s waiting for worker-admission clear", self.task_id)
+                time.sleep(max(0.01, self.admission_retry_seconds))
         if not isinstance(claim, dict) or claim.get("id") != self.task_id:
             raise RuntimeError(f"claim did not return task {self.task_id!r}")
+        self._admission_pending = False
         started = self.client.start(self.task_id, self.worker_id)
         self._started = True
         self._start_heartbeats()

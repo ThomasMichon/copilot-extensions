@@ -68,17 +68,17 @@ aggregator and does not claim native `additionalContext` composition.
 ## Snapshot limits
 
 A cue is a **launch-time snapshot**, not continuously refreshed budget evidence.
-Before relying on it later, retain its evaluation instant and the selected
-fields' capture/freshness metadata and re-evaluate with
-`budget-guidance status --json` when evidence has expired or is uncertain.
+Retain its evaluation instant and the selected fields' capture/freshness
+metadata; an optional `budget-guidance status --json` lookup can clarify
+expired or uncertain evidence.
 Hookless or missing-interpreter launches have no new cue; an older retained
 file is not proof of current state.
 
-Budget remains advisory: it can refine already-demonstrated eligible choices,
-not qualify models, clear holds, arm trials, bypass review/safety gates, override
-an operator choice, or block operator work. The cue grants no worker-control,
+Budget remains informational: usage/quota and optional monthly economy advice
+do not select models or delegation strategies, clear holds, bypass review/safety
+gates, or block requested work. No upfront budget check is required. The cue grants no worker-control,
 sleep, suspension, or inferred-concurrency authority. Provider refresh,
-selected-account proof, routing integration, and rollout are separate gates.
+selected-account proof and rollout are separate gates.
 
 The opt-in Windows desktop witness includes the session-cue wrapper alongside
 the external-reader path. Its two successful cue cycles use an identity-recording

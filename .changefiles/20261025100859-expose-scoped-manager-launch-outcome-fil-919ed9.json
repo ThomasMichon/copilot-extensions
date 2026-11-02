@@ -1,0 +1,9 @@
+{
+  "comment": "Expose scoped Manager launch-outcome filters without inferring Copilot or prompt acceptance",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

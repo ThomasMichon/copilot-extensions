@@ -17,6 +17,7 @@ import pytest
 
 import ssh_manager.forward as forward_mod
 import ssh_manager.proxy as proxy
+import ssh_manager.proxy_jump as proxy_jump
 import ssh_manager.relay_channel as relay_mod
 import ssh_manager.reverse_candidates as candidate_mod
 from ssh_manager.codespace_source import CodespaceConfigSource
@@ -71,6 +72,13 @@ async def test_create_ssh_subprocess_defaults_to_the_pinned_environment(monkeypa
     process = SimpleNamespace(wait=AsyncMock(return_value=0), pid=1, returncode=None)
     spawn = AsyncMock(return_value=(process, None))
     brokers = []
+    metadata_environments = []
+
+    def profile(host, **kwargs):
+        metadata_environments.append(kwargs["process_env"])
+        return SimpleNamespace(
+            get_ssh_config=lambda: SSHConfig(host, process_env=kwargs["process_env"]),
+        )
 
     def make_broker(command, env, **kwargs):
         brokers.append(env)
@@ -82,6 +90,7 @@ async def test_create_ssh_subprocess_defaults_to_the_pinned_environment(monkeypa
     monkeypatch.setattr(proxy, "_split_windows_command", lambda command: ["proxy"])
     monkeypatch.setattr(proxy, "_client_command", lambda *args, **kwargs: "client")
     monkeypatch.setattr(proxy, "register_process_cleanup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(proxy_jump, "SSHProfileSource", profile)
     config = _pinned_config(proxy_command="gh cs ssh -c fixture-box --stdio")
 
     await proxy.create_ssh_subprocess("ssh", "target", config=config)
@@ -93,6 +102,7 @@ async def test_create_ssh_subprocess_defaults_to_the_pinned_environment(monkeypa
     spawn.reset_mock()
     await proxy.create_ssh_subprocess("ssh", "target", config=config, env={"EXPLICIT": "1"})
     assert spawn.await_args.kwargs["env"] == {"EXPLICIT": "1"}
+    assert metadata_environments == ([PINNED, {"EXPLICIT": "1"}] if windows else [])
 
 
 async def test_local_forward_spawns_with_the_pinned_environment(monkeypatch):

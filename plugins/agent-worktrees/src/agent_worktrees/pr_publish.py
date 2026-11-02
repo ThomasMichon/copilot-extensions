@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -249,8 +250,6 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     """
     recorded = (getattr(pr, "remote", "") or "").strip()
     if recorded:
-        if not git_ops.has_remote(recorded, cwd=worktree_path):
-            return None
         # The name alone isn't proof: fork setup repoints `fork` when the identity changes,
         # and a repoint to another host can keep the same owner/name.
         want = (getattr(pr, "head_repo", "") or "").lower()
@@ -309,10 +308,10 @@ def head_branch_gone(repo, pr, worktree_path: str) -> bool:
     Unreadable or undecided is never "gone"."""
     try:
         with publish_lock(worktree_path, push_timeout_seconds=publication_deadline.configured(repo.pr)):
-            where = push_remote(repo, pr, worktree_path)
+            target = _select_push_target(repo, pr, worktree_path)
             # The exact ref: `ls-remote <branch>` is a tail glob, so an unrelated
             # `archive/<branch>` would keep a deleted head looking present.
-            return where is not None and _tip(where, pr.branch, worktree_path) == ""
+            return target is not None and _tip(target.remote, pr.branch, worktree_path) == ""
     except PublishLockTimeout:
         return False
 
@@ -623,6 +622,46 @@ def push_history_message(pushed, feature: str, source: str) -> str:
     )
 
 
+def _advance_published_snapshot(pr, head_sha: str, *, cwd: str) -> None:
+    """Advance only an idle snapshot contained in the previous published head."""
+    if not pr.branch or not pr.head_sha or not Path(cwd).is_dir():
+        return
+    ref = f"refs/heads/{pr.branch}"
+    result = git_ops.git(
+        "for-each-ref", "--format=%(refname)%09%(objectname)%09%(worktreepath)%09%(symref)",
+        ref, cwd=cwd, check=False, isolated_repository=True,
+    )
+    if result.returncode:
+        return
+    rows = [line.split("\t") for line in result.stdout.splitlines()]
+    row = next((fields for fields in rows if len(fields) == 4 and fields[0] == ref), None)
+    if row is None or row[1] == head_sha:
+        return
+    previous = row[1]
+    if row[2] or row[3] or not git_ops.is_commit_ancestor(previous, pr.head_sha, cwd=cwd):
+        output.warn(f"Local PR ref '{ref}' was retained; it is checked out or has unpublished history.")
+        return
+    directory = git_ops.git(
+        "rev-parse", "--path-format=absolute", "--git-common-dir",
+        cwd=cwd, check=False, isolated_repository=True,
+    )
+    if directory.returncode:
+        return
+    # Native receive checks linked-worktree occupancy as well as the exact lease.
+    # This local bookkeeping must not run a second set of publication hooks.
+    receiver = shlex.join((
+        "git", "-c", "receive.denyCurrentBranch=refuse", "-c", f"core.hooksPath={os.devnull}", "receive-pack",
+    ))
+    updated = git_ops.git(
+        "-c", "protocol.allow=never", "-c", "protocol.file.allow=always",
+        "send-pack", "--no-signed", f"--receive-pack={receiver}", f"--force-with-lease={ref}:{previous}",
+        "--", directory.stdout.strip(), f"{head_sha}:{ref}",
+        cwd=cwd, check=False, isolated_repository=True,
+    )
+    if updated.returncode:
+        output.warn(f"Local PR ref '{ref}' update was not confirmed; inspect it before cleanup.")
+
+
 def _persist_head(
     config: Config, record: tracking.WorktreeRecord, pushed_pr: tracking.PRRecord | None, head_sha: str,
     *, remote: str = "", head_repo: str = "", head_identity: str = "", rebase_base_sha: str = "",
@@ -663,6 +702,10 @@ def record_pushed_head(
         config, record, pushed_pr, head_sha, remote=remote,
         head_repo=head_repo, head_identity=head_identity, rebase_base_sha=rebase_base_sha,
     )
+    from . import pr_publication_labels
+    labels = pr_publication_labels.refresh(config, record, pushed_pr)
+    if labels and not labels["ok"]:
+        output.warn(f"PR head was pushed; publication labels need repair: {labels['error']}")
     from . import pr_ops
 
     observation_error = pr_ops.refresh_head_observation(config, record, pushed_pr, head_sha)
@@ -701,12 +744,14 @@ def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tra
                     and expected is not None and not expected.provider
                 ))):
             raise ValueError("PR head was pushed, but tracking authority changed; inspect and reconcile its lease.")
+        previous = replace(current)
         if any(getattr(current, field) != getattr(pr, field) for field in fields):
             for field in fields:
                 setattr(current, field, getattr(pr, field))
             current.pr_revision += 1
             tracking.save_record(fresh)
         pr_publication_state.copy_pr(pr, current)
+        _advance_published_snapshot(previous, pr.head_sha, cwd=record.worktree_path)
 
 
 def _publication_pr(record: tracking.WorktreeRecord, pr: tracking.PRRecord) -> tracking.PRRecord | None:

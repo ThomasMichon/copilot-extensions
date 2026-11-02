@@ -1,0 +1,9 @@
+{
+  "comment": "Keep local Picker sources available without optional machine-map enrollment",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

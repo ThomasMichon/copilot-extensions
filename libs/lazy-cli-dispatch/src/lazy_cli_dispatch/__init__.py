@@ -69,8 +69,12 @@ from __future__ import annotations
 import argparse
 import importlib
 from collections.abc import Callable, Mapping
+from typing import ParamSpec, TypeVar, cast
 
 __all__ = ["core_helper", "dispatch_lazy", "self_override"]
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def dispatch_lazy(
@@ -153,7 +157,9 @@ def dispatch_lazy(
     return handler(args)
 
 
-def self_override(module_globals: Mapping[str, object], name: str, local):
+def self_override(
+    module_globals: Mapping[str, object], name: str, local: Callable[_P, _R],
+) -> Callable[_P, _R]:
     """Prefer a pre-bound/monkeypatched ``name`` in ``module_globals`` (a
     caller's own ``globals()``) over ``local`` (a direct sibling-module
     import).
@@ -170,11 +176,14 @@ def self_override(module_globals: Mapping[str, object], name: str, local):
     """
     candidate = module_globals.get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        # Reflective overrides must preserve the replaced callable's contract.
+        return cast(Callable[_P, _R], candidate)
     return local
 
 
-def core_helper(core_module: object, name: str, local):
+def core_helper(
+    core_module: object, name: str, local: Callable[_P, _R],
+) -> Callable[_P, _R]:
     """Prefer an already-bound callable ``name`` on ``core_module`` (a CLI
     submodule's own entry-root accessor, e.g. its ``_core()``) over
     ``local`` (a direct sibling-module import).
@@ -192,5 +201,6 @@ def core_helper(core_module: object, name: str, local):
     """
     candidate = vars(core_module).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        # Reflective overrides must preserve the replaced callable's contract.
+        return cast(Callable[_P, _R], candidate)
     return local

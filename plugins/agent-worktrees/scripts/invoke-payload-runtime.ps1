@@ -463,7 +463,37 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_worktrees @forwardArgs
+        $pythonCache = [IO.Path]::GetFullPath(
+            (Join-Path $runtimeRoot ('cache\python\unsealed-' + [Guid]::NewGuid().ToString('N')))
+        )
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $pythonCache.StartsWith('\\?\')) {
+            $pythonCache = if ($pythonCache.StartsWith('\\')) {
+                '\\?\UNC\' + $pythonCache.Substring(2)
+            } else { '\\?\' + $pythonCache }
+        }
+        $cacheSelector = @'
+import sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    print(sys.pycache_prefix)
+else:
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1])
+'@
+        $selectedCache = & $Python -I -B -X "pycache_prefix=$pythonCache" -c $cacheSelector $runtimeRoot
+        if ($LASTEXITCODE -ne 0 -or @($selectedCache).Count -ne 1 -or -not $selectedCache) {
+            [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
+            exit 126
+        }
+        $terminalHost = Join-Path $payloadRoot 'bin\terminal-launch.ps1'
+        if (Test-Path -LiteralPath $terminalHost -PathType Leaf) {
+            . $terminalHost
+            Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments (
+                @('-X', "pycache_prefix=$selectedCache", '-m', 'agent_worktrees') + $forwardArgs
+            ) -QueryArguments @('-I', '-B', '-m', 'agent_worktrees', '--version') -Package agent_worktrees
+        } else {
+            & $Python -X "pycache_prefix=$selectedCache" -m agent_worktrees @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }
@@ -471,7 +501,7 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 }
 
 $python = Resolve-AgentWorktreesRuntime
-if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION) {
+if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION -and -not $_awUpdateDiagnostic) {
     Assert-PluginRuntimePublication
 }
 # Commit to self-provisioning (and, in doing so, permit the boot-trace
@@ -481,7 +511,7 @@ if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION) {
 # strictly before `provision-start`'s own `New-Item`, are captured on a
 # genuine first-ever launch instead of silently dropped (Copilot review
 # follow-up, PR #3310).
-$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION)
+$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION) -and (-not $_awUpdateDiagnostic)
 Write-BootTrace 'resolver-loaded'
 # Log the outer dispatcher template's own 'shim-start' phase here, now
 # that $runtimeRoot reflects whichever root (legacy or an active
@@ -496,6 +526,10 @@ if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS) {
 if ($python) {
     Write-BootTrace 'dispatch' 'fast'
     Invoke-AgentWorktreesRuntime $python
+}
+if ($_awUpdateDiagnostic) {
+    [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
+    exit 127
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(

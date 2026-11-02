@@ -64,6 +64,10 @@ def test_docker_timeout_is_normalized_to_safe_operation_label(
     expected,
 ):
     monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda _: {"Id": "a" * 64, "Name": "/example-1", "Config": {"Labels": {}}},
+    )
+    monkeypatch.setattr(
         "agent_containers.lifecycle.subprocess.run",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             subprocess.TimeoutExpired(["docker", "inspect"], 30)

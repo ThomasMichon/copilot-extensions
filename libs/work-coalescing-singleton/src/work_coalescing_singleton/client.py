@@ -13,6 +13,7 @@ import secrets
 import socket
 import time
 from collections.abc import Callable
+from typing import Any
 
 PROTOCOL_VERSION = 1
 _DEFAULT_DIAL_TIMEOUT_S = 2.0
@@ -28,9 +29,9 @@ def new_client_id() -> str:
 
 
 def _send_recv(
-    host: str, port: int, token: str, message: dict, *, timeout: float,
+    host: str, port: int, token: str, message: dict[str, Any], *, timeout: float,
     completion_deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     def remaining() -> float:
         if completion_deadline is None:
             return timeout
@@ -96,11 +97,11 @@ def request(
     *,
     kind: str,
     key: str,
-    payload: dict,
+    payload: dict[str, Any],
     request_deadline_s: float,
     client_id: str | None = None,
     completion_timeout_s: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Send one request, optionally bounding the entire transport completion.
 
     The optional monotonic completion budget includes dialing, sending and all
@@ -116,7 +117,7 @@ def request(
             raise ValueError("completion_timeout_s must be finite and positive")
         completion_deadline = time.monotonic() + completion_timeout_s
     deadline = time.time() + request_deadline_s
-    message: dict = {
+    message: dict[str, Any] = {
         "action": "request",
         "kind": kind,
         "key": key,
@@ -152,12 +153,12 @@ def call_with_fallback(
     boot_wait_s: float,
     kind: str,
     key: str,
-    payload: dict,
+    payload: dict[str, Any],
     request_deadline_s: float,
-    fallback: Callable[[], dict],
+    fallback: Callable[[], dict[str, Any]],
     client_id: str | None = None,
     poll_interval_s: float = 0.1,
-) -> dict:
+) -> dict[str, Any]:
     """The full client sequence -- never raises past this call.
 
     1. ``dial()`` resolves rendezvous; ``None`` means no live daemon is

@@ -45,8 +45,8 @@ This skill owns bridge transport, authentication, filtering, catalog
 reshaping, materialization, and bridge-equivalent fallback. The normative
 custom-agent contract -- whether a domain MCP belongs in a sub-agent, bounded
 execution, top-level tools, `## MCP Readiness`, and anti-self-delegation -- is
-owned by **`customizing-copilot:defining-subagents`**. Runtime task decomposition
-is owned by **`delegation-guidance:delegating-work`**.
+owned by **`customizing-copilot:defining-subagents`**. This domain-tool boundary
+does not prescribe a delegation strategy for arbitrary work.
 
 ## When to use
 

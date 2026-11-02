@@ -71,6 +71,7 @@ from .self_update_types import (
     StepResult,
     default_command_runner,
     shutil_which,
+    update_was_inhibited,
 )
 
 LIVE_SESSION_DEFER_STATUSES = {"awaiting-operator", "busy", "idle", "running"}
@@ -568,24 +569,27 @@ def run_tier(
                         "-p",
                         repo_name,
                         "update",
+                        "--auto",
                         "--no-manager",
                     ],
                     timeout=3600,
                 )
+                update_output = plugin_refresh.output
+                inhibited = update_was_inhibited(plugin_refresh.returncode, update_output)
                 steps.append(
                     StepResult(
                         f"update:{repo_name}",
-                        "changed" if plugin_refresh.returncode == 0 else "error",
-                        plugin_refresh.output or "updated plugin payloads and runtimes",
+                        "noop" if inhibited else "changed" if plugin_refresh.returncode == 0 else "error",
+                        update_output or "updated plugin payloads and runtimes",
                         command=plugin_refresh.argv,
                     )
                 )
                 if plugin_refresh.returncode != 0:
                     return RunResult(
                         tier=tier,
-                        status="error",
+                        status="noop" if inhibited else "error",
                         opted_in=True,
-                        detail=plugin_refresh.output or "agent-worktrees update failed",
+                        detail=update_output or "agent-worktrees update failed",
                         lock_reclaimed=lock.reclaimed,
                         attempted_at=attempted_at,
                         steps=steps,

@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import (
@@ -43,31 +42,10 @@ from .lifecycle import (
     stop_container,
 )
 from .devcontainer_launch import _devcontainer_up
+from .lifecycle_ownership import lifecycle_blocker, require_internal_fleet
+from .fleet_results import FleetOperationResult, RecreateMemberError
 
 log = logging.getLogger("agent-containers")
-
-
-class RecreateMemberError(RuntimeError):
-    """A targeted recreation failed after reporting its destructive boundary."""
-
-    def __init__(self, message: str, *, old_container_removed: bool) -> None:
-        self.old_container_removed = old_container_removed
-        super().__init__(message)
-
-
-@dataclass
-class FleetOperationResult:
-    """Per-member result for a fleet lifecycle operation."""
-
-    created: list[str] = field(default_factory=list)
-    stopped: list[str] = field(default_factory=list)
-    unchanged: dict[str, str] = field(default_factory=dict)
-    removed: list[str] = field(default_factory=list)
-    recreated: list[str] = field(default_factory=list)
-    captured: list[str] = field(default_factory=list)
-    deferred: dict[str, str] = field(default_factory=dict)
-    rescues: dict[str, dict] = field(default_factory=dict)
-    telemetry_abandoned: list[str] = field(default_factory=list)
 
 
 def _fleet_members(config: ContainersConfig, fleet_name: str) -> list[DockerContainerInfo]:
@@ -276,6 +254,7 @@ def _image_run(
     exec_user: str,
 ) -> str:
     """Run one warm container directly from an image; return its name."""
+    require_internal_fleet(fleet)
     from . import dispatch_projection
     args = dispatch_projection.creation_args(fleet_name, fleet, name)
     if fleet.restricted:
@@ -446,12 +425,13 @@ def reconcile_up(
     deterministic, but replacement is admitted only after any lease is
     released.
     """
-    _check_docker()
     fleet = config.fleets.get(fleet_name)
     if fleet is None:
         raise RuntimeError(
             f"Fleet '{fleet_name}' is not defined in containers.yaml"
         )
+    require_internal_fleet(fleet)
+    _check_docker()
     if not fleet.devcontainer_path and not fleet.image:
         raise RuntimeError(
             f"Fleet '{fleet_name}' needs either 'devcontainer_path' or 'image'"
@@ -467,6 +447,10 @@ def reconcile_up(
 
     target = count if count is not None else fleet.size
     existing = _fleet_members(config, fleet_name)
+    for member in existing:
+        reason = lifecycle_blocker(config, member.name, member.labels)
+        if reason:
+            raise RuntimeError(reason)
     workspace_folder = fleet.workspace_folder or config.workspace_folder
     exec_user = fleet.exec_user or config.exec_user
     if fleet.restricted:
@@ -637,6 +621,10 @@ def recreate_member(
         raise RuntimeError(
             f"Container '{name}' has no matching fleet configuration"
         )
+    require_internal_fleet(fleet)
+    reason = lifecycle_blocker(config, info.name, info.labels)
+    if reason:
+        raise RuntimeError(reason)
     if fleet.restricted or info.security_profile != "trusted":
         raise RuntimeError(
             "Targeted parity recreation is supported only for trusted fleets"
@@ -716,7 +704,13 @@ def down_fleet(
     """Stop members independently, rescuing restricted tmpfs evidence first."""
     result = FleetOperationResult()
     fleet = config.fleets.get(fleet_name)
+    if fleet is not None:
+        require_internal_fleet(fleet)
     for c in _fleet_members(config, fleet_name):
+        reason = lifecycle_blocker(config, c.name, c.labels)
+        if reason:
+            result.deferred[c.name] = reason
+            continue
         if c.fleet and c.fleet != fleet_name:
             result.deferred[c.name] = (
                 f"container fleet label {c.fleet!r} conflicts with "
@@ -868,8 +862,12 @@ def start(config: ContainersConfig, fleet_name: str) -> list[str]:
     fleet = config.fleets.get(fleet_name)
     if fleet is None:
         raise RuntimeError(f"Fleet '{fleet_name}' is not defined in containers.yaml")
+    require_internal_fleet(fleet)
     started = []
     for c in _fleet_members(config, fleet_name):
+        reason = lifecycle_blocker(config, c.name, c.labels)
+        if reason:
+            raise RuntimeError(reason)
         if not c.is_running:
             if fleet.restricted or c.security_profile == "restricted":
                 if not fleet.restricted or c.security_profile != "restricted":
@@ -902,7 +900,13 @@ def remove_fleet(
     """Remove fleet members independently, deferring unsafe restricted members."""
     result = FleetOperationResult()
     requested_fleet = config.fleets.get(fleet_name)
+    if requested_fleet is not None:
+        require_internal_fleet(requested_fleet)
     for c in _fleet_members(config, fleet_name):
+        reason = lifecycle_blocker(config, c.name, c.labels)
+        if reason:
+            result.deferred[c.name] = reason
+            continue
         if c.fleet and c.fleet != fleet_name:
             result.deferred[c.name] = (
                 f"container fleet label {c.fleet!r} conflicts with "

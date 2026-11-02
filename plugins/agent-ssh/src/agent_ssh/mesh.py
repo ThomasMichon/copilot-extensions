@@ -102,6 +102,12 @@ def find_machines_file(start: Path | None = None) -> Path | None:
     Use Bridge's existing conventional location priority within the calling Git
     repository. Without Git, walk parents but never cross a ``.git`` boundary.
     """
+    source = _find_machines_source(start)
+    return source[1] if source is not None else None
+
+
+def _find_machines_source(start: Path | None = None) -> tuple[Path, Path] | None:
+    """Keep the native selected repository root paired with its topology file."""
     start = (start or Path.cwd()).resolve()
     try:
         top = subprocess.run(
@@ -115,7 +121,8 @@ def find_machines_file(start: Path | None = None) -> Path | None:
         )
         if top.returncode == 0:
             root = Path(top.stdout.strip())
-            return _machines_file_at(root)
+            candidate = _machines_file_at(root)
+            return (root, candidate) if candidate is not None else None
     except FileNotFoundError:
         pass
     except subprocess.TimeoutExpired as exc:
@@ -123,10 +130,17 @@ def find_machines_file(start: Path | None = None) -> Path | None:
     for parent in (start, *start.parents):
         cand = _machines_file_at(parent)
         if cand is not None:
-            return cand
+            return parent, cand
         if (parent / ".git").exists():
             break
     return None
+
+
+def _preference_root(path: Path, start: Path | None = None) -> Path:
+    source = _find_machines_source(start)
+    if source is not None and source[1].resolve() == path.resolve():
+        return source[0]
+    raise ValueError("cannot establish the selected topology repository root")
 
 
 def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
@@ -187,7 +201,10 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
     return doc or {}
 
 
-def load_mesh(path: Path, *, strict: bool = False) -> Mesh:
+def load_mesh(
+    path: Path, *, strict: bool = False, preferences: bool = False,
+    selection_start: Path | None = None,
+) -> Mesh:
     """Project topology; mutating callers must request strict input validation."""
     doc = _load(path, strict=strict)
     if not isinstance(doc, dict):
@@ -246,7 +263,12 @@ def load_mesh(path: Path, *, strict: bool = False) -> Mesh:
                     dtssh_best_effort=bool(dtssh.get("best_effort", False)),
                 )
             )
-    return Mesh(project=project, source=str(path), machines=machines)
+    result = Mesh(project=project, source=str(path), machines=machines)
+    if preferences:
+        from .configuration import apply_preferences
+
+        return apply_preferences(result, _preference_root(path, selection_start))
+    return result
 
 
 def summary_line(mesh: Mesh) -> str:

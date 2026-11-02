@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -42,6 +41,16 @@ def test_unlocked_configured_vault_is_ready():
 
     assert result["state"] == "ready"
     assert "currently unlocked" in result["detail"]
+
+
+@pytest.mark.parametrize("kpdb", (None, "example.kdbx"))
+def test_reachable_passive_generation_is_not_credential_ready(kpdb):
+    result = evaluate(_context(kpdb), {
+        "ok": True, "cli": "unlocked", "accepting_work": False,
+    })
+    assert result["state"] == "failed"
+    assert "not admitting credential work" in result["detail"]
+    assert "separate outcomes" in result["detail"]
 
 
 def test_ping_reports_selected_vault_locked_when_another_is_unlocked():
@@ -487,14 +496,14 @@ def test_readiness_rejects_unreadable_endpoint_before_legacy_fallback(
     endpoint = run_dir / "endpoint.json"
     endpoint.write_text("{}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
-    original_read_text = Path.read_text
+    original_open = rendezvous._open_endpoint
 
-    def fail_endpoint_read(path, *args, **kwargs):
+    def fail_endpoint_read(path):
         if path == endpoint:
             raise PermissionError("denied")
-        return original_read_text(path, *args, **kwargs)
+        return original_open(path)
 
-    monkeypatch.setattr(Path, "read_text", fail_endpoint_read)
+    monkeypatch.setattr(rendezvous, "_open_endpoint", fail_endpoint_read)
     monkeypatch.setattr(
         cli,
         "_send_tcp",

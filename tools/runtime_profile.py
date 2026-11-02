@@ -67,7 +67,7 @@ def _digest(value: Any, label: str) -> str:
     return value
 
 
-def _strings(value: Any, label: str, deadline: float) -> list[str]:
+def _strings(value: Any, label: str, deadline: float, *, unique: bool = True) -> list[str]:
     if not isinstance(value, list):
         raise ProfileError(f"{label}: expected a list")
     result = []
@@ -75,7 +75,7 @@ def _strings(value: Any, label: str, deadline: float) -> list[str]:
         _check_deadline(deadline)
         result.append(_text(item, label))
     _check_deadline(deadline)
-    if len(set(result)) != len(result):
+    if unique and len(set(result)) != len(result):
         raise ProfileError(f"{label}: duplicate values")
     return result
 
@@ -129,6 +129,16 @@ def _target(value: Any, max_tags: int, deadline: float) -> None:
     _reference(value["device"], "target device")
 
 
+def _wheel_filename(filename: str, max_tags: int, deadline: float):
+    if not filename.endswith(".whl") or "/" in filename or "\\" in filename:
+        raise ProfileError("wheel filename must be a .whl basename")
+    prefix, python, abi, platform = filename[:-4].rsplit("-", 3)
+    canonical, _ = bounded_tag(
+        "-".join((python, abi, platform)), limit=max_tags, deadline=deadline,
+    )
+    return parse_wheel_filename(prefix + "-" + canonical + ".whl")
+
+
 def _closure(record: dict, max_tags: int, deadline: float) -> None:
     entries = record["wheels"]
     if not isinstance(entries, list) or not entries:
@@ -147,16 +157,8 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
             raise ProfileError(f"duplicate normalized distribution: {name}")
         version = Version(_text(entry["version"], "version"))
         filename = _text(entry["filename"], "filename")
-        if "/" in filename or "\\" in filename:
-            raise ProfileError("wheel filename must be a basename")
-        prefix, python, abi, platform = filename.removesuffix(".whl").rsplit("-", 3)
-        canonical, _ = bounded_tag(
-            "-".join((python, abi, platform)), limit=max_tags, deadline=deadline,
-        )
-        wheel_name, wheel_version, _, tags = parse_wheel_filename(prefix + "-" + canonical + ".whl")
+        wheel_name, wheel_version, _, tags = _wheel_filename(filename, max_tags, deadline)
         _check_deadline(deadline)
-        if not filename.endswith(".whl"):
-            raise ProfileError("wheel filename must end with .whl")
         if wheel_name != name or wheel_version != version or not tags & compatible:
             raise ProfileError(f"{name}: wheel identity or target tags disagree")
         _digest(entry["sha256"], "wheel digest")
@@ -172,15 +174,25 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
         if not selected <= provided:
             raise ProfileError(f"{name}: selected extra not provided")
         requirements = [_requirement(text, deadline) for text in
-                        _strings(entry["requires_dist"], "Requires-Dist", deadline)]
+                        _strings(entry["requires_dist"], "Requires-Dist", deadline, unique=False)]
         wheels[name] = entry, requirements
 
-    roots = [_requirement(text, deadline) for text in _strings(record["roots"], "roots", deadline)]
+    wanted = _reachable(wheels, record["roots"], target["environment"], deadline)
+    if wanted.keys() != wheels.keys():
+        raise ProfileError("closure includes distributions unreachable from its roots")
+    for name, (entry, _) in wheels.items():
+        _check_deadline(deadline)
+        if wanted[name] != _extras(entry["selected_extras"], "selected extras", deadline):
+            raise ProfileError(f"{name}: selected extras do not match full root closure")
+
+
+def _reachable(wheels: dict, roots: list[str], environment: dict, deadline: float) -> dict[str, set[str]]:
+    """Traverse inspected metadata and exact versions, never resolve packages."""
+    roots = [_requirement(text, deadline) for text in _strings(roots, "roots", deadline)]
     if not roots:
         raise ProfileError("closure: roots cannot be empty")
     wanted: dict[str, set[str]] = {}
     pending = [(requirement, {""}) for requirement in roots]
-    environment = target["environment"]
     while pending:
         _check_deadline(deadline)
         requirement, parent_extras = pending.pop()
@@ -213,12 +225,7 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
         for edge in dependencies:
             _check_deadline(deadline)
             pending.append((edge, {"", *wanted[name]}))
-    if wanted.keys() != wheels.keys():
-        raise ProfileError("closure includes distributions unreachable from its roots")
-    for name, (entry, _) in wheels.items():
-        _check_deadline(deadline)
-        if wanted[name] != _extras(entry["selected_extras"], "selected extras", deadline):
-            raise ProfileError(f"{name}: selected extras do not match full root closure")
+    return wanted
 
 
 @dataclass(frozen=True)

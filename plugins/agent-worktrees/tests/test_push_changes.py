@@ -13,6 +13,42 @@ from agent_worktrees import git_ops, pr_ops, tracking
 
 
 class TestPushChanges(PRWorkflowSetup):
+    @pytest.mark.parametrize("matching_origin", [True, False])
+    def test_publication_origin_checks_selected_snapshot_pr(self, pr_repo, matching_origin):
+        from agent_worktrees import finalize as fin
+
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(
+            wid, config, title="Add feature", publication_origin="control-plane",
+            publication_labels=("source:control-plane",),
+        )
+        assert first["success"], first
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        record = tracking.load_record(path)
+        older = record.prs[0]
+        record.prs.append(tracking.PRRecord(
+            state="open", branch="feature/newer", provider=older.provider,
+            repo=older.repo, opened_at="2099-01-01T00:00:00Z",
+            publication_origin={"id": "other", "labels": ["source:other"]},
+        ))
+        tracking.save_record(record)
+        _git("checkout", older.branch, cwd=wt_path)
+        before = _git("rev-parse", f"origin/{older.branch}", cwd=wt_path)
+        (wt_path / "feedback.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+        kwargs = dict(
+            publication_origin="control-plane" if matching_origin else "other",
+            publication_labels=("source:control-plane" if matching_origin else "source:other",),
+        )
+        if matching_origin:
+            assert fin.push_changes(wid, config, **kwargs)
+            assert _git("rev-parse", f"origin/{older.branch}", cwd=wt_path) == _git("rev-parse", "HEAD", cwd=wt_path)
+        else:
+            with pytest.raises(ValueError, match="frozen"):
+                fin.push_changes(wid, config, **kwargs)
+            assert _git("rev-parse", f"origin/{older.branch}", cwd=wt_path) == before
+
     def test_push_changes_updates_feature_branch(self, pr_repo, capsys):
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _remote_dir = pr_repo

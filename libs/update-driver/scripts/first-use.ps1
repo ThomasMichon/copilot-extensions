@@ -1,6 +1,9 @@
 # Installation driver lifecycle contract: vault-stamp-v1
 # Installation driver lifecycle contract: logger-install-v1
+# Installation driver lifecycle contract: bridge-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
+# Installation driver lifecycle contract: logger-command-v1
+# Installation driver lifecycle contract: bridge-command-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -49,13 +52,14 @@ switch -CaseSensitive ($plugin) {
     'agent-ssh' { $prefix = 'AGENT_SSH' }
     'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
     'agent-logger' { $prefix = 'AGENT_LOGGER' }
+    'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
     throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
 }
-if ($InstallerAction -ceq 'install' -and $plugin -cne 'agent-logger') {
-    throw 'Fixed install action requires Logger.'
+if ($InstallerAction -ceq 'install' -and $plugin -cnotin @('agent-logger', 'agent-bridge')) {
+    throw 'Fixed install action requires Logger or Bridge.'
 }
 if ($plugin -ceq 'agent-logger') {
     foreach ($helper in @(
@@ -67,8 +71,26 @@ if ($plugin -ceq 'agent-logger') {
         }
     }
 }
-if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger' }[$plugin]
+if ($plugin -ceq 'agent-bridge') {
+    foreach ($helper in @(
+        'installer-engine.ps1', 'installer-engine.sh',
+        'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
+        'installer_wheel_inputs.py', 'installer_wheel_snapshot.py', 'installer_wheel_acquisition.py',
+        'installer_dependency_policy.py', 'installer_dependency_config.py',
+        'installation-context\installation_context.py',
+        'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
+        'install.ps1', 'install.sh', 'repair-scheduled-task.ps1',
+        'versioned_runtime_native.ps1', 'versioned_runtime.py',
+        'versioned_runtime_construction.py', 'versioned_runtime_source.py',
+        'versioned_runtime_publication.py', 'versioned_runtime_leases.py'
+    )) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'Bridge first use requires its complete materialized installation helpers.'
+        }
+    }
+}
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge' }[$plugin]
     $sshDeclaration = @{
         legacyRuntimeRoot = '.' + $plugin
         payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
@@ -89,20 +111,20 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
         throw "$label first use requires its declared native runtime gate."
     }
 }
-if ($plugin -cin @('agent-codespaces', 'agent-logger') -and (
+if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge') -and (
     (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
     $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
     -not (
         ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
             (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
             [IO.Path]::GetFileName($Payload) -ceq $plugin) -or
-        ($plugin -ceq 'agent-logger' -and $InstallerAction -ceq 'provision' -and
+        ($plugin -cin @('agent-logger', 'agent-bridge') -and $InstallerAction -ceq 'provision' -and
             [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots'))
     ))) {
     throw "$label first use requires its canonical installed payload and default legacy root."
 }
-if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-logger' = 'Logger'; 'agent-pull-requests' = 'Pull Requests' }[$plugin]
+if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger', 'agent-bridge')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-pull-requests' = 'Pull Requests' }[$plugin]
     $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
         (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
         ($plugin -ceq 'agent-pull-requests' -or [IO.Path]::GetFileName($Payload) -ceq $plugin)
@@ -117,6 +139,17 @@ if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger')) {
         $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
         if ($receipt.schema -cne 'copilot-extensions.legacy-snapshot-source') {
             throw "$label first use requires canonical selected snapshot provenance."
+        }
+        if ($plugin -ceq 'agent-bridge') {
+            $sourcePath = Join-Path $Payload 'runtime-source.json'
+            $null = [CopilotExtensions.NativeFoundationState]::CheckPath($sourcePath, $false, $false)
+            $selectedSource = [IO.File]::ReadAllText($sourcePath) | ConvertFrom-Json
+            if ($selectedSource.schema -cne 'copilot-extensions.runtime-source' -or
+                $selectedSource.plugin -cne $plugin -or
+                $selectedSource.package_version -cne $identity.version -or
+                $selectedSource.runtime_version -cne [IO.Path]::GetFileName($Payload)) {
+                throw 'Bridge first use requires its source-qualified selected snapshot.'
+            }
         }
     }
 }
@@ -225,19 +258,22 @@ if ($Mode -ceq 'launch') {
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
     [IO.File]::Open($log, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
+    $diagnosticLog = Join-Path $Root ('process-' + [IO.Path]::GetFileName($log))
+    [IO.File]::Open($diagnosticLog, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
         $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode, $InstallerAction
-    ) -WorkingDirectory $Project -LogPath $log
+    ) -WorkingDirectory $Project -LogPath $diagnosticLog
     try {
         $acknowledgement = @{
-            launched = $true; log = $log; pid = $worker.Id
+            launched = $true; log = $log; diagnostic_log = $diagnosticLog; pid = $worker.Id
             created = $worker.StartTime.ToUniversalTime().ToFileTimeUtc()
         } | ConvertTo-Json -Compress
         if ($Wait) {
             [Console]::Error.WriteLine("[installation-driver] launch acknowledgement: $acknowledgement")
             $worker.WaitForExit()
             $code = $worker.ExitCode
-            Get-Content -LiteralPath $log -Encoding UTF8 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            Get-Content -LiteralPath @($log, $diagnosticLog) -Encoding UTF8 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
             exit $code
         }
         # This is launch acknowledgement, never a durable ordinary-request receipt.

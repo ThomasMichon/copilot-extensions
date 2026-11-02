@@ -12,7 +12,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import finalize, launch_admission, output, sessions
+from . import finalize, launch_admission, output, sessions, worktree_lifecycle
 from .session_liveness import session_liveness
 
 
@@ -143,7 +143,7 @@ def launch_fence(repo, record_path: Path):
     with output.stdout_to_stderr():
         lifecycle.acquire()
     try:
-        with launch_admission.guard(record_path):
+        with worktree_lifecycle.guard(record_path), launch_admission.guard(record_path):
             agent_policy.require_record(record_path)
             yield
     finally:

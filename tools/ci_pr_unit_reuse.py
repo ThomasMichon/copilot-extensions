@@ -20,7 +20,7 @@ import zipfile
 
 from candidate_qualification_receipt import (
     MAX_ARCHIVE_BYTES,
-    MAX_PACKET_FILE_BYTES,
+    MAX_UNIT_EVIDENCE_FILE_BYTES,
     PACKET_FILES,
     UnitQualificationError,
     canonical_digest,
@@ -389,8 +389,8 @@ def verify_download(
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             for name in PACKET_FILES:
                 with archive.open(name) as stream:
-                    body = stream.read(MAX_PACKET_FILE_BYTES + 1)
-                if len(body) > MAX_PACKET_FILE_BYTES:
+                    body = stream.read(MAX_UNIT_EVIDENCE_FILE_BYTES + 1)
+                if len(body) > MAX_UNIT_EVIDENCE_FILE_BYTES:
                     raise ReuseUnavailable("oversized-unit-packet-file")
                 files[name] = body
     except (zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError) as error:

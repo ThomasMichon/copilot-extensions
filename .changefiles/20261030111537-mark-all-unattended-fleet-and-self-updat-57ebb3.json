@@ -1,0 +1,13 @@
+{
+  "comment": "Mark all unattended fleet and self-update calls automatic while preserving manual project update admission",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ class Deliveries:
         self.transaction = transaction
         self.shutdown = shutdown
         self.workers: dict[str, threading.Thread] = {}
+        self._native_threads: set[threading.Thread] = set()
         self.in_flight: dict[str, dict] = {}
         self.lock = threading.Lock()
         self.legacy_queue = deque()
@@ -37,6 +38,7 @@ class Deliveries:
                 self.scheduler = threading.Thread(
                     target=self._schedule, name="pr-notify-scheduler", daemon=True,
                 )
+                self._native_threads.add(self.scheduler)
                 try:
                     self.scheduler.start()
                 except RuntimeError:
@@ -60,6 +62,7 @@ class Deliveries:
             with self.transaction, self.lock:
                 if self.shutdown.is_set():
                     return
+                self._native_threads.intersection_update(threading.enumerate())
                 available = self.max_workers - len(self.workers)
                 candidates = []
                 ready = deque(
@@ -81,6 +84,7 @@ class Deliveries:
                         target=target, args=(event,), name=f"pr-notify:{identity}", daemon=True,
                     )
                     self.workers[identity] = thread
+                    self._native_threads.add(thread)
                     self.in_flight[identity] = {
                         "registration_id": identity, "subscriber_id": event.subscriber.subscriber_id,
                         "repo": event.key.repo, "number": event.key.number,
@@ -221,6 +225,7 @@ class Deliveries:
                         name=f"pr-notify:{identity}", daemon=True,
                     )
                     self.workers[identity] = thread
+                    self._native_threads.add(thread)
                     try:
                         thread.start()
                     except RuntimeError:
@@ -241,10 +246,10 @@ class Deliveries:
                 for worker in workers:
                     worker.join(max(0.0, deadline - time.monotonic()))
                 break
-        live = [worker.name for worker in workers if worker.is_alive()]
-        if scheduler is not None and scheduler.is_alive():
-            live.append(scheduler.name)
         with self.lock:
+            native = threading.enumerate()
+            live = [worker.name for worker in self._native_threads if worker in native]
+            self._native_threads.intersection_update(native)
             if self.legacy_queue:
                 live.append(f"pr-notify:legacy-queued({len(self.legacy_queue)})")
         return live

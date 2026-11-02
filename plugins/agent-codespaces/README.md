@@ -1,7 +1,24 @@
 # agent-codespaces
 
+See the [configuration reference](docs/configuration.md) for native files,
+fields, precedence, source-relative provisioning and credential boundaries.
+
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
+
+Default native `uninstall` removes only explicitly named runtime code and
+selectors. Operator configuration, databases, adoption/account bindings, locks,
+SSH configuration, sockets, logs and unknown entries remain in the install
+root. Removal requires matching deployment ownership and an installer-engine
+with entry-list support. Foreign roots and linked ancestry refuse before
+removal; unowned binstubs remain untouched. Connection Owner registration and active/reconnect transport
+receipts also refuse; uninstall does not stop the owner or close SSH masters.
+The canonical uninstall engine holds runtime, snapshot and redirect-publication
+custody throughout finite native cleanup. Persistent lease files alone are not
+busy and retain their inodes; actual conflicting owners refuse admission.
+Every native mutating lifecycle action shares the install transaction inode;
+Bash uses an attached standard-library owner rather than depending on `flock`.
+Existing native dry runs perform read-only admission and remove nothing.
 
 ## Overview
 
@@ -84,6 +101,13 @@ helper deployment from authenticated hooks: Session Hosts deploy helpers first,
 verify the real relay, then run hooks in the login-shell launch environment
 before plugin preparation.
 
+Pre-plugin relay readiness has a 30-second total budget: up to 20 seconds for
+SSH startup and transport retries, with 10 seconds reserved for owned SSH
+cancellation cleanup. Windows process-tree termination is bounded to 3 seconds
+before killing and reaping the SSH root; cancellation does not detach its reaper.
+Each remote ping remains bounded to 3 seconds; a relay that never answers still
+blocks launch.
+
 Attached CLI launches retain their foreground-owned relay fallback when the
 Connection Owner is unavailable. Its event loop supervises the forward until the
 interactive child exits, while SSH retains the main thread and terminal signals.
@@ -95,6 +119,69 @@ Attached checkout-creating hooks receive the same relay launch prelude inside
 their login shell, including on a cold foreground fallback without cached auth.
 Full SSH provisioning and fresh `create` provisioning carry that context too;
 fresh creation also supplies it to authenticated control-repository bootstrap.
+
+Connection Owner retirement waits for its already-admitted native work: late
+factory results remain in channel custody, mirror append/push work keeps its
+slot and OS lock until settled, and channel teardown waits for native process
+and registered proxy cleanup rather than relying on forward health. Repeated
+cancellation does not abandon teardown. The beacon's bounded `stop()` remains
+unchanged; daemon finalization additionally joins its thread before withdrawing
+liveness. Shutdown never starts an unstarted transport or replays an unknown
+transcript push, and dirty/prune markers retain any owed work for a later Owner.
+The liveness beacon also records the running process's frozen build `version`,
+alongside its PID and process-birth identity. Changing the selected runtime does
+not relabel an incumbent process. Legacy beacons without this additive field
+remain readable, but do not establish which build is running.
+
+On Windows, install/update/repair registers future login starts and separately
+ensures the selected interpreter through the owned headless daemon launcher;
+it never starts through an incumbent task's `IgnoreNew` gate or stops that task.
+Disabled configuration creates/starts nothing and leaves existing registrations
+alone. Code application and selected-process readiness do not depend on old
+beacon compatibility or channel cleanup.
+
+An immutable-slot Owner freezes its principal-owned completion identity at
+birth, using the slot's retained runtime helper. A verified selection inequality
+(including rollback or repair, not package-version ordering) ends admission of
+new reconcile cycles, but does not alone end process lifetime. Retirement and
+cleanup wait for a fresh, principal- and process-birth-verified passive or active
+beacon matching the different selected full identity. Missing, stale, foreign
+or unprovable successor readiness does not authorize retirement.
+Its isolated startup explicitly selects the
+[external Python bytecode cache](../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
+under the existing durable owner HOME, without moving existing bytecode or state.
+The selected process publishes additive `runtime_identity`, `state` and
+`work_lease_version: 1` beacon fields. `passive` readiness has empty serving sets:
+it is process readiness, not proof of relay service. One OS-held work lease in
+the existing durable HOME excludes channel mutations across generations until
+predecessor cleanup settles. Legacy/unknown peers do not prevent incoming
+startup; without a compatible work lease, their observed native process birth
+is conservatively retained before activating incoming work. An unknown birth
+can leave that process passive, never license forced shutdown. Predecessors
+cannot withdraw a successor's beacon. Source/legacy layouts without immutable
+slot attribution retain the previous singleton discovery behavior.
+Lease-less process-birth exclusions are persisted separately in
+`connection-owner.predecessors.json`, under the existing registry lock, before
+replacing a legacy beacon. Passive restarts, supersession and beacon cleanup
+retain this evidence. Only positive native exit or birth mismatch retires an
+entry; corrupt, foreign, linked or unknown evidence conservatively excludes
+work without preventing passive startup or code application. Barrier updates
+are principal-validated, bounded and atomically published; an empty record is
+retained rather than deleting the last durable exclusion path.
+This record is preserved state, outside the uninstall profile's disposable
+`root_entries`. The existing uninstall custody guard refuses unresolved or
+uncertain exclusions; settled empty evidence survives ordinary runtime removal.
+
+`agent-codespaces owner --stop` requests cooperative shutdown of the verified
+local PID and process-birth identity. The running beacon advertises
+`owner_control_version: 1` for the `agent-codespaces.owner-control` contract;
+an older or unknown provider is refused before writing a request. Version 1
+uses the existing owner registry lock and an atomic, bounded
+`connection-owner.stop.json` request/acknowledgement. The owner stops its loop
+and acknowledges only after normal channel cleanup returns; cleanup failure
+and the 30-second timeout are non-success outcomes, never process termination
+or permission to target a replacement. Holds and pending work remain intact.
+This explicit shutdown is not called by installation or replacement activation.
 
 `ssh`, `copilot`, and `namespace-resolve` accept repeatable
 `--stage-plugin SOURCE` and `--stage-plugin-disabled SOURCE`. The latter preserves
@@ -138,7 +225,7 @@ readiness error rather than an alternate installer or completion parser.
 
 On Windows, initial installation `status` and selected-context `validate`
 reads may use the payload's canonical SDK in a fresh isolated, no-site Python
-process. The [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+process. The [PATH Python bootstrap selector](../../docs/install-contract.md#path-python-evaluator-bootstrap)
 admits a registered signed CPython base before it executes; PATH and the
 addressed runtime do not establish admission. Missing optional support or an
 unavailable base selects native PowerShell before evaluation. Once selected,
@@ -174,6 +261,12 @@ the first stamp. POSIX drift detection retains its existing Python metadata
 reader. The hook uses its own canonical installed payload and default legacy
 root, not the deployment manifest's potentially different source.
 
+Direct POSIX installer mutation requires either native `flock` or an already
+available bootstrap Python for the same install-inode transaction. Native
+`flock` permits Python-free cold stamping; the Python fallback supports Bash
+3.2. If neither capability exists, the installer refuses without provisioning
+one. Read-only `status` requires neither capability.
+
 The existing 15-second hook returns `{}` after bounded native launch admission.
 Its diagnostic acknowledgement identifies a supervisor and log, **not** durable
 queue acceptance or installation success. Read the ordinary request receipt
@@ -193,6 +286,12 @@ This migration does not cover primary/payload command publishers, selected
 snapshots, explicit installers or namespaced/custom-root bootstrap publication.
 
 ## Configuration
+
+Runtime-home overrides are anchored to the selecting process's cwd and
+normalized lexically, including `..`, before daemon reservation or admission.
+The owner child receives that same canonical home even when launched from
+HOME. Filesystem links are not resolved away; instance custody checks still
+refuse redirected runtime roots.
 
 **Most repos need no config at all.** agent-codespaces works out of the box on
 standard GitHub CodeSpaces by **convention**:
@@ -482,6 +581,19 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   account when a CodeSpace uses ambient ownership. Each must be logged in with
   the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
   login flow.
+- **Private observation foundations:** `owner_inventory` and `owner_mux_probe`
+  expose explicit qualified inventory and versioned mux-protocol operations.
+  They are not wired into the Connection Owner's default factories or session
+  consumer. Production retains its existing listing, probing and cleanup paths.
+  A qualified listing treats errors and the 50-row limit as incomplete; it is
+  not a complete inventory or fresh selected-authority API. Repeated full scope
+  resolution remains unqualified for production cost. Consumer integration,
+  selected-effect/full-publication scheduling and provider admission remain
+  tracked separately in #7949 and #5761.
+  The optional `heartbeat(..., generation=...)` fences renewal under the existing
+  lock; omitting it preserves the existing behavior and does not activate a wave.
+  Explicit probe cleanup errors produce unknown observations and retain caller
+  cancellation; they do not establish successful channel teardown.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
@@ -558,6 +670,26 @@ provider after success.
 Authentication and inventory use one shared set of mapped, bound, configured,
 provider-authorized and active account candidates. A mapped-only account
 missing scope therefore offers Authorize even when another account has rows.
+
+The internal `account_candidates.read_candidates(*, on_account=None,
+concurrent=False)` seam returns a frozen `CandidateRead` containing that
+invocation's ordered accounts, routing inventory, effective configuration,
+actual configuration-provider reports and bound/provider/active selection
+observations. `candidates()` remains the ordered accounts tuple. The result
+contains no credentials and is not a cache or a currentness authority; nested
+source-owned configuration/routing values must not be mutated. Consumers make
+their own immutable projection. The unwired inventory foundation uses the actual
+reports to withhold authority when a provider is indeterminate, including when
+retained configuration would otherwise produce the same merged value.
+
+`inventory_store` is an **unwired internal JSON/storage prototype**, not an
+enabled inventory cache. Its caller supplies an absolute existing data parent,
+source identity, explicit limits and policy. It reuses existing operation
+custody/atomic-replace primitives and compares source, creation epoch and
+revision before replacement. Read failures remain unknown; snapshots contain
+no credentials or credential digests. Pure freshness results label status only
+and cannot authorize connection or tenant mutation. No runtime path, production
+defaults, timer, provider read, push transport or consumer is activated.
 
 No private broker, persistent authentication daemon, PAT or repository opt-out
 is required. A remote terminal without an available browser can still use the

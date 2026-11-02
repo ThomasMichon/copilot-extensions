@@ -97,8 +97,9 @@ class _FakePathIndex:
         self.deleted_sources.append(source)
 
 
-def test_gc_unconfigured_sources_purges_only_removed_sources() -> None:
+def test_gc_unconfigured_sources_purges_only_removed_sources(tmp_path) -> None:
     from agent_index.indexing.gc import gc_unconfigured_sources
+    from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.state import IndexState, SourceState
 
     multi_store = _FakeMultiStore(
@@ -108,7 +109,9 @@ def test_gc_unconfigured_sources_purges_only_removed_sources() -> None:
             "git:removed-repo": 7,
         }
     )
-    path_index = _FakePathIndex()
+    path_index = PathIndex(tmp_path / "paths.db")
+    path_index.mark_indexed("git:removed-repo", "gone.md")
+    path_index.mark_indexed("github:owner/repo", "keep.md")
     state = IndexState(
         sources={
             "github:owner/repo": SourceState(chunk_count=10),
@@ -127,7 +130,8 @@ def test_gc_unconfigured_sources_purges_only_removed_sources() -> None:
     assert summary["kept"] == ["github:owner/repo", "github:owner/repo:issues"]
     assert summary["chunks_deleted"] == 7
     assert multi_store.deleted == ["git:removed-repo"]
-    assert path_index.deleted_sources == ["git:removed-repo"]
+    assert path_index.get_entry("git:removed-repo", "gone.md") is None
+    assert path_index.get_entry("github:owner/repo", "keep.md") is not None
     assert "git:removed-repo" not in state.sources
     assert state.total_chunks == 13
 

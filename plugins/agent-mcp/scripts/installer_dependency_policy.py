@@ -140,26 +140,9 @@ def _contained(path: Path, roots: tuple[Path, ...]) -> Path:
 
 
 def _argument_pairs(arguments: list[str]):
-    iterator = iter(arguments)
-    positional = False
-    for argument in iterator:
-        if positional or not argument.startswith("-"):
-            yield "", argument
-        elif argument == "--":
-            positional = True
-        else:
-            option, separator, value = argument.partition("=")
-            if (not argument.startswith("--") and len(argument) > 2
-                    and argument[:2] in _VALUE_OPTIONS):
-                option, separator, value = argument[:2], "=", argument[2:]
-            if option in _VALUE_OPTIONS:
-                if not separator:
-                    value = next(iterator, "")
-                if not value or value.startswith("--"):
-                    raise DependencyPolicyError("dependency installation option has no value")
-                yield option, value
-            else:
-                yield option, value
+    return _configuration.argument_pairs(
+        arguments, _VALUE_OPTIONS, error_type=DependencyPolicyError,
+    )
 
 
 def _check_requirement(
@@ -406,7 +389,9 @@ def cutoff_arguments(
     )
 
 
-def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operation="install"):
+def _source_inputs(
+    arguments, environment, cwd, trusted_source_roots, *, operation="install", non_editable=False,
+):
     if "--" in arguments:
         raise DependencyPolicyError("UV end-of-options markers cannot precede mandatory resolver policy")
     if any(arg.split("=", 1)[0] in ("--show-settings", "--dry-run") for arg in arguments):
@@ -514,8 +499,11 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
         if environment.get(variable):
             for path in environment[variable].split():
                 _check_requirements_sources(base / path, set(), roots, base, seen, files, editables)
+    if non_editable and editables:
+        raise DependencyPolicyError("deployed runtimes require non-editable source inputs")
     source_editables = (
         operation != "source-compile"
+        and not non_editable
         and "--no-sources" not in dict(pairs) and "--no-editable" not in dict(pairs)
         and environment.get("UV_NO_SOURCES", "").lower() not in ("1", "true")
         and environment.get("UV_NO_EDITABLE", "").lower() not in ("1", "true")
@@ -574,6 +562,9 @@ exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec")
 RetainedInputCleanupError = _configuration.RetainedInputCleanupError
 _report_cleanup_error = _configuration.report_cleanup_error
 _native_retained_path = _configuration.native_retained_path
+_file_uri = _configuration.file_uri
+
+_bounded_content_map = _configuration.bounded_content_map
 _temporary_inputs = _configuration.temporary_inputs
 tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
@@ -595,10 +586,11 @@ def _config_inputs(arguments, environment, base):
     )
 
 
-def _copy_retained_file(source, destination, *, deadline=None):
+def _copy_retained_file(source, destination, *, deadline=None, on_progress=None):
     return _configuration.copy_retained_file(
         source, destination, native_path=_native_retained_path,
         deadline=deadline, error_type=DependencyPolicyError,
+        on_progress=on_progress,
     )
 
 
@@ -637,8 +629,11 @@ def retain_uv_install(
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
     excluded_local_packages: tuple[str, ...] = (),
+    non_editable: bool = False,
     _operation: str = "install",
     deadline: float | None = None, native_target: bool = False,
+    _projection: list[str] | None = None,
+    on_progress=None,
 ):
     """Own the admitted graph and optional first-party exclusion constraints."""
     with _configuration.retain_local_exclusions(
@@ -646,8 +641,11 @@ def retain_uv_install(
         error_type=DependencyPolicyError,
         env=env, cwd=cwd, now=now, trusted_source_roots=trusted_source_roots,
         retained_resource_roots=retained_resource_roots, _operation=_operation,
+        **({"non_editable": True} if non_editable else {}),
         **({"deadline": deadline} if deadline is not None else {}),
         **({"native_target": True} if native_target else {}),
+        **({"_projection": _projection} if _projection is not None else {}),
+        **({"on_progress": on_progress} if on_progress is not None else {}),
     ) as transaction:
         yield transaction
 
@@ -658,9 +656,12 @@ def _retain_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
+    non_editable: bool = False,
     _operation: str = "install",
     _generated_constraints: tuple[Path, ...] = (),
     deadline: float | None = None, native_target: bool = False,
+    _projection: list[str] | None = None,
+    on_progress=None,
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     check_time = partial(_configuration.remaining_timeout, deadline, error_type=DependencyPolicyError)
@@ -676,6 +677,7 @@ def _retain_uv_install(
     base, projects, files, editables = _source_inputs(
         arguments, environment, cwd, trusted_source_roots,
         **({"operation": _operation} if _operation != "install" else {}),
+        **({"non_editable": True} if non_editable else {}),
     )
     check_time()
     uv = _select_uv_executable(uv)
@@ -726,6 +728,8 @@ def _retain_uv_install(
         **({"_operation": _operation} if _operation != "install" else {}),
         **execution,
     )
+    if on_progress is not None:
+        on_progress()
     if editables and re.search(r'"editable_mode"\s*:', _resolver_configuration(original_projection[0], now=now)):
         raise DependencyPolicyError("retained editable metadata owns the setuptools editable mode")
     temporary_parent = None
@@ -753,7 +757,10 @@ def _retain_uv_install(
         )
         remap = _configuration.retained_source_remapper(projects | files, mirror)
 
-        copy = partial(_copy_retained_file, deadline=deadline) if deadline is not None else _copy_retained_file
+        copy = (
+            partial(_copy_retained_file, deadline=deadline, on_progress=on_progress)
+            if deadline is not None or on_progress is not None else _copy_retained_file
+        )
         for project in sorted(projects, key=lambda path: len(path.parts)):
             check_time()
             destination = mirror(project)
@@ -770,28 +777,17 @@ def _retain_uv_install(
             check_time()
             shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
                             copy_function=copy)
-        source_hashes = {}
-        verified_pairs = set()
-        for project in projects:
-            destination = Path(_native_retained_path(mirror(project)))
-            for path in destination.rglob("*"):
-                check_time()
-                if path.is_file():
-                    original_path = project / path.relative_to(destination)
-                    # Preserve exact names even where Path equality folds case.
-                    pair = (str(original_path), str(path))
-                    if pair in verified_pairs:
-                        continue
-                    retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-                    if hashlib.sha256(Path(_native_retained_path(original_path)).read_bytes()).hexdigest() != retained_hash:
-                        raise DependencyPolicyError("source content changed while retaining UV inputs")
-                    source_hashes[original_path] = retained_hash
-                    verified_pairs.add(pair)
+        source_hashes = _configuration.retained_source_hashes(
+            projects, mirror, native_path=_native_retained_path, check_time=check_time,
+            error_type=DependencyPolicyError, content_map=_bounded_content_map, on_progress=on_progress,
+        )
         for project in projects:
             check_time()
             manifest = mirror(project) / "pyproject.toml"
             original_data = _toml(manifest)
             data = remap(original_data)
+            if non_editable:
+                _configuration.freeze_source_editables(data)
             if data != original_data:
                 _write_toml(Path(_native_retained_path(manifest)), data)
         for project in editables:
@@ -897,8 +893,13 @@ def _retain_uv_install(
         if original_configuration != retained_configuration:
             raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
         check_time()
+        if on_progress is not None:
+            on_progress()
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
+        if _projection is not None:
+            _projection.append(original_projection[0])
+            _projection.append(retained_projection[0])
         yield RetainedUVInstall(
             (uv, "pip", "compile" if _operation == "source-compile" else _operation, *admitted),
             retained_environment, retained_base,
@@ -912,6 +913,7 @@ def run_uv_install(
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
     excluded_local_packages: tuple[str, ...] = (),
+    non_editable: bool = False,
     _operation: str = "install", **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
@@ -921,6 +923,7 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
+            **({"non_editable": True} if non_editable else {}),
             **({"excluded_local_packages": excluded_local_packages}
                if excluded_local_packages != () else {}),
             **({"_operation": _operation} if _operation != "install" else {}),
@@ -970,9 +973,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
     try:
+        arguments = _configuration.immutable_install_arguments(
+            arguments, list(_argument_pairs(arguments)), error_type=DependencyPolicyError,
+        )
         roots = () if args.registry_only else (tuple(args.trusted_source_root) or _anchor_roots())
         return run_uv_install(
-            args.uv, arguments, trusted_source_roots=roots,
+            args.uv, arguments, trusted_source_roots=roots, non_editable=True,
             stdout=sys.stdout, stderr=sys.stderr,
         ).returncode
     except RetainedInputCleanupError as exc:

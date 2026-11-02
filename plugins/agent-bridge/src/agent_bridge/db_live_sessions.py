@@ -14,6 +14,7 @@ from .db_core import (
 )
 from .db_live_session_aliases import (
     CANONICAL_SESSION_SQL as _CANON,
+    MESSAGE_TARGET_SQL,
     PROCESS_START_TOLERANCE_SECONDS,
     register_live_session_atomic,
 )
@@ -779,6 +780,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         runtime_admission: RuntimeAdmission | None = None,
         enrolled_inbox: bool = False,
         inbox_refusal: str | None = None,
+        exact_session: bool = False,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -817,6 +819,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         return enqueue_fresh(self, LiveMessageEnqueue(
             session_id, sender, body, now, reply_to, kind, delivery,
             expected_session_id, idempotency_key, stale_seconds, report_duplicate, require_idle,
+            exact_session,
         ), runtime_admission, enrolled_inbox=enrolled_inbox, inbox_refusal=inbox_refusal)
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
@@ -829,10 +832,12 @@ class _LiveSessionsMixin(LiveControlsMixin):
         """
         rows = self.execute_read(
             "SELECT * FROM live_messages "
-            f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+            f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+            "AND (exact_session=0 OR NOT EXISTS (SELECT 1 FROM live_session_aliases "
+            "WHERE alias_session_id=live_messages.session_id)) "
             "AND consumed_at IS NULL AND handoff_json IS NULL "
             "AND runtime_custody_json IS NULL ORDER BY id ASC",
-            (session_id, session_id),
+            (session_id, session_id, session_id),
         )
         return [dict(r) for r in rows]
 
@@ -861,17 +866,17 @@ class _LiveSessionsMixin(LiveControlsMixin):
         if controls:
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=?, outcome=? "
-                f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind LIKE 'control:%' "
+                f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind LIKE 'control:%' "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND claimed_at IS NOT NULL AND id IN ({placeholders})",
-                (now, outcome or "applied", session_id, session_id, *ids),
+                (now, outcome or "applied", session_id, session_id, session_id, *ids),
             )
         else:
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=? "
-                f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+                f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
                 "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
                 f"AND id IN ({placeholders})",
-                (now, session_id, session_id, *ids),
+                (now, session_id, session_id, session_id, *ids),
             )
         return cur.rowcount

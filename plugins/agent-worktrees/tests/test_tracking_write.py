@@ -302,6 +302,40 @@ class TestVerbRegistryAndCompute:
 
 
 class TestRunDirectFallback:
+    @pytest.mark.parametrize("verb", (
+        "launch_attempt_execution", "launch_seed_stage", "launch_seed_take",
+        "launch_seed_restore", "launch_seed_finish", "launch_seed_remove",
+    ))
+    def test_finite_direct_owners_match_the_canonical_registry(self, verb):
+        tracking_write._ensure_verb_modules_loaded()
+        owner = tracking_write._DIRECT_VERB_MODULES[verb]
+        assert owner in tracking_write._VERB_MODULES
+        assert tracking_write._VERBS[verb].__module__ == owner
+
+    def test_finite_receipt_imports_its_owner_without_the_full_roster(self, monkeypatch):
+        original = tracking_write.importlib.import_module
+        imports = []
+
+        def load(name):
+            imports.append(name)
+            return original(name)
+
+        def refuse_full_roster():
+            pytest.fail("A finite receipt must not import unrelated mutation owners")
+
+        monkeypatch.setattr(tracking_write.importlib, "import_module", load)
+        monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", refuse_full_roster)
+        result = tracking_write.run_direct("launch_attempt_execution", {}, reason="test")
+        assert imports == ["agent_worktrees.launch_execution"]
+        assert result == {"error": "Could not retain launch execution receipt"}
+
+    def test_unknown_finite_name_retains_full_roster_discovery(self, monkeypatch):
+        loads = []
+        monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", lambda: loads.append(True))
+        with pytest.raises(ValueError, match="unregistered verb"):
+            tracking_write.run_direct("launch_seed_unknown", {}, reason="test")
+        assert loads == [True]
+
     def test_run_direct_calls_the_same_registered_function(self):
         calls = []
 

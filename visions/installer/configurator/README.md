@@ -4,7 +4,7 @@
   plugin-owned backstage panels it hosts.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-11-02
 - **Reality docs:** [Manager configuration](../../../worktree-manager/docs/configuration.md),
   [plugin contribution contract](../../../worktree-manager/docs/plugin-contribution-contract.md)
 
@@ -76,6 +76,32 @@ machine-owned adjustments with visible scope and consequences. Removing an
 override restores the underlying source's authority rather than replacing it
 with a copied value. Overrides cannot weaken a non-overridable safety or
 authorization boundary.
+
+### installation-and-updates
+
+Provide a standing Installation and Updates section showing the complete
+maintained component set, including Manager, runtime services and payload-only
+plugins. Distinguish known, installed and enabled components, delivered payload,
+selected runtime and actually observed running versions, with attributable
+sources and explicit unknown, missing and platform-policy outcomes.
+
+Offer explicitly confirmed updates for individual components through their
+existing installation authority. A selected plugin update never silently
+updates Manager or unrelated plugins, or substitutes forced reinstallation.
+Missing prerequisites and unsupported owners explain the precise limitation
+and supported retry or recovery. Whole-suite updating remains a separate scope.
+Durable acceptance, queued/running progress and terminal outcomes remain
+observable after the view is dismissed; refreshed inventory establishes what
+actually changed. Browsing does not enroll background maintenance.
+
+Make automatic-update policy visible and editable in this same workspace.
+Explain the effective enabled/disabled state, its scope and any independent
+maintenance veto, and provide an actionable way to change supported local
+controls rather than only an OFF notification. Automatic requests remain
+distinguishable from explicit user or agent updates throughout execution.
+Disabling automation never disables those explicit updates or their normal
+single-writer/re-entrancy protection. Allowing automatic updates does not
+silently enroll a recurring worker or clear another owner's independent hold.
 
 ### related-repositories-and-venues
 

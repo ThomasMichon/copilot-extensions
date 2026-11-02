@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from .repo_urls import remote_host as remote_host
+
 if TYPE_CHECKING:
     from .repos import RepoEntry, ReposRegistry
 
@@ -64,23 +66,6 @@ def resolution_snapshot() -> dict:
             for owner in sorted(owners)
         },
     }
-
-
-def remote_host(value: str, scheme: str = "https") -> str:
-    """Canonical host authority, retaining only non-default network ports."""
-    parsed = urlsplit(scheme + "://" + value)
-    if (
-        not parsed.hostname or parsed.username or parsed.password
-        or parsed.path or parsed.query or parsed.fragment
-    ):
-        raise ValueError("remote host must be a host authority")
-    host = parsed.hostname.casefold()
-    if ":" in host:
-        host = "[" + host + "]"
-    default = {"http": 80, "https": 443, "ssh": 22, "git": 9418}.get(scheme.casefold())
-    if parsed.port is not None and parsed.port != default:
-        host += ":" + str(parsed.port)
-    return host
 
 
 def account_for_remote(remote: str) -> str | None:

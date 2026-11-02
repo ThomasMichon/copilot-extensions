@@ -447,3 +447,59 @@ def test_missing_interpreter_cannot_pass_activation_gate():
     ):
         assert text.index(health) < text.index(publication) < text.index(activation)
         assert "m._load_full_command_surface()" in text
+
+
+
+@pytest.mark.parametrize("shell,executable", SHELLS[:2])
+@pytest.mark.parametrize("operation", ["complete", "stop"])
+@pytest.mark.parametrize("reuse", [False, True])
+def test_exited_construction_helper_preserves_original_failure(
+    tmp_path: Path, shell: str, executable: str | None, operation: str, reuse: bool,
+):
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    _copy_helper(tmp_path, shell)
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.2.3"
+    if reuse:
+        slot.mkdir(parents=True)
+        marker = slot / ".install-complete.json"
+        marker.write_text(json.dumps({
+            "version": "1.2.3", "completed_at": "2026-01-01T00:00:00Z",
+            "pid": 123, "payload_hash": DIGEST,
+        }), encoding="utf-8")
+        before = marker.read_bytes(), marker.stat().st_ino
+    script = _construction_script(shell, tmp_path, root) + f"""
+$code = 0
+try {{
+    if (-not (Invoke-VersionedSlotClean)) {{ throw 'Construction was not admitted' }}
+    $owner = $script:RuntimeConstructionSession.Process
+    $owner.StandardInput.WriteLine('{{"command":"invalid"}}')
+    $owner.StandardInput.Flush()
+    $owner.WaitForExit()
+    if ($owner.ExitCode -ne 1) {{ throw 'Unexpected helper exit' }}
+    {'Complete-RuntimeConstruction ' + _ps_quote(DIGEST) if operation == 'complete' else 'Stop-RuntimeConstruction'}
+    [Console]::Out.WriteLine('UNEXPECTED_SUCCESS')
+}} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    $code = 1
+}} finally {{
+    try {{ Stop-RuntimeConstruction }} catch {{
+        [Console]::Error.WriteLine($_.Exception.Message)
+        $code = 1
+    }}
+    if ($script:RuntimeConstructionSession) {{ throw 'Construction session did not settle' }}
+}}
+exit $code
+"""
+    result = _run(shell, executable, script, tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "unsupported construction command" in result.stderr
+    assert "construction helper exit 1" in result.stderr
+    assert "UNEXPECTED_SUCCESS" not in result.stdout
+    if reuse:
+        assert (marker.read_bytes(), marker.stat().st_ino) == before
+    else:
+        assert not slot.exists()
+    assert not (root / "current-version").exists()
+    assert not (root / ".venv").exists()

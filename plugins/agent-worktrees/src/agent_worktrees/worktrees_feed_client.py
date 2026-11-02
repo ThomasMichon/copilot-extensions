@@ -273,25 +273,25 @@ class FeedReceiver:
 
 
 def _client(request: dict):
-    from zdd import routing
-
     from . import status_monitor_cutover as control
     from . import config as cfg
-    from .worktrees_client import read_current
+    from .worktrees_client import read_current, resident_endpoint
 
     runtime_home = cfg.install_dir()
-    endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
-    if endpoint is None:
+    try:
+        endpoint = resident_endpoint(runtime_home)
+    except ConnectionError:
         restored = read_current(request)
         if restored["projection"]["quality"] != "current":
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
             )
-        endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
-        if endpoint is None:
+        try:
+            endpoint = resident_endpoint(runtime_home)
+        except ConnectionError as exc:
             raise FeedFailure(
                 "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
-            )
+            ) from exc
     with control.control_token_path(runtime_home).open(encoding="utf-8") as token_file:
         token = token_file.read(4097).strip()
     if not token or len(token) > 4096:
@@ -307,8 +307,9 @@ def _client(request: dict):
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
             ) from exc
-        endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
-        if endpoint is None:
+        try:
+            endpoint = resident_endpoint(runtime_home)
+        except ConnectionError:
             raise FeedFailure(
                 "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
             ) from exc

@@ -31,6 +31,13 @@ worktrees it allocated for that task.
 - **Delegates:** none initially
 - **Handoff:** keep this README current at phase boundaries; a successor resumes
   from the next unchecked Plan item
+- **Finite #2567 design intake:** existing Worktrees removal/design ownership
+  retains the ordinary-versus-managed executor evaluation below. This does
+  not take #4094, #1488, assigned #1918, held #6471 or resource custody.
+  Preserve the distinct producer, Dispatch, Bridge-shutdown and Worktrees-
+  finality roles. Draft status and an older required-Active-receiver source
+  condition remain unchanged; neither generic Taking nor this mapping
+  establishes a new transfer, owner ACK or expiry.
 
 ## Context
 
@@ -69,6 +76,13 @@ Additional operator request:
 > We need to ensure that these dispatched autopilot workers and tracked and
 > attributed correctly. We also need to ensure they are garbage collected.
 
+**Interface-neutral terminal lifecycle clarification (summary):** Dispatch
+requests agent shutdown from Bridge, then Worktrees evaluates cleanup. CLI/ACP
+is tracking metadata, not ownership authority. The bounded
+[interface-neutral conclusion contract](interface-neutral-conclusion.md)
+owns this source slice and its validation; it does not authorize historical
+adoption, runtime rollout or disposal of another owner's obligations.
+
 ## Plan
 
 ### Phase 1 — Durable allocation and resolution contract
@@ -93,6 +107,8 @@ Additional operator request:
       prune-eligibility ledger.
 
 ### Phase 2 — Supervisor reclamation loop
+- [ ] Close the [interface-neutral terminal conclusion](interface-neutral-conclusion.md)
+      contract through Bridge-owned shutdown followed by ground cleanup.
 - [x] Reconcile release-requested, failed, and yielded attempts before reserving
       a replacement: retire the exact session, delegate safe conclusion to
       agent-worktrees, and retain a visible retryable cleanup state until the
@@ -124,6 +140,33 @@ Additional operator request:
       worktree; never infer ownership or bulk-delete unproven legacy worktrees.
 - [ ] Document the producer boundary and remove producer-specific worktree
       deletion where the generic owner now covers it.
+
+### Finite ordinary/managed executor design evaluation from #2567
+
+**Agent-recommended tracking amendment.** This is a bounded maintainability
+decision, not a mandatory executor merge or a new cleanup authority.
+
+- [ ] **P2567-1:** Evaluate a shared teardown core WITH small kind-specific
+  hooks/callbacks OR record a reviewed accepted decision to retain separate
+  executors. Account for conditional complexity and shrink-only discipline;
+  shared low-level Git helpers and #2520 guard parity are completed/related
+  credit, not the complete executor decision.
+- [ ] **P2567-2:** In either design preserve exact ledger/identity/pair and
+  responsibility fences, dirty/unmerged/open-PR/live-claim/other-owner holds;
+  ordinary process, permissions/trust and unmanaged tracking-only retirement;
+  managed last-moment daemon/mux/session/branch reacquisition checks and
+  retained retryable tracking records on Git-removal failure. Kind alone
+  grants no disposal authority. #4094's locked-directory repair does not
+  substitute for accepting this architecture scope.
+
+#### Local Validation for #2567
+
+- [ ] **V2567-1:** Review a finite responsibility/failure crosswalk for BOTH
+  executor kinds against the chosen shared-core-WITH-hooks OR accepted-
+  separate design. Preserve every distinct reacquisition, unmanaged,
+  process/permission/trust and failure/retry duty with its actual owner.
+  Record the accepted tradeoff; guard parity, shared primitives and this
+  Draft parent alone are not decision or execution evidence.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -164,6 +207,12 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       minting unsafe compatibility behavior.
 - [x] Producer-owned domain records are neither inferred nor deleted by the
       generic reclamation loop.
+- [ ] **G2567:** Resolve the complete direct #2567 finite Plan/local Validation
+  through a reviewed shared core WITH hooks OR explicit accepted separate-
+  executor decision preserving BOTH kinds' identity/pair/permission/trust,
+  reacquisition, retry, unmanaged and safety/claim duties. No forced
+  implementation, removal, unrelated whole-parent/native gate or custody
+  change follows from this planning intake.
 
 ## Proposal
 
@@ -177,6 +226,38 @@ definitive liveness, a clean abandoned workspace, or compatible ground-layer
 capability leaves the worktree in place with a visible reason.
 
 ## Journal
+
+### 2026-10-28 - Executor-design intake and bounded source-credit reconciliation
+
+- Added #2567's complete finite design decision directly to Plan, local
+  Validation, actual global Validation and continuing coordination. Preserve
+  shared core WITH hooks OR accepted separate executors and all distinct
+  ordinary/managed responsibilities; no executor implementation or removal
+  occurs here.
+- The source owner's later #1488 receipt reports #9307 merged to `dev`
+  following #9305, with 158 Worktrees, 36 selected Dispatch and eight Bridge
+  source controls, including isolated host/child exit and temporary-worktree
+  removal. Credit that bounded interface-neutral source slice at its
+  reported scope; the older publication checkbox is reconciliation debt,
+  not evidence the slice must be rebuilt.
+- Keep terminal resolution, inbound-claim release, complete shared-allocation
+  fencing, operations and attested historical adoption unresolved. The
+  existing unchecked TWO-task/ONE-worktree global witness remains the finite
+  shared-set gate. Draft status, source-specific receiver restrictions and
+  assigned #1918/held #6471/#1666 custody remain; no running adoption,
+  historical cleanup, rollout, source closure or claim release is asserted.
+
+### 2026-10-27 - Interface-neutral terminal conclusion
+
+- Reviewed the bounded [contract](interface-neutral-conclusion.md) in #9305
+  before implementation.
+- Corrected the existing ground operation rather than adding a Stop RPC or
+  alternate cleanup policy. CLI/ACP remains descriptive metadata.
+- Qualified existing Bridge-owned terminal shutdown, Dispatch's exact identity
+  checkpoint and stop-before-conclude ordering, and interface-neutral ground
+  conclusion/removal with independent preservation gates.
+- Source publication, historical adoption and operational activation remain
+  distinct; this slice does not close the broader effort.
 
 ### 2026-08-31 — Kickoff
 - Captured the allocator-owns-reclamation boundary in the agent-dispatch vision.

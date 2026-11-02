@@ -53,6 +53,10 @@ def _session(
     s.updated_at = time.time() - idle_for
     s.subscriber_count = 0
     mgr._sessions[sid] = s
+    mgr.db.create_session(
+        sid, sid, None, s.target.cwd, s.target.type, status.value, s.updated_at,
+        target_json=s.target.to_json(),
+    )
     return s
 
 

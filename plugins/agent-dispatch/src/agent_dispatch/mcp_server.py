@@ -27,6 +27,7 @@ from pydantic import PlainValidator, StrictInt, WithJsonSchema
 from .client import DispatchClient, DispatchError
 from .client_authority import Authority, default_authority
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
+from .mcp_task_recovery import TaskRecoveryToolsMixin
 from .queue import StructuredResult, worker_id_for
 
 ClientFactory = Callable[[], DispatchClient]
@@ -53,7 +54,19 @@ def _default_client() -> DispatchClient:
     return _resolve_cli_module()._client(argparse.Namespace())
 
 
-class DispatchTools:
+def _default_observation_client() -> DispatchClient:
+    from .loop_commands import _resolve_cli_module
+
+    return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, read_only=True)
+
+
+def _default_recovery_client() -> DispatchClient:
+    from .loop_commands import _resolve_cli_module
+
+    return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, allow_ssh_failover=False)
+
+
+class DispatchTools(TaskRecoveryToolsMixin):
     """Transport-free implementation of the dispatch MCP tools.
 
     Each method opens a short-lived client to the coordinator. Identity-bearing
@@ -66,12 +79,18 @@ class DispatchTools:
 
     def __init__(
         self,
-        client_factory: ClientFactory = _default_client,
+        client_factory: ClientFactory | None = None,
         identity_resolver: IdentityResolver = resolve_identity,
         repo_resolver: RepoResolver = resolve_repo,
         authority_resolver: Callable[[], Authority] = default_authority,
     ):
-        self._client_factory = client_factory
+        self._client_factory = _default_client if client_factory is None else client_factory
+        self._observation_client_factory = (
+            _default_observation_client if client_factory is None else client_factory
+        )
+        self._recovery_client_factory = (
+            _default_recovery_client if client_factory is None else client_factory
+        )
         self._identity = identity_resolver
         self._repo = repo_resolver
         self._authority = authority_resolver
@@ -647,6 +666,11 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_abandon")(t.abandon)
     mcp.tool(name="dispatch_heartbeat")(t.heartbeat)
     mcp.tool(name="dispatch_detach")(t.detach)
+    mcp.tool(name="dispatch_task_diagnostics")(t.task_diagnostics)
+    mcp.tool(name="dispatch_detach_agent")(t.detach_agent)
+    mcp.tool(name="dispatch_recover_task")(t.recover_task)
+    mcp.tool(name="dispatch_reset")(t.reset)
+    mcp.tool(name="dispatch_reconcile_wake")(t.reconcile_wake)
     mcp.tool(name="dispatch_recover")(t.recover)
     mcp.tool(name="dispatch_rearm_spawn")(t.rearm_spawn)
     return mcp

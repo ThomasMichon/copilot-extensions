@@ -1,0 +1,9 @@
+{
+  "comment": "Type digest-cache hardening test callbacks and native adapters",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

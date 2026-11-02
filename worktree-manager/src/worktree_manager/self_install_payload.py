@@ -17,6 +17,69 @@ import uuid
 from pathlib import Path
 
 
+def _safe_extract(tf, dest: Path) -> None:
+    """Extract a tar into ``dest``, refusing anything that would escape it.
+
+    A hand-rolled path-only pre-check computed against ``getmembers()``
+    BEFORE any extraction happens cannot catch a classic tar symlink
+    attack -- a symlink member (``evil -> /tmp/outside``) followed by a
+    second member using it as a path prefix (``evil/payload.py``) --
+    because at pre-check time neither path exists on disk yet, so a
+    lexical ``.resolve()`` sees no symlink to follow and both members
+    pass; only DURING a batch extractall's own sequential write does the
+    second member actually traverse through the just-created symlink and
+    land outside ``dest`` entirely.
+
+    Fixed by extracting ONE member at a time, validating each immediately
+    before extracting it (not the whole batch up front): by the time a
+    later member (``evil/payload.py``) is checked, an earlier symlink
+    member (``evil``) has ALREADY been written to disk in a prior
+    iteration of this same loop, so ``.resolve()`` follows the REAL
+    symlink now sitting there and correctly detects the escape --
+    reproducing the safety property of stdlib's ``filter="data"``
+    (available only since Python 3.12, backported to some but not all
+    supported-version patch releases) without depending on it, since this
+    project declares ``requires-python = \">=3.10\"`` and a raw
+    ``filter=\"data\"`` call would raise ``TypeError`` on an
+    unpatched 3.10/3.11 host, breaking the documented git-optional
+    tarball fallback instead of updating."""
+    import warnings
+
+    dest = dest.resolve()
+    for member in tf.getmembers():
+        target = (dest / member.name).resolve()
+        if target != dest and dest not in target.parents:
+            raise OSError(f"unsafe path in tarball: {member.name}")
+        # Hardlinks, device files, fifos, etc. are refused outright by the
+        # member-type check below -- only a symlink's own target needs
+        # validating here.
+        if member.issym():
+            if os.path.isabs(member.linkname):
+                raise OSError(f"{member.name} is a link to an absolute path")
+            # Resolve the link's OWN target relative to where it will
+            # live (target.parent), the same way the filesystem would --
+            # this is what actually catches the sequential-traversal
+            # attack: a later member's own target path (checked above)
+            # only escapes visibly once THIS check has forced the
+            # symlink's resolved destination to be validated too.
+            link_dest = (target.parent / member.linkname).resolve()
+            if link_dest != dest and dest not in link_dest.parents:
+                raise OSError(f"{member.name} is a link escaping the destination")
+        if not (member.isreg() or member.isdir() or member.issym()):
+            raise OSError(
+                f"refusing to extract {member.name}: unsupported member type "
+                "(only regular files, directories, and symlinks are allowed)"
+            )
+        with warnings.catch_warnings():
+            # Every member here is already validated by hand above,
+            # independent of Python's own filter= mechanism (unavailable
+            # on this project's older supported Python versions) --
+            # silence the resulting "no filter given" DeprecationWarning
+            # rather than leaving noise in every real self-update run.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            tf.extract(member, dest)  # noqa: S202 - each member validated immediately above
+
+
 def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     """Expand any vendor-pointer lib copies under a freshly-copied
     ``slot/libs/*``, AND any `uv`-editable canonical-reference entry in
@@ -260,3 +323,94 @@ def _swap_in_staged_slot(staging: Path, slot: Path) -> None:
         raise
     if retired is not None:
         shutil.rmtree(retired, ignore_errors=True)
+
+
+def _clear_dir(d: Path) -> None:
+    """Empty a directory in place (keep the directory itself)."""
+    if not d.exists():
+        return
+    for child in d.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            try:
+                child.unlink()
+            except OSError:
+                pass
+
+
+def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180, _extract=None) -> None:
+    """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
+
+    Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload
+    PLUS its sibling ``libs/`` directory, so ``staging/worktree-manager/pyproject.toml``
+    and ``staging/libs/`` both exist -- the same monorepo-shaped layout the git
+    clone produces. ``libs/`` supplies canonical content for
+    ``_materialize_payload_pointers`` to expand any vendor-pointer copy inside the
+    payload -- expansion itself uses the LOCAL, already-trusted
+    ``_trusted_pointer_materializer`` module (never the fetched ``tools/``, which
+    this function deliberately does NOT fetch: ``self_update`` supports
+    user-configured forks/canary refs, so executing anything from that untrusted
+    tree would be a real supply-chain risk -- see
+    ``_materialize_payload_pointers``'s own docstring). A tarball-only fetch that
+    skipped the ``libs/`` sibling would leave those pointers permanently
+    unresolvable in the installed slot.
+    Raises ``OSError`` on any failure so the caller can degrade to an ``error`` result.
+    """
+    import tarfile
+    import tempfile
+    import urllib.request
+
+    staging.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        archive = tdp / "payload.tar.gz"
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - https codeload
+            archive.write_bytes(resp.read())
+        extract = tdp / "x"
+        extract.mkdir()
+        with tarfile.open(archive, "r:gz") as tf:
+            (_extract or _safe_extract)(tf, extract)
+        # codeload extracts to a single <name>-<ref>/ top dir; find the payload.
+        payload = None
+        for rdir in (p for p in extract.iterdir() if p.is_dir()):
+            if rdir.is_symlink():
+                # rdir.is_dir() above already follows a symlink -- checking
+                # only payload (rdir / "worktree-manager") afterward misses
+                # THIS case: a symlinked top-level extraction dir whose own
+                # "worktree-manager" subpath is a real (non-symlink) file
+                # within the symlinked target, so payload.is_symlink() alone
+                # would be False even though the whole tree was reached via
+                # a symlinked parent.
+                raise OSError(f"extracted tarball entry {rdir} is a symlink -- refusing")
+            cand = rdir / "worktree-manager"
+            if (cand / "pyproject.toml").is_file():
+                payload = cand
+                break
+        if payload is None:
+            raise OSError(f"worktree-manager payload not found in tarball from {url}")
+        if payload.is_symlink():
+            raise OSError(f"worktree-manager payload at {payload} is a symlink -- refusing")
+        _clear_dir(staging)
+        # symlinks=True on every copytree below: shutil.copytree's default
+        # (symlinks=False) DEREFERENCES a symlink anywhere in the source
+        # tree, silently copying whatever file it points to -- a malicious
+        # or corrupted tarball could include a symlink entry pointing
+        # outside the extracted archive, and a naive copytree would smuggle
+        # that external content straight into staging before
+        # materialize_main ever gets a chance to reject it. Preserving
+        # symlinks as symlinks instead lets the existing canonical-symlink
+        # validation (_find_symlink()) correctly detect and refuse them
+        # downstream, the same as it already does for a real dev checkout.
+        # NOTE: symlinks=True does NOT protect the copytree's own SOURCE
+        # ROOT -- shutil.copytree always creates dst as a real directory,
+        # so if the root argument itself were a symlink, os.scandir would
+        # transparently follow it with nowhere for a preserved-symlink
+        # object to even go. Each root (payload, libs_source) is
+        # explicitly is_symlink()-checked before its own copy call.
+        shutil.copytree(payload, staging / "worktree-manager", symlinks=True)
+        libs_source = payload.parent / "libs"
+        if libs_source.is_symlink():
+            raise OSError(f"{libs_source} is a symlink -- refusing")
+        if libs_source.is_dir():
+            shutil.copytree(libs_source, staging / "libs", symlinks=True)

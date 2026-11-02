@@ -240,6 +240,10 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(
             chunk("git:repository", "prefixterm", path="prefix.md"),
         ]
         empty.upsert("code", retired, inference(None, ["a", "b"]))
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+    # These direct retirement fixtures are outside ordinary ingestion.
+    prepare_ingestion_indices(empty, max_rows=3)
     queued(True)
     config = IndexConfig()
     store = initialize_source_store(config)
@@ -271,6 +275,7 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(
             "code", [chunk("git:retired", "incrementalretired", path="retired.md")],
             inference(None, ["x"]),
         )
+        prepare_ingestion_indices(store, max_rows=1)
     queued(False)
     restarted = initialize_source_store(config)
     current = restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
@@ -436,9 +441,9 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
     def fail(*args, **kwargs):
         raise RuntimeError("fixture source failure")
 
-    for failure in ("current_commit", "discover_changed", "chunk", "embed", "reconcile"):
+    for failure in ("current_commit", "discover", "chunk", "embed"):
         with monkeypatch.context() as patch:
-            if failure in ("current_commit", "discover_changed"):
+            if failure in ("current_commit", "discover"):
                 original = sources.get_connector
 
                 def connector(*args, **kwargs):
@@ -456,21 +461,45 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
                 patch.setattr(chunking, "get_chunker", lambda path: (FailingChunker(), "markdown"))
             elif failure == "embed":
                 patch.setattr(EngineClient, "embed_texts", fail)
-            else:
-                patch.setattr(MultiModelStore, "delete_stale_by_file", fail)
-            code, task = run()
+            code, task = run(full=True)
             assert code == 0 and task.status == "partial", failure
         assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:old"}
         store = initialize_source_store(config)
         assert "git:old" in store.distinct_sources()
         assert store.get_document("git:old", "one.md") is not None
-    assert run()[1].status == "complete"
+    assert run(full=True)[1].status == "complete"
     assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:new"}
     assert "git:old" not in store.distinct_sources()
     assert "git:new" in store.distinct_sources()
     # Empty/unchanged incremental success preserves the published canonical identity.
     assert run()[1].status == "complete"
     assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:new"}
+
+
+def test_queued_partial_publication_keeps_identity_and_closes_native_serving(
+    queued_source, monkeypatch,
+):
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.indexing.state import IndexState
+
+    repository, configure, run, config = queued_source
+    assert run(full=True)[1].status == "complete"
+    configure(repository("new"))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("fixture uncertain publication")
+
+    monkeypatch.setattr(MultiModelStore, "reconcile_file_chunks", fail)
+    code, task = run(full=True)
+    assert code == 1 and task.status == "failed"
+    state = IndexState.load(config.state_file)
+    assert state.stored_families == {"git:alias": "git:old"}
+    assert PendingCrawls(PathIndex(config.data_dir / "path_index.db")).sources() == ["git:alias"]
+    receipt = json.loads((config.lance_dir / MARKER).read_text())
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"]
+    with pytest.raises(SourceLayoutError):
+        initialize_source_store(config)
 
 
 @pytest.mark.timeout(120)
@@ -508,6 +537,9 @@ def test_queued_maintenance_effect_failure_never_completes(
         vector = np.zeros((1, 768), dtype=np.float32)
         vector[:, 0] = 1
         store.upsert("code", [chunk("monorepo", "retirement fixture")], vector)
+        from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+        prepare_ingestion_indices(store, max_rows=1)
         table = store.content_store._get_or_create_table()
         original = type(table).delete
 
@@ -603,6 +635,7 @@ def test_selected_fts_failed_rebuild_is_not_old_index_availability(cold, monkeyp
         return native_run(args, **kwargs)
 
     monkeypatch.setattr(content_module.subprocess, "run", fail_real_child)
+    store.upsert_content([chunk(path="new.md")])
     content.mark_fts_dirty()
     with pytest.raises(SourceLayoutError, match="FTS preparation failed"):
         content.ensure_fts_index(max_retries=1)

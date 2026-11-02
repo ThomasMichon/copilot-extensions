@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-25
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
@@ -118,6 +118,17 @@ an event against the existing review. It nudges a live reviewer or resumes its
 hibernated session. The review's identity is the change itself, not its current
 revision; a new head neither reassigns the review nor creates a second reviewer
 or task.
+
+### shared-service-discovery-and-observation
+
+Where the [central PR service](../../agent-pull-requests/README.md) is adopted,
+reviewer emitters request durable
+subscriptions to their selected PR populations and consume its shared
+discovery and observation. New eligible targets and later changes feed the
+existing task deduplication and reviewer lineage; unchanged observations do
+not create duplicate reviews or false resumes. The service supplies PR facts,
+not reviewer eligibility, verdict or task authority. Supported standalone
+reviewer operation remains useful without fleet adoption.
 
 ### verdict-bearing-review
 

@@ -6,14 +6,19 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_all_packaged_launchers_and_validators_match():
+def test_all_packaged_launchers_and_validators_match() -> None:
     canonical = ROOT / "libs" / "peer-launch" / "peer_launch.py"
     primitive_dir = ROOT / "libs" / "installation-context"
     primitive = primitive_dir / "installation_context.py"
-    fragments = sorted(path.name for path in primitive_dir.glob("_installation_context_*.py"))
+    fragments = sorted(
+        path.name for path in primitive_dir.glob("_installation_context_*.py")
+        if path.name != "_installation_context_worker.py"
+    )
     for plugin, filename in (
         ("agent-bridge", "_peer_launch.py"),
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
@@ -22,16 +27,22 @@ def test_all_packaged_launchers_and_validators_match():
         ("agent-machines", "_peer_launch.py"),
         ("agent-pull-requests", "_peer_launch.py"),
         ("agent-ssh", "_peer_launch.py"),
+        ("agent-mcp", "_peer_launch.py"), ("agent-vault", "_peer_launch.py"),
     ):
         package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
         assert (package / filename).read_bytes() == canonical.read_bytes()
         assert (package / "_installation_context.py").read_bytes() == primitive.read_bytes()
         for fragment in fragments:
             assert (package / fragment).read_bytes() == (primitive_dir / fragment).read_bytes()
+        worker = "_installation_context_worker.py"
+        assert not (package / worker).exists()
+        assert (
+            ROOT / "plugins" / plugin / "scripts" / "installation-context" / worker
+        ).read_bytes() == (primitive_dir / worker).read_bytes()
 
 
 def _import_roots(source: str) -> set[str]:
-    roots = set()
+    roots: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             roots.update(alias.name.split(".")[0] for alias in node.names)
@@ -40,20 +51,21 @@ def _import_roots(source: str) -> set[str]:
     return roots
 
 
-def test_launcher_has_no_runtime_dependency():
+def test_launcher_has_no_runtime_dependency() -> None:
     source = ROOT / "libs" / "peer-launch" / "peer_launch.py"
     assert _import_roots(source.read_text(encoding="utf-8")) <= sys.stdlib_module_names
 
 
-def test_dependency_guard_sees_both_import_forms():
+def test_dependency_guard_sees_both_import_forms() -> None:
     for source in ("import agent_procutil", "from agent_worktrees import cli"):
         assert _import_roots(source) - sys.stdlib_module_names
 
 
-def test_sync_tool_registers_all_packaged_primitives():
+def test_sync_tool_registers_all_packaged_primitives() -> None:
     spec = importlib.util.spec_from_file_location(
         "sync_installation_context", ROOT / "tools" / "sync-installation-context.py",
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     destinations = {destination for _, destination in module.vendor_pairs()}
@@ -61,6 +73,7 @@ def test_sync_tool_registers_all_packaged_primitives():
         "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
         "agent-worktrees", "agent-logger", "agent-index", "agent-machines",
         "agent-pull-requests", "agent-ssh",
+        "agent-mcp", "agent-vault",
     ):
         assert (
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
@@ -68,10 +81,13 @@ def test_sync_tool_registers_all_packaged_primitives():
         ) in destinations
 
 
-def test_converted_codespaces_paths_have_no_unexplained_sibling_launches(monkeypatch):
+def test_converted_codespaces_paths_have_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "peer_launch_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
@@ -93,10 +109,13 @@ def test_converted_codespaces_paths_have_no_unexplained_sibling_launches(monkeyp
     assert findings == []
 
 
-def test_containers_config_has_no_unexplained_sibling_launches(monkeypatch):
+def test_containers_config_has_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "containers_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
@@ -107,10 +126,13 @@ def test_containers_config_has_no_unexplained_sibling_launches(monkeypatch):
     ]
 
 
-def test_logger_compact_has_no_unexplained_sibling_launches(monkeypatch):
+def test_logger_compact_has_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "logger_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
@@ -121,10 +143,13 @@ def test_logger_compact_has_no_unexplained_sibling_launches(monkeypatch):
     ]
 
 
-def test_index_resolve_effective_config_has_no_unexplained_sibling_launches(monkeypatch):
+def test_index_resolve_effective_config_has_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "index_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
@@ -136,10 +161,13 @@ def test_index_resolve_effective_config_has_no_unexplained_sibling_launches(monk
     assert findings == [], findings
 
 
-def test_containers_provider_ssh_has_no_unexplained_sibling_launches(monkeypatch):
+def test_containers_provider_ssh_has_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "containers_ssh_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
@@ -151,10 +179,13 @@ def test_containers_provider_ssh_has_no_unexplained_sibling_launches(monkeypatch
     assert findings == [], findings
 
 
-def test_machines_self_update_has_no_unexplained_sibling_launches(monkeypatch):
+def test_machines_self_update_has_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "machines_ssh_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
@@ -166,10 +197,13 @@ def test_machines_self_update_has_no_unexplained_sibling_launches(monkeypatch):
     assert findings == [], findings
 
 
-def test_bridge_handoff_check_has_no_unexplained_sibling_launches(monkeypatch):
+def test_bridge_handoff_check_has_no_unexplained_sibling_launches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "bridge_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
     )
+    assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)

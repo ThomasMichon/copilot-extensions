@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agent_worktrees import config as cfg, pr_config, repos
+from agent_worktrees import config as cfg, pr_config, related, repos
 from agent_worktrees.pr_related_binding import parse_repository, resolve_related_binding
 
 
@@ -33,6 +33,31 @@ def test_related_only_target_resolves_without_inheriting_the_callers_binding(mon
     assert result.repo_config.pr.token_env == "TARGET_TOKEN"
     assert result.repo_config.pr.provider == "azure-devops"
     assert result.repo_config.anchor == "" and result.repo_config.default_branch == ""
+
+
+def test_metadata_only_overlay_keeps_the_contributed_foreign_pr_binding(monkeypatch, tmp_path):
+    base, overlay = tmp_path / "base", tmp_path / "overlay"
+    related.write_related(base, related.RelatedConfig(related={
+        "target": related.RelatedEntry(name="target", pr=binding()),
+    }))
+    related.write_related(overlay, related.RelatedConfig(related={
+        "target": related.RelatedEntry(name="target", summary="operator metadata"),
+    }))
+
+    def grafted_policies():
+        return {
+            name: entry.pr
+            for name, entry in related.read_related_grafted([base, overlay]).related.items()
+            if entry.pr
+        }
+
+    monkeypatch.setattr(cfg, "_control_plane_related_pr_map", grafted_policies)
+    monkeypatch.setattr(pr_config, "_resolve_repo_remote", lambda *args: "https://github.com/owner/caller")
+    monkeypatch.setattr(repos, "list_repos", lambda: [])
+    result = pr_config.resolve_repo_config_for_slug(configuration(), "Project/repository")
+    assert result.resolved and result.repo_name == "target"
+    assert result.repo_config.pr.provider == "azure-devops"
+    assert result.repo_config.pr.token_env == "TARGET_TOKEN"
 
 
 def test_ambiguous_related_targets_are_not_selected_by_file_order(monkeypatch):

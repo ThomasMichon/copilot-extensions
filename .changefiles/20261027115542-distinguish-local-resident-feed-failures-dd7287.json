@@ -1,0 +1,9 @@
+{
+  "comment": "Distinguish local resident feed failures from machine SSH source identity labels",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

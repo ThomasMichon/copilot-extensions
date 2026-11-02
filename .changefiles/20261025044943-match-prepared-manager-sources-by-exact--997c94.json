@@ -1,0 +1,9 @@
+{
+  "comment": "Match prepared Manager sources by exact identity and reuse healthy immutable repair generations",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

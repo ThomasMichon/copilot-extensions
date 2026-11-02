@@ -1,0 +1,9 @@
+{
+  "comment": "Inhibit native maintenance and automatic reconciliation without blocking available runtime startup.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

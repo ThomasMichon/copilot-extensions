@@ -15,6 +15,7 @@ from .watch_contract import ALL_TRANSITIONS
 from .watch_notification import positive_seconds, validate_pending
 from .watch_registry import WatchKey
 from .watch_replay import MAX_BATCH, MAX_BATCH_BYTES, RETENTION_SECONDS
+from .watch_replay_binding import SCOPED_PROTOCOL, ReplayBinding
 from .watch_replay_store import json_object
 
 PROTOCOL = "agent-pull-requests.watch/v1"
@@ -68,6 +69,7 @@ class ReplayCapabilities:
     max_batch: int
     max_batch_bytes: int
     receipt_retention_seconds: int
+    binding: ReplayBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -111,12 +113,18 @@ class ReplayClient:
     """
 
     def __init__(self, caller: ServiceCaller, *, route_prefix: str,
-                 target: str, repo: str) -> None:
+                 target: str, repo: str, binding: ReplayBinding | None = None) -> None:
         if not isinstance(target, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
             raise ValueError("invalid replay target")
         if not isinstance(route_prefix, str) or route_prefix.endswith("/"):
             raise ValueError("invalid replay route prefix")
-        path = route_prefix + "/v1/watch/" + target
+        if binding is not None and (
+            type(binding) is not ReplayBinding or (binding.target, binding.repo) != (target, repo)
+        ):
+            raise ValueError("invalid replay binding")
+        self._binding = binding
+        self._protocol = SCOPED_PROTOCOL if binding is not None else PROTOCOL
+        path = route_prefix + ("/v2/watch/" if binding is not None else "/v1/watch/") + target
         canonical, query = service_target(path)
         if canonical != path or query:
             raise ValueError("invalid replay route prefix")
@@ -125,6 +133,8 @@ class ReplayClient:
 
     async def _exchange(self, operation: str, payload: dict) -> dict:
         mutation = operation in ("register", "acknowledge", "cancel")
+        if self._binding is not None and operation != "capabilities":
+            payload = {"binding": self._binding.document(), "request": payload}
         try:
             response = await self._caller.request(
                 "GET" if operation == "capabilities" else "POST",
@@ -208,10 +218,13 @@ class ReplayClient:
 
     async def capabilities(self) -> ReplayCapabilities:
         value = await self._exchange("capabilities", {})
+        fields = {"protocol", "operations", "max_batch", "max_batch_bytes",
+                  "receipt_retention_seconds"}
+        if self._binding is not None:
+            fields.add("binding")
         if (
-            set(value) != {"protocol", "operations", "max_batch", "max_batch_bytes",
-                           "receipt_retention_seconds"}
-            or value["protocol"] != PROTOCOL
+            set(value) != fields or value["protocol"] != self._protocol
+            or (self._binding is not None and value["binding"] != self._binding.document())
             or not isinstance(value["operations"], list)
             or any(not isinstance(item, str) for item in value["operations"])
             or sorted(value["operations"]) != sorted(_OPERATIONS)
@@ -222,7 +235,8 @@ class ReplayClient:
         ):
             raise ReplayClientError("invalid_watch_capabilities")
         return ReplayCapabilities(
-            PROTOCOL, tuple(value["operations"]), MAX_BATCH, MAX_BATCH_BYTES, RETENTION_SECONDS,
+            self._protocol, tuple(value["operations"]), MAX_BATCH, MAX_BATCH_BYTES,
+            RETENTION_SECONDS, self._binding,
         )
 
     async def register(self, request: ReplayRequest, *, number: int,

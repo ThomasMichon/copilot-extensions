@@ -36,13 +36,13 @@ catalog = {
         }
     ],
 }
-@@CATALOG_BINDING_PYTHON@@context = (
+@@CATALOG_BINDING_PYTHON@@@@CATALOG_FLIGHT_PYTHON@@context = (
     "## @@COMMAND@@ session command catalog\n\n"
     "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
     "same-named command from another payload.\n\n"
     "```json\n"
     + json.dumps(catalog, sort_keys=True)
-    + "\n```"
+    + "\n```\n\n" + runtime_status
 )
 print(json.dumps({"additionalContext": context}))
 PY

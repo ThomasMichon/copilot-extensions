@@ -1,0 +1,13 @@
+{
+  "comment": "Expose frozen running-build identity in Vault ping and independent Index engine health.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

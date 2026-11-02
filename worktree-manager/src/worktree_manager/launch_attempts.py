@@ -54,6 +54,24 @@ _METADATA = (
     "attempt_id, submitted_at, action, project, surface, machine, environment, provider, venue_id, "
     "is_local, worktree_id"
 )
+MANAGER_OUTCOMES = ("unknown", "refused", "failed", "interrupted", "returned")
+_MANAGER_SEQUENCE = (
+    "(SELECT sequence FROM events "
+    "WHERE events.attempt_id=observed.attempt_id AND owner='manager' "
+    "ORDER BY sequence DESC LIMIT 1)"
+)
+_MANAGER_OUTCOME = (
+    "manager_outcome(manager_sequence, manager_observed_at, manager_phase, manager_details)"
+)
+_OBSERVED_METADATA = (
+    f"WITH observed AS (SELECT {_METADATA}, "
+    "inputs IS NOT NULL AND submitted_at>? AS inputs_available FROM attempts), "
+    "snapshots AS (SELECT observed.*, latest.sequence AS manager_sequence, "
+    "latest.observed_at AS manager_observed_at, latest.phase AS manager_phase, "
+    "latest.details AS manager_details FROM observed "
+    f"LEFT JOIN events AS latest ON latest.sequence={_MANAGER_SEQUENCE}) "
+    f"SELECT *, {_MANAGER_OUTCOME} AS manager_outcome FROM snapshots"
+)
 
 
 class LaunchAttemptError(RuntimeError):
@@ -123,6 +141,46 @@ def _validate_observation(owner: str, phase: str, details: dict) -> None:
             raise ValueError("Unsupported launch observation field")
 
 
+def _manager_observation(sequence, observed_at, phase, details) -> dict | None:
+    event = None if sequence is None else {
+        "sequence": sequence, "observed_at": observed_at, "phase": phase,
+        "details": json.loads(details),
+    }
+    if event is not None:
+        _validate_observation("manager", event["phase"], event["details"])
+        if (
+            type(event["sequence"]) is not int or event["sequence"] <= 0
+            or not isinstance(event["observed_at"], (int, float))
+            or not math.isfinite(event["observed_at"]) or event["observed_at"] < 0
+        ):
+            raise ValueError("Invalid stored Manager observation")
+    return event
+
+
+def _manager_outcome(sequence, observed_at, phase, details) -> str:
+    event = _manager_observation(sequence, observed_at, phase, details)
+    if event is None:
+        return "unknown"
+    phase, details = event["phase"], event["details"]
+    if phase == "refused":
+        return "refused"
+    if phase == "unknown" and details.get("code") == "interrupted":
+        return "interrupted"
+    if phase == "launcher-returned" and "exit_code" in details:
+        return "returned" if details["exit_code"] == 0 else "failed"
+    return "unknown"
+
+
+def _observed_metadata(row: sqlite3.Row, *, version: int) -> dict:
+    result = _metadata(row, version=version)
+    event = _manager_observation(*(
+        result.pop("manager_" + key) for key in ("sequence", "observed_at", "phase", "details")
+    ))
+    return {
+        **result, "last_manager_event": event, "manager_outcome_scope": "manager-boundary",
+    }
+
+
 class LaunchAttempts:
     def __init__(self, root: Path | None = None) -> None:
         self.path = (root if root is not None else default_root()) / "launch-attempts" / "attempts.sqlite3"
@@ -170,6 +228,11 @@ class LaunchAttempts:
             raise LaunchAttemptError("Launch journal has an incompatible database header.")
         if header[18:20] != b"\x01\x01":
             raise LaunchAttemptError("Launch journal requires DELETE journaling.")
+        if any(
+            self.path.with_name(self.path.name + suffix).exists()
+            for suffix in ("-wal", "-shm")
+        ):
+            raise LaunchAttemptError("Launch journal has an unexpected WAL sidecar.")
         if (
             int.from_bytes(header[60:64], "big") not in (1, _SCHEMA_VERSION)
             or int.from_bytes(header[68:72], "big") != _APPLICATION_ID
@@ -245,6 +308,7 @@ class LaunchAttempts:
             self.path.absolute().as_uri() + f"?mode={mode}", uri=True, timeout=5,
         )) as connection, connection:
             connection.row_factory = sqlite3.Row
+            connection.create_function("manager_outcome", 4, _manager_outcome, deterministic=True)
             if write:
                 connection.execute("PRAGMA synchronous=FULL")
                 connection.execute("PRAGMA secure_delete=ON")
@@ -329,20 +393,38 @@ class LaunchAttempts:
     def entries(
         self, *, limit: int = 100, before: float | None = None,
         project: str | None = None, action: str | None = None,
+        after: float | None = None, machine: str | None = None,
+        environment: str | None = None, provider: str | None = None,
+        venue_id: str | None = None, before_id: str | None = None,
+        outcome: str | None = None,
     ) -> list[dict]:
         """Read bounded metadata only; absent storage remains absent."""
         try:
             if type(limit) is not int or not 1 <= limit <= 1000:
                 raise ValueError("Invalid launch-journal read limit")
-            if before is not None and (not math.isfinite(before) or before < 0):
-                raise ValueError("Invalid launch-journal time filter")
+            for timestamp in (before, after):
+                if timestamp is not None and (not math.isfinite(timestamp) or timestamp < 0):
+                    raise ValueError("Invalid launch-journal time filter")
+            if before_id is not None:
+                _identity(before_id)
+                if before is None:
+                    raise ValueError("Launch cursor requires its timestamp")
             if action is not None and action not in _ACTIONS:
                 raise ValueError("Invalid launch-journal action filter")
+            if outcome is not None and outcome not in MANAGER_OUTCOMES:
+                raise ValueError("Invalid Manager outcome filter")
             if not self._exists():
                 return []
             clauses, values = [], []
+            if before_id is not None:
+                clauses.append("(submitted_at<? OR (submitted_at=? AND attempt_id<?))")
+                values.extend((before, before, before_id))
             for column, value, operator in (
-                ("submitted_at", before, "<"), ("project", project, "="), ("action", action, "="),
+                ("submitted_at", before if before_id is None else None, "<"),
+                ("project", project, "="), ("action", action, "="),
+                ("submitted_at", after, ">="), ("machine", machine, "="),
+                ("environment", environment, "="), ("provider", provider, "="),
+                ("venue_id", venue_id, "="), ("manager_outcome", outcome, "="),
             ):
                 if value is not None:
                     clauses.append(f"{column}{operator}?")
@@ -350,12 +432,12 @@ class LaunchAttempts:
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
             with self._connect() as connection:
                 rows = connection.execute(
-                    f"SELECT {_METADATA}, inputs IS NOT NULL AND submitted_at>? AS inputs_available "
-                    f"FROM attempts{where} ORDER BY submitted_at DESC, attempt_id DESC LIMIT ?",
+                    f"{_OBSERVED_METADATA}{where} "
+                    "ORDER BY submitted_at DESC, attempt_id DESC LIMIT ?",
                     (_timestamp() - RETENTION_SECONDS, *values, limit),
                 ).fetchall()
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
-                return [_metadata(row, version=version) for row in rows]
+                return [_observed_metadata(row, version=version) for row in rows]
         except (OSError, sqlite3.Error, ValueError, TypeError, OverflowError) as exc:
             raise LaunchAttemptError("Could not read launch-attempt metadata.") from exc
 
@@ -377,14 +459,13 @@ class LaunchAttempts:
                 raise LaunchAttemptError("Launch attempt was not found.")
             with self._connect() as connection:
                 row = connection.execute(
-                    f"SELECT {_METADATA}, inputs IS NOT NULL AND submitted_at>? AS inputs_available "
-                    "FROM attempts WHERE attempt_id=?",
+                    f"{_OBSERVED_METADATA} WHERE attempt_id=?",
                     (_timestamp() - RETENTION_SECONDS, attempt_id),
                 ).fetchone()
                 if row is None:
                     raise LaunchAttemptError("Launch attempt was not found.")
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
-                result = _metadata(row, version=version)
+                result = _observed_metadata(row, version=version)
                 events = []
                 for event in connection.execute(
                     "SELECT sequence, observed_at, owner, phase, details FROM events "

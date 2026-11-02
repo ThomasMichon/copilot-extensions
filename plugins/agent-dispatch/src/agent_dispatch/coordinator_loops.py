@@ -10,7 +10,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Condition
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -18,8 +18,11 @@ from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .events import EventBus
 from .loop_governance import LoopGovernance
 from .procutil import run_agent_worktrees_capture
-from .queue import Status, Task, TaskQueue, machine_matches
+from .queue import Status, Task, TaskError, TaskQueue, machine_matches
 from .worktree_status_relay import WorktreeStatusRelayStore
+
+if TYPE_CHECKING:
+    from .coordinator_pool_source import CoordinatorPoolSource
 
 log = logging.getLogger("agent-dispatch.coordinator")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -198,6 +201,7 @@ def _spawn_self_deploy(python_path: Any) -> None:
     # so it must not pin whatever checkout was current when the check fired.
     spawn_dispatch_daemon(
         cmd,
+        finite_worker=True,
         log_name="logs/self-deploy.log",
         env={**os.environ, **windowless_python_env(python_path)},
         console_children=False,
@@ -421,6 +425,7 @@ async def _gc_loop(
     governance: LoopGovernance | None = None,
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
+    pool_source: CoordinatorPoolSource | None = None,
 ) -> None:
     """Maintain diagnostics; garbage-collect tasks only when interval is enabled."""
     from .diagnostic_logs import MAINTENANCE_SECONDS, maintain_file_logging
@@ -456,6 +461,11 @@ async def _gc_loop(
             loop_name="liveness GC",
         ):
             continue
+        if pool_source is not None:
+            try:
+                await pool_source.maintain(timeout=min(interval, 3.0))
+            except Exception:
+                log.exception("configured cohort maintenance unresolved; original custody retained")
         counts = await run_supervised_cycle(
             health,
             queue.reconcile_liveness,
@@ -756,8 +766,12 @@ def _attempt_handoff_fallback(
     spawn_fn: Callable[..., Any] | None = None,
 ) -> str:
     """Attempt exactly one fallback launch for ``task``."""
-    if not queue.claim_handoff_fallback(task.id):
-        return "skipped"
+    try:
+        if not queue.claim_handoff_fallback(task.id):
+            return "skipped"
+    except TaskError as exc:
+        log.info("handoff fallback inhibited for task %s: %s", task.id, exc)
+        return "inhibited"
     from . import bridge
     from .handoff_fallback_seed import build_fallback_seed
 

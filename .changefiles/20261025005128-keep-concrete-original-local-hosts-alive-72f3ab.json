@@ -1,0 +1,9 @@
+{
+  "comment": "Keep concrete original local Hosts alive across graceful detach despite configured active timeout bounds, preserving ordinary unselected policies.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

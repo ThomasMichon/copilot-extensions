@@ -1,8 +1,9 @@
 """Configure retained application diagnostics for ``agent-dispatch.*``.
 
 Call :func:`configure_file_logging` once, early, from each long-running
-daemon entrypoint (the coordinator's ``serve`` and the supervisor's
-``supervise serve``) -- never from a short-lived CLI invocation, which would
+daemon entrypoint (the coordinator's ``serve``, ``supervise serve`` and its
+actual worker-lane ``supervise`` process) -- never from unrelated short-lived
+CLI invocations, which would
 needlessly create log files for every one-off command. Native stdout/stderr,
 installer attempts and old text handlers are separate owners; ``logs`` discovers
 their locations without claiming application retention covers them.

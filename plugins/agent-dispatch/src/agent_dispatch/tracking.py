@@ -28,14 +28,17 @@ best-effort: no ``ssh`` on PATH, an unreachable host, or a missing remote
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 import shutil
 import subprocess
 import time
+from http.client import HTTPException
 from typing import Any
 
 from . import bridge_remote, remote_dispatch
+from .bridge_owner import LocalOwnerSessionClient
 from .procutil import (
     agent_bridge_launch_prefix,
     run_agent_worktrees_capture,
@@ -82,8 +85,26 @@ _OVERLAY_KEYS = (
 
 
 def bridge_available() -> bool:
-    """True if the local ``agent-bridge`` runtime can be launched safely."""
-    return agent_bridge_launch_prefix() is not None
+    """Compatibility gate; actual availability is established by the passive read."""
+    return True
+
+
+def _resolve_local_owner(worktree: str, *, timeout: float) -> dict[str, Any] | None:
+    try:
+        return LocalOwnerSessionClient().resolve(worktree, timeout=timeout)
+    except (
+        bridge_remote.RemoteBridgeUnavailable,
+        bridge_remote.RemoteBridgeOperationError,
+        OSError,
+        HTTPException,
+        ValueError,
+        OverflowError,
+    ) as exc:
+        logging.getLogger(__name__).warning(
+            "Local Bridge owner-session read unavailable (%s); liveness unknown",
+            type(exc).__name__,
+        )
+        return None
 
 
 def worktree_from_owner(owner: str | None) -> str | None:
@@ -213,11 +234,14 @@ def resolve_live_session(
 
     Remote owners use the local Bridge carrier first and shell the remote
     ``agent-bridge`` binstub over SSH only when that optional capability is
-    absent. Local owners use the local binstub directly. All failures collapse
+    absent. Local owners use the passive local HTTP reader. All failures collapse
     to ``None`` so display-only enrichment degrades cleanly.
     """
     if not worktree:
         return None
+    if machine is None:
+        data = _resolve_local_owner(worktree, timeout=timeout if timeout is not None else 3.0)
+        return data or None
     if machine is not None:
         satellite_entry = _satellite_entry_for(machine)
         if satellite_entry is not None:
@@ -491,8 +515,8 @@ def liveness_verdict(
     :func:`worktree_directory_present` and its caller in
     ``supervisor.release_requested_bodies``.
 
-    Never raises. Mirrors :func:`resolve_live_session`'s transport (local
-    ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``; a
+    Never raises. Mirrors :func:`resolve_live_session`'s transport (passive local
+    HTTP; a remote owner over ``ssh <machine> agent-bridge``; a
     registered ``role=satellite`` owner over its own pushed status instead of
     an SSH-back that would only ever time out -- see that function's matching
     branch).
@@ -507,6 +531,12 @@ def liveness_verdict(
     # takes.
     if machine is not None and not remote_dispatch.is_peer_machine(machine):
         machine = None
+    if machine is None:
+        data = _resolve_local_owner(worktree, timeout=timeout if timeout is not None else 3.0)
+        return (
+            UNKNOWN if data is None
+            else _verdict_from_resolved_data(data, owner_session_id)
+        )
     if machine is not None:
         satellite_entry = _satellite_entry_for(machine)
         if satellite_entry is not None:
@@ -686,15 +716,16 @@ def enrich_task(
     *,
     bridge_ok: bool | None = None,
     local: Any = _UNSET,
+    _sessions: dict[tuple[str | None, str], dict[str, Any] | None] | None = None,
 ) -> Any:
     """Return ``task`` with an ``embodiment`` overlay when it is leased and its
     worktree resolves to a live session; otherwise return it unchanged.
 
     The overlay resolves against the *owner's* machine (Phase 8 Slice 8b): a
-    local owner uses the local ``agent-bridge`` (gated on
-    :func:`bridge_available`); a remote owner first uses the local Bridge carrier
+    local owner uses the passive local HTTP reader; a remote owner first uses the
+    local Bridge carrier
     and resolves SSH only if that optional capability is absent. A batch caller
-    (``list``) hoists local Bridge and machine-identity probes.
+    (``list``) hoists machine identity and deduplicates local owner reads within that wave.
     """
     if not isinstance(task, dict) or task.get("status") not in _LEASED:
         return task
@@ -712,6 +743,11 @@ def enrich_task(
             and machine.strip().casefold() != str(local).strip().casefold()
         )
     if is_remote:
+        _sessions = None  # Keep the existing remote transport path unchanged.
+    key = (machine if is_remote else None, worktree)
+    if _sessions is not None and key in _sessions:
+        session = _sessions[key]
+    elif is_remote:
         session = resolve_live_session(worktree, machine=machine)
     else:
         if bridge_ok is None:
@@ -719,6 +755,8 @@ def enrich_task(
         if not bridge_ok:
             return task
         session = resolve_live_session(worktree)
+    if _sessions is not None:
+        _sessions[key] = session
     overlay = embodiment_overlay(session)
     if overlay is None:
         return task
@@ -747,6 +785,7 @@ def enrich_tasks(tasks: Any) -> Any:
         local = remote_dispatch.local_machine()
         deadline = time.monotonic() + _enrich_budget()
         out = []
+        sessions: dict[tuple[str | None, str], dict[str, Any] | None] = {}
         for t in tasks:
             # Only leased tasks incur a (bounded) resolve; a non-leased task passes
             # through enrich_task cheaply. Skip the probe for a leased task once
@@ -759,7 +798,7 @@ def enrich_tasks(tasks: Any) -> Any:
                 out.append(t)
                 continue
             out.append(
-                enrich_task(t, bridge_ok=bridge_ok, local=local)
+                enrich_task(t, bridge_ok=bridge_ok, local=local, _sessions=sessions)
             )
         return out
     return enrich_task(tasks)

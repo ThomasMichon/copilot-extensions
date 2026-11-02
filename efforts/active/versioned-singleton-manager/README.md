@@ -42,6 +42,21 @@ new blanket approval gate.
 - **Handoff:** Preserve this README, the current phase, open PRs, and test
   evidence. Resume the first unresolved Plan/Validation Plan item.
 
+<!-- backlog-reconciliation:7556:first-ten:Coordination -->
+
+### Continuing source-specific #876 custody
+
+- **C.876.complete-retention:** Keep the ACTUAL incumbent current assigned876 owner and
+  installer/runtime/task/daemon/elevation, shared manager/adopter and native validation
+  authorities. The receiving ROOT author/driver is not appointed executor by this
+  document. Concrete overlapping source edits retain their original agreement/safety
+  boundaries; no blanket ACK, silence consent or age expiry is added.
+
+- **C876.assignment:** The actual #876 assignee remains ThomasMichon. Preserve the
+  source-specific same-assignee Dev-delivery/unconditional-completion caveat for a
+  completed-disposition claim. This proposal is neither that delivery nor a source
+  judgment.
+
 ## Context
 
 The [versioned singleton manager pattern](../../../docs/patterns/versioned-singleton-manager.md)
@@ -261,6 +276,70 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5801 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/5803 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/5821 .
 
+<!-- backlog-reconciliation:7556:first-ten:Plan -->
+
+### Direct retained acceptance from #876
+
+_Agent-recommended additive tracking proposal; original source requirements,
+alternatives, finite proof tiers and custody remain binding._
+
+These rows retain work rather than certify it complete. Existing Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact. Review of this amendment is document
+intake only, not implementation, native/installed proof, source closure,
+owner reassignment or claim/resource release. A separate source judgment
+must preserve each literal source-specific hold; no generic ACK, every-host
+or whole-parent completion gate is added.
+
+#### Source #876
+
+- [ ] **P.876.diagnose-never-ran:** Diagnose267011 SCHED_S_TASK_HAS_NOT_RUN after a
+  requested Windows Scheduled Task start; task Ready/presence or a Start-ScheduledTask
+  call without actionable error is not actual action launch. Preserve the domain/AAD and
+  unavailable-domain-controller boot scenario as original finite context.
+
+- [ ] **P.876.hypothesis-and-diagnostic:** Explain LIKELY S4U token-acquisition failure
+  and the interactive-logon alternative without asserting an unobserved native root
+  cause; later successful starts or normal-user daemon health do not prove the
+  elevated/principal path or original failure cause.
+
+- [ ] **P.876.mode-intent-and-consented-repair:** When selected/default mode is
+  interactive, migrate or explicitly override an unusable preserved S4U configuration
+  without changing INTENTIONAL non-interactive S4U/Password installations. Preserve
+  ordinary write-once behavior and explicit actual repair/elevation consent, not routine
+  task churn or a silent privilege-changing retry.
+
+- [ ] **P.876.original-tests:** Preserve original mode-resolution/diagnostic tests plus
+  the separately required directly inherited1030 native truthful-repair cases, with real
+  principal/trigger/action/mode/activation and honest status/exit tiers; no new all-host
+  or whole-parent test programme.
+
+- [ ] **P.876.retained-union:** Retain the complete CURRENT876 original, BOTH
+  refinements and directly inherited1030 contract, all four original Expected outcomes
+  and five native checklist rows, actual assignee and
+  installer/runtime/task/daemon/elevation/resource boundaries. Preserve specific
+  assigned-completed-disposition caveats without converting them into universal ACK or
+  technical-completion-before-any-administrative-retention gates.
+
+- [ ] **P.876.inherited-01:** Distinguish runtime installation, startup-task
+  registration and daemon start. Access denied or declined repair must not certify
+  success; optional degraded operation must be explicit.
+
+- [ ] **P.876.inherited-02:** Preserve intended non-interactive/headless task mode,
+  ordinary write-once behavior and explicit consent/elevation for repair; no routine
+  task churn.
+
+- [ ] **P.876.inherited-03:** Verify user/principal, logon mode, trigger and stable
+  action, not task presence alone. Normal-user daemon health does not prove the elevated
+  startup path.
+
+- [ ] **P.876.inherited-04:** Fence owned stale routes after failed startup instead of
+  reporting them current.
+
+- [ ] **P.876.inherited-05:** Qualify native denied-UAC/access-denied, misleading
+  scheduler-success, principal/action mismatch and healthy existing-task cases,
+  including truthful status and exit results.
+
 ## Validation Plan
 
 - [ ] Complete EVERY directly retained #4022 P1-P8, V1-V7 and C1-C4 clause above at its
@@ -288,6 +367,87 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5821 .
   pass under the bounded test runner.
 - [ ] Every platform claimed production-ready has real platform evidence;
   unresolved items remain open or use an explicit named transfer.
+
+<!-- backlog-reconciliation:7556:first-ten:Validation -->
+
+### Global validation of retained #876
+
+#### Source #876
+
+- [ ] **V.876.diagnose-never-ran:** Qualify the COMPLETE matching Plan clause at its
+  ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Diagnose267011
+  SCHED_S_TASK_HAS_NOT_RUN after a requested Windows Scheduled Task start; task
+  Ready/presence or a Start-ScheduledTask call without actionable error is not actual
+  action launch. Preserve the domain/AAD and unavailable-domain-controller boot scenario
+  as original finite context.
+
+- [ ] **V.876.hypothesis-and-diagnostic:** Qualify the COMPLETE matching Plan clause at
+  its ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Explain LIKELY S4U
+  token-acquisition failure and the interactive-logon alternative without asserting an
+  unobserved native root cause; later successful starts or normal-user daemon health do
+  not prove the elevated/principal path or original failure cause.
+
+- [ ] **V.876.mode-intent-and-consented-repair:** Qualify the COMPLETE matching Plan
+  clause at its ORIGINAL scope, alternatives, supported native venue and finite bounds;
+  preserve current finite credit and same source/resource custody: When selected/default
+  mode is interactive, migrate or explicitly override an unusable preserved S4U
+  configuration without changing INTENTIONAL non-interactive S4U/Password installations.
+  Preserve ordinary write-once behavior and explicit actual repair/elevation consent,
+  not routine task churn or a silent privilege-changing retry.
+
+- [ ] **V.876.original-tests:** Qualify the COMPLETE matching Plan clause at its
+  ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Preserve original
+  mode-resolution/diagnostic tests plus the separately required directly inherited1030
+  native truthful-repair cases, with real principal/trigger/action/mode/activation and
+  honest status/exit tiers; no new all-host or whole-parent test programme.
+
+- [ ] **V.876.retained-union:** Qualify the COMPLETE matching Plan clause at its
+  ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Retain the complete CURRENT876
+  original, BOTH refinements and directly inherited1030 contract, all four original
+  Expected outcomes and five native checklist rows, actual assignee and
+  installer/runtime/task/daemon/elevation/resource boundaries. Preserve specific
+  assigned-completed-disposition caveats without converting them into universal ACK or
+  technical-completion-before-any-administrative-retention gates.
+
+- [ ] **V.876.inherited-01:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Distinguish runtime installation,
+  startup-task registration and daemon start. Access denied or declined repair must not
+  certify success; optional degraded operation must be explicit.
+
+- [ ] **V.876.inherited-02:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Preserve intended non-interactive/headless
+  task mode, ordinary write-once behavior and explicit consent/elevation for repair; no
+  routine task churn.
+
+- [ ] **V.876.inherited-03:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Verify user/principal, logon mode, trigger
+  and stable action, not task presence alone. Normal-user daemon health does not prove
+  the elevated startup path.
+
+- [ ] **V.876.inherited-04:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Fence owned stale routes after failed startup
+  instead of reporting them current.
+
+- [ ] **V.876.inherited-05:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Qualify native denied-UAC/access-denied,
+  misleading scheduler-success, principal/action mismatch and healthy existing-task
+  cases, including truthful status and exit results.
+
+- [ ] **GV.876.complete-retention:** Complete EVERY matching retained 876
+  Plan/Validation clause, complete original/refined/inherited union and continuing
+  source/resource conditions at the ORIGINAL finite scope. Preserve all incumbent ROOT
+  Plan/Validation/Request/Participants/checked credit/Journal. This paper intake is not
+  technical completion, native/release/installed proof, source closure or claim
+  transfer.
 
 ## Proposal
 
@@ -320,3 +480,9 @@ requirements or permission to weaken the existing vision.
   review, actual merge and whole-current-root readback precede source supersession.
   Existing owners, completed work, alternatives and independent gates remain; the effort
   stays Active.
+
+<!-- backlog-reconciliation:7556:first-ten:Journal -->
+
+### 2026-10-28 - Additive retained #876 contract proposal
+
+Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.

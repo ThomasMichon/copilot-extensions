@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -113,6 +115,17 @@ def test_marketplace_overlay_identity_wins(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setenv(
         "COPILOT_EXTENSIONS_CONTEXT",
         '{"marketplaceId":"mp-test"}',
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.configuration_layers_adapter.configuration_report",
+        lambda root: {
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "qualified-overlay-repository", "execution_machine": "worker",
+                "installation_cell": "qualified-overlay-cell", "binding": "unbound",
+                "base_root": str(root),
+            },
+        },
     )
     identity = load_worker_identity("custom", cwd=tmp_path)
     assert identity.description == "Overlay identity."
@@ -303,6 +316,36 @@ def test_cli_identities_show_unknown_name_fails(tmp_path: Path, no_overlay, caps
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "no identity file found" in captured.err
+
+
+def test_layered_identity_first_touch_read_only_cli(tmp_path):
+    base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
+    for root in (base, knowledge, machine):
+        root.mkdir()
+    for root, rules in ((base, "base rules"), (knowledge, "knowledge rules")):
+        directory = root / ".copilot-extensions" / "agent-dispatch" / "identities"
+        _write_identity(directory, "worker", "Reusable worker.", rules)
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-fixture-repository", "execution_machine": "fixture-worker",
+            "installation_cell": "fixture-cell", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment["AGENT_DISPATCH_INSTALL_DIR"] = str(machine)
+    environment["AGENT_CONFIGURATION_CONTEXT"] = json.dumps(report)
+    result = subprocess.run(
+        [sys.executable, "-I", "-m", "agent_dispatch", "identities", "show", "worker",
+         "--repo-root", str(base)],
+        cwd=base, env=environment, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["rules"] == "knowledge rules"
+    assert list(machine.iterdir()) == []
 
 
 def test_cli_identities_list_rejects_missing_repo_root(tmp_path: Path, capsys):

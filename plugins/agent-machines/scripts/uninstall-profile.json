@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "root_entries": [
+    ".venv",
+    "current-version",
+    "last-known-good",
+    "payload-dir",
+    "payload-origin",
+    "stamped-version",
+    "deploy-manifest.json"
+  ],
+  "bin_entries": [
+    "bootstrap-check.ps1",
+    "bootstrap-check.sh",
+    "bootstrap-killswitch-guard.ps1",
+    "bootstrap-killswitch-guard.sh",
+    "resolve-runtime.ps1",
+    "resolve-runtime.sh"
+  ],
+  "script_entries": [],
+  "local_bin_entries": [
+    "agent-machines",
+    "agent-machines.ps1",
+    "agent-machines.cmd"
+  ],
+  "module": "agent_machines"
+}

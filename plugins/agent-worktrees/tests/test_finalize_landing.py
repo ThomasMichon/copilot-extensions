@@ -16,12 +16,16 @@ from __future__ import annotations
 import subprocess
 import shlex
 import shutil
+from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import finalize, finalize_landing, finalize_ref
+from agent_worktrees import (
+    config as cfg, finalize, finalize_landing, finalize_open_pr_gate, finalize_ref, git_ops, pr_publish, tracking,
+)
 from conftest import _published_seed_environment, _seed_directory
 
 
@@ -91,6 +95,142 @@ def _topology_snapshot(root: Path) -> dict[Path, bytes]:
         path.relative_to(root): path.read_bytes()
         for path in root.rglob("*") if path.is_file()
     }
+
+
+@pytest.mark.parametrize("guard", ["none", "divergent", "checked-out", "racing", "tracking-race", "foreign-selector",
+                                   "create-pr", "checkout-race", "receiver-config", "hooks"])
+def test_rewritten_publication_advances_only_its_idle_published_snapshot(env, monkeypatch, guard):
+    _commit(env.clone, "first.txt", "first\n")
+    snapshot = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("branch", env.slug, snapshot, cwd=env.clone)
+    _commit(env.clone, "second.txt", "second\n")
+    published = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "-q", "-b", "rewritten", "origin/main", cwd=env.clone)
+    _commit(env.clone, "new.txt", "rewritten\n")
+    replacement = _git("rev-parse", "HEAD", cwd=env.clone)
+    pr = tracking.PRRecord(state="open", branch=env.slug, head_sha=published)
+    record = SimpleNamespace(worktree_path=str(env.clone), worktree_id=env.worktree_id)
+    config = SimpleNamespace(repo_name="fixture", default_repo=SimpleNamespace(remote="origin"))
+    saved = []
+    stored = replace(pr)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda *a: env.tmp_path)
+    monkeypatch.setattr(pr_publish, "metadata_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(tracking, "load_record", lambda *a: SimpleNamespace(prs=[stored]))
+    monkeypatch.setattr(tracking, "save_record", lambda *a: saved.append(stored.head_sha))
+    expected = replacement
+    if guard == "divergent":
+        _git("update-ref", f"refs/heads/{env.slug}", replacement, snapshot, cwd=env.clone)
+        _commit(env.clone, "later.txt", "unpublished\n")
+        replacement = _git("rev-parse", "HEAD", cwd=env.clone)
+        expected = _git("rev-parse", env.slug, cwd=env.clone)
+    elif guard == "checked-out":
+        _git("worktree", "add", "-q", str(env.tmp_path / "other"), env.slug, cwd=env.clone)
+        expected = snapshot
+    elif guard in ("racing", "checkout-race", "receiver-config", "hooks"):
+        original = git_ops.git
+        expected = replacement if guard == "hooks" else snapshot
+        if guard == "racing":
+            expected = _git(
+                "commit-tree", f"{snapshot}^{{tree}}", "-p", snapshot,
+                "-m", "unpublished racing commit", cwd=env.clone,
+            )
+        elif guard in ("receiver-config", "hooks"):
+            _git("config", "receive.denyCurrentBranch", "ignore", cwd=env.clone)
+            hooks = env.tmp_path / "hooks"
+            hooks.mkdir()
+            for name in ("pre-push", "pre-receive", "update"):
+                hook = hooks / name
+                hook.write_text("#!/bin/sh\nexit 1\n")
+                hook.chmod(0o755)
+            _git("config", "core.hooksPath", str(hooks), cwd=env.clone)
+
+        def race(*args, **kwargs):
+            if "send-pack" in args:
+                if guard == "racing":
+                    _git("update-ref", f"refs/heads/{env.slug}", expected, snapshot, cwd=env.clone)
+                elif guard != "hooks":
+                    _git("worktree", "add", "-q", str(env.tmp_path / "other"), env.slug, cwd=env.clone)
+            result = original(*args, **kwargs)
+            if "send-pack" in args and guard in ("checkout-race", "receiver-config"):
+                assert result.returncode and "currently checked out" in result.stderr
+            return result
+
+        monkeypatch.setattr(git_ops, "git", race)
+    if guard == "tracking-race":
+        stored.head_sha = snapshot
+        with pytest.raises(ValueError, match="tracking authority"):
+            pr_publish.record_reconciled_head(config, record, pr, replacement)
+        assert _git("rev-parse", env.slug, cwd=env.clone) == snapshot
+        return
+    foreign = None
+    if guard == "foreign-selector":
+        foreign = env.tmp_path / "foreign"
+        _git("clone", "-q", "--template=", str(env.clone), str(foreign), cwd=env.tmp_path)
+        _git("branch", env.slug, snapshot, cwd=foreign)
+    with monkeypatch.context() as patch:
+        if foreign:
+            patch.setenv("GIT_DIR", str(foreign / ".git"))
+            patch.setenv("GIT_WORK_TREE", str(foreign))
+        if guard == "create-pr":
+            expected_pr = replace(pr)
+            pr.head_sha = replacement
+            pr_publish.persist_publication(config, record, pr, expected=expected_pr)
+        else:
+            pr_publish.record_reconciled_head(config, record, pr, replacement)
+    assert pr.head_sha == replacement and saved == [replacement]
+    if foreign:
+        assert _git("rev-parse", env.slug, cwd=foreign) == snapshot
+    assert _git("rev-parse", env.slug, cwd=env.clone) == expected
+    assert _git("rev-parse", "HEAD", cwd=env.clone) == replacement
+    if guard in ("checkout-race", "receiver-config"):
+        assert _git("rev-parse", "HEAD", cwd=env.tmp_path / "other") == snapshot
+        assert not _git("status", "--porcelain", cwd=env.tmp_path / "other")
+    if guard == "none":
+        _git("push", "-q", "origin", f"{replacement}:refs/heads/{env.slug}", cwd=env.clone)
+        _git("fetch", "-q", "origin", env.slug, cwd=env.seed)
+        _git("merge", "--squash", "FETCH_HEAD", cwd=env.seed)
+        _git("commit", "-q", "-m", "merge rewritten publication", cwd=env.seed)
+        _git("push", "-q", "origin", "main", cwd=env.seed)
+        _git("fetch", "-q", "origin", cwd=env.clone)
+        pr.state = "merged"
+        record.worktree_id, record.branch, record.prs, record.pr = env.worktree_id, "rewritten", [pr], pr
+        assert not finalize_open_pr_gate.content_exceeds_merged_head_any(
+            record, "rewritten", "origin/main", cwd=str(env.clone),
+        )
+
+
+def test_finalize_refusal_identifies_stale_cleanup_snapshot(env):
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("branch", env.slug, head, cwd=env.clone)
+    _git("checkout", "-q", env.slug, cwd=env.clone)
+    _commit(env.clone, "unpublished.txt", "keep this work\n")
+    _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    pr = tracking.PRRecord(state="merged", branch=env.slug, head_sha=head)
+    record = SimpleNamespace(worktree_id=env.worktree_id, branch=f"worktree/{env.worktree_id}", pr=pr, prs=[pr])
+    message = finalize_open_pr_gate.merged_pr_block_message(
+        record, record.branch, "origin/main", cwd=str(env.clone),
+    )
+    assert f"ref '{env.slug}' has 1 commit(s)" in message
+
+
+def test_finalize_refusal_uses_every_landing_base(env, monkeypatch):
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("branch", env.slug, head, cwd=env.clone)
+    _commit(env.clone, "main.txt", "already published on main\n")
+    _git("push", "-q", "origin", "HEAD:main", cwd=env.clone)
+    _git("checkout", "-q", env.slug, cwd=env.clone)
+    _commit(env.clone, "unpublished.txt", "keep this work\n")
+    _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    pr = tracking.PRRecord(state="merged", branch=env.slug, head_sha=head)
+    record = SimpleNamespace(worktree_id=env.worktree_id, branch=f"worktree/{env.worktree_id}", pr=pr, prs=[pr])
+    repo = SimpleNamespace(remote="origin", default_branch="main")
+    monkeypatch.setattr(finalize_landing, "pr_base", lambda *a: "refs/remotes/origin/dev")
+    monkeypatch.setattr(finalize_open_pr_gate, "pr_merge_status", lambda *a: True)
+    monkeypatch.setattr(finalize_open_pr_gate, "refresh_merged_head", lambda *a: False)
+    ok, message, _ = finalize_landing.pr_content_landed(record, repo, record.branch, cwd=str(env.clone))
+    assert ok is False and f"ref '{env.slug}' has 1 commit(s)" in message
+    assert "refs/remotes/origin/main, refs/remotes/origin/dev" in message
 
 
 @pytest.mark.parametrize(

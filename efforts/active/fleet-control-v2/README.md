@@ -61,6 +61,14 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
   implementation contract. Private presentation copies are non-authoritative
   exports and are not linked from public artifacts.
 - **Completion boundary:** Plan publication is not V2 implementation completion.
+- **Retained Fleet contracts:** The [direct retained charter](retained-fleet-contracts.md#coordination-and-retained-charter)
+  keeps #4121/#5862/#6240/#6241 under the existing participants and source owners.
+  #4121's library AND CLI quartet is not an expansion of #5862's
+  observation-only reservation. One fleet remains single-operator, with future
+  collaboration fleet-to-fleet. This tracking amendment appoints no executor,
+  releases no source/resource claim and grants no implementation or rollout.
+  Concrete source/interface agreements remain required before affected wiring;
+  no universal ACK or whole-parent completion prerequisite is added.
 
 ## Context
 
@@ -442,6 +450,22 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Resolve or transfer every Plan/Validation item, archive this effort,
   and release ownership only after its full completion gate.
 
+### Retained cross-machine, observation, lifecycle and operation acceptance
+
+- [ ] Fulfill the complete [#4121 library AND CLI contract](retained-fleet-contracts.md#source-4121):
+  cross-machine listing, status reconciliation, delegate-chain tracing and
+  transcript access, with actual consumers and original domain authority.
+- [ ] Fulfill the complete [#5862 observation contract](retained-fleet-contracts.md#source-5862):
+  authorized current state, replay OR authoritative snapshot recovery,
+  bounded serving and retained origin/source responsibilities.
+- [ ] Fulfill the complete [#6240 lifecycle contract](retained-fleet-contracts.md#source-6240):
+  selected role closure, independent lifecycle/configuration/credential
+  continuity and explicitly selected verification policy; deferred
+  GitHub-positive proof remains deferred under its existing constraint.
+- [ ] Fulfill the complete [#6241 operation contract](retained-fleet-contracts.md#source-6241):
+  identified admission, distinct acceptance/effect receipts, UNKNOWN and actual
+  resource fencing/release, retaining the already-appointed narrow manager seam.
+
 ## Validation Plan
 
 All entries are **agent-recommended implementation gates**, not completed tests.
@@ -486,12 +510,33 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   actual interactive first setup, installed pump/paired-repo refresh,
   independent slow-sync dispatch, notifications and exact-plan confirmation,
   persistent PR flow and no Gateway whole-machine provisioning/removal.
+- [ ] Complete every matching [retained Fleet Validation row](retained-fleet-contracts.md#validation-plan)
+  for #4121/#5862/#6240/#6241 at its original complete scope, AND/OR, finite
+  venue/metric and evidence tier. Preserve all checked prerequisite credit and
+  existing owners; paper acceptance is not runtime qualification, claim release
+  or whole-product completion.
 
 ## Proposal
 
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-28 - Direct retained Fleet acceptance amendment
+
+- Added [direct per-origin Plan and global Validation acceptance](retained-fleet-contracts.md)
+  for #4121/#5862/#6240/#6241 as an agent-recommended tracking amendment.
+  Existing Request, status, participants, checked prerequisites and the first
+  unresolved Plan/Validation gates remain unchanged.
+- Retained the complete library AND CLI quartet outside #5862's isolated
+  observation reservation, single-operator fleet charter, source/interface
+  custodians, selected release-verification policy and deferred GitHub-positive
+  proof. The narrow fixed-manager/shared-journal appointment is not a general
+  operation or deployment takeover.
+- No implementation, qualification, source-issue disposition, resource release,
+  installation, live migration or rollout is performed or authorized here.
+  A later donor judgment requires actual reviewed merge and complete receiving
+  readback, not this journal entry alone.
 
 ### 2026-10-24 - Real silent broker renewal observed
 

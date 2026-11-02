@@ -36,7 +36,7 @@ def _resume_dialog(*, record=None, ahp=False, history=True):
     if history:
         field = dialog._prompt_rec["primary"]
         field.seed_store = seed_history.SeedHistory(context.project())
-        field.seed_cursor = seed_history.HistoryCursor(field.seed_store.entries())
+        field.seed_cursor = field.seed_store.cursor()
     return dialog
 
 
@@ -102,10 +102,11 @@ def test_actual_history_connection_ddl_does_not_start_implicit_transaction(
     history.remember("second")
     assert history.entries() == ["second", "first"]
     assert [row for row in observed if row[0] == "CREATE"] == [
-        ("CREATE", False, False, ""), ("CREATE", False, False, ""),
+        ("CREATE", True, True, ""), ("CREATE", True, True, ""),
     ]
     assert [row for row in observed if row[0] == "BEGIN"] == [
         ("BEGIN", False, True, ""), ("BEGIN", False, True, ""),
+        ("BEGIN", False, True, ""),
     ]
     assert [row for row in observed if row[0] == "INSERT"] == [
         ("INSERT", True, True, ""), ("INSERT", True, True, ""),
@@ -369,6 +370,7 @@ def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, m
 
 def test_remote_resume_has_no_local_history_composer(monkeypatch):
     monkeypatch.setattr(seed_history.SeedHistory, "entries", lambda *_: pytest.fail("remote history read"))
+    monkeypatch.setattr(seed_history.SeedHistory, "cursor", lambda *_: pytest.fail("remote history read"))
     record = {"is_local": False, "machine": "target", "env": "wsl", "raw": {"id": "wt-a"}}
     dialog = _resume_dialog(record=record, history=False)
     assert not dialog._can_prompt()
@@ -480,6 +482,7 @@ def test_missing_resume_id_ui_refuses_before_history_composer(
     def forbidden(*args, **kwargs):
         pytest.fail("missing resume target must not open or read/write a history composer")
     monkeypatch.setattr(seed_history.SeedHistory, "entries", forbidden)
+    monkeypatch.setattr(seed_history.SeedHistory, "cursor", forbidden)
     monkeypatch.setattr(seed_history.SeedHistory, "remember", forbidden)
     dialog = _resume_dialog(record={"is_local": True, "raw": {"id": target}}, history=False)
     dialog._engine._run_bg = forbidden

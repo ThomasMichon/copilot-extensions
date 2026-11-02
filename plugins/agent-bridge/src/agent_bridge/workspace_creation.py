@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from dataclasses import replace
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
@@ -39,6 +40,28 @@ def creation_fact_options(options: dict[str, Any]) -> dict[str, Any]:
         if len(owner_parts) == 3 and all(owner_parts):
             facts["caller_owner_ref"] = owner_scope
     return facts
+
+
+async def allocate_workspace(
+    target: SpawnTarget, key: str, owner_ref: str | None, *,
+    before_spawn: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """The existing allocation command; selected custody fences its actual spawn."""
+    args = ["create", "--creation-key", key, "--no-owner",
+            "--interface", "acp", "--origin", "delegate", "--json"]
+    if owner_ref:
+        args += ["--owner-ref", owner_ref]
+    allocation = await worktree_command(
+        args, target.project, **({"before_spawn": before_spawn} if before_spawn is not None else {}),
+    )
+    creation = allocation.get("creation")
+    saved = allocation.get("worktree")
+    if (
+        not isinstance(creation, dict) or creation.get("version") != 1
+        or creation.get("status") != "complete" or not isinstance(saved, dict)
+    ):
+        raise AcquisitionRefused("creation_unproven", "ground owner did not prove keyed allocation")
+    return saved
 
 
 async def start_request(
@@ -168,19 +191,7 @@ async def start(
             if target.worktree_id:
                 saved, _ = await _workspace(target.project, target.worktree_id)
             else:
-                args = ["create", "--creation-key", key, "--no-owner",
-                        "--interface", "acp", "--origin", "delegate", "--json"]
-                owner_ref = options.get("caller_owner_ref")
-                if owner_ref:
-                    args += ["--owner-ref", owner_ref]
-                allocation = await worktree_command(args, target.project)
-                creation = allocation.get("creation")
-                saved = allocation.get("worktree")
-                if (
-                    not isinstance(creation, dict) or creation.get("version") != 1
-                    or creation.get("status") != "complete" or not isinstance(saved, dict)
-                ):
-                    raise AcquisitionRefused("creation_unproven", "ground owner did not prove keyed allocation")
+                saved = await allocate_workspace(target, key, options.get("caller_owner_ref"))
         if (
             not isinstance(saved.get("id"), str) or not saved["id"]
             or saved.get("repo") != target.project or not saved.get("path")

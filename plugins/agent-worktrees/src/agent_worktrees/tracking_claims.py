@@ -444,6 +444,7 @@ def load_or_create_anchor_record(
     tracking_path: Path,
     *,
     identity_mode: IdentityMode = "legacy",
+    config: cfg.Config | None = None,
 ) -> tracking.WorktreeRecord:
     validate_mode(identity_mode)
     tracking = _tracking()
@@ -458,7 +459,7 @@ def load_or_create_anchor_record(
         pair_kind="anchor",
         machine_identity_factory=lambda: new_tracking_identity(
             identity_mode, repo=repo, machine=machine, platform_name=platform_name,
-            tracking_path=tracking_path, anchor_path=anchor_path,
+            tracking_path=tracking_path, anchor_path=anchor_path, config=config,
         ),
     )
     return record

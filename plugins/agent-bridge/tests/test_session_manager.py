@@ -300,6 +300,21 @@ class TestStartSession:
         assert row["acp_session_id"] == "acp-test-123"
 
     @pytest.mark.asyncio
+    async def test_start_unselected_local_still_registers_ordinary_lineage(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, monkeypatch,
+    ) -> None:
+        register = Mock(return_value=True)
+        monkeypatch.setattr("agent_bridge.worktree_lineage.register_session", register)
+        spawn_target.worktree_id = "ordinary-worktree"
+        spawn_target.explicit_cwd = True
+        session = await session_manager.start_session(spawn_target)
+        assert session.status == SessionStatus.IDLE
+        register.assert_called_once_with(
+            "ordinary-worktree", session.acp_session_id, pid=session.pid,
+            worktree_dir=spawn_target.cwd,
+        )
+
+    @pytest.mark.asyncio
     async def test_start_failure_marks_failed(
         self, session_manager, spawn_target, _patch_spawn
     ) -> None:

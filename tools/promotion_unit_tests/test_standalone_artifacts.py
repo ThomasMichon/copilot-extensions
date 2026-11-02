@@ -11,14 +11,53 @@ import pytest
 
 import promotion_python_artifacts as artifacts
 from artifact_source_build import validate_static_build
-from standalone_python_artifacts import artifact_label, project_key
+from standalone_python_artifacts import artifact_label, injected_resources, project_key
+
+
+@pytest.mark.parametrize("member", ["__init__.py", "_job_scopes.py", "_windows_job_types.py",
+                                   "_output_relay.py", "streaming.py"])
+@pytest.mark.parametrize("changed", [False, True])
+def test_construction_pair_source_binding_refuses_each_changed_included_member(tmp_path, member, changed):
+    root = Path(__file__).resolve().parents[2]
+    helper = tmp_path / "libs/versioned-runtime/standalone_build.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes((root / "libs/versioned-runtime/standalone_build.py").read_bytes())
+    expected = {
+        "fleet_manager/_construction_procutil/" + name: (
+            tmp_path / "libs/agent-procutil/src/agent_procutil" / name
+        ) for name in ("__init__.py", "_job_scopes.py", "_windows_job_types.py", "_output_relay.py", "streaming.py")
+    }
+    for name, source in expected.items():
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"# retained canonical construction fixture\n")
+        included = tmp_path / "fleet-manager/src" / name
+        included.parent.mkdir(parents=True, exist_ok=True)
+        included.write_bytes(source.read_bytes())
+    if changed:
+        from build_toolchain_lock import ArtifactBuildError
+
+        (tmp_path / "fleet-manager/src/fleet_manager/_construction_procutil" / member).write_bytes(
+            b"# substituted included construction fixture\n",
+        )
+        with pytest.raises(ArtifactBuildError, match="differs from canonical source"):
+            injected_resources("fleet-manager", tmp_path)
+    else:
+        actual = injected_resources("fleet-manager", tmp_path)
+        assert {name: source for name, source in actual.items() if "_construction_procutil" in name} == expected
 
 
 @pytest.mark.parametrize("record,label,key", [
     ({"plugin": "agent-pull-requests"}, "agent-pull-requests", "agent-pull-requests"),
     ({"component": "pr-service"}, "standalone-pr-service", "standalone:pr-service"),
     ({"component": "fleet-manager"}, "standalone-fleet-manager", "standalone:fleet-manager"),
-], ids=["plugin", "pr-service", "fleet-manager"])
+    ({"component": "chat-service"}, "standalone-chat-service", "standalone:chat-service"),
+    ({"component": "dispatch-service"}, "standalone-dispatch-service", "standalone:dispatch-service"),
+    ({"component": "ssh-service"}, "standalone-ssh-service", "standalone:ssh-service"),
+    ({"component": "worktree-manager"}, "standalone-worktree-manager", "standalone:worktree-manager"),
+], ids=[
+    "plugin", "pr-service", "fleet-manager", "chat-service", "dispatch-service",
+    "ssh-service", "worktree-manager",
+])
 def test_explicit_standalone_identity_preserves_plugin_names(record, label, key):
     assert artifact_label(record) == label
     assert project_key(record) == key
@@ -27,7 +66,7 @@ def test_explicit_standalone_identity_preserves_plugin_names(record, label, key)
 @pytest.mark.parametrize("record", [
     {"component": "../services/pr"},
     {"component": "services/pr"},
-    {"component": "worktree-manager"},
+    {"component": "unregistered-service"},
     {"component": []},
     {"component": "pr-service", "plugin": "pr-service"},
 ], ids=["traversal", "path", "unregistered", "invalid-type", "plugin-alias"])
@@ -46,6 +85,37 @@ def test_candidate_inventory_keeps_same_name_plugin_and_standalone_distinct(tmp_
     assert artifacts.candidate_projects(tmp_path) == {
         "pr-service": "1.0", "standalone:pr-service": "1.0", "standalone:fleet-manager": "1.0",
     }
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_candidate_closure_uses_selected_root_without_mutating_reference_owner(tmp_path, monkeypatch, foreign):
+    import build_python_artifacts as builder
+
+    candidate, host = tmp_path / "candidate", tmp_path / "host"
+    consumer = candidate / "fleet-manager"
+    consumer.mkdir(parents=True)
+    for root in (candidate, host):
+        library = root / "libs" / "helper"
+        (library / "src" / "helper").mkdir(parents=True)
+        (library / "src" / "helper" / "__init__.py").write_text("")
+        (library / "pyproject.toml").write_text(
+            '[project]\nname="helper"\nversion="1"\n',
+        )
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="consumer"\nversion="1"\n[tool.uv.sources]\n'
+        'helper={path="' + ("../../host/libs/helper" if foreign else "../libs/helper")
+        + '",editable=true}\n',
+    )
+    monkeypatch.setattr(builder, "REPO", candidate)
+    monkeypatch.setattr(builder, "LIBS_DIR", candidate / "libs")
+    monkeypatch.setattr(builder.uer, "REPO", host)
+    monkeypatch.setattr(builder.uer, "LIBS_DIR", host / "libs")
+    if foreign:
+        with pytest.raises(builder.ArtifactBuildError, match="not libs/helper"):
+            builder.resolve_vendored_libs(consumer)
+    else:
+        assert builder.resolve_vendored_libs(consumer) == [("helper", candidate / "libs" / "helper")]
+    assert builder.uer.REPO == host and builder.uer.LIBS_DIR == host / "libs"
 
 
 @pytest.mark.parametrize("failure", ["missing", "malformed"])

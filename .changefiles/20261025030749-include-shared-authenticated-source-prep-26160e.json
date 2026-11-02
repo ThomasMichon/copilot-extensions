@@ -1,0 +1,9 @@
+{
+  "comment": "Include shared authenticated-source preparation and exact local-package selection",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

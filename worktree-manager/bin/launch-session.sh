@@ -596,7 +596,7 @@ start_update_stage() {
     admit_launch_target "$_LAUNCH_POLICY_PATH" maintenance || return 3
     automatic_maintenance_enabled || return 0
     setup_log INFO 'Starting background update stage (stage-update)'
-    ( "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 ) &
+    ( "$PYTHON" -m agent_worktrees stage-update --auto >/dev/null 2>&1 ) &
     _STAGE_PID=$!
 }
 
@@ -615,7 +615,7 @@ invoke_update_apply() {
     if [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
         local _automatic_args=(-m agent_worktrees)
         [[ -n "$LAUNCH_PROJECT" ]] && _automatic_args+=(--project "$LAUNCH_PROJECT")
-        _automatic_args+=(launch-update automatic --detach)
+        _automatic_args+=(launch-update automatic --auto --detach)
         local _include_reconcile=""
         [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]] && _include_reconcile=1
         if [[ "$_NO_UPDATE" == "1" ]]; then
@@ -679,7 +679,7 @@ for value in [
         if [[ "$stage_done" != "True" || "$skipped" == "locked" ]]; then
             automatic_maintenance_enabled || { _stop_setup_progress; return 0; }
             setup_status INFO 'Background download unavailable; downloading the plugin update now...'
-            "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 || true
+            "$PYTHON" -m agent_worktrees stage-update --auto >/dev/null 2>&1 || true
             _parse_stage_status
         fi
         if [[ -n "$runtime_apply_blocked" ]]; then
@@ -689,7 +689,7 @@ for value in [
         # (1) Defer self-installation until foreground maintenance is finished.
         local _project_args=()
         [[ -n "$LAUNCH_PROJECT" ]] && _project_args=(--project "$LAUNCH_PROJECT")
-        local _bootstrap_args=(launch-update bootstrap)
+        local _bootstrap_args=(launch-update bootstrap --auto)
         [[ "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]] && _bootstrap_args+=(--defer-worktrees)
 
         # (2) The executor re-derives the bootstrap plan under driver custody.
@@ -710,14 +710,14 @@ for value in [
         local _reconcile_project=()
         [[ -n "$LAUNCH_PROJECT" ]] && _reconcile_project=(--project "$LAUNCH_PROJECT")
         _run_launch_request reconcile 'Plugin reconcile' \
-            "$PYTHON" -m agent_worktrees ${_reconcile_project[@]+"${_reconcile_project[@]}"} launch-update reconcile
+            "$PYTHON" -m agent_worktrees ${_reconcile_project[@]+"${_reconcile_project[@]}"} launch-update reconcile --auto
         if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
             PYTHON="$_refreshed_python"
         fi
     fi
     # Submit last so foreground maintenance never joins our detached install.
     if [[ "$_NO_UPDATE" != "1" && "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]]; then
-        local _request_args=(launch-update staged --status "$status_file")
+        local _request_args=(launch-update staged --auto --status "$status_file")
         [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && _request_args+=(--detach)
         _run_launch_request installer 'Staged runtime request (applies on the next launch)' \
             "$PYTHON" -m agent_worktrees ${_project_args[@]+"${_project_args[@]}"} "${_request_args[@]}"
@@ -1005,12 +1005,15 @@ if [[ "$ACTION" == "exec" ]]; then
     # env -u prefix on the child launches below.
 
     # Export profile env vars (BYOK, offline mode, token limits, etc.)
-    # Uses shlex.quote for safe shell quoting; keys are validated alphanumeric.
+    # One quoted assignment array serves both export and literal tmux argv.
+    ENV_ASSIGNMENTS=()
     ENV_EXPORTS=$(echo "$JSON" | "$PYTHON" -c "
 import sys, json, shlex
 d = json.load(sys.stdin)
-for k, v in d.get('env', {}).items():
-    print(f'export {k}={shlex.quote(str(v))}')
+assignments = [shlex.quote(f'{k}={v}') for k, v in d.get('env', {}).items()]
+print('ENV_ASSIGNMENTS=(' + ' '.join(assignments) + ')')
+if assignments:
+    print('export ' + ' '.join(assignments))
 " 2>/dev/null) || true
     if [[ -n "$ENV_EXPORTS" ]]; then
         eval "$ENV_EXPORTS"
@@ -1145,7 +1148,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
     PYTHON="$_REFRESHED_PYTHON"
     setup_log INFO "Runtime refreshed before knowledge preflight: $PYTHON"
-    if [[ "$_PENDING_NEW_SEED" == "1" ]]; then
+    if [[ "$_PENDING_NEW_SEED" == "1" &&
+        "${CMD_ARRAY[1]:-}" == "-m" &&
+        "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
         CMD_ARRAY[0]="$PYTHON"
     fi
 
@@ -1265,6 +1270,14 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             # below.
             local incarnation=""
             incarnation="$(tmux display-message -t "$sess" -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
+            local cli_pane=""
+            local -a cli_pane_args=()
+            if [[ "${3:-}" == created ]]; then
+                cli_pane="$(tmux display-message -t "$sess" -p '#{pane_id}' 2>/dev/null || true)"
+                if [[ "$cli_pane" =~ ^%[0-9]+$ ]]; then
+                    cli_pane_args=("--cli-pane=$cli_pane")
+                fi
+            fi
             # Only the canonical spawn handshake is synchronous; expensive
             # registration continues outside the launcher's lifetime.
             aw_manager_callback "$wm_root" register \
@@ -1272,7 +1285,8 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 --worktree-id="$WORKTREE_ID" \
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
-                --mux-bin=tmux \
+                --mux-bin="$(type -P tmux)" \
+                "${cli_pane_args[@]+"${cli_pane_args[@]}"}" \
                 ${incarnation:+--session-incarnation="$incarnation"} \
                 >/dev/null 2>&1 || true
         }
@@ -1357,20 +1371,16 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         if [[ -n "${LAUNCH_ID:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_LAUNCH_ID=$LAUNCH_ID")
         fi
-        if [[ -n "$ENV_EXPORTS" ]]; then
-            while IFS= read -r line; do
-                # Strip 'export ' prefix → KEY=VALUE
-                local_kv="${line#export }"
-                if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
-                    case "$local_kv" in
-                        GH_TOKEN=*|GITHUB_TOKEN=*|AGENT_WORKTREES_AHP_AUTH_TOKEN=*)
-                            continue
-                            ;;
-                    esac
-                fi
-                TMUX_ENV_FLAGS+=(-e "$local_kv")
-            done <<< "$ENV_EXPORTS"
-        fi
+        for local_kv in ${ENV_ASSIGNMENTS[@]+"${ENV_ASSIGNMENTS[@]}"}; do
+            if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
+                case "$local_kv" in
+                    GH_TOKEN=*|GITHUB_TOKEN=*|AGENT_WORKTREES_AHP_AUTH_TOKEN=*)
+                        continue
+                        ;;
+                esac
+            fi
+            TMUX_ENV_FLAGS+=(-e "$local_kv")
+        done
         if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             TMUX_ENV_FLAGS+=(
                 -e "COPILOT_CLI_ENABLED_FEATURE_FLAGS=$COPILOT_CLI_ENABLED_FEATURE_FLAGS"
@@ -1383,6 +1393,28 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         # id for the mark and is consumed by the wrapper (not forwarded).
         SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
         PANE_WRAPPER="$SCRIPT_DIR/pane-wrapper.sh"
+        PANE_MANAGER_ROOT=""
+        RECORD_PATH="$(printf '%s' "$JSON" | "$PYTHON" -c \
+            'import json,sys; print(json.load(sys.stdin).get("record_path") or "")')" || exit 3
+        PANE_SHELL_VERSION="$(printf '%s' "$JSON" | "$PYTHON" -c \
+            'import json,sys; print(json.load(sys.stdin).get("pane_shell_version") or "")')" || exit 3
+        source "$SCRIPT_DIR/manager-runtime.sh"
+        if [[ "$PANE_SHELL_VERSION" == 1 && -n "$RECORD_PATH" \
+              && "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]] \
+              && MANAGER_SLOT="$(aw_manager_runtime_slot "${SCRIPT_DIR%/bin}")"; then
+            PANE_MANAGER_ROOT="${MANAGER_SLOT%/versions/*}"
+            if ! PREPARED_SHELL=$(
+                "$PYTHON" -I -m agent_worktrees.session_shell \
+                    --record "$RECORD_PATH" --wrapper "$PANE_WRAPPER" \
+                    --installation-root "$RUNTIME_DIR" --installation-root "$PANE_MANAGER_ROOT"
+            ); then
+                setup_log ERROR "Could not prepare installation-independent pane assets"
+                exit 3
+            fi
+            PANE_WRAPPER="$(printf '%s' "$PREPARED_SHELL" | "$PYTHON" -c \
+                'import json,sys; print(json.load(sys.stdin)["wrapper"])')" || exit 3
+            [[ -r "$PANE_WRAPPER" ]] || exit 3
+        fi
         AHP_TOKEN_FILE=""
         if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             if [[ ! -r "$PANE_WRAPPER" ]]; then
@@ -1409,6 +1441,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         fi
         if [[ -r "$PANE_WRAPPER" ]]; then
             PANE_CONTROL=(--aw-wt "${WORKTREE_ID:-}")
+            if [[ -n "$PANE_MANAGER_ROOT" ]]; then
+                PANE_CONTROL+=(--aw-manager-root "$PANE_MANAGER_ROOT" --aw-mux-bin "$(type -P tmux)")
+            fi
             if [[ -n "${LAUNCH_PROJECT:-}" ]]; then
                 PANE_CONTROL+=(--aw-project "$LAUNCH_PROJECT")
             fi
@@ -1493,7 +1528,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             activity_log mux_attached "$WORKTREE_ID" mux=create \
                 "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"
             _aw_apply_session_opts "$TMUX_SESS"
-            _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
+            _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}" created
             if [[ "$_PENDING_NEW_SEED" != "1" ]]; then
                 _aw_deliver_pending_seed "$WORKTREE_ID"
             fi

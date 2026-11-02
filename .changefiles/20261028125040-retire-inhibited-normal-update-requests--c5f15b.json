@@ -1,0 +1,13 @@
+{
+  "comment": "Retire inhibited normal update requests without executing installers and retain explicitly authorized repair requests under shared custody",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

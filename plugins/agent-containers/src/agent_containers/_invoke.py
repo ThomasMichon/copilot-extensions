@@ -17,9 +17,9 @@ _DIST_NAME = "agent-containers"
 def runtime_root() -> Path:
     override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
     if override:
-        return Path(override).expanduser()
+        return Path(os.path.abspath(Path(override).expanduser()))
     _legacy = ".agent-containers"  # marketplace-isolation: allow legacy compatibility root
-    return Path.home() / _legacy
+    return Path(os.path.abspath(Path.home() / _legacy))
 
 
 def _deploy_manifest_source_root() -> Path | None:

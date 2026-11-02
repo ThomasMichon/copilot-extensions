@@ -7,6 +7,22 @@ import math
 import re
 from urllib.parse import urlsplit
 
+SCOPED_PROTOCOL = "agent-pull-requests.watch/v2"
+_ROUTING_FIELDS = {"gateway", "route_prefix", "target", "repo", "caller_scope"}
+_SERVICE_FIELDS = {
+    "fleet", "gateway", "slot", "namespace", "principal", "target", "consumer", "account", "repo",
+}
+
+
+def _validate_service_binding(binding: dict) -> None:
+    service = binding["service_binding"]
+    if (binding["protocol"] != SCOPED_PROTOCOL or not isinstance(service, dict)
+            or set(service) != _SERVICE_FIELDS
+            or any(not isinstance(v, str) or not v or len(v) > 256
+                   or any(ord(char) < 32 for char in v) for v in service.values())
+            or any(service[name] != binding[name] for name in ("target", "repo"))):
+        raise ValueError("invalid scoped replay binding")
+
 
 def validate_replay(value: object, *, repo: str, timeout: float) -> dict:
     if not isinstance(value, dict) or set(value) != {
@@ -14,11 +30,14 @@ def validate_replay(value: object, *, repo: str, timeout: float) -> dict:
     }:
         raise ValueError("invalid replay intent")
     binding = value["binding"]
-    if not isinstance(binding, dict) or set(binding) != {
-        "gateway", "route_prefix", "target", "repo", "caller_scope",
-    }:
+    if not isinstance(binding, dict) or set(binding) not in (
+        _ROUTING_FIELDS, _ROUTING_FIELDS | {"protocol", "service_binding"},
+    ):
         raise ValueError("invalid replay binding")
-    if any(not isinstance(v, str) or not v or len(v) > 512 for v in binding.values()):
+    if "protocol" in binding:
+        _validate_service_binding(binding)
+    if any(not isinstance(binding[k], str) or not binding[k] or len(binding[k]) > 512
+           for k in _ROUTING_FIELDS):
         raise ValueError("invalid replay binding")
     gateway = urlsplit(binding["gateway"])
     if (

@@ -1,0 +1,9 @@
+{
+  "comment": "Store prepared Windows pane manifests and receipts beside copied launch assets",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ SPEC.loader.exec_module(RUNNER)
 GUARDS = (
     "check-no-sibling-tracking-writes.py",
     "check-headless-launch.py",
+    "check-daemon-coverage.py",
     "check-asyncio-timeout-handlers.py",
 )
 
@@ -111,7 +112,7 @@ def test_real_timeout_reaps_the_child_and_preserves_output(tmp_path, monkeypatch
     assert len(children) == 1 and children[0].poll() is not None
 
 
-@pytest.mark.parametrize("failed_index", [None, 0, 1, 2])
+@pytest.mark.parametrize("failed_index", [None, *range(len(GUARDS))])
 def test_real_processes_overlap_join_and_keep_all_diagnostics(
     tmp_path,
     monkeypatch,
@@ -120,8 +121,8 @@ def test_real_processes_overlap_join_and_keep_all_diagnostics(
 ):
     tools = tmp_path / "tools"
     tools.mkdir()
-    markers = [str(tmp_path / f"started-{index}") for index in range(3)]
-    finished = [tmp_path / f"finished-{index}" for index in range(3)]
+    markers = [str(tmp_path / f"started-{index}") for index in range(len(GUARDS))]
+    finished = [tmp_path / f"finished-{index}" for index in range(len(GUARDS))]
     for index, guard in enumerate(GUARDS):
         script = (
             "import sys, time\n"
@@ -146,7 +147,7 @@ def test_real_processes_overlap_join_and_keep_all_diagnostics(
     assert [line for line in output.splitlines() if line.startswith("::group::")] == [
         f"::group::{guard}" for guard in GUARDS
     ]
-    for index in range(3):
+    for index in range(len(GUARDS)):
         assert f"stdout-{index}" in output and f"stderr-{index}" in output
     assert output.count("::error::") == int(failed_index is not None)
     if failed_index is not None:

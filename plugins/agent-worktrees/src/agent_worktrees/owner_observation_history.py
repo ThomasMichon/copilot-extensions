@@ -1,0 +1,489 @@
+"""Owner-fenced SQLite projection; never a YAML transaction or canonical ledger."""
+
+from __future__ import annotations
+
+import sqlite3
+import threading
+from collections.abc import Callable
+from contextlib import closing, contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from . import owner_observation_contract as c
+from . import owner_observation_failure as failures
+from . import owner_observation_intent as intents
+from .owner_observation_append import (
+    SCHEMA,
+    PreparationOverflow,
+    delivery_failed,
+    freeze_record,
+    prepare,
+)
+from .owner_observation_initialize import initialize
+from .owner_observation_publication import publish
+
+
+@dataclass(frozen=True)
+class CanonicalObservation:
+    """Explicit owner-supplied capture; no filesystem or actor discovery."""
+
+    project: str
+    worktree_id: str
+    source: str
+    head_session_id: str | None
+    facts: dict[str, Any]
+    record_fence: dict[str, Any]
+    observed_at: str
+    availability: str = "observed"
+    completeness: str = "unknown"
+
+    def __post_init__(self) -> None:
+        c.Selection(self.project, self.worktree_id, self.head_session_id)
+        c.reference(self.source, "canonical source identity")
+        c.timestamp(self.observed_at)
+        c.enum(self.availability, c.AVAILABILITY, "record availability")
+        c.enum(self.completeness, c.COMPLETENESS, "retained coverage")
+        if not isinstance(self.facts, dict) or not isinstance(self.record_fence, dict):
+            raise c.ObservationError("canonical capture facts/fence must be objects")
+        c.encode(asdict(self), c.BODY_BYTES - 2048)
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return self.project, self.worktree_id
+
+
+class OwnerObservationHistory:
+    """An optional projection fence under an already elected caller-owned resident."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        resident_generation: str,
+        writer_id: str,
+        authority_check: Callable[[], bool],
+        max_entries: int = 5000,
+        max_bytes: int = 8 * 1024 * 1024,
+    ) -> None:
+        self.path = Path(path)
+        self.resident_generation = c.generation(resident_generation)
+        self.writer_id = c.generation(writer_id)
+        if not callable(authority_check):
+            raise c.ObservationError("explicit elected-owner callback required")
+        if type(max_entries) is not int or not 1 <= max_entries <= 5000:
+            raise c.ObservationError("invalid history retention count")
+        if type(max_bytes) is not int or not c.BODY_BYTES <= max_bytes <= 8 * 1024 * 1024:
+            raise c.ObservationError("invalid history retention bytes")
+        self.authority_check = authority_check
+        self.max_entries, self.max_bytes = max_entries, max_bytes
+        self._lock = threading.RLock()
+        self._active = False
+        self._retired = False
+        self._failures: dict[tuple[str, str], failures.PendingFailure] = {}
+        self._after_intent: Callable[[intents.Intent], None] | None = None
+
+    def _authority(self) -> None:
+        if self._retired or self.authority_check() is not True:
+            raise c.ObservationError("owner observation publisher is not elected", "superseded")
+        if self.path.is_symlink():
+            raise c.ObservationError("linked owner observation database refused", "unavailable")
+
+    def _connect(self, *, write: bool = False) -> sqlite3.Connection:
+        self._authority()
+        if not self._active:
+            raise c.ObservationError("owner observation index is unready", "unready")
+        uri = self.path.resolve().as_uri() + ("?mode=rw" if write else "?mode=ro")
+        conn = sqlite3.connect(uri, uri=True, timeout=0.2)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _fence(self, conn: sqlite3.Connection) -> None:
+        self._authority()
+        row = conn.execute(
+            "SELECT generation,writer FROM owner_observation_owner WHERE singleton=1",
+        ).fetchone()
+        if row is None or tuple(row) != (self.resident_generation, self.writer_id):
+            self._retired = True
+            raise c.ObservationError("owner observation writer was replaced", "superseded")
+
+    @contextmanager
+    def _read(self):
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute("BEGIN")
+            self._fence(conn)
+            yield conn
+            conn.rollback()
+            with closing(self._connect()) as fresh:
+                self._fence(fresh)
+
+    def activate(self, *, expected_generation: str | None = None) -> None:
+        if expected_generation is not None:
+            c.generation(expected_generation)
+        with self._lock:
+            self._authority()
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with closing(sqlite3.connect(self.path, timeout=0.2)) as conn, conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    tables = {
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    }
+                    coverage_missing = (
+                        not {
+                            "owner_observation_intent",
+                            "owner_observation_gap",
+                            "owner_observation_protocol",
+                        }
+                        <= tables
+                    )
+                    for statement in (*SCHEMA, *intents.SCHEMA):
+                        conn.execute(statement)
+                    conn.row_factory = sqlite3.Row
+                    self._authority()
+                    previous = conn.execute(
+                        "SELECT generation,writer FROM owner_observation_owner WHERE singleton=1",
+                    ).fetchone()
+                    if previous is None or tuple(previous) != (
+                        self.resident_generation,
+                        self.writer_id,
+                    ):
+                        if self._active:
+                            self._retired = True
+                            raise c.ObservationError(
+                                "replaced writer cannot reactivate", "superseded"
+                            )
+                        old = None if previous is None else previous[0]
+                        if old != expected_generation or old == self.resident_generation:
+                            raise c.ObservationError(
+                                "observation owner generation changed", "superseded"
+                            )
+                        conn.execute(
+                            "INSERT OR REPLACE INTO owner_observation_owner VALUES (1,?,?)",
+                            (self.resident_generation, self.writer_id),
+                        )
+                    if not self._active:
+                        intents.recover(conn, coverage_missing=coverage_missing)
+                    self._authority()
+                self._active = True
+            except (OSError, sqlite3.Error):
+                self._active = False
+                raise
+
+    def close(self) -> None:
+        with self._lock:
+            self._retired, self._active = True, False
+
+    def _row(
+        self,
+        conn: sqlite3.Connection,
+        selected: c.Selection,
+        journal: str | None = None,
+        *,
+        _pending: bool = True,
+    ):
+        active = journal is None
+        if journal is None:
+            found = conn.execute(
+                "SELECT generation FROM owner_observation_active WHERE project=? AND worktree=?",
+                (selected.project, selected.worktree_id),
+            ).fetchone()
+            journal = None if found is None else found[0]
+        row = conn.execute(
+            "SELECT * FROM owner_observation_journal "
+            "WHERE generation=? AND project=? AND worktree=?",
+            (journal, selected.project, selected.worktree_id),
+        ).fetchone()
+        if row is None:
+            raise c.ObservationError("selected owner source is not materialized", "unready")
+        return intents.overlay(self, conn, row, active=active, pending=_pending)
+
+    def _source(self, row) -> c.Source:
+        return c.Source(
+            row["project"],
+            row["worktree"],
+            row["source"],
+            row["generation"],
+            self.resident_generation,
+            row["head"],
+        )
+
+    def _body(self, row, selected: c.Selection, *, _materializing: bool = False) -> dict:
+        state = row["availability"]
+        if selected.expected_head_session_id is None or row["head"] is None:
+            state = "unknown"
+        elif selected.expected_head_session_id != row["head"]:
+            state = "head-changed"
+        failure = None if _materializing else self.pending_failure(row)
+        if failure or row.get("_intent_pending", False):
+            state = "unavailable"
+        return {
+            "availability": state,
+            "completeness": "partial"
+            if failure
+            else (row.get("_coverage", "partial") if row["gap"] else row["completeness"]),
+            "durability": "pending"
+            if failure or row.get("_intent_pending", False)
+            else "committed",
+            "history_scope": "retained-range",
+            "history_floor": c.position(self._source(row), row["floor"]),
+            "observed_at": row["observed_at"],
+        }
+
+    def _entries(self, conn, row, after: int, before: int | None = None, limit: int = 64):
+        upper = row["position"] if before is None else before - 1
+        found = conn.execute(
+            "SELECT payload FROM owner_observation_entry WHERE generation=? "
+            "AND position>? AND position<=? ORDER BY position DESC LIMIT ?",
+            (row["generation"], after, upper, limit),
+        ).fetchall()
+        return [c.decode(c.utf8(item[0]), c.BODY_BYTES) for item in reversed(found)]
+
+    def _snapshot(self, conn, row, selected: c.Selection, after_cursor: str | None = None):
+        if row["qualified"] != self.resident_generation:
+            raise c.ObservationError(
+                "current canonical record requires requalification", "unready"
+            )
+        source, entries, complete, base = self._source(row), [], True, after_cursor
+        reason = row["gap"]
+        if after_cursor is not None:
+            try:
+                after = c.sequence(after_cursor, source)
+            except c.ObservationError as error:
+                if error.code != "source-replaced":
+                    raise
+                after, reason, complete = row["position"], "source-replaced", False
+            if after > row["position"]:
+                raise c.ObservationError("owner position is ahead of the index")
+            if after < row["floor"]:
+                reason, complete = "retention", False
+            elif row["position"] - after > c.PAGE_ENTRIES:
+                reason, complete = "cursor-unavailable", False
+            elif complete:
+                entries = self._entries(conn, row, after)
+        body = self._body(row, selected)
+        facts = c.decode(c.utf8(row["facts"])) if body["availability"] == "observed" else None
+        body.update(
+            replay_barrier=c.position(source, row["position"]),
+            base_cursor=base,
+            entries=entries,
+            replay_complete=complete,
+            facts=facts,
+        )
+        try:
+            snapshot = c.frame("snapshot", source, body["replay_barrier"], body)
+        except c.ObservationError as error:
+            if error.code != "oversized" or not entries:
+                raise
+            body.update(entries=[], replay_complete=False)
+            snapshot = c.frame("snapshot", source, body["replay_barrier"], body)
+            reason = "cursor-unavailable"
+        failure = self.pending_failure(row)
+        if failure is not None:
+            reason = failure.reason
+        return snapshot, reason
+
+    def snapshot(
+        self, selected: c.Selection, after_cursor: str | None = None
+    ) -> tuple[dict, dict | None]:
+        with self._read() as conn:
+            self._fence(conn)
+            row = self._row(conn, selected)
+            snapshot, reason = self._snapshot(conn, row, selected, after_cursor)
+            gap = None if reason is None else self._gap(row, selected, reason, after_cursor)
+            self._fence(conn)
+            return snapshot, gap
+
+    def _gap(self, row, selected, reason, base):
+        source = self._source(row)
+        body = self._body(row, selected)
+        body.update(
+            availability="unavailable",
+            completeness="partial",
+            reason=reason,
+            base_cursor=base,
+            details=failure.details
+            if (failure := self.pending_failure(row)) is not None
+            else row.get("_gap_details", reason),
+            reconcile="snapshot-and-history",
+            source_ref=None,
+        )
+        return c.frame("gap", source, c.position(source, row["position"]), body)
+
+    def initialize(
+        self,
+        record: CanonicalObservation,
+        *,
+        expected_source_generation: str | None = None,
+    ) -> dict:
+        """Qualify explicit current record input, preserving old journal identities."""
+        record = freeze_record(record)
+        return initialize(self, record, expected_source_generation)
+
+    def publish(
+        self,
+        record: CanonicalObservation,
+        entries: list[dict],
+        *,
+        batch_id: str,
+        expected_cursor: str,
+        post_save: bool = False,
+    ) -> dict:
+        c.reference(batch_id, "observation batch identity")
+        record = freeze_record(record)
+        selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
+        try:
+            record, frozen, digest = prepare(record, entries, post_save)
+        except PreparationOverflow as error:
+            delivery_failed(
+                self,
+                selected,
+                record,
+                expected_cursor,
+                error,
+                batch_id=batch_id,
+                entries=error.entries,
+            )
+            raise c.ObservationError(
+                "admitted owner publication requires reconciliation",
+                "cursor-unavailable",
+            ) from error
+        return publish(self, record, frozen, digest, batch_id, expected_cursor, delivery_failed)
+
+    def delta(self, selected: c.Selection, after_cursor: str) -> tuple[dict, dict | None]:
+        with self._read() as conn:
+            self._fence(conn)
+            row = self._row(conn, selected)
+            snapshot, reason = self._snapshot(conn, row, selected, after_cursor)
+            gap = None if reason is None else self._gap(row, selected, reason, after_cursor)
+            if gap is not None or not snapshot["replay_complete"]:
+                return snapshot, gap
+            if after_cursor == snapshot["cursor"]:
+                return snapshot, None
+            body = {key: snapshot[key] for key in c.BODY_FIELDS["delta"]}
+            result = c.frame("delta", self._source(row), snapshot["cursor"], body)
+            self._fence(conn)
+            return result, None
+
+    def page(
+        self, selected: c.Selection, journal: str, before_cursor: str | None, limit: int = 64
+    ):
+        c.generation(journal)
+        if type(limit) is not int or not 1 <= limit <= 64:
+            raise c.ObservationError("invalid owner history page limit")
+        with self._read() as conn:
+            self._fence(conn)
+            row = self._row(conn, selected, journal)
+            source = self._source(row)
+            before = None if before_cursor is None else c.sequence(before_cursor, source)
+            if before is not None and before > row["position"] + 1:
+                raise c.ObservationError("history before position is ahead of the source")
+            if before is not None and before <= row["floor"]:
+                return self._gap(row, selected, "retention", before_cursor)
+            entries = self._entries(conn, row, row["floor"], before, limit)
+            while True:
+                oldest = None if not entries else c.sequence(entries[0]["cursor"], source)
+                more = oldest is not None and oldest > row["floor"] + 1
+                body = self._body(row, selected)
+                body.update(
+                    before_cursor=before_cursor,
+                    next_before=entries[0]["cursor"] if more else None,
+                    entries=entries,
+                    has_more=more,
+                )
+                try:
+                    result = c.frame(
+                        "history-page", source, c.position(source, row["position"]), body
+                    )
+                    break
+                except c.ObservationError as error:
+                    if error.code != "oversized" or len(entries) <= 1:
+                        raise
+                    entries.pop(0)
+            self._fence(conn)
+            return result
+
+    def last_record(self, selected: c.Selection) -> tuple[CanonicalObservation, str, str]:
+        """Last materialization for labelled reconciliation, never active-source proof."""
+        with self._read() as conn:
+            self._fence(conn)
+            row = self._row(conn, selected)
+            record = CanonicalObservation(
+                row["project"],
+                row["worktree"],
+                row["source"],
+                row["head"],
+                c.decode(c.utf8(row["facts"])),
+                c.decode(c.utf8(row["fence"])),
+                row["observed_at"],
+                row["availability"] if row["qualified"] == self.resident_generation else "unknown",
+                row["completeness"],
+            )
+            self._fence(conn)
+            return record, c.position(self._source(row), row["position"]), row["generation"]
+
+    def check_owner(self) -> None:
+        with self._lock, closing(self._connect()) as conn:
+            self._fence(conn)
+
+    def append_failed(
+        self,
+        key: tuple[str, str],
+        error: Exception,
+        *,
+        reason: str = "journal-write-failed",
+    ) -> None:
+        c.enum(reason, c.GAP_REASONS, "gap reason")
+        selected = c.Selection(*key, None)
+        with self._lock:
+            with closing(self._connect(write=True)) as conn, conn:
+                conn.execute("BEGIN IMMEDIATE")
+                self._fence(conn)
+                row = self._row(conn, selected, _pending=False)
+                record = CanonicalObservation(
+                    row["project"],
+                    row["worktree"],
+                    row["source"],
+                    row["head"],
+                    c.decode(c.utf8(row["facts"])),
+                    c.decode(c.utf8(row["fence"])),
+                    row["observed_at"],
+                    row["availability"],
+                    row["completeness"],
+                )
+                token = intents.start(self, conn, record, row, kind="failure")
+            failure = intents.fail(self, record, token, error, reason=reason)
+            if not failure.gap_persisted:
+                raise failure
+
+    def _mark_failed(self, row, error: Exception, *, reason: str = "journal-write-failed") -> None:
+        reason = c.enum(reason, c.GAP_REASONS, "gap reason")
+        generation = c.generation(row["generation"])
+        source = c.reference(row["source"], "journal source")
+        self._failures[(row["project"], row["worktree"])] = failures.PendingFailure(
+            generation,
+            source,
+            reason,
+            str(error)[:1024] or type(error).__name__,
+        )
+
+    def pending_failure(self, row) -> failures.PendingFailure | None:
+        pending = self._failures.get((row["project"], row["worktree"]))
+        if pending is not None and (pending.generation, pending.source) == (
+            row["generation"],
+            row["source"],
+        ):
+            return pending
+        return None
+
+    def _clear_failure(self, key, generation, source) -> None:
+        pending = self._failures.get(key)
+        if pending is not None and (pending.generation, pending.source) == (generation, source):
+            self._failures.pop(key)
+
+    @property
+    def _failure_reasons(self) -> dict:
+        return {key: pending.reason for key, pending in self._failures.items()}

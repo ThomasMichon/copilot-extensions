@@ -48,7 +48,7 @@ _native_foundation_files() {
         { _native_foundation_error 'requires exact update-driver source'; return 1; }
     _native_foundation_plain "$plugin" directory || return 1
     __foundation_files=()
-    for name in update-driver agent-procutil single-instance-lease; do
+    for name in update-driver agent-procutil single-instance-lease zdd; do
         package="${plugin%/*}/$name"
         _native_foundation_plain "$package" directory || return 1
         _native_foundation_plain "$package/pyproject.toml" file || return 1
@@ -117,7 +117,7 @@ native_foundation_source_digest() (
 
 _native_foundation_outside_sources() {
     local path="$1" plugin="$2" name package
-    for name in update-driver agent-procutil single-instance-lease; do
+    for name in update-driver agent-procutil single-instance-lease zdd; do
         package="${plugin%/*}/$name"
         [[ "$path" != "$package" && "$path" != "$package/"* ]] ||
             { _native_foundation_error 'execution paths cannot mutate source closure'; return 1; }

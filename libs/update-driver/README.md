@@ -37,6 +37,17 @@ no environment variable silently replaces that authority. A product worker may
 call `drain(root=...)`, or use the finite `python -m update_driver worker`
 entrypoint. No command/runner submission CLI exists.
 
+The canonical executor uses procutil's explicit installation-owned process
+boundary. Bounded installer descendants remain caller-owned; on Windows only
+explicitly durable product daemons can leave its cleanup Job through native
+breakaway. A restrictive external Job still refuses escape, and contained tests
+retain strict cleanup. Completion confirms the installer scope, not termination
+of independently owned service daemons. There is no Task, COM or UAC fallback.
+
+The private executor shim places generated Python bytecode beneath the existing
+driver root's `cache/python`, outside the invoking runtime's immutable slot.
+Its pinned product invocation and installation custody remain unchanged.
+
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
 SYSTEM and Administrators. Elevated execution therefore does not leave a
@@ -49,6 +60,22 @@ creation, not an implicit permission migration or a read-only status side effect
   cwd is normalized, while argument ordering and spelling remain significant.
   Adapters own semantic option normalization and safe-field projection. Never
   put credentials in argv, source, context, error strings, or runner metadata.
+  The optional `repair=False` boolean is the existing wire name for explicit
+  manual admission past the automatic-update hold, including ordinary manual
+  updates and operator repair. It never adds force/recreate arguments or changes
+  construction selection. Public `update` adapters set it unless `--auto` was
+  explicitly requested; force options do not exempt automatic requests.
+  It is not an environment-variable override or a grant of operator authority.
+  Automatic records omit the default field, preserving existing identities;
+  legacy records without it retain their automatic inhibition semantics.
+  Readers already supporting `repair` need no schema migration to admit a
+  manual request. Earlier readers reject that field rather than silently
+  claiming support. Older CLI parsers reject `--auto` before installation.
+  An explicit `BOOTSTRAP_KILLSWITCH_STATE_FILE` override is captured at enqueue
+  as the absolute `killswitch_path`, relative to the request's original cwd
+  when needed. It participates in identity; a detached or already-running
+  worker never substitutes its own override. The empty default is omitted
+  from ordinary records, and legacy records continue to use canonical paths.
 - `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication
@@ -124,6 +151,36 @@ creation, not an implicit permission migration or a read-only status side effect
   An optional trusted `executor(Transaction)->int` must finish all its effects
   and cleanup before returning. Returning an exit code certifies that cleanup
   boundary; custom-executor exceptions remain conservatively interrupted.
+
+### Automatic-update KillSwitch and explicit/manual admission
+
+Before each pending request becomes running, the existing owner re-reads the
+shared bootstrap KillSwitch, including its legacy-path fallback and existing
+`BOOTSTRAP_KILLSWITCH_STATE_FILE` selection. An active switch completes automatic
+jobs with exit 3 and error `automatic-update KillSwitch active; nothing ran`.
+Their start time stays absent, no product runner or installer starts, and the
+pending position is released. Status and wait retain this non-success outcome;
+the worker continues to later jobs. Clearing the switch permits new automatic
+requests, but does not replay jobs already retired.
+
+Explicit/manual `repair=True` requests bypass only this automatic-update inhibition,
+under the operator authority of the submitting driver. They retain the same
+execution lock, native process containment, foundation and interruption fences.
+Switch activation does not kill a running job. Ordinary jobs require no
+additional per-job provenance approval: their trusted adapter and normal
+installation admission remain responsible for source and execution integrity.
+
+As with the bootstrap guard, missing state means inactive; malformed or
+unreadable state warns and retains the existing fail-open policy. The shared
+default-installation hold does not cross into independently namespaced cells:
+`COPILOT_EXTENSIONS_CONTEXT` retains its existing scope exemption, not a grant
+of manual authority or an invented per-cell hold policy. Manual/automatic
+admission above applies where that hold is applicable.
+Manual and automatic requests have different persisted identities even when
+their installer argv is identical, and therefore cannot coalesce.
+No database migration, direct queue edit, new scheduler or flag removal is
+needed. Older pending jobs are handled by the next capable worker; updating
+source alone does not upgrade a selected or already-running worker.
 
 ## Execution and borrowed custody
 
@@ -387,7 +444,7 @@ Deleting control files or rotating roots is not recovery.
 On Windows, the packaged `update_driver/foundation.ps1` provides the same
 progress protocol without Python. Load the canonical native operation lock
 first. `Start-NativeFoundationProgress -Custody <held-object> -Root <execution-root>
--Plugin <absolute-update-driver-source>` hashes the fixed three-sibling
+-Plugin <absolute-update-driver-source>` hashes the fixed four-sibling
 non-generated inventory and publishes running progress under that exact lock.
 `Get-NativeFoundationProgress -Root <execution-root>` is read-only; it returns
 the validated JSON record or no record. It rejects duplicate/unknown fields,
@@ -457,10 +514,10 @@ operation edits or initializes a queue. The same cold-only queue/sidecar refusal
 applies before native admission.
 
 `native_foundation_source_digest` and `freeze_native_foundation_source` use the
-same UTF-8, byte-sorted three-package inventory as Python and PowerShell,
+same UTF-8, byte-sorted four-package inventory as Python and PowerShell,
 including both canonical installer-engine variants. Freezing requires a new
 destination inside the execution root, which cannot be inside a source package.
-Both the root and destination must remain outside all three source packages,
+Both the root and destination must remain outside all four source packages,
 including when the execution root is an ancestor of the selected sources.
 It rechecks the original and frozen inventories under custody. These Linux
 helpers do **not** launch a producer, acquire prerequisites, settle child groups,
@@ -476,7 +533,7 @@ and outcome. This is an internal foundation-construction front door, not a
 plugin provisioning request or an arbitrary-argv installer.
 
 The producer holds the same FD 9 flock before staging, freezes the fixed
-three-package source closure, and acquires pinned uv/private managed Python
+four-package source closure, and acquires pinned uv/private managed Python
 through the existing installer-engine helper. It does not require Python or
 uv on PATH. The native acquisition guardian keeps its direct session child
 alive through Bash's deliberate exec of that private interpreter.
@@ -533,12 +590,16 @@ observation. Stalled handshakes expire independently. Async I/O retains its
 task-owned wait handle through completion/cancellation even after a deadline.
 
 `scripts/foundation-build.py` constructs only this library plus the canonical
-`agent-procutil` and `single-instance-lease` sibling packages. The fixed
+`agent-procutil`, `single-instance-lease` and `zdd` sibling packages. The fixed
 manifests, local references and complete non-generated source inventory must
 match admission. This raw-source closure is identical in shape on development
 and materialized payloads. Existing installer-engine/versioned-runtime sync
 owners supply its byte-identical construction helpers; Manager and plugin
 runtimes are not dependencies.
+
+The Windows dependency metadata declares `agent-zdd` only on Windows; the
+fixed source inventory includes its stdlib-only transport on every platform
+so native and Python admission hash the same complete construction inputs.
 
 The internal participant requires a live borrowed execution witness and
 matching running foundation progress **before staging**. It consumes the
@@ -564,6 +625,79 @@ venv and are not removed by this participant.
 The construction participant itself does not acquire a bootstrap interpreter,
 write admission/completion records or modify a plugin publisher. The separate
 Windows producer below owns those earlier construction stages.
+
+### Driver-owned Windows broker adoption
+
+After Windows foundation selection settles, the same construction participant
+calls `update_driver.windows_broker.adopt(runtime_root, slot, root=execution_root)`.
+It requires an authenticated inherited or already-scoped witness for the exact
+execution root and registers its execution obligation with that same owner.
+Both native PowerShell and Python witnesses support nested begin/end scopes;
+disconnecting with an open scope prevents successful witness disposal and
+later admission. No independent mutation lock, installer queue or forced
+recovery is introduced.
+
+An installer running the selected installed interpreter can invoke the same
+adapter across its existing process boundary:
+
+```text
+python -I -m update_driver.windows_broker --runtime-root <installation-root> --slot <immutable-slot> --execution-root <driver-root>
+```
+
+All three paths are explicit. The entry point accepts no command recipe,
+requires the same live inherited witness, and reports `{"adopted": true}` only
+after reconciliation completes. Missing custody, contained execution and an
+invalid installation refuse without provisioning another execution owner.
+This entry point is for owning installers, never an ordinary spawn fallback.
+
+Adoption validates the fixed immutable action paths, recovers pending broker
+publication, loads the prior owned registration and reconciles under that
+custody. It runs outside the runtime publication lease. A retained, qualified
+candidate may be adopted before application selector publication so the first
+activation callback already has its launch prerequisite. The broker's durable
+runtime ownership is independent of application selection or rollback.
+A crash after selection
+but before adoption does not discard a prior action: its durable runtime
+reference remains until explicit adoption/recovery settles. Missing first
+adoption is an explicit launch prerequisite, not a foreground-worker fallback.
+Contained construction never adopts an OS registration, and direct contained
+adoption refuses before reading installation state.
+
+Foundation construction adopts after its own selection. The Windows Manager
+installer adopts before its first publication callback through the fixed
+installed entry above. Its explicit cold bootstrap and `self-install --apply`
+drive the existing finite native executor, while inherited/scoped callers
+join their owner. Ordinary `ensure_worker` failure still never falls back to
+foreground execution. Other consumer installers and the normal daemon-launch
+default remain separate migration and qualification gates.
+
+The Windows Worktrees installer similarly adopts a retained numbered candidate
+before helper publication, recovery or monitor activation. Its explicit native
+entry takes driver custody before legacy or namespaced publication leases; a
+cold caller submits only the fixed installation recipe to the same finite
+executor. A reentry marker selects a live-witness check, never authorizes
+mutation by itself. Scoped installer children re-export the current witness;
+source-only fixtures reconstruct their own import graph after the Manager
+intentionally strips parent Python overrides. Mutable development slots are
+not broker actions. Full construction, live maintenance and desktop consumers
+remain distinct qualification obligations.
+
+Bridge and Codespaces use the canonical payload-local `installer_driver.py`
+adapter and shared native entry helper for their fixed Windows
+install/update/provision recipes. The adapter
+binds source, installation root and native options, joins raw or scoped custody,
+and requires a live witness on native reentry before self-staging. Its attached
+construction owner retains the canonical helper/launcher bundle before
+completion; a reused slot is verified without writes. Installed broker adoption
+then precedes selection and service callbacks; Bridge keeps its existing rollback
+boundary. Codespaces retains the previous numbered broker action during explicit
+development-generation use and restores it through the deployed release helper.
+This adapter is not a generic command runner, and neither it nor
+`ensure_worker` provisions a missing broker during ordinary launch.
+Its uninstall path calls `windows_broker.remove` under the same live owner,
+retains the adopted action through native removal, and refuses pending
+publication or uncertain cleanup before runtime deletion. Dry-run is read-only
+with respect to both the driver and application installation.
 
 `tests/test_native_participant.py` exercises the real stock-PowerShell owner
 against unchanged Python participants: simultaneous joins, consumed environment,
@@ -594,7 +728,7 @@ rejected before control-directory creation. New control roots use the same
 TokenUser-owned protected inheritable ACL as the Python queue, and existing
 permissions are never migrated.
 
-After publishing progress, native source freezing copies only the fixed three
+After publishing progress, native source freezing copies only the fixed four
 packages into the operation's private bootstrap tree. Both the copy and the
 original must match the admitted inventory before any acquisition helper runs.
 The fixed owned acquisition child loads that frozen canonical
@@ -659,8 +793,8 @@ canonical queued request receipts.
 ### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces
-and Agent Logger payloads' existing legacy
+support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces,
+Agent Logger and Agent Bridge payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -685,14 +819,83 @@ disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
 
+Bridge's fixed `stamp`/`provision`/`install` recipes admit its canonical
+installed payload and default legacy root, required direct command/module
+declaration and native runtime gates. Its canonical Python engine helpers
+provide the existing complete-input freezer. Both materialized native engine
+files are also required before acquisition or queue writes. Bridge's native
+installers still own construction, immutable completion/activation, publication and service
+lifecycle. Linux admission also requires the owning installer's `xargs` content
+fingerprinting and `seq` service-loop tools before acquisition or queue writes.
+The queue supplies no service override: Windows cold provision
+performs the full native install, whereas prepared-runtime provision only
+reconciles the task (including its explicit never-ran S4U repair). POSIX
+provision preserves its install path and healthy immutable reuse. An unattended
+Windows repair that needs elevation refuses before UAC or task mutation;
+interactive explicit repair retains its existing elevation flow.
+The fixed `install` action preserves the owning installer's content-qualified
+construction/publication/start path, including its healthy no-rebuild/no-restart
+return and immutable same-version content-mismatch refusal. It is distinct from
+`provision` in request identity/coalescing, including on POSIX where both map
+to the same native action. Windows prepared provision remains task-only;
+bootstrap drift still requires separate publisher adoption of `install`.
+The manual `bridge-recipes` portfolio exercises actual materialized payloads,
+Python-free callers, caller Job/group loss, coalescing and installed safe CLI
+consumers. Registration/start effects use isolated adapters, whose synthetic
+health replies prove adapter control flow, not actual serving or deployment.
+Only `provision` additionally admits the exact source-qualified selected legacy
+snapshot. Its canonical provenance must describe the current `payload-dir` and
+`stamped-version`; its full immutable runtime-source identity and assembly are
+validated before durable queue acceptance and rechecked around complete-input
+freezing. Source-qualified native stamp captures that canonical provenance with
+the shared legacy snapshot publisher before publishing selection redirects;
+ordinary unreceipted stamping is unchanged.
+The native Python-free admission checks the ordinary source declaration
+and canonical selection before acquisition; launch acknowledgement is not
+durable request acceptance. A changed accepted snapshot records an explicit,
+settled nonzero refusal before any installer starts, without switching sources.
+`stamp`, `install` and bootstrap publication remain canonical-installed-only.
+Unreceipted copies, cells, custom roots and compound actions still refuse.
+The manual `bridge-snapshots` portfolio exercises canonical source preparation,
+actual stamp/selected-source provision, caller loss, same-package source
+generations, installed consumers and failed-candidate preservation on Windows
+and Linux. Its registration/start adapters are synthetic, not serving proof.
+Bridge's ordinary legacy primary and payload commands submit the fixed single
+`provision` action through the packaged native first-use client and wait as
+observers. The `bridge-first-use-v1` dispatcher and `bridge-command-v1` client
+markers distinguish support independently of package versions. Generated
+primary commands retain exact source-qualified snapshot selection; ordinary
+unreceipted compatibility retains its exact publisher instead, without
+discovering another payload. Missing or older dispatchers cannot execute an
+old direct-installer path. A qualified read-only resolver may still serve a
+healthy source-independent runtime.
+
+Healthy dispatch precedes publication admission and cold-only controls.
+Managed, no-self-provision, pinned, nested, unavailable/skewed support and
+unsupported cold cell/custom-root requests refuse before acquisition, queue
+or plugin writes. Cold commands own no outer provision lock, reaper, private
+status or direct installer fallback. Historical records are left untouched.
+The documented `::agent-provisioning::` stderr cue references the canonical
+execution root, without promising an installation ETA. Native acknowledgement
+and driver progress remain distinct from an ordinary committed receipt/result;
+successful completion is followed by source-aware runtime resolution.
+
+The explicit `bridge-commands` native portfolio qualifies actual command
+publication and installed consumers separately from synthetic transport
+probes. Construction uses isolated registration/start/health adapters, never
+live host registrations or a Bridge session. Explicit installers, cold
+cells/custom roots, compound actions, macOS, rollout and remote sessions remain
+outside this adoption; canonical-installed-only bootstrap `install` is unchanged.
+
 Logger's fixed prerequisite admits its canonical installed payload at the
 default legacy root. It preserves the six declared command/module pairs,
 required context and native runtime gates without a top-level command/module
 or provision-mode declaration. The fixed adapter supplies no service flags:
 native `provision` constructs the package/runtime and deployment manifest,
 whereas Logger's additional fixed `install` action retains its native sync/prune
-task or timer reconciliation. That action is not admitted for other plugins
-and is distinct from `provision` in request identity/coalescing. No new service
+task or timer reconciliation. Only Logger and Bridge admit fixed `install`,
+each retaining its own native semantics; other plugins refuse it. The action
+is distinct from `provision` in request identity/coalescing. No new service
 option, queue or execution owner is introduced. Fatal native registration
 errors remain nonzero durable results; Windows' existing access-denied warning
 retains its successful process exit and unchanged task, not a claim of
@@ -729,6 +932,28 @@ actual stamp-to-snapshot provision, installed six-command help/version consumers
 failed-candidate preservation, Python-free concurrency/caller loss and early
 refusals. Snapshot `stamp`, `install` and bootstrap remain unsupported; their
 canonical-installed-source boundary is unchanged.
+
+Logger's legacy primary and five auxiliary compatibility commands now
+delegate cold invocation to their exact selected snapshot's qualified payload
+dispatcher. Its six payload command targets submit the existing single
+service-less `provision` request through the packaged native client and wait
+as observers; command arguments are never installer argv. The
+`logger-first-use-v1` dispatcher and `logger-command-v1` client markers expose
+actual support independently of package versions. Missing/older support refuses
+explicitly, with no foreground installer, arbitrary installed-payload fallback,
+outer provisioning lock or status writer. An older selected dispatcher can
+still serve a verified healthy auxiliary invocation without gaining cold
+publication authority.
+
+Healthy runtime dispatch remains before publication and retains selected
+installation context and module argument/exit forwarding. Cold custom roots/
+cells, pinned/no-self/nested requests and managed publication retain explicit
+refusal before acquisition/queue/plugin writes. The manual `logger-commands`
+portfolio exercises actual primary, Windows `.cmd`, payload and auxiliary
+commands, caller loss/concurrency, selected-source independence, safe installed
+consumers and isolated service effects. This command adoption neither widens
+bootstrap `install` nor adopts explicit installer entry points, compound
+actions, live periodic workers, cold custom roots/cells, macOS or rollout.
 
 Logger's legacy session bootstrap now submits `stamp` for a missing deployment
 manifest and `install` for runtime drift through its canonically packaged
@@ -858,6 +1083,10 @@ stderr, so diagnostics can identify and observe that exact owner even if the
 caller disappears; this still does not certify ordinary queue acceptance.
 They do not move installation into the caller. Launch-only
 acknowledgement remains the default for existing native clients.
+On Windows, acknowledgement `log` remains the receipt stream;
+`diagnostic_log` names a separate root-owned stdout/stderr file. Native
+bootstrap failures use inherited stderr rather than reopening that writable
+handle. `-Wait` relays both logs without changing ordinary receipt semantics.
 
 Vault's bootstrap first reads its existing deployment/version/selected-runtime
 markers. A healthy runtime, selected cell or active bootstrap killswitch stays
@@ -887,7 +1116,7 @@ stamp rather than hook return. Its native admission wrapper still owns the
 single empty JSON response, and the guidance hook remains independent.
 
 Vault declares this library through the existing canonical `uv` source and
-release materializer. Its self-contained payload carries the fixed three-sibling
+release materializer. Its self-contained payload carries the fixed four-sibling
 foundation closure under `libs/`, including the canonical acquisition helpers.
 No installed sibling plugin, Manager, PATH Python or alternate downloader is
 required. Commands use the default per-user execution root, not a plugin-specific

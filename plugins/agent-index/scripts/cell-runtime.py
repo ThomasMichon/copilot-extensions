@@ -1092,6 +1092,16 @@ def _load_versioned_runtime(payload_root: Path):
     )
 
 
+def _reconcile_installer_instances() -> None:
+    source = Path(__file__).with_name("installer_instance_reconcile.py")
+    spec = importlib.util.spec_from_file_location("cell_installer_reconcile", source)
+    if spec is None or spec.loader is None:
+        raise CellError("installer reconciliation adapter cannot be loaded")
+    component = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(component)
+    component.reconcile_installer_instances(source.parent)
+
+
 def _install_runtime_dependency(
     payload_root: Path, uv: str, interpreter: Path, source: Path, cwd: Path,
 ) -> None:
@@ -4267,29 +4277,18 @@ def provision(args: argparse.Namespace, payload_root: Path) -> dict[str, Any]:
         getattr(args, "origin_payload_root", None) or payload_root
     )
     durable_home = _durable_home(context, args.durable_home)
+    context_identity = (context, args.expected_marketplace_id, durable_home)
     version = _plugin_version(payload_root)
     validated = _validate_context(
-        payload_root,
-        context,
-        args.expected_marketplace_id,
-        durable_home,
-        expected_payload_root=origin_payload_root,
+        payload_root, *context_identity, expected_payload_root=origin_payload_root,
     )
     plugin_root = Path(str(validated["pluginRoot"]))
     with _installation_lock(plugin_root) as lock_token:
         status = _installation_status(
-            payload_root,
-            origin_payload_root,
-            context,
-            args.expected_marketplace_id,
-            durable_home,
+            payload_root, origin_payload_root, *context_identity,
         )
         validated = _validate_context(
-            payload_root,
-            context,
-            args.expected_marketplace_id,
-            durable_home,
-            expected_payload_root=origin_payload_root,
+            payload_root, *context_identity, expected_payload_root=origin_payload_root,
         )
         pending = _load_selection_transaction(
             plugin_root,
@@ -4297,25 +4296,17 @@ def provision(args: argparse.Namespace, payload_root: Path) -> dict[str, Any]:
             args.expected_marketplace_id,
         )
         if pending is not None:
-            return _resume_selection_transaction(
-                payload_root,
-                context,
-                args.expected_marketplace_id,
-                durable_home,
-                validated,
-                lock_token,
-                pending,
+            result = _resume_selection_transaction(
+                payload_root, *context_identity, validated, lock_token, pending,
             )
+            if result["status"] == "ready":
+                _reconcile_installer_instances()
+            return result
         _governance_mode(status, operation="cell-provision")
+        _reconcile_installer_instances()
         return _provision_locked(
-            payload_root,
-            origin_payload_root,
-            context,
-            args.expected_marketplace_id,
-            durable_home,
-            version,
-            validated,
-            lock_token,
+            payload_root, origin_payload_root, *context_identity,
+            version, validated, lock_token,
         )
 
 

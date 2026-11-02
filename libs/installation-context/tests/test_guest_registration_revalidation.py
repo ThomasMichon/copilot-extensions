@@ -8,11 +8,14 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from test_guest_environment_posix import _initialized_host, _library
+from _powershell_fixture import _inject_owner_hook
 
 pytestmark = [
     pytest.mark.skipif(os.name != "posix", reason="native POSIX registration boundary"),
@@ -21,23 +24,18 @@ pytestmark = [
 
 
 def _publish_at_lock_entry(library: Path) -> None:
-    python = library / "guest-python.py"
-    source = python.read_text(encoding="utf-8")
-    marker = "raise SystemExit(module.main(sys.argv[1:]))"
-    assert source.count(marker) == 1
-    python.write_text(source.replace(marker, """
-import json
-native_enter = module._DirectoryLock.__enter__
+    _inject_owner_hook(library, """
+native_enter = _DirectoryLock.__enter__
 def enter(lock):
     result = native_enter(lock)
     registration = json.loads(Path(os.environ['GUEST_TEST_REGISTRATION']).read_text())
-    module._atomic_write_json(
+    _atomic_write_json(
         Path(os.environ['HOME']) / '.copilot-extensions' / 'guest-environment.json',
         registration, lock=lock,
     )
     return result
-module._DirectoryLock.__enter__ = enter
-""" + marker), encoding="utf-8")
+_DirectoryLock.__enter__ = enter
+""")
 
     bash = library / "guest-bash.sh"
     source = bash.read_text(encoding="utf-8")
@@ -50,21 +48,6 @@ module._DirectoryLock.__enter__ = enter
 acquire_lock() {
     native_acquire_lock "$@"
     atomic_write_json "$HOME/.copilot-extensions/guest-environment.json" "$(cat "$GUEST_TEST_REGISTRATION")"
-}
-""" + marker, 1), encoding="utf-8")
-
-    powershell = library / "guest-powershell.ps1"
-    source = powershell.read_text(encoding="utf-8")
-    marker = "\nfunction Acquire-Lock("
-    assert source.count(marker) == 1
-    source = source.replace(marker, "\nfunction NativeAcquire-Lock(", 1)
-    marker = "\ntry {\n    Assert-ExactChoice $Action @("
-    assert source.count(marker) == 1
-    powershell.write_text(source.replace(marker, """
-function Acquire-Lock([string]$Path, [string]$Kind, [string]$MarketplaceIdValue) {
-    NativeAcquire-Lock $Path $Kind $MarketplaceIdValue
-    $target = Join-Path (Join-Path $env:HOME '.copilot-extensions') 'guest-environment.json'
-    Write-AtomicJson $target (Read-Json $env:GUEST_TEST_REGISTRATION) -Private
 }
 """ + marker, 1), encoding="utf-8")
 
@@ -95,11 +78,13 @@ def test_registration_revalidates_publication_after_initial_read(
             "GUEST_TEST_REGISTRATION": str(publication),
         }, monkeypatch,
     )
+    getuid = cast(Callable[[], int], getattr(os, "getuid"))
+    getgid = cast(Callable[[], int], getattr(os, "getgid"))
     lookup = profile / "test-bin" / "getent"
     lookup.write_text(
         "#!/bin/sh\n"
-        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {os.getuid()} ] || exit 1\n'
-        f"printf '%s\\n' {shlex.quote(f'fixture:x:{os.getuid()}:{os.getgid()}:fixture:{profile}:/bin/sh')}\n",
+        f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {getuid()} ] || exit 1\n'
+        f"printf '%s\\n' {shlex.quote(f'fixture:x:{getuid()}:{getgid()}:fixture:{profile}:/bin/sh')}\n",
         encoding="utf-8",
     )
     lookup.chmod(0o755)

@@ -5,13 +5,29 @@ import importlib.util
 import json
 import os
 import sys
+from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Mapping
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "installation_context.py"
+
+
+class _CurrentEnvironment(Protocol):
+    def __call__(
+        self, *, environment: Mapping[str, str],
+        os_profile: str | os.PathLike[str] | None, platform: str | None,
+        wsl_distro: str | None,
+    ) -> tuple[dict[str, Any], Path]: ...
+
+
+if TYPE_CHECKING:
+    import installation_context
+
+    _checked_current_environment: _CurrentEnvironment = installation_context._current_environment
 
 
 @pytest.fixture
@@ -24,21 +40,96 @@ def primitive(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_native_account_lookup_retains_uid_and_home_contract(
+    primitive: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: bool,
+) -> None:
+    observed: list[int] = []
+
+    def account(uid: int) -> SimpleNamespace:
+        observed.append(uid)
+        if missing:
+            raise KeyError(uid)
+        return SimpleNamespace(pw_dir=str(tmp_path))
+
+    backend = ModuleType("pwd")
+    monkeypatch.setattr(backend, "getpwuid", account, raising=False)
+    monkeypatch.setitem(sys.modules, "pwd", backend)
+    monkeypatch.setattr(primitive, "os", SimpleNamespace(**{**vars(os), "getuid": lambda: 42}))
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: False)
+    arguments: dict[str, object] = dict(environment={}, os_profile=None, platform="posix", wsl_distro=None)
+    if missing:
+        with pytest.raises(primitive.InstallationContextError, match="passwd-database"):
+            primitive._current_environment(**arguments)
+    else:
+        current, profile = primitive._current_environment(**arguments)
+        assert profile == tmp_path.resolve()
+        assert current["homeRealPath"] == str(profile)
+    assert observed == [42]
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_native_registry_lookup_validates_default_before_second_read(
+    primitive: ModuleType, monkeypatch: pytest.MonkeyPatch, malformed: bool,
+) -> None:
+    identity = "{11111111-2222-3333-4444-555555555555}"
+    root = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    opened: list[str] = []
+    queried: list[tuple[object, str]] = []
+
+    def open_key(hive: int, path: str) -> AbstractContextManager[object]:
+        assert hive == 7
+        opened.append(path)
+        return nullcontext(path)
+
+    def query_value(key: object, name: str) -> tuple[object, int]:
+        queried.append((key, name))
+        if name == "DefaultDistribution":
+            return (42 if malformed else identity), 1
+        assert name == "DistributionName"
+        return "Example Distro", 1
+
+    backend = ModuleType("winreg")
+    for name, value in {
+        "OpenKey": open_key, "QueryValueEx": query_value, "HKEY_CURRENT_USER": 7,
+    }.items():
+        monkeypatch.setattr(backend, name, value, raising=False)
+    monkeypatch.setitem(sys.modules, "winreg", backend)
+    monkeypatch.setattr(primitive, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: False)
+    if malformed:
+        with pytest.raises(primitive.InstallationContextError, match="guest-default-invalid"):
+            primitive._host_default_wsl_distribution()
+        assert opened == [root]
+        assert queried == [(root, "DefaultDistribution")]
+    else:
+        assert primitive._host_default_wsl_distribution() == "Example Distro"
+        assert opened == [root, root + "\\" + identity]
+        assert queried == [(root, "DefaultDistribution"), (root + "\\" + identity, "DistributionName")]
+
+
 @pytest.fixture
 def guest(primitive: ModuleType, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: True)
     monkeypatch.setattr(primitive, "_guest_machine_id", lambda: "a" * 32)
-    current = primitive._current_environment
+    current = cast(_CurrentEnvironment, primitive._current_environment)
 
-    def environment(**kwargs: Any) -> tuple[dict[str, Any], Path]:
-        return current(**{**kwargs, "platform": kwargs.get("platform") or "posix"})
+    def environment(
+        *, environment: Mapping[str, str], os_profile: str | os.PathLike[str] | None,
+        platform: str | None, wsl_distro: str | None,
+    ) -> tuple[dict[str, Any], Path]:
+        return current(
+            environment=environment, os_profile=os_profile,
+            platform=platform or "posix", wsl_distro=wsl_distro,
+        )
 
     monkeypatch.setattr(primitive, "_current_environment", environment)
     return primitive
 
 
-def _current(guest: ModuleType, profile: Path, environment: dict[str, str]) -> dict:
-    return guest._current_environment(
+def _current(guest: ModuleType, profile: Path, environment: dict[str, str]) -> dict[str, Any]:
+    current = cast(_CurrentEnvironment, guest._current_environment)
+    return current(
         environment=environment, os_profile=profile, platform="posix", wsl_distro=None,
     )[0]
 
@@ -197,12 +288,12 @@ def test_guest_detection_uses_os_evidence_not_shell_variables(
             return path.as_posix() == marker
         return original_is_file(path)
 
-    def read(path: Path, *args: object, **kwargs: object) -> str:
+    def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
         if path.as_posix() == "/proc/1/cgroup":
             return cgroup
         if path.as_posix() == "/proc/sys/kernel/osrelease":
             return release
-        return original_read(path, *args, **kwargs)
+        return original_read(path, encoding=encoding, errors=errors)
 
     with monkeypatch.context() as context:
         context.setattr(primitive.sys, "platform", "linux")

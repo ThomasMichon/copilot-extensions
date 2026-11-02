@@ -189,7 +189,13 @@
   // library this single JSON string can't source). `onCreateCommand` runs
   // before `run_tests_in_devcontainer.py` has populated the workspace
   // volume with repository content, so nothing here may assume the
-  // checkout (e.g. `pyproject.toml`) is present yet -- only `uv` itself is
-  // installed.
-  "onCreateCommand": "set -eu; UV_VERSION=0.12.6; ARCH=$(uname -m); case \"$ARCH\" in x86_64) ASSET=uv-x86_64-unknown-linux-gnu.tar.gz; EXPECTED_SHA=8681d8921e7d520fb368991dcf5f9c1905b80f5bf2a265a0ed085c8d8e342477 ;; aarch64) ASSET=uv-aarch64-unknown-linux-gnu.tar.gz; EXPECTED_SHA=d58030acd26159499ac82f32da12d1b3c12a3a1bfc414232d9082070c03e128d ;; *) echo \"unsupported uv bootstrap architecture: $ARCH\" >&2; exit 1 ;; esac; curl -LsSf \"https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$ASSET\" -o /tmp/uv.tar.gz; ACTUAL_SHA=$(sha256sum /tmp/uv.tar.gz | awk '{print $1}'); if [ \"$ACTUAL_SHA\" != \"$EXPECTED_SHA\" ]; then echo \"uv archive SHA-256 mismatch for $ASSET (expected $EXPECTED_SHA, got $ACTUAL_SHA)\" >&2; exit 1; fi; mkdir -p \"$HOME/.local/bin\"; tar -xzf /tmp/uv.tar.gz -C /tmp; mv /tmp/uv-*/uv /tmp/uv-*/uvx \"$HOME/.local/bin/\"; rm -rf /tmp/uv.tar.gz /tmp/uv-*"
+  // checkout (e.g. `pyproject.toml`) is present yet. Node's native extension
+  // contract tests also need their interpreter before network disconnection.
+  // Node 22.15.0 matches the seasoned trusted-harness-base lock; both official
+  // architecture hashes come from that release's SHASUMS256.txt. Only the
+  // interpreter is extracted: these suites do not need npm or a package install.
+  "onCreateCommand": {
+    "uv": "set -eu; UV_VERSION=0.12.6; ARCH=$(uname -m); case \"$ARCH\" in x86_64) ASSET=uv-x86_64-unknown-linux-gnu.tar.gz; EXPECTED_SHA=8681d8921e7d520fb368991dcf5f9c1905b80f5bf2a265a0ed085c8d8e342477 ;; aarch64) ASSET=uv-aarch64-unknown-linux-gnu.tar.gz; EXPECTED_SHA=d58030acd26159499ac82f32da12d1b3c12a3a1bfc414232d9082070c03e128d ;; *) echo \"unsupported uv bootstrap architecture: $ARCH\" >&2; exit 1 ;; esac; curl -LsSf \"https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$ASSET\" -o /tmp/uv.tar.gz; ACTUAL_SHA=$(sha256sum /tmp/uv.tar.gz | awk '{print $1}'); if [ \"$ACTUAL_SHA\" != \"$EXPECTED_SHA\" ]; then echo \"uv archive SHA-256 mismatch for $ASSET (expected $EXPECTED_SHA, got $ACTUAL_SHA)\" >&2; exit 1; fi; mkdir -p \"$HOME/.local/bin\"; tar -xzf /tmp/uv.tar.gz -C /tmp; mv /tmp/uv-*/uv /tmp/uv-*/uvx \"$HOME/.local/bin/\"; rm -rf /tmp/uv.tar.gz /tmp/uv-*",
+    "node": "set -eu; NODE_VERSION=22.15.0; ARCH=$(uname -m); case \"$ARCH\" in x86_64) NODE_ARCH=x64; EXPECTED_SHA=dafe2e8f82cb97de1bd10db9e2ec4c07bbf53389b0799b1e095a918951e78fd4 ;; aarch64) NODE_ARCH=arm64; EXPECTED_SHA=d68adf72c531f1118bee75b20ffbc5911accfda5e73454a798625464b40a4adf ;; *) echo \"unsupported Node bootstrap architecture: $ARCH\" >&2; exit 1 ;; esac; ASSET=node-v$NODE_VERSION-linux-$NODE_ARCH; curl -LsSf \"https://nodejs.org/dist/v$NODE_VERSION/$ASSET.tar.xz\" -o /tmp/node.tar.xz; printf '%s  %s\\n' \"$EXPECTED_SHA\" /tmp/node.tar.xz | sha256sum --check --status; mkdir -p \"$HOME/.local/bin\"; tar -xJf /tmp/node.tar.xz -C \"$HOME/.local/bin\" --strip-components=2 \"$ASSET/bin/node\"; \"$HOME/.local/bin/node\" --version; rm -f /tmp/node.tar.xz"
+  }
 }

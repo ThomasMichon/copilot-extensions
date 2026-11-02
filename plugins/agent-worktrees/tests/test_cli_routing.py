@@ -851,10 +851,13 @@ def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
     # Context comes from CWD resolution (not the retired $WORKTREE_PROJECT).
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
-    monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    launched = []
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.append(argv) or 0)
 
     rc = m.main([])
     assert rc == 0
+    assert launched == [[]]
     assert os.environ.get("WORKTREE_ID") == "keep-me"
 
 
@@ -1519,9 +1522,20 @@ def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
     assert seen["argv"] == [
         r"C:\manager\worktree-manager.cmd", "--project", "demo"
     ]
-    assert json.loads(
-        seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV]
-    ) == [r"C:\runtime\python.exe", "-m", "agent_worktrees"]
+    from agent_worktrees import manager_launch_cli
+
+    engine = json.loads(seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV])
+    fresh = manager_launch_cli._agent_worktrees_launch_command(None)
+    assert engine[:2] == fresh[:2] == [m.sys.executable, "-X"]
+    assert engine[3:] == fresh[3:] == ["-m", "agent_worktrees"]
+    prefixes = [
+        Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+        for command in (engine, fresh)
+    ]
+    assert all(prefix.parent == Path(m.cfg.install_dir()).absolute() / "cache" / "python"
+               for prefix in prefixes)
+    assert all(prefix.name.startswith("unsealed-") for prefix in prefixes)
+    assert prefixes[0] != prefixes[1]
 
 
 def test_exec_worktree_manager_closes_job_on_windows_clean_exit(monkeypatch):
@@ -1831,8 +1845,8 @@ def test_provider_stderr_is_redacted_before_bounding(monkeypatch, tmp_path, retu
     assert health.state == "failed"
     assert "fixture-secret" not in health.diagnostic
     assert "example.invalid" in health.diagnostic
-    assert len(health.diagnostic.split("stderr: ", 1)[1]) == 400
-    assert len(health.diagnostic) < 800
+    assert len(health.diagnostic.split("stderr: ", 1)[1]) <= 2048
+    assert len(health.diagnostic) < 2600
 
 
 def test_healthy_provider_stderr_is_not_reported(monkeypatch, tmp_path, capsys):

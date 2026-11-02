@@ -1,0 +1,9 @@
+{
+  "comment": "Type runtime profile policy tests with checked module contracts",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

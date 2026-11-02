@@ -28,17 +28,20 @@ _OWNER_POLICY_JSON = (
     " raise SystemExit('Required repository hosting receiver returned invalid policy')\n"
     "print(json.dumps(p))\n"
 )
+_RECEIVER_ABSENT = "__HOSTING_RECEIVER_ABSENT__"
 
 def guest_check_command(workspace: str | None, *, operation: str = "launch") -> str:
     if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
         raise RuntimeError("Repository hosting admission requires an absolute guest checkout")
     return (
         f"cd -- {shlex.quote(workspace)} && "
-        "WORKTREES=$(command -v agent-worktrees) && test -f \"$WORKTREES\" && "
+        "(WORKTREES=$(command -v agent-worktrees) || "
+        f"{{ printf '%s\\n' {shlex.quote(_RECEIVER_ABSENT)}; exit 127; }}; "
+        "test -f \"$WORKTREES\" && "
         '(POLICY_RESULT=$("$WORKTREES" agent-policy check --path "$PWD" '
         f"--operation {shlex.quote(operation)} --json) || "
         "{ POLICY_STATUS=$?; printf '%s\\n' \"$POLICY_RESULT\" >&2; exit \"$POLICY_STATUS\"; }; "
-        f"printf '%s\\n' \"$POLICY_RESULT\" | python3 -c {shlex.quote(_OWNER_POLICY_JSON)})"
+        f"printf '%s\\n' \"$POLICY_RESULT\" | python3 -c {shlex.quote(_OWNER_POLICY_JSON)}))"
     )
 
 
@@ -77,6 +80,7 @@ def admit_stdio_launch(args: Namespace) -> None:
 
 async def require_guest_hosting(
     manager: ConnectionManager, name: str, workspace: str | None,
+    *, preflight: bool = False,
 ) -> None:
     from ._ssh_retry import exec_with_retry
     from .worktrees import validate_context
@@ -85,6 +89,19 @@ async def require_guest_hosting(
     result = await exec_with_retry(
         manager, name, f"bash -lc {shlex.quote(guest_check_command(workspace))}", timeout=90,
     )
+    if (
+        preflight and result.exit_code == 127
+        and result.stdout.strip() == _RECEIVER_ABSENT and not result.stderr.strip()
+    ):
+        from repository_policy.guest_probe import build_guest_policy_probe
+
+        script, payload = build_guest_policy_probe()
+        command = f"python3 -I -S -c {shlex.quote(script)} {shlex.quote(workspace)}"
+        result = await exec_with_retry(
+            manager, name,
+            f"bash -lc {shlex.quote(command)}",
+            input_bytes=payload, timeout=90,
+        )
     if result.exit_code:
         raise RuntimeError(
             "Guest repository hosting refused or receiver unsupported: "
@@ -156,7 +173,7 @@ def require_codespace_hosting(
                 if result.exit_code:
                     raise RuntimeError("Guest could not resolve the actual execution worktree")
                 actual = parse_execution_checkout(result.stdout)
-            await require_guest_hosting(manager, actual_name, actual)
+            await require_guest_hosting(manager, actual_name, actual, preflight=True)
         finally:
             await manager.disconnect(actual_name)
 

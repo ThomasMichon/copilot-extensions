@@ -72,7 +72,7 @@ class _FakeRecordLock:
 
 def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
            active_sessions=None, turn_count=None, min_idle_secs=None,
-           branch_merged=True, reaped=None):
+           branch_merged=True, reaped=None, scanned=None):
     """Invoke ``sweep_finished_session_worktrees`` with all I/O patched.
 
     Records use non-existent paths so git-state resolves from ``status``
@@ -95,6 +95,11 @@ def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
     def _fake_load_record(path):
         return by_id[Path(path).stem]
 
+    def _fake_scan(selected):
+        if scanned is not None:
+            scanned.append([rec.worktree_id for rec in selected])
+        return ctx
+
     real_exists = Path.exists
 
     def _fake_exists(self):
@@ -116,7 +121,7 @@ def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
                return_value=(mux or {})), \
          patch("agent_worktrees.sessions._mux_session_activity",
                return_value=(activity or {})), \
-         patch("agent_worktrees.sessions.scan_sessions_fast", return_value=ctx), \
+         patch("agent_worktrees.sessions.scan_sessions_fast", side_effect=_fake_scan), \
          patch("agent_worktrees.__main__._build_active_paths", return_value=set()), \
          patch("agent_worktrees.sessions._normalize_path", side_effect=lambda p: p), \
          patch("agent_worktrees.__main__._hosted_session_blocks_cleanup",
@@ -131,6 +136,120 @@ def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
 
 def test_no_records_is_noop():
     assert _sweep([]) == {"removed": [], "skipped": []}
+
+
+def _tombstone(wt_id, *, paired=False):
+    rec = _rec(wt_id)
+    rec.reaped_at = "2026-06-02T10:00:00"
+    if paired:
+        rec.pair_id = f"pair-{wt_id}"
+        rec.pair_kind = "worktree"
+        rec.pair_role = "harness"
+        rec.pair_ref = f"m/knowledge/{wt_id}-k"
+    return rec
+
+
+def test_retained_tombstone_history_does_not_repeat_cleanup():
+    records = [_tombstone(f"done-{i}") for i in range(128)]
+    records.append(_rec("pending"))
+    scanned, reaped = [], []
+    report = _sweep(records, dry_run=False, scanned=scanned, reaped=reaped)
+    assert reaped == ["pending"]
+    assert scanned == [["pending"], ["pending"]]
+    assert [item["id"] for item in report["removed"]] == ["pending"]
+
+
+def test_archived_history_is_not_scanned_or_reaped():
+    scanned, reaped = [], []
+    assert _sweep(
+        [_rec("archived", status="archived")],
+        dry_run=False, scanned=scanned, reaped=reaped,
+    ) == {"removed": [], "skipped": []}
+    assert scanned == reaped == []
+
+
+def test_reaped_pair_without_retired_sibling_is_not_scanned():
+    rec = _tombstone("paired", paired=True)
+    for sibling in (
+        None,
+        types.SimpleNamespace(status="active", reaped_at=None),
+        types.SimpleNamespace(status="finalized", reaped_at=None),
+    ):
+        scanned, reaped = [], []
+        with patch("agent_worktrees.paired_claims.reciprocal_sibling", return_value=sibling):
+            assert _sweep(
+                [rec], dry_run=False, scanned=scanned, reaped=reaped,
+            ) == {"removed": [], "skipped": []}
+        assert scanned == reaped == []
+
+
+def test_retained_paired_history_only_reads_sibling_once_per_record():
+    records = [_tombstone(f"paired-{i}", paired=True) for i in range(128)]
+    scanned, reaped = [], []
+    with patch(
+        "agent_worktrees.paired_claims.reciprocal_sibling", return_value=None,
+    ) as sibling:
+        assert _sweep(
+            records, dry_run=False, scanned=scanned, reaped=reaped,
+        ) == {"removed": [], "skipped": []}
+    assert sibling.call_count == len(records)
+    assert scanned == reaped == []
+
+
+def test_tombstone_selection_reads_current_reciprocal_records(tmp_path, monkeypatch):
+    from agent_worktrees import reap_cli
+
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda project: tmp_path / project)
+    rec = _tombstone("parent", paired=True)
+    rec.repo = "harness"
+    assert not reap_cli._needs_session_cleanup(rec)
+
+    sibling = _rec("parent-k")
+    sibling.repo = "knowledge"
+    sibling.pair_id = rec.pair_id
+    sibling.pair_kind = "worktree"
+    sibling.pair_role = "knowledge"
+    sibling.pair_ref = "m/harness/parent"
+    path = tmp_path / "knowledge" / "worktrees" / "parent-k.yaml"
+    tracking.save_record(sibling, path)
+    assert not reap_cli._needs_session_cleanup(rec)
+
+    sibling.reaped_at = rec.reaped_at
+    tracking.save_record(sibling, path)
+    assert reap_cli._needs_session_cleanup(rec)
+
+    rec.pair_id = "different-pair"
+    assert not reap_cli._needs_session_cleanup(rec)
+
+
+def test_both_reaped_pair_still_reaches_locked_cleanup():
+    rec = _tombstone("paired", paired=True)
+    sibling = types.SimpleNamespace(status="finalized", reaped_at=rec.reaped_at)
+    reaped = []
+    with patch("agent_worktrees.paired_claims.reciprocal_sibling", return_value=sibling):
+        report = _sweep([rec], dry_run=False, reaped=reaped)
+    assert reaped == ["paired"]
+    assert [item["id"] for item in report["removed"]] == ["paired"]
+
+
+def test_reaped_marker_does_not_skip_recreated_checkout(tmp_path):
+    rec = _tombstone("recreated")
+    rec.worktree_path = str(tmp_path)
+    with patch("agent_worktrees.git_ops.classify_worktree") as classify:
+        classify.return_value = cli.git_ops.WorktreeStateInfo(
+            state=cli.git_ops.WorktreeState.ACTIVE,
+        )
+        report = _sweep([rec])
+    classify.assert_called_once()
+    assert report["removed"] == []
+
+
+def test_reaped_marker_does_not_skip_reopened_record():
+    rec = _tombstone("reopened")
+    rec.status = "active"
+    scanned = []
+    _sweep([rec], scanned=scanned)
+    assert scanned == [["reopened"]]
 
 
 def test_cadence_cleanup_output_is_bounded(monkeypatch, capsys):

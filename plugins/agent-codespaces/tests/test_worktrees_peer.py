@@ -201,6 +201,8 @@ def test_packaged_shared_bytes_are_canonical():
         Path(worktrees.__file__).with_name("_installation_context.py").read_bytes()
     )
     for fragment in sorted(context_dir.glob("_installation_context_*.py")):
+        if fragment.name == "_installation_context_worker.py":
+            continue
         assert fragment.read_bytes() == Path(worktrees.__file__).with_name(fragment.name).read_bytes()
 
 

@@ -73,8 +73,10 @@ def test_wrong_native_engine_refuses_before_build_or_network(
 @pytest.mark.parametrize("selected", ["amd64", "arm64"])
 @pytest.mark.parametrize("changed", [None, "architecture", "os", "source"])
 def test_selected_platform_and_exact_image_receipt(
-    tmp_path: Path, selected: str, changed: str | None,
+    tmp_path: Path, selected: str, changed: str | None, monkeypatch,
 ) -> None:
+    monkeypatch.setattr(ENGINE.os, "getuid", lambda: 1001, raising=False)
+    monkeypatch.setattr(ENGINE.os, "getgid", lambda: 1002, raising=False)
     receipt = {}
     engine = ENGINE.Engine(tmp_path, receipt, selected)
     metadata = {"Architecture": selected, "Os": "linux", "Config": {"Labels": {
@@ -109,7 +111,17 @@ def test_selected_platform_and_exact_image_receipt(
     argv = calls[0]
     assert argv[argv.index("--platform") + 1] == "linux/" + selected
     assert argv[argv.index("--build-arg") + 1] == "SOURCE_COMMIT=" + SHA
+    assert "GATEWAY_UID=1001" in argv and "GATEWAY_GID=1002" in argv
     assert len(calls) == 2 and not any("network" in args for args in calls)
+
+
+def test_root_witness_refuses_before_image_build(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ENGINE.os, "getuid", lambda: 0, raising=False)
+    engine = ENGINE.Engine(tmp_path, {})
+    engine.call = Mock()
+    with pytest.raises(SOURCE.ProofError, match="nonroot-host-required"):
+        engine.build(SHA, 30)
+    engine.call.assert_not_called()
 
 
 @pytest.mark.parametrize("selected,machine,platform,accepted", [

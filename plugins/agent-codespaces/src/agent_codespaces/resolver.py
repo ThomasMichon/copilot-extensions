@@ -235,7 +235,9 @@ class CodespaceResolver:
         from agent_bridge.transport import SpawnTarget
 
         sources = [
-            {"source": p.source, "enable": getattr(p, "enable", True)} for p in (extra_plugins or [])
+            {"source": p.source, "enable": getattr(p, "enable", True),
+             **({"allow_missing": True} if getattr(p, "allow_missing", False) else {})}
+            for p in (extra_plugins or [])
             if getattr(p, "source", None)
         ]
         spec = await self.resolve_spec(

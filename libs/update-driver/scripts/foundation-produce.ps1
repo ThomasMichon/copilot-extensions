@@ -27,8 +27,9 @@ function Invoke-FoundationChild {
     } catch {
         $errorValue = $_.Exception
         while ($null -ne $errorValue) {
-            if ($errorValue -is [CopilotExtensions.NativeOwnedProcessException]) {
-                $script:descendantsSettled = $errorValue.CleanupConfirmed
+            if ($errorValue.Data.Contains('CleanupConfirmed')) {
+                $confirmation = $errorValue.Data['CleanupConfirmed']
+                $script:descendantsSettled = $confirmation -is [bool] -and $confirmation -ceq $true
                 break
             }
             $errorValue = $errorValue.InnerException
@@ -170,7 +171,7 @@ $uv = Ensure-Uv -InstallRoot $c.bootstrap
 if (-not $uv) { throw 'Canonical uv acquisition failed.' }
 $venv = Join-Path $c.bootstrap 'venv'
 $python = Join-Path $venv 'Scripts\python.exe'
-if (-not (New-SignedVenv -VenvDir $venv -VenvPython $python -PythonVersion '3.11' -MinimumSignedBaseVersion '3.11' -UvCommand $uv)) {
+if (-not (New-SignedVenv -VenvDir $venv -VenvPython $python -PythonVersion '3.11' -MinimumSignedBaseVersion '3.11' -UvCommand $uv -WithoutPip)) {
     throw 'Canonical bootstrap interpreter acquisition failed.'
 }
 $result = @{

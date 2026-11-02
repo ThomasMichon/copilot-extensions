@@ -53,6 +53,12 @@ prevents accidentally exercising the current uncommitted runtime or substituting
 a host fixture. The allowlist intentionally requires review when the package
 source closure changes.
 
+The pinned roster and closed Docker context must carry the construction inputs
+declared by `fleet-manager/setup.py` and the package data declared by its
+`pyproject.toml`, not only Python modules. The distribution controls build both
+repository and pinned contexts and check the installed resource bytes; they do
+not qualify a live container witness.
+
 ## Composition and custody
 
 One unique timestamp/random private directory beneath the supplied root contains
@@ -77,6 +83,14 @@ dropped and `no-new-privileges`, and uses a read-only image filesystem plus
 device, socket or published port. The production image uses the installed
 `fleet-manager ... --service-policy ... --tls-config ...` CLI; services import
 the installed SDK, not Gateway source via `PYTHONPATH`.
+
+The witness build selects the invoking user's nonzero UID/GID and prepares
+that account's passwd home and state directory. Fixture services run under
+separate lease supervisors, not their own renewal loops. Each supervisor
+observes a private FIFO whose only writer belongs to the host proof runner;
+runner loss ends renewal and stops the exact service child. The service also
+retains the unattended lease and hard lifetime bound. This does not require a
+shared PID namespace or a mounted Docker socket.
 
 Container IDs come only from per-creation cidfiles; the network ID comes only
 from its creation response. Receipts are written before starting containers.

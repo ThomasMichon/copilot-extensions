@@ -8,26 +8,49 @@ from typing import Any
 from .ordinary_agent_facts import (
     identity, native_conflict, owner_record, validate_created, validate_resumed,
 )
-from .ordinary_native_bindings import inherited_retirement, native_bindings
+from .ordinary_native_bindings import (
+    RESERVATION_NATIVE_IDENTITY_PROTOCOL,
+    inherited_retirement, native_bindings, reservation_native_identity, retained_redrive_facts,
+)
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
 
 def reservation_native_facts(queue: Any, key: str) -> dict:
     with queue._connect() as conn:
+        conn.execute("BEGIN")
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None:
             raise TaskError("ordinary assignment has no current task/reservation")
+        pool_bound = conn.execute(
+            "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key=?", (key,),
+        ).fetchone() is not None
+        native, native_error = None, None
+        try:
+            native = reservation_native_identity(conn, row)
+        except TaskError as exc:
+            native_error = str(exc)
         try:
             known, retired = native_bindings(conn, row, task)
             reconcile_retirement = inherited_retirement(conn, row, task)
             error = _admission_error(conn, row, task)
         except TaskError as exc:
             known, retired, reconcile_retirement, error = [], [], False, str(exc)
+        redrive, redrive_error = None, None
+        if row["driver"] == "ordinary-bridge":
+            try:
+                redrive = retained_redrive_facts(conn, row, task)
+            except TaskError as exc:
+                redrive_error = str(exc)
     return {
+        "reservation_native_identity_protocol": RESERVATION_NATIVE_IDENTITY_PROTOCOL,
+        "reservation_native_session_id": native,
+        "reservation_native_identity_error": native_error,
+        "reservation_pool_bound": pool_bound,
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
         "inherited_retirement_reconcilable": reconcile_retirement,
+        "ordinary_redrive": redrive, "ordinary_redrive_error": redrive_error,
     }
 
 

@@ -7,9 +7,12 @@ its reconcile loop is doing.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 from .connection_owner import (
@@ -18,6 +21,9 @@ from .connection_owner import (
     _live_snapshot,
     _owner_lock,
     _write_liveness,
+    _PROCESS_SELECTION,
+    selected_successor_ready,
+    verified_owner_beacon,
 )
 
 log = logging.getLogger("agent-codespaces")
@@ -37,6 +43,8 @@ def renew_owner_singleton(
     interval: float,
     active: Iterable[str] | None = None,
     bridge_forwards: Iterable[str] | None = None,
+    *,
+    state: str = "active",
 ) -> bool:
     """Refresh this daemon's beacon -- or report that another Owner holds the machine.
 
@@ -44,13 +52,25 @@ def renew_owner_singleton(
     (Windows), so a beacon that lapsed during one slow cycle lets a second
     Owner start. Without this check both keep rewriting the beacon and both
     keep competing forwards into every CodeSpace, indefinitely. Each cycle,
-    under the registry lock, an Owner that finds another's fresh beacon
-    yields (False) instead of overwriting it."""
+    under the registry lock, an installed incumbent yields only to a verified
+    ready process of the selected different identity. Selection publication
+    alone is not incoming-process readiness."""
     with _owner_lock():
         live = _live_snapshot()
-        if live is not None and live.pid != os.getpid():
+        if _PROCESS_SELECTION is None and live is not None and live.pid != os.getpid():
             return False
-        _write_liveness(interval, active=active, bridge_forwards=bridge_forwards)
+        if selected_successor_ready(live):
+            return False
+        if (_PROCESS_SELECTION and state == "passive" and live and live.pid != os.getpid()
+                and live.runtime_identity == _PROCESS_SELECTION.identity and live.state == "active"
+                and verified_owner_beacon(live)):
+            # A losing same-build passive contender has admitted no channel work.
+            return False
+        from .owner_control import stop_requested
+
+        if stop_requested():
+            return False
+        _write_liveness(interval, active=active, bridge_forwards=bridge_forwards, state=state)
         return True
 
 
@@ -74,6 +94,7 @@ class BeaconKeeper:
         self._on_yield = on_yield
         self._stop = threading.Event()
         self.yielded = False
+        self.active = False
         self._thread = threading.Thread(target=self._run, name="owner-beacon", daemon=True)
 
     def _snapshot(self) -> tuple[set[str], dict[str, int]]:
@@ -86,7 +107,10 @@ class BeaconKeeper:
 
     def beat(self) -> bool:
         active, bridges = self._snapshot()
-        if renew_owner_singleton(self._interval, active=active, bridge_forwards=bridges):
+        if renew_owner_singleton(
+            self._interval, active=active, bridge_forwards=bridges,
+            state="active" if self.active else "passive",
+        ):
             return True
         self.yielded = True
         return False
@@ -96,7 +120,7 @@ class BeaconKeeper:
             try:
                 if not self.beat():
                     log.warning(
-                        "Connection Owner: another Owner holds this machine now; "
+                        "Connection Owner: ownership yielded or cooperative stop requested; "
                         "stopping this one and its forwards."
                     )
                     self._on_yield()
@@ -120,4 +144,191 @@ class BeaconKeeper:
         if self._thread.is_alive():
             self._thread.join(timeout=5)
         log.info("Connection Owner stopping (pid %s%s)", os.getpid(),
-                 ", yielded to another Owner" if self.yielded else "")
+                 ", relinquished ownership" if self.yielded else "")
+
+    async def wait_stopped(self) -> None:
+        """Retain the beacon until its last native write has actually returned."""
+        if self._thread.ident is not None:
+            await owner_native_call(self._thread.join)
+
+
+async def run_owner_loop(
+    owner: Any, *, interval: float, stop_event: asyncio.Event | None,
+    idle_shutdown_after: float | None,
+) -> None:
+    """Keep process readiness separate from native channel-work custody."""
+    from single_instance_lease import OperationLock, OperationLockedError
+    from . import connection_owner as registry
+    from .owner_identity import legacy_work_blocked
+
+    if not registry.claim_owner_singleton(interval):
+        log.info("Connection Owner already live on this machine; not starting a second one.")
+        return
+    stop = stop_event if stop_event is not None else asyncio.Event()
+    idle_since: float | None = None
+    loop = asyncio.get_running_loop()
+    keeper = BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))
+    work = OperationLock(Path(registry.RUNTIME_DIR).resolve() / "connection-owner.work.lock")
+    try:
+        keeper.start()
+        while not stop.is_set():
+            if keeper.yielded or not keeper.beat():
+                break
+            demoted = bool(_PROCESS_SELECTION and _PROCESS_SELECTION.superseded())
+            if not keeper.active:
+                if demoted:
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=min(interval, 1.0))
+                    except (TimeoutError, asyncio.TimeoutError):
+                        pass
+                    continue
+                with registry._owner_lock():
+                    if not legacy_work_blocked():
+                        try:
+                            work.acquire()
+                        except OperationLockedError:
+                            pass
+                        else:
+                            keeper.active = True
+                if not keeper.active:
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=min(interval, 1.0))
+                    except (TimeoutError, asyncio.TimeoutError):
+                        pass
+                    continue
+                if not keeper.beat():
+                    break
+            work.assert_owned()
+            if not demoted:
+                try:
+                    await owner.reconcile()
+                except Exception as exc:
+                    log.warning("Connection Owner reconcile cycle failed: %s", exc)
+            if keeper.yielded or not keeper.beat():
+                break
+            if idle_shutdown_after is not None:
+                if registry.list_holds():
+                    idle_since = None
+                else:
+                    if idle_since is None:
+                        idle_since = time.monotonic()
+                    elif time.monotonic() - idle_since >= owner.idle_limit(idle_shutdown_after):
+                        log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
+                                 " a tenant starts it back up on demand.")
+                        break
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+            except (TimeoutError, asyncio.TimeoutError):
+                pass
+    finally:
+        async def finish() -> None:
+            from .owner_control import shutdown_owner
+
+            keeper.stop()
+            await keeper.wait_stopped()
+            try:
+                await shutdown_owner(owner)
+            finally:
+                try:
+                    registry._clear_liveness()
+                finally:
+                    if keeper.active:
+                        work.release()
+
+        task = asyncio.create_task(finish())
+        cancelled = await settle_owner_task(task)
+        task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+async def settle_owner_task(task: asyncio.Future[Any]) -> bool:
+    """Finish admitted Owner work; report cancellation for its custodian to replay."""
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.cancelled():
+                break
+            cancelled = True
+        except Exception:
+            break
+    return cancelled
+
+
+async def owner_native_call(function: Callable[..., Any], *args: Any) -> Any:
+    """Settle value-only native work before propagating cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    cancelled = await settle_owner_task(task)
+    try:
+        result = task.result()
+    except Exception:
+        if cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
+async def build_owner_channel(
+    factory: Callable[..., Any], *args: Any, retain: Callable[[Any], None],
+) -> Any:
+    """Publish even a late constructor result to its Owner before replaying cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(factory, *args))
+    cancelled = await settle_owner_task(task)
+    try:
+        channel = task.result()
+    except Exception:
+        if cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    retain(channel)
+    if cancelled:
+        raise asyncio.CancelledError
+    return channel
+
+
+async def stop_owner_channel(channel: Any) -> None:
+    """Retain a channel's actual native cleanup, including after a bounded stop."""
+    from ssh_manager import SupervisedRelayForward
+    from ssh_manager.forward import LocalForward
+    from ssh_manager.process import run_process_cleanup
+
+    async def finish() -> None:
+        transport = channel if isinstance(channel, SupervisedRelayForward) else getattr(
+            channel, "_forward", None,
+        )
+        proc = getattr(transport, "_proc", None) if isinstance(
+            transport, (SupervisedRelayForward, LocalForward),
+        ) else None
+        try:
+            try:
+                await channel.stop()
+            except Exception:
+                # A failed monitor can make stop raise before it reaches the
+                # native process. Use that transport's existing teardown, never start.
+                if proc is not None and proc.returncode is None:
+                    if isinstance(transport, SupervisedRelayForward):
+                        await transport._terminate(proc)
+                    else:
+                        await transport._kill(proc)
+                raise
+        finally:
+            # Lower stop APIs may bound their process wait or clear their handle.
+            # Keep the original process and its registered proxy cleanup in custody.
+            try:
+                if proc is not None:
+                    await proc.wait()
+                    await run_process_cleanup(proc)
+            finally:
+                tasks = tuple(getattr(channel, "_cleanup_tasks", ()))
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
+    task = asyncio.create_task(finish())
+    cancelled = await settle_owner_task(task)
+    task.result()
+    if cancelled:
+        raise asyncio.CancelledError

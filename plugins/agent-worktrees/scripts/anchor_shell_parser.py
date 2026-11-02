@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import re
 
+GIT_INTRINSIC_NONWRITE_COMMANDS = frozenset({
+    "blame", "cat-file", "describe", "diff", "diff-files", "diff-index",
+    "diff-tree", "fetch", "grep", "help", "log", "ls-files", "ls-remote",
+    "ls-tree", "merge-base", "name-rev", "rev-list", "rev-parse", "show",
+    "show-ref", "status", "version", "whatchanged",
+})
+
 _GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
     r"""^(?:
         --list|--all|--remotes|--verbose|--show-current|

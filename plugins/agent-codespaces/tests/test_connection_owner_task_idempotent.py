@@ -86,7 +86,73 @@ def test_connection_owner_service_query_failure_preserves_existing_task() -> Non
     assert "if (-not $co.Known)" in sync
     assert "leaving any existing scheduled task unchanged" in sync
     assert sync.index("if (-not $co.Known)") < sync.index("if (-not $co.Enabled)")
-    assert sync.index("if (-not $co.Enabled)") < sync.index("Unregister-ConnectionOwnerService")
+    assert "Unregister-ConnectionOwnerService" not in sync
+    assert "existing task left unchanged" in sync
+
+
+@pytest.mark.parametrize("registration", ("current", "refused", "missing-stub"))
+def test_windows_owner_ensure_is_independent_of_existing_or_refused_task(tmp_path: Path, registration: str) -> None:
+    from agent_procutil import no_window_kwargs
+
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh is unavailable")
+    if registration != "missing-stub":
+        (tmp_path / "agent-codespaces.ps1").touch()
+    witness = tmp_path / "ensure.txt"
+    python = tmp_path / "selected-python.ps1"
+    python.write_text(
+        f"[IO.File]::WriteAllText('{witness}', ($args -join '|'))\n"
+        "$global:LASTEXITCODE = 0\n", encoding="utf-8",
+    )
+    harness = tmp_path / "ensure.ps1"
+    harness.write_text(
+        f"""
+$ErrorActionPreference = 'Stop'
+$LocalBin = '{tmp_path}'
+$InstallDir = '{tmp_path}'
+$LinkPython = '{python}'
+$OwnerTaskName = 'isolated-owner'
+function Get-ConnectionOwnerConfig {{ return @{{ Known=$true; Enabled=$true; Interval=15 }} }}
+function Write-ServiceOk {{ param($Message) }}
+function Write-ServiceChanged {{ param($Message) }}
+function Write-ServiceWarn {{ param($Message) }}
+function New-ScheduledTaskAction {{
+    param($Execute, $Argument, $WorkingDirectory)
+    $script:action = [pscustomobject]@{{ Execute=$Execute; Arguments=$Argument }}
+    return $script:action
+}}
+function New-ScheduledTaskTrigger {{ param([switch]$AtLogOn, $User) }}
+function New-ScheduledTaskPrincipal {{ param($UserId, $LogonType, $RunLevel) }}
+function New-ScheduledTaskSettingsSet {{
+    param([switch]$AllowStartIfOnBatteries, [switch]$DontStopIfGoingOnBatteries,
+          [switch]$StartWhenAvailable, $ExecutionTimeLimit, $RestartCount, $RestartInterval)
+}}
+function Get-ScheduledTask {{
+    param($TaskName)
+    if ('{registration}' -eq 'current') {{ return [pscustomobject]@{{ Actions=@($script:action) }} }}
+}}
+function Register-ScheduledTask {{
+    [IO.File]::WriteAllText('{tmp_path / "registration"}', 'attempted')
+    throw 'isolated registration refused'
+}}
+function Start-ScheduledTask {{ throw 'Task Scheduler must not be the incoming-start gate' }}
+function Unregister-ConnectionOwnerService {{ throw 'must not stop predecessor' }}
+function Sync-ConnectionOwnerService
+""" + _sync_connection_owner_service_body() + "\n}\nSync-ConnectionOwnerService\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "registration").exists() == (registration == "refused")
+    assert witness.exists(), result.stdout
+    invocation = witness.read_text()
+    assert invocation.startswith("-I|-c|")
+    assert "ensure_owner_running(None)" in invocation
+    assert "--stop" not in invocation
 
 
 def test_connection_owner_service_posix_unknown_preserves_existing_unit() -> None:

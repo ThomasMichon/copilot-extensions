@@ -18,7 +18,7 @@ from . import config as cfg
 from . import finalize, git_ops, paired_claims, sessions, tracking
 from . import terminal_pair_progress
 
-DISPOSABLE_CLI_POLICY = "disposable-cli"
+DISPOSABLE_CLI_POLICY = "disposable-cli"  # Historical wire name; interface-neutral.
 DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
 
 def _normalized(path: str | Path) -> str:
@@ -181,8 +181,6 @@ def _preservation_reason(
     sibling is not yet safe to dispose) keeps the original unconditional
     block: pairing is still an outstanding obligation.
     """
-    if policy == DISPOSABLE_CLI_POLICY and record.resolved_interface != "cli":
-        return "not-cli-worktree"
     if record.pending_handoffs:
         return "pending-handoff"
     if record.follow_up or record.active_effort is not None:
@@ -884,15 +882,11 @@ def conclude_disposable_worktree(
                 and record.status in {"complete", "finalized"}
                 and record.owner == owner
                 and record.resolved_origin == "delegate"
-                and (
-                    policy == DISPATCH_ATTEMPT_POLICY
-                    or record.resolved_interface == "cli"
-                )
             )
+            interface = record.resolved_interface
             record.kind = "bridge"
             record.owner = owner
-            if policy == DISPOSABLE_CLI_POLICY:
-                record.interface = "cli"
+            record.interface = interface
             record.origin = "delegate"
             tracking.update_status(record, "complete", save=False)
             tracking.save_record(record, record_path)

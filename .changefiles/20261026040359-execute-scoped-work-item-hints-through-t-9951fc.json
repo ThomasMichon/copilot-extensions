@@ -1,0 +1,9 @@
+{
+  "comment": "Execute scoped work-item hints through the shared engine and fresh targeted GitHub acquisition",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

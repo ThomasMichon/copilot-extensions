@@ -58,6 +58,17 @@ you report "nothing outstanding" to the user:
    the predecessor's own transcript (<reason>)" is honest; a bare "nothing
    outstanding" is not, when the check was never actually completed.
 
+## Verify approval evidence and current limits
+
+Before deployment, content/disclosure or external-owner effects, read the
+carrier's original approval reference and current canonical limits/holds.
+Check known later narrowing, revocation, expiry and limited uses, not merely the
+predecessor's summary. Use bounded source-history reads to repair missing
+original answers or countermand; unavailable evidence is not permission.
+Follow [authorization continuity](authorization-continuity.md). Reuse only the
+established scope without asking again for an ordinary unpinned revision, and
+continue independent authorized work while the affected decision is unresolved.
+
 ## Orient using the worktree's own status and session lineage
 
 The brief is one predecessor's account of its own work; the worktree itself

@@ -7,5 +7,6 @@
   "noSelfProvisionEnv": "BUDGET_GUIDANCE_NO_SELFPROVISION",
   "purpose": "Report current attributable budget posture",
   "installer": "install",
+  "installerLifecycle": true,
   "posixCatalogMode": "shell"
 }

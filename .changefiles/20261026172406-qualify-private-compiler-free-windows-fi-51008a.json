@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify private compiler-free Windows file custody without enabling bootstrap callers",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

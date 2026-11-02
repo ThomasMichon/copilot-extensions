@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 import pytest
 
@@ -56,7 +58,13 @@ DOWNLOAD_PROFILES = {
 }
 
 
-def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+class _TimeoutDiagnostics(Protocol):
+    __notes__: list[str]
+
+
+def _run_adapter(
+    runner: str, arguments: list[str], *, trace_root: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
@@ -68,11 +76,64 @@ def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProce
         ]
         if runner == "posix32" else _runner_command(runner, arguments)
     )
-    return subprocess.run(
-        command, capture_output=True, text=True,
-        encoding="utf-8", env=environment, check=False, timeout=30,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    if (
+        runner == "powershell" and trace_root is not None
+        and environment.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1"
+    ):
+        script_index = command.index("-File") + 1
+        argument_file = trace_root / "native-policy-arguments.json"
+        argument_file.write_text(json.dumps(command[script_index + 1:]), encoding="utf-8")
+        command = [
+            *command[:script_index],
+            str(Path(__file__).with_name("native_policy_trace.ps1")),
+            "-Adapter", command[script_index], "-ArgumentsFile", str(argument_file),
+        ]
+    started = datetime.now(timezone.utc).isoformat()
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True,
+            encoding="utf-8", env=environment, check=False, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raw_stderr = exc.stderr or b""
+        stderr = (
+            raw_stderr.decode("utf-8", errors="replace")
+            if isinstance(raw_stderr, bytes) else raw_stderr
+        )
+        diagnostics = cast(_TimeoutDiagnostics, exc)
+        diagnostics.__notes__ = [
+            *getattr(exc, "__notes__", []),
+            f"Native policy child started at {started}; phase evidence:\n{stderr}",
+        ]
+        raise
+    if runner == "powershell" and environment.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1":
+        print(f"Native policy child started at {started}; phase evidence:\n{result.stderr}")
+    return result
+
+
+def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    failure = subprocess.TimeoutExpired(
+        ["native-reader"], 30, stderr=b"native-policy-phase=Get-Command;elapsed_ms=50\n",
     )
+    monkeypatch.setattr(failure, "add_note", None, raising=False)
+    diagnostics = cast(_TimeoutDiagnostics, failure)
+    diagnostics.__notes__ = ["existing diagnostic"]
+
+    def timeout(command: list[str], **kwargs: Any) -> None:
+        calls.append((command, kwargs))
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        _run_adapter("python", ["probe-plugin-publication"])
+    assert captured.value is failure
+    assert len(calls) == 1
+    assert calls[0][1]["timeout"] == 30
+    assert "native-policy-phase=Get-Command" in "\n".join(diagnostics.__notes__)
+    assert diagnostics.__notes__[0] == "existing diagnostic"
+    assert "Native policy child started at " in diagnostics.__notes__[-1]
 
 
 @pytest.mark.skipif(
@@ -105,7 +166,7 @@ def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> Non
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
 ) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     current = _environment()
     profile = Path(current["homeRealPath"])
@@ -195,9 +256,13 @@ def test_native_policy_decision_matches_reference(
         _cli_arguments(
             layout, legacy, action="probe-plugin-publication", policy_path=mode_policy,
         ),
+        trace_root=tmp_path,
     )
     expected_code = 0 if reference["allowPluginPublication"] else 3
     assert result.returncode == expected_code, result.stdout + result.stderr
+    if runner == "powershell" and os.environ.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1":
+        for stage in ("process-entry", "ConvertTo-InputPath", "Get-Command", "ConvertFrom-Json"):
+            assert f"native-policy-phase={stage};" in result.stderr, result.stderr
     value = json.loads(result.stdout)
     actual = value["deployment"]
     for field in ("path", "state", "managed", "allowPluginPublication", "reason", "owner", "recovery"):
@@ -212,7 +277,7 @@ def test_native_policy_decision_matches_reference(
 
 @pytest.mark.parametrize("runner", ADMISSION_RUNNERS)
 def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, runner: str) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     current = _environment()
     profile = Path(current["homeRealPath"])
@@ -250,9 +315,10 @@ def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, run
 def test_inaccessible_policy_cannot_become_missing(
     tmp_path: Path, runner: str, blocked: str,
 ) -> None:
-    if os.geteuid() == 0:
+    geteuid: Callable[[], int] = getattr(os, "geteuid")
+    if geteuid() == 0:
         pytest.skip("An OS superuser can read the restricted fixture")
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     legacy = tmp_path / "runtime"
     path = legacy / module.RUNTIME_DEPLOYMENT_FILE

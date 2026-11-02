@@ -106,6 +106,10 @@ $needsElevation = $existing -and ($existing.Principal.LogonType -in @('S4U', 'Pa
 # Stage 1: relaunch under UAC ONLY when elevation is actually needed.
 # ---------------------------------------------------------------------------
 if ($needsElevation -and -not (Test-IsAdmin)) {
+    if ([Environment]::GetCommandLineArgs() -icontains '-NonInteractive') {
+        Write-Error 'Scheduled-task repair requires an elevated interactive host; unattended repair left the existing task unchanged.'
+        exit 1
+    }
     Write-Host "agent-bridge: replacing the existing elevated/S4U '$TaskName' task with the default non-elevated one needs elevation." -ForegroundColor Cyan
     Write-Host "A Windows UAC prompt will appear -- approve it to continue." -ForegroundColor DarkGray
 

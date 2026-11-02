@@ -28,6 +28,9 @@ drifted (``tools/check-install-contract.py`` independently enforces the
 ``pyproject.toml`` **and** a runtime installer (``install.*`` or ``init.*``) --
 the exact set the install contract requires to carry the primitive.
 Both modes refuse linked destinations and ancestors before reading or writing.
+Containers also adopts the canonical ``standalone_build.py`` resource builder.
+Its synchronized scripts are complete build inputs, so package construction
+does not discover a sibling checkout or import a mutable installer at runtime.
 """
 from __future__ import annotations
 
@@ -39,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer
 import installer_engine_ref as ier
+from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -46,12 +50,18 @@ CANONICAL = REPO / "libs" / "versioned-runtime" / "versioned_runtime.py"
 VRT_NAME = "versioned_runtime.py"
 COMPONENT_NAMES = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-    "versioned_runtime_source.py",
+    "versioned_runtime_source.py", "versioned_runtime_readiness.py",
     "versioned_runtime_publication.py",
     "versioned_runtime_native.ps1",
 )
+INSTALLER_INSTANCE_NAMES = (
+    "installer-instance-reconcile.ps1", "installer-instance-reconcile.sh",
+    "installer_instance_reconcile.py",
+    "daemon_instances.ps1", "daemon_instances.sh",
+)
 DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
 DEPENDENCY_CONFIG = DEPENDENCY_POLICY.with_name("installer_dependency_config.py")
+DEPENDENCY_CONTENT = DEPENDENCY_POLICY.with_name("installer_retained_content.py")
 
 # Canonical parameterized shell resolvers (uniform-runtime-resolution, #765). The
 # one marker-only way a binstub / hook / service launcher resolves the versioned
@@ -66,6 +76,7 @@ RESOLVER_NAMES = ("resolve-runtime.sh", "resolve-runtime.ps1")
 # a hardcoded root and its own deploy path, #1106/#742); it is intentionally not
 # the parameterized canonical, so the fan-out never overwrites it.
 RESOLVER_BESPOKE = frozenset({"agent-worktrees"})
+BUILD_HELPER_CONSUMERS = frozenset({"agent-containers", "agent-worktrees", "worktree-manager"})
 
 
 def _has_installer(plugin: Path) -> bool:
@@ -105,18 +116,33 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def installer_instance_sources(repo: Path) -> dict[str, Path]:
+    engine = repo / "libs" / "installer-engine"
+    procutil = repo / "libs" / "agent-procutil" / "src" / "agent_procutil"
+    return {
+        name: (procutil if name.startswith("daemon_instance") else engine) / name
+        for name in INSTALLER_INSTANCE_NAMES
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--check", action="store_true",
         help="verify every plugin copy matches the canonical; write nothing",
     )
+    ap.add_argument(
+        "--only-installer-instances", action="store_true",
+        help="synchronize only the disposable-instance installer adapters and source archive",
+    )
     args = ap.parse_args()
 
     if not CANONICAL.exists():
         print(f"canonical missing: {CANONICAL.relative_to(REPO)}", file=sys.stderr)
         return 1
-    if any(source.is_symlink() or not source.is_file() for source in (DEPENDENCY_POLICY, DEPENDENCY_CONFIG)):
+    if any(source.is_symlink() or not source.is_file() for source in (
+        DEPENDENCY_POLICY, DEPENDENCY_CONFIG, DEPENDENCY_CONTENT,
+    )):
         print("canonical installer dependency policy component missing or linked", file=sys.stderr)
         return 1
 
@@ -131,6 +157,7 @@ def main() -> int:
     canonical_bytes = CANONICAL.read_bytes()
     policy_bytes = DEPENDENCY_POLICY.read_bytes()
     config_bytes = DEPENDENCY_CONFIG.read_bytes()
+    content_bytes = DEPENDENCY_CONTENT.read_bytes()
     component_bytes = {}
     for name in COMPONENT_NAMES:
         source = CANONICAL.with_name(name)
@@ -144,7 +171,14 @@ def main() -> int:
         pairs.append((canonical_bytes, plugin / "scripts" / VRT_NAME))
         pairs.append((policy_bytes, plugin / "scripts" / DEPENDENCY_POLICY.name))
         pairs.append((config_bytes, plugin / "scripts" / DEPENDENCY_CONFIG.name))
+        pairs.append((content_bytes, plugin / "scripts" / DEPENDENCY_CONTENT.name))
         pairs.extend((data, plugin / "scripts" / name) for name, data in component_bytes.items())
+        if plugin.name in BUILD_HELPER_CONSUMERS:
+            helper = RESOLVER_DIR / "standalone_build.py"
+            if helper.is_symlink() or not helper.is_file():
+                print("canonical runtime build helper missing or linked", file=sys.stderr)
+                return 1
+            pairs.append((helper.read_bytes(), plugin / "scripts" / helper.name))
 
     resolver_plugins = _resolver_plugins()
     resolver_bytes: dict[str, bytes] = {}
@@ -158,6 +192,34 @@ def main() -> int:
         for name in RESOLVER_NAMES:
             pairs.append((resolver_bytes[name], plugin / "scripts" / name))
 
+    instance_pairs: list[tuple[bytes, Path]] = []
+    for name, source in installer_instance_sources(REPO).items():
+        if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or not source.is_file():
+            print(f"canonical installer instance helper missing or linked: {name}", file=sys.stderr)
+            return 1
+        data = source.read_bytes()
+        instance_pairs.extend((data, consumer / "scripts" / name) for consumer in consumers)
+        wsl = REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
+        if name in {"daemon_instances.ps1", "installer-instance-reconcile.ps1"} and (
+            wsl / "wsl-keepalive.ps1"
+        ).is_file():
+            instance_pairs.append((data, wsl / name))
+    try:
+        archive = lifecycle_archive(REPO)
+    except (OSError, ValueError) as error:
+        print(f"lifecycle source archive refused: {error}", file=sys.stderr)
+        return 1
+    instance_pairs.extend((archive, consumer / "scripts" / ARCHIVE_NAME) for consumer in consumers)
+    archive_paths = {consumer / "scripts" / ARCHIVE_NAME for consumer in consumers}
+    wsl = REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
+    if (wsl / "wsl-keepalive.ps1").is_file():
+        instance_pairs.append((archive, wsl / ARCHIVE_NAME))
+        archive_paths.add(wsl / ARCHIVE_NAME)
+    package_archive = REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / ARCHIVE_NAME
+    instance_pairs.append((archive, package_archive))
+    archive_paths.add(package_archive)
+    pairs = instance_pairs if args.only_installer_instances else [*pairs, *instance_pairs]
+
     for _want_bytes, dest in pairs:
         bad_destination = uer._find_symlinked_ancestor(dest, REPO.resolve())
         if bad_destination is not None:
@@ -168,7 +230,11 @@ def main() -> int:
     written: list[str] = []
     for want_bytes, dest in pairs:
         current = dest.read_bytes() if dest.exists() else None
-        if current is not None and _sha(current) == _sha(want_bytes):
+        mode_matches = (
+            dest not in archive_paths or sys.platform == "win32"
+            or not dest.stat().st_mode & 0o022
+        ) if current is not None else False
+        if current is not None and _sha(current) == _sha(want_bytes) and mode_matches:
             continue
         rel = dest.relative_to(REPO).as_posix()
         if args.check:
@@ -176,6 +242,8 @@ def main() -> int:
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(want_bytes)
+        if dest in archive_paths:
+            dest.chmod(0o644)
         written.append(rel)
 
     n_plugins = len(plugins)
@@ -183,14 +251,21 @@ def main() -> int:
     scope = f"{n_plugins} plugins (+ resolvers in {n_res}); {len(standalone)} standalone adopter(s)"
     if args.check:
         if drifted:
+            source_label = (
+                "the canonical installer-instance sources" if args.only_installer_instances
+                else f"the canonical sources in {RESOLVER_DIR.relative_to(REPO).as_posix()}"
+            )
             print(
                 "vendored versioned-runtime files are out of sync with the "
-                f"canonical sources in {RESOLVER_DIR.relative_to(REPO).as_posix()}:",
+                f"{source_label.removeprefix('the ')}:",
                 file=sys.stderr,
             )
             for d in drifted:
                 print(f"  - {d}", file=sys.stderr)
-            print("\nRun: python tools/sync-versioned-runtime.py", file=sys.stderr)
+            command = "python tools/sync-versioned-runtime.py"
+            if args.only_installer_instances:
+                command += " --only-installer-instances"
+            print(f"\nRun: {command}", file=sys.stderr)
             return 1
         print(f"versioned-runtime files in sync across {scope}.")
         return 0

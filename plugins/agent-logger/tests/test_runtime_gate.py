@@ -234,6 +234,7 @@ printf '{"pluginRoot":"%s","versionsRoot":"%s/versions","snapshotsRoot":"%s/snap
         newline="\n",
     )
     (payload / "scripts" / "resolve-runtime.sh").write_text(
+        '# Trace contract: normal/read-only/ready-v1\n'
         '[ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" = ready ] || return 126\n'
         'AGENT_RT_PY="${TEST_PYTHON:-}"\n',
         encoding="utf-8",
@@ -276,6 +277,7 @@ $root = $env:TEST_CELL_ROOT
         encoding="utf-8",
     )
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "# Trace contract: normal/read-only/ready-v1\n"
         "param([string]$TraceMode)\n"
         "if ($TraceMode -ne 'ready') { throw 'Expected ready-only resolution' }\n"
         "$AgentRtPy = $env:TEST_PYTHON\n", encoding="utf-8"

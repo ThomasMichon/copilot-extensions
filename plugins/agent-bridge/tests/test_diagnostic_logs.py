@@ -117,6 +117,28 @@ def test_both_existing_bridge_logger_namespaces_use_one_application_writer(handl
         "agent-bridge.test", "agent_bridge.worktree_head",
     }
 
+@pytest.mark.asyncio
+async def test_failed_readiness_diagnostic_survives_ordinary_control_cleanup(handler, tmp_db, tmp_path):
+    from agent_bridge.plugin_readiness import PluginReadinessError, wait_plugin_readiness
+    from test_plugin_readiness import claimed, expectation, register, reply
+
+    register(tmp_db, tmp_path)
+    task = asyncio.create_task(wait_plugin_readiness(tmp_db, "native", expectation(tmp_path)))
+    control = await claimed(tmp_db, "native")
+    reply(tmp_db, "native", control, status="failed", missing=["private-loadout"])
+    with pytest.raises(PluginReadinessError, match="selected-plugin-disabled"):
+        await task
+    assert tmp_db.deregister_live_session("native")
+    assert tmp_db.live_control_state("native", control["id"]) is None
+    wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+    events = [json.loads(line) for line in handler.store.path.read_text(encoding="utf-8").splitlines()]
+    event = next(event for event in events if event["logger"] == "agent_bridge.plugin_readiness")
+    assert f"control_id={control['id']}" in event["message"]
+    assert "code=selected-plugin-disabled" in event["message"]
+    assert "missing_count=1" in event["message"]
+    assert "private-loadout" not in json.dumps(event)
+    assert str(tmp_path) not in event["message"]
+
 
 def test_held_file_mutex_and_handler_lock_do_not_block_event_loop(handler):
     release = threading.Event()

@@ -103,13 +103,18 @@ def test_real_parser_default_keyed_send_and_receipt_preserve_wire(
             assert body == vector["request"]
             return vector["admission_response"]
 
-    monkeypatch.setattr(core, "_get_client", lambda: Client())
+    client_modes = []
+    def get_client(**kwargs):
+        client_modes.append(kwargs)
+        return Client()
+    monkeypatch.setattr(core, "_get_client", get_client)
     args = core.build_parser().parse_args([
         "--json", "send", "bridge-a", "--native-invocation-file", str(file),
         "--expected-native-session-id", "native-a",
         *(["--receipt-only"] if receipt_only else []), *output_options,
     ])
     args.func(args)
+    assert client_modes == ([{"ensure": False}] if receipt_only else [{}])
     assert json.loads(capsys.readouterr().out) == {
         **vector["admission_response"], "outcome": "delivered",
     }

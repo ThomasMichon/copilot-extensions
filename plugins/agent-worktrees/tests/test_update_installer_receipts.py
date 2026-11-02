@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,3 +85,21 @@ def test_engine_installer_fails_an_exit_0_that_left_the_old_receipt(
     # The installer's own output looked successful, so the reason must be shown.
     assert errors == ["agent-worktrees installer failed: runtime not at target after a "
                       "successful installer exit (deployed 1.0.0, expected 2.0.0)"]
+
+
+@pytest.mark.parametrize("project_context", [False, True])
+def test_engine_installer_preserves_its_project_only_marketplace_source(
+    example, tmp_path, monkeypatch, project_context,
+):
+    plugin, _deployed = example
+    project = tmp_path / "owning-project"
+    project.mkdir()
+    monkeypatch.setattr(
+        runtime, "_invocation_update_context", lambda: project if project_context else None,
+    )
+    observed = []
+    monkeypatch.setattr(runtime, "_run_human_installer", lambda argv, **kwargs: (
+        observed.append(kwargs["cwd"]) or SimpleNamespace(status="OK", rc=0)
+    ))
+    assert runtime._run_engine_installer(["installer"], plugin, 60, {}) == 0
+    assert observed == [project if project_context else plugin]

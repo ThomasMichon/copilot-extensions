@@ -121,7 +121,11 @@ def load_pivot(
         message = detail[-1] if detail else f"exit {proc.returncode}"
         raise PivotLoadError(message[:200])
     try:
-        data = json.loads(stdout_text or "[]")
+        data = json.loads(stdout_text)
     except ValueError as exc:
-        raise PivotLoadError("list command did not print JSON") from exc
+        detail = stderr_text.strip().splitlines()
+        message = "list command did not print JSON"
+        if detail:
+            message += ": " + detail[-1][:200]
+        raise PivotLoadError(message) from exc
     return parse_list_payload(data, items_field=pivot.items_field)

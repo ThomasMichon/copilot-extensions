@@ -661,7 +661,7 @@ def test_stop_does_not_close_client_while_tick_thread_still_alive(monkeypatch, d
     fake_thread.start()
     runner._thread = fake_thread
     try:
-        runner.stop(resign=False, timeout=0.05)
+        assert runner.stop(resign=False, timeout=0.05) is False
         # The thread is still alive -- must NOT have closed the client out
         # from under it, and must still hold the thread handle so a caller
         # can join() again later.
@@ -673,6 +673,6 @@ def test_stop_does_not_close_client_while_tick_thread_still_alive(monkeypatch, d
         fake_thread.join(timeout=5)
 
     # Once the thread has genuinely exited, a later stop() completes cleanup.
-    runner.stop(resign=False, timeout=1.0)
+    assert runner.stop(resign=False, timeout=1.0) is True
     assert client.closed is True
     assert runner._work_intake is None

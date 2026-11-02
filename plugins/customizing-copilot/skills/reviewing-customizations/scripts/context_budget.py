@@ -125,7 +125,7 @@ def _repo_instruction_files(root: Path) -> tuple[set[Path], set[Path]]:
     return always_loaded, conditional
 
 
-def _custom_instruction_dirs(home: Path) -> list[Path]:
+def _custom_instruction_dirs(home: Path, *, base_directory: Path | None = None) -> list[Path]:
     raw = os.environ.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
     if not raw:
         return []
@@ -143,6 +143,8 @@ def _custom_instruction_dirs(home: Path) -> list[Path]:
             directory = home / configured[2:]
         else:
             directory = Path(configured)
+            if not directory.is_absolute() and base_directory is not None:
+                directory = base_directory / directory
         key = str(directory.resolve())
         if key not in seen:
             seen.add(key)
@@ -170,17 +172,18 @@ def _instruction_files_in(directory: Path) -> set[Path]:
 
 def _custom_instruction_files(
     home: Path,
+    *, base_directory: Path | None = None,
 ) -> tuple[set[Path], tuple[tuple[Path, str], ...]]:
     files: set[Path] = set()
     aliases: list[tuple[Path, str]] = []
-    for index, directory in enumerate(_custom_instruction_dirs(home), 1):
+    for index, directory in enumerate(_custom_instruction_dirs(home, base_directory=base_directory), 1):
         files.update(_instruction_files_in(directory))
         aliases.append((directory, f"custom-instructions-{index}"))
     return files, tuple(aliases)
 
 
-def _personal_instruction_files(home: Path) -> set[Path]:
-    base = home / ".copilot"
+def _personal_instruction_files(home: Path, *, copilot_home: Path | None = None) -> set[Path]:
+    base = copilot_home or home / ".copilot"
     files: set[Path] = set()
     direct = base / "copilot-instructions.md"
     if direct.is_file():

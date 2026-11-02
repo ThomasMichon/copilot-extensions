@@ -1,0 +1,9 @@
+{
+  "comment": "Regenerate the shared daemon lifetime archive with current cache and construction inputs",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

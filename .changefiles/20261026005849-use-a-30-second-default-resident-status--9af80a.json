@@ -1,0 +1,9 @@
+{
+  "comment": "Use a 30-second default resident status correctness backstop while preserving immediate push wakes and explicit intervals.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

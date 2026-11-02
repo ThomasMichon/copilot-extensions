@@ -1,0 +1,9 @@
+{
+  "comment": "Observe explicit configured supervisor scopes through the existing registrar configuration owner without activating membership",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "fleet-manager.ssh-client-contract",
+  "version": 1,
+  "configuration": {
+    "schema": "fleet-manager.ssh-client",
+    "versions": [1]
+  },
+  "directory": {
+    "schema": "agent-ssh.service-directory",
+    "versions": [1]
+  },
+  "entrypoint": {
+    "command": "serve",
+    "role": "ssh-client"
+  },
+  "automatic_invocation": false
+}

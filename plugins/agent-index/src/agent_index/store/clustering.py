@@ -85,6 +85,12 @@ def source_bucket(source: str) -> str:
     return ":".join(source.split(":")[:2])
 
 
+def validate_bucket(bucket: str) -> None:
+    if (not isinstance(bucket, str) or not bucket or len(bucket.encode()) > 256
+            or any(ord(char) < 32 for char in bucket) or source_bucket(bucket) != bucket):
+        raise ValueError("Invalid clustering bucket")
+
+
 class _UnionFind:
     def __init__(self, n: int) -> None:
         self._parent = list(range(n))

@@ -67,9 +67,11 @@ def frames(root: Path, project: str, *, alive, startup_timeout: float):
             or not isinstance(state.get("capabilities"), list)
             or "worktrees-feed-v1" not in state["capabilities"]
         ):
-            raise FeedUnavailable("resident lacks worktrees-feed-v1; update the engine", retry=False)
+            raise FeedUnavailable(
+                "resident lacks worktrees-feed-v1; update the engine", retry=False, connected=True,
+            )
         if state.get("status") == "draining":
-            raise FeedUnavailable("resident is draining")
+            raise FeedUnavailable("resident is draining", connected=True)
         payload = {
             "contract_version": 1, "project": project, "worktree_id": None,
             "codename": None, "status_filter": None,
@@ -85,7 +87,10 @@ def frames(root: Path, project: str, *, alive, startup_timeout: float):
             while alive():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise FeedUnavailable("resident feed missed its startup/publication/heartbeat deadline")
+                    raise FeedUnavailable(
+                        "resident feed missed its startup/publication/heartbeat deadline",
+                        connected=True,
+                    )
                 readable, _, _ = select.select([sock], [], [], min(remaining, 0.1))
                 if not readable:
                     continue
@@ -99,7 +104,9 @@ def frames(root: Path, project: str, *, alive, startup_timeout: float):
                     if len(line) > _MAX_FRAME_BYTES:
                         raise ValueError("resident feed exceeded its frame bound")
                     if time.monotonic() >= deadline:
-                        raise FeedUnavailable("resident feed exceeded its publication deadline")
+                        raise FeedUnavailable(
+                            "resident feed exceeded its publication deadline", connected=True,
+                        )
                     frame = json.loads(line)
                     if not isinstance(frame, dict):
                         raise ValueError("resident feed emitted a non-object frame")

@@ -306,10 +306,18 @@ def materialize_build_fixture(snapshot):
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
 @pytest.mark.effect("network")
-@pytest.mark.timeout(180)
+# Both native construction subprocesses own a 300-second deadline.
+@pytest.mark.timeout(720)
 def test_cell_real_package_build_and_completed_replay(cell, monkeypatch):
     """Real engine/uv package construction, never a shared-profile installation."""
     adapter, api, receipt, arguments, snapshot, home = cell
+    monkeypatch.setattr(
+        adapter, "broker_operation", lambda *_: pytest.fail("Normal provisioning invoked a legacy broker"),
+        raising=False,
+    )
+    monkeypatch.setattr(adapter, "remove_legacy_broker", lambda *_: pytest.fail("Normal provisioning removed a broker"))
+    import update_driver.windows_broker as broker
+    monkeypatch.setattr(broker, "adopt", lambda *_: pytest.fail("Normal provisioning adopted a broker"))
     activate_fixture(cell, monkeypatch)
     arguments[arguments.index("--runtime-version") + 1] = json.loads(
         (PAYLOAD / "plugin.json").read_text("utf-8"),
@@ -335,13 +343,33 @@ def test_cell_real_package_build_and_completed_replay(cell, monkeypatch):
     assert not (home / ".local" / "bin").exists()
 
 
+def test_cell_legacy_broker_removal_is_explicit_and_never_adopts(cell, monkeypatch):
+    adapter, api, receipt, arguments, _, _ = cell
+    removed = []
+    monkeypatch.setattr(adapter, "remove_legacy_broker", removed.append)
+    result = adapter.execute(adapter.parse(["broker-remove", *arguments]), api)
+    assert result == {"status": "ready", "action": "broker-remove", "removed": True}
+    assert removed == [Path(receipt["pluginRoot"])]
+
+
 def test_cell_failed_build_never_completes_or_retries_in_place(cell, monkeypatch):
     adapter, api, _, arguments, snapshot, _ = cell
     activate_fixture(cell, monkeypatch)
     arguments[arguments.index("--runtime-version") + 1] = json.loads(
         (PAYLOAD / "plugin.json").read_text("utf-8"),
     )["version"]
-    materialize_build_fixture(snapshot)
+    (snapshot / "pyproject.toml").write_text('[project]\nname="fixture"\nversion="1.0"\n')
+    for library in adapter.LIBRARIES:
+        root = snapshot / "libs" / library
+        root.mkdir(parents=True)
+        (root / "pyproject.toml").write_text('[project]\nname="fixture"\nversion="1.0"\n')
+    scripts = snapshot / "scripts"
+    scripts.mkdir()
+    for helper in SCRIPTS.glob("versioned_runtime*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    (scripts / ("installer-engine.ps1" if os.name == "nt" else "installer-engine.sh")).write_text(
+        "# Subprocess execution is replaced by the construction failure below.\n",
+    )
     def fail(*args, **kwargs):
         raise ValueError("construction failed")
     monkeypatch.setattr(adapter, "run", fail)

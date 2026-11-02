@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -47,7 +49,9 @@ def test_absent_key_does_not_grant_permission(tmp_path: Path, text: str) -> None
     assert not policy.denied_by
 
 
-def test_absent_file_reads_no_machine_settings(tmp_path: Path, monkeypatch) -> None:
+def test_absent_file_reads_no_machine_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     write(home, "expose_agent: false\n", ".agent-worktrees/projects.yaml")
@@ -91,9 +95,9 @@ def test_other_marketplace_is_not_consulted(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("identity", ["../other", ".", "..", "/absolute", "a/b", "a\\b", 1])
-def test_invalid_marketplace_identity_refuses(tmp_path: Path, identity) -> None:
+def test_invalid_marketplace_identity_refuses(tmp_path: Path, identity: object) -> None:
     with pytest.raises(RepositoryPolicyError, match="marketplace"):
-        require_agent_hosting(tmp_path, marketplace_id=identity)
+        require_agent_hosting(tmp_path, marketplace_id=cast(str, identity))
 
 
 @pytest.mark.parametrize("text", [
@@ -112,24 +116,28 @@ def test_malformed_policy_refuses_with_source(tmp_path: Path, text: str) -> None
         require_agent_hosting(tmp_path)
 
 
-def test_unreadable_required_policy_is_not_absent(tmp_path: Path, monkeypatch) -> None:
+def test_unreadable_required_policy_is_not_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target = write(tmp_path, "expose_agent: false\n")
     original = Path.read_text
 
-    def read(path: Path, *args, **kwargs):
+    def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
         if path == target:
             raise PermissionError("synthetic access denied")
-        return original(path, *args, **kwargs)
+        return original(path, encoding=encoding, errors=errors)
 
     monkeypatch.setattr(Path, "read_text", read)
     with pytest.raises(RepositoryPolicyError, match="synthetic access denied"):
         require_agent_hosting(tmp_path)
 
 
-def test_inspection_error_is_not_absent(tmp_path: Path, monkeypatch) -> None:
+def test_inspection_error_is_not_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = Path.lstat
 
-    def inspect(path: Path):
+    def inspect(path: Path) -> os.stat_result:
         if path == tmp_path / CANONICAL:
             raise PermissionError("synthetic inspection denied")
         return original(path)
@@ -172,3 +180,86 @@ def test_refusal_has_no_writes_and_no_purpose_escape(tmp_path: Path) -> None:
     after = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
     assert before == after
     assert load_agent_policy(tmp_path).to_dict()["version"] == 1
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("text,allowed", [
+    (None, True),
+    ("expose_agent: true\n", True),
+    ("expose_agent: false\n", False),
+    ('expose_agent: "false"\n', False),
+    ("expose_agent: false\nexpose_agent: true\n", False),
+])
+def test_fresh_guest_reader_uses_canonical_policy_without_installed_packages(
+    tmp_path: Path, text: str | None, allowed: bool,
+) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from repository_policy.guest_probe import build_guest_policy_probe
+
+    (tmp_path / ".git").mkdir()
+    if text is not None:
+        write(tmp_path, text)
+    nested = tmp_path / "source"
+    nested.mkdir()
+    reader_temp = tmp_path / "reader-temp"
+    reader_temp.mkdir()
+    before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+    script, payload = build_guest_policy_probe()
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.update(TMP=str(reader_temp), TEMP=str(reader_temp), TMPDIR=str(reader_temp))
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    else:
+        creationflags = 0
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(nested)],
+        input=payload, capture_output=True, timeout=10, env=environment,
+        creationflags=creationflags,
+    )
+    assert result.stderr == b"", result.stderr
+    answer = json.loads(result.stdout)
+    assert result.returncode == (0 if allowed else 3), answer
+    if allowed:
+        assert answer["allowed"] is True
+        assert answer["repository"] == str(tmp_path)
+        assert answer["sources"] == ([str(tmp_path / CANONICAL)] if text is not None else [])
+    else:
+        assert answer["code"] in {
+            "repository-agent-exposure-denied", "repository-agent-exposure-invalid",
+        }
+    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_fresh_guest_reader_cannot_downgrade_explicit_installation_context(tmp_path: Path) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from repository_policy.guest_probe import build_guest_policy_probe
+
+    script, payload = build_guest_policy_probe()
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    else:
+        creationflags = 0
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(tmp_path)],
+        input=payload, capture_output=True, timeout=10,
+        env=dict(os.environ, COPILOT_EXTENSIONS_CONTEXT="unvalidated-context"),
+        creationflags=creationflags,
+    )
+    assert result.returncode == 3
+    answer = json.loads(result.stdout)
+    assert answer["code"] == "repository-agent-exposure-invalid"
+    assert "context" in answer["error"]

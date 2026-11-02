@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installation driver contract: logger-first-use-v1
 set -euo pipefail
 
 export PYTHONUTF8=1
@@ -123,6 +124,10 @@ resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    if ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER"; then
+        printf '[agent-logger] read-only runtime resolver is unavailable; update or repair the owning payload.\n' >&2
+        exit 126
+    fi
     local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
@@ -294,102 +299,29 @@ if [[ -n "${AGENT_LOGGER_NO_SELFPROVISION:-}" ]]; then
     exit 1
 fi
 
-PUBLICATION_ARGS=(
-    probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
-    --plugin-id agent-logger --legacy-root "$RUNTIME_ROOT"
-)
-if [[ -n "$CONTEXT" ]]; then
-    PUBLICATION_ARGS+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
+if [[ -v AGENT_LOGGER_PINNED_CONTEXT ]]; then
+    printf '[agent-logger] pinned invocation requires a prepared owning runtime; provision independently.\n' >&2
+    exit 126
 fi
-PUBLICATION="" PUBLICATION_RC=0
-PUBLICATION="$(bash "$MODE_RUNNER" "${PUBLICATION_ARGS[@]}")" || PUBLICATION_RC=$?
-PUBLICATION_ROOT_PATH="$(json_path legacy root)"
-[[ -z "$CONTEXT" ]] || PUBLICATION_ROOT_PATH="$(json_path runtimeRoot)"
-if [[ "$PUBLICATION_RC" != 0 ||
-      "$(json_type "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != boolean ||
-      "$(json_get "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != true ||
-      "$(json_get "$PUBLICATION" "$PUBLICATION_ROOT_PATH" 2>/dev/null || true)" != "$RUNTIME_ROOT" ||
-      "$(json_get "$PUBLICATION" "$(json_path deployment path)" 2>/dev/null || true)" != "$RUNTIME_ROOT/runtime-deployment.json" ]]; then
-    printf '[agent-logger] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
-        "$PUBLICATION" >&2
-    exit 3
+if [[ -n "$CONTEXT" || "$RUNTIME_ROOT" != "$HOME/.agent-logger" ||
+      -v AGENT_LOGGER_INSTALLATION_ID ]]; then
+    printf '[agent-logger] cold namespaced/custom-root provisioning requires explicit installation management.\n' >&2
+    exit 126
 fi
-
-resolve_runtime normal
-if [[ -n "${AGENT_RT_PY:-}" ]]; then
-    run_runtime "$@"
+if [[ -v UPDATE_DRIVER_WITNESS ]]; then
+    printf '[agent-logger] nested first-use submission is unsupported; retain the current installation owner.\n' >&2
+    exit 126
 fi
-mkdir -p "$RUNTIME_ROOT"
-STATUS_PATH="$RUNTIME_ROOT/.provision-status"
-_lock_link=""
-_unlock_provision() {
-    if [[ -n "$_lock_link" ]]; then
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
-        _lock_link=""
-    else
-        flock -u 9 2>/dev/null || true
-        exec 9>&-
-    fi
-}
-if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-    exec 9>"$RUNTIME_ROOT/.provision.lock"
-    flock 9
-else
-    _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
-    until ln -s "$$" "$_lock_link" 2>/dev/null; do
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        case "$_owner" in
-            *[!0-9]*|"") _live=0 ;;
-            *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
-        esac
-        if [[ -z "$_owner" ]]; then
-            # The link vanished after the failed `ln -s` (or is not a
-            # symlink): never unlink then -- a live lock could be created
-            # between the read and the unlink. Just retry.
-            sleep 0.1
-        elif [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
-            rm -f "$_lock_link"
-        else
-            sleep 1
-        fi
-    done
+FIRST_USE="$PAYLOAD_ROOT/libs/update-driver/scripts/first-use.sh"
+if [[ ! -f "$FIRST_USE" ]] ||
+   ! grep -Fq '# Installation driver lifecycle contract: logger-command-v1' "$FIRST_USE"; then
+    printf '[agent-logger] packaged installation driver lacks the Logger command contract.\n' >&2
+    exit 126
 fi
-trap '_unlock_provision' EXIT INT TERM
+PROJECT="$(pwd -P)"
+bash "$FIRST_USE" "$HOME/.copilot-extensions/update-driver" "$PAYLOAD_ROOT" \
+    "$RUNTIME_ROOT" "$PROJECT" --installer-action provision --wait
 resolve_runtime
-if [[ -n "${AGENT_RT_PY:-}" ]]; then
-    _unlock_provision
-    trap - EXIT INT TERM
-    run_runtime "$@"
-fi
-printf '[%s] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.\n' \
-    "$COMMAND" >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
-    "$COMMAND" "$STATUS_PATH" >&2
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-
-apply_runtime_env
-set +e
-bash "$INSTALLER" provision --install-dir "$RUNTIME_ROOT" >&2
-PROVISION_EXIT=$?
-set -e
-if [[ "$PROVISION_EXIT" -ne 0 ]]; then
-    printf 'failed rc=%s %s\n' "$PROVISION_EXIT" "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    printf '[%s] provisioning FAILED. See the log above; retry, or run: bash "%s" provision --install-dir "%s"\n' \
-        "$COMMAND" "$INSTALLER" "$RUNTIME_ROOT" >&2
-    exit "$PROVISION_EXIT"
-fi
-
-resolve_runtime
-if [[ -n "${AGENT_RT_PY:-}" ]]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    _unlock_provision
-    trap - EXIT INT TERM
-    run_runtime "$@"
-fi
-
-_unlock_provision
-trap - EXIT INT TERM
-printf 'failed rc=1 %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-printf '[%s] provisioning reported success but no runtime slot resolved.\n' "$COMMAND" >&2
+[[ -z "${AGENT_RT_PY:-}" ]] || run_runtime "$@"
+printf '[%s] driver completed without a resolvable runtime.\n' "$COMMAND" >&2
 exit 1

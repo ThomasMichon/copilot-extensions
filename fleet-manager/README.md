@@ -6,10 +6,15 @@ resource diagnostics, explicitly authenticated artifact staging and an explicit
 admitted-client construction/health and owned runtime-selector transitions, a local current-observation
 storage API, and an opt-in authenticated NEW
 Gateway/SDK/subscribed-controller boundary.**
+The explicitly configured [foreground SSH consumer](docs/ssh-machine.md)
+composes the existing registered directory and agent-ssh writers under its
+normal lifetime owner; thin installation remains inert.
 The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
 no production Gateway/index offload or managed install/update/uninstall,
 telemetry sink or fleet resource mutation is claimed.
 Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
+The explicit local-owner SDK binding below is not activated by those default
+CLI roles and does not establish a production controller or adopted fleet.
 
 The opt-in [service Gateway SDK](docs/gateway-service-profile.md) includes a
 finite authenticated caller and accepts a code-registered provider-neutral
@@ -67,12 +72,27 @@ requirements without contacting Core, installing a manager or authorizing
 effects. Default planning preserves its optional configuration namespace without
 selecting it; actual managed lifecycle and production readiness remain separate.
 
+The explicit Linux host [Komodo substrate owner](docs/komodo-owner.md) supplies
+fixed native Core/Periphery/Mongo convergence, preserving adoption, current
+authenticated status and receipt-owned container withdrawal. It also exposes
+an explicitly preserving-only incumbent materialization for
+original local named volumes, files, explicitly selected bridge topology,
+configuration-derived local-auth usernames and MongoDB 7.0 without rendering a
+fresh profile or permitting native apply. That selection does not provide updates
+or withdrawal.
+Its installed SDK bootstrap works independently of Core/Gateway and may register with the
+existing service Gateway. This opt-in API does not activate the ordinary CLI;
+actual adopter construction and official-image/live qualification remain open.
+
 The explicit [ARC Helm owner API](docs/arc-owner.md) supplies fixed, journaled
 scale-set convergence through an independently adopted Helm 3/cluster owner.
 It consumes the exact reviewed preparation and a separately content-bound
 runtime permit; it is not enabled by the planner or an SDK review. Production
 controller wiring, complete lifecycle, support-owner authentication and live
 readiness/job acceptance remain open. It never supervises ARC pods through Komodo.
+Its opt-in in-process Gateway binding uses the original verified caller and
+independent content-bound operation admission; it does not activate that binding
+in the ordinary CLI or adopt an incumbent release.
 
 The separate, explicit Linux-root [host profile bootstrap](docs/host-profiles.md)
 owns one fixed, enforcing trusted-systemd AppArmor profile. Its module CLI

@@ -1,6 +1,6 @@
 {
   "name": "budget-guidance",
-  "description": "Provider-neutral budget posture, deterministic source resolution, sustainable-rate arithmetic, and an on-demand credential-free foreground-session quota capture tool.",
+  "description": "Current usage and quota lookup with attributable provider-neutral readings, sustainable monthly pace estimates and optional economy advice. Credential-free foreground-session captures; no request blocking, model selection or delegation strategy.",
   "version": "0.1.0-dev16",
   "runtimeScope": "universal",
   "hooks": "hooks.json",
@@ -14,7 +14,7 @@
   "keywords": [
     "budget",
     "usage",
-    "routing",
+    "economy",
     "guidance"
   ],
   "skills": [

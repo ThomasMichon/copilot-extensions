@@ -650,19 +650,20 @@ try {
     }
 
     $Kernel = "[owner: efforts@$Version]`n" +
-        'Efforts are required. For substantial multi-step work, use ' +
-        '`planning-efforts` to create or resume the canonical effort, not a new ' +
-        'plan document. Review its plan before implementation and execute in ' +
-        'waves. Only the rightful head drives the next slice; superseded sessions ' +
-        'assist or hand off. Continue until the effort is explicitly Done and ' +
-        'each Plan and Validation Plan item is resolved or transferred to a named ' +
-        'tracked objective. A completed phase, PR, ' +
-        'handoff, or session is not completion. Pause only for genuine ' +
-        'uncertainty, prerequisites, required review, or required ' +
-        'safety/admin confirmation. Handoffs name the effort and next slice; ' +
-        'bounded predecessor ramp-up covers only immediate activity. Keep ' +
-        'cross-repo planning host-owned by default. Valid adoption only permits ' +
-        'an explicitly selected target-owned sub-effort referenced one-way.'
+        'Efforts required: use `planning-efforts`; review its plan before code. ' +
+        'Only the rightful head drives; others assist or hand off. Continue to ' +
+        'explicit Done with every Plan/Validation item resolved or transferred ' +
+        'to named tracked work; phase/PR/session/handoff is not completion. ' +
+        'Handoffs retain effort/next slice; ramp-up is immediate only. Cross-repo ' +
+        'plans stay host-owned unless verified adoption and explicit selection ' +
+        'permit a one-way-linked target effort. Opted-in agendas use ' +
+        '`driving-effort-agendas`: tail queue, scoped subqueues, saved continuations. ' +
+        'Revisit needs relevant new context and a viable changed approach, not ' +
+        'metadata. Preserve history/caps; legacy count limits stay strict. New ' +
+        'mode requires actual source support. With unchanged context investigate/' +
+        'refine/wait or choose other assigned work, not Operator steer from counts. ' +
+        'Operator only for actual decisions/permissions/safety; honor holds and ' +
+        'required review.'
     if ([Text.Encoding]::UTF8.GetByteCount($Kernel) -ge $MaxContextBytes) {
         Write-Diagnostic 'policy context exceeds its byte budget; no policy context emitted'
         Emit-Empty

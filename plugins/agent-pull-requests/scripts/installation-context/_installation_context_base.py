@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, NoReturn, ParamSpec, TypeVar, cast
 from urllib.parse import quote, urlsplit, urlunsplit
 
 LOCK_SCHEMA = "copilot-extensions.installation-lock"
@@ -89,10 +89,15 @@ _VALIDATION_SCOPE_DEPTH: ContextVar[int] = ContextVar(
     "_VALIDATION_SCOPE_DEPTH",
     default=0,
 )
+_POWERSHELL_PATHS: ContextVar[bool] = ContextVar("_POWERSHELL_PATHS", default=False)
 
 
 class InstallationContextError(ValueError):
     """Raised when installation identity or ownership cannot be proven."""
+
+
+class MalformedDeploymentManifest(InstallationContextError):
+    """Ordinary, stably read deployment bytes are not a JSON document."""
 
 
 class _FileIdentityChanged(InstallationContextError):
@@ -108,13 +113,21 @@ class NormalizedSource:
     ref: str = ""
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     raise InstallationContextError(message)
 
 
-def _validation_scope(function: Callable[..., Any]) -> Callable[..., Any]:
+_ValidationParameters = ParamSpec("_ValidationParameters")
+_ValidationResult = TypeVar("_ValidationResult")
+
+
+def _validation_scope(
+    function: Callable[_ValidationParameters, _ValidationResult],
+) -> Callable[_ValidationParameters, _ValidationResult]:
     @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(
+        *args: _ValidationParameters.args, **kwargs: _ValidationParameters.kwargs,
+    ) -> _ValidationResult:
         depth = _VALIDATION_SCOPE_DEPTH.get()
         outermost = depth == 0
         cache_token = None
@@ -170,6 +183,8 @@ def canonical_path(value: str | os.PathLike[str], *, must_exist: bool = False) -
     try:
         resolved = path.resolve(strict=must_exist)
     except (OSError, RuntimeError) as error:
+        if must_exist and _POWERSHELL_PATHS.get() and isinstance(error, FileNotFoundError):
+            _fail(f"Path does not exist: {value}")
         _fail(f"Cannot resolve path '{value}': {error}")
     if must_exist and not resolved.exists():
         _fail(f"Path does not exist: {value}")
@@ -189,7 +204,17 @@ def _path_is_fully_qualified(
 
 
 def _path_key(path: Path) -> str:
-    return os.path.normcase(os.fspath(canonical_path(path)))
+    text = os.fspath(canonical_path(path))
+    if os.name == "nt":
+        drive = PureWindowsPath(text).drive
+        if drive.casefold().startswith("\\\\?\\unc\\"):
+            text = "\\\\" + text[8:]
+        elif (
+            len(drive) == 6 and drive.startswith("\\\\?\\")
+            and drive[4].lower() in "abcdefghijklmnopqrstuvwxyz" and drive[5] == ":"
+        ):
+            text = text[4:]
+    return os.path.normcase(text)
 
 
 def paths_equal(left: str | os.PathLike[str], right: str | os.PathLike[str]) -> bool:
@@ -203,10 +228,10 @@ def _is_link_or_junction(path: Path) -> bool:
     if is_junction and is_junction():
         return True
     try:
-        attributes = os.lstat(path).st_file_attributes
+        attributes = cast(int, getattr(os.lstat(path), "st_file_attributes"))
     except (AttributeError, FileNotFoundError, OSError):
         return False
-    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return bool(attributes & cast(int, getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")))
 
 
 def path_is_within(child: str | os.PathLike[str], parent: str | os.PathLike[str]) -> bool:
@@ -235,6 +260,7 @@ def _rename_directory_no_replace(source: Path, destination: Path) -> None:
     source_bytes = os.fsencode(source)
     destination_bytes = os.fsencode(destination)
     library = ctypes.CDLL(None, use_errno=True)
+    result: int
     if sys.platform.startswith("linux"):
         rename_no_replace = getattr(library, "renameat2", None)
         if rename_no_replace is None:
@@ -285,7 +311,10 @@ def _rename_directory_no_replace(source: Path, destination: Path) -> None:
     )
 
 
-def _read_json_document(path: str | os.PathLike[str], *, encoding: str) -> Any:
+def _read_json_document(
+    path: str | os.PathLike[str], *, encoding: str,
+    malformed_error: type[InstallationContextError] = InstallationContextError,
+) -> Any:
     canonical = canonical_path(path, must_exist=True)
     try:
         content, validated_stat = _read_regular_file(
@@ -293,10 +322,13 @@ def _read_json_document(path: str | os.PathLike[str], *, encoding: str) -> Any:
             label="JSON document",
             require_stable_identity=True,
         )
-        value = json.loads(
-            content.decode(encoding),
-            object_pairs_hook=_reject_duplicate_keys,
-        )
+        try:
+            value = json.loads(
+                content.decode(encoding),
+                object_pairs_hook=_reject_duplicate_keys,
+            )
+        except (UnicodeError, json.JSONDecodeError, InstallationContextError) as error:
+            raise malformed_error(f"Invalid JSON in '{canonical}': {error}") from error
         _cache_validated_file_digest(canonical, content, validated_stat)
         return value
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -308,7 +340,9 @@ def read_json(path: str | os.PathLike[str]) -> Any:
 
 
 def read_deployment_manifest(path: str | os.PathLike[str]) -> Any:
-    return _read_json_document(path, encoding="utf-8-sig")
+    return _read_json_document(
+        path, encoding="utf-8-sig", malformed_error=MalformedDeploymentManifest,
+    )
 
 
 def _utc_now() -> str:

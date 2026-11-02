@@ -1,0 +1,13 @@
+{
+  "comment": "Separate Main bootstrap transport from independently selected runtime source policy.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

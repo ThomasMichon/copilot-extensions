@@ -34,15 +34,13 @@ def _default_deliver(
     task_id: str,
     message: str | None,
     idempotency_key: str,
+    *,
+    queue: TaskQueue,
 ) -> bool:
-    from . import bridge
+    from .owner_wake_delivery import deliver_owner_wake
 
-    return bridge.resume_steered_owner(
-        owner,
-        task_id,
-        message,
-        owner_session_id=owner_session_id,
-        idempotency_key=idempotency_key,
+    return deliver_owner_wake(
+        queue, owner, owner_session_id, task_id, message, idempotency_key,
     )
 
 
@@ -66,7 +64,7 @@ async def drain_wake_outbox(
     bus: EventBus,
     *,
     interval: float = 0.25,
-    deliver: DeliverWake = _default_deliver,
+    deliver: DeliverWake | None = None,
     max_attempts: int = 8,
     retry_base: float = 1.0,
     is_active: WakeActive | None = None,
@@ -83,6 +81,9 @@ async def drain_wake_outbox(
     owner-session identity, status, and latest-wake identity fence stale work.
     """
     idle_interval = interval if idle_interval is None else idle_interval
+    if deliver is None:
+        from functools import partial
+        deliver = partial(_default_deliver, queue=queue)
 
     async def _wait(delay: float) -> None:
         if wake_signal is None:

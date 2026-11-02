@@ -1,0 +1,9 @@
+{
+  "comment": "Add configurable signature profiles with shared guidance and pure draft decoration",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    }
+  ]
+}

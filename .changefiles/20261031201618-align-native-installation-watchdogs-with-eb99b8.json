@@ -1,0 +1,9 @@
+{
+  "comment": "Align native installation watchdogs with the declared 900-second budget and preserve child exit status when post-install custody is unconfirmed.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

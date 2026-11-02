@@ -1,0 +1,13 @@
+{
+  "comment": "Allow explicitly durable product daemons to escape the canonical installation cleanup Job while ordinary tools remain contained",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

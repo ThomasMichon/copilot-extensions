@@ -134,6 +134,36 @@ class AzureDevOpsProvider:
             return ""
         return f"{org.rstrip('/')}/{project}/_git/{repo}/pullrequest/{number}"
 
+    def _publication_labels_request(self, method, repo, number, api_base, token, payload=None):
+        from urllib.parse import quote
+
+        if not api_base:
+            raise ProviderError("Publication labels need the Azure DevOps organization URL")
+        project, name = self._split_repo(repo)
+        url = (f"{api_base.rstrip('/')}/{quote(project, safe='')}/_apis/git/repositories/"
+               f"{quote(name, safe='')}/pullRequests/{number}/labels?api-version=7.1")
+        auth, error = self._auth_header(token)
+        if error:
+            raise ProviderError(error)
+        status, body = self._rest_call(method, url, auth, payload)
+        if status not in (200, 201):
+            raise ProviderError(f"Publication labels {method} returned HTTP {status}")
+        return json.loads(body or "{}")
+
+    def get_publication_labels(self, repo, number, *, api_base="", token=None):
+        data = self._publication_labels_request("GET", repo, number, api_base, token)
+        items = data.get("value") if isinstance(data, dict) else None
+        if not isinstance(items, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("name"), str) for item in items):
+            raise ProviderError("Malformed publication-label response")
+        return tuple(item["name"] for item in items)
+
+    def add_publication_labels(self, repo, number, labels, *, api_base="", token=None):
+        for label in labels:
+            self._publication_labels_request(
+                "POST", repo, number, api_base, token, json.dumps({"name": label}),
+            )
+
     @staticmethod
     def _canonical_state(status: str) -> str:
         states = {"active": "open", "completed": "merged", "abandoned": "closed"}

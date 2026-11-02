@@ -9,15 +9,16 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
+import shutil as shutil
 import stat
 import sys
-import tempfile
+import time as time
 from types import ModuleType
 from typing import Any
 
 SOURCE_FILE = "runtime-source.json"
 SOURCE_SCHEMA = "copilot-extensions.runtime-source"
+SOURCE_PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
 _OBJECT_ID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _PACKAGE_VERSION = re.compile(
@@ -124,7 +125,8 @@ def _stage_redirect(
     root: Path, name: str, content: bytes, mode: int,
     owned: dict[Path, tuple[int, int]], receipt: Any = None, target: Path | None = None,
 ) -> Path:
-    fd, temporary = tempfile.mkstemp(prefix=f".{name}.redirect-", dir=root)
+    publication = _runtime()._runtime_component("versioned_runtime_publication")
+    fd, temporary = publication._temporary_file(root, f".{name}.redirect-")
     path = Path(temporary)
     opened = os.fstat(fd)
     owned[path] = opened.st_dev, opened.st_ino
@@ -324,7 +326,8 @@ def package_version(slot_name: str) -> str:
     """Separate generated source/repair identities from the package version."""
     ordinary = re.sub(r"[+.]repair\.[0-9a-f]{32}$", "", slot_name)
     return re.sub(
-        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}$", "", ordinary,
+        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+        r"(?:\.profile\.[0-9a-f]{16})?$", "", ordinary,
     )
 
 
@@ -394,7 +397,7 @@ def _runtime() -> ModuleType:
     return module
 
 
-def assembly_hash(payload: Path) -> str:
+def assembly_hash(payload: Path, *, on_progress=None) -> str:
     files: list[Path] = []
 
     def scan_error(error: OSError) -> None:
@@ -428,14 +431,28 @@ def assembly_hash(payload: Path) -> str:
             if path == payload / "snapshot-provenance.json":
                 continue
             files.append(path)
+            if on_progress is not None:
+                on_progress()
     if not files:
         raise SourceIdentityError("Materialized runtime payload is empty")
-    return _runtime().fingerprint_source(files)
+    return _runtime().fingerprint_source(
+        files, **({"on_progress": on_progress} if on_progress is not None else {}),
+    )
 
 
 def payload_package_version(payload: Path, plugin: str) -> str:
     """Read the selected consumer's attributed package identity."""
-    if plugin == "worktree-manager":
+    standalone = {
+        "worktree-manager": "copilot-extensions-worktree-manager",
+        "fleet-manager": "fleet-manager",
+        "pr-service": "agent-pull-requests-service",
+        "chat-service": "agent-chat-service",
+        "dispatch-service": "agent-dispatch-service",
+        "ssh-service": "agent-ssh-service",
+        "index-service": "agent-index-service",
+        "index-engine": "agent-index-engine",
+    }
+    if plugin in standalone:
         import tomllib
 
         data = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
@@ -443,9 +460,9 @@ def payload_package_version(payload: Path, plugin: str) -> str:
         if (
             not isinstance(manifest, dict) or not isinstance(manifest.get("name"), str)
             or re.sub(r"[-_.]+", "-", manifest["name"]).lower()
-            != "copilot-extensions-worktree-manager"
+            != standalone[plugin]
         ):
-            raise SourceIdentityError("Materialized Manager project identity does not match")
+            raise SourceIdentityError("Materialized standalone project identity does not match")
     else:
         manifest = json.loads(
             (payload / "plugin.json").read_text(encoding="utf-8"),
@@ -461,6 +478,7 @@ def payload_package_version(payload: Path, plugin: str) -> str:
 
 def read_source_identity(
     payload: Path, package_version: str, *, plugin: str | None = None,
+    on_progress=None,
 ) -> SourceIdentity | None:
     path = payload / SOURCE_FILE
     try:
@@ -495,7 +513,7 @@ def read_source_identity(
     expected = runtime_version(package_version, data["source_commit"], data["assembly_hash"])
     if data["runtime_version"] != expected:
         raise SourceIdentityError("Source runtime version does not match its immutable inputs")
-    if assembly_hash(payload) != data["assembly_hash"]:
+    if assembly_hash(payload, on_progress=on_progress) != data["assembly_hash"]:
         raise SourceIdentityError("Materialized payload bytes do not match the source identity")
     return SourceIdentity(
         plugin=data["plugin"],
@@ -516,7 +534,9 @@ def manifest_fields(identity: SourceIdentity | None) -> dict[str, object]:
     }
 
 
-def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity) -> Path:
+def publish_source_snapshot(
+    payload: Path, root: Path, identity: SourceIdentity, *, on_progress=None,
+) -> Path:
     """Serialize complete source publication without directory-nesting moves."""
     payload = Path(os.path.abspath(payload))
     root = Path(os.path.abspath(root.expanduser()))
@@ -530,26 +550,19 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             raise SourceIdentityError("Source snapshot inputs must be ordinary directories")
-        if read_source_identity(path, identity.package_version, plugin=identity.plugin) != identity:
+        if read_source_identity(
+            path, identity.package_version, plugin=identity.plugin, on_progress=on_progress,
+        ) != identity:
             raise SourceIdentityError("Source snapshot identity changed after runtime selection")
 
     verify(payload)
     snapshots = root / "snapshots"
-    snapshot = snapshots / identity.runtime_version
     snapshots.mkdir(parents=True, exist_ok=True)
-    with _runtime().construction_lease(snapshots, identity.runtime_version):
-        verify(payload)
-        if snapshot.exists() or snapshot.is_symlink():
-            verify(snapshot)
-            verify(payload)
-            return snapshot
-        with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
-            candidate = Path(temporary) / "payload"
-            shutil.copytree(payload, candidate, symlinks=True)
-            verify(candidate)
-            verify(payload)
-            candidate.rename(snapshot)
-        return snapshot
+    runtime = _runtime()
+    return runtime._runtime_component("versioned_runtime_construction").publish_source_snapshot(
+        payload, snapshots, identity.runtime_version, runtime=runtime, verify=verify,
+        on_progress=on_progress,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -562,10 +575,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot-root", type=Path)
     parser.add_argument("--format", choices=("version", "json", "shell-fields"), default="version")
     args = parser.parse_args(argv)
+    on_progress = lambda: print("source-runtime: completed source work", file=sys.stderr, flush=True)
     try:
         if not _PACKAGE_VERSION.fullmatch(args.package_version):
             raise SourceIdentityError("Source deployment requires a supported package version")
-        identity = read_source_identity(args.payload, args.package_version, plugin=args.plugin)
+        identity = read_source_identity(
+            args.payload, args.package_version, plugin=args.plugin, on_progress=on_progress,
+        )
         selected_version = identity.runtime_version if identity else args.package_version
         if args.expected_runtime_version is not None and args.expected_runtime_version != selected_version:
             raise SourceIdentityError("Source identity changed after runtime selection")
@@ -574,10 +590,17 @@ def main(argv: list[str] | None = None) -> int:
             and json.dumps(manifest_fields(identity), sort_keys=True) != args.expected_source_identity
         ):
             raise SourceIdentityError("Source identity changed after runtime selection")
+        selected_pin = os.environ.get(SOURCE_PIN_ENV)
+        if selected_pin is not None and json.dumps(
+            manifest_fields(identity), sort_keys=True,
+        ) != selected_pin:
+            raise SourceIdentityError("Source identity differs from the update transaction selection")
         if args.snapshot_root is not None:
             if identity is None or args.format != "version":
                 raise SourceIdentityError("Source snapshot publication requires a source receipt and path output")
-            print(publish_source_snapshot(args.payload, args.snapshot_root, identity))
+            print(publish_source_snapshot(
+                args.payload, args.snapshot_root, identity, on_progress=on_progress,
+            ))
             return 0
         if args.format == "version":
             print(selected_version)
@@ -597,7 +620,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
+def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=None) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
     Covers the FULL attributable runtime install input, not just one
@@ -699,13 +722,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
     import os as _os
 
     def _lstat_mode(p: Path, context: str) -> int:
-        # An explicit lstat (never following the final symlink component),
-        # with any OSError other than "does not exist" propagating. This is
-        # deliberately NOT Path.is_symlink()/is_dir()/is_file(): those
-        # catch OSError internally (including PermissionError) and return
-        # False, which would silently misclassify -- and potentially drop
-        # -- an entry this function could not actually stat, rather than
-        # failing closed like every other check in this function.
+        # lstat preserves the final link and propagates unreadable-entry errors;
+        # Path.is_* can silently misclassify those failures as absence.
         try:
             return _os.lstat(p).st_mode
         except FileNotFoundError:
@@ -738,14 +756,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
     # regardless of the order `paths` was passed in.
     ordered_roots = sorted(roots, key=lambda r: len(r.parts), reverse=True)
 
-    # The common ancestor of every declared root is itself a deterministic
-    # function of the ROOT SET (never of the order `paths` was passed in,
-    # and never of where that set happens to live on disk): relocating the
-    # whole checkout moves the ancestor too, but every root's path RELATIVE
-    # to it is unchanged. Label roots by that relative path instead of their
-    # absolute one, so the fingerprint is both order- and location-
-    # independent while still disambiguating two roots that merely share a
-    # basename (e.g. "src" under two different parents).
+    # Relative labels preserve order/location independence and distinguish
+    # equal basenames under different parents.
     common_root = Path(_os.path.commonpath([str(r) for r in roots]))
 
     def _root_label(root_path: Path) -> str:
@@ -956,6 +968,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
         # only by unframed leading bytes.
         digest.update(_frame(entries[f].encode("utf-8")))
         digest.update(_frame(data))
+        if on_progress is not None:
+            on_progress()
 
     ordered = sorted(entries, key=_label)
     if len(ordered) < 2:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from contextlib import contextmanager
 from dataclasses import replace
 import json
 import os
@@ -11,12 +12,13 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_dependency_policy as policy
-from installer_wheel_snapshot import retain_wheel_inputs
+from installer_wheel_snapshot import retain_wheel_bundle, retain_wheel_inputs
 from installer_wheel_inputs import WheelError
 from wheel_input_fixture import wheel_bytes
 
@@ -35,16 +37,18 @@ def engine(monkeypatch):
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, engine):
     root = tmp_path / "sources"
-    procutil = root / "procutil"
-    shutil.copytree(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil", procutil)
+    frozen = engine.freeze_inputs(
+        Path(__file__).resolve().parents[1] / "libs" / "agent-procutil", root,
+    )
     plugin = root / "plugin"
     plugin.mkdir()
     (plugin / "pyproject.toml").write_text(
         '[project]\nname="demo-pkg"\nversion="1.0"\ndependencies=[]\n'
         '[project.optional-dependencies]\nbootstrap=["agent-procutil"]\n'
-        '[tool.uv.sources]\nagent-procutil={path="../procutil"}\n',
+        '[tool.uv.sources]\nagent-procutil={path=' +
+        json.dumps(os.path.relpath(frozen.plugin, plugin).replace(os.sep, "/")) + '}\n',
         encoding="utf-8",
     )
     return plugin
@@ -88,7 +92,7 @@ def candidate(engine, root, plugin, wheels, **options):
     )
 
 
-def snapshot(tmp_path, *, closure=False, version="1.0"):
+def snapshot(tmp_path, *, closure=False, version="1.0", transport="loose"):
     path = tmp_path / "demo_pkg-1.0-py3-none-any.whl"
     if not path.exists():
         path.write_bytes(wheel_bytes(
@@ -106,12 +110,60 @@ def snapshot(tmp_path, *, closure=False, version="1.0"):
                 metadata=b"Metadata-Version: 2.4\nName: helper\nVersion: 1.0\n\n",
             ))
         paths[helper.name] = helper
+    hashes = {
+        name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in paths.items()
+    }
+    if transport == "bundle":
+        bundle = tmp_path / "transport.zip"
+        with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, path in paths.items():
+                archive.write(path, "wheels/" + name)
+        for path in paths.values():
+            path.unlink()
+        return retain_wheel_bundle(
+            bundle, hashes, bundle_sha256="sha256:" + hashlib.sha256(bundle.read_bytes()).hexdigest(),
+            max_bundle_bytes=100_000, max_wheels=2, max_archive_bytes=100_000,
+            max_total_bytes=100_000, max_snapshot_bytes=200_000, deadline=time.monotonic() + 60,
+        )
     return retain_wheel_inputs(
-        paths, {name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-                for name, path in paths.items()},
+        paths, hashes,
         max_wheels=2, max_archive_bytes=100_000, max_total_bytes=100_000,
         max_snapshot_bytes=100_000, deadline=time.monotonic() + 60,
     )
+
+
+def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    root = tmp_path / "runtime"
+    observed = []
+
+    def validate(slot):
+        observed.append((slot, engine.runtime.marker_path(root, slot.name).exists()))
+
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        with candidate(engine, root, plugin, wheels, validate_candidate=validate) as ready:
+            assert observed == [(ready.slot, False)]
+            assert engine.runtime.is_complete(root, ready.slot.name, expect_hash=ready.payload_hash)
+            marker = engine.runtime.marker_path(root, ready.slot.name)
+            completed = marker.read_bytes()
+
+    monkeypatch.setattr(engine, "_construct", lambda *_a, **_k: pytest.fail("reuse invoked writers"))
+
+    def reject(slot):
+        validate(slot)
+        raise ValueError("owner rejected reused candidate")
+
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        with pytest.raises(ValueError, match="owner rejected"):
+            with candidate(engine, root, plugin, wheels, validate_candidate=reject):
+                pytest.fail("rejected reuse was exposed")
+        assert observed[-1] == (ready.slot, True)
+        assert marker.read_bytes() == completed
+        assert engine.runtime.is_complete(root, ready.slot.name, expect_hash=ready.payload_hash)
 
 
 @pytest.mark.parametrize("executable", ["path", "command"])
@@ -138,7 +190,8 @@ def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, execu
             requirement = Path(transaction.argv[-1])
             text = requirement.read_text(encoding="utf-8")
             wheel, = retained.paths.values()
-            assert wheel.as_uri() in text and "--hash=sha256:" in text
+            assert policy._file_uri(wheel) in text and "--hash=sha256:" in text
+            assert "file://%3F/" not in text
             assert transaction.cwd.is_dir()
         assert not requirement.exists() and not transaction.cwd.exists()
         retained.verify()
@@ -210,13 +263,31 @@ def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path):
         assert not (poison / "cache").exists() and not (poison / "target").exists()
 
 
+@pytest.mark.parametrize("transport", ["loose", "bundle"])
 def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
-    tmp_path, engine, plugin, monkeypatch,
+    tmp_path, engine, plugin, monkeypatch, transport,
 ):
     monkeypatch.setenv("UV_INDEX_URL", "http://127.0.0.1:1/unavailable")
     monkeypatch.setenv("UV_CONFIG_FILE", str(tmp_path / "missing-config"))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "poison-cache"))
-    with snapshot(tmp_path, closure=True, version="1") as retained:
+    leases = []
+
+    def bounded(lease):
+        @contextmanager
+        def acquire(*args, **kwargs):
+            remaining = wheels.deadline - time.monotonic()
+            assert 0 <= kwargs["timeout"] <= remaining + 0.05
+            leases.append((lease.__name__, kwargs["timeout"]))
+            with lease(*args, **kwargs) as held:
+                yield held
+        return acquire
+
+    monkeypatch.setattr(engine.runtime, "construction_lease", bounded(engine.runtime.construction_lease))
+    monkeypatch.setattr(engine.runtime, "retention_custody", bounded(engine.runtime.retention_custody))
+    with snapshot(tmp_path, closure=True, version="1", transport=transport) as retained:
+        if transport == "bundle":
+            (tmp_path / "transport.zip").unlink()
+        original_wheels = {name: path.read_bytes() for name, path in retained.paths.items()}
         wheels = inspected(retained)
         assert wheels.receipt()["distributions"]["demo-pkg"]["version"] == "1"
         slots = []
@@ -234,7 +305,10 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
         assert not (tmp_path / "poison-cache").exists()
     # Re-inspect cached bytes under a new temporary path; reuse binds content,
     # not the ephemeral location used by a previous installation.
-    with snapshot(tmp_path, closure=True, version="1") as retained:
+    if transport == "bundle":
+        for name, data in original_wheels.items():
+            (tmp_path / name).write_bytes(data)
+    with snapshot(tmp_path, closure=True, version="1", transport=transport) as retained:
         wheels = inspected(retained)
 
         def no_reconstruction(*args, **kwargs):
@@ -244,6 +318,29 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
         with candidate(engine, tmp_path / "first-runtime", plugin, wheels) as reused:
             assert reused.reused
             assert reused.slot == slots[0]
+    assert [name for name, _timeout in leases] == [
+        "construction_lease", "retention_custody",
+        "construction_lease", "retention_custody", "retention_custody",
+    ]
+    assert leases[1][1] < leases[0][1]
+
+
+def test_closed_lease_timeout_preserves_wait_limit_and_rejects_expiry(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        inputs = engine.FrozenInputs(plugin, (plugin,), "fixture", wheel_inputs=wheels)
+        now = time.monotonic()
+        with monkeypatch.context() as clock:
+            clock.setattr(time, "monotonic", lambda: now)
+            assert engine._lease_timeout(inputs, 0) == 0
+            assert engine._lease_timeout(inputs, 0.1) == 0.1
+            assert engine._lease_timeout(inputs, 180) == wheels.deadline - now
+            clock.setattr(time, "monotonic", lambda: wheels.deadline)
+            with pytest.raises(WheelError, match="deadline"):
+                engine._lease_timeout(inputs, 180)
+            assert engine._lease_timeout(replace(inputs, wheel_inputs=None), 180) == 180
 
 
 def test_closed_constructor_retains_caller_relative_uv_as_absolute(
@@ -519,7 +616,7 @@ def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows absolute-deadline guardian")
-def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp_path):
+def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp_path, monkeypatch):
     from test_installer_wheel_acquisition import worker_procutil
     import installer_engine_process as guardian
 
@@ -531,7 +628,10 @@ def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp
         "def _supervise_windows(args, argv):\n"
         "    Path(" + repr(str(guardian_marker)) + ").write_text('entered')\n    time.sleep(1.5)",
     ))
-    selected = guardian._load_resource("absolute_deadline_guardian", delayed)
+    spec = importlib.util.spec_from_file_location("absolute_deadline_guardian", delayed)
+    selected = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, selected)
+    spec.loader.exec_module(selected)
     runtime = engine.runtime
     root = tmp_path / "runtime"
     root.mkdir()

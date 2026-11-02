@@ -53,6 +53,43 @@ def test_explicit_command_renews_with_bounded_captured_streams(monkeypatch):
     })] * 2
 
 
+def test_each_renewal_caps_the_existing_timeout_to_the_remaining_budget(monkeypatch):
+    observed = []
+    limits = iter([40.0, 1.25, 0.5])
+
+    def run(argv, **kwargs):
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(envelope()), "")
+
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned", run)
+    source = command_source(json.dumps([sys.executable]), remaining=lambda: next(limits))
+    for _ in range(3):
+        source()
+    assert observed == [15.0, 1.25, 0.5]
+
+
+def test_exhausted_remaining_budget_refuses_before_launch(monkeypatch):
+    monkeypatch.setattr(
+        pr_credential_command, "run_caller_owned",
+        lambda *_args, **_kwargs: pytest.fail("exhausted helper launched"),
+    )
+    source = command_source(json.dumps([sys.executable]), remaining=lambda: 0.0)
+    with pytest.raises(ObservationCredentialError):
+        source()
+
+
+def test_real_slow_helper_is_retired_at_the_remaining_budget(tmp_path):
+    helper = tmp_path / "slow_credential.py"
+    helper.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    started = time.monotonic()
+    source = command_source(
+        json.dumps([sys.executable, str(helper)]), remaining=lambda: 0.25,
+    )
+    with pytest.raises(ObservationCredentialError):
+        source()
+    assert time.monotonic() - started < 8
+
+
 @pytest.mark.parametrize("serialized", [
     "not-json", "{}", "[]", '["relative-command"]', '[""]', '["x", null]', '["x", "\\u0000"]',
     "[" * 2000, json.dumps([sys.executable, "x" * 16384]),
@@ -141,6 +178,7 @@ def test_unconfirmed_cleanup_retains_the_original_process_custody(monkeypatch):
     assert retained.value is failure
 
 
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize("failure", [None, "disconnect", "scope"])
 def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure):
     helper = tmp_path / "credential.py"
@@ -192,10 +230,12 @@ def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure
         "sys.exit(pr_cli.cmd_pr_watch_dispatch(sys.argv[1:]))\n",
         encoding="utf-8",
     )
+    # This outer fixture includes cold SDK/venv startup and multiple helpers.
+    # It is separate from the per-helper work-deadline controls above.
     result = run_caller_owned(
         [sys.executable, str(native), "snapshot", "owner/repository", "7", "--config", str(config),
          "--credential-command", json.dumps([sys.executable, str(helper)]), "--json"],
-        timeout=20, max_stdout_bytes=65536, max_stderr_bytes=8192,
+        timeout=45, max_stdout_bytes=65536, max_stderr_bytes=8192,
     )
     assert "synthetic-command-" not in result.stdout + result.stderr
     if failure:

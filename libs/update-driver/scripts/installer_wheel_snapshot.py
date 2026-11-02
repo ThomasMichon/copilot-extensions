@@ -9,11 +9,15 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from types import MappingProxyType
 from typing import BinaryIO, Mapping
+import zipfile
+import zlib
 
 from installer_wheel_inputs import (
-    WheelError, _check_deadline, _identity, _ordinary, _unsafe_windows_component,
+    WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary,
+    _unsafe_windows_component, preflight_archive,
 )
 
 
@@ -26,6 +30,127 @@ def retain_wheel_inputs(archives, expected, **limits):
         root = policy._private_retained_root(Path(temporary)).resolve()
         with open_wheel_snapshot(root, archives, expected, **limits) as snapshot:
             yield snapshot
+
+
+@contextmanager
+def retain_wheel_bundle(bundle, expected, **limits):
+    """Unpack an already selected transport into the existing snapshot owner."""
+    import installer_dependency_policy as policy
+
+    with policy._temporary_inputs(None) as temporary:
+        root = policy._private_retained_root(Path(temporary)).resolve()
+        with open_wheel_bundle_snapshot(root, bundle, expected, **limits) as snapshot:
+            yield snapshot
+
+
+def _selected_hashes(expected, max_wheels, deadline):
+    hashes = dict(expected)
+    if not hashes or len(hashes) > max_wheels:
+        raise WheelError("wheel snapshot count limit exceeded or empty set")
+    names = set()
+    for name, digest in hashes.items():
+        _check_deadline(deadline)
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl", name) is None
+            or _unsafe_windows_component(name) or name.casefold() in names
+        ):
+            raise WheelError("unsafe or ambiguous wheel snapshot filename")
+        names.add(name.casefold())
+        if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise WheelError("invalid wheel snapshot digest")
+    return hashes
+
+
+@contextmanager
+def open_wheel_bundle_snapshot(
+    root: Path, bundle: Path, expected: Mapping[str, str], *,
+    bundle_sha256: str, max_bundle_bytes: int, max_wheels: int,
+    max_archive_bytes: int, max_total_bytes: int, max_snapshot_bytes: int,
+    deadline: float,
+):
+    """Retain exact ``wheels/<filename>`` members, not release/feed authority.
+
+    The caller owns a private root and cleanup, as with open_wheel_snapshot.
+    Storage includes both unpacked inputs and retained copies. All byte/count
+    bounds and the single deadline are inclusive and supplied by the caller.
+    """
+    from installer_dependency_config import native_retained_path
+
+    _check_deadline(deadline)
+    if any(type(value) is not int or value <= 0 for value in (
+        max_bundle_bytes, max_wheels, max_archive_bytes, max_total_bytes, max_snapshot_bytes,
+    )):
+        raise WheelError("wheel bundle limits must be explicit positive integers")
+    if not isinstance(bundle_sha256, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", bundle_sha256):
+        raise WheelError("invalid wheel bundle digest")
+    hashes = _selected_hashes(expected, max_wheels, deadline)
+    root = Path(native_retained_path(root))
+    bundle = Path(os.path.abspath(bundle))
+    before = _ordinary(bundle)
+    if before.st_size > max_bundle_bytes:
+        raise WheelError("wheel bundle archive byte budget exceeded")
+    paths = {}
+    total = 0
+    try:
+        with _open(bundle) as stream:
+            opened = _unchanged(bundle, before, stream)
+            if _digest(stream, max_bundle_bytes, deadline) != (bundle_sha256, before.st_size):
+                raise WheelError("wheel bundle digest or size mismatch")
+            _unchanged(bundle, before, stream, opened=opened)
+            preflight_archive(
+                stream, limits=WheelLimits(
+                    max_archive_bytes=max_bundle_bytes, max_expanded_bytes=max_total_bytes,
+                    max_member_bytes=max_archive_bytes, max_metadata_bytes=max_bundle_bytes,
+                    max_members=max_wheels, max_tags=1, max_metadata_member_bytes=max_bundle_bytes,
+                ), deadline=deadline,
+            )
+            with zipfile.ZipFile(stream) as archive:
+                members = archive.infolist()
+                if (
+                    len(members) != len(hashes)
+                    or {member.filename for member in members} != {"wheels/" + name for name in hashes}
+                ):
+                    raise WheelError("wheel bundle member set differs from selected wheels")
+                for member in members:
+                    _check_deadline(deadline)
+                    if (
+                        member.is_dir() or member.orig_filename != member.filename or member.flag_bits & 1
+                        or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                        or stat.S_IFMT(member.external_attr >> 16) not in (0, stat.S_IFREG)
+                        or member.external_attr & 0x10
+                        or member.file_size <= 0 or member.file_size > max_archive_bytes
+                    ):
+                        raise WheelError("wheel bundle member is unsafe or exceeds its byte budget")
+                    total += member.file_size
+                    if total > max_total_bytes or 2 * total > max_snapshot_bytes:
+                        raise WheelError("wheel bundle total or storage byte budget exceeded")
+                directory = root / "bundle"
+                directory.mkdir(mode=0o700)
+                for member in members:
+                    _check_deadline(deadline)
+                    name = member.filename.removeprefix("wheels/")
+                    destination = directory / name
+                    digest, size = hashlib.sha256(), 0
+                    with destination.open("xb") as output:
+                        for chunk in _member_chunks(
+                            stream, archive, member, limit=member.file_size, deadline=deadline,
+                        ):
+                            digest.update(chunk)
+                            size += len(chunk)
+                            output.write(chunk)
+                    if ("sha256:" + digest.hexdigest(), size) != (hashes[name], member.file_size):
+                        raise WheelError("wheel bundle member digest or size mismatch")
+                    paths[name] = destination
+            _unchanged(bundle, before, stream, opened=opened)
+    except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, UnicodeError) as error:
+        raise WheelError("wheel bundle archive is invalid") from error
+    with open_wheel_snapshot(
+        root, paths, hashes, max_wheels=max_wheels, max_archive_bytes=max_archive_bytes,
+        max_total_bytes=max_total_bytes, max_snapshot_bytes=max_snapshot_bytes - total,
+        deadline=deadline,
+    ) as snapshot:
+        yield snapshot
 
 
 def _unchanged(path, before, stream, *, opened=None):
@@ -115,6 +240,22 @@ class WheelSnapshot:
         """Asserted archive identities, not approval or semantic admission."""
         return MappingProxyType({name: record[2] for name, record in self._records.items()})
 
+    def subset(self, filenames: tuple[str, ...]) -> WheelSnapshot:
+        """Borrow an exact nonempty subset; the original owner keeps custody."""
+        self.verify()
+        if (
+            not isinstance(filenames, tuple) or not filenames
+            or any(not isinstance(name, str) for name in filenames)
+            or len(set(filenames)) != len(filenames) or not set(filenames) <= self.paths.keys()
+        ):
+            raise WheelError("wheel snapshot subset must select unique retained filenames")
+        return WheelSnapshot(
+            MappingProxyType({name: self.paths[name] for name in filenames}),
+            MappingProxyType({name: self.archives[name] for name in filenames}),
+            MappingProxyType({name: self._records[name] for name in filenames}),
+            self._deadline,
+        )
+
     def verify(self):
         """Recheck custody before a caller's construction/publication boundary."""
         for name, path in self.paths.items():
@@ -126,6 +267,67 @@ class WheelSnapshot:
                 raise WheelError("retained wheel snapshot digest changed")
             _unchanged(path, before, stream, opened=opened)
         _check_deadline(self._deadline)
+
+
+@dataclass(frozen=True)
+class WheelReuseInputs:
+    """Existing constructor evidence; cannot supply bytes for construction.
+
+    The current installation owner must independently admit its source, profile
+    and policy before use. This type verifies only the bounded receipt shape.
+    """
+
+    generation: str
+    canonical_json: str
+    deadline: float
+
+    def receipt(self) -> dict:
+        self.verify()
+        return json.loads(self.canonical_json)
+
+    @property
+    def distributions(self) -> tuple[tuple[str, str, str, str], ...]:
+        return tuple(
+            (name, wheel["version"], wheel["filename"], wheel["sha256"])
+            for name, wheel in sorted(self.receipt()["distributions"].items())
+        )
+
+    def verify(self) -> None:
+        _check_deadline(self.deadline)
+        try:
+            record = json.loads(self.canonical_json)
+            binding = json.dumps(record["binding"], sort_keys=True, separators=(",", ":"), allow_nan=False)
+            if (
+                not isinstance(self.generation, str) or not self.generation or self.generation == "dev"
+                or not isinstance(record, dict) or set(record) - {"acquisition"} != {
+                    "construction", "lock_id", "binding", "distributions",
+                }
+                or record["construction"] != "closed-wheels"
+                or not isinstance(record["binding"], dict) or not record["binding"]
+                or record["lock_id"] != "sha256:" + hashlib.sha256(binding.encode("ascii")).hexdigest()
+                or self.canonical_json != json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                or not isinstance(record["distributions"], dict) or not record["distributions"]
+            ):
+                raise ValueError
+            filenames = set()
+            for name, wheel in record["distributions"].items():
+                _check_deadline(self.deadline)
+                if (
+                    re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                    or not isinstance(wheel, dict) or set(wheel) != {"version", "filename", "sha256"}
+                    or not isinstance(wheel["version"], str) or not wheel["version"]
+                    or not isinstance(wheel["filename"], str)
+                    or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl", wheel["filename"]) is None
+                    or _unsafe_windows_component(wheel["filename"])
+                    or wheel["filename"].casefold() in filenames
+                    or not isinstance(wheel["sha256"], str)
+                    or re.fullmatch(r"sha256:[0-9a-f]{64}", wheel["sha256"]) is None
+                ):
+                    raise ValueError
+                filenames.add(wheel["filename"].casefold())
+        except (KeyError, TypeError, ValueError, UnicodeError):
+            raise WheelError("existing wheel evidence has an invalid constructor receipt") from None
+        _check_deadline(self.deadline)
 
 
 @dataclass(frozen=True)
@@ -184,7 +386,7 @@ class WheelInstallInputs:
             seen, total = set(), 0
             for item in record["files"]:
                 _check_deadline(self.deadline)
-                if not isinstance(item, dict) or set(item) != {
+                if not isinstance(item, dict) or set(item) - {"requires_python"} != {
                     "filename", "sha256", "size", "feed", "uploaded", "source_origins", "yanked", "withdrawn",
                 }:
                     raise ValueError
@@ -199,6 +401,11 @@ class WheelInstallInputs:
                     or not isinstance(item["source_origins"], list) or not item["source_origins"]
                     or any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in item["source_origins"])
                     or item["yanked"] is not False or item["withdrawn"] is not False
+                    or ("requires_python" in item and (
+                        not isinstance(item["requires_python"], str) or not item["requires_python"]
+                        or item["requires_python"] != item["requires_python"].strip()
+                        or len(item["requires_python"]) > 4096
+                    ))
                 ):
                     raise ValueError
                 seen.add(name)
@@ -263,6 +470,9 @@ def open_wheel_snapshot(
     extraction, cache population, resolution or backend execution occurs here.
     All limits and the one deadline come from the caller, not runtime defaults.
     """
+    from installer_dependency_config import native_retained_path
+
+    root = Path(native_retained_path(root))
     _check_deadline(deadline)
     if any(type(value) is not int or value <= 0 for value in (
         max_wheels, max_archive_bytes, max_total_bytes, max_snapshot_bytes,
@@ -272,21 +482,11 @@ def open_wheel_snapshot(
         raise WheelError("wheel snapshot count limit exceeded or empty set")
     if set(archives) != set(expected):
         raise WheelError("wheel snapshot filename set differs from expected")
-    paths, hashes = dict(archives), dict(expected)
-    names = set()
+    paths, hashes = dict(archives), _selected_hashes(expected, max_wheels, deadline)
     originals = {}
     total = 0
     for name, source in paths.items():
         _check_deadline(deadline)
-        if (
-            not isinstance(name, str)
-            or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl", name) is None
-            or _unsafe_windows_component(name) or name.casefold() in names
-        ):
-            raise WheelError("unsafe or ambiguous wheel snapshot filename")
-        names.add(name.casefold())
-        if not isinstance(hashes[name], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", hashes[name]):
-            raise WheelError("invalid wheel snapshot digest")
         source = Path(os.path.abspath(source))
         before = _ordinary(source)
         if before.st_size > max_archive_bytes:

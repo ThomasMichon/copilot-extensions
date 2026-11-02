@@ -309,6 +309,10 @@ def test_real_adapter_processes_and_coordinator_lifecycle(tmp_path, monkeypatch)
     ordinary = Supervisor(client, spawn_fn=lambda task: pytest.fail("catch-all cannot spawn"),
                           repo=task["repo"])
     assert not ordinary._matches_pool(task)
+    from agent_dispatch.registrar_configuration import ConfiguredSupervisorCohort
+    client.queue.observe_pool_configured_cohort(
+        ConfiguredSupervisorCohort("complete", "a" * 64, 0, ()), expected_revision=0,
+    )
     with pytest.raises(TaskError):
         client.queue.reserve_spawn(task["id"], reserved_by="catch-all")
     reservation, won = client.queue.reserve_spawn(task["id"], reserved_by="repair-lane")

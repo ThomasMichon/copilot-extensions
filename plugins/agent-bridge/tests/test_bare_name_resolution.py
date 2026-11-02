@@ -8,16 +8,17 @@ from agent_bridge.agent_registry import (
     AgentConfig,
     AgentResolver,
     AmbiguousAgentError,
+    CliNamespaceResolver,
     NamespaceAgentInfo,
 )
 from agent_bridge.transport import SpawnTarget
 
 
-class _NsResolver:
+class _NsResolver(CliNamespaceResolver):
     """Configurable mock namespace resolver."""
 
     def __init__(self, prefix: str, infos: list[NamespaceAgentInfo]):
-        self._prefix = prefix
+        super().__init__(prefix, "synthetic-provider")
         self._infos = infos
         self.resolved: list[str] = []
 
@@ -37,13 +38,16 @@ class _NsResolver:
     async def ensure_ready(self, name: str) -> None:
         pass
 
+    async def target_repo(self, name: str) -> None:
+        return None
+
 
 def test_namespace_agent_info_aliases_default():
     assert NamespaceAgentInfo(name="x").aliases == []
 
 
 @pytest.mark.asyncio
-async def test_bare_friendly_name_resolves_to_raw():
+async def test_bare_friendly_name_resolves_to_raw(permitted_provider_hosting):
     r = AgentResolver({}, {})
     cs = _NsResolver("codespace", [
         NamespaceAgentInfo(name="type-filters-adoption-7qv",
@@ -53,7 +57,8 @@ async def test_bare_friendly_name_resolves_to_raw():
     target = await r.resolve_async("type-filters-adoption")  # friendly, no prefix
     # Spawns against the RAW name.
     assert target.spawn_command == ["echo", "codespace:type-filters-adoption-7qv"]
-    assert cs.resolved == ["type-filters-adoption-7qv"]
+    # Readiness and both staging checks retain the canonical name.
+    assert cs.resolved == ["type-filters-adoption-7qv"] * 3
 
 
 @pytest.mark.asyncio
@@ -86,7 +91,7 @@ async def test_bare_name_collision_static_vs_namespace_balks():
 
 
 @pytest.mark.asyncio
-async def test_explicit_prefix_bypasses_collision():
+async def test_explicit_prefix_bypasses_collision(permitted_provider_hosting):
     r = AgentResolver({}, {})
     r.register_namespace_resolver(
         _NsResolver("codespace", [NamespaceAgentInfo(name="foo-aaa", aliases=["foo"])])
@@ -111,7 +116,7 @@ async def test_bare_static_agent_still_resolves():
 
 
 @pytest.mark.asyncio
-async def test_failing_resolver_does_not_break_resolution():
+async def test_failing_resolver_does_not_break_resolution(permitted_provider_hosting):
     class _Boom(_NsResolver):
         async def list(self):
             raise RuntimeError("gh down")
@@ -152,7 +157,7 @@ async def test_non_bare_addressable_resolver_excluded_from_candidates():
 
 
 @pytest.mark.asyncio
-async def test_admin_resolver_does_not_shadow_bare_static_agent(monkeypatch):
+async def test_admin_resolver_does_not_shadow_bare_static_agent(monkeypatch, tmp_path):
     # The admin: twin must not make the bare name ambiguous. A requires_admin
     # agent's bare name auto-relays to the elevated sub-daemon (Cap 2 Slice 3)
     # when relay is applicable -- here we force it applicable so the assertion
@@ -166,7 +171,7 @@ async def test_admin_resolver_does_not_shadow_bare_static_agent(monkeypatch):
     monkeypatch.setattr(elevated, "discovered_port", lambda *a, **k: 59051)
 
     r = AgentResolver(
-        {"spo": AgentConfig(name="spo", project="p", requires_admin=True)}, {}
+        {"spo": AgentConfig(name="spo", project="p", requires_admin=True, cwd=str(tmp_path))}, {}
     )
     r.register_namespace_resolver(AdminResolver(r))
     target = await r.resolve_async("spo")
@@ -220,7 +225,7 @@ async def test_admin_prefix_rejects_non_opted_in_agent():
 
 
 @pytest.mark.asyncio
-async def test_admin_prefix_still_elevates_explicitly(monkeypatch):
+async def test_admin_prefix_still_elevates_explicitly(monkeypatch, permitted_provider_hosting):
     # admin: stays opt-in -- the explicit prefix resolves an opted-in agent and
     # routes it through the elevated sub-daemon relay (no gsudo / RunAs, no
     # CLI-side difference from a bare elevated agent).

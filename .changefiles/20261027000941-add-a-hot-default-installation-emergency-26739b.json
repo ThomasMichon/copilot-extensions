@@ -1,0 +1,9 @@
+{
+  "comment": "Add a hot default-installation emergency stop for suite preToolUse workflow guards, independent of lifecycle and native permissions.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

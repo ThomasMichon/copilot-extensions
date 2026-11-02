@@ -1,0 +1,13 @@
+{
+  "comment": "Strictly type Lazy CLI Dispatch while preserving reflective callable signatures",
+  "changes": [
+    {
+      "plugin": "libs/lazy-cli-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

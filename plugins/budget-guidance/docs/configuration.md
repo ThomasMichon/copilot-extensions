@@ -64,25 +64,27 @@ All numeric output is serialized as decimal strings so consumers receive exact,
 stable values. The posture schema is `copilot-extensions.budget-posture`,
 version `1`.
 
-## Optional routing advice
+## Optional monthly economy advice
 
-Status also emits `routing_advice`, a version `1`
-`copilot-extensions.budget-routing-advice` object. The budget owner, not a routing
-consumer, calculates its `availability`, `evaluated_at`, `valid_until`,
-`warning_band`, and `reason`. An available advice interval ends at the earliest
+Status emits `economy_advice`, a version `1`
+`copilot-extensions.budget-economy-advice` object. The budget owner calculates
+`availability`, `evaluated_at`, `valid_until`, `warning_band`, `reason` and
+optional `suggestions`. An available advice interval ends at the earliest
 selected field's freshness deadline, the reset instant, or 300 seconds after
 evaluation. It is valid only before `valid_until`, not at that instant. Future
 captures, elapsed reset/freshness boundaries, missing fields, errors, and
 contradictions withhold the band and deadline (`null`); the source posture
 continues to retain its full diagnostic evidence.
 
-This is bounded **point-in-time** advice, not a claim of continuous provider
-refresh. Consumers reject future evaluations and expired advice rather than
-recalculating budget arithmetic or trusting a saved `availability` forever.
-Older posture documents without this optional envelope remain useful as status
-but cannot supply routing advice. Neither a warning band nor an ordinal model
-cost rank establishes the cost or affordability of an individual task.
+This is bounded **point-in-time** information, not continuous provider refresh.
+Expired or uncertain evidence is not a current reading. Unavailable evidence
+withholds suggestions, never requested work. Suggestions may encourage reuse of
+valid results or bounded speculative detours; they do not select models,
+delegation strategies or worker counts. No lookup is required before honoring
+a request.
 
-The delegation module's [optional consumer](../../agent-conduct-guidance/README.md#optional-budget-advice)
-accepts an explicitly supplied status JSON file. No routing plugin is required
-to use budget status or session guidance.
+The former optional `routing_advice` envelope and model-resolver budget
+integration are retired. Existing posture documents still carry useful status
+fields, but their saved availability does not establish current evidence.
+Quota capture and access validation are unchanged: denial or missing evidence
+withholds the reading, not the user's unrelated work.

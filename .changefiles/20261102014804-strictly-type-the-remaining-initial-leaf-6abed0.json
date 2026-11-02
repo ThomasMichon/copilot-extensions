@@ -1,0 +1,49 @@
+{
+  "comment": "Strictly type the remaining initial leaf-library test and helper scopes",
+  "changes": [
+    {
+      "plugin": "libs/remote-login-shell",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/session-liveness-probe",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/worktree-identity",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

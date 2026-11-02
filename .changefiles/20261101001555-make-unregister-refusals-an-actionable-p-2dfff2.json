@@ -1,0 +1,9 @@
+{
+  "comment": "Make unregister refusals an actionable project-closure bounce and distinguish explicit force from settled work.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

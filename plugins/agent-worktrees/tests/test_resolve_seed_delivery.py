@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,7 +27,7 @@ import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import launch_seed_state, resolve_cli, tracking
+from agent_worktrees import launch_seed_state, push_timeout, resolve_cli, tracking
 from agent_worktrees.sessions import LiveVerdict
 
 
@@ -135,6 +136,82 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, s
     return code, plans[-1]
 
 
+def _tool_preparation_result(monkeypatch, *, blocked):
+    from agent_worktrees import copilot_plugin_profile, local_cache_refresh
+
+    def prepare(*args, **kwargs):
+        if blocked:
+            raise RuntimeError("selected tool roster conflict")
+        return {"action": "no-op"}
+    monkeypatch.setattr(copilot_plugin_profile, "prepare_checkout", prepare)
+    monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", lambda *a, **kw:
+                        local_cache_refresh.RefreshResult(
+                            "failed", blocking=1, detail="selected tool roster conflict" if blocked else "optional copy failure",
+                            tool_roster_blocked=blocked))
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("defer", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_base_resolvers_block_tool_roster_but_not_optional_copy_failure(
+    tmp_path, monkeypatch, capfd, surface, defer, blocked,
+):
+    from agent_worktrees import resolve_launch_cli as rlc
+
+    config = _create_config(tmp_path)
+    config = replace(config, repos={config.repo_name:
+                                   replace(config.default_repo, copilot_plugin_profile="tools.json")})
+    _stub_launch_plumbing(monkeypatch, config)
+    _tool_preparation_result(monkeypatch, blocked=blocked)
+    args = _args(base=True, worktree_id=None, dry_run=False, no_mux=True, profile=None,
+                 defer_projections=defer)
+    if surface == "json":
+        code = resolve_cli.cmd_resolve(args)
+        plan = json.loads(capfd.readouterr().out)
+    else:
+        monkeypatch.setattr(rlc.git_ops, "get_dirty_files", lambda *a: [])
+        plans = []
+        monkeypatch.setattr(rlc, "_emit_plan", plans.append)
+        code = rlc._resolve_base_repo(config, args)
+        plan = plans[-1]
+    assert code == (3 if blocked else 0)
+    if blocked:
+        assert plan.get("action") != "exec"
+        assert "tool roster conflict" in plan["error"]
+        assert "cmd" not in plan
+    else:
+        assert plan["action"] == "exec"
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("defer", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_resume_resolvers_block_tool_roster_but_not_optional_copy_failure(
+    tmp_path, monkeypatch, capfd, surface, defer, blocked,
+):
+    from agent_worktrees import worktree_trust
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    config = replace(config, repos={config.repo_name:
+                                   replace(config.default_repo, copilot_plugin_profile="tools.json")})
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), config.repo_name, "test",
+        "windows", tmp_path, codename="already-set")
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(worktree_trust, "ensure_record_trusted", lambda *a: None)
+    _tool_preparation_result(monkeypatch, blocked=blocked)
+    code, plan = _resume_plan(config, record, monkeypatch, capfd, surface=surface,
+                              no_resume=True, no_mux=True, defer_projections=defer)
+    assert code == (3 if blocked else 0)
+    if blocked:
+        assert plan.get("action") != "exec"
+        assert "tool roster conflict" in plan["error"]
+        assert "cmd" not in plan
+    else:
+        assert plan["action"] == "exec"
+
+
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 def test_native_resume_is_carried_to_the_real_deferred_owner_boundary(
     tmp_path, monkeypatch, capfd, surface,
@@ -217,19 +294,15 @@ def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
     assert code == 0 and "--admission-only" in plan["cmd"]
     assert "--preserve-seed-id" in plan["cmd"] and before_seed.seed_id in plan["cmd"]
     assert not plan["seed_pending"] and "--interactive" not in plan["cmd"]
-    options = {
-        "capture_output": True, "text": True, "timeout": 15,
-        "env": {
-            **os.environ,
-            "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
-        },
-        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    environment = {
+        **os.environ,
+        "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
     }
     with launch_admission.guard(record.yaml_path):
-        blocked = subprocess.run(plan["cmd"], **options)
+        blocked = push_timeout.run_bounded(plan["cmd"], cwd=None, timeout=15, env=environment)
     assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
     assert "bare-backend-started" not in blocked.stdout
-    admitted = subprocess.run(plan["cmd"], **options)
+    admitted = push_timeout.run_bounded(plan["cmd"], cwd=None, timeout=15, env=environment)
     assert admitted.returncode == 0, admitted.stderr
     assert admitted.stdout.strip() == "bare-backend-started"
     assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
@@ -277,13 +350,13 @@ def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
         assert original.wait(timeout=10) == 0
         monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
         with launch_admission.guard(record.yaml_path):
-            blocked = subprocess.run(
-                plan["cmd"], capture_output=True, text=True, timeout=15, **options,
+            blocked = push_timeout.run_bounded(
+                plan["cmd"], cwd=None, timeout=15, env=options["env"],
             )
         assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
         assert "replacement-started" not in blocked.stdout
-        admitted = subprocess.run(
-            plan["cmd"], capture_output=True, text=True, timeout=15, **options,
+        admitted = push_timeout.run_bounded(
+            plan["cmd"], cwd=None, timeout=15, env=options["env"],
         )
         assert admitted.returncode == 0, admitted.stderr
         assert admitted.stdout.strip() == "replacement-started"
@@ -315,6 +388,9 @@ def test_explicit_resume_seed_is_staged_with_history_and_provenance(
     cmd = payload["launch"]["cmd"]
     assert payload["launch"]["seed_pending"] is True
     assert payload["launch"]["seed_kind"] == "resume"
+    assert payload["launch"]["record_path"] == str(tmp_path / "wt-a.yaml")
+    assert type(payload["launch"]["pane_shell_version"]) is int
+    assert payload["launch"]["pane_shell_version"] == 1
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
     assert "--resume=history-s1" in cmd
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
@@ -475,6 +551,7 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
 def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,
 ):
+    from agent_procutil.owned_process import run_caller_owned
     from agent_worktrees import output
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
@@ -493,7 +570,9 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
         lambda *_a, **_k: [
             shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File",
             str(Path(__file__).resolve().parents[1] / "scripts/default-setup.ps1"),
-            "-RuntimePython", sys.executable, "-CopilotPath", str(consumer),
+            # Seed execution gets its explicit interpreter from the plan.
+            # This fixture has no installed runtime for optional activity logging.
+            "-CopilotPath", str(consumer),
         ],
     )
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast", lambda *_a, **_k: "history-s1")
@@ -501,12 +580,16 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     with output.capture_json_output() as captured:
         assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
     plan = json.loads(captured.getvalue())["launch"]
-    proc = subprocess.run(
-        plan["cmd"], capture_output=True, text=True, check=True, timeout=20,
-        cwd=work_dir,
-        env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        proc = run_caller_owned(
+            plan["cmd"], timeout=20, max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
+            cwd=work_dir,
+            env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"Native seed handoff timed out: stdout={error.stdout!r}; stderr={error.stderr!r}")
+    assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout.splitlines()[-1]) == ["--resume=history-s1", "--interactive", seed]
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml") is None
@@ -531,6 +614,39 @@ def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch, capfd):
     payload = json.loads(capfd.readouterr().out)
     assert payload["launch"]["seed_pending"] is True
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX JSON setup plan")
+def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_path, monkeypatch, capfd):
+    from agent_worktrees import launch_seed_contract, launch_seed_exec, manager_launch_cli
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    config = _create_config(tmp_path, platform="linux")
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "linux", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    runtime = tmp_path / "runtime"
+    scripts = runtime / "scripts"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: tmp_path / "manager")
+    monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", lambda _root: True)
+    monkeypatch.setattr(
+        m, "_build_launch_cmd",
+        lambda *_a, **_k: ["/bin/bash", str(scripts / "default-setup.sh"), "--stdio"],
+    )
+
+    assert resolve_cli.cmd_resolve(_args(seed="direct JSON seed")) == 0
+
+    plan = json.loads(capfd.readouterr().out)["launch"]
+    assert plan["no_mux"] and plan["seed_pending"]
+    index = launch_seed_exec.native_setup_index(plan["cmd"])
+    assert index is not None
+    assert Path(plan["cmd"][index]).is_relative_to(tmp_path / "launch-attempts")
+    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "direct JSON seed"
 
 
 def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(

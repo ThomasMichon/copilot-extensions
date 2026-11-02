@@ -1515,7 +1515,7 @@ def test_config_sources_self_hosted_avoids_unused_state_root_probe(
         lambda *args, **kwargs: pytest.fail("self-hosted overlay needs no state root"),
     )
     srcs = sr.config_source_anchors(
-        config, base_anchor="/explicit" if explicit_base else None, cwd="/cwd",
+        config, base_anchor="/explicit" if explicit_base else None, cwd="/cwd", family="registry",
     )
     assert [(s.anchor, s.origin) for s in srcs] == [
         ("/explicit" if explicit_base else "/work/tree", "harness"),
@@ -1534,15 +1534,15 @@ def test_config_sources_external_overlay_is_resolved_fresh(
         lambda cwd: pytest.fail("explicit external overlay needs no Git root"),
     )
     fake_checkouts["knowledge"] = "/first"
-    assert sr.config_source_anchors(config, base_anchor="/base")[-1] == (
+    assert sr.config_source_anchors(config, base_anchor="/base", family="registry")[-1] == (
         sr.ConfigSource("/first", "knowledge")
     )
     fake_checkouts["knowledge"] = "/second"
-    assert sr.config_source_anchors(config, base_anchor="/base")[-1] == (
+    assert sr.config_source_anchors(config, base_anchor="/base", family="registry")[-1] == (
         sr.ConfigSource("/second", "knowledge")
     )
     fake_checkouts.clear()
-    assert sr.config_source_anchors(config, base_anchor="/base") == [
+    assert sr.config_source_anchors(config, base_anchor="/base", family="registry") == [
         sr.ConfigSource("/base", "harness"),
     ]
 

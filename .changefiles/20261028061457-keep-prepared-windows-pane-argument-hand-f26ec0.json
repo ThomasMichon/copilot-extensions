@@ -1,0 +1,9 @@
+{
+  "comment": "Keep prepared Windows pane argument handoffs in launch-owned state outside removable runtimes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

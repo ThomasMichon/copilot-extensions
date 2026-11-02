@@ -541,6 +541,15 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 ### Step 1: `create-pr`
 
 Managed PR pushes retain a bounded deadline and run the real pre-push hook.
+The managed hook performs shell/ref policy only, without Python/runtime startup,
+validation, provisioning or claims-backend calls. Its existing installer resolves
+and embeds PR mode and protected branches; refresh hooks through that owner after
+policy changes. Foreign `.local` hooks still run with the original arguments/ref
+input and may be expensive. Preserved repository wrappers do not chain back
+into their own `.local` file. Move repository-owned validators into required CI;
+`validate_hook`, `validate_paths` and legacy core-validation scripts no longer run
+automatically during managed publication. Explicit review policies, source/ref
+custody, post-success bookkeeping and remote merge gates remain unchanged.
 If legitimate validation needs longer than the default 180 seconds, configure
 `pr.push_timeout_seconds: 300` in the repository's
 `.copilot-extensions/agent-worktrees/config.yaml` (or the machine-local
@@ -1018,6 +1027,18 @@ Either way HEAD stays on
 `worktree/{id}` — just commit there and run `push-changes`. (A worktree still
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
+
+After successful publication is recorded, an existing idle local PR snapshot
+advances to the published head only when its history is contained in the
+previously recorded head. Checked-out, symbolic, independently changed, or
+concurrently moved refs are retained. Finalization still checks every ref it
+would remove; a merged PR does not waive unpublished history. Its refusal names
+the blocking ref and commit count rather than assuming the checkout is ahead.
+Snapshot maintenance uses Git's local receive path with an exact lease and
+checked-out-branch refusal, including checkouts admitted after inventory.
+Its receiver does not run publication hooks a second time; the actual remote
+publication keeps its normal hooks and policy. No network destination is used
+for this internal ref update.
 
 Ordinary `push-changes` accepts only incremental publication or the bounded
 source-owned replay proof described above; an arbitrary squash or rewrite

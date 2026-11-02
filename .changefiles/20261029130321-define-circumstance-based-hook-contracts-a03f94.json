@@ -1,0 +1,9 @@
+{
+  "comment": "Define circumstance-based hook contracts, recovery defaults, and static timeout review checks.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

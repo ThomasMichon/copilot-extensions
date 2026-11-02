@@ -1,0 +1,9 @@
+{
+  "comment": "Support state-preserving selective runtime removal; tighten owned legacy teardown and retain install coordination.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

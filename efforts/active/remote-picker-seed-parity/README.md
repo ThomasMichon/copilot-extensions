@@ -144,6 +144,17 @@ equivalent-flow contract, not additional product features.
 - [ ] Confirm unchanged local New/Resume and live Open behavior; retire owned
   test sessions/worktrees and leave no untracked background work.
 
+## Current blockers
+
+The containing release is blocked by the already-owned #8983 artifact-build
+compatibility repair. Installed validation also retains the #6859 / #7833
+broker/runtime qualification owner and the unreplayed uncertain updater
+outcome. #8375's source inspection is available after #9013 / #9017, but neither
+those source merges nor #8961's binding-free Bridge startup prove installed
+New/cold Resume/Open behavior. Preserve authorized rollout, same-conversation,
+exactly-once and cleanup gates; do not take over the existing repair or waive
+its evidence.
+
 ## Proposal
 
 Use a pre-launch, non-interactive structured invocation of the remote engine to
@@ -167,6 +178,91 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #9017 merged exact selected-machine detail with explicit
+  protected-input retrieval after current-head approval, required CI and no
+  findings. Both parent plans were re-read; this completes #8375's source
+  inspection path, not installed parity. Preserve accepted-turn correlation,
+  containing release, authorized rollout and installed local/SSH New/cold
+  Resume conversation, exactly-once and cleanup gates. Both efforts stay Active.
+
+- **2026-10-25** -- #9013 merged per-owner launch observations after genuine
+  current-head approval, required CI and a fixed receipt-result/final-wrapper
+  distinction. Windows and frozen-source POSIX packets each pass 76 cases,
+  including the actual execution owner's earlier-write-failure path. Both
+  parent plans were re-read. Continue #8375's selected-machine protected detail;
+  accepted-turn correlation, containing release, authorized rollout and the
+  original installed local/SSH conversation, exactly-once and cleanup gates
+  remain open. This source merge does not make either effort Done.
+
+- **2026-10-25** -- #9008 merged explicit configured-SSH metadata inspection
+  after current-head review, required CI and resolution of all four concrete
+  findings. Windows and frozen-source POSIX packets each pass 225 cases.
+  Both parent plans were re-read; metadata source progress does not prove
+  installed target compatibility or prompt delivery. Continue per-owner
+  terminal observations and selected-machine protected detail, then containing
+  release, authorized rollout and the original installed conversation /
+  exactly-once / cleanup gates. Neither effort is Done.
+- **2026-10-25** -- Prepared explicit configured-SSH metadata inspection under
+  #8375, using existing transport and target Manager reader ownership without
+  setup or replay. A selected live SSH target returned incompatible non-JSON
+  reader output, preserved as a sanitized per-source failure rather than empty
+  success. This is not a rollout or proof of target-owned prompt delivery.
+  Original installed New/cold Resume, exact conversation, exactly-once,
+  containing-release and cleanup gates all remain open.
+- **2026-10-25** -- #9004 merged the bounded local positive-evidence summary
+  after genuine current-head approval, required CI and no review findings.
+  Both parent plans were re-read. Proceed to explicitly selected-machine
+  inspection through existing owners; complete terminal outcomes, containing
+  release, authorized rollout and installed local/SSH exact-conversation
+  acceptance remain open. No source summary or native-session observation is
+  proof that Copilot accepted a prompt.
+- **2026-10-25** -- Prepared an opt-in bounded local Manager evidence summary
+  using the existing engine v1 reader, with no launch/SSH protocol change.
+  Completed New allocation, launcher/backend spawn and qualified original
+  native-session evidence remain distinct; absent receipts and prompt
+  acceptance stay unknown. Four actual Manager/engine read cases on Windows
+  and frozen-source POSIX
+  preserve fixture state, including later-page native evidence. This is source
+  inspection, not selected-machine sweeping, rollout or installed parity.
+  All original conversation, exactly-once and cleanup gates remain open.
+- **2026-10-25** -- #9001 merged scoped Manager-boundary outcome filtering
+  after genuine current-head approval, no open findings and required CI.
+  Zero launcher return remains distinct from successful Copilot launch or
+  accepted prompt; missing evidence stays unknown. Whole-attempt qualified
+  evidence, selected-machine sweeps, containing release, authorized rollout,
+  installed local/SSH conversation proof and cleanup remain open.
+- **2026-10-25** -- #8999 merged 90-day private-input retention and legacy
+  prompt-history migration after current-head approval, resolved findings and
+  required CI. Final frozen POSIX checks include actual WAL/restart and
+  composer-cache expiry. Pending daemon seeds remain untouched. This closes
+  the bounded retention source slice, not target-owned SSH acceptance or
+  rollout. Outcome classification/filtering, selected-machine sweeps,
+  containing release, installed same-conversation New/cold Resume and owned
+  resource cleanup remain open.
+- **2026-10-25** -- #8994 merged interactive local launch-history inspection
+  after current-head approval and required CI. Both Pickers expose protected
+  metadata/detail without replay or inferred acceptance. Journal retention,
+  selected-machine inspection, containing release, authorized rollout and
+  installed New/cold Resume conversation evidence remain open.
+- **2026-10-25** -- #8990 merged bounded local Manager/engine attempt inspection
+  with current-head approval and required CI. Saved intent and qualified
+  receipts can be inspected without replaying prompts; acceptance remains
+  unknown. Interactive history, remote inspection, retention, release and
+  installed same-conversation New/cold Resume proof remain open.
+- **2026-10-25** -- #8961 merged binding-free Bridge startup after current-head
+  approval and required CI. Discovery no longer requires source-project
+  machine binding; explicit selectors and effect-side ownership remain.
+  This removes a source readiness prerequisite only. Containing release,
+  authorized rollout, actual local/SSH conversation evidence and every
+  remaining Phase 3 gate stay open.
+- **2026-10-24** -- #8641 merged original native-session observations with
+  current-head approval, no open findings and required CI. Qualified
+  Linux/WSL source witnesses can join exact execution/incarnation/epoch and
+  backend PID/birth evidence; prompt acceptance remains explicitly unknown.
+  Native positive and unavailable-registration/observation controls passed.
+  Re-read both canonical efforts after merge. Joined inspection, retention,
+  containing release, authorized rollout, installed local/SSH same-conversation
+  proof and cleanup remain open; no Phase 3 completion is claimed.
 - **2026-10-24** -- #8627 merged prompt-free deferred execution receipts with
   current-head approval and required CI. Attempt/resolution/parent IDs now
   reach the cooperative backend boundary; OS spawn, seed claim and observed

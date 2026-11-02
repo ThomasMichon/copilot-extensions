@@ -19,6 +19,8 @@ DESTINATIONS = (
     REPO / "plugins" / "agent-machines" / "src" / "agent_machines" / "_peer_launch.py",
     REPO / "plugins" / "agent-pull-requests" / "src" / "agent_pull_requests" / "_peer_launch.py",
     REPO / "plugins" / "agent-ssh" / "src" / "agent_ssh" / "_peer_launch.py",
+    REPO / "plugins" / "agent-mcp" / "src" / "agent_mcp" / "_peer_launch.py",
+    REPO / "plugins" / "agent-vault" / "src" / "agent_vault" / "_peer_launch.py",
 )
 
 

@@ -29,7 +29,7 @@ test("a same-process resume switches registration to the resumed id", () => {
   assert.equal(adoptSessionId(state, "placeholder"), false); // same id: nothing to do
   assert.equal(adoptSessionId(state, undefined), false); // an event without an id
   assert.equal(adoptSessionId(state, "resumed"), true); // the resume renamed it
-  assert.deepEqual(state, { sessionId: "resumed", registered: false });
+  assert.deepEqual(state, { sessionId: "resumed", nativeSessionId: "resumed", registered: false });
   assert.equal(adoptSessionId(state, "resumed"), false);
 });
 
@@ -361,6 +361,297 @@ function interruptHarness(messages) {
     },
   };
 }
+
+const exactMessage = (id, kind = "prompt") => ({
+  id, kind, sender: "peer", body: `input ${id}`, delivery: "steer",
+  exact_session: true, original_session_id: "s",
+});
+
+function exactHarness(messages) {
+  const { calls, deps } = interruptHarness(messages);
+  const state = { sessionId: "s", nativeSessionId: "s", registered: true };
+  let native = "s";
+  deps.session.rpc = { metadata: { snapshot: async () => ({ sessionId: native }) } };
+  deps.isCurrent = () => state.registered && state.sessionId === "s" && state.nativeSessionId === "s";
+  deps.log = (message) => calls.push(["held", message]);
+  const rollover = () => { native = "successor"; adoptSessionId(state, native); };
+  return { calls, deps, state, rollover };
+}
+
+for (const kind of ["prompt", "notify"]) {
+  test(`an in-flight exact ${kind} poll cannot deliver after native rollover`, async () => {
+    const message = exactMessage(1, kind);
+    const { calls, deps, rollover } = exactHarness([message]);
+    deps.getJson = async () => { rollover(); return { messages: [message] }; };
+    assert.deepEqual(await drainInbox("s", deps), []);
+    assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+    assert.equal(calls[0][0], "held");
+  });
+
+  test(`a preceding awaited SDK send fences the later exact ${kind}`, async () => {
+    const { calls, deps, rollover } = exactHarness([exactMessage(1), exactMessage(2, kind)]);
+    deps.session.send = async () => { calls.push(["send"]); rollover(); };
+    assert.deepEqual(await drainInbox("s", deps), [1]);
+    assert.equal(calls.filter(([type]) => type === "send").length, 1);
+    assert.deepEqual(calls.at(-1), ["ack", [1]]);
+  });
+}
+
+test("registration fallback cannot restore the original exact native context", async () => {
+  const { calls, deps, state, rollover } = exactHarness([exactMessage(1)]);
+  const register = serializedRegister(state, async (id) => id === "s" ? true : "rejected");
+  await register();
+  rollover();
+  await register();
+  assert.equal(state.sessionId, "s");
+  assert.equal(state.registered, true);
+  assert.equal(state.nativeSessionId, "successor");
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send").length, 0);
+  await register.close();
+});
+
+test("actual SDK metadata fences an exact message even before a rollover event arrives", async () => {
+  const { calls, deps } = exactHarness([exactMessage(1)]);
+  deps.session.rpc.metadata.snapshot = async () => ({ sessionId: "successor" });
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+});
+
+test("rollover during an abort holds exact interrupted input and its pending replay", async () => {
+  const interrupt = { ...exactMessage(5), delivery: "interrupt" };
+  const { calls, deps, rollover } = exactHarness([interrupt]);
+  const earlier = exactMessage(4);
+  deps.inFlight.sent(earlier);
+  deps.session.abort = async () => { calls.push(["abort"]); rollover(); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+  assert.deepEqual(deps.inFlight.takeBefore(5), [earlier]);
+});
+
+test("rollover during an earlier replay fences the next replay and interrupt", async () => {
+  const interrupt = { ...exactMessage(5), delivery: "interrupt" };
+  const { calls, deps, rollover } = exactHarness([interrupt]);
+  deps.inFlight.sent(exactMessage(3));
+  const earlier = exactMessage(4);
+  deps.inFlight.sent(earlier);
+  deps.session.send = async () => { calls.push(["send"]); rollover(); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send").length, 1);
+  assert.deepEqual(deps.inFlight.takeBefore(5).map((row) => row.id), [3, 4]);
+  assert.equal(calls.filter(([type]) => type === "ack").length, 0);
+});
+
+test("exact delivery requires raw native provenance and the public metadata observer", async () => {
+  for (const change of ["missing-id", "wrong-id", "missing-rpc"]) {
+    const message = exactMessage(1);
+    const { calls, deps } = exactHarness([message]);
+    if (change === "missing-id") delete message.original_session_id;
+    if (change === "wrong-id") message.original_session_id = "other";
+    if (change === "missing-rpc") delete deps.session.rpc;
+    assert.deepEqual(await drainInbox("s", deps), []);
+    assert.equal(calls.filter(([type]) => type === "send" || type === "ack").length, 0);
+  }
+});
+
+for (const failure of ["metadata", "send"]) {
+  for (const failedId of [1, 2]) {
+    test(`replay retains its unconsumed batch after ${failure} rejects at ${failedId}`, async () => {
+      const interrupt = { ...exactMessage(5), delivery: "interrupt" };
+      const earlier = [1, 2, 3].map((id) => exactMessage(id));
+      const { calls, deps } = exactHarness(earlier);
+      assert.deepEqual(await drainInbox("s", deps), [1, 2, 3]);
+      assert.deepEqual(calls.at(-1), ["ack", [1, 2, 3]]);
+      calls.length = 0;
+      deps.getJson = async () => ({ messages: [interrupt] });
+      let metadataCalls = 0;
+      const sent = [];
+      deps.session.rpc.metadata.snapshot = async () => {
+        metadataCalls++;
+        if (failure === "metadata" && metadataCalls === failedId + 1) {
+          throw new Error("metadata unavailable");
+        }
+        return { sessionId: "s" };
+      };
+      deps.session.send = async (options) => {
+        const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+        if (failure === "send" && id === failedId) throw new Error("SDK rejected");
+        sent.push(id);
+        deps.inFlight.observe(recorded(exactMessage(id)));
+      };
+      assert.deepEqual(await drainInbox("s", deps), []);
+      assert.deepEqual([...deps.inFlight.pending.keys()], earlier.slice(failedId - 1).map((m) => m.id));
+      assert.equal(calls.filter(([type]) => type === "ack").length, 0);
+      assert.match(calls.at(-1)[1], /deliver failed/);
+
+      deps.session.rpc.metadata.snapshot = async () => ({ sessionId: "s" });
+      deps.session.send = async (options) => {
+        const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+        sent.push(id);
+        deps.inFlight.observe(recorded(exactMessage(id)));
+      };
+      assert.deepEqual(await drainInbox("s", deps), [5]);
+      assert.deepEqual(sent, [1, 2, 3, 5]);
+      assert.equal(deps.inFlight.pending.size, 0);
+      assert.deepEqual(calls.at(-1), ["ack", [5]]);
+    });
+  }
+}
+
+test("a rejected legacy replay retains acknowledged inputs for a later interrupt", async () => {
+  const { deps } = interruptHarness([{ id: 5, delivery: "interrupt" }]);
+  for (const id of [1, 2, 3]) deps.inFlight.sent({ id });
+  deps.session.send = async () => { throw new Error("SDK rejected"); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.deepEqual([...deps.inFlight.pending.keys()], [1, 2, 3]);
+  const sent = [];
+  deps.session.send = async (options) => {
+    const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+    sent.push(id);
+    deps.inFlight.observe(recorded({ id }));
+  };
+  assert.deepEqual(await drainInbox("s", deps), [5]);
+  assert.deepEqual(sent, [1, 2, 3, 5]);
+  assert.equal(deps.inFlight.pending.size, 0);
+});
+
+for (const consumedId of [1, 2]) {
+  test(`consumed input ${consumedId} is not replayed after an awaited metadata observation`, async () => {
+    const earlier = [1, 2, 3].map((id) => exactMessage(id));
+    const { deps } = exactHarness(earlier);
+    assert.deepEqual(await drainInbox("s", deps), [1, 2, 3]);
+    deps.getJson = async () => ({ messages: [{ ...exactMessage(5), delivery: "interrupt" }] });
+    let metadataCalls = 0;
+    deps.session.rpc.metadata.snapshot = async () => {
+      if (++metadataCalls === consumedId + 1) {
+        deps.inFlight.observe(recorded(exactMessage(consumedId)));
+        if (consumedId === 1) {
+          for (let id = 100; id <= 150; id++) deps.inFlight.observe(recorded(exactMessage(id)));
+          assert.equal(deps.inFlight.consumed.has(consumedId), false);
+        }
+      }
+      return { sessionId: "s" };
+    };
+    const sent = [];
+    deps.session.send = async (options) => {
+      const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+      sent.push(id);
+      deps.inFlight.observe(recorded(exactMessage(id)));
+    };
+    assert.deepEqual(await drainInbox("s", deps), [5]);
+    assert.deepEqual(sent, [1, 2, 3, 5].filter((id) => id !== consumedId));
+    assert.equal(deps.inFlight.pending.size, 0);
+  });
+}
+
+test("consumed later input is not replayed after an earlier awaited SDK send", async () => {
+  const earlier = [1, 2, 3].map((id) => exactMessage(id));
+  const { deps } = exactHarness(earlier);
+  assert.deepEqual(await drainInbox("s", deps), [1, 2, 3]);
+  deps.getJson = async () => ({ messages: [{ ...exactMessage(5), delivery: "interrupt" }] });
+  const sent = [];
+  deps.session.send = async (options) => {
+    const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+    sent.push(id);
+    deps.inFlight.observe(recorded(exactMessage(id)));
+    if (id === 1) deps.inFlight.observe(recorded(exactMessage(2)));
+  };
+  assert.deepEqual(await drainInbox("s", deps), [5]);
+  assert.deepEqual(sent, [1, 3, 5]);
+  assert.equal(deps.inFlight.pending.size, 0);
+});
+
+for (const boundary of ["poll", "first-metadata", "final-metadata", "abort", "replay-send", "SDK-send"]) {
+  test(`ACK failure redelivery fences consumption during ${boundary}`, async () => {
+    const message = { ...exactMessage(5),
+      delivery: ["abort", "replay-send"].includes(boundary) ? "interrupt" : "steer" };
+    const { deps } = exactHarness([message]);
+    const sent = [], acknowledged = [];
+    let failedAck = false;
+    const consume = () => {
+      deps.inFlight.observe(recorded(message));
+      for (let id = 100; id <= 150; id++) deps.inFlight.observe(recorded(exactMessage(id)));
+      assert.equal(deps.inFlight.consumed.has(message.id), false);
+    };
+    deps.post = async (_method, _path, body) => {
+      if (!failedAck) {
+        failedAck = true;
+        throw new Error("inbox ACK did not commit");
+      }
+      acknowledged.push(body.ids);
+      return true;
+    };
+    deps.session.send = async (options) => {
+      sent.push(Number(/msg-id="(\d+)"/.exec(options.prompt)[1]));
+      if (boundary === "SDK-send") consume();
+    };
+    await assert.rejects(drainInbox("s", deps), /ACK did not commit/);
+    assert.equal(deps.inFlight.consumptionObservers.size, 0);
+    if (boundary === "poll") {
+      deps.getJson = async () => { consume(); return { messages: [message] }; };
+    } else if (boundary.endsWith("metadata")) {
+      let snapshots = 0;
+      deps.session.rpc.metadata.snapshot = async () => {
+        if (++snapshots === (boundary === "first-metadata" ? 1 : 2)) consume();
+        return { sessionId: "s" };
+      };
+    } else if (boundary === "abort") {
+      deps.session.abort = async () => consume();
+    } else if (boundary === "replay-send") {
+      deps.inFlight.sent(exactMessage(4));
+      deps.session.send = async (options) => {
+        sent.push(Number(/msg-id="(\d+)"/.exec(options.prompt)[1]));
+        consume();
+      };
+    }
+    assert.deepEqual(await drainInbox("s", deps), [5]);
+    assert.equal(sent.filter((id) => id === 5).length, 1);
+    assert.deepEqual(acknowledged, [[5]]);
+    assert.equal(deps.inFlight.pending.has(5), false);
+    assert.equal(deps.inFlight.consumptionObservers.size, 0);
+  });
+}
+
+test("ACK failure redelivery keeps consumed exact input held after rollover", async () => {
+  const message = exactMessage(5);
+  const { calls, deps, rollover } = exactHarness([message]);
+  deps.post = async () => { throw new Error("inbox ACK did not commit"); };
+  await assert.rejects(drainInbox("s", deps), /ACK did not commit/);
+  calls.length = 0;
+  deps.getJson = async () => {
+    deps.inFlight.observe(recorded(message));
+    rollover();
+    return { messages: [message] };
+  };
+  deps.post = async () => { throw new Error("changed native cannot ACK"); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send").length, 0);
+  assert.equal(deps.inFlight.consumptionObservers.size, 0);
+});
+
+test("active consumption observation ignores nested input and closes after a poll failure", async () => {
+  const { deps } = exactHarness([exactMessage(5)]);
+  const observation = deps.inFlight.watchConsumption();
+  observation.select([5]);
+  deps.inFlight.observe({ ...recorded(exactMessage(5)), agentId: "child" });
+  assert.equal(observation.has(5), false);
+  deps.inFlight.observe(recorded(exactMessage(5)));
+  for (let id = 100; id <= 150; id++) deps.inFlight.observe(recorded(exactMessage(id)));
+  assert.equal(observation.has(5), true);
+  assert.equal(observation.has(150), false);
+  observation.close();
+  deps.getJson = async () => { throw new Error("poll unavailable"); };
+  await assert.rejects(drainInbox("s", deps), /poll unavailable/);
+  assert.equal(deps.inFlight.consumptionObservers.size, 0);
+});
+
+test("legacy alias-following messages keep their delivery behavior across a rollover", async () => {
+  const message = { id: 1, sender: "peer", body: "legacy" };
+  const { calls, deps, rollover } = exactHarness([message]);
+  deps.getJson = async () => { rollover(); return { messages: [message] }; };
+  assert.deepEqual(await drainInbox("s", deps), [1]);
+  assert.deepEqual(calls, [["send", "immediate"], ["ack", [1]]]);
+});
 
 test("an interrupt to a session whose main turn is idle never aborts (background sub-agents survive)", async () => {
   const { calls, deps } = interruptHarness([{ id: 5, sender: "a", body: "x", delivery: "interrupt" }]);

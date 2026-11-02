@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh shared native lifecycle archive after nested application cache compatibility repair",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

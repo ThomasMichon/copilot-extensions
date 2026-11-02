@@ -57,6 +57,13 @@ Preserve the owning ground-layer, installer and configuration authorities.
   or permission for cleanup, restart, native execution or rollout.
 - **Lifecycle owners:** Compose #5301 and #5655; do not add a competing watchdog,
   cleanup daemon, reservation store or repository registry.
+- **Retained registry/deferral intake:** Keep the complete #8778/#8779
+  original/refined/inherited contracts in the
+  [direct Phase 3 Plan and Validation](retained-registry-deferrals.md).
+  Existing coordinator/supervisor, Bridge registry/acquisition, retained-start
+  and terminal-capacity custodians remain. Uncertain/live allocations are
+  retained or flagged without positive existing release authority; no new
+  cleanup actor, source appointment or resource transfer is introduced.
 - **Proposed Phase 7:** Coordinate the bounded ordinary native-startup admission
   amendment through #7486. Preserve #6467's master-supervisor scope and #6793's
   source-safety scope, plus acquisition #6076, head-resume #6934 and remote
@@ -183,6 +190,14 @@ startup path first; it does not claim every suite entry point already conforms.
 - [ ] Bound post-timeout pipe draining as well as initial subprocess execution.
 - [ ] Compose #6185's conclusion boundary with terminal-cleanup recovery rather
   than replaying completed task work.
+- [ ] Complete all directly retained #8778
+  [finite deferral-episode Plan rows](retained-registry-deferrals.md#plan),
+  preserving budget/backoff/visible-exhaustion and release-or-flag alternatives,
+  historical evidence and original custody.
+- [ ] Complete all directly retained #8779
+  [typed registry-to-reservation Plan rows](retained-registry-deferrals.md#plan),
+  preserving finite transient versus definitive-absence classification,
+  distinct task/reservation accounting and original caller uncertainty.
 
 ### Phase 3a - Startup progress and timeout adoption
 
@@ -442,7 +457,6 @@ No host process, service, marker, override, watchdog, permission, credential or 
 is changed by this consolidation.
 
 ## Validation Plan
-
 - [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Complete every directly retained #2207 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
@@ -497,6 +511,12 @@ is changed by this consolidation.
   cases, independent process expiry, nested flush, retained identity and
   uncertain acceptance. Qualify the actual consumer, not only clock helpers.
 
+- [ ] Complete every matching #8778/#8779
+  [direct Validation row](retained-registry-deferrals.md#validation-plan)
+  against its full original/refined/inherited Plan scope and evidence tier.
+  Preserve all original OR/AND choices, retained allocations and current
+  custodians; tracker intake is not behavior completion or resource release.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -510,6 +530,22 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-28 - Direct retained registry and deferral contract
+
+The complete #8778/#8779 original/refined/inherited outcomes are retained in
+the direct Phase 3 Plan, matching Validation and continuing Coordination
+through [their per-origin ledger](retained-registry-deferrals.md).
+The bounded current-contract study verified actual whole text and complete
+nested eligibility under stable actor/roster guards, with the current
+immutable receiving ROOT read separately from implementation evidence.
+
+Budget, backoff, exhaustion and release-or-flag alternatives remain open at
+their original scope. Existing acquisition, retained allocation, native-history
+and supervisory ownership are unchanged; no retry, release, rearm, cleanup or
+runtime operation occurred. Normal review, actual merge and complete current
+receiving readback precede any supported source-tracker supersession. This is
+neither technical completion nor whole-effort closeout.
 
 ### 2026-10-23 - Startup observation source merged; release and adoption remain open
 

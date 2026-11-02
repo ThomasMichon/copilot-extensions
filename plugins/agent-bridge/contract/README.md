@@ -91,6 +91,13 @@ The checker still rejects unrefreshed source hashes, unjustified non-semantic
 classification, uncovered semantic changes and corrupt historical provenance.
 Never bulk-rebaseline goldens to make an implementation-only update pass.
 
+When a duplicate source is removed, its source record may retain the historical
+`path` with `current_path` pointing to an independently registered, byte-identical
+canonical source. The historical path must be absent; chained or unregistered
+relocations and mismatched bytes are refused. Captured packets and provenance
+keep their original paths, commits and blob identities. This repository-only
+mapping does not restore an executable shadow or change a wire contract.
+
 Local Git observations are batched by object and by each commit's requested
 paths, with the same per-command deadline and no lazy fetch. Hash normalization,
 actual commit/path/blob bindings, missing-object handling, and the complete
@@ -116,6 +123,110 @@ When a wire contract does change:
    python tools/check-agent-bridge-contracts.py
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
+
+## HTTP-51 standard native-send evidence
+
+HTTP generation 51 adds `NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION` for ordinary
+`send` with an exact native identity and idempotency key. Bridge owns admission
+and original-receipt recovery through its existing turn journal; callers do not
+construct a startup invocation. A changed intent conflicts, a busy target
+refuses without queuing, and ambiguous post-commit responses remain unknown
+until the same key recovers its receipt. No represented inbox is used.
+
+Independent expectations live in `inputs/http51/standard-native-send.json`.
+The parser, authenticated ASGI routes and actual journal execute in both fixture
+installation modes. HTTP-50 refusal, malformed receipts and lost post-commit
+responses are explicit cases. The required portfolio also overlaps two stopped
+retries through the actual resume lifecycle owner and recovers the first
+operation's receipt after the losing resume's state refusal. An unsuccessful
+resume without a matching receipt remains a failure. The ACP boundary is mocked:
+these observations do not qualify an installed receiver or retained native
+conversation.
+
+Commit matching source and declarations, then use the existing bounded
+capture owner:
+
+```text
+python tools/capture_bridge_http51.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http51.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+HTTP-50 and earlier packets, inputs and provenance remain immutable. Ordinary
+HTTP-50 behavioral replay accepts a later advertisement, but an explicit HTTP-50
+capture still requires its genuine matching source and may never publish
+HTTP-51 observations as historical evidence.
+
+### HTTP-51 ordinary receipt-only capability
+
+The running receiver additionally advertises
+`capabilities.native_send_receipt: 1` on `/health`, independently of the HTTP-51
+generation and package version. The current HTTP-51 portfolio retains its
+original admission/retry/refusal observations and adds the actual ordinary
+receipt-only parser command and authenticated route. It observes found and
+missing history, pre-POST refusal by an HTTP-51 receiver without the capability,
+stopped/busy preservation, identity conflicts, corrupt history, authentication
+and unchanged journal/session/inbox state. `accepted` proves admission only;
+a missing receipt never proves no effects.
+
+The independent command, route and expected observations are in the same
+`inputs/http51/standard-native-send.json` vector. The capture probe executes
+them through `http51_receipt_probes.py` in both fixture installation modes.
+Its successful health discovery and receipt POSTs reach the actual ASGI app;
+the old-capability case masks only that capability in the health response.
+The CLI cases execute the real `_get_client` factory, require its explicit
+`ensure=False` argument, and place fail-fast spies on daemon ensure/start.
+Both ordinary and keyed receipt-only commands also exercise a synthetic
+missing provider with no POSTs and zero ensure/start calls. The ordinary
+reader retains an unproven outcome (exit 70); the existing keyed CLI retains
+its unavailable-error exit rather than inventing JSON success or no-effect
+evidence. Configuration and transport are fixture-bound, not live discovery.
+It does not qualify an installed daemon, SDK or native conversation.
+
+Before a new capture, prepare the explicit semantic-owner declarations against
+the full real commit containing the provider implementation:
+
+```text
+python tools/capture_bridge_http51.py --source-commit <provider-source-commit> --prepare
+```
+
+Preparation changes only registered semantic source fingerprints and the owning
+deferred documentation reference. It registers `native_send_receipt.py` and does
+not add provenance, observations or fixture hashes, classify the new wire
+behavior as non-semantic, or make the contract guard pass without a capture.
+It refuses dirty/uncommitted provider bytes, unrelated source drift and changed
+historical packets. It uses the existing locked registry-publication owner.
+
+Commit those declarations together with the capture policy, writer, helper,
+probe, independent input and owning documentation. Then run the `--write`
+capture and no-write verification above with **that new full source commit**,
+not the earlier provider-only commit. The broad execution closure requires every
+new/modified helper and input to be committed before execution. Only genuine
+successful source-bound probes may publish `captured_from` commit/blob identities.
+Include the no-ensure provider fix in that checkpoint: the real-factory
+observations intentionally fail a receipt command that uses the default
+daemon-ensuring factory, even if its route alone is read-only.
+The mutable current HTTP-51 packets may refresh through their existing owner;
+ordered provenance and all HTTP-50/earlier packets remain unchanged.
+
+### HTTP-51 exact live-CLI capabilities
+
+The same current portfolio additionally captures the independent
+`live_keyed_receipt: 1` and `live_exact_notify: 1` capabilities. The input vector
+declares their real parser commands and expected observations; the actual
+authenticated ASGI inbox, schema-39 provenance and same-process registration
+rollover execute in both fixture installation modes. Prompt admission, read-only
+original receipt, informational notification, capability-less refusal and
+rollover before/after admission are separate observations.
+The real client factory is called with `ensure=False`; ensure/start spies must
+remain untouched. These are local source-bound observations, not installed
+CLI, SDK or native-conversation qualification. Declaration preparation binds
+the affected inbox, schema, targeting and distinct route owners before capture
+without changing historical packets or inventing provenance.
+
+Run all capture/test commands under the invoking harness's bounded test
+supervisor and its isolated source runner where applicable. A prepared registry
+or unit-test pass is not captured capability evidence.
 
 ## HTTP-50 original-handoff recovery evidence
 

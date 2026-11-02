@@ -28,13 +28,12 @@ live (fail-open -- never hide a session that might be real).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import tempfile
 import time
 from pathlib import Path
-
-import single_instance_lease
 
 # Bumped only on a breaking change to the on-disk shape; readers tolerate an
 # absent/unknown version (treat as legacy best-effort) so a rollout is safe.
@@ -63,6 +62,8 @@ def _pid_alive(pid: int) -> bool:
     """
     if pid <= 0:
         return False
+    import single_instance_lease
+
     return single_instance_lease.pid_alive(pid)
 
 
@@ -103,36 +104,9 @@ def process_start_time(pid: int) -> str | None:
 
 
 def _start_time_darwin(pid: int) -> str | None:
-    import ctypes
+    from zdd.darwin_identity import birth_time
 
-    # Public proc_bsdinfo ABI from XNU bsd/sys/proc_info.h.
-    class BsdInfo(ctypes.Structure):
-        _fields_ = [
-            (name, ctypes.c_uint32) for name in (
-                "flags", "status", "exit_status", "pid", "parent_pid",
-                "uid", "gid", "real_uid", "real_gid", "saved_uid", "saved_gid", "reserved",
-            )
-        ] + [
-            ("command", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
-            ("files", ctypes.c_uint32), ("group", ctypes.c_uint32),
-            ("job_count", ctypes.c_uint32), ("tty_device", ctypes.c_uint32),
-            ("tty_group", ctypes.c_uint32), ("nice", ctypes.c_int32),
-            ("start_seconds", ctypes.c_uint64), ("start_microseconds", ctypes.c_uint64),
-        ]
-
-    try:
-        query = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_pidinfo
-        query.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
-        query.restype = ctypes.c_int
-        info = BsdInfo()
-        size = ctypes.sizeof(info)
-        if query(pid, 3, 0, ctypes.byref(info), size) != size:
-            return None
-    except (OSError, AttributeError):
-        return None
-    if info.pid != pid or not info.start_seconds or info.start_microseconds >= 1_000_000:
-        return None
-    return f"{info.start_seconds}:{info.start_microseconds}"
+    return birth_time(pid)
 
 
 def _start_time_windows(pid: int) -> str | None:
@@ -278,6 +252,26 @@ def lock_is_live(data: dict | None) -> bool:
 def lock_live(path: Path | str) -> bool:
     """Convenience: read ``path`` and report whether its owner is live."""
     return lock_is_live(read_lock(path))
+
+
+def lock_is_running(data: dict | None) -> bool:
+    """Keep unknown owners live, but reject a retained, already-exited process."""
+    if not isinstance(data, dict) or not lock_is_live(data):
+        return False
+    birth = data.get("start_time")
+    if not birth or platform.system() not in {"Windows", "Linux"}:
+        return True
+    from zdd.process_exit import observe_original_exit
+
+    try:
+        return not observe_original_exit(data["pid"], birth)
+    except NotImplementedError:
+        return True
+    except (OSError, ValueError) as exc:
+        logging.getLogger(__name__).warning(
+            "Owner exit evidence unavailable; retaining liveness protection: %s", exc,
+        )
+        return True
 
 
 def remove_lock(path: Path | str) -> None:

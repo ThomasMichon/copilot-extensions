@@ -1,0 +1,86 @@
+{
+  "schema": "efforts.agenda-request",
+  "version": 2,
+  "mode": "context-qualified",
+  "expected_revision": 0,
+  "operation_id": "init-guidance-context-v2",
+  "change": {
+    "operation": "init",
+    "worktree": "example-guidance-lane",
+    "board": {
+      "version": 2,
+      "source": {
+        "kind": "effort",
+        "ref": "efforts/active/example/README.md"
+      },
+      "revision": 1,
+      "items": {
+        "parent": {
+          "source_ref": "Validation Plan: parent validation",
+          "scope_ref": "Scope Approvals: assigned validation",
+          "action": "Run the same bounded validation command.",
+          "exit": ["The parent validation outcome is recorded."],
+          "on": {"done": "advance", "needs-context": "replan", "blocked": "wait"},
+          "relevant_subjects": ["validation-input"]
+        },
+        "sibling-a": {
+          "source_ref": "Plan: next accepted work package",
+          "scope_ref": "Scope Approvals: assigned next package",
+          "action": "Continue the next already-assigned work package.",
+          "exit": ["The next work package outcome is recorded."],
+          "on": {"done": "advance", "needs-context": "replan", "blocked": "wait"},
+          "relevant_subjects": ["validation-input"]
+        },
+        "sibling-b": {
+          "source_ref": "Plan: later accepted work package",
+          "scope_ref": "Scope Approvals: assigned later package",
+          "action": "Continue the later already-assigned work package.",
+          "exit": ["The later work package outcome is recorded."],
+          "on": {"done": "advance", "needs-context": "replan", "blocked": "wait"},
+          "relevant_subjects": ["validation-input"]
+        },
+        "inspect-input": {
+          "source_ref": "Validation Plan: inspect relevant inputs",
+          "scope_ref": "Scope Approvals: bounded input inspection",
+          "action": "Inspect the input that prevented the parent validation.",
+          "exit": ["The relevant input inspection result is recorded."],
+          "on": {"done": "advance", "needs-context": "replan", "blocked": "wait"},
+          "relevant_subjects": ["validation-input"]
+        },
+        "compare-results": {
+          "source_ref": "Validation Plan: compare expected and observed behavior",
+          "scope_ref": "Scope Approvals: bounded result comparison",
+          "action": "Compare expected and observed behavior within the assigned scope.",
+          "exit": ["The bounded comparison result is recorded."],
+          "on": {"done": "advance", "needs-context": "replan", "blocked": "wait"},
+          "relevant_subjects": ["validation-input"]
+        },
+        "probe-fixture": {
+          "source_ref": "Validation Plan: isolate the fixture precondition",
+          "scope_ref": "Scope Approvals: synthetic fixture probe",
+          "action": "Isolate the synthetic fixture precondition before resuming inspection.",
+          "exit": ["The fixture precondition result is recorded."],
+          "on": {"done": "advance", "needs-context": "replan", "blocked": "wait"},
+          "relevant_subjects": ["validation-input"]
+        }
+      },
+      "order": ["parent", "sibling-a"]
+    },
+    "baseline_context": {
+      "facts": [
+        {
+          "kind": "input",
+          "subject": "validation-input",
+          "value": {"content": "fixture-input-A"},
+          "evidence_ref": "example:observed-input-A"
+        }
+      ]
+    },
+    "resource_caps": {
+      "max_depth": 4,
+      "max_pending_items": 16,
+      "max_deferred_frames": 4,
+      "max_no_parent_progress": 3
+    }
+  }
+}

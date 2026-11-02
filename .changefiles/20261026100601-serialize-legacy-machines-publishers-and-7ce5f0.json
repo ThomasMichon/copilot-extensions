@@ -1,0 +1,13 @@
+{
+  "comment": "Serialize legacy Machines publishers and add finite state-preserving native uninstall with canonical runtime custody and conservative SSH reconnect refusal.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

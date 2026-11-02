@@ -144,14 +144,29 @@ class RepositoryResourceSnapshot:
     def __init__(self, *, execution: bool = True):
         self._execution = execution
         self._roots: dict[str, tuple[Path, str]] = {}
+        self._errors: dict[str, str] = {}
         self._deadline = monotonic() + 15
 
+    def with_execution(self, *, execution: bool) -> RepositoryResourceSnapshot:
+        """Share this operation's cache/deadline, not its admission mode."""
+        view = RepositoryResourceSnapshot(execution=execution)
+        view._roots = self._roots
+        view._errors = self._errors
+        view._deadline = self._deadline
+        return view
+
     def root(self, name: str, *, execution: bool | None = None) -> Path:
+        if name in self._errors:
+            raise RegistrarError(self._errors[name])
         if name not in self._roots:
             remaining = self._deadline - monotonic()
             if remaining <= 0:
                 raise RegistrarError("repository resource resolution exceeded its shared 15s budget")
-            self._roots[name] = _registered_repository(name, timeout=remaining)
+            try:
+                self._roots[name] = _registered_repository(name, timeout=remaining)
+            except RegistrarError as exc:
+                self._errors[name] = str(exc)
+                raise
         root, repo_class = self._roots[name]
         _check_execution_class(
             name, repo_class, execution=self._execution if execution is None else execution,
