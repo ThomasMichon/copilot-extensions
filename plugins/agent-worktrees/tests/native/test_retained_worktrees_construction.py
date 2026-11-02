@@ -62,7 +62,7 @@ with engine.numbered_candidate(
     health_module="agent_worktrees.runtime_candidate",
     health_callable="verify_runtime_candidate",
     construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
-    construction_data=provenance,
+    construction_data=provenance,process_retention=True,
 ) as candidate:
     assert not candidate.reused
     assert engine.runtime.is_complete(runtime,version,expect_hash=candidate.payload_hash)
