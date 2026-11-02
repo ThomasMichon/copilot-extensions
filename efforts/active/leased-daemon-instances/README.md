@@ -186,11 +186,13 @@ their existing owners and guarantees.
 - [x] Land atomic TokenUser-owned private inventory creation and qualify the
   four actual Windows SDK owner, binary and concurrent-cold-cache selectors
   through reviewed source #9956.
-- [ ] Complete the retained Git-Bash Manager callback with the reviewed creator
-  in a canonical complete candidate; preserve the same-user/different-TokenOwner
+- [x] Qualify the retained PowerShell and Git-Bash Manager callbacks with the
+  reviewed creator in a canonical complete candidate; preserve the same-user/different-TokenOwner
   boundary, existing-path admission and borrowed runtime anchors. See the
   [ownership journal](journal/2026/11.02%20private-inventory-ownership.md)
-  and the existing #7028 consumer report.
+  and the existing #7028 consumer report. This closes the callback bug proof
+  only; the application owner's complete source publication and broader
+  construction/lifecycle qualification remain open.
 
 ## Validation Plan
 
