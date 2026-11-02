@@ -4,8 +4,9 @@ Parent: [Dev/Main Release Pipeline](README.md), Phase 9d. Tracker: #8736.
 
 **Status:** Active; agent-recommended plan reviewed in #8745 before execution.
 The parent Request retains the operator's exact direction and execution consent.
-The source-publication implementation merged in #8790. Control reconciliation,
-independent Main activation and live release acceptance remain open.
+Source publication merged in #8790; trusted retirement and transition
+classification support merged in #8838. Operational reconciliation, equivalent
+build reuse, independent Main activation and live release acceptance remain open.
 
 ## Goal and non-goals
 
@@ -78,10 +79,16 @@ validation items retain those gates.
 
 ### 3. Reconcile advancing Main without changing release ownership
 
-The next in-flight source slice provides authenticated, bounded deletion
-tombstones and a strict full-tree transition classifier. It does not yet
-connect equivalent build reuse or activate refreshed landing generations.
-Validation and merge evidence are recorded in the parent Journal.
+Source support in #8838 provides authenticated, bounded deletion tombstones and
+a strict full-tree transition classifier. Its 72 focused controls and separate
+seven-case actual-Git witness include the two reproduced review defects. It does
+not yet connect equivalent build reuse or activate refreshed landing generations.
+Validation and actual merge evidence are recorded in the parent Journal.
+
+- Early build-source retention support is prepared through the existing Dev
+  publisher, with its own unqualified data schema and shared auxiliary bounds.
+  Its observed unit packet, review and fresh-Git CLI witness remain required;
+  this does not close artifact equivalence or operational replacement below.
 
 - [ ] Read the latest Main and classify changes against the trusted explicit
       Main-owned contract before final candidate push. Never infer ownership
