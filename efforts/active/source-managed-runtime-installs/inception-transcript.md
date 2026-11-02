@@ -264,3 +264,37 @@ launch. The two command spellings are proposed; this capture neither implements
 them nor authorizes sending new flags to older providers. The outgoing owner
 sunsets after the successor starts, not merely when its selector changes.
 Existing installation/data, lifecycle and rollout custody remain unchanged.
+
+## Git-addressed local promotion without version increments
+
+Operator discussion, 2026-11-01:
+
+> So, to deploy from a dec checkout, we have two paths we can consider:
+> 1. Make it possible to directly use dev raw source as the install-source for uv.
+> OR
+> 2. Use a local promotion run to create a main-equivalent local footprint, with built wheels, and install from there
+> I guess we could have a "dev-install" be to just kick #2 whenever we do `<repo> update` and the local config says to use the dev install
+
+The assistant recommended the second path: local Dev selection enters the
+existing promotion flow, whose snapshot and wheels feed the same UV installer
+and stage/activate lifecycle. Reusing matching outputs was a recommendation,
+not yet an implemented update route.
+
+Operator agreement:
+
+> Agree; reuse outputs if the input source didn't change, bashed on git-hash, since we won't be incrementing versions for locally-sourced installs, only official main versions.
+
+Settled summary: when the existing local configuration selects Dev installation,
+`<repo> update` consumes a local promotion result for the selected Git commit.
+Reuse its complete outputs when that source hash is unchanged. Local promotion
+does not increment package versions; official Main releases remain the version
+authority. Distinct source commits may therefore have the same package versions
+while selecting different snapshots, wheels and immutable installed code.
+
+Agent-recommended realization: retain the selected official Main version seed
+alongside the source commit, and preserve the canonical provider's existing
+wheel/interpreter/platform compatibility checks. Git source identity does not
+make an incompatible wheel installable or an incomplete promotion reusable.
+Do not add another version counter, builder, cache or fingerprint framework.
+This agreement changes the proposed source/update contract, not installed
+configuration, provider ownership or rollout authority.
