@@ -247,3 +247,12 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   is refined through the existing source probe; appeared or unreadable inputs
   refuse publication. The focused packet passed 46 cases with one native FIFO
   capability skip, including malformed binding/recovery and cache controls.
+- Added the real producer wiring regression requested in the next review:
+  actual source selection, plugin contribution discovery and YAML grafting over
+  plugin/base/caller-specific knowledge/global machine/exact project layers.
+  Only native acquisition is substituted. Managed knowledge and exact-layer
+  removals republish the two callers without staleness or context crossover.
+  The same focused selection verifies lossless Git pointer spaces, including
+  actual Windows extended-path directories. The wider run passed 47 cases with
+  one native FIFO capability skip; a normal Win32 trailing-space fixture needed
+  extended paths, and its corrected focused selection passed both cases.

@@ -147,6 +147,25 @@ def test_repository_identity_is_nearest_and_resolves_common_directory(tmp_path):
     assert reader.repository_identity(anchor)["common_dir"] == reader.canonical(anchor)
 
 
+def test_git_pointer_path_spaces_are_preserved(tmp_path):
+    reader = _load("guarded_anchor_map")
+    base = Path("\\\\?\\" + str(tmp_path)) if os.name == "nt" else tmp_path
+    anchor = _repo(base / "anchor with suffix ", bare=True)
+    linked = base / "linked"
+    linked.mkdir()
+    gitdir = anchor / "worktrees" / "branch with suffix "
+    gitdir.mkdir(parents=True)
+    (gitdir / "HEAD").write_text("ref: refs/heads/branch\n")
+    (gitdir / "commondir").write_text(str(anchor) + "\n")
+    marker = linked / ".git"
+    marker.write_text(f"gitdir: {gitdir}\n")
+    assert reader._text(marker) == f"gitdir: {gitdir}"
+    identity = reader.repository_identity(linked / "new")
+    assert identity is not None
+    assert identity["git_dir"] == reader.canonical(gitdir)
+    assert identity["common_dir"] == reader.canonical(anchor)
+
+
 def test_native_and_resident_share_file_only_decisions_and_live_controls(tmp_path, monkeypatch):
     from agent_worktrees import __main__ as main
     from agent_worktrees import related, registry_paths, repos
@@ -906,3 +925,113 @@ def test_concurrent_publication_exposes_only_whole_maps(producer):
                 if result.status == "ready" and caller == p.callers[0]:
                     assert len(result.roots) == 1
         assert all(future.result()["published"] == 2 for future in futures)
+
+
+def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_path, monkeypatch):
+    import yaml
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config, guarded_anchors, machine_config, registry_paths, related, repos, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport, SourceObservation
+    from agent_worktrees.repos_registry_transaction import revision
+
+    reader = _load("guarded_anchor_map")
+    root = tmp_path / "registry"
+    home = tmp_path / "home"
+    callers = {name: _repo(tmp_path / name) for name in ("first", "second")}
+    targets = {name: _repo(tmp_path / name) for name in ("target", "knowledge-only", "plugin-only")}
+    paths = {**callers, **targets}
+    registry = repos.ReposRegistry(
+        repos={name: repos.RepoEntry(name=name) for name in paths},
+        _baseline=(str((root / "repos.yaml").resolve()), revision(None)),
+    )
+    knowledge = {name: tmp_path / f"knowledge-{name}" for name in callers}
+    local = {name: root / name for name in callers}
+    plugin = home / ".copilot" / "installed-plugins" / "fixture" / "sample"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name":"sample"}')
+
+    def entry(delegate, location):
+        return {"delegate": {"via": delegate}, "locus": {"preferred": f"machine:{location}"}}
+
+    def layer(anchor, entries, *, direct=False, plugin_owned=False):
+        directory = (
+            Path() if direct else Path(related.INREPO_DIRNAME)
+            if plugin_owned else related.CANONICAL_RELATED_DIR
+        )
+        path = anchor / directory / related.RELATED_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump({"related": entries}))
+
+    layer(plugin, {
+        "target": entry("agent-bridge", "plugin"),
+        "plugin-only": entry("agent-bridge", "plugin"),
+    }, plugin_owned=True)
+    for name, caller in callers.items():
+        layer(caller, {"target": entry("agent-codespaces", f"base-{name}")})
+        layer(knowledge[name], {
+            "target": entry("agent-containers", f"knowledge-{name}"),
+            "knowledge-only": entry("agent-codespaces" if name == "first" else "none", "knowledge"),
+        })
+    layer(root, {"target": entry("agent-bridge", "global")}, direct=True)
+    layer(local["first"], {"target": entry("agent-codespaces", "exact-first")})
+    layer(local["second"], {})
+
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    monkeypatch.setattr(registry_paths, "registry_root", lambda *args: root)
+    monkeypatch.setattr(config, "install_dir", lambda: root)
+    monkeypatch.setattr(config, "project_dir", lambda name: local[name])
+    monkeypatch.setattr(guarded_anchors, "read_registry", lambda *args, **kwargs: registry)
+    monkeypatch.setattr(repos, "registered_entry_root", lambda item: paths[item.name])
+
+    def configuration(*args, project, **kwargs):
+        return SimpleNamespace(
+            repo_name=project, knowledge_repo=project,
+            default_repo=SimpleNamespace(anchor=str(callers[project])),
+        )
+
+    def machine_source(base, *, project):
+        assert Path(base) == callers[project]
+        return AcquisitionReport("native-machine", str(local[project]), (
+            SourceObservation(str(local[project]), "native-machine", ScanAuthority.COMPLETE),
+        ))
+
+    def activation(*, home, project_root):
+        assert home == config._home() and project_root in callers.values()
+        return SimpleNamespace(
+            authority=ScanAuthority.COMPLETE, findings=(), plugin_names=None, decisions={},
+            active={"sample@fixture": SimpleNamespace(
+                name="sample", source="sample@fixture",
+                live_roots=(SimpleNamespace(root=plugin),),
+            )},
+        )
+
+    monkeypatch.setattr(config, "load_config", configuration)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", machine_source)
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda cfg, **kwargs: (
+        SimpleNamespace(bound=True, path=str(knowledge[cfg.knowledge_repo]))
+    ))
+    monkeypatch.setattr(guarded_anchors, "resolve_active_plugins", activation)
+    assert guarded_anchors.refresh(callers.values())["published"] == 2
+
+    def rows(name):
+        result = reader.read_map(callers[name], root)
+        assert result.status == "ready", result.reason
+        return {row["name"]: row for row in result.roots}
+
+    first, second = rows("first"), rows("second")
+    assert first["target"]["delegate"] == "agent-codespaces"
+    assert first["target"]["locus"]["preferred"] == "machine:exact-first"
+    assert second["target"]["delegate"] == "agent-bridge"
+    assert second["target"]["locus"]["preferred"] == "machine:global"
+    assert "knowledge-only" in first and "knowledge-only" not in second
+    assert "plugin-only" in first and "plugin-only" in second
+    assert related.remove_related(knowledge["first"], "knowledge-only")
+    assert "knowledge-only" not in rows("first")
+    assert rows("second") == second
+    assert related.remove_related(local["first"], "target")
+    assert rows("first")["target"]["delegate"] == "agent-bridge"
+    assert rows("first")["target"]["locus"]["preferred"] == "machine:global"
+    assert "plugin-only" in rows("first")

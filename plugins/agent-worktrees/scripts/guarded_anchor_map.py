@@ -76,7 +76,7 @@ def _text(path: Path) -> str:
         raw = stream.read(8193)
     if len(raw) > 8192:
         raise ValueError("Git metadata exceeds its bound")
-    return raw.decode("utf-8").strip()
+    return raw.decode("utf-8").removesuffix("\n").removesuffix("\r")
 
 
 def repository_identity(start: str | Path) -> dict | None:
@@ -95,7 +95,7 @@ def repository_identity(start: str | Path) -> dict | None:
                 text = _text(marker)
                 if not text.lower().startswith("gitdir:"):
                     return None
-                pointer = text[7:].strip()
+                pointer = text[7:].removeprefix(" ")
                 if not pointer:
                     return None
                 git_dir = Path(pointer)

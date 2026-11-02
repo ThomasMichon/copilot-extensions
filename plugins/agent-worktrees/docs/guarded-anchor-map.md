@@ -101,9 +101,11 @@ they never cause acquisition or an infrastructure-shaped deny.
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,
 bare repositories and the nearest nested repository/submodule. No Git
-subprocess, object scan, index/config read or RPC is needed. A nested repository
-does not inherit its containing checkout's guard. Direct write tools match the
-repository common-directory identity, including linked target worktrees.
+subprocess, object scan, index/config read or RPC is needed.
+Git pointer reads remove only the line terminator and format separator, not
+meaningful spaces in a repository/common-directory path.
+A nested repository does not inherit its containing checkout's guard. Direct
+write tools match the repository common-directory identity, including linked target worktrees.
 Shell and direct-write evaluation resolve each distinct target identity only
 once per event, not once per guarded row; no identity result is retained across
 events. Shell handling retains the existing command-position/write-target heuristic; this
