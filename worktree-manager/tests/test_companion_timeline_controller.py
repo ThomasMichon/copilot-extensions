@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
 from dataclasses import replace
+from typing import TypeVar
 
 import pytest
 
@@ -38,18 +39,23 @@ class Source:
         self.page_cancelled = asyncio.Event()
         self.wrong_page = False
 
-    async def observe(self, selected: SourceToken) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
+    async def observe(
+        self, selected: SourceToken, *, stop: asyncio.Event,
+    ) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
         try:
             yield snapshot(selected)
             while True:
-                yield await self.queue.get()
+                yield await until_stopped(self.queue.get(), stop)
         finally:
             self.closed.set()
 
-    async def history(self, selected: SourceToken, before: SourcePosition) -> HistoryPage:
+    async def history(
+        self, selected: SourceToken, before: SourcePosition, *, stop: asyncio.Event,
+    ) -> HistoryPage:
         self.page_started.set()
         try:
-            await self.page_release.wait()
+            if not self.page_release.is_set():
+                await until_stopped(self.page_release.wait(), stop)
         except asyncio.CancelledError:
             self.page_cancelled.set()
             raise
@@ -59,7 +65,9 @@ class Source:
 
 
 class BrokenSource(Source):
-    async def observe(self, selected: SourceToken) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
+    async def observe(
+        self, selected: SourceToken, *, stop: asyncio.Event,
+    ) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
         yield snapshot(selected)
         raise RuntimeError("broken provider contract")
 
@@ -81,25 +89,70 @@ class SlowCleanupSource(Source):
             self.cleanup_interrupted.set()
             raise
 
-    async def observe(self, selected: SourceToken) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
+    async def observe(
+        self, selected: SourceToken, *, stop: asyncio.Event,
+    ) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
         self.observations_started += 1
         try:
             yield snapshot(selected)
-            await asyncio.Event().wait()
+            await until_stopped(asyncio.Event().wait(), stop)
         finally:
             self.cleanup_started.set()
             await self._cleanup()
             self.closed.set()
 
-    async def history(self, selected: SourceToken, before: SourcePosition) -> HistoryPage:
+    async def history(
+        self, selected: SourceToken, before: SourcePosition, *, stop: asyncio.Event,
+    ) -> HistoryPage:
         self.page_started.set()
         try:
-            await self.page_release.wait()
+            if not self.page_release.is_set():
+                await until_stopped(self.page_release.wait(), stop)
             return HistoryPage(selected, before, None, (), Completeness.PARTIAL)
         finally:
             self.page_cleanup_started.set()
             await self._cleanup()
             self.page_cleanup_finished.set()
+
+
+T = TypeVar("T")
+
+
+async def until_stopped(value: Awaitable[T], stop: asyncio.Event) -> T:
+    request = asyncio.ensure_future(value)
+    stopping = asyncio.create_task(stop.wait())
+    try:
+            done, _ = await asyncio.wait((request, stopping), return_when=asyncio.FIRST_COMPLETED)
+            if request in done:
+                return request.result()
+            raise asyncio.CancelledError
+    finally:
+            for task in (request, stopping):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(request, stopping, return_exceptions=True)
+
+
+class FiniteCleanupSource(SlowCleanupSource):
+    async def observe(
+            self, selected: SourceToken, *, stop: asyncio.Event,
+    ) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
+            try:
+                yield snapshot(selected)
+            finally:
+                self.cleanup_started.set()
+                await self._cleanup()
+                self.closed.set()
+
+
+class FailedCleanupSource(SlowCleanupSource):
+    async def history(
+            self, selected: SourceToken, before: SourcePosition, *, stop: asyncio.Event,
+    ) -> HistoryPage:
+            try:
+                return await super().history(selected, before, stop=stop)
+            finally:
+                raise OSError("history cleanup failed")
 
 
 @pytest.mark.parametrize("operation", ["select", "close"])
@@ -163,6 +216,82 @@ def test_close_during_selection_cleanup_does_not_start_replacement_reader() -> N
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("operation", ["select", "close"])
+def test_teardown_does_not_interrupt_history_cleanup_already_in_progress(operation: str) -> None:
+    async def run() -> None:
+        source = SlowCleanupSource()
+        controller = TimelineController(
+            {Provider.WORKTREES: source}, observation=lambda value: None,
+            page=lambda value: pytest.fail("retired page was delivered"),
+            error=lambda selected, message: pytest.fail(message),
+        )
+        selected = token()
+        await controller.select((selected,))
+        await asyncio.sleep(0)
+        assert controller.request_history(selected, position(selected))
+        await source.page_started.wait()
+        source.page_release.set()
+        await source.page_cleanup_started.wait()
+        action = controller.close() if operation == "close" else controller.select((token(epoch=1),))
+        caller = asyncio.create_task(action)
+        try:
+            await source.cleanup_started.wait()
+            assert not source.cleanup_interrupted.is_set()
+            assert not source.page_cleanup_finished.is_set() and not caller.done()
+            assert controller.reader_count == controller.page_count == 1
+        finally:
+            source.cleanup_release.set()
+            await caller
+            await controller.close()
+        assert source.page_cleanup_finished.is_set() and not source.cleanup_interrupted.is_set()
+        assert controller.reader_count == controller.page_count == 0
+    asyncio.run(run())
+
+
+def test_teardown_waits_for_naturally_ending_observer_cleanup() -> None:
+    async def run() -> None:
+        source = FiniteCleanupSource()
+        controller = TimelineController(
+            {Provider.WORKTREES: source}, observation=lambda value: None,
+            page=lambda value: None, error=lambda selected, message: pytest.fail(message),
+        )
+        await controller.select((token(),))
+        await source.cleanup_started.wait()
+        caller = asyncio.create_task(controller.close())
+        try:
+            await asyncio.sleep(0)
+            assert not caller.done() and controller.reader_count == 1
+            assert not source.cleanup_interrupted.is_set()
+        finally:
+            source.cleanup_release.set()
+            await caller
+        assert source.closed.is_set() and not source.cleanup_interrupted.is_set()
+        assert controller.reader_count == 0
+    asyncio.run(run())
+
+
+def test_cleanup_failure_remains_visible_after_selection_is_retired() -> None:
+    async def run() -> None:
+        source = FailedCleanupSource()
+        controller = TimelineController(
+            {Provider.WORKTREES: source}, observation=lambda value: None,
+            page=lambda value: None, error=lambda selected, message: pytest.fail(message),
+        )
+        selected = token()
+        await controller.select((selected,))
+        await asyncio.sleep(0)
+        assert controller.request_history(selected, position(selected))
+        await source.page_started.wait()
+        caller = asyncio.create_task(controller.close())
+        await source.page_cleanup_started.wait()
+        source.cleanup_release.set()
+        with pytest.raises(TimelineSourceError, match="history cleanup failed"):
+            await caller
+        assert source.closed.is_set() and source.page_cleanup_finished.is_set()
+        assert controller.reader_count == controller.page_count == 0
+    asyncio.run(run())
+
+
 def test_unexpected_adapter_failure_is_visible_before_close() -> None:
     async def run() -> None:
         errors: list[str] = []
@@ -185,14 +314,21 @@ def test_three_sources_are_independent_and_close_only_readers() -> None:
         sources = {provider: Source() for provider in Provider}
         observations: list[TimelineSnapshot | LiveDelta] = []
         errors: list[tuple[SourceToken, str]] = []
+        error_received = asyncio.Event()
+
+        def receive_error(selected: SourceToken, message: str) -> None:
+            errors.append((selected, message))
+            error_received.set()
+
         controller = TimelineController(
             sources, observation=observations.append, page=lambda value: None,
-            error=lambda selected, message: errors.append((selected, message)),
+            error=receive_error,
         )
         await controller.select(tuple(token(provider) for provider in Provider))
         await asyncio.sleep(0)
         assert controller.reader_count == 3 and len(observations) == 3
         await sources[Provider.WORKTREES].queue.put(snapshot(token(epoch=1)))
+        await error_received.wait()
         await asyncio.sleep(0)
         assert len(errors) == 1 and "wrong-selection" in errors[0][1]
         assert controller.reader_count == 2

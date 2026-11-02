@@ -268,6 +268,11 @@ History/detail reads and source workers share caller-owned cancellation,
 stdout/frame bounds and late-epoch rejection. Observer exit closes only its
 subscriptions/processes. Existing Bridge watch/idle effects remain visible;
 this interface does not silently redefine session lifetime.
+Manager's internal adapters receive a request-local `stop` event. They must stop
+new reads cooperatively and await bounded cleanup of their own handles.
+Controller teardown signals that event and waits for the adapter task; it does
+not cancel a task that may already be finalizing a read. Caller cancellation
+cannot discard those handles, and cleanup failures remain explicit.
 
 Old/unsupported peers retain current Summary/Claims/Agenda/Recovery behavior.
 Optional unavailable sources and errors do not disable independent views.

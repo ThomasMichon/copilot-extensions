@@ -48,6 +48,10 @@ event and Enter expands it; mouse selection is highlighted. Home browses the
 oldest loaded event and requests bounded older history. End/Follow returns
 selection to the live bottom. These controls do not change application focus
 or Escape behavior.
+Timeline adapters receive independent request-local stop events. Teardown waits
+for their bounded cleanup, including a naturally completed read already being
+finalized, without canceling adapter tasks or discarding their handles. Cleanup
+errors remain explicit after selection retirement.
 The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
 retains the provider, joined-app, native-client and installed-adoption gates.
 

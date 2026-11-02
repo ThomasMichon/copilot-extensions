@@ -20,11 +20,15 @@ class TimelineSourceError(RuntimeError):
 
 
 class TimelineSource(Protocol):
-    """Adapters retain their own transport admission and cancellation cleanup."""
+    """Adapters stop reads cooperatively and await their owned bounded cleanup."""
 
-    def observe(self, token: SourceToken) -> AsyncGenerator[Observation, None]: ...
+    def observe(
+        self, token: SourceToken, *, stop: asyncio.Event,
+    ) -> AsyncGenerator[Observation, None]: ...
 
-    async def history(self, token: SourceToken, before: SourcePosition) -> HistoryPage: ...
+    async def history(
+        self, token: SourceToken, before: SourcePosition, *, stop: asyncio.Event,
+    ) -> HistoryPage: ...
 
 
 class TimelineController:
@@ -52,6 +56,8 @@ class TimelineController:
         self._selected: dict[Provider, SourceToken] = {}
         self._readers: dict[Provider, asyncio.Task[None]] = {}
         self._pages: dict[Provider, asyncio.Task[None]] = {}
+        self._reader_stops: dict[Provider, asyncio.Event] = {}
+        self._page_stops: dict[Provider, asyncio.Event] = {}
         self._revision = 0
         self._closed = False
         self._selection_lock = asyncio.Lock()
@@ -96,8 +102,10 @@ class TimelineController:
             if source is None:
                 self._error(token, "Unsupported: no admitted timeline adapter for this provider.")
             else:
+                stop = asyncio.Event()
+                self._reader_stops[provider] = stop
                 task = asyncio.create_task(
-                    self._observe(source, token, revision),
+                    self._observe(source, token, revision, stop),
                     name=f"sidecar-observer:{provider.value}",
                 )
                 self._readers[provider] = task
@@ -115,9 +123,9 @@ class TimelineController:
             self._error(token, f"Timeline adapter failed: {failure}")
 
     async def _observe(
-        self, source: TimelineSource, token: SourceToken, revision: int,
+        self, source: TimelineSource, token: SourceToken, revision: int, stop: asyncio.Event,
     ) -> None:
-        stream = source.observe(token)
+        stream = source.observe(token, stop=stop)
         try:
             async for value in stream:
                 if not self._current(token, revision):
@@ -130,6 +138,8 @@ class TimelineController:
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline source error: {exc}")
+            else:
+                raise
         finally:
             await stream.aclose()
 
@@ -149,8 +159,10 @@ class TimelineController:
         if source is None:
             self._error(token, "Unsupported: no admitted timeline history adapter.")
             return False
+        stop = asyncio.Event()
+        self._page_stops[provider] = stop
         task = asyncio.create_task(
-            self._history(source, token, before, self._revision),
+            self._history(source, token, before, self._revision, stop),
             name=f"sidecar-history:{provider.value}",
         )
         self._pages[provider] = task
@@ -162,10 +174,10 @@ class TimelineController:
 
     async def _history(
         self, source: TimelineSource, token: SourceToken,
-        before: SourcePosition, revision: int,
+        before: SourcePosition, revision: int, stop: asyncio.Event,
     ) -> None:
         try:
-            value = await source.history(token, before)
+            value = await source.history(token, before, stop=stop)
             if not self._current(token, revision):
                 return
             if not isinstance(value, HistoryPage) or value.token != token or value.before != before:
@@ -174,14 +186,16 @@ class TimelineController:
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline history error: {exc}")
+            else:
+                raise
 
     async def _stop(self) -> None:
         if self._teardown is None:
             self._revision += 1
             self._selected.clear()
             tasks = (*self._pages.values(), *self._readers.values())
-            for task in tasks:
-                task.cancel()
+            for stop in (*self._page_stops.values(), *self._reader_stops.values()):
+                stop.set()
             self._teardown = asyncio.gather(*tasks, return_exceptions=True)
         teardown = self._teardown
         cancelled: asyncio.CancelledError | None = None
@@ -195,6 +209,8 @@ class TimelineController:
                 cancelled = exc
         self._pages.clear()
         self._readers.clear()
+        self._page_stops.clear()
+        self._reader_stops.clear()
         self._teardown = None
         for outcome in outcomes:
             if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):

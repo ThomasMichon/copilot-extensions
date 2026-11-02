@@ -527,6 +527,22 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Cooperative observer teardown
+
+- Reproduced a controller race: a page already in its adapter's cleanup was
+  interrupted by teardown's task cancellation. Both close and selection
+  replacement failed the new regression while the prior ten cases passed.
+- Internal adapters now receive a request-local stop event for observation and
+  history. Teardown signals those events rather than canceling adapter tasks,
+  and retains all handles until their bounded owned cleanup finishes.
+- Late results remain revision-fenced. Cleanup errors after selection retirement
+  propagate through teardown rather than disappearing with stale callbacks.
+- All 14 controller cases passed, including cleanup already in progress, natural
+  observer completion, repeated caller cancellation and explicit cleanup failure.
+  The changed controller also passed strict checking.
+- This expands the unpublished internal adapter protocol; no provider transport,
+  CLI/resident capability, installed rollout or whole-parent gate is closed.
+
 ### 2026-11-02 - Journal-local pending failures
 
 - Pending invalidation records the verified journal generation and source.
