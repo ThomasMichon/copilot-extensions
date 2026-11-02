@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10026 canonical Fleet Contracts implementation and qualification. #10025 canonical Core Delegation admission is complete; the lead is selecting another independent library slice.
+- **Current slice:** #10029 canonical Repository Policy source/test contracts and guest-reader qualification. #10026 canonical Fleet Contracts admission is complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** One Fleet Contracts worker owns #10026's six canonical modules and release changefile in isolation. The lead owns integration, shared admission/coverage manifests, documentation, the effort and full completion judgment. Prior test-cohort delegates are complete.
+- **Delegates:** The lead owns #10029's canonical Repository Policy scope, shared admission/coverage manifests, documentation, the effort and full completion judgment. The Fleet Contracts worker and prior test-cohort delegates are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -117,7 +117,8 @@ rewrite.
 - [x] Strictly admit canonical Installation Context source, worker and every test/helper after the final fixture cohorts (#10018).
 - [x] Strictly admit all four canonical Configuration Layers source/test modules (#10021).
 - [x] Strictly admit all five canonical Core Delegation source/test modules (#10025).
-- [ ] Strictly admit all six canonical Fleet Contracts source/test modules (#10026).
+- [x] Strictly admit all six canonical Fleet Contracts source/test modules (#10026).
+- [ ] Strictly admit canonical Repository Policy source/test modules, including the executable guest reader (#10029).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1305,3 +1306,42 @@ composition prerequisites, and review/validation rules.
   Fresh-machine and live-venue lanes are not applicable to this annotation-only
   library admission: no installer, provisioning or transport behavior changes.
   Required remote CI and review remain pending before merge.
+
+### 2026-11-02 - Fleet Contracts merged; Repository Policy selected
+
+- #10033 merged as `f38815cff84771b5676a91738b8e3c3a2b45a96e`
+  after exact-head approval, zero open review threads and green required CI in
+  [run 41500645633](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41500645633).
+  #10026 is complete. Native finalization independently verified the worker's
+  full content on `dev`, removed its worktree and settled the parent claim.
+- Re-reading this Plan and Validation Plan leaves 51 pending projects and the
+  overall completion gate open. #10029 owns Repository Policy's next bounded
+  library admission: type the canonical evaluator and tests, extract its
+  embedded guest-reader program into a genuinely checked module, and preserve
+  fresh `-I -S` receiver behavior and required license metadata.
+
+### 2026-11-02 - Repository Policy strict qualification
+
+- Extracted the embedded guest program into `_guest_reader.py`, checked as
+  real source rather than an unchecked string. The builder reads it only when
+  constructing a probe. All six canonical files pass strict MyPy on Linux and
+  Windows with the existing declared YAML/stub environment; the expanded
+  enforced gate passes for 18 strict projects, with 50 still pending.
+- All 73 canonical tests pass in an isolated managed environment, including
+  fresh `-I -S` receiver acceptance/refusal and explicit-context refusal.
+  The first attempt's six metadata failures were resolved by preparing the
+  real distribution in that environment, not by weakening the license guard.
+  A normal wheel build includes the exact checked reader and license.
+  Installed-wheel controls pass allowed, denied, duplicate-policy and
+  explicit-context receiver cases without repository writes.
+- Targeted consumer checks pass: CodeSpaces 27, Containers 6, Dispatch 24,
+  Bridge 101 and Worktrees 55. The Worktrees transaction-order fixture now
+  isolates the unrelated profile reconciler and explicitly proves its call
+  remains after the registry write and inside the transaction. This resolves
+  the observed nested-guard fixture failure without changing production locks.
+- Both consumer maps identify the same five editable consumers and no physical
+  copies. The changefile includes the library and all five consumers. No
+  Repository Policy file belongs to the existing promotion-unit source closure,
+  so that packet's manifest is unchanged; required CI still runs it.
+  No live remote venue is needed for this read-only source extraction; fresh
+  subprocess and installed-wheel composition are exercised locally.
