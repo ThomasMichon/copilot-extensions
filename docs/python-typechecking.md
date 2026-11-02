@@ -102,6 +102,10 @@ promotion. Each MyPy step has a six-minute bound; the combined job has a
 20-minute deadline covering setup, both checks, the unchanged 300-second unit
 packet and evidence upload. Effective shell overrides cannot mask check failures.
 Unit selection, evidence and Main's independent lifecycle stay intact.
+Release-helper discovery includes the candidate-local checker and its
+repository import closure. Their bytes and actor-free decision coverage join
+the existing promotion manifest; the unit runner retains its separate
+qualification-framework role.
 
 `python tools/check-release-controller-compatibility.py --main-ref origin/main`
 validates this prepared sequence and reports `candidate_types_prepared`

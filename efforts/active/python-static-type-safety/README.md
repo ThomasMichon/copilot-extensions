@@ -282,3 +282,14 @@ composition prerequisites, and review/validation rules.
   two steps. Contract controls reject failure-masking step/job/workflow shells;
   promotion messages use binary UTF-8 input with a raw commit-object assertion.
   The unchanged unit budget remains independent. Focused controls pass 109 tests.
+- Current Dev now includes the independently landed lifecycle and guardian
+  fixture repairs. The rebase preserves those stronger scoped controls and
+  removes this PR's redundant isolation fixtures; only the P3 source contract
+  and coupled materialization/message fixes remain in the proposal.
+- Review also exposed missing release-helper discovery for candidate-local
+  checker commands. Discovery now includes that checker and its namespace-
+  relative import closure, with three newly admitted implementation files,
+  four decision targets and two actor-free controls. The real compatibility
+  command refused the missing admission before enrollment. Focused helper,
+  shell and checker controls pass 136 tests; exact packet coverage remains
+  required before merge.

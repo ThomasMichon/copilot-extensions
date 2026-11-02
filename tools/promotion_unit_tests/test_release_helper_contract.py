@@ -80,6 +80,7 @@ def test_source_selected_producer_and_verifier_follow_one_admitted_revision():
 def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence():
     workflow = _workflow()
     control.verify_candidate_typechecking(workflow)
+    assert "typecheck.py" in control.helper_implementations(workflow)
     for fault in (
         "missing", "order", "ignored", "wrong-input", "skip", "job-timeout",
         "step-shell", "job-shell", "workflow-shell",
@@ -221,6 +222,7 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
     }
     _source(tmp_path, ".github/workflows/validate-and-promote.yml", yaml.safe_dump(prepared).encode())
     _source(tmp_path, "tools/promotion_frozen_candidate.py", b'parser.add_argument("--dev-sha", required=True)')
+    _source(tmp_path, "tools/typecheck.py", b'parser.add_argument("--enforced", action="store_true")')
     _source(tmp_path, "tools/main_only.py", b'parser.add_argument("--main-input", required=True)')
     _source(tmp_path, "tools/promotion-unit-manifest.json", b"{}")
     monkeypatch.setattr(cli, "ROOT", tmp_path)

@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 import sys
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -17,13 +14,6 @@ spec = importlib.util.spec_from_file_location(
 original = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = original
 spec.loader.exec_module(original)
-
-@pytest.fixture(autouse=True)
-def portable_path_owner(monkeypatch):
-    if os.name == "nt":
-        from agent_procutil import _daemon_instance_owner
-
-        monkeypatch.setattr(_daemon_instance_owner, "assert_path_owner", lambda _path: None)
 
 for name in (
     "test_expired_lifecycle_lock_never_creates_or_deletes_inventory_files",
