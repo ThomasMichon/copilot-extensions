@@ -1,0 +1,9 @@
+{
+  "comment": "Type POSIX installation-context parity fixtures",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
