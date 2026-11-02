@@ -24,8 +24,17 @@ def selected_document(root: Path, *, local: bool = False) -> Path | None:
     return None
 
 
-def compose_documents(report: dict[str, Any], machine_root: Path) -> dict[str, Any]:
-    """Read selected native sources without touching runtime/resource state."""
+def compose_documents(
+    report: dict[str, Any], machine_root: Path, *, plugin_fleets: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Read selected native sources without touching runtime/resource state.
+
+    ``plugin_fleets`` names fleets backed by plugin-shipped fragments; an
+    explicit null in those fleets is a clear that ``plugin_config`` resolves
+    after composition, so it is exempt from per-layer value validation here.
+    The result additionally carries ``operator_layers``: each composed layer's
+    owner record and values, low to high, for replay over fragment defaults.
+    """
     from configuration_context import context_from_owner
 
     from .config import SECURITY_PROFILES, _strict_bool
@@ -62,6 +71,8 @@ def compose_documents(report: dict[str, Any], machine_root: Path) -> dict[str, A
             fleets = {}
         for name, fleet in fleets.items():
             if isinstance(fleet, dict):
+                if name in plugin_fleets:
+                    fleet = {key: value for key, value in fleet.items() if value is not None}
                 if (
                     "security_profile" in fleet
                     and str(fleet["security_profile"]).lower() not in SECURITY_PROFILES
@@ -100,6 +111,14 @@ def compose_documents(report: dict[str, Any], machine_root: Path) -> dict[str, A
         "repository_machine", "repository_machine",
     )
     result = compose(context, layers)
+    by_id = {layer["id"]: layer for layer in layers}
+    result["operator_layers"] = [
+        (
+            {key: value for key, value in by_id[layer_id].items() if key != "values"},
+            by_id[layer_id]["values"],
+        )
+        for layer_id in result["layers"]
+    ]
     values = result["values"]
     # Remote paths/commands are not host source paths. The devcontainer config
     # retains its native relative-to-devcontainer contract.

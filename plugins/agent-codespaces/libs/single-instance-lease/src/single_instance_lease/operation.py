@@ -10,7 +10,9 @@ import threading
 from pathlib import Path
 from typing import BinaryIO
 
-from .lease import _acquire_os_lock
+from .lease import _acquire_os_lock as _acquire_os_lock
+
+_REPARSE_POINT: int = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
 
 _guard = threading.Lock()
 _holders: dict[tuple[int, int, int], OperationLock] = {}
@@ -60,7 +62,7 @@ def _plain_file(path: Path) -> os.stat_result:
     info = path.lstat()
     if (
         not stat.S_ISREG(info.st_mode) or path.is_symlink()
-        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
     ):
         raise OperationOwnershipError(f"operation lock is not a plain file: {path}")
     return info

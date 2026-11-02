@@ -154,6 +154,19 @@ above is requested; these implementation choices remain reviewable.
 
 ## Plan
 
+### Original named-volume observation compatibility
+
+Tracked by #10078 under #6030 and the existing substrate source appointment.
+This closes the preserving-adoption contract above and the machine-fleet
+`repeatable-role-fleet-adoption` intent; it introduces no new deployment authority.
+An original Docker-volume owner may supply fresh descriptor-bound metadata,
+file digests and public keys when the host caller cannot traverse its storage.
+The SDK binds the complete native mount/volume records, original daemon,
+explicit file owners and current observation. Local private-file checks remain
+unchanged. No key copy, permission repair, credential rotation, new Docker
+reconciler or incumbent replacement is part of this compatibility slice.
+Actual producer authentication and installation/adoption remain adopter gates.
+
 ### Original-attempt SDK repair amendment
 
 Tracked by #9735 under the existing #8860 appointment and #6030 campaign.

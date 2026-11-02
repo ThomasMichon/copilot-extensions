@@ -78,10 +78,12 @@ Configured membership changes, retained obsolete scopes and direct-row migration
 still need their owning integration; metadata maintenance does not erase them.
 
 The [original transport custody](pool-publication.md#implemented-explicit-sender-and-unknown-outcome-recovery)
-remains in force. Reconnect does not retarget an unresolved request or rebase a
-settled publisher onto another URL. Same-queue cross-endpoint continuity remains
-an explicit integration obligation; this setting does not infer it from equal
-catalog revisions or definitions.
+remains in force. The sender can continue a quiescent original request or settled
+publisher across endpoints only after confirming the same existing durable queue
+identity. Its original body and the provider's transactional identity fence remain
+in force; equal catalog revisions or definitions never establish continuity.
+The cadence tests exercise both settled continuation and recovery of a lost
+original reply through the actual existing reconcile owner.
 
 ## Source validation
 

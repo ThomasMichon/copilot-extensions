@@ -165,6 +165,7 @@ def test_running_health_advertises_only_the_registered_metadata_contract(queue) 
         "control_authority_configured": True, "metadata_only": True,
         "lock_holder_verification": False, "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
+        "queue_identity_fencing_versions": [1],
         "configured_cohort_projection_versions": [1],
         "configured_cohort_projection_owner": "explicit-caller",
         "atomic_placement": False,

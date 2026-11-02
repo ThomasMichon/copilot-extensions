@@ -270,7 +270,7 @@
         "libs/single-instance-lease"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-ssh-manager",

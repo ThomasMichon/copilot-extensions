@@ -511,6 +511,8 @@ agent-containers source-remove <name> --project <project>
                                       # remove that Picker source registration
 agent-containers ssh-profile <name> --json
                                       # inspect provider/profile metadata only
+agent-containers config-sources [--json]
+                                      # layers, plugin fragments, per-pointer owners
 agent-containers config-migrate      # stamp/migrate machine-local containers.yaml
 agent-containers version             # show version
 ```
@@ -553,6 +555,63 @@ container (`exec_user: vscode`, `workspace_folder: /workspace`,
 `image_prefixes: ["vsc-"]`); point them at a real repo in your own
 `containers.yaml`. The overlay lookup is additive and fail-open; agent-worktrees
 is not required for standalone use.
+
+### Plugin-shipped fleet fragments
+
+An active plugin can ship fleet definitions by declaring a fragment in its own
+`plugin.json`:
+
+```json
+{ "name": "example-harness", "containersConfig": "config/containers.yaml" }
+```
+
+Fragments form the **lowest** layer, beneath the builtins and every
+configuration tier above (or the single selected compatibility file).
+Discovery uses the canonical identity-verified activation resolver for the
+invoking repository -- global activation plus that checkout's own plugin
+settings -- the same resolver as `codespaceConfig` and plugin-shipped
+`related.yaml`:
+
+- A fragment contributes `fleets:` entries only. `schema_version` is accepted;
+  any other top-level key (defaults, `relay`, `dotfiles`, `harness`, ...) is
+  ignored with a warning -- those stay operator-owned.
+- Your config overrides a plugin fleet **per key**: the fleet mapping is
+  deep-merged, nested mappings such as `environment` merge per key, lists and
+  scalars replace, and an explicit `null` clears a shipped value back to its
+  default (as if neither source set it). Set only what is personal:
+
+  ```yaml
+  schema_version: 2
+  dotfiles:
+    repo: ~/dotfiles
+  fleets:
+    example:        # shipped by example-harness
+      size: 2
+  ```
+
+- An **empty fleet entry removes a plugin-shipped fleet** entirely (`example:`,
+  `example: null` or `example: {}`): none of its keys are inherited, `fleet` /
+  `up example` report it as not defined, and `config-sources` shows it as
+  removed by that layer (an explicit `fleets: null` removes every shipped
+  fleet the same way). A higher layer may define the fleet again from
+  scratch. (An empty entry for a fleet no plugin ships keeps its existing
+  meaning: a fleet with default settings.)
+- Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
+  values in a fragment (and `devcontainer_config` when the fragment's
+  `devcontainer_path` is omitted or null) resolve against the fragment file's
+  directory.
+- If two plugins define the same fleet name, the plugin whose
+  `name@marketplace` sorts first wins and the other definition is ignored as a
+  whole (never blended), with a warning.
+- An unreadable, invalid or cyclic fragment/declaration is skipped with a
+  warning and never fails your own config. Merged fleets go through the normal
+  fleet validation.
+
+`agent-containers config-sources [--json]` shows the composed layers (plugin
+fragments first), the contributing fragments, and the owning layer of every
+configured value as a JSON pointer (`configuration_provenance`); `agent-containers
+fleet --json` also reports each member's `fleet_source`. See
+[`docs/configuration.md`](docs/configuration.md#plugin-shipped-fleet-fragments).
 
 `AGENT_CONTAINERS_STATE_DIR` may relocate mutable lease/admission/rescue state
 without relocating either platform's runtime installation. When Windows and
