@@ -361,3 +361,6 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   controls preserve ordinary commit denial and fast-forward-only pull access.
   The complete map, both guards, deployment and relevance packet passed
   370 cases with six native-capability skips.
+- Re-admitted the changed shared Git parser bytes after CI rejected its prior
+  anchor-guard source hash. Only that existing manifest hash changed; the unit
+  nodes, source inventory, coverage requirements and gate behavior are intact.
