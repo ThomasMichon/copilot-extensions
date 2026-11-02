@@ -177,9 +177,9 @@ def test_admission_refusal_does_not_mutate_task_or_reservation(q, reason):
 
 
 def test_legacy_reservations_are_preserved_and_not_guessed_into_pool_capacity(q):
-    publish(q, pool())
     legacy = task(q)
     r, _ = q.reserve_spawn(legacy.id)
+    publish(q, pool())
     with pytest.raises(TaskError, match="legacy capacity"):
         place(q, task(q))
     with pytest.raises(TaskError, match="cannot be adopted"):
@@ -331,6 +331,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "supported_drivers": ["cli"],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
+        "configured_cohort_reservation_fencing_versions": [1],
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
     body = {"task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision, "driver": "cli"}

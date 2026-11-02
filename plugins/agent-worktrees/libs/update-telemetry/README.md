@@ -5,6 +5,14 @@ Shared, stdlib-only telemetry for update runs (`agent-worktrees update`,
 `update-status.json`, and a stable exit-code table. Distribution
 `agent-update-telemetry`; import module `update_telemetry`.
 
+The eight canonical source modules are admitted to strict MyPy on Linux and
+Windows analysis targets. From the repository root, prepare once with
+`python tools/typecheck.py lib-update-telemetry --prepare`, then run
+`python tools/typecheck.py lib-update-telemetry` before publication.
+Serialized events/status remain explicit dynamic boundaries. Contract tests
+live in the Worktrees suite and retain that project's independent type-admission
+status; generated lifecycle helpers likewise remain independently pending.
+
 ## Locations and propagation
 
 | What | Where |

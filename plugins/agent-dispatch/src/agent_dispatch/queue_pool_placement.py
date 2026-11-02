@@ -15,6 +15,33 @@ POOL_PLACEMENT_PROTOCOL = "pool_placement/v1"
 POOL_PLACEMENT_VERSION = 1
 
 
+class ConfiguredPoolPlacementRequired(TaskError):
+    """Fresh queued spawn admission cannot bypass a projected cohort."""
+
+    def __init__(self) -> None:
+        super().__init__("configured pool cohort requires the pool placement operation")
+
+    def detail(self) -> dict[str, object]:
+        return {
+            "code": "configured_pool_placement_required",
+            "reason": str(self),
+            "retryable": False,
+        }
+
+
+def require_legacy_pool_admission(
+    conn: sqlite3.Connection, task: Task, catalog_revision: int | None,
+) -> None:
+    """Fence fresh legacy spawning under the caller's reservation write lock."""
+    if catalog_revision is not None or task.status != Status.QUEUED or task.source == "ci-repair":
+        return
+    revision = conn.execute(
+        "SELECT cohort_revision FROM pool_catalog_clock WHERE singleton = 1",
+    ).fetchone()["cohort_revision"]
+    if revision > 0:
+        raise ConfiguredPoolPlacementRequired()
+
+
 def pool_placement_contract() -> dict[str, object]:
     """Describe explicit provider support, not automatic lane admission."""
     return {
@@ -22,6 +49,7 @@ def pool_placement_contract() -> dict[str, object]:
         "supported_drivers": ["cli"],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
+        "configured_cohort_reservation_fencing_versions": [1],
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
 

@@ -244,7 +244,7 @@ def capture(
             worker = threading.Thread(target=server.serve_capture, daemon=True)
             worker.start()
             argv = [
-                *command, "--no-auto-update", "--no-remote", "--model", model,
+                *command, "--no-auto-update", "--model", model,
                 "--no-ask-user", "-p", prompt,
             ]
             for flag, value in (("--reasoning-effort", reasoning_effort), ("--context", context)):

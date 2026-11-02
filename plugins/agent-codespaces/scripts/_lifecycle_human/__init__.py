@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-import contextvars
 import codecs
+import contextvars
 import os
 import re
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import TracebackType
+from typing import Protocol, cast
 
 from .redact import redact
 
-_CURRENT = contextvars.ContextVar("update_human_operation", default=None)
+_CURRENT: contextvars.ContextVar[HumanOperation | None] = contextvars.ContextVar(
+    "update_human_operation", default=None,
+)
 _WRITE_LOCK = threading.Lock()
 _FRAMED = re.compile(
     r"^(\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] )(.+)"
@@ -32,7 +36,7 @@ _LEGACY_STATES = {
 
 def _available(fd: int) -> int:
     """Bytes already written, without waiting for detached descendants' EOF."""
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
         import msvcrt
         from ctypes import wintypes
@@ -44,13 +48,13 @@ def _available(fd: int) -> int:
             wintypes.LPVOID, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID,
         ]
         peek.restype = wintypes.BOOL
-        count = wintypes.DWORD()
-        if not peek(msvcrt.get_osfhandle(fd), None, 0, None, ctypes.byref(count), None):
+        available = wintypes.DWORD()
+        if not peek(msvcrt.get_osfhandle(fd), None, 0, None, ctypes.byref(available), None):
             error = ctypes.get_last_error()
             if error == 109:  # ERROR_BROKEN_PIPE
                 return 0
             raise ctypes.WinError(error)
-        return count.value
+        return available.value
     import array
     import fcntl
     import termios
@@ -60,9 +64,15 @@ def _available(fd: int) -> int:
     return count[0]
 
 
-def current_operation():
+def current_operation() -> HumanOperation | None:
     """Return the explicit human scope, never infer one from protocol output."""
     return _CURRENT.get()
+
+
+class HumanStream(Protocol):
+    def write(self, text: str) -> object: ...
+
+    def flush(self) -> object: ...
 
 
 class HumanOperation:
@@ -72,15 +82,22 @@ class HumanOperation:
     duration; arbitrary progress/child lines report elapsed time in that scope.
     """
 
-    def __init__(self, label: str, *, stream=None, wall=None, monotonic=None):
+    path: str
+    started: float
+
+    def __init__(
+        self, label: str, *, stream: HumanStream | None = None,
+        wall: Callable[[], datetime] | None = None,
+        monotonic: Callable[[], float] | None = None,
+    ) -> None:
         self.label = re.sub(r"\s+", "-", redact(label).strip())
         self.stream = stream
         self.wall = wall
         self.monotonic = monotonic
-        self._token = None
+        self._token: contextvars.Token[HumanOperation | None] | None = None
         self._completed = False
 
-    def __enter__(self):
+    def __enter__(self) -> HumanOperation:
         parent = current_operation()
         self.path = f"{parent.path}/{self.label}" if parent else self.label
         if self.stream is None:
@@ -89,7 +106,7 @@ class HumanOperation:
             self.wall = parent.wall if parent else lambda: datetime.now(timezone.utc)
         if self.monotonic is None:
             self.monotonic = parent.monotonic if parent else time.monotonic
-        self.started = self.monotonic()
+        self.started = cast(Callable[[], float], self.monotonic)()
         self._token = _CURRENT.set(self)
         try:
             self.progress("starting")
@@ -103,6 +120,7 @@ class HumanOperation:
         self, text: str, *, completed: bool = False, elapsed: float | None = None,
         state: str | None = None,
     ) -> None:
+        # Entering the scope resolves the inherited sink and clocks.
         message = str(text)
         safe = redact(message)
         originals = message.splitlines() or [""]
@@ -127,15 +145,18 @@ class HumanOperation:
                         line = legacy[3]
                 if line_state is not None:
                     line = f"{line_state} {line}".rstrip()
-                now = self.wall().astimezone(timezone.utc)
+                now = cast(Callable[[], datetime], self.wall)().astimezone(timezone.utc)
                 stamp = now.strftime("%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-                seconds = self.monotonic() - self.started if elapsed is None else elapsed
+                seconds = (
+                    cast(Callable[[], float], self.monotonic)() - self.started
+                    if elapsed is None else elapsed
+                )
                 kind = "duration" if completed else "elapsed"
                 body = f"{self.path} {line}" if line else self.path
                 rendered = f"[{stamp}] {body} [{kind} {seconds:.1f}s]"
             with _WRITE_LOCK:
-                self.stream.write(rendered + "\n")
-                self.stream.flush()
+                cast(HumanStream, self.stream).write(rendered + "\n")
+                cast(HumanStream, self.stream).flush()
 
     def progress(self, message: str, *, state: str | None = None) -> None:
         if state is not None and state not in _STATES:
@@ -146,11 +167,17 @@ class HumanOperation:
         if state not in _STATES - {"starting", "running"}:
             raise ValueError(f"invalid completion state: {state}")
         if not self._completed:
-            elapsed = self.monotonic() - self.started if elapsed is None else elapsed
+            elapsed = (
+                cast(Callable[[], float], self.monotonic)() - self.started
+                if elapsed is None else elapsed
+            )
             self._write(f"{state} {message}".rstrip(), completed=True, elapsed=elapsed)
             self._completed = True
 
-    def __exit__(self, exc_type, exc, traceback):
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         try:
             if exc is not None:
                 self.complete("failed", f"{type(exc).__name__}: {exc}")
@@ -165,7 +192,7 @@ class HumanOperation:
 class HumanLineBuffer:
     """Retain only credential prefixes needing a following physical line."""
 
-    def __init__(self, emit: Callable[[str], None]):
+    def __init__(self, emit: Callable[[str], None]) -> None:
         self.emit = emit
         self.pending: str | None = None
 
@@ -186,7 +213,7 @@ class HumanLineBuffer:
 
 
 @contextmanager
-def native_output():
+def native_output() -> Iterator[int | None]:
     """Relay a known-human child's merged output live in the existing Python.
 
     The caller still owns execution, timeout and exit handling. No interpreter
@@ -199,14 +226,14 @@ def native_output():
         return
     reader_fd, writer_fd = os.pipe()
     stopped = threading.Event()
-    errors = []
+    errors: list[BaseException] = []
 
-    def relay():
+    def relay() -> None:
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pending = ""
         lines = HumanLineBuffer(operation.progress)
 
-        def consume(data: bytes, *, final: bool = False):
+        def consume(data: bytes, *, final: bool = False) -> None:
             nonlocal pending
             pending += decoder.decode(data, final=final)
             while "\n" in pending:

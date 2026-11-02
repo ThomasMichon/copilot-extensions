@@ -8,7 +8,7 @@ The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
 Context, Lazy CLI Dispatch,
-Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Work
+Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -39,6 +39,7 @@ python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-repository-policy
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
+python tools/typecheck.py lib-update-telemetry
 python tools/typecheck.py lib-work-coalescing-singleton
 python tools/typecheck.py lib-worktree-identity-remaining
 python tools/typecheck.py --inventory
@@ -130,6 +131,16 @@ without import-time I/O. YAML and receiver JSON remain validated dynamic
 boundaries. The archive builder retains its existing filesystem-distribution
 requirement at the metadata path boundary and preserves required licenses.
 The five consuming runtimes remain independently pending.
+
+Update Telemetry checks its eight canonical source modules on both targets
+in the base environment. Its contract tests remain owned by the pending
+Worktrees project. JSON events, status records and error details retain
+explicit dynamic boundaries; human sinks use a minimal write/flush protocol,
+and active-context clocks and enabled-run paths retain narrow lifecycle
+invariants. Native platform branches are visible to both analysis targets.
+The generated lifecycle human helpers stay synchronized through the
+payload-invocation generator, but their copies and consuming projects do not
+inherit canonical admission.
 
 Work Coalescing Singleton checks all eight canonical source/test files in the
 base environment on both targets. Protocol-agnostic payloads and computation

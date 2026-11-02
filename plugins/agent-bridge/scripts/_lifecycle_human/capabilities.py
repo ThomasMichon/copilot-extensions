@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from collections.abc import Sequence
 from pathlib import Path
 
 HUMAN_UTF8_ENV = "COPILOT_EXTENSIONS_HUMAN_UTF8"
 
 
-def powershell_file_target(argv) -> Path | None:
+def powershell_file_target(argv: Sequence[str | os.PathLike[str]]) -> Path | None:
     if not argv or Path(str(argv[0])).name.lower() not in {
         "powershell", "powershell.exe", "pwsh", "pwsh.exe",
     }:
@@ -31,7 +33,7 @@ def powershell_human_utf8_supported(target: Path) -> bool:
         if not isinstance(data, dict):
             return False
 
-        def digest(path):
+        def digest(path: Path) -> str:
             return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
         return (

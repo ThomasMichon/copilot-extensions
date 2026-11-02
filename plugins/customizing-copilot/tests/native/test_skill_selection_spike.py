@@ -18,7 +18,8 @@ def test_model_free_context_helpers():
     result = subprocess.run(
         [node, "--test", "--test-reporter=tap",
          str(test_directory / "skill-selection-spike.test.mjs"),
-         str(test_directory / "skill-selection-contract.test.mjs")],
+         str(test_directory / "skill-selection-contract.test.mjs"),
+         str(test_directory / "skill-selection-native.test.mjs")],
         capture_output=True,
         text=True,
         timeout=30,

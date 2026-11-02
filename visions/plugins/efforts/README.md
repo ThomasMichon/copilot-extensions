@@ -4,7 +4,7 @@
   for multi-session, multi-wave work.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-01
+- **Last revised:** 2026-11-02
 - **Reality docs:** [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md) ·
@@ -225,6 +225,23 @@ explicit. Movement is deliberate and attributable; optional helpers can reject
 unsupported or stale cursor changes. This is a cooperative process aide, not a
 guarantee that an agent cannot act outside it. A cursor, child result, or terminal
 graph node never independently proves that the effort is complete.
+
+### judgment-led-agenda-recovery
+
+The agenda should help the agent recall what it was doing, choose what it should
+do next and retain where to return afterward, not become an unyielding enforcer.
+Unavailable, stale or rewound agenda state must not halt otherwise-authorized
+work. The agent should recover its root, current position and saved continuation
+from current context, operator steering, canonical efforts, live evidence and
+prior session/worktree history as needed, distinguishing reconstruction and
+uncertainty from observed records.
+
+Freshness evidence should inform judgment, not impose an arbitrary expiry rule.
+Recovery should preserve confirmed external progress without replaying uncertain
+actions, inventing history or cosmetically resetting finite budgets. The agent
+should reconcile durable agenda state when practical, with provenance, while
+permissions, safety, resource constraints, explicit holds and canonical
+completion gates remain independently authoritative.
 
 ### autonomous-no-progress-recovery
 

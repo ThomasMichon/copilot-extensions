@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from . import outcomes as oc
 
@@ -17,11 +18,11 @@ MAX_DETAIL = 300
 MAX_AUTH_PREVIEW_BYTES = 2 * 1024 * 1024
 
 
-def retain_auth_cleanup_offer(events_path: Path, offer: dict) -> dict:
+def retain_auth_cleanup_offer(events_path: Path, offer: dict[str, Any]) -> dict[str, Any]:
     """Keep large previews outside bounded event lines, under their run owner."""
     from .run import _redact_obj, write_json_atomic
 
-    document = _redact_obj(offer)
+    document: dict[str, Any] = _redact_obj(offer)
     raw = json.dumps(document, indent=2).encode("utf-8")
     if len(raw) <= 2048:
         return document
@@ -39,7 +40,7 @@ def retain_auth_cleanup_offer(events_path: Path, offer: dict) -> dict:
     }
 
 
-def _resolve_auth_cleanup_offer(offer: dict, run: dict) -> dict:
+def _resolve_auth_cleanup_offer(offer: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     if "preview_file" not in offer:
         return offer
     unavailable = {
@@ -76,11 +77,11 @@ def _resolve_auth_cleanup_offer(offer: dict, run: dict) -> dict:
         return unavailable
 
 
-def _severity(outcome) -> int:
-    return oc.SEVERITY.get(outcome, -1)
+def _severity(outcome: str | None) -> int:
+    return -1 if outcome is None else oc.SEVERITY.get(outcome, -1)
 
 
-def _merge_target(entry: dict, event: dict) -> None:
+def _merge_target(entry: dict[str, Any], event: dict[str, Any]) -> None:
     """Accumulate one ``end`` event; :func:`_finish_target` resolves the entry.
 
     Required and advisory events are kept apart so an advisory failure never
@@ -88,7 +89,9 @@ def _merge_target(entry: dict, event: dict) -> None:
     the detail and error code are both the ones from the event that set each
     pool's worst outcome (never one event's detail with another's code).
     """
-    details = event.get("details") if isinstance(event.get("details"), dict) else {}
+    details = event.get("details")
+    if not isinstance(details, dict):
+        details = {}
     pool = entry["_pools"]["required" if details.get("required", True) is not False
                            else "advisory"]
     outcome = event.get("outcome")
@@ -109,12 +112,12 @@ def _merge_target(entry: dict, event: dict) -> None:
         durations[phase] = durations.get(phase, 0) + event["duration_ms"]
 
 
-def _pool_outcome(pool: dict) -> str:
+def _pool_outcome(pool: dict[str, Any]) -> str:
     known = [o for o in pool["outcomes"] if o in oc.SEVERITY]
     return oc.worst(known) if known else oc.SKIPPED
 
 
-def _finish_target(entry: dict) -> dict:
+def _finish_target(entry: dict[str, Any]) -> dict[str, Any]:
     pools = entry.pop("_pools")
     required, advisory = pools["required"], pools["advisory"]
     chosen = required if required["outcomes"] else advisory
@@ -130,9 +133,9 @@ def _finish_target(entry: dict) -> dict:
     return entry
 
 
-def fold_targets(events: Iterable[dict]) -> dict[str, dict]:
+def fold_targets(events: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Merge every target ``end`` event (component other than ``run``)."""
-    targets: dict[str, dict] = {}
+    targets: dict[str, dict[str, Any]] = {}
     for event in events:
         component = event.get("component")
         if event.get("event") != "end" or not component or component == RUN_COMPONENT:
@@ -146,10 +149,10 @@ def fold_targets(events: Iterable[dict]) -> dict[str, dict]:
     return {name: _finish_target(entry) for name, entry in targets.items()}
 
 
-def fold_phases(events: Iterable[dict]) -> list[dict]:
+def fold_phases(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Run-level phases (component ``run``) paired start->end per process."""
-    phases: list[dict] = []
-    open_: dict[tuple, dict] = {}
+    phases: list[dict[str, Any]] = []
+    open_: dict[tuple[object, object], dict[str, Any]] = {}
     for event in events:
         if event.get("component") != RUN_COMPONENT or event.get("phase") in (None, "run"):
             continue
@@ -170,22 +173,22 @@ def fold_phases(events: Iterable[dict]) -> list[dict]:
     return phases
 
 
-def run_outcome(targets: dict[str, dict], hint: str | None = None) -> str:
+def run_outcome(targets: dict[str, dict[str, Any]], hint: str | None = None) -> str:
     """Maximum severity over required targets (plus the caller's own hint)."""
     required = [t.get("outcome") for t in targets.values() if t.get("required", True)]
     return oc.worst([*required, hint])
 
 
 def fold(
-    events: list[dict],
+    events: list[dict[str, Any]],
     *,
-    run: dict,
-    previous: dict | None = None,
+    run: dict[str, Any],
+    previous: object = None,
     final: bool = True,
     hint: str | None = None,
     error_code: str | None = None,
     updated_at: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build the status document for ``run`` from its events.
 
     ``run`` carries the run metadata (``id``, ``owner``, ``trigger``,
