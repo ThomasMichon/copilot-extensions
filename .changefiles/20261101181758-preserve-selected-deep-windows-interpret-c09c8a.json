@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve selected deep Windows interpreter paths in shared native output relays",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}
