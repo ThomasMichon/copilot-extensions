@@ -112,7 +112,6 @@ class Endpoint:
     def base_url(self) -> str:
         return f"http://{format_authority(self.client_host, self.port)}"
 
-
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None or k == "pid"}
 
@@ -528,6 +527,25 @@ def publish_active(
             process_start_time=process_start_time,
         )
         return active
+
+
+def confirm_active(
+    config_dir: str | os.PathLike[str], expected: Endpoint,
+) -> Endpoint:
+    """Durably confirm the exact selected owner without changing its fallback."""
+    from .diagnostics import process_start_time
+    with _routing_lock(config_dir):
+        table = _read_mutation_table(config_dir)
+        raw = table.get("active")
+        active = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        if (
+            active != expected or type(expected.pid) is not int or expected.pid <= 0
+            or expected.process_start_time is None
+            or process_start_time(expected.pid) != expected.process_start_time
+        ):
+            raise ActivePublicationRefused("active owner changed before publication confirmation")
+        _atomic_write(routing_table_path(config_dir), table)
+        return expected
 
 
 def publish_active_with_previous(

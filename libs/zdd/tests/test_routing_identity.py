@@ -212,3 +212,54 @@ def test_watchdog_does_not_promote_reused_or_unverifiable_predecessor(
     assert result["reaped"] is False
     assert "process identity changed" in result["reason"]
     assert path.read_bytes() == original
+
+
+def test_confirm_active_durably_rewrites_without_replacing_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: str(pid * 10))
+    previous = routing.publish_active(tmp_path, bind="127.0.0.1", port=1234, pid=42)
+    active = routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=5678, pid=43, demote_existing=True,
+    )
+    before = routing.read_table(tmp_path)
+    write = routing._atomic_write
+    writes = []
+
+    def durable_write(path, table):
+        writes.append((path, json.loads(json.dumps(table))))
+        write(path, table)
+
+    monkeypatch.setattr(routing, "_atomic_write", durable_write)
+    confirmed = routing.confirm_active(tmp_path, active)
+
+    assert confirmed == active
+    assert writes == [(routing.routing_table_path(tmp_path), before)]
+    after = routing.read_table(tmp_path)
+    assert after == before
+    assert after["previous"] == previous.to_dict()
+    assert after["active"]["generation"] == active.generation
+    assert after["epoch"] == before["epoch"]
+
+
+@pytest.mark.parametrize("change", ["active", "native-birth", "native-unavailable"])
+def test_confirm_active_refuses_changed_identity_without_writing(tmp_path, monkeypatch, change):
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: str(pid * 10))
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=1234, pid=42)
+    expected = routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=5678, pid=43, demote_existing=True,
+    )
+    if change == "active":
+        routing.publish_active(tmp_path, bind="127.0.0.1", port=9012, pid=44)
+    else:
+        monkeypatch.setattr(
+            diagnostics, "process_start_time",
+            lambda pid: "99999" if change == "native-birth" else None,
+        )
+    before = routing.routing_table_path(tmp_path).read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("changed active identity must not write routing state")
+
+    monkeypatch.setattr(routing, "_atomic_write", forbidden)
+    with pytest.raises(routing.ActivePublicationRefused, match="active owner changed"):
+        routing.confirm_active(tmp_path, expected)
+    assert routing.routing_table_path(tmp_path).read_bytes() == before

@@ -201,7 +201,7 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
 
 
 @pytest.mark.timeout(300)
-@pytest.mark.parametrize("failure", ["none", "successor", "installer"])
+@pytest.mark.parametrize("failure", ["none", "successor", "installer", "installer-started"])
 def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path, failure):
     from agent_procutil import no_window_kwargs
     from agent_worktrees import classify_daemon
@@ -274,7 +274,7 @@ def controlled_spawn(argv, env, **kwargs):
         [argv[0], "-c", sys.argv[4], sys.argv[2], sys.argv[3], *options], env, **kwargs,
     )
 cutover.spawn_monitor = controlled_spawn
-if len(sys.argv) > 7 and sys.argv[7] == "installer":
+if len(sys.argv) > 7 and sys.argv[7] in {"installer", "installer-started"}:
     from agent_worktrees import runtime_monitor_retirements
     def owner_exits_before_grant(*args, **kwargs):
         Path(sys.argv[5]).touch()
@@ -282,7 +282,16 @@ if len(sys.argv) > 7 and sys.argv[7] == "installer":
         while not Path(sys.argv[6]).exists():
             threading.Event().wait(0.1)
         os._exit(29)
-    runtime_monitor_retirements.commit = owner_exits_before_grant
+    if sys.argv[7] == "installer":
+        runtime_monitor_retirements.commit = owner_exits_before_grant
+    else:
+        from zdd import breadcrumb
+        write_breadcrumb = breadcrumb.write_breadcrumb
+        def owner_exits_before_flipped(*args, **kwargs):
+            if kwargs["state"] == "flipped":
+                owner_exits_before_grant()
+            return write_breadcrumb(*args, **kwargs)
+        breadcrumb.write_breadcrumb = owner_exits_before_flipped
 if len(sys.argv) > 6:
     started, release = map(Path, sys.argv[5:7])
     make_client = cutover._make_client
@@ -383,8 +392,11 @@ with ExitStack() as custody:
             _wait_for(started.exists, message="baseline did not accept the held request")
             promotion_release.touch()
             exit_code = first_installer.wait(timeout=60)
-            if failure == "installer":
+            if failure in {"installer", "installer-started"}:
                 assert exit_code == 29
+                assert breadcrumb.read_breadcrumb(root / "status-monitor-routing")["state"] == (
+                    "started" if failure == "installer-started" else "committed"
+                )
                 second_loop.touch()
                 _wait_for(
                     lambda: (locks.read_lock(root / "status-monitor.lock") or {}).get("pid") != old_pid,

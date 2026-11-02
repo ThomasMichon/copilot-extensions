@@ -364,6 +364,134 @@ def test_cancel_preserves_dev_claim_and_pending_claim_is_exact_and_readonly(reta
     assert not retirements.cancel(root, predecessor, runtime=runtime)
 
 
+@pytest.fixture
+def prepared_release(retained, monkeypatch):
+    from single_instance_lease import SingleInstance
+
+    root, runtime, identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    runtime.mark_complete(root, "dev", payload_hash="dev", dev_owner=claim["owner"])
+    runtime.activate(root, "dev", link_free=True, dev_owner=claim["owner"])
+    retirements.reserve(root, _predecessor(slot="dev", claim=claim), runtime=runtime)
+    endpoint = retirements.routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001")
+    table = {"active": endpoint.to_dict(), "previous": None}
+    monkeypatch.setattr(retirements.routing, "read_table", lambda *a, **kw: table)
+    with SingleInstance(root / "status-monitor-routing", lock_name="cutover.lock") as guard:
+        yield root, runtime, identities, alive, claim, table, guard
+
+
+@pytest.mark.parametrize("exited", [False, True])
+def test_prepared_release_retry_cancels_durably_without_grant_or_claim_release(
+    prepared_release, monkeypatch, exited,
+):
+    root, runtime, _identities, alive, claim, table, guard = prepared_release
+    references = runtime._leases.read_runtime_references(root)
+    syncs = []
+    sync = retirements.os.fsync
+    monkeypatch.setattr(
+        retirements.os, "fsync", lambda fd: (syncs.append(fd), sync(fd))[-1],
+    )
+    monkeypatch.setattr(
+        runtime, "_release_dev", lambda *a: pytest.fail("Retry released the dev claim"),
+    )
+    if exited:
+        alive.remove(101)
+        table["active"] = None
+    assert retirements.cancel_prepared_release(root, claim, guard=guard, runtime=runtime)
+    assert syncs
+    assert runtime.current_version(root) == "dev"
+    assert runtime.read_dev_claim(root, strict=True) == claim
+    assert not retirements.pending_claim(root, claim)
+    assert not retirements.pending_slot(root, "dev", include_cancelled=False)
+    if exited:
+        assert not retirements._records(root)
+        assert not runtime._leases.read_runtime_references(root)
+    else:
+        assert retirements._records(root)[0][1]["state"] == "cancelled"
+        assert runtime._leases.read_runtime_references(root) == references
+        assert retirements.pending_slot(root, "dev")
+        assert retirements.reconcile(root, runtime=runtime)
+        assert runtime.read_dev_claim(root, strict=True) == claim
+        assert runtime._leases.read_runtime_references(root) == references
+
+
+@pytest.mark.parametrize("blocker", [
+    "committed", "foreign-record", "foreign-current-claim", "numbered-current",
+    "changed-route", "gone-with-foreign-route", "missing-live-route",
+    "unknown-witness", "breadcrumb", "late-breadcrumb",
+])
+def test_prepared_release_retry_refusal_preserves_custody(
+    prepared_release, monkeypatch, blocker,
+):
+    from zdd import breadcrumb
+
+    root, runtime, identities, alive, claim, table, guard = prepared_release
+    witness = breadcrumb.breadcrumb_path(root / "status-monitor-routing")
+    if blocker == "committed":
+        retirements.commit(root, _predecessor(slot="dev", claim=claim), runtime=runtime)
+    elif blocker == "foreign-record":
+        path, record = retirements._records(root)[0]
+        retirements._write_record(path, {
+            **record, "release_claim": {**claim, "host": "foreign-host"},
+        })
+    elif blocker == "foreign-current-claim":
+        runtime.claim_dev(root, "foreign-owner", previous_version="current", force=True)
+    elif blocker == "numbered-current":
+        runtime.activate(root, "current", link_free=True)
+    elif blocker in {"changed-route", "gone-with-foreign-route"}:
+        table["active"]["pid"] = 202
+        table["active"]["process_start_time"] = "2002"
+        if blocker == "gone-with-foreign-route":
+            alive.remove(101)
+    elif blocker == "missing-live-route":
+        table["active"] = None
+    elif blocker == "unknown-witness":
+        identities.pop(101)
+    elif blocker == "breadcrumb":
+        witness.write_text("publication in progress", encoding="utf-8")
+    elif blocker == "late-breadcrumb":
+        read = retirements.routing.read_table
+
+        def reading(*args, **kwargs):
+            witness.write_text("publication in progress", encoding="utf-8")
+            return read(*args, **kwargs)
+
+        monkeypatch.setattr(retirements.routing, "read_table", reading)
+    records = [(path, path.read_bytes()) for path, _record in retirements._records(root)]
+    references = runtime._leases.read_runtime_references(root)
+    current_claim = runtime.read_dev_claim(root, strict=True)
+    assert not retirements.cancel_prepared_release(root, claim, guard=guard, runtime=runtime)
+    assert [(path, path.read_bytes()) for path, _record in retirements._records(root)] == records
+    assert runtime._leases.read_runtime_references(root) == references
+    assert runtime.read_dev_claim(root, strict=True) == current_claim
+
+
+@pytest.mark.parametrize("proof", ["duck-typed", "unheld", "wrong-path"])
+def test_prepared_release_retry_requires_actual_held_cutover_guard(prepared_release, proof):
+    from single_instance_lease import SingleInstance
+
+    root, runtime, _identities, _alive, claim, _table, guard = prepared_release
+    if proof == "duck-typed":
+        supplied = SimpleNamespace(held=True, lock_path=guard.lock_path)
+    else:
+        supplied = SingleInstance(
+            root / "status-monitor-routing",
+            lock_name="foreign.lock" if proof == "wrong-path" else "cutover.lock",
+        )
+    if proof == "wrong-path":
+        supplied.acquire()
+    references = runtime._leases.read_runtime_references(root)
+    try:
+        with pytest.raises(ValueError, match="held cutover guard"):
+            retirements.cancel_prepared_release(root, claim, guard=supplied, runtime=runtime)
+    finally:
+        if proof == "wrong-path":
+            supplied.release()
+    assert retirements._records(root)[0][1]["state"] == "prepared"
+    assert runtime._leases.read_runtime_references(root) == references
+    assert runtime.read_dev_claim(root, strict=True) == claim
+
+
 def test_cancel_failed_reference_cleanup_keeps_record(retained, monkeypatch):
     root, runtime, _identities, alive = retained
     retirements.reserve(root, _predecessor(), runtime=runtime)

@@ -130,7 +130,12 @@ def test_cutover_happy_path(tmp_path: Path, monkeypatch):
 
 # -- new daemon never becomes healthy -> rollback ----------------------------
 
-def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monkeypatch):
+@pytest.fixture
+def native_birth(monkeypatch):
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
+
+
+def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monkeypatch, native_birth):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
     registry = {}
@@ -164,7 +169,7 @@ def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monke
     assert not handle.terminated and not next_handle.terminated
 
 
-def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(tmp_path, monkeypatch):
+def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(tmp_path, monkeypatch, native_birth):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
     registry = {}
@@ -185,7 +190,7 @@ def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(
     assert breadcrumb.read_breadcrumb(tmp_path)["old"]["pid"] == 111
 
 
-def test_post_promotion_requires_serving_not_merely_passive_health(tmp_path, monkeypatch):
+def test_post_promotion_requires_serving_not_merely_passive_health(tmp_path, monkeypatch, native_birth):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
     orch, handle = _make(
@@ -198,9 +203,139 @@ def test_post_promotion_requires_serving_not_merely_passive_health(tmp_path, mon
     assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
 
 
+def test_self_retirement_captures_native_birth_after_passive_health(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    phase = "before-health"
+    observations = []
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=promoted.append,
+    )
+
+    def birth(pid):
+        if pid != handle.pid:
+            return str(pid * 10)
+        token = None if phase == "before-health" else "43210"
+        observations.append((phase, token))
+        return token
+
+    def health(host, port):
+        nonlocal phase
+        phase = "after-health"
+        return True
+
+    publish = routing.publish_active
+
+    def publish_with_baseline(*args, **kwargs):
+        nonlocal phase
+        assert breadcrumb.read_breadcrumb(tmp_path)["new_process_start_time"] == "43210"
+        assert kwargs["process_start_time"] == "43210"
+        phase = "publication"
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", birth)
+    monkeypatch.setattr(routing, "publish_active", publish_with_baseline)
+    orch.health_check = health
+    result = orch.run(health_timeout=1, drain_timeout=0)
+
+    assert result.ok and result.committed
+    assert observations[:3] == [
+        ("before-health", None), ("after-health", "43210"), ("publication", "43210"),
+    ]
+    active = routing.Endpoint.from_dict(routing.read_table(tmp_path)["active"])
+    assert promoted == [active]
+    assert active.pid == handle.pid and active.process_start_time == "43210"
+
+
+def test_self_retirement_refuses_birth_changed_at_publication(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    before = routing.routing_table_path(tmp_path).read_bytes()
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=promoted.append,
+    )
+    publish = routing.publish_active
+    rechecked = []
+
+    def changed_birth(pid):
+        rechecked.append(pid)
+        return "99999" if pid == handle.pid else str(pid * 10)
+
+    def publish_after_birth_change(*args, **kwargs):
+        assert kwargs["process_start_time"] == "43210"
+        monkeypatch.setattr("zdd.diagnostics.process_start_time", changed_birth)
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "publish_active", publish_after_birth_change)
+    result = orch.run(health_timeout=1, drain_timeout=0)
+
+    assert not result.ok and not result.committed
+    assert "process identity changed before publication" in result.error
+    assert handle.pid in rechecked and promoted == []
+    assert routing.routing_table_path(tmp_path).read_bytes() == before
+
+
+@pytest.mark.parametrize("self_retirement", [False, True])
+@pytest.mark.parametrize(
+    "state, marker",
+    [
+        ("started", True), ("flipped", True), ("committed", True),
+        ("publication-uncertain", True), ("rolled_back", "true"),
+    ],
+)
+def test_next_install_preserves_pending_self_retirement_witness(
+    tmp_path, monkeypatch, native_birth, state, marker, self_retirement,
+):
+    import json
+
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    record = breadcrumb.write_breadcrumb(
+        tmp_path, state=state, old={"bind": "127.0.0.1", "port": 9281, "pid": 111},
+        new_port=9290, new_pid=4321, new_process_start_time="43210",
+        self_retirement=True,
+    )
+    record["self_retirement"] = marker
+    path = breadcrumb.breadcrumb_path(tmp_path)
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+    route_before = routing.routing_table_path(tmp_path).read_bytes()
+    spawned = []
+    registry = {}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("pending resident completion must not trigger recovery or overwrite")
+
+    monkeypatch.setattr(breadcrumb, "recover_stale_cutover", forbidden)
+    monkeypatch.setattr(breadcrumb, "reap_abandoned_passive", forbidden)
+    monkeypatch.setattr(breadcrumb, "write_breadcrumb", forbidden)
+    monkeypatch.setattr(routing, "reap_stale_active", forbidden)
+    monkeypatch.setattr(routing, "publish_active", forbidden)
+    options = (
+        {"self_retirement": True, "activate_successor": forbidden}
+        if self_retirement else {}
+    )
+    orch, handle = _make(
+        tmp_path, healthy_ports={9291}, registry=registry, spawned=spawned,
+        port=9291, **options,
+    )
+    result = orch.run(health_timeout=1, drain_timeout=0)
+
+    assert not result.ok and not result.committed and not result.rolled_back
+    assert "resident completion" in result.error
+    assert spawned == [] and registry == {} and not handle.terminated
+    assert path.read_bytes() == before
+    assert routing.routing_table_path(tmp_path).read_bytes() == route_before
+
+
 @pytest.mark.parametrize("recovery_write_fails", [False, True])
 def test_self_retirement_publication_is_irreversible_before_flipped_record(
-    tmp_path, monkeypatch, recovery_write_fails,
+    tmp_path, monkeypatch, recovery_write_fails, native_birth,
 ):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)

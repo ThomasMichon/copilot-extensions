@@ -696,6 +696,69 @@ def test_cache_fault_does_not_break_roster(owned):
     assert owner.agendas.read(request())["error"]["code"] == "unavailable"
 
 
+@pytest.mark.parametrize("refresh", [False, True])
+def test_cached_handoff_read_retains_corrupt_project_error(owned, monkeypatch, refresh):
+    owner, _head, elected, _path = owned
+    assert owner.agendas.publish(publication(owner))["ok"] is True
+    with sqlite3.connect(owner.store.db_path) as conn:
+        conn.execute("UPDATE worktrees_agenda_cache SET payload=?", ('{"bad":true}',))
+    owner.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
+    failed = owner.agendas.read(request(), refresh=refresh)
+    assert failed["error"]["code"] == "unavailable"
+    rows = copy.deepcopy(owner.agendas._rows)
+    sequence = owner.agendas._sequence
+    pending = {("project", "full-worktree-id")}
+    owner.agendas._pending.update(pending)
+    monkeypatch.setattr(owner, "_admitted", lambda: True)
+    elected[0] = False
+    monkeypatch.setattr(
+        owner, "register_project_demand", lambda *a, **kw: pytest.fail("cached read renewed demand")
+    )
+    monkeypatch.setattr(
+        owner.agendas, "_refresh_pending", lambda: pytest.fail("cached read refreshed records")
+    )
+    assert owner.agendas.read(request(), refresh=refresh) == failed
+    assert owner.agendas.read(request(project="unpublished"))["error"]["code"] == "unready"
+    assert owner.agendas._rows == rows
+    assert owner.agendas._sequence == sequence
+    assert owner.agendas._pending == pending
+
+
+def test_cached_handoff_reads_and_held_feed_keep_admitted_read_fence(owned, monkeypatch):
+    owner, _head, elected, _path = owned
+    admitted = [True]
+    monkeypatch.setattr(owner, "_admitted", lambda: admitted[0])
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.001)
+    accepted = owner.agendas.publish(publication(owner))
+    stream = owner.agendas.stream(request(), lambda: False)
+    try:
+        assert next(stream) == {"type": "snapshot", **accepted}
+        elected[0] = False
+        monkeypatch.setattr(
+            owner.agendas, "_refresh_pending", lambda: pytest.fail("cached read refreshed records")
+        )
+        heartbeat = {
+            "type": "heartbeat",
+            "generation": accepted["generation"],
+            "sequence": accepted["sequence"],
+        }
+        assert next(stream) == heartbeat
+        assert next(stream) == heartbeat
+        assert owner.agendas.feed.active_count() == 1
+        assert owner.agendas.read(request()) == accepted
+        assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
+        assert owner.agendas.publish(publication(owner, observation(2)))["error"]["code"] == "superseded"
+        admitted[0] = False
+        assert next(stream) == {**heartbeat, "type": "going-away", "reason": "superseded"}
+        with pytest.raises(StopIteration):
+            next(stream)
+        assert owner.agendas.read(request())["error"]["code"] == "superseded"
+        assert owner.handle({"contract_version": 1, "project": "project"})["error"]["code"] == "superseded"
+        assert owner.agendas.feed.active_count() == 0
+    finally:
+        stream.close()
+
+
 @contextmanager
 def socket_feed(owner, payload=None):
     server = control.ControlServer(

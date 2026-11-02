@@ -323,8 +323,9 @@ def test_repair_refuses_changed_governance_before_acquiring_cutover(modes, tmp_p
 
 
 @pytest.mark.parametrize("blocked_by", ["pending", "serving"])
+@pytest.mark.parametrize("selected", ["dev", "current"])
 def test_dev_rebuild_refuses_live_code_before_claim_or_construction(
-    modes, tmp_path, monkeypatch, blocked_by,
+    modes, tmp_path, monkeypatch, blocked_by, selected,
 ):
     from contextlib import nullcontext
     from agent_worktrees import runtime_monitor_retirements as retirements
@@ -339,7 +340,10 @@ def test_dev_rebuild_refuses_live_code_before_claim_or_construction(
     claim = lifecycle.runtime.claim_dev(root, "original-owner", previous_version="numbered")
     (root / "versions" / "dev").mkdir(parents=True, exist_ok=True)
     lifecycle.runtime.mark_complete(root, "dev", payload_hash="dev-content")
-    lifecycle.runtime.activate(root, "dev", link_free=True)
+    if selected == "current":
+        (root / "versions" / selected).mkdir()
+        lifecycle.runtime.mark_complete(root, selected, payload_hash="numbered-content")
+    lifecycle.runtime.activate(root, selected, link_free=True)
     released = []
     monkeypatch.setattr(lifecycle, "_load_installed", lambda _slot: None)
     monkeypatch.setattr(
@@ -358,6 +362,18 @@ def test_dev_rebuild_refuses_live_code_before_claim_or_construction(
         lambda requested, slot: blocked_by == "pending" and requested == root and slot == "dev",
     )
     monkeypatch.setattr(lifecycle, "_monitor_identity", lambda requested: (101, "1001"))
+    monkeypatch.setattr(
+        retirements.locks, "read_lock",
+        lambda *_args: {
+            "pid": 101, "start_time": "1001", "prefix": str(root / "versions" / "dev"),
+        },
+    )
+    monkeypatch.setattr(retirements.locks, "lock_is_live", lambda _record: True)
+    monkeypatch.setattr(retirements.locks, "process_start_time", lambda _pid: "1001")
+    monkeypatch.setattr(
+        lifecycle.runtime, "claim_dev",
+        lambda *_args, **_kwargs: pytest.fail("Live dev code was claimed before retirement"),
+    )
     monkeypatch.setattr(
         lifecycle.engine, "dev_candidate",
         lambda *_args, **_kwargs: pytest.fail("Retiring dev runtime was reconstructed"),
@@ -379,6 +395,7 @@ def test_duplicate_dev_release_refuses_while_original_claim_is_retiring(
 ):
     from contextlib import ExitStack, nullcontext
     from agent_worktrees import runtime_monitor_retirements as retirements
+    from single_instance_lease import SingleInstance
 
     root = tmp_path / "runtime"
     owner = tmp_path / "owner"
@@ -394,9 +411,12 @@ def test_duplicate_dev_release_refuses_while_original_claim_is_retiring(
     monkeypatch.setattr(retirements, "pending_slot", pending_slot)
     governance = SimpleNamespace(held=lambda **kwargs: nullcontext())
     with ExitStack() as custody:
+        guard = custody.enter_context(
+            SingleInstance(root / "status-monitor-routing", lock_name="cutover.lock"),
+        )
         with pytest.raises(modes.lifecycle.InstallationRefused, match="pending resident retirement"):
             modes._release(
-                root, tmp_path, governance, custody, None, tmp_path,
+                root, tmp_path, governance, custody, guard, tmp_path,
                 owner=owner, wait_timeout=0.1, child_timeout=0.1,
             )
     assert modes.lifecycle.runtime.read_dev_claim(root) == claim

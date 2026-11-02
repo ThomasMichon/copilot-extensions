@@ -542,9 +542,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(managed_mux_runtime.lock_extra())
         return extra
 
-    def _publish_lock() -> bool:
+    def _publish_lock(*, routing_held: bool = False) -> bool:
         nonlocal discovery_published
-        discovery_published = publish_lock(lock, extra=_lock_extra())
+        discovery_published = publish_lock(lock, extra=_lock_extra(), routing_held=routing_held)
         return discovery_published
 
     def _hook_busy() -> bool:
@@ -614,7 +614,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     from . import status_monitor_recovery_contract as guarded_recovery
 
-    def _handle_control(action: str, payload: dict) -> dict:
+    def _handle_control(action: str, payload: dict, *, routing_held: bool = False) -> dict:
         nonlocal admission_closed, published_lock
         if action == "health":
             health = guarded_recovery.monitor_health(
@@ -685,7 +685,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 return guarded_recovery.handle(
                     payload, directory=status_monitor_cutover.routing_dir(),
                     generation=PROCESS_GENERATION, port=control_server.port,
-                    reopen=lambda: _handle_control("undrain", {}),
+                    reopen=lambda: _handle_control("undrain", {}, routing_held=True),
                     close_on_failure=_enter_drain_only_state,
                     lock_timeout=status_monitor_cutover._READ_TIMEOUT_S,
                 )
@@ -714,7 +714,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     if core.git_ops._windows_observation():
                         segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
-                        if not _publish_lock():
+                        if not _publish_lock(routing_held=routing_held):
                             _enter_drain_only_state()
                             return {"draining": True, "error": "monitor discovery publication refused"}
             trace.emit("complete", "ok")
@@ -747,13 +747,30 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     if published_lock:
         _publish_lock()
 
+    def _idle_candidate_still_empty() -> bool:
+        retirements.refresh(cleanup=False)
+        return (
+            status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
+            and published_lock and not admission_closed and not shutdown_requested.is_set()
+            and not monitor_roots.live_picker_projects()
+            and not core.list_cache.recent_demand_projects()
+            and not reconciler.has_live_worktree_mux
+            and not worktree_status_runtime.has_active_demand()
+            and not managed_mux_runtime.has_active_demand()
+            and not worktrees_runtime.demand_projects()
+            and not repositories_runtime.has_active_demand()
+            and not _drain_busy_reasons()
+            and not allocation_linker.has_demand()
+            and not retirements.pending
+        )
+
     try:
         repositories_runtime.start(interval)
         while True:
             complete_publication(
                 status_monitor_runtime._aw_runtime_home(),
                 promote=lambda: _handle_control("promote", {}),
-                ready=lambda: _handle_control("health", {}).get("published") is True,
+                ready=lambda: guarded_recovery.serving_ready(_handle_control("health", {})),
             )
             if core.git_ops._windows_observation():
                 segment_cache.settle_pending_once()
@@ -886,19 +903,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 _wake_interruptible_wait(wake_event, interval)
                 continue
 
-            retirements.refresh(cleanup=False)
             if (
                 served == 0
-                and status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
                 and not external_projects
-                and not reconciler.has_live_worktree_mux
-                and not worktree_status_runtime.has_active_demand()
-                and not managed_mux_runtime.has_active_demand()
-                and not worktrees_runtime.demand_projects()
-                and not repositories_runtime.has_active_demand()
-                and not _drain_busy_reasons()
-                and not allocation_linker.has_demand()
-                and not retirements.pending
+                and _idle_candidate_still_empty()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -908,28 +916,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     )
                     if retry_wt:
                         reconciler.observe_mux(set(retry_mux))
-                    retirements.refresh(cleanup=False)
-                    if (
-                        retry_wt
-                        or status_monitor_cutover.active_generation_for_pid(os.getpid()) is None
-                        or monitor_roots.live_picker_projects()
-                        or core.list_cache.recent_demand_projects()
-                        or worktree_status_runtime.has_active_demand()
-                        or managed_mux_runtime.has_active_demand()
-                        or worktrees_runtime.demand_projects()
-                        or repositories_runtime.has_active_demand()
-                        or _drain_busy_reasons()
-                        or allocation_linker.has_demand()
-                        or retirements.pending
-                    ):
+                    if retry_wt or not _idle_candidate_still_empty():
                         empty_strikes = 0
                     else:
                         idle_guard = handover.idle_guard(status_monitor_cutover.routing_dir())
                         if idle_guard is not None:
                             with state_lock:
-                                _enter_drain_only_state()
-                                handover.retiring = True
-                            if not _drain_busy_reasons():
+                                if _idle_candidate_still_empty():
+                                    _enter_drain_only_state()
+                                    handover.retiring = True
+                                else:
+                                    idle_guard.release()
+                                    idle_guard = None
+                            if idle_guard is not None and not _drain_busy_reasons():
                                 break
                         empty_strikes = 0
             else:

@@ -162,3 +162,49 @@ def test_commit_forward_does_not_wait_for_or_contact_the_predecessor(owned, monk
     assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
     assert breadcrumb.read_breadcrumb(route_root)["state"] == "committed"
     assert events == [] and handle.poll() is None
+
+
+@pytest.mark.parametrize("phase", ["started", "flipped"])
+@pytest.mark.parametrize("grant_fails", [False, True])
+def test_original_installer_completes_selected_async_candidate_without_legacy_rollback(
+    owned, monkeypatch, phase, grant_fails,
+):
+    from agent_worktrees import runtime_monitor_retirements as retirements
+
+    root, directory, original, handle, client, health, events, _identities = owned
+    record = breadcrumb.write_breadcrumb(
+        directory, state=phase, old=original["old"], new_port=41002, new_pid=202,
+        new_process_start_time="2002", self_retirement=True,
+    )
+    monkeypatch.setattr(retirements, "_records", lambda path: [(root / "old.json", {
+        "pid": 101, "start": "1001", "slot": None, "release_claim": None, "state": "prepared",
+    })])
+
+    def grant(*a, **k):
+        events.append("grant")
+        if grant_fails:
+            raise OSError("grant unavailable")
+        return True
+
+    def promote(self):
+        assert self.port == 41002
+        events.append("promote")
+        health[41002].update(
+            published=True, worktrees={"status": "ready"}, repositories={"admitting": True},
+        )
+        return {"adopted": True}
+
+    monkeypatch.setattr(retirements, "commit", grant)
+    monkeypatch.setattr(client, "promote", promote, raising=False)
+    if grant_fails:
+        with pytest.raises(OSError, match="grant unavailable"):
+            recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+        assert breadcrumb.read_breadcrumb(directory)["state"] == "committed"
+        assert events == ["grant"]
+    else:
+        assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+        assert breadcrumb.read_breadcrumb(directory) is None
+        assert events == ["grant", "promote"]
+    assert handle.poll() is None
+    table = routing.read_table(directory, strict=True)
+    assert table["active"]["pid"] == 202 and table["previous"]["pid"] == 101

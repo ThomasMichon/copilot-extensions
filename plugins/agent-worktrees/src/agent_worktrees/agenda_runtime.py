@@ -139,7 +139,7 @@ class AgendaRuntime:
             for project in {key[0] for key in changed}:
                 self.feed.changed(project)
 
-    def _fresh_fence(self, expected) -> None:
+    def _fresh_fence(self, expected, *, read=False) -> None:
         with closing(
             sqlite3.connect(
                 self.owner.store.db_path.resolve().as_uri() + "?mode=ro",
@@ -147,7 +147,7 @@ class AgendaRuntime:
                 timeout=0.2,
             )
         ) as conn:
-            self._fence(conn, expected)
+            self._fence(conn, expected, read=read)
 
     def roster_changed(self, project) -> None:
         with self._lock:
@@ -158,14 +158,15 @@ class AgendaRuntime:
                     self._project_errors[project] = str(exc)[:1024]
                 self.feed.changed(project)
 
-    def _request_project(self, project: str) -> None:
+    def _request_project(self, project: str, *, read=False) -> None:
         published = project in self.owner.store.published_projects()
-        self.owner.register_project_demand(project, unready=not published)
+        if not read:
+            self.owner.register_project_demand(project, unready=not published)
         if not published:
-            self._fresh_fence(self._generation)
+            self._fresh_fence(self._generation, read=read)
             raise contract.AgendaError("resident project roster is not published", "unready")
         if project in self._project_errors:
-            self._fresh_fence(self._generation)
+            self._fresh_fence(self._generation, read=read)
             raise contract.AgendaError(self._project_errors[project], "unavailable")
 
     def _advance(self) -> None:
@@ -335,6 +336,7 @@ class AgendaRuntime:
             with self.owner._activation_lock, self._lock:
                 self._fence(expected=self._generation, read=True)
                 if self.owner._elected is not None and not self.owner._elected():
+                    self._request_project(project, read=True)
                     return self._reply(request)
                 self._request_project(project)
                 pending, updates = self._refresh_pending()

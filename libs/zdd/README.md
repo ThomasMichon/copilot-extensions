@@ -40,6 +40,14 @@ are an explicit refusal, not a silent synchronous downgrade. Recovery records
 include the full predecessor endpoint so uncertain publication can be reconciled
 against its original native identity. Once a ready successor is observed,
 outgoing retirement must remain latched even if that successor later dies.
+Self-retirement records carry an explicit marker through every phase. Legacy
+recovery and a following cutover refuse a pending marked witness rather than
+overwriting it or treating it as a synchronous failure. The adopter may complete
+an interrupted `started` publication only when its exact candidate is selected.
+`routing.confirm_active()` confirms that native owner durably while preserving
+the existing fallback and generation; it does not perform another route flip.
+Candidate publication binds a freshly verified native birth after health
+preparation and refuses a changed identity at the publication boundary.
 On macOS, native birth identity uses the process start seconds and microseconds;
 the same bounded token is accepted by routing and receiver-bound protocols.
 

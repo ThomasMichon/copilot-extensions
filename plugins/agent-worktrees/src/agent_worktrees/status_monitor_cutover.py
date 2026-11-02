@@ -740,23 +740,22 @@ def activate_after_update(
             client.transition_custody = transition_custody
             return client
     try:
+        prior = breadcrumb.read_breadcrumb(routing_dir())
+        refusal = breadcrumb.recovery_refusal(routing_dir(), prior)
+        if refusal is not None:
+            summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
+            return summary
         if asynchronous_retirement:
             try:
+                from .runtime_monitor_identity import async_predecessor
+
                 observed = routed_monitor_identity(
                     smr._aw_runtime_home(), require_async_retirement=True,
                 )
-                if observed is None and (lock_live or monitor_was_live or retirement_predecessor):
-                    raise ValueError("Live unrouted monitor cannot safely retire asynchronously")
-                if observed is not None:
-                    native = {"pid": observed[0], "start": observed[1], "slot": observed[2]}
-                    if retirement_predecessor is not None and any(
-                        retirement_predecessor.get(key) != value for key, value in native.items()
-                    ):
-                        raise ValueError("Serving predecessor changed before retirement reservation")
-                    retirement_predecessor = {
-                        **native,
-                        "release_claim": (retirement_predecessor or {}).get("release_claim"),
-                    }
+                retirement_predecessor, options = async_predecessor(
+                    smr._aw_runtime_home(), retirement_predecessor, observed=observed,
+                    incumbent_expected=bool(lock_live or monitor_was_live or retirement_predecessor),
+                )
             except (OSError, ValueError, ConnectionError) as error:
                 summary.update(
                     action="refused", reason=str(error), result={"ok": False, "error": str(error)},

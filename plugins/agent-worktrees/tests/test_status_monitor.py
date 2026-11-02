@@ -4214,7 +4214,7 @@ def _elect_monitor_for_one_iteration(monkeypatch):
     monkeypatch.setattr(self_retire, "is_superseded", lambda *args, **kwargs: next(retired, True))
     monkeypatch.setattr(
         runtime_monitor_identity, "publish_lock",
-        lambda path, *, extra: m.locks.write_lock(path, extra=extra),
+        lambda path, *, extra, routing_held=False: m.locks.write_lock(path, extra=extra),
     )
 
 
@@ -4353,6 +4353,144 @@ def test_promotion_refuses_failed_discovery_without_advertising_ready_publicatio
     monkeypatch.setattr(smc, "ControlServer", Control)
     assert m.cmd_status_monitor(argparse.Namespace(interval=1, passive=True)) == 0
     assert replies == [{"adopted": False, "error": "monitor discovery publication refused"}]
+
+
+def test_guarded_undrain_reuses_native_routing_custody_in_actual_monitor(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from zdd import routing
+    from agent_worktrees import status_monitor_cutover as smc
+    from agent_worktrees import status_monitor_recovery_contract as recovery
+
+    directory = tmp_path / "status-monitor-routing"
+    monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "fixture-build")
+    monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "fixture-build")
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
+    monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(smc, "routing_dir", lambda *a: directory)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(m, "_monitor_sweep", lambda *a, **k: pytest.fail("shutdown should precede sweep"))
+    native_lock = routing._file_routing_lock
+    locked = {"value": False}
+    replies = []
+
+    @contextmanager
+    def file_lock(*args, **kwargs):
+        assert not locked["value"], "guarded undrain reacquired its held native routing lock"
+        with native_lock(*args, **kwargs):
+            locked["value"] = True
+            try:
+                yield
+            finally:
+                locked["value"] = False
+
+    monkeypatch.setattr(routing, "_file_routing_lock", file_lock)
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            self.handle = handle
+
+        def start(self):
+            route = routing.publish_active(
+                directory, bind="127.0.0.1", port=self.port, pid=os.getpid(),
+                process_start_time=m.locks.process_start_time(os.getpid()),
+            )
+            assert self.handle("promote", {}) == {"adopted": True}
+            health = self.handle("health", {})
+            self.handle("drain", {"timeout": 0.01, "poll": 0.01})
+            replies.append(self.handle(recovery.ACTION, {
+                "contractVersion": 1,
+                "expectedReceiver": recovery.ReceiverIdentity(
+                    route.pid, route.process_start_time, health["runtime_generation"],
+                ).to_dict(),
+                "expectedRoute": route.to_dict(),
+            }))
+            self.handle("shutdown", {})
+
+        def current_read_count(self, action="worktrees-read"):
+            return 0
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(smc, "ControlServer", Control)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=1, passive=True)) == 0
+    assert replies[0]["status"] == "undrained" and not locked["value"], replies
+
+
+@pytest.mark.parametrize("late", ["demand", "retirement", "route"])
+def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_path, monkeypatch, late):
+    from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees.status_monitor_handover import MonitorHandover
+
+    state = {"acquired": False, "released": False, "generation": 42, "waits": 0}
+    handles = []
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: state["generation"])
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
+    monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
+    monkeypatch.setattr(m, "_monitor_sweep", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        monitor_roots, "live_picker_projects",
+        lambda: {"late-demand"} if state["acquired"] and late == "demand" else set(),
+    )
+    monkeypatch.setattr(m.list_cache, "recent_demand_projects", lambda: set())
+
+    def refresh(self, **kwargs):
+        self.pending = state["acquired"] and late == "retirement"
+
+    monkeypatch.setattr(retirements.ResidentRetirements, "refresh", refresh)
+
+    def acquire(self, directory):
+        state["acquired"] = True
+        if late == "route":
+            state["generation"] = None
+        return types.SimpleNamespace(release=lambda: state.update(released=True))
+
+    monkeypatch.setattr(MonitorHandover, "idle_guard", acquire)
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            handles.append(handle)
+
+        def start(self):
+            pass
+
+        def current_read_count(self, action="worktrees-read"):
+            return 0
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(smc, "ControlServer", Control)
+
+    def wait(event, interval):
+        state["waits"] += 1
+        if state["acquired"]:
+            assert state["released"]
+            assert handles[0]("health", {})["status"] == "ready"
+            handles[0]("shutdown", {})
+        else:
+            assert state["waits"] < 10, "fixture never reached voluntary idle retirement"
+            time.sleep(0.02)
+
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
+    assert state["acquired"] and state["released"]
 
 
 def test_status_monitor_keeps_repository_map_available_until_handoff_is_ready(tmp_path, monkeypatch):

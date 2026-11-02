@@ -120,7 +120,8 @@ retirement cannot reopen merely because the successor dies. The selected
 resident completes an interrupted committed install through its existing loop,
 retaining the witness until its grant and serving readiness are durable. See
 the [install contract](../install-contract.md) for the custody and idle-exit
-serialization boundaries.
+serialization boundaries, explicitly marked pre-`flipped` recovery, exact
+prepared-dev retry and guarded rollback's private routing-lock reuse.
 
 ## Bounded cold takeover
 

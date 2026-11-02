@@ -105,6 +105,12 @@ def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
 
 def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) -> str | None:
     """Shared refusal for existing custody that legacy paths cannot interpret."""
+    if record is not None and (
+        record.get("self_retirement") is True
+        and record.get("state") in _NON_TERMINAL | {"committed"}
+        or "self_retirement" in record and type(record["self_retirement"]) is not bool
+    ):
+        return "asynchronous cutover requires resident completion"
     if requires_owner_reconciliation(record):
         return "stateful cutover requires installation-owner reconciliation"
     if requires_conditional_recovery(record):
@@ -133,6 +139,7 @@ def write_breadcrumb(
     publication_witness: str | None = None,
     new_process_start_time: str | None = None,
     requires_writer_reconciliation: bool = False,
+    self_retirement: bool = False,
 ) -> dict:
     """Write/update the cutover breadcrumb atomically. Returns the record.
 
@@ -161,6 +168,8 @@ def write_breadcrumb(
     }
     if requires_writer_reconciliation:
         record["requires_writer_reconciliation"] = True
+    if self_retirement:
+        record["self_retirement"] = True
     _atomic_write(breadcrumb_path(config_dir), record)
     return record
 

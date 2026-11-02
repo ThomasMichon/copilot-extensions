@@ -50,6 +50,20 @@ def recover_owned_publication(
                 return False
         candidate = ControlClient(f"http://127.0.0.1:{new_port}")
         health = candidate.health() if handle.poll() is None else None
+        if record.get("self_retirement") is True:
+            if active is None or (active.pid, active.process_start_time, active.port) != (
+                handle.pid, start, new_port,
+            ):
+                return False
+            from .runtime_monitor_completion import finish
+            from .status_monitor_recovery_contract import successor_healthy
+
+            return finish(
+                root, record, active, promote=candidate.promote,
+                ready=lambda: successor_healthy(
+                    active.client_host, active.port, lambda _url: candidate, expected=active,
+                ),
+            )
         committed = bool(
             health and health.get("pid") == handle.pid and health.get("status") == "ready"
             and health.get("published") is True

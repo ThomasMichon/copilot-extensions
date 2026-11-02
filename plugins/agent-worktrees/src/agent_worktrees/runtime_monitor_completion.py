@@ -12,11 +12,67 @@ from . import locks, status_monitor_cutover as cutover
 from . import runtime_monitor_retirements as retirements
 
 
+def finish(root, record, endpoint, *, promote, ready) -> bool:
+    """Finish this exact asynchronous publication under the caller's cutover custody."""
+    directory = root / "status-monitor-routing"
+    if (
+        record.get("self_retirement") is not True
+        or breadcrumb.read_breadcrumb(directory) != record
+        or (record.get("new_pid"), record.get("new_process_start_time"), record.get("new_port"))
+        != (endpoint.pid, endpoint.process_start_time, endpoint.port)
+        or locks.process_start_time(endpoint.pid) != endpoint.process_start_time
+    ):
+        raise ValueError("Asynchronous publication witness identity changed")
+    old = record.get("old")
+    if old is not None and (
+        not isinstance(old, dict) or type(old.get("pid")) is not int
+        or not isinstance(old.get("process_start_time"), str)
+        or not old["process_start_time"]
+    ):
+        raise ValueError("Asynchronous predecessor witness identity is unavailable")
+    if old is not None:
+        routing._validate_endpoint_rows({"active": old})
+    table = routing.read_table(directory, strict=True)
+    raw = table.get("active") if isinstance(table, dict) else None
+    if not isinstance(raw, dict) or routing.Endpoint.from_dict(raw) != endpoint:
+        raise ValueError("Asynchronous selected owner changed before retirement grant")
+    if record["state"] != "committed":
+        routing.confirm_active(directory, endpoint)
+        breadcrumb.write_breadcrumb(
+            directory, state="committed", old=old,
+            new_port=endpoint.port, new_pid=endpoint.pid,
+            new_process_start_time=endpoint.process_start_time,
+            publication_witness=record.get("publication_witness"),
+            started_at=record.get("started_at"), self_retirement=True,
+        )
+    for _path, predecessor in retirements._records(root):
+        if (
+            isinstance(old, dict)
+            and predecessor["pid"] == old.get("pid")
+            and predecessor["start"] == old.get("process_start_time")
+            and predecessor["state"] == "prepared"
+        ):
+            retirements.commit(
+                root, {key: predecessor[key] for key in ("pid", "start", "slot", "release_claim")},
+            )
+    if not ready() and promote().get("adopted") is not True:
+        raise ValueError("Asynchronous publication promotion remains pending")
+    if not ready():
+        return False
+    table = routing.read_table(directory, strict=True)
+    raw = table.get("active") if isinstance(table, dict) else None
+    if not isinstance(raw, dict) or routing.Endpoint.from_dict(raw) != endpoint:
+        raise ValueError("Asynchronous serving owner changed before witness cleanup")
+    if not breadcrumb.clear_breadcrumb(directory):
+        raise OSError("Asynchronous publication witness cleanup remains pending")
+    return True
+
+
 def recover(root, *, promote, ready) -> None:
     directory = root / "status-monitor-routing"
     record = breadcrumb.read_breadcrumb(directory)
-    if not isinstance(record, dict) or record.get("state") not in (
-        "flipped", "committed", "publication-uncertain",
+    if not isinstance(record, dict) or record.get("self_retirement") is not True or record.get("state") not in (
+        "started", "flipped", "committed", "publication-uncertain",
     ):
         return
     pid, start = os.getpid(), locks.process_start_time(os.getpid())
@@ -30,35 +86,12 @@ def recover(root, *, promote, ready) -> None:
         table = routing.read_table(directory, strict=True)
         raw = table.get("active") if isinstance(table, dict) else None
         endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-        if endpoint is None or (endpoint.pid, endpoint.process_start_time) != (pid, start):
+        if endpoint is None or (
+            (endpoint.pid, endpoint.process_start_time) != (pid, start)
+            or endpoint.port != record.get("new_port")
+        ):
             return
-        if record["state"] != "committed":
-            # Re-publish the exact selected native owner through the normal
-            # durability boundary before enabling any deferred retirement grant.
-            routing.publish_active(
-                directory, bind=endpoint.bind, port=endpoint.port, pid=pid,
-                version=endpoint.version, generation=endpoint.generation,
-                process_start_time=start, demote_existing=True,
-            )
-            breadcrumb.write_breadcrumb(
-                directory, state="committed", old=record.get("old"),
-                new_port=endpoint.port, new_pid=pid, new_process_start_time=start,
-                publication_witness=record.get("publication_witness"),
-                started_at=record.get("started_at"),
-            )
-        old = record.get("old")
-        for _path, predecessor in retirements._records(root):
-            if (
-                isinstance(old, dict)
-                and predecessor["pid"] == old.get("pid")
-                and predecessor["start"] == old.get("process_start_time")
-                and predecessor["state"] == "prepared"
-            ):
-                retirements.commit(
-                    root, {key: predecessor[key] for key in ("pid", "start", "slot", "release_claim")},
-                )
-        if promote().get("adopted") is True and ready():
-            breadcrumb.clear_breadcrumb(directory)
+        finish(root, record, endpoint, promote=promote, ready=ready)
     except AlreadyRunningError:
         return
     except (OSError, ValueError, RuntimeError) as error:

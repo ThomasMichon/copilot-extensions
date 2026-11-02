@@ -1,14 +1,7 @@
 """Active/passive cutover orchestration for zero-downtime redeploys.
 
-This is the headline of the zero-downtime effort: stand the **new** daemon up
-beside the **old** one on a fresh port, confirm it is healthy, flip the routing
-table so clients follow it, drain the old daemon's in-flight work, then retire
-the old daemon -- with no client ever dialing a dead port and no active turn
-hard-killed.
-
-Orchestration is app-level and OS-agnostic. Injected spawning, health, HTTP
-and free-port collaborators support isolated rollback tests; the deploy CLI
-wires the real implementations rather than delegating handoff to a service manager.
+OS-agnostic, injected collaborators keep publication, readiness and retirement
+under application ownership rather than delegating them to a service manager.
 
 Default sequence (each step before the commit point is reversible)::
 
@@ -24,12 +17,12 @@ Default sequence (each step before the commit point is reversible)::
 
 A failure anywhere before the commit point rolls back: re-publish the old
 endpoint as active, undrain the old daemon, and terminate the freshly spawned
-passive. After the commit point the new daemon is the sole survivor, so
-remaining steps are best-effort and never roll back.
+passive. After the commit point, retirement is irreversible.
 
 An adopter with resident-owned supersession can opt into ``self_retirement``.
-Its ``activate_successor`` callback promotes the published successor; readiness
-commits installation without contacting or waiting for the predecessor.
+Publication is irreversible before its ``activate_successor`` callback can
+admit work. Serving readiness completes installation without contacting or
+waiting for the predecessor's independently owned retirement.
 """
 
 from __future__ import annotations
@@ -382,6 +375,8 @@ class CutoverOrchestrator:
             kwargs["publication_witness"] = publication_witness
             kwargs["new_process_start_time"] = new_process_start_time
             kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
+            if self.self_retirement:
+                kwargs["self_retirement"] = True
             return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
 
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
@@ -522,12 +517,15 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
             healthy = self._await_health(new_port, health_timeout, poll, health_check)
-            if self.expected_old is not None:
+            if self.expected_old is not None or self.self_retirement:
                 new_pid = getattr(handle, "pid", None)
                 captured_start = getattr(handle, "process_start_time", None)
+                observed_start = process_start_time(new_pid) if new_pid else None
+                if isinstance(captured_start, str) and captured_start != observed_start:
+                    raise CutoverError("healthy successor native identity changed")
                 new_process_start_time = (
                     captured_start if isinstance(captured_start, str)
-                    else process_start_time(new_pid) if new_pid else None
+                    else observed_start
                 )
                 write_breadcrumb(
                     state="started", old=old_dict, new_port=new_port,
@@ -546,8 +544,10 @@ class CutoverOrchestrator:
                     f"within {health_timeout:.0f}s"
                 )
             result.steps.append("new daemon healthy")
-            if self.expected_old is not None:
-                if not new_pid or not new_process_start_time:
+            if self.expected_old is not None or self.self_retirement:
+                from .darwin_identity import valid_start_time
+
+                if type(new_pid) is not int or new_pid <= 0 or not valid_start_time(new_process_start_time):
                     raise CutoverError("healthy successor native identity unavailable")
             self._emit(
                 lifecycle.CUTOVER_NEW_BOUND, lifecycle.OK, port=new_port,
@@ -572,10 +572,11 @@ class CutoverOrchestrator:
             refused = _NeverRaised
             try:
                 if self.refuse_old is None and conditional is None and not self.drain_before_publish:
-                    self.routing.publish_active(
+                    new_for_cas = self.routing.publish_active(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=getattr(handle, "pid", None), version=self.version,
                         demote_existing=True,
+                        **({"process_start_time": new_process_start_time} if self.self_retirement else {}),
                     )
                 else:
                     import inspect
@@ -597,7 +598,7 @@ class CutoverOrchestrator:
                             "lock_deadline": conditional.routing_deadline(),
                             "process_start_time": candidate.process_start_time,
                         }
-                    elif self.expected_old is not None:
+                    elif self.expected_old is not None or self.self_retirement:
                         conditional_kwargs = {"process_start_time": new_process_start_time}
                     publication = self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=self.bind, port=new_port,
@@ -611,7 +612,7 @@ class CutoverOrchestrator:
                         published, _ = publication
                         conditional.new = published
                         result.serving_endpoint = published
-                    if self.drain_before_publish or self.expected_old is not None:
+                    if self.drain_before_publish or self.expected_old is not None or self.self_retirement:
                         new_for_cas = (
                             publication[0]
                             if isinstance(publication, tuple) and len(publication) == 2
@@ -693,10 +694,9 @@ class CutoverOrchestrator:
             )
 
             if self.self_retirement:
-                successor = Endpoint(
-                    bind=self.bind, port=new_port, pid=new_pid, version=self.version,
-                    process_start_time=new_process_start_time,
-                )
+                if not isinstance(new_for_cas, Endpoint) or new_for_cas.process_start_time != new_process_start_time:
+                    raise CutoverError("published successor native identity unavailable")
+                successor = new_for_cas
                 activate_successor = self.activate_successor
                 assert activate_successor is not None
                 result.retirement_pending = old is not None and old.port != new_port

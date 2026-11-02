@@ -290,6 +290,15 @@ def routed_owner_present(directory: Path) -> bool:
     return found
 
 
+def serving_ready(health: dict) -> bool:
+    roster, repositories = health.get("worktrees"), health.get("repositories")
+    return (
+        health.get("status") == "ready" and health.get("published") is True
+        and isinstance(roster, dict) and roster.get("status") == "ready"
+        and isinstance(repositories, dict) and repositories.get("admitting") is True
+    )
+
+
 def successor_healthy(
     host: str, port: int, make_client, *, expected: routing.Endpoint | None = None,
 ) -> bool:
@@ -301,14 +310,11 @@ def successor_healthy(
         return False
     roster = health.get("worktrees")
     if expected is not None:
-        repositories = health.get("repositories")
         return (
             host == expected.client_host and port == expected.port
             and type(health.get("pid")) is int and health["pid"] == expected.pid
             and locks.process_start_time(expected.pid) == expected.process_start_time
-            and health.get("published") is True
-            and isinstance(roster, dict) and roster.get("status") == "ready"
-            and isinstance(repositories, dict) and repositories.get("admitting") is True
+            and serving_ready(health)
         )
     return not isinstance(roster, dict) or roster.get("status") == "ready" or (
         health.get("published") is False and roster.get("status") == "unready"

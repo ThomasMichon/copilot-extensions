@@ -456,6 +456,60 @@ def pending_claim(root: Path, claim: dict) -> bool:
     )
 
 
+def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleType) -> bool:
+    """Cancel exact, proven precommit dev preparations for an authorized retry."""
+    from single_instance_lease import SingleInstance
+    from zdd import breadcrumb
+
+    route_root = root / "status-monitor-routing"
+    if (
+        not isinstance(guard, SingleInstance) or not guard.held
+        or guard.lock_path.resolve() != (route_root / "cutover.lock").resolve()
+    ):
+        raise ValueError("Prepared dev release recovery requires its held cutover guard")
+    if breadcrumb.breadcrumb_path(route_root).exists():
+        return False
+    directory = root / "status-monitor-retirements"
+    if not directory.exists():
+        return False
+    with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+        records = [
+            (path, record) for path, record in _records(root)
+            if record["slot"] == "dev" and record["state"] != "cancelled"
+        ]
+        if not records or any(
+            record["state"] != "prepared" or record["release_claim"] != claim
+            for _path, record in records
+        ):
+            return False
+        with runtime._publication_lease(root):
+            if runtime.current_version(root) != "dev" or runtime.read_dev_claim(root, strict=True) != claim:
+                return False
+            table = routing.read_table(route_root, strict=True)
+            routing._validate_endpoint_rows(table)
+            raw_active = table.get("active") if isinstance(table, dict) else None
+            raw_previous = table.get("previous") if isinstance(table, dict) else None
+            raw_endpoint = raw_active or raw_previous
+            endpoint = routing.Endpoint.from_dict(raw_endpoint) if isinstance(raw_endpoint, dict) else None
+            for _path, record in records:
+                exited = _exit_state(record)
+                if exited is None or (
+                    endpoint is not None
+                    and (endpoint.pid, endpoint.process_start_time) != (record["pid"], record["start"])
+                ) or (endpoint is None and exited is not True):
+                    return False
+            if breadcrumb.breadcrumb_path(route_root).exists():
+                return False
+            for path, record in records:
+                cancelled = {**record, "state": "cancelled"}
+                _write_record(path, cancelled)
+        for path, record in records:
+            done, _needed = _cancelled_status(root, {**record, "state": "cancelled"}, runtime)
+            if done:
+                path.unlink()
+    return True
+
+
 def cancel(root: Path, predecessor: dict, *, runtime: ModuleType | None = None) -> bool:
     """Cancel exact custody after the parent has proven precommit rollback."""
     record = {"version": 1, **predecessor, "state": "prepared"}

@@ -4998,6 +4998,13 @@ exits at that boundary, the selected resident's existing loop completes the
 exact birth-identified publication under the cutover lease, enables its grant
 and promotes itself. The attributable witness remains until serving readiness
 is confirmed; failed completion remains visible and retryable.
+Only an explicitly marked asynchronous witness permits resident completion.
+An exact selected PID, recorded native birth and port can complete even if the
+installer departed before writing `flipped`; unmarked synchronous witnesses
+retain their original recovery path. Durable confirmation preserves the
+previous route rather than republishing away the fallback. A subsequent
+installer rechecks pending witness refusal after acquiring cutover custody,
+before reserving retirement or invoking legacy recovery.
 Cancellation is fsynced before cleanup and revokes the claim grant while keeping
 execution protection for any still-live code. Completed retirement is an
 idempotent commit outcome, not a missing-record loop.
@@ -5017,10 +5024,19 @@ installation locks for a permanently unready candidate. Dev release similarly re
 the original claim and defers its exact-snapshot release to that resident;
 changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
 duplicate release cannot bypass the original pending claim.
+Idle retirement rechecks election, accepted work, demand and pending retirement
+inside the acquired cutover custody before closing admission. Guarded synchronous
+rollback reuses its already-held routing authority for discovery renewal; this
+is a private call-chain fact, never an instruction accepted from a wire payload.
 Release also refuses other pending dev-code retirement; cancelled attempts do
 not prevent a newly authorized release retry. Reconstruction independently
-refuses a selected live dev resident, and reselected `dev` prevents deferred
-claim release.
+refuses an attributable resident actually executing `dev`, regardless of a
+different selector, and reselected `dev` prevents deferred claim release.
+A retry may durably cancel exact prepared dev release under the held cutover,
+inventory and publication guards only while the original dev claim and route
+still match and no cutover witness exists. Committed grants and foreign claims
+remain refusals. Reference cleanup occurs after publication custody is released,
+retaining live execution protection without recursively acquiring that lease.
 There is no installer-owned subscription, new cleanup worker, forced unrouted
 restart or delayed daemon reaper in this path.
 Failed candidate children remain under installer custody, and uncertain durable
