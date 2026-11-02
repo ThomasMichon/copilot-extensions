@@ -139,7 +139,8 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         if target is None or target["root"] != reader.canonical(path):
             raise GuardPublicationError(f"registered guarded checkout {name!r} has no Git identity")
         rows.append({
-            "name": name, "delegate": entry.delegate, "path": os.path.abspath(path),
+            "name": name, "delegate": entry.delegate,
+            "path": os.path.abspath(registered.local_path()),
             "locus": {
                 "preferred": entry.locus.preferred,
                 "machines": list(entry.locus.machines),

@@ -290,3 +290,12 @@ evaluation is distinct from authorization or successful lifecycle mutation.
 - Re-admitted the changed configuration-source bytes in the existing unit
   manifest after CI rejected the old hash. Source verification passes without
   changing the unit inventory, coverage targets or required gate behavior.
+- Qualified aliases through the actual registered-root owner, which deliberately
+  returns a canonical path. Publication now retains the registry's lexical
+  path only after that owner validates the checkout; the native alias control
+  no longer substitutes past this resolution seam.
+- Let the resident invoke the same cross-repo decision path as the native
+  consumer, so relevance and live disabled modes run before Git/map lookup.
+  Read-only shell commands and disabled write events fail a regression if they
+  traverse Git metadata. The map and pre-tool relevance packet passed 121
+  cases with four explicit native-capability skips.

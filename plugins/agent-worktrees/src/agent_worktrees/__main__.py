@@ -4106,11 +4106,7 @@ class _ResidentHookPolicy:
             if module is None:
                 continue
             kwargs = {}
-            if name == "cross_repo_guard.py":
-                kwargs["guarded_roots"] = (
-                    self.guarded_roots(_hook_payload_cwd(payload)) if may_write else []
-                )
-            elif name == "anchor_write_guard.py":
+            if name == "anchor_write_guard.py":
                 kwargs["anchors"] = self.anchors() if may_write else []
             try:
                 decision = module.decide(payload, home=Path.home(), **kwargs)

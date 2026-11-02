@@ -371,12 +371,16 @@ def producer(tmp_path, monkeypatch):
     callers = [_repo(tmp_path / name) for name in ("first", "second")]
     target = _repo(tmp_path / "target")
     root = tmp_path / "registry"
-    entries = {name: repos.RepoEntry(name=name) for name in ("first", "second", "target")}
-    paths = dict(zip(entries, [*callers, target]))
+    paths = dict(zip(("first", "second", "target"), [*callers, target]))
+    entries = {
+        name: repos.RepoEntry(name=name, paths={repos._current_platform(): str(path)})
+        for name, path in paths.items()
+    }
     registry = repos.ReposRegistry(repos=entries, _baseline=(
         str((root / "repos.yaml").resolve()), revision(None),
     ))
     monkeypatch.setattr(producer, "read_registry", lambda *a, **k: registry)
+    registered_entry_root = repos.registered_entry_root
     monkeypatch.setattr(repos, "registered_entry_root", lambda entry: paths[entry.name])
     configurations = []
     monkeypatch.setattr(config, "load_config", lambda *a, **k: configurations.append(k["project"]) or k)
@@ -400,6 +404,7 @@ def producer(tmp_path, monkeypatch):
     return SimpleNamespace(
         module=producer, root=root, callers=callers, target=target,
         reader=reader, related=related_values, configurations=configurations, registry=registry,
+        registered_entry_root=registered_entry_root,
     )
 
 
@@ -451,8 +456,9 @@ def test_registered_alias_and_physical_shell_targets_remain_guarded(producer, mo
     else:
         alias.symlink_to(p.target, target_is_directory=True)
     original_root = repos.registered_entry_root
+    p.registry.repos["target"].paths[repos._current_platform()] = str(alias)
     monkeypatch.setattr(repos, "registered_entry_root", lambda entry: (
-        alias if entry.name == "target" else original_root(entry)
+        p.registered_entry_root(entry) if entry.name == "target" else original_root(entry)
     ))
     p.module.refresh(p.callers, registry_root=p.root)
     rows = p.reader.read_map(p.callers[0], p.root).roots
@@ -484,6 +490,25 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
     with pytest.raises(p.module.GuardPublicationError, match="views withdrawn"):
         p.module.refresh(registry_root=p.root)
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+
+
+@pytest.mark.parametrize("disabled", [False, True])
+def test_resident_cross_repo_policy_skips_git_for_irrelevant_or_disabled_events(tmp_path, monkeypatch, disabled):
+    from agent_worktrees.__main__ import _ResidentHookPolicy
+
+    guard = _load("cross_repo_guard")
+    policy = _ResidentHookPolicy(None, ttl=30)
+    monkeypatch.setattr(policy, "_module", lambda name: guard if name == "cross_repo_guard.py" else None)
+    monkeypatch.setattr(guard._guard_map, "repository_identity", lambda *args: pytest.fail("unrelated Git traversal"))
+    if disabled:
+        monkeypatch.setenv("CROSS_REPO_GUARD", "off")
+    else:
+        monkeypatch.delenv("CROSS_REPO_GUARD", raising=False)
+        monkeypatch.delenv("CROSS_REPO_GUARD_MODE", raising=False)
+    command = "Set-Content new.txt -Value new" if disabled else "Get-Content existing.txt"
+    assert policy.pre({
+        "toolName": "powershell", "toolArgs": {"command": command}, "cwd": str(tmp_path),
+    }) == {}
 
 
 def test_binding_load_failure_is_observed_despite_an_outer_warm_config_cache(producer, monkeypatch):
@@ -1119,7 +1144,10 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     targets = {name: _repo(tmp_path / name) for name in ("target", "knowledge-only", "plugin-only")}
     paths = {**callers, **targets}
     registry = repos.ReposRegistry(
-        repos={name: repos.RepoEntry(name=name) for name in paths},
+        repos={
+            name: repos.RepoEntry(name=name, paths={repos._current_platform(): str(path)})
+            for name, path in paths.items()
+        },
         _baseline=(str((root / "repos.yaml").resolve()), revision(None)),
     )
     knowledge = {name: tmp_path / f"knowledge-{name}" for name in callers}
