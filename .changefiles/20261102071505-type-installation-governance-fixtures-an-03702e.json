@@ -1,0 +1,9 @@
+{
+  "comment": "Type installation governance fixtures and callback boundaries.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
