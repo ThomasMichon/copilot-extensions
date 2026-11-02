@@ -205,6 +205,12 @@ Systemd runtime is disposable with the image.
    - [ ] Record missing release or platform evidence explicitly. An offline
      contract pass alone does not make an image ready.
 3. **Builder and deployment integration — existing controller/deployment owners.**
+   - [x] Add an explicit single-role Komodo workload SDK source seam (#10112):
+     existing content-bound admission, exact Server/Stack/storage custody,
+     fixed Core APIs, original asynchronous Update recovery and authenticated
+     current readback. Ordinary planning remains inert. See
+     [the execution contract](../../../fleet-manager/docs/komodo-workload.md).
+     Finite HTTP/TLS source tests do not close native integration or rollout.
    - [ ] Gateway builds approved source updates using the reviewed image contract;
      fleet-manager owns desired source/config/package selection and prepared state.
    - [ ] Selected Komodo on the Gateway service host is the sole deployment/update

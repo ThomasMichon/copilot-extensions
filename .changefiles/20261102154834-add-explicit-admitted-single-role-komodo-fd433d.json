@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit admitted single-role Komodo workload execution with original asynchronous deployment recovery and current readback",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
