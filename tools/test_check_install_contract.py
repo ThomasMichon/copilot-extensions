@@ -143,13 +143,19 @@ def test_machine_gate_contract_reports_missing_source(tmp_path: Path, name: str)
     assert checker.check_machine_gate(source)
 
 
-def test_bundle_candidate_inputs_match_the_real_repository() -> None:
+def test_bundle_candidate_real_repository_retains_origin_refusal() -> None:
     import sys
 
     sys.path.insert(0, str(REPO / "tools"))
     import bundle_lock
 
-    bundle_lock.check(REPO)
+    output = REPO / bundle_lock.OUTPUT
+    before = output.read_bytes() if output.exists() else None
+    with pytest.raises(
+        bundle_lock.InputError, match="dbus-next: local dependency is absent from canonical inventory",
+    ):
+        bundle_lock.check(REPO)
+    assert (output.read_bytes() if output.exists() else None) == before
 
 
 def test_agent_pull_requests_wrapper_counts_as_real_engine_usage() -> None:

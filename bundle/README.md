@@ -1,7 +1,8 @@
 # Candidate release-lock inputs
 
-This directory currently contains **inert dependency inputs**, not a runtime
-bundle, installer, approved lock or published artifact. It advances the release
+`tools/bundle_lock.py` produces **inert dependency inputs**, not a runtime
+bundle, installer, approved lock or published artifact. Generated virtual
+projects are working outputs, not checked-in universal qualification. The tool advances the release
 lock described by the
 [Runtime Assembly vision](../visions/plugin-services/runtime-assembly/README.md)
 without changing any installation's selected source, profile or runtime.
@@ -15,7 +16,7 @@ python tools/bundle_lock.py check
 python tools/check-bundle-inputs.py
 ```
 
-Generation reads the existing canonical project inventory and standalone
+Default generation reads the existing canonical project inventory and standalone
 consumer registry. It excludes vendored duplicates and follows first-party
 runtime dependencies and explicitly selected extras to their third-party
 declarations. It preserves target markers and version constraints; it neither
@@ -24,6 +25,49 @@ The virtual project retains the existing shared minimum-age cutoff. Selected
 local-source runtime metadata must match its canonical counterpart throughout
 the selected dependency graph, including nested mappings and cycles. A
 divergent copy is not silently replaced by a different closure.
+
+## Explicit group and target projection
+
+The programmatic `collect_inputs` and `render` APIs accept `groups=GROUPS` and
+`target_environment=None`. Selecting groups requires roots only for those
+groups; canonical inventory validation and the shared root selector remain in
+use. With no target context, conditions remain symbolic as before.
+
+An explicit target must contain exactly the standard `packaging.markers.Environment`
+fields. Missing facts are never filled from the generating host. Applicable
+runtime Python ranges, including prerelease interpreters, are checked before
+emitting inputs. Proven-inactive edges are omitted before source lookup;
+applicable markers/extras remain in the output, and rendered target facts are
+attributed under `[tool.bundle-inputs.target-environment]`.
+
+For example, from a Python process whose own target facts are intended:
+
+```python
+import sys
+from pathlib import Path
+from packaging.markers import default_environment
+
+sys.path.insert(0, str(Path.cwd() / "tools"))
+from bundle_lock import render
+
+candidate = render(
+    Path.cwd(), groups=("core",), target_environment=default_environment(),
+)
+```
+
+This returns an inert string; it does not resolve, write a lock, approve a
+source or authorize native compilation. External source mappings are audited
+even when no direct selected edge names them. Unknown/transitive-only mappings
+and resolver settings that cannot be preserved refuse; a mapping is not
+silently treated as a registry dependency. Omission of an external mapping
+requires explicit inactive markers across its declarations.
+
+The CLI remains the universal three-group interface above. The real universal
+graph currently refuses the qualified local Manager `dbus-next` wheel source;
+generation/check neither create nor change output when refusal occurs.
+An explicit Windows-core projection can omit that Linux-only edge, but active
+Linux and untargeted cases still refuse. This is not qualification or removal
+evidence for the existing workaround.
 
 | Group | Candidate roots |
 |-------|-----------------|
@@ -47,9 +91,12 @@ metadata, dynamic runtime dependencies or Python ranges, direct references
 and unsupported source/extra-marker forms
 refuse generation rather than producing an incomplete closure.
 
-The already-wired install-contract test suite collects the input regression
-class and checks the generated file against the real repository. No workflow
-change or new publication/admission path is required.
+The existing install-contract test module collects the input regression class,
+including real-tree scoped projection and universal-source refusal controls.
+The earlier proposed checked-in universal project and positive real-tree
+qualification check are withheld until that source can be represented. This
+does not relax an existing runtime or publication guard. No workflow change or
+new publication/admission path is required.
 
 **Not implemented here:** resolution, lock approval/selection, exports, feed
 compatibility proof, artifact publication, shared runtime construction or
