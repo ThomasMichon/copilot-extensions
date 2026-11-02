@@ -8,6 +8,7 @@
 - **Status:** Active
 - **Vision:** vision-extending against [`visions/mux-companion`](../../../visions/mux-companion/README.md)
 - **Umbrella issue:** [#4369](https://github.com/ThomasMichon/copilot-extensions/issues/4369)
+- **Current Sidecar coordination:** [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811)
 - **Sub-issues:** filed per-step as each step is scoped for execution
 
 ## Guiding Intent
@@ -30,6 +31,22 @@ the precedent `agent-worktrees handoffs-check --execute` already set for the
 retire half, and adds no new behavior when the operator does not press the
 button.
 
+The purpose-first continuation also owns the same-window live Sidecar: an
+agenda-level subway timeline, owner-qualified push observations, work topology
+and truthful input/compaction indicators. Its current implementation amendment
+is [Step 7](sidecar-live-timeline.md). This adds source work without retiring the
+original recovery, manual/head, popup or Relay acceptance.
+
+## Participants
+
+| Participant | Scope | Reached via |
+| --- | --- | --- |
+| Sidecar source coordinator | Step 7 plan admission, bounded source integration, review and whole-root completion readback | Retained source workspace under the external harness |
+| Incumbent diagnostics and Relay custodians | Every original Step 1-6, direct intake, manual/head/native and current resource responsibility | Existing Coordination and complementary Mux-bind Relay root |
+
+Step 7's bounded contributors and non-overlapping integration roles are declared
+in its linked plan. A participant label does not transfer another owner's claim.
+
 ## Coordination
 
 The complete direct retained #4369 acceptance below continues through this SAME Active
@@ -50,6 +67,15 @@ source/head/background-work/provider holds. Closing a popup does not trigger cut
 consume a baton or retire a session.
 
 ## Context
+
+### Current Step 7 source approval
+
+The operator authorized continuing the implementation plan and starting source
+work when ready. [Step 7](sidecar-live-timeline.md) captures the exact request,
+strict pre-compaction warning definition and retained scope. Its plan/vision
+amendment must clear normal review before source execution. It authorizes no
+installed rollout, live user-Mux rebinding, answer automation, head repair,
+runtime threshold change, cutover or unrelated resource action.
 
 ### Prior art (directly reused, not rebuilt)
 
@@ -87,6 +113,13 @@ Companion-side post-cutover head-verification (a refreshable session-lineage
 view highlighting whether resolved head matches the just-resumed session).
 
 ## Request
+
+**2026-11-02 continuation:** turn the subway-map guidance into a real live
+Sidecar with bottom-head/upward-history virtualization, owner push feeds and
+input/problem indicators. The operator defines compaction below 65% of
+qualified pre-context usage as premature and authorized plan completion followed
+by source execution. Exact capture, configurable-policy interpretation and
+implementation/validation are in [Step 7](sidecar-live-timeline.md).
 
 **2026-10-24 continuation:** prioritize purpose-first Summary and Claims over
 handoff session selection; add a switchable work-topology summary pane,
@@ -411,7 +444,20 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       hotkey guides
       through the Mux-bind owner, with tmux/psmux qualification.
 
+### Step 7 - Live Sidecar timeline and owner observations (#8811)
+
+- [ ] Complete S0-S5 and the own Validation Plan of the
+      [live Sidecar implementation](sidecar-live-timeline.md), using its
+      [proposed observation contract](sidecar-observation-contract.md).
+      Preserve every original parent clause, owner and evidence tier; a model,
+      widget, provider or source PR alone does not complete this root.
+
 ## Validation Plan
+
+- [ ] Step 7: verify the complete source, real consumer, qualified pre-context,
+      history/viewport, native and bounded-performance acceptance in
+      [the linked plan](sidecar-live-timeline.md#validation-plan). Unsupported
+      evidence stays unknown/open; original manual/head/Relay gates remain.
 
 - [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
@@ -480,6 +526,23 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-11-02 - Live Sidecar implementation amendment
+
+- Continued under #8811 after verifying the retained source venue, current
+  coordination and unchanged Companion core. Reused the existing workspace
+  and its controller; no new source-hosted agent or parallel canonical effort.
+- Added the linked implementation/validation and proposed observation contract
+  for true virtualized history, push-first owner adapters and truthful
+  notifications. The vision is extended before source execution; normal
+  plan review remains the admission gate.
+- The configurable warning uses strict unrounded pre-context utilization.
+  Current public SDK start fields can retain total token counts, but targeted
+  window capacity is not silently equated with active pre-window capacity.
+  Selected-runtime/denominator qualification remains explicit.
+- Preserve every incumbent manual/head, popup, relay/native and resource
+  responsibility. No source implementation, installed rollout, live rebinding,
+  threshold mutation or process action is claimed by this planning amendment.
 
 ### 2026-10-31 - Timeline and current-worktree presentation guidance
 

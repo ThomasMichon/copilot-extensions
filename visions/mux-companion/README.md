@@ -5,7 +5,7 @@
   that delivers them.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-11-02
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -96,6 +96,36 @@ and bridges, downstream worktrees and open pull requests, with accumulated
 tool-call statistics. Users can understand overall work without reading a
 raw conversation feed. Graphical and terminal companions share source
 meaning, identity and freshness rather than growing competing backends.
+
+### live-agenda-subway-timeline
+A live subway-style timeline shows agenda work, reported contributions and
+resource/binding transitions with their source meaning. The current head sits
+at the bottom; upward browsing reveals older history and expandable child work.
+The current accepted effort/purpose leads, with original creation context kept
+as expandable provenance rather than a stale replacement for present intent.
+
+### virtual-history-with-stable-position
+Long histories remain responsive without materializing the entire graph.
+Incoming updates do not pull an operator away from the historical position
+being read. Following the live head is explicit; expansion and terminal resize
+preserve a meaningful position. Bounds, omissions and unavailable history are
+visible rather than a truncated tree being presented as complete history.
+
+### owner-qualified-push-observations
+The Sidecar receives pushed worktree, agenda and Bridge observations from their
+existing owners, with bounded history access and source continuity. It discovers
+related work through owner-qualified relationships, not repeated fleet scans or
+caller labels promoted to ownership. Independent source uncertainty does not
+hide other usable views.
+
+### compaction-and-input-observability
+The operator can see actual input/permission availability and context-pressure
+or compaction occurrences without reading the raw chat feed. A configurable
+warning identifies premature compaction from qualified, unrounded pre-context
+usage; missing or ambiguous measurements remain unknown. Target-model/window
+changes and the measurement basis remain legible rather than being mistaken for
+the active pre-compaction context. Notifications do not answer, hand off, repair
+or change the runtime's threshold policy.
 
 ### switchable-cli-and-summary-views
 The operator can flip between the running Copilot CLI and an overall summary
@@ -249,6 +279,20 @@ Refreshing a visible view is bounded and does not create a second fleet
 poller when an owning producer already supplies the data. An alternate pane
 has an explicit mux-owned lifetime, separate from the disposable popup.
 
+### history-retains-evidence-meaning
+An observed snapshot change, recorded mutation, reported lifecycle and confirmed
+acceptance retain different meanings. Current-state coalescing is not a replay
+of every intervening event. Source gaps, durability, retained ranges and partial
+attribution stay visible; a heartbeat, allocation, claim release or child return
+does not manufacture parent progress or completion.
+
+### live-browsing-does-not-steal-focus-or-authority
+History browsing and live updates preserve the CLI, viewport and observer
+identity. A notification offers explicit navigation instead of stealing focus
+or submitting input. Each observer's history position is independent of the
+controller's delivery/acceptance position, and closing an observer closes only
+its own demand and supporting operations.
+
 ### mode-guides-describe-real-actions
 Hotkey guides describe controls actually available in the current view and
 selected backend. Summoning a popup and switching to the persistent summary
@@ -286,6 +330,11 @@ not its only possible one.
 - Reality docs: [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Provenance
+
+- **2026-11-02** — Extended the purpose-first Sidecar intent with a live
+  bottom-head subway timeline, virtual historical browsing, owner-qualified
+  push observations and evidence-based input/compaction warnings. Existing
+  popup, pane, recovery, Relay and action boundaries remain.
 
 - **2026-10-25** — Replaced required clickable view tabs with the operator's
   selected visible hotkey guides for mode switching. The same-window pane
