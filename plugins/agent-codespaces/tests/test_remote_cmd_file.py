@@ -94,6 +94,9 @@ class TestBuildSpawnCommand:
 
     @pytest.mark.parametrize("payload", [
         "copilot --acp '", 'bash -lc "$ACP_COMMAND"', "bash launch.sh",
+        "git clone -- https://example.com/repo /workspaces/bash && bash launch.sh",
+        "env -C git clone -- https://example.com/repo /workspaces/bash",
+        "git clone -- https://example.com/repo /workspaces/bash extra",
         "copilot --acp --stdio --allow-" + "\\\n" + "all",
         "bash -lc 'copilot --acp --stdio --allow-" + "\\\n" + "all'",
     ])

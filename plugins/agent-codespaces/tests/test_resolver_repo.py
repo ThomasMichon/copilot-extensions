@@ -138,31 +138,29 @@ class TestResolveCrossRepo:
         assert {path.name: path.read_bytes() for path in dispatch.iterdir()} == original
 
     @pytest.mark.asyncio
-    async def test_other_repo_clone_if_missing(self, _patched):
+    @pytest.mark.parametrize("repo", ["example-marketplace", "bash", "sh", "dash", "zsh"])
+    async def test_other_repo_clone_if_missing(self, repo, _patched):
         _patched(CodespacesConfig())
-        remote = "https://your-org.visualstudio.com/your-org/_git/example-marketplace"
+        remote = f"https://example.com/example-org/{repo}"
+        workspace = f"/workspaces/{repo}"
         target = await CodespaceResolver().resolve(
-            "cs-1", repo="example-marketplace", repo_remote=remote,
+            "cs-1", repo=repo, repo_remote=remote,
         )
         cmd = _remote_cmd(target.spawn_command)
         provision = (
-            f"[ -e /workspaces/example-marketplace/.git ] || "
-            f"git clone -- {remote} /workspaces/example-marketplace"
+            f"[ -e {workspace}/.git ] || "
+            f"git clone -- {remote} {workspace}"
         )
         assert cmd == guarded_launch(
-            f"[ -e /workspaces/example-marketplace/.git ] || "
-            f"git clone -- {remote} /workspaces/example-marketplace && "
-            f"cd /workspaces/example-marketplace && {_COPILOT}",
-            "/workspaces/example-marketplace",
+            f"{provision} && cd {workspace} && {_COPILOT}",
+            workspace,
             provision=provision,
         )
         assert target.codespace["name"] == "cs-1"
         assert target.codespace["checkout_provision_command"] == provision
         assert cmd.index(provision) < cmd.index("agent-policy check") < cmd.index(_COPILOT)
-        assert target.codespace["repo"] == "example-marketplace"
-        assert target.codespace["workspace_folder"] == (
-            "/workspaces/example-marketplace"
-        )
+        assert target.codespace["repo"] == repo
+        assert target.codespace["workspace_folder"] == workspace
 
     @pytest.mark.asyncio
     async def test_disabled_related_selection_survives_metadata_and_cli(self, _patched):

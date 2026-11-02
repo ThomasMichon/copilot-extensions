@@ -158,6 +158,20 @@ def _check_launch_permissions(command: str, depth: int = 0) -> None:
                 and (cd_index == 0
                      or re.fullmatch(r"[();&|\n]+|\{", words[cd_index - 1]))):
             continue
+        # The generated clone has two literal operands, neither an executable.
+        clone_operand = False
+        for start in (index - 3, index - 4):
+            end = start + 5
+            if (start >= 0 and words[start:start + 3] == ["git", "clone", "--"]
+                    and (start == 0
+                         or re.fullmatch(r"[();&|\n]+|\{", words[start - 1]))
+                    and end <= len(words)
+                    and (end == len(words)
+                         or re.fullmatch(r"[();&|\n]+", words[end]))):
+                clone_operand = True
+                break
+        if clone_operand:
+            continue
         arguments = words[index + 1:]
         if (len(arguments) < 2 or arguments[0] not in ("-c", "-lc", "-cl")
                 or not arguments[1].strip() or re.search(r"[$`]", arguments[1])):

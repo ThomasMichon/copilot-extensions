@@ -542,6 +542,15 @@ fallbacks only when the bridge venv happens to vendor the package. This follows
 the repo's à-la-carte independence pattern: the agent-codespaces CLI owns its
 runtime; agent-bridge only lights up optional dispatch/relay features.
 
+Namespace ACP launches use normal permissions and refuse known blanket
+permission-bypass options before persisting a dispatch payload. Literal shell
+wrappers are inspected recursively; unsupported shell forms fail explicitly.
+The generated `git clone -- <remote> <directory>` operands and command-position
+`cd` directory operands are not shell executables, including directories named
+`bash`, `sh`, `dash`, or `zsh`. This bounded inspection is not proof of arbitrary
+custom executable behavior. Permission requests still require an explicit
+answer through the Bridge client; they are not implicitly approved.
+
 ## Multi-account gh (per-repo identity)
 
 Host-side `gh` operations (`gh codespace list/create/delete/stop/ssh`, `gh api`,
