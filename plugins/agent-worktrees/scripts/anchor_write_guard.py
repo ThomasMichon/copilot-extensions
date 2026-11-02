@@ -145,6 +145,12 @@ _GIT_WRITE_SUBCOMMANDS = frozenset({
     "revert", "init", "branch", "__configured-alias__",
 })
 _GIT_READ_ONLY_DASHED_SUBCOMMANDS = frozenset({"merge-base"})
+_GIT_READ_BUILTINS = frozenset({
+    "blame", "cat-file", "describe", "diff", "diff-files", "diff-index",
+    "diff-tree", "grep", "help", "log", "ls-files", "ls-remote", "ls-tree",
+    "merge-base", "name-rev", "rev-list", "rev-parse", "show", "show-ref",
+    "status", "version", "whatchanged",
+})
 _GIT_WORKTREE_WRITE_SUBCOMMANDS = frozenset({
     "apply", "checkout", "checkout-index", "cherry-pick", "clean", "merge",
     "merge-file", "mv", "pull", "rebase", "reset", "restore", "revert", "rm",
@@ -387,7 +393,8 @@ def _git_invocation(
             index += 1
             continue
         subcommand = "__configured-alias__" if (
-            lower in configured_aliases and not _git_subcommand_is_write(lower)
+            lower in configured_aliases and lower not in _GIT_READ_BUILTINS
+            and not _git_subcommand_is_write(lower)
         ) else lower
         resolved_targets = _git_resolved_targets(
             targets, git_cwd, git_cwd_overridden, subcommand,
@@ -395,7 +402,10 @@ def _git_invocation(
         return subcommand, tokens[index + 1:], resolved_targets, has_repo_override
     if index < len(tokens):
         subcommand = tokens[index].lower()
-        if subcommand in configured_aliases and not _git_subcommand_is_write(subcommand):
+        if (
+            subcommand in configured_aliases and subcommand not in _GIT_READ_BUILTINS
+            and not _git_subcommand_is_write(subcommand)
+        ):
             subcommand = "__configured-alias__"
         resolved_targets = _git_resolved_targets(
             targets, git_cwd, git_cwd_overridden, subcommand,

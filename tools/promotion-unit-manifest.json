@@ -3873,7 +3873,7 @@
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-mcp/src/agent_mcp/home.py": "62c504a90b38853728e6cc5371ca28ffd77668c23abdae61e32b913e191ed108",
         "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "c6a423ba34a9b4922dc57d2394f7708510cb31c290e41e18172e2c3187939c16",
-        "plugins/agent-worktrees/scripts/anchor_write_guard.py": "2d89450ca067669950fb430e02e89057ed648a45daded9770ead248fcb1c05f1",
+        "plugins/agent-worktrees/scripts/anchor_write_guard.py": "a11c2d6fd0d04ee9980c593ef7d7486d2e673b9e4ed4d18154759f30ddc402df",
         "plugins/agent-worktrees/scripts/registry_root.py": "380691bd9191b695b7590e90322a258ee83f3007d3f27e5bd432a7d59a6e21e3",
         "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "8b728f317d0eab08b75462c75d4fe7e60b92b7ca123c031aa1fda5aa6e8e760f",
         "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "5aabbae888c445b882dac787e5695f5e59905799c2e2a2303a8c5ea05df976ff",

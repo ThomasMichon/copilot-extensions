@@ -448,6 +448,19 @@ def test_git_global_options_read_does_not_acquire_guard_facts(tmp_path, monkeypa
     }, home=tmp_path, env={}) is None
 
 
+@pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base"])
+def test_same_name_alias_cannot_turn_git_read_into_guarded_write(tmp_path, monkeypatch, subcommand):
+    guard = _load("cross_repo_guard")
+    monkeypatch.setattr(
+        guard._guard_map, "repository_identity",
+        lambda *args: pytest.fail("built-in Git read must not acquire guard facts"),
+    )
+    assert guard.decide({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": f"git -c alias.{subcommand}=commit {subcommand}"},
+    }, home=tmp_path, env={}) is None
+
+
 @pytest.mark.parametrize("option", ["--work-tree '{outside}'", "--work-tree='{outside}'"])
 @pytest.mark.parametrize("guarded_repository", [False, True])
 def test_worktree_override_preserves_git_index_repository(tmp_path, option, guarded_repository):

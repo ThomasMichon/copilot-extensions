@@ -378,3 +378,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   the final directory contract. Both guard suites and the map/deployment/
   relevance packet passed 388 cases with six native-capability skips; only the
   changed shared parser's existing admission hash was updated.
+- Preserved intrinsic read commands when same-name aliases are configured.
+  Six read forms retain recovery access in both guards. Git relevance now
+  uses the pure parser alone instead of also accepting the obsolete broad
+  Git regex, which could mistake `merge-base` or message data for mutation.
+  The first focused run exposed that duplicate classifier; the corrected
+  complete packet passed 400 cases with six native-capability skips.

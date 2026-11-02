@@ -84,7 +84,7 @@ PATH_ARG_KEYS = ("path", "file_path", "filePath", "filename", "fileName",
                  "target_file", "targetFile")
 CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input")
 
-# Write-ish verbs (PowerShell cmdlets + POSIX + git mutations); presence
+# Write-ish verbs (PowerShell cmdlets + POSIX); presence
 # alongside a guarded-root literal in a shell command flips a read into a
 # suspected write.
 _WRITE_VERBS = re.compile(
@@ -95,9 +95,6 @@ _WRITE_VERBS = re.compile(
         ">>?",
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
-        r"""git\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)\s+)*(?:apply|commit|checkout|switch|reset|"""
-        r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
-        r"add|init)",
     ]),
     re.IGNORECASE,
 )
