@@ -2092,8 +2092,17 @@ silently accept a legacy interactive claim. Ordinary starts and task-only
 projection remain distinct, and projected workers reject the new fleet option.
 No ordinary supervisor, publisher or seed prompt is automatically switched.
 
-The bounded five-selector caller/placement/replay/CLI matrix passes **473
+The bounded five-selector caller/placement/replay/CLI matrix passes **475
 controls** with cleanup verified; focused new-caller typing and changed Python
 lint pass. Current-head review and actual merge remain open. The selected
 startup attempts, decision nudges/exhaustion/cooldowns, automatic caller/cohort
 migration and all remaining parent/native gates are still required.
+
+Explicit acceptance uses `/tasks/{id}/pool-start`, backed by the existing start
+handler and transition. A capability observation alone cannot exclude a
+provider rollback before the write: an older ordinary start handler can ignore
+the new field and accept an interactive claim. The distinct route gives that
+older provider no matching operation and refuses before mutation. A two-provider
+transport control switches after the successful health read and proves no
+legacy start or ownership mutation occurs; a direct legacy control confirms
+the ordinary route would otherwise accept that same claim.

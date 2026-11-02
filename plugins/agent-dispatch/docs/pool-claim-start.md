@@ -46,7 +46,10 @@ Decline/closeout and automatic worker-prompt migration remain separate work.
 `/health.pool_placement` and requires `explicit_start_versions: [1]` in addition
 to the placement contract. This descriptor uses ordinary API-read authority;
 workers need no control credential. It sends `pool_placement_version: 1`,
-the exact generation, worker and native identity to the existing start route.
+the exact generation, worker and native identity to `/tasks/{id}/pool-start`.
+This explicit route reuses the start handler and transition owner; an older
+provider has no matching route and refuses before mutation even if rollback
+occurs after the health read. The caller never retries it as `/start`.
 The transaction requires an actual pool assignment and all current startup,
 workspace, native, routing and owner fences. It cannot silently start a
 legacy interactive claim instead. Response validation requires `STARTED`

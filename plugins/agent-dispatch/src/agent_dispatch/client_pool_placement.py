@@ -149,7 +149,7 @@ class PoolPlacementClientMixin:
             health.get("pool_placement") if isinstance(health, dict) else None, explicit_start=True,
         )
         try:
-            result = self._unwrap(self._http.post(f"/tasks/{task_id}/start", json={
+            result = self._unwrap(self._http.post(f"/tasks/{task_id}/pool-start", json={
                 "worker_id": worker_id, "owner_session_id": owner_session_id,
                 "expected_generation": expected_generation, "expected_owner_session_id": None,
                 "pool_placement_version": 1,

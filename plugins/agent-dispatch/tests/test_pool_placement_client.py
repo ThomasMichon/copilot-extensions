@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from copy import deepcopy
+from dataclasses import asdict
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from agent_dispatch import __main__ as cli
 from agent_dispatch.client import DispatchClient, DispatchError, DispatchUpgradeRequired
@@ -66,8 +69,8 @@ def test_real_placement_and_data_only_worker_acceptance(q: TaskQueue, api: TestC
             assert accepted["status"] == Status.STARTED
     assert [(r.method, r.url.path) for r in requests] == [
         ("GET", "/pool-placements/contract"), ("POST", "/pool-placements"),
-        ("GET", "/health"), ("POST", f"/tasks/{requested.id}/start"),
-        ("GET", "/health"), ("POST", f"/tasks/{requested.id}/start"),
+        ("GET", "/health"), ("POST", f"/tasks/{requested.id}/pool-start"),
+        ("GET", "/health"), ("POST", f"/tasks/{requested.id}/pool-start"),
     ]
     assert requests[2].headers["Authorization"] == placement_controls.headers("data")["Authorization"]
     assert len(q.list_reservations(task_id=requested.id)) == 1
@@ -204,7 +207,7 @@ def test_cli_pool_start_uses_current_native_generation_and_does_not_claim(
         "expected_generation": placed.assignment.task_generation, "expected_owner_session_id": None,
         "pool_placement_version": 1,
     }
-    assert [r.url.path for r in requests] == ["/health", f"/tasks/{requested.id}/start"]
+    assert [r.url.path for r in requests] == ["/health", f"/tasks/{requested.id}/pool-start"]
 
 
 @pytest.mark.parametrize("wrong", ["worker", "native", "generation"])
@@ -292,13 +295,13 @@ def test_invalid_acceptance_reply_is_unknown_and_same_request_can_be_observed(
     assert len(q.attachment_history(requested.id)) == 1
 
 
-@pytest.mark.parametrize("version", [True, 0, 2, "1"])
+@pytest.mark.parametrize("version", [None, True, 0, 2, "1"])
 def test_explicit_start_wire_version_is_strict_without_mutation(
     q: TaskQueue, api: TestClient, version: object,
 ) -> None:
     requested = task(q)
     before = q.claim_one("host-a/worktree", task_id=requested.id)
-    response = api.post(f"/tasks/{requested.id}/start", headers=placement_controls.headers("data"), json={
+    response = api.post(f"/tasks/{requested.id}/pool-start", headers=placement_controls.headers("data"), json={
         "worker_id": "host-a/worktree", "owner_session_id": "native",
         "expected_generation": before.generation, "pool_placement_version": version,
     })
@@ -337,3 +340,57 @@ def test_placement_keeps_prior_provider_contract_and_additive_response_compatibi
     with connected(api, requests, rewrite=rewrite) as client:
         result = client.place_pool_task(requested.id, reserved_by="allocator", catalog_revision=revision)
     assert result["reserved"] is True and q.get(requested.id).status == Status.CLAIMED
+
+
+class LegacyStartBody(BaseModel):
+    worker_id: str
+    owner_session_id: str | None = None
+    expected_generation: int | None = None
+    expected_owner_session_id: str | None = None
+
+
+def test_rollback_between_health_and_acceptance_refuses_before_mutation(
+    q: TaskQueue, api: TestClient,
+) -> None:
+    requested = task(q)
+    claimed = q.claim_one("host-a/worktree", task_id=requested.id)
+    old_provider = FastAPI()
+    legacy_starts = []
+
+    @old_provider.post("/tasks/{task_id}/start")
+    def legacy_start(task_id: str, body: LegacyStartBody) -> dict:
+        legacy_starts.append(task_id)
+        return asdict(q.start(
+            task_id, body.worker_id, owner_session_id=body.owner_session_id,
+            expected_generation=body.expected_generation,
+            expected_owner_session_id=body.expected_owner_session_id,
+        ))
+
+    requests = []
+    with TestClient(old_provider) as prior:
+        def send(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            provider = api if request.method == "GET" else prior
+            response = provider.request(
+                request.method, str(request.url), headers=dict(request.headers), content=request.content,
+            )
+            return httpx.Response(response.status_code, content=response.content)
+
+        with DispatchClient("http://testserver", token="data", transport=httpx.MockTransport(send)) as client:
+            with pytest.raises(DispatchError) as error:
+                client.start_pool_task(
+                    requested.id, "host-a/worktree", owner_session_id="native",
+                    expected_generation=claimed.generation,
+                )
+            assert error.value.status_code == 404
+            assert q.get(requested.id) == claimed and not legacy_starts
+            assert [(r.method, r.url.path) for r in requests] == [
+                ("GET", "/health"), ("POST", f"/tasks/{requested.id}/pool-start"),
+            ]
+            # The prior ordinary route really can start this claim if invoked.
+            response = prior.post(f"/tasks/{requested.id}/start", json={
+                "worker_id": "host-a/worktree", "owner_session_id": "native",
+                "expected_generation": claimed.generation, "pool_placement_version": 1,
+            })
+            assert response.status_code == 200 and response.json()["status"] == Status.STARTED
+            assert legacy_starts == [requested.id]
