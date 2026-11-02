@@ -710,10 +710,14 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         if report is not None:
             from .configuration_layers_adapter import compose_documents
 
-            result = compose_documents(report, RUNTIME_DIR)
+            result = compose_documents(
+                report, RUNTIME_DIR,
+                plugin_fleets=frozenset(n for f in fragments for n in f.fleets),
+            )
             parsed = result["values"]
             config.configuration_provenance = result["provenance"]
             config.configuration_layers = result["layers"]
+            operator_layers = result["operator_layers"]
         elif path:
             parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
         else:
@@ -742,6 +746,10 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         if before_mode is None and data.get("copilot_auth_mode") == "legacy":
             log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
                         "select host-copilot and its intended account for inference isolation")
+    if report is None:
+        operator_layers = [(
+            {"id": str(path), "tier": "selected_file", "origin": "selected_file"}, data,
+        )] if path else []
     (
         data, config.configuration_provenance, config.configuration_layers,
         config.plugin_fragments,
@@ -749,10 +757,7 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         data, fragments,
         provenance=config.configuration_provenance,
         layers=config.configuration_layers,
-        operator_owner=(
-            {"id": str(path), "tier": "selected_file", "origin": "selected_file"}
-            if report is None and path else None
-        ),
+        operator_layers=operator_layers,
     )
 
     config.exec_user = data.get("exec_user", config.exec_user)

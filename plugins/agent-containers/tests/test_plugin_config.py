@@ -9,6 +9,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agent_containers import __main__ as cli
 from agent_containers import config as config_mod
@@ -249,14 +250,15 @@ def test_unknown_nested_mapping_keys_merge_per_key(tmp_path, monkeypatch, isolat
             future_options:
               beta: 3
     """)
+    operator = {"fleets": {"example": {"future_options": {"beta": 3}}}}
     data, provenance, _, _ = plugin_config.merge_fragments(
-        {"fleets": {"example": {"future_options": {"beta": 3}}}},
+        operator,
         plugin_config.discover_plugin_fragments(),
-        provenance={}, layers=[],
+        provenance={}, layers=[], operator_layers=[({"id": "operator"}, operator)],
     )
     assert data["fleets"]["example"]["future_options"] == {"alpha": 1, "beta": 3}
     assert provenance["/fleets/example/future_options/alpha"]["id"] == PLUGIN
-    assert "/fleets/example/future_options/beta" not in provenance
+    assert provenance["/fleets/example/future_options/beta"]["id"] == "operator"
     # Unknown keys are not rejected by the loader.
     assert load_config().fleets["example"].image == "example:latest"
 
@@ -483,3 +485,116 @@ def test_acyclic_shared_aliases_remain_usable(tmp_path, isolated):
     assert cfg.fleets["one"].environment == {"SHARED": "1"}
     assert cfg.fleets["two"].environment == {"SHARED": "1"}
     assert cfg.configuration_provenance["/fleets/two/native_env/b/SHARED"]["id"] == PLUGIN
+
+
+@pytest.fixture
+def layered(tmp_path, monkeypatch, isolated):
+    """Composed four-tier context (base, bound knowledge, machine) plus plugins."""
+    base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
+    for root in (base, knowledge, machine):
+        root.mkdir()
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-qualified", "execution_machine": "logical-worker",
+            "installation_cell": "cell-one", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+    monkeypatch.setattr(config_mod, "_configuration_report", lambda: report)
+    monkeypatch.setattr(config_mod, "RUNTIME_DIR", machine)
+
+    def write(root, data, *, machine_file=False):
+        target = root / "containers.yaml" if machine_file else (
+            root / ".copilot-extensions" / "agent-containers" / "containers.yaml"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(yaml.safe_dump({"schema_version": 2, **data}), encoding="utf-8")
+        return target
+
+    return base, knowledge, machine, write
+
+
+def test_composed_plugin_backed_clears_bypass_tier_validation(tmp_path, layered, isolated):
+    base, _, _, write = layered
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            image: example:latest
+            dispatch_only: true
+            systemd_capable: true
+            security_profile: trusted
+            copilot_auth_mode: legacy
+    """)
+    isolated.append(("example-harness@example", [root]))
+    write(base, {"fleets": {"example": {
+        "dispatch_only": None, "systemd_capable": None,
+        "security_profile": None, "copilot_auth_mode": None,
+    }}})
+
+    fleet = load_config(strict=True).fleets["example"]
+
+    assert fleet.dispatch_only is False
+    assert fleet.systemd_capable is False
+    assert fleet.security_profile == "trusted"
+    assert fleet.copilot_auth_mode is None
+
+    write(base, {"fleets": {"example": {"dispatch_only": "yes"}}})
+    with pytest.raises(RuntimeError, match="dispatch_only"):
+        load_config(strict=True)
+
+
+def test_composed_lower_tier_reset_removes_shipped_values_before_higher_tiers(
+    tmp_path, layered, isolated,
+):
+    base, knowledge, machine, write = layered
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            image: example:latest
+            devcontainer_path: shipped-devcontainer
+            environment:
+              SHIPPED: "1"
+    """)
+    isolated.append(("example-harness@example", [root]))
+    write(base, {"fleets": {"example": {"environment": None}}})
+    knowledge_file = write(knowledge, {"fleets": {"example": {"devcontainer_path": "../ws"}}})
+    machine_file = write(machine, {"fleets": {"example": {"environment": {"LOCAL": "2"}}}},
+                         machine_file=True)
+
+    cfg = load_config(strict=True)
+
+    fleet = cfg.fleets["example"]
+    assert fleet.environment == {"LOCAL": "2"}
+    assert fleet.devcontainer_path == str(knowledge_file.parent.parent / "ws")
+    provenance = cfg.configuration_provenance
+    assert provenance["/fleets/example/environment/LOCAL"]["origin"] == "local_machine"
+    assert provenance["/fleets/example/environment/LOCAL"]["id"] == str(machine_file)
+    assert "/fleets/example/environment/SHIPPED" not in provenance
+    assert provenance["/fleets/example/devcontainer_path"]["origin"] == "knowledge"
+    assert provenance["/fleets/example/image"]["id"] == PLUGIN
+    assert cfg.configuration_layers[0] == PLUGIN
+
+
+def test_operator_only_values_are_not_attributed_to_the_plugin(tmp_path, layered, isolated):
+    base, _, _, write = layered
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            image: example:latest
+    """)
+    isolated.append(("example-harness@example", [root]))
+    base_file = write(base, {"fleets": {"example": {
+        "image": "operator:latest", "environment": {"REMOVE": None},
+    }}})
+
+    cfg = load_config(strict=True)
+
+    assert cfg.fleets["example"].image == "operator:latest"
+    assert cfg.fleets["example"].environment == {}
+    owners = {
+        pointer: owner["id"] for pointer, owner in cfg.configuration_provenance.items()
+        if pointer.startswith("/fleets/example")
+    }
+    assert PLUGIN not in owners.values()
+    assert cfg.fleet_source("example") == str(base_file)

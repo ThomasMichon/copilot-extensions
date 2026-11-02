@@ -58,8 +58,12 @@ enabled plugin. Without an invoking checkout only global activation applies.
 - Fragments may define `fleets:` only (`schema_version` is accepted); other
   top-level keys are ignored with a warning.
 - Operator values override a shipped fleet per key; nested mappings merge per
-  key. Unlike ordinary tier composition, an explicit `null` over a shipped
-  value removes it, so the field falls back to its default/global value.
+  key. Each operator layer is replayed over the fragment in tier order, so a
+  lower tier's reset still removes shipped values before a higher tier adds to
+  that mapping. Unlike ordinary tier composition, an explicit `null` in a
+  plugin-backed fleet removes the value, so the field falls back to its
+  default/global value; such clears are exempt from per-tier value validation,
+  while any non-null value is still validated.
 - The plugin whose `name@marketplace` sorts first owns a duplicated fleet name;
   the other definition is ignored as a whole, with a warning.
 - Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
@@ -69,7 +73,9 @@ enabled plugin. Without an invoking checkout only global activation applies.
   fragments are skipped with a warning, including in strict reads.
 
 Contributions extend `configuration_provenance` with `tier: plugin` owners
-(`source` names the plugin root and fragment path), and contributing fragment
+(`source` names the plugin root and fragment path) for surviving shipped values;
+a cleared pointer keeps the clearing layer as owner and an emptied mapping is
+owned by the layer that left it empty. Contributing fragment
 IDs (`plugin:<name>@<marketplace>`) are prepended to `configuration_layers`.
 `agent-containers config-sources [--json]` prints the layers, fragments and
 per-pointer owners; `fleet --json` reports each member's `fleet_source`.

@@ -284,38 +284,49 @@ def discover_plugin_fragments(
     return fragments
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Merge ``override`` over ``base`` per key; ``None`` removes the key.
-
-    Removing (rather than storing ``None``) makes a cleared key behave exactly
-    as if neither source set it, so it falls back to the fleet default or the
-    global setting instead of reaching type conversion as a literal null.
-    """
-    merged = dict(base)
-    for key, value in override.items():
-        if value is None:
-            merged.pop(key, None)
-        elif isinstance(value, dict):
-            current = merged.get(key)
-            merged[key] = _deep_merge(current if isinstance(current, dict) else {}, value)
-        else:
-            merged[key] = copy.deepcopy(value)
-    return merged
-
-
 def _pointer(parent: str, key: Any) -> str:
     return parent + "/" + str(key).replace("~", "~0").replace("/", "~1")
 
 
-def _leaves(mapping: dict[str, Any], prefix: str) -> list[str]:
-    out: list[str] = []
-    for key, value in mapping.items():
-        pointer = _pointer(prefix, key)
-        if isinstance(value, dict) and value:
-            out.extend(_leaves(value, pointer))
+def _drop(provenance: dict[str, Any], pointer: str) -> None:
+    for key in [k for k in provenance if k == pointer or k.startswith(pointer + "/")]:
+        del provenance[key]
+
+
+def _replay(
+    target: dict[str, Any], incoming: dict[str, Any], pointer: str,
+    owner: dict[str, Any], provenance: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply one layer's fleet mapping over ``target`` per key.
+
+    Mappings merge recursively, lists and scalars replace, and ``None``
+    removes the key so it falls back to its default -- the clearing layer is
+    kept as that pointer's owner. Provenance tracks every surviving value; an
+    empty mapping is owned by the layer that left it empty.
+    """
+    result = dict(target)
+    for key, child in incoming.items():
+        child_pointer = _pointer(pointer, key)
+        if child is None:
+            _drop(provenance, child_pointer)
+            result.pop(key, None)
+            provenance[child_pointer] = copy.deepcopy(owner)
+        elif isinstance(child, dict):
+            current = result.get(key)
+            if isinstance(current, dict):
+                provenance.pop(child_pointer, None)
+            else:
+                _drop(provenance, child_pointer)
+                current = {}
+            merged = _replay(current, child, child_pointer, owner, provenance)
+            result[key] = merged
+            if not merged and not any(k.startswith(child_pointer + "/") for k in provenance):
+                provenance[child_pointer] = copy.deepcopy(owner)
         else:
-            out.append(pointer)
-    return out
+            _drop(provenance, child_pointer)
+            result[key] = copy.deepcopy(child)
+            provenance[child_pointer] = copy.deepcopy(owner)
+    return result
 
 
 def merge_fragments(
@@ -324,18 +335,20 @@ def merge_fragments(
     *,
     provenance: dict[str, Any],
     layers: list[str],
-    operator_owner: dict[str, Any] | None = None,
+    operator_layers: list[tuple[dict[str, Any], Any]],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], list[dict[str, Any]]]:
-    """Merge plugin fragments beneath ``data``.
+    """Merge plugin fragments beneath the operator configuration.
 
-    ``data`` is the operator configuration (composed tiers or the single
-    compatibility file; may be empty) and ``provenance``/``layers`` are the
-    composition's own metadata. Returns ``(data, provenance, layers,
-    fragments)`` where provenance gains ``tier: plugin`` owners for every
-    winning plugin leaf; when ``operator_owner`` is given (compatibility file
-    path, which has no composed provenance), operator keys inside plugin
-    fleets are attributed to it. ``fragments`` summarizes each fragment and
-    the fleets it defines or had shadowed by a higher-sorting plugin.
+    ``data`` is the effective operator configuration (composed tiers or the
+    single compatibility file; may be empty); ``provenance``/``layers`` are
+    the composition's own metadata and ``operator_layers`` lists each operator
+    layer's ``(owner record, values)`` low to high. Each plugin-backed fleet is
+    rebuilt by replaying those layers over the fragment, so a clear in a lower
+    tier still removes a shipped value before a higher tier adds to it, and its
+    provenance subtree is replaced by the replay's (``tier: plugin`` owners for
+    surviving shipped values). Returns ``(data, provenance, layers,
+    fragments)``, where ``fragments`` summarizes each fragment's winning and
+    shadowed fleets. Other fleets keep the composition's values/provenance.
     """
     plugin_fleets: dict[str, dict[str, Any]] = {}
     owners: dict[str, PluginFragment] = {}
@@ -369,34 +382,35 @@ def merge_fragments(
         # merged beneath a malformed operator ``fleets`` value.
         return data, provenance, layers, summaries
 
-    merged_fleets: dict[str, Any] = {}
-    for name, override in user_fleets.items():
-        base = plugin_fleets.get(name)
-        if base is None:
-            merged_fleets[name] = override
-        elif override is None:
-            merged_fleets[name] = copy.deepcopy(base)
-        elif isinstance(override, dict):
-            merged_fleets[name] = _deep_merge(base, override)
-        else:
-            merged_fleets[name] = override
-    for name, base in plugin_fleets.items():
-        if name not in merged_fleets:
-            merged_fleets[name] = copy.deepcopy(base)
-
+    merged_fleets: dict[str, Any] = dict(user_fleets)
     for name, fragment in owners.items():
+        effective = user_fleets.get(name)
+        if effective is not None and not isinstance(effective, dict):
+            continue  # an invalid operator value reaches native validation
         prefix = _pointer("/fleets", name)
-        override = user_fleets.get(name)
-        if override is not None and not isinstance(override, dict):
-            continue
-        overridden = set(_leaves(override, prefix)) if override else set()
-        if operator_owner is not None:
-            for pointer in overridden:
-                provenance[pointer] = copy.deepcopy(operator_owner)
-        owner = fragment.owner()
-        for pointer in _leaves(merged_fleets[name], prefix):
-            if pointer not in overridden:
-                provenance[pointer] = copy.deepcopy(owner)
+        replayed: dict[str, Any] = {}
+        value = _replay({}, plugin_fleets[name], prefix, fragment.owner(), replayed)
+        for owner, values in operator_layers:
+            layer_fleets = values.get("fleets") if isinstance(values, dict) else None
+            if not isinstance(layer_fleets, dict) or layer_fleets.get(name) is None:
+                continue
+            layer_value = layer_fleets[name]
+            if not isinstance(layer_value, dict):
+                replayed.clear()
+                value = {}
+                continue
+            value = _replay(value, layer_value, prefix, owner, replayed)
+        # Operator-owned source-relative paths keep the composition's resolution.
+        for key in _SOURCE_RELATIVE_KEYS:
+            owner = replayed.get(_pointer(prefix, key))
+            if (
+                isinstance(effective, dict) and key in effective and key in value
+                and isinstance(owner, dict) and owner.get("tier") != PLUGIN_TIER
+            ):
+                value[key] = effective[key]
+        merged_fleets[name] = value
+        _drop(provenance, prefix)
+        provenance.update(replayed)
 
     merged = dict(data)
     merged["fleets"] = merged_fleets
