@@ -100,12 +100,12 @@ def build_plan(
         elif selected_platform not in module.platforms:
             state = PlanState.UNSUPPORTED
         else:
-            result = outcomes.get(module.qualified_id)
-            if result is None or result.state is ReadinessState.NOT_READY:
+            outcome = outcomes.get(module.qualified_id)
+            if outcome is None or outcome.state is ReadinessState.NOT_READY:
                 state = PlanState.PLANNED
-            elif result.state is ReadinessState.READY:
+            elif outcome.state is ReadinessState.READY:
                 state = PlanState.READY
-            elif result.state is ReadinessState.CONFIGURATION_EMPTY:
+            elif outcome.state is ReadinessState.CONFIGURATION_EMPTY:
                 state = PlanState.CONFIGURATION_EMPTY
             else:
                 state = PlanState.FAILED

@@ -34,13 +34,18 @@ def launch(tmp_path):
 
 
 @pytest.mark.parametrize("name", ["pane-wrapper.ps1", "pane-wrapper.sh"])
-def test_assets_survive_removal_and_do_not_follow_source_updates(launch, name):
+@pytest.mark.parametrize("hardlinked", [False, True])
+def test_assets_survive_removal_and_do_not_follow_source_updates(launch, name, hardlinked):
     record, runtime, assets = launch
+    if hardlinked:
+        for source in (record, *tuple(assets.iterdir())):
+            os.link(source, source.with_name(source.name + ".cache"))
     expected = (assets / name).read_bytes()
     prepared = session_shell.prepare(record, assets / name, installation_roots=(runtime,))
     assert prepared.directory.is_relative_to(record.parent / "launch-attempts")
     assert prepared.wrapper.read_bytes() == expected
     assert not prepared.directory.is_relative_to(runtime)
+    assert all(path.stat().st_nlink == 1 for path in prepared.directory.iterdir())
     if name.endswith(".ps1"):
         assert (prepared.directory / "pane-launch.ps1").read_bytes() == (assets / "pane-launch.ps1").read_bytes()
     else:
@@ -50,6 +55,27 @@ def test_assets_survive_removal_and_do_not_follow_source_updates(launch, name):
     shutil.rmtree(runtime)
     assert prepared.wrapper.read_bytes() == expected
     assert not stat.S_ISLNK(prepared.wrapper.lstat().st_mode)
+
+
+def test_hardlinked_native_console_helper_gets_an_independent_copy(launch, monkeypatch):
+    from agent_worktrees import installer
+
+    record, runtime, assets = launch
+    wrapper = assets / "pane-wrapper.ps1"
+    wrapper.write_text(session_shell.NATIVE_CONSOLE_MARKER + "\n", encoding="utf-8")
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    helper = scripts / "native-seed-boundary.ps1"
+    helper.write_bytes(b"native helper\n")
+    os.link(helper, helper.with_suffix(".cache"))
+    monkeypatch.setattr(installer, "install_dir", lambda: runtime)
+
+    prepared = session_shell.prepare(record, wrapper, installation_roots=(runtime,))
+    copied = prepared.directory / helper.name
+    helper.write_bytes(b"replacement\n")
+    shutil.rmtree(runtime)
+    assert copied.read_bytes() == b"native helper\n"
+    assert copied.stat().st_nlink == 1
 
 
 def test_each_execution_gets_its_own_assets_even_with_one_attempt(launch):
