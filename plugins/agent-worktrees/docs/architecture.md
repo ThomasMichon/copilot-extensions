@@ -3119,7 +3119,7 @@ settled late observation timeout preserves an accumulated ask. The native/SDK
 28-second adapter and 30-second host limits are unchanged.
 
 SDK acquisition is lazy for supersede observations: an absent SDK cannot
-suppress an intact cheap guard's denial. SDK-capable legacy PR observations use
+suppress an intact cheap guard's denial.
 Legacy command mode evaluates its non-observation guards first, retaining their
 decision before native observation admission. A deferred owned frame evaluates
 only PR observations in the child, so cheap guards are not evaluated twice.

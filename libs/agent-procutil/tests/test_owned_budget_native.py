@@ -127,13 +127,17 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 from agent_procutil.owned_process import run_caller_owned
 from agent_procutil.owned_budget import OwnedExecutionBudget
+from agent_procutil import _caller_owned
 root=Path(sys.argv[2]);budget=OwnedExecutionBudget.from_timeout(8,cleanup_reserve=2)
 env=dict(os.environ);env['BUDGET_NATIVE_DEADLINE']=str(budget.deadline)
 settled=[]
+def settled_after_lifetime_close():
+    assert not _caller_owned._lifetime_readers and not _caller_owned._lifetime_writers
+    settled.append(True)
 try:
     run_caller_owned([sys.executable,'-I',sys.argv[3],sys.argv[1],str(root),sys.argv[4]],
                      timeout=10,max_stdout_bytes=4096,max_stderr_bytes=4096,
-                     env=env,budget=budget,on_settled=lambda:settled.append(True))
+                     env=env,budget=budget,on_settled=settled_after_lifetime_close)
 except subprocess.TimeoutExpired:
     pass
 (root/'result.json').write_text(json.dumps({'deadline':budget.deadline,

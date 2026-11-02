@@ -37,9 +37,10 @@ class OutputLimitExceeded(subprocess.SubprocessError):
 class OwnedCleanupError(subprocess.SubprocessError):
     """Cleanup is unconfirmed; retain exact process/Job custody for the owner."""
 
-    def __init__(self, process: UnreapedChild | None, job=None) -> None:
+    def __init__(self, process: UnreapedChild | None, job=None, *, cleanup_resources=()) -> None:
         self.process = process
         self.job = job
+        self.cleanup_resources = tuple(cleanup_resources)
         super().__init__("native child cleanup did not complete")
 
 

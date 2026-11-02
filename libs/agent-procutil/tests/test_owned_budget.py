@@ -188,6 +188,65 @@ def test_between_check_expiry_notifies_after_closing_lifetime_descriptors(monkey
     assert settled == [True]
 
 
+@pytest.mark.parametrize("failed_side", ["reader", "writer"])
+@pytest.mark.parametrize("outcome", ["preparation", "settled"])
+def test_between_check_expiry_retains_failed_lifetime_close_without_settlement(monkeypatch, failed_side, outcome):
+    from agent_procutil import _caller_owned as protocol
+
+    fds = []
+    original_pipe, original_close = os.pipe, os.close
+    before_writers = set(protocol._lifetime_writers)
+    local_os = SimpleNamespace(**vars(os))
+    local_os.name = "posix"
+    monkeypatch.setattr(protocol, "os", local_os)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    monkeypatch.setattr(protocol, "Path", lambda value: SimpleNamespace(
+        resolve=lambda: SimpleNamespace(parents=["source", "root"]),
+    ))
+    def pipe():
+        values = original_pipe()
+        fds.extend(values)
+        return values
+    def close(fd):
+        if fd == fds[0 if failed_side == "reader" else 1]:
+            raise OSError("fixture lifetime close failed")
+        original_close(fd)
+    def refuse(argv, **kwargs):
+        if outcome == "settled":
+            kwargs["on_settled"]()
+            return subprocess.CompletedProcess(argv, 0, '{"kind":"exit","returncode":0}', "")
+        raise owned_process._PreparationTimeout(argv, kwargs["timeout"])
+    monkeypatch.setattr(local_os, "pipe", pipe)
+    monkeypatch.setattr(local_os, "close", close)
+    monkeypatch.setattr(protocol, "_run_owned", refuse)
+    settled = []
+    try:
+        with pytest.raises(OwnedCleanupError) as caught:
+            run_caller_owned(
+                ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+                budget=OwnedExecutionBudget(time.monotonic() + 5, 1),
+                on_settled=lambda: settled.append(True),
+            )
+        failed = fds[0 if failed_side == "reader" else 1]
+        assert settled == []
+        assert os.fstat(failed)
+        assert ("descriptor", failed) in caught.value.cleanup_resources
+        if failed_side == "writer":
+            assert failed in protocol._lifetime_writers
+        else:
+            assert failed in protocol._lifetime_readers
+        with pytest.raises(OSError):
+            os.fstat(fds[1 if failed_side == "reader" else 0])
+    finally:
+        for fd in fds:
+            try:
+                original_close(fd)
+            except OSError:
+                pass
+        protocol._lifetime_writers.difference_update(set(fds) - before_writers)
+        getattr(protocol, "_lifetime_readers", set()).difference_update(fds)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job preparation")
 @pytest.mark.parametrize("phase", ["environment", "allocation", "configuration"])
 def test_native_precreation_refusal_notifies_once_after_releasing_job(monkeypatch, phase):
@@ -241,6 +300,7 @@ def test_precreation_failed_job_close_retains_custody_without_notifying(monkeypa
     with pytest.raises(OwnedCleanupError) as caught:
         run_caller_owned(
             ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
             on_settled=lambda: settled.append(True),
         )
     job = caught.value.job
@@ -251,6 +311,50 @@ def test_precreation_failed_job_close_retains_custody_without_notifying(monkeypa
     finally:
         assert original_close(job.handle)
         job._handle = None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows preparation descriptor")
+def test_precreation_failed_descriptor_close_retains_custody_without_notifying(monkeypatch):
+    from agent_procutil import _windows_caller_owned as windows
+
+    descriptors = []
+    original_pipe, original_close = os.pipe, os.close
+    kernel = windows._api()
+    def pipe():
+        values = original_pipe()
+        descriptors.extend(values)
+        return values
+    def close(fd):
+        if fd == descriptors[1]:
+            raise OSError("fixture preparation descriptor close failed")
+        original_close(fd)
+    monkeypatch.setattr(os, "pipe", pipe)
+    monkeypatch.setattr(os, "close", close)
+    monkeypatch.setattr(kernel, "InitializeProcThreadAttributeList", lambda *args: False)
+    monkeypatch.setattr(kernel, "CreateProcessW", lambda *args: pytest.fail("preparation must not launch"))
+    settled = []
+    error = None
+    try:
+        with pytest.raises(OwnedCleanupError) as caught:
+            run_caller_owned(
+                ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+                on_settled=lambda: settled.append(True),
+            )
+        error = caught.value
+        assert error.process is None and error.job.handle
+        assert ("descriptor", descriptors[1]) in error.cleanup_resources
+        assert settled == [] and os.fstat(descriptors[1])
+        for fd in descriptors[:1] + descriptors[2:]:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+    finally:
+        for fd in descriptors:
+            try:
+                original_close(fd)
+            except OSError:
+                pass
+        if error is not None and error.job.handle:
+            error.job.close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows CreateProcessW refusal")

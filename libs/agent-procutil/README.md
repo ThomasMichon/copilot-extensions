@@ -415,7 +415,7 @@ Cwd, environment, raw-byte limits, binary capture and caller-death custody are
 unchanged. Omitting `budget` preserves every existing default.
 
 Windows retirement, retirement-lock acquisition, pipe-worker completion/join
-and process-exit waits consume the same remaining deadline. POSIX passes that
+and process-exit waits consume the same remaining deadline.
 Native startup checks the earlier individual/aggregate execution cutoff
 immediately before target creation and before resuming the suspended target.
 Slow setup cannot admit execution into the reserve. Known no-target refusal or
@@ -431,6 +431,10 @@ supervised waits, not arbitrary
 blocking kernel calls or caller-supplied callbacks. Settlement callbacks remain
 synchronous bounded bookkeeping, never permission or execution-success proof.
 Consumers must reserve response/serialization time outside this budget.
+Failed preparation or lifetime-descriptor closure also withholds notification.
+`OwnedCleanupError.cleanup_resources` retains exact `(kind, resource)` pairs
+alongside any process/Job custody; lifetime descriptors remain registered until
+confirmed closed. A failure is not permission to retry a possibly closed handle.
 
 For an explicitly enclosing finite POSIX owner, opt-in
 `borrow_parent_scope=True` keeps observations in that owner's native group
@@ -443,7 +447,7 @@ not application authority or a general ambient-containment fallback. Windows
 retains its strict owned Job. Ordinary callers keep the existing guardian.
 `budget.enclosed_budget()` places a nested owner's settlement deadline before
 the enclosing read cutoff, reserving a quarter-second for its bounded completion
-frame and retaining cleanup time inside that earlier bound. POSIX callers pass
+frame and retaining cleanup time inside that earlier bound.
 The single cleanup reserve is divided between nested and enclosing settlement,
 with publication charged to the nested share; it is not subtracted twice from
 the target's execution allowance. Publication scales down for smaller reserves. POSIX callers pass

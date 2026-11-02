@@ -31,6 +31,7 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
 _lifetime_writers: set[int] = set()
+_lifetime_readers: set[int] = set()
 _BOOTSTRAP = (
     "import sys;sys.path.insert(0,sys.argv.pop(1));"
     "from agent_procutil._caller_owned import _main;_main()"
@@ -314,9 +315,11 @@ def run(
     reader = writer = None
     launch_attempted = False
     preparation_refused = False
+    native_settled = []
     try:
         with _lifetime_lock:
             reader, writer = os.pipe()
+            _lifetime_readers.add(reader)
             _lifetime_writers.add(writer)
         os.set_inheritable(writer, False)
         launch_attempted = True
@@ -331,7 +334,7 @@ def run(
                 input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
-                on_settled=on_settled,
+                on_settled=lambda: native_settled.append(True),
                 **({"budget": execution_budget} if execution_budget is not None else {}),
                 **({"cwd": cwd} if cwd is not None else {}),
                 **({"env": env} if env is not None else {}),
@@ -344,18 +347,26 @@ def run(
         except OutputLimitExceeded as error:
             raise RuntimeError("caller-owned completion frame exceeded its byte budget") from error
     finally:
-        try:
+        pending = sys.exc_info()[1]
+        failed = []
+        cause = None
+        for descriptor, owned in ((reader, _lifetime_readers), (writer, _lifetime_writers)):
+            if descriptor is None:
+                continue
             try:
-                if reader is not None:
-                    os.close(reader)
-            finally:
-                if writer is not None:
-                    with _lifetime_lock:
-                        _lifetime_writers.discard(writer)
-                        os.close(writer)
-        finally:
-            if (not launch_attempted or preparation_refused) and on_settled is not None:
-                on_settled()
+                with _lifetime_lock:
+                    os.close(descriptor)
+                    owned.discard(descriptor)
+            except BaseException as error:
+                failed.append(("descriptor", descriptor))
+                cause = error
+        if failed:
+            raise OwnedCleanupError(
+                getattr(pending, "process", None), getattr(pending, "job", None),
+                cleanup_resources=(*getattr(pending, "cleanup_resources", ()), *failed),
+            ) from cause
+        if (native_settled or not launch_attempted or preparation_refused) and on_settled is not None:
+            on_settled()
     try:
         reply = json.loads(result.stdout)
     except (ValueError, TypeError) as error:

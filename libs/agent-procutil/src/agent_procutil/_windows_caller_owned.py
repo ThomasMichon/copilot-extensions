@@ -340,6 +340,19 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
     creation_attempted = False
     info = _ProcessInfo()
     streams = []
+    failed_preparation = []
+
+    def release(kind, resource, close):
+        try:
+            close()
+        except BaseException as error:
+            failed_preparation.append(((kind, resource), error))
+
+    def cleanup_error():
+        return OwnedCleanupError(
+            process, job, cleanup_resources=[resource for resource, _ in failed_preparation],
+        )
+
     try:
         job_name = _job_scopes.new_name()
         environment = _environment_block(
@@ -372,25 +385,25 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                 if kwargs[name] == subprocess.PIPE:
                     reader, writer = os.pipe()
                     child, parent = (reader, writer) if index == 0 else (writer, reader)
-                    resources.callback(os.close, child)
+                    resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
                     try:
                         stream = os.fdopen(parent, "wb" if index == 0 else "rb", buffering=0)
                     except BaseException:
-                        os.close(parent)
+                        release("descriptor", parent, lambda: os.close(parent))
                         raise
-                    parent_streams.callback(stream.close)
+                    parent_streams.callback(release, "stream", stream, stream.close)
                 elif name == "stderr" and kwargs[name] == subprocess.STDOUT:
                     child = child_fds[1]
                     stream = None
                 elif kwargs[name] not in (subprocess.DEVNULL, None):
                     child = os.dup(kwargs[name].fileno())
-                    resources.callback(os.close, child)
+                    resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
                     stream = None
                 else:
                     child = os.open(
                         os.devnull, (os.O_RDONLY if index == 0 else os.O_WRONLY) | os.O_BINARY,
                     )
-                    resources.callback(os.close, child)
+                    resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
                     stream = None
                 child_fds.append(child)
                 streams.append(stream)
@@ -407,7 +420,9 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                 attributes, 2, 0, ctypes.byref(size),
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
-            resources.callback(kernel.DeleteProcThreadAttributeList, attributes)
+            resources.callback(
+                release, "attributes", attributes, lambda: kernel.DeleteProcThreadAttributeList(attributes),
+            )
             for key, value in ((0x20002, handles), (0x2000D, jobs)):
                 if not kernel.UpdateProcThreadAttribute(
                     attributes, 0, key, value, ctypes.sizeof(value), None, None,
@@ -445,6 +460,9 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                     if not kernel.CloseHandle(info.hThread):
                         raise ctypes.WinError(ctypes.get_last_error())
                     info.hThread = None
+            resources.close()
+            if failed_preparation:
+                raise cleanup_error() from failed_preparation[0][1]
             # Transfer only parent streams and native custody, never inheritable child handles.
             parent_streams.pop_all()
             return process, job
@@ -459,23 +477,27 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                     process.retire_job(job, budget.cleanup_timeout())
                 process.wait(budget.cleanup_timeout() if budget else 2.0)
             except BaseException as cleanup:
-                raise OwnedCleanupError(process, job) from cleanup
+                raise cleanup_error() from cleanup
+            if failed_preparation:
+                raise cleanup_error() from failed_preparation[0][1]
             try:
                 for stream in (process.stdin, process.stdout, process.stderr):
                     if stream is not None:
                         stream.close()
             except BaseException as cleanup:
-                raise OwnedCleanupError(process, job) from cleanup
-            if process._thread_handle:
+                raise cleanup_error() from cleanup
+            if process._thread_handle or failed_preparation:
                 # Keep the failed native handle, rather than retrying an uncertain close.
-                raise OwnedCleanupError(process, job) from error
+                raise cleanup_error() from error
             try:
                 process.close()
             except BaseException as cleanup:
-                raise OwnedCleanupError(process, job) from cleanup
+                raise cleanup_error() from cleanup
+        elif failed_preparation:
+            raise cleanup_error() from failed_preparation[0][1]
         elif job is not None:
             if not kernel.CloseHandle(job.handle):
-                raise OwnedCleanupError(None, job) from ctypes.WinError(ctypes.get_last_error())
+                raise cleanup_error() from ctypes.WinError(ctypes.get_last_error())
             job._handle = None
         if on_settled is not None and (process is not None or not creation_attempted):
             on_settled()
