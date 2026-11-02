@@ -149,6 +149,7 @@ def enqueue_message(
             expected_session_id=expected_session_id, idempotency_key=body.idempotency_key,
             report_duplicate=True, runtime_admission=admission,
             enrolled_inbox=True, inbox_refusal=refusal,
+            exact_session=body.exact_session,
         )
 
 

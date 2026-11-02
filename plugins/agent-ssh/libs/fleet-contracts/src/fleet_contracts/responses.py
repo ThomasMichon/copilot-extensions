@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from .records import (
     MAX_QUERY_BYTES,
@@ -80,7 +81,7 @@ class IndexHealth:
             raise BackendResponseError("inconsistent backend process/promotion evidence")
         return cls(data["installationId"], data["version"], state, state == "ok")
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         # Backend process tokens and PIDs are deliberately not part of the public health DTO.
         return asdict(self)
 
@@ -172,7 +173,7 @@ class IndexSearchResult:
         return cls(data["query"], data["available"],
                    tuple(IndexHit.from_dict(hit) for hit in raw_hits))
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
             "available": True,

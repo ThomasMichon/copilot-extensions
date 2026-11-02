@@ -1,7 +1,8 @@
 # Pool-owned assignment startup and retry eligibility
 
-Status: **reviewed design; due-time admission and explicit atomic placement/start
-provider source merged; caller/startup integration and native qualification pending**.
+Status: **reviewed design; due-time admission, explicit atomic placement/start
+provider and opt-in caller source merged; ordinary startup integration and
+native qualification pending**.
 The documentation/design slice merged in
 [#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
 The existing due-time reservation check merged separately in
@@ -12,6 +13,9 @@ this is source acceptance, not admitted caller or installed qualification.
 The [explicit caller boundary](../../../plugins/agent-dispatch/docs/pool-claim-start.md)
 provides negotiated placement and opt-in current-worker acceptance separately
 from ordinary supervisor/prompt migration and the selected startup policy.
+That explicit source slice merged in
+[#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955);
+it does not enable automatic publisher/cohort or supervisor migration.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).

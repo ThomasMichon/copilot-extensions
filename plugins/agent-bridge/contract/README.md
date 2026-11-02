@@ -209,6 +209,21 @@ daemon-ensuring factory, even if its route alone is read-only.
 The mutable current HTTP-51 packets may refresh through their existing owner;
 ordered provenance and all HTTP-50/earlier packets remain unchanged.
 
+### HTTP-51 exact live-CLI capabilities
+
+The same current portfolio additionally captures the independent
+`live_keyed_receipt: 1` and `live_exact_notify: 1` capabilities. The input vector
+declares their real parser commands and expected observations; the actual
+authenticated ASGI inbox, schema-39 provenance and same-process registration
+rollover execute in both fixture installation modes. Prompt admission, read-only
+original receipt, informational notification, capability-less refusal and
+rollover before/after admission are separate observations.
+The real client factory is called with `ensure=False`; ensure/start spies must
+remain untouched. These are local source-bound observations, not installed
+CLI, SDK or native-conversation qualification. Declaration preparation binds
+the affected inbox, schema, targeting and distinct route owners before capture
+without changing historical packets or inventing provenance.
+
 Run all capture/test commands under the invoking harness's bounded test
 supervisor and its isolated source runner where applicable. A prepared registry
 or unit-test pass is not captured capability evidence.

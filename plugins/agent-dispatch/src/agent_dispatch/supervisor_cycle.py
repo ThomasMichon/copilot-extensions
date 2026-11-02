@@ -37,7 +37,7 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             getattr(self, name)(**kwargs)
 
     call("reconcile")
-    call("reconcile_reserving")
+    call("reconcile_reserving", now=now)
     call("release_requested_bodies", now=now)
     call("bind_headless_owner_sessions")
     call("renew_restricted_grants")
@@ -61,7 +61,7 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             call("sweep_task_reservation_consistency")
         except Exception as exc:
             log.error("task-reservation consistency sweep failed: %s", diagnostic_text(str(exc), trace.secrets))
-    call("redrive_unclaimed_spawns")
+    call("redrive_unclaimed_spawns", now=now)
     if self.nudge:
         call("nudge_stalled", now=now)
     if action_inhibited("worker-admission", logger=log):

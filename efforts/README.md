@@ -11,7 +11,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Precomputed Hook Guard Map](active/precomputed-hook-guard-map/README.md) | Active; plan review before producer and lookup-only consumers | Small resident-produced local repository facts; bounded Git identity, missing-map fail-open, no hook-triggered topology acquisition |
+| [Precomputed Hook Guard Map](active/precomputed-hook-guard-map/README.md) | Done; source released and installed Windows consumer accepted | #10031 startup/cutover and #10032 native UNC/non-Windows qualification remain open; bounded Git identity, missing-map fail-open, no hook-triggered topology acquisition |
 | [Python Static Type Safety](active/python-static-type-safety/README.md) | Active; source/candidate gates and canonical view qualified, larger canonical-project preparation | #9807/#9971; 13 strict / 55 pending projects, bounded Installation Context preparation before complete-project admission; existing owners retained, no runtime rollout |
 | [Model-Guided Skill Selection](active/model-guided-skill-selection/README.md) | Active; native SDK witnesses and model preflight recorded, guided comparison and implementation pending | #9809; existing customization, SDK and model-policy owners; no parallel catalog or shared rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |

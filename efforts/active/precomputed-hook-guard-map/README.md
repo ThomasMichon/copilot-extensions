@@ -4,9 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source worktree
 - **Created:** 2026-11-01
-- **Status:** Active
+- **Status:** Done
 - **Umbrella issue:** #9911
-- **Sub-issues:** None selected.
+- **Sub-issues:** #10031 (startup/cutover qualification), #10032 (native platform qualification).
 - **Vision:** [Worktree lifetime and agency authority](../../../visions/plugins/agent-worktrees/README.md)
 
 ## Guiding Intent
@@ -112,9 +112,10 @@ The decomposition and implementation details below are **agent-recommended**.
 
 ### Phase 4 - Qualification and delivery
 
-- [ ] Complete the Validation Plan and document actual behavior.
-- [ ] Land source through required review/CI, then verify release inclusion.
-- [ ] Resolve every Plan/Validation item before marking this effort Done.
+- [x] Complete the Validation Plan and document actual behavior; unexecuted
+  broader qualification is transferred to #10031 and #10032.
+- [x] Land source through required review/CI, then verify release inclusion.
+- [x] Resolve every Plan/Validation item before marking this effort Done.
   Record installed acceptance separately; do not infer it from source delivery.
 
 ## Validation Plan
@@ -127,15 +128,18 @@ The decomposition and implementation details below are **agent-recommended**.
 - [x] Positive, negative, complete-empty, malformed, incomplete and wrong-scope
   views retain distinct truthful outcomes. Managed mutations withdraw old views
   before committing; out-of-band changes require explicit refresh/preparation.
-- [ ] Cover ordinary subdirectories, new files, relative/absolute and multiple
+- [x] Cover ordinary subdirectories, new files, relative/absolute and multiple
   targets, linked worktrees, bare anchors, nested repositories/submodules,
-  aliases, UNC paths and platform case/normalization semantics.
+  aliases and exercised platform case/normalization semantics. Native UNC and
+  unexecuted non-Windows lanes are explicitly transferred to #10032.
 - [x] Verify live mode/kill-switch/grant-expiry changes and existing decisions.
 - [x] Verify serialized current acquisition, atomic concurrent reads,
   failure withdrawal before source mutation and retained retry scopes.
-- [ ] Exercise related add/remove/primary and registry mutation publication,
+- [x] Exercise related add/remove/primary and registry mutation publication,
   preparation/startup publication and explicit refresh; prove no watcher,
   TTL-driven or periodic topology acquisition is installed.
+- [x] Transfer large prepared-caller initial acquisition/startup/cutover deadline
+  qualification to #10031; ordinary Windows construction is not that proof.
 - [x] Exercise the actual cold/warm/missing-map native entry, bounded Git and
   cleanup; preserve one implementation per event and supported ACP behavior.
 - [x] Verify the actual installer-owned fresh wrapper copy and its reader
@@ -389,3 +393,31 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   of growing the anchor guard beyond its hard module cap. The exact changed
   source hashes are re-admitted without changing the cap or baseline.
   The focused alias/builtin packet passed 39 cases.
+- Implementation #9938 merged to Dev after required green CI and assessment
+  of the owner-authored Comment review. The remaining overview names the
+  already-documented native construction/startup deadline qualification limit,
+  not a qualified result; no source test is substituted for that lane.
+  Release inclusion, remaining platform/mutation validation and separately
+  authorized installed acceptance remain open. The next slice observes the
+  generated Main release before any adoption.
+- The normal gated release completed and generated #9984 merged the exact
+  qualified Dev snapshot from #9938. Separately authorized Windows component-
+  only adoption reached matching payload, selected and running version
+  `1.24.408-dev1`, with a settled native runtime transition.
+- Actual runtime producer and deployed guard/reader/parser bytes matched the
+  source. Explicit caller preparation produced a complete map. The declared
+  installed native entry passed ten unmasked Windows PowerShell 5/7 controls:
+  protected cold/warm creates and global-option Git writes denied, reads and
+  missing-map creates did not deny. Missing-map testing used an unprepared
+  disposable caller and did not withdraw the live map. No requested writes ran.
+  Entry-inclusive policy controls completed in 1.641-2.497 seconds.
+- These local results do not qualify native UNC/non-Windows lanes or synchronous
+  initial acquisition across a large prepared-caller inventory. Those remaining
+  source Validation Plan items require explicit disposition before Done.
+- With explicit operator approval, transferred the remaining startup/cutover
+  qualification to #10031 and native UNC/non-Windows qualification to #10032.
+  Both issue bodies retain the existing producer/consumer contracts, actual
+  evidence limits and independent acceptance criteria. No follow-up implementation
+  or deployment authority is inferred. All Plan/Validation items for this
+  source-and-installed-consumer delivery are resolved or explicitly transferred;
+  this effort is Done.

@@ -42,6 +42,7 @@ def test_http51_uses_the_existing_capture_owner_and_keeps_prior_floors():
     assert evidence.SPEC.generation == 51
     assert dict(evidence.SPEC.capability_floors) == {
         "NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION": 51,
+        "NATIVE_SEND_RECEIPT_CAPABILITY_VERSION": 1,
         "RETAINED_INBOX_PROTOCOL_VERSION": 48,
         "RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION": 49,
         "RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION": 50,
@@ -51,7 +52,15 @@ def test_http51_uses_the_existing_capture_owner_and_keeps_prior_floors():
             "protocol.py", "native_send_admission.py", "native_bound_prompt.py",
             "native_keyed_admission.py", "routes/prompts.py", "send_outcome.py",
             "session_prompts.py", "session_targeting_cli.py",
+            "native_send_receipt.py", "native_keyed_client.py", "routes/health.py",
+            "db_core.py", "db_schema.py", "inbox_custody.py", "db_live_sessions.py", "db_live_session_aliases.py",
+            "db_live_message_receipts.py", "live_message_enqueue.py", "live_message_models.py",
+            "live_keyed_receipt.py", "live_exact_notify.py", "routes/live_inbox.py",
+            "routes/live_sessions.py", "routes/live_message_receipts.py",
         )
+    } | {
+        "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
+        "plugins/agent-bridge/extensions/agent-bridge/extension.mjs",
     }
 
 

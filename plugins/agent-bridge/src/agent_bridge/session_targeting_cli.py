@@ -106,6 +106,14 @@ def _send(args: argparse.Namespace) -> None:
 
     validate_options(args)
     core = _core()
+    if getattr(args, "live_exact_notify", False):
+        from .live_exact_notify import send
+        send(args)
+        return
+    if getattr(args, "live_receipt_only", False) or getattr(args, "live_exact", False):
+        from .live_keyed_receipt import send
+        send(args)
+        return
     if getattr(args, "native_invocation_file", None) is not None:
         from .native_keyed_client import send, validate_options
         from .hosting_admission_cli import configure_client as configure_hosting
