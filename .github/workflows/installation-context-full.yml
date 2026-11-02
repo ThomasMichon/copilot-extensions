@@ -46,19 +46,15 @@ permissions:
   contents: read
 
 jobs:
-  worktrees-git-probes:
+  worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
-    name: Worktrees Git probe packet (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Worktrees Git probe packet (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    env:
+    env: &worktrees-git-probes-env
       UV_PYTHON: "3.12"
       PYTEST_ADDOPTS: "-n 2 --max-worker-restart=0"
-    steps:
+    steps: &worktrees-git-probes-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -86,6 +82,13 @@ jobs:
           --test-file tests/test_update_auth_usage.py
           --max-files-per-sub-suite 1
           --subsuite-timeout 240 --plugin-timeout 900
+  worktrees-git-probes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
+    name: Worktrees Git probe packet (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env: *worktrees-git-probes-env
+    steps: *worktrees-git-probes-steps
   dispatch-publication-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-publication'
     name: Dispatch admission publication (Ubuntu)
