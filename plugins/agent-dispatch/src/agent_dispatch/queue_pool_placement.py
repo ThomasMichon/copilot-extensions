@@ -129,6 +129,7 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
 
 def select_pool(
     conn: sqlite3.Connection, task: Task, definitions: tuple[PoolInstanceDefinition, ...],
+    *, execution_machine: str | None = None,
 ) -> PoolInstanceDefinition:
     """Recheck retained routing and count accountable reservations, never caller slots."""
     accounting = ReservationAccountability(conn)
@@ -141,9 +142,15 @@ def select_pool(
         raise TaskError("pool placement requires reconciliation of unaccounted legacy capacity")
     retained = pool_assignment(conn, task.id)
     candidates = definitions
+    if execution_machine is not None:
+        from .bridge_remote import normalize_host
+        candidates = tuple(
+            pool for pool in candidates
+            if normalize_host(pool.machine) == normalize_host(execution_machine)
+        )
     if retained is not None:
         candidates = tuple(
-            pool for pool in definitions
+            pool for pool in candidates
             if pool.identity == (retained.registration_id, retained.machine, retained.env)
         )
         if not candidates or not _permits(candidates[0], task):

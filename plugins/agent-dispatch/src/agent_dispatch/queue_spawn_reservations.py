@@ -353,6 +353,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             carried_session = None
             prior = None
             carried_project = carried_path = carried_host = carried_driver = None
+            carried_execution_machine = None
             if latest_allocation is not None and not new_allocation:
                 carried_project = latest_allocation["allocation_project"]
             conversation_retired = False
@@ -393,6 +394,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     carried_session = prior["session_handle"]
                     carried_project, carried_path = prior["allocation_project"], prior["worktree_path"]
                     carried_host, carried_driver = prior["creating_host"], prior["driver"]
+                    carried_execution_machine = prior["execution_machine"]
                     if carried_session is not None:
                         # rearmed counts as retired too (copilot-extensions#4978):
                         # an operator rearm starts the task over, so its carried
@@ -487,6 +489,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         )
                     carried_worktree = carried_session = None
                     carried_path = carried_host = carried_driver = None
+                    carried_execution_machine = None
                     carried_project = latest_allocation["allocation_project"] if latest_allocation else None
                     worktree_ownership = None
                     conversation_retired = False
@@ -499,6 +502,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     raise TaskError("driver transition cannot discard explicit or required target worktree")
                 carried_worktree = carried_session = None
                 carried_path = carried_host = carried_driver = None
+                carried_execution_machine = None
                 worktree_ownership = None
             if driver == "ordinary-bridge" and not new_allocation:
                 from .ordinary_bridge import carry_agent
@@ -507,20 +511,25 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     conversation_retired, creation_key=creation_key)
                 if prior is not None and carried_worktree == prior["worktree"]:
                     allocation_reservation_key = prior["allocation_reservation_key"] or prior["key"]
+                else:
+                    carried_execution_machine = None
             if pool_catalog_revision is not None:
                 resolved_task = replace(
                     task, target_worktree=carried_worktree,
                     affinity={key: value for key, value in task.affinity.items() if key != "worktree"},
                 )
-                selected_pool = select_pool(conn, resolved_task, catalog.definitions)
+                selected_pool = select_pool(
+                    conn, resolved_task, catalog.definitions,
+                    execution_machine=carried_execution_machine,
+                )
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
                 "session_handle, worktree, inherited_worktree, "
                 "worktree_ownership, conversation_retired, allocation_project, worktree_path, "
                 "creating_host, driver, reserved_at, updated_at, allocation_revision, "
-                "creation_key, allocation_reservation_key, agent_info) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "creation_key, allocation_reservation_key, agent_info, execution_machine) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     key,
                     task_id,
@@ -543,6 +552,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     creation_key,
                     allocation_reservation_key,
                     agent_info,
+                    carried_execution_machine,
                 ),
             )
             if selected_pool is not None:

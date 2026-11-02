@@ -151,6 +151,12 @@ preparation and response validation compare execution hosts with the same
 strip/lower normalization, while keeping the original recorded host spelling
 immutable. Equivalent casing/whitespace is replay, not a different execution
 machine; a genuinely different host still refuses preparation.
+Reservation reuse carries that validated execution host with the exact retained
+workspace, including a distinct successor task in the same logical allocation.
+Placement intersects the retained host with current machine targets, requirements
+and exclusions before committing the claim or slot. It does not replace those
+selectors or infer a legacy execution host from creation provenance. Discarding
+an optional workspace also discards its execution-host constraint.
 Workspace recording and start both recheck that execution machine and current exclusions
 against the retained supplied capabilities and current intrinsic requirements.
 Retained CLI liveness and cleanup use the validated recorded execution machine
