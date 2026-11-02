@@ -235,9 +235,18 @@ owns the revised implementation and validation boundary.
   startup deadline through #9687. This is source closure only; current native
   Job/handle, helper-loss, runspace, lifetime and construction acceptance remain
   open in the [continuation journal](journal/2026/11.01%20non-ui-process-safety.md).
-- [ ] Prepare and qualify a separate no-desktop-observation process-safety
-  stage, preserving existing console/desktop admission and the still-unverified
-  actual no-window/no-focus gate.
+- [x] Prepare and source-qualify the separate no-desktop-observation
+  process-safety stage through #9896, preserving existing console/desktop
+  admission. This closes source preparation, not actual native acceptance.
+- [ ] Obtain the specific native preparation/execution approval and qualify
+  that process-only stage through the original outside containment owner;
+  preserve the separately unverified actual no-window/no-focus gate.
+- [x] Wire and source-qualify the explicit process-only outside driver,
+  PowerShell adapter and non-owning stage through the existing containment
+  owner before native execution. Preserve the four-field request, original
+  clock/root/limits and outside-only final settlement; old functional
+  preparations are not process-only evidence. Merged in #9909; fresh native
+  preparation and separately authorized execution remain open.
 - [ ] Remove first-party native sources, generated copies, custom compiled
   artifacts, compiler build hooks and release construction/verification
   compilation; retain normal integrity and source admission.
