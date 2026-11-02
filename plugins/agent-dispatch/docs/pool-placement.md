@@ -144,7 +144,14 @@ An affirmative `POST /tasks/{id}/start` supplies `worker_id`,
 worker machine/worktree, exact recorded native identity and assignment
 generation, rejects release/cooling/startup fences and applies the existing
 native acquisition authority. Only the successful transition binds the worker
-and native owner. Preparation records `execution_machine` independently of
+and native owner. If that response is lost, the unchanged initial payload
+(including an absent or null expected owner) can replay the already-`STARTED`
+result only for the same validated current worker, native and generation.
+An explicit mismatched expected owner still refuses, and the initial transition
+retains its strict ownership-incarnation fence. Replay leaves task timestamps,
+attachments, reservation and capacity unchanged; an existing hold remains
+intact, while release, cooling, retirement and startup fences still refuse.
+Preparation records `execution_machine` independently of
 `creating_host`: targeted/reused workspaces retain their real ownership and
 creation provenance instead of being relabeled as newly created. Workspace
 preparation and response validation compare execution hosts with the same

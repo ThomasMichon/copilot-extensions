@@ -740,6 +740,12 @@ class QueueLifecycleMixin(QueueProgressMixin):
                     conn, task, worker_id, (extra or {}).get("owner_session_id"),
                     expected_generation,
                 ):
+                    if (
+                        task.status == Status.STARTED
+                        and expected_owner_session_id is None
+                        and task.owner_session_id == (extra or {}).get("owner_session_id")
+                    ):
+                        expected_owner_session_id = task.owner_session_id
                     extra = {**(extra or {}), "owner": worker_id}
                     task = replace(task, owner=worker_id)
             if note == "start" or note == "resume" and (extra or {}).get("owner_session_id"):

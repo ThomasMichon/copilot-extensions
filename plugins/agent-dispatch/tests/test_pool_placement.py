@@ -347,8 +347,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
     assert response.status_code == 200, response.text
     assert response.json()["status"] == Status.STARTED
     replay = client.post(
-        f"/tasks/{t.id}/start", headers=headers(),
-        json={**start, "expected_owner_session_id": "native"},
+        f"/tasks/{t.id}/start", headers=headers(), json=start,
     )
     assert replay.status_code == 200, replay.text
     assert q.get(t.id).generation == placement["assignment"]["task_generation"]
