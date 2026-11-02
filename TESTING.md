@@ -1222,6 +1222,8 @@ controls give acquisition and offline work independent allowances, identify
 the expired phase with its original deadline cause and preserve non-timeout
 integrity refusals. Phase diagnostics stay on stderr; unsupported fallback and
 the caller's subsequent installation are outside offline timing.
+Every verified work unit renews its phase deadline, while transport emits only
+at the existing bounded heartbeat interval and phase boundaries, not per file.
 `test_manager_source_native.py` exercises the real standalone Manager adapter and immutable
 constructor with a complete synthetic Manager/process-owner wheel closure:
 offline construction, retained reuse, changed binding, missing first-party

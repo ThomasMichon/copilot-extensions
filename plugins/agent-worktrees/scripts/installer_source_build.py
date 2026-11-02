@@ -257,7 +257,6 @@ class _SourceProgress:
         self.deadline = now + self.timeout
         self.units += 1
         if self.reported_at is not None and now - self.reported_at < min(1.0, self.timeout / 4):
-            print(".", end="", file=sys.stderr, flush=True)
             return
         if self.reported_at is not None:
             print(file=sys.stderr)

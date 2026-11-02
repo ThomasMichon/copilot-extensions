@@ -96,6 +96,7 @@ def test_source_progress_coalesces_output_not_completed_work(monkeypatch, capsys
     monkeypatch.setattr(wheels, "time", clock)
     elapsed = {}
     chunks = []
+    last_emission = None
     with builds._source_phase("offline", 10, elapsed) as progress:
         chunks.append(capsys.readouterr().err)
         for unit in range(1, 20001):
@@ -104,13 +105,17 @@ def test_source_progress_coalesces_output_not_completed_work(monkeypatch, capsys
             assert progress.deadline == now[0] + 10
             output = capsys.readouterr()
             assert output.out == ""
-            assert output.err
-            chunks.append(output.err)
+            if output.err:
+                chunks.append(output.err)
+                last_emission = now[0]
+            assert last_emission is not None
+            assert now[0] - last_emission <= 1.001 + 1e-9
     assert progress.units == 20000
     assert elapsed["offline"] == 20
     output = capsys.readouterr()
     assert output.out == ""
     chunks.append(output.err)
+    assert len(chunks) <= 25
     assert len("".join(chunks).encode("utf-8")) <= 65536
     assert "".join(chunks).count("Source wheel progress:") <= 21
     assert "completed-units=20000" in output.err
