@@ -776,9 +776,10 @@ def test_tool_only_guard_does_not_disable_markerless_personal_repointing(family)
     assert "current@personal" not in summary["conflicts"]["enabled_plugins"]
 
 
-@pytest.mark.parametrize("name", ["caf\u00e9", "ending ", "line\nbreak"], ids=["quoted-unicode", "trailing-space", "newline"])
+@pytest.mark.parametrize("name", ["caf\u00e9", "ending ", "line\nbreak", "line\rbreak"],
+                         ids=["quoted-unicode", "trailing-space", "newline", "carriage-return"])
 def test_git_family_paths_remain_exact_through_stage_and_retirement(family, name):
-    if os.name == "nt" and (name.endswith(" ") or "\n" in name):
+    if os.name == "nt" and (name.endswith(" ") or any(char in name for char in "\r\n")):
         pytest.skip("This pathname requires native POSIX filesystem semantics")
     root, worktree, configuration = family()
     checkout = root.parent / name

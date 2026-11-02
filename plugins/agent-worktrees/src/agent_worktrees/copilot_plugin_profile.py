@@ -71,7 +71,7 @@ def _common(path: Path) -> str:
     _safe_path(path, path / ".git")
     try:
         result = git_ops.git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path,
-                             isolated_repository=True)
+                             isolated_repository=True, input_data=b"")
     except git_ops.GitError as exc:
         raise _error(f"cannot inspect project Git custody: {exc}") from exc
     return _identity(Path(os.fsdecode(result.stdout).removesuffix("\n")))

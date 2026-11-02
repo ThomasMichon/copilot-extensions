@@ -1633,14 +1633,14 @@ def list_worktree_paths(
     ``isolated_repository`` opts custody probes out of inherited Git selectors.
     """
     res = git("worktree", "list", "--porcelain", "-z", cwd=cwd, check=False,
-              isolated_repository=isolated_repository)
+              isolated_repository=isolated_repository, input_data=b"")
     if res.returncode != 0:
         if fail_on_error:
-            detail = (res.stderr or res.stdout or "git worktree list failed").strip()
+            detail = os.fsdecode(res.stderr or res.stdout or "git worktree list failed").strip()
             raise RuntimeError(detail)
         return []
     paths: list[Path] = []
-    for line in (res.stdout or "").split("\0"):
+    for line in os.fsdecode(res.stdout or b"").split("\0"):
         if line.startswith("worktree "):
             paths.append(Path(line[len("worktree "):]))
     return paths
