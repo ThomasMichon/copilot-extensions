@@ -58,9 +58,12 @@ A terminal pool attempt enters the existing release/retirement path with
 another active assignment. Release intent is not exact-absence evidence:
 historical capacity stays accountable until its original native is retired.
 An identical release replay after qualified retirement preserves that evidence
-instead of reasserting pending native retirement. Newly returned workspace/native
-effects remain accountable, and replay never clears the reservation's unresolved
-transport custody.
+even when the native was bound by its driver-qualified acquisition receipt
+before a session handle was published. Repeating that same receipt-native
+does not reopen pending release or reclaim retired capacity and exclusivity;
+a different late native still requires its own retirement.
+Newly returned workspace/native effects remain accountable, and replay never
+clears the reservation's unresolved transport custody.
 A qualified handleless root retirement is distinct from inherited native
 retirement: its first returned native remains pending release even when the
 workspace was already recorded or failure preceded release. Its empty-native

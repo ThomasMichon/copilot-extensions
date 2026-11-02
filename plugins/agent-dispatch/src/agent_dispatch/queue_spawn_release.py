@@ -58,12 +58,15 @@ class SpawnReleaseMixin:
                 clear_retirement = pool_native_publication(
                     conn, task, row, session_handle, releasing=True,
                 )
-            from .ordinary_native_bindings import is_native_retired
+            from .ordinary_native_bindings import is_native_retired, reservation_native_identity
             retired_replay = bool(
                 terminal_pool and row["release_requested"] and not row["native_release_pending"]
                 and (row["startup_complete"] or row["startup_fenced"])
                 and is_native_retired(row) and not clear_retirement
-                and session_handle in (None, row["session_handle"])
+                and (
+                    session_handle in (None, row["session_handle"])
+                    or session_handle == reservation_native_identity(conn, row)
+                )
                 and worktree in (None, row["worktree"])
             )
             if finished_startup_revision is not None:
