@@ -17,6 +17,7 @@ from .client_categories import CategoryClientMixin
 from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 -- public re-exports
 from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
+from .client_pool_placement import PoolPlacementClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_schedules import ScheduleClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
@@ -29,7 +30,7 @@ from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -233,26 +234,6 @@ class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, Catego
         return self._unwrap(
             self._http.post(f"/tasks/{task_id}/start", json=body)
         )
-
-    def place_pool_task(
-        self, task_id: str, *, reserved_by: str, catalog_revision: int,
-        driver: str = "cli",
-    ) -> dict:
-        """Explicit allocator transaction; no workspace or process is launched here."""
-        return self._unwrap(self._http.post(
-            "/pool-placements", headers=self._control_headers(),
-            json={
-                "version": 1,
-                "task_id": task_id, "reserved_by": reserved_by,
-                "catalog_revision": catalog_revision, "driver": driver,
-            },
-        ))
-
-    def pool_placement_contract(self) -> dict:
-        """Read this executing provider's support, not a package version."""
-        return self._unwrap(self._http.get(
-            "/pool-placements/contract", headers=self._control_headers(),
-        ))
 
     def task_grant(
         self, task_id: str, worker_id: str, owner_session_id: str,

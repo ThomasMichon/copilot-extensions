@@ -62,6 +62,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         owner_session_id: str | None = None,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
+        require_pool_assignment: bool = False,
         now: float | None = None,
     ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match)."""
@@ -88,6 +89,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             start_acquisition_authority=authority,
             expected_owner_session_id=expected_owner_session_id,
             expected_generation=expected_generation,
+            require_pool_assignment=require_pool_assignment,
         )
 
     def complete(
@@ -711,6 +713,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         idempotent_replay: bool = False,
         report_replay: bool = False,
         start_acquisition_authority: dict | None = None,
+        require_pool_assignment: bool = False,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -729,6 +732,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             from .queue_pool_placement import pool_assignment
+            if require_pool_assignment and pool_assignment(conn, task_id) is None:
+                raise TaskError("explicit pool start requires an allocator-owned pool assignment")
             if (
                 note != "start" and task.status == Status.CLAIMED and task.owner is None
                 and worker_id is not None and pool_assignment(conn, task_id) is not None

@@ -17,7 +17,13 @@ pool-owned placement before embodiment from worker acceptance, and adds bounded
 startup, scoped decline routing/closeout and retry-eligibility design. The existing
 queued due-time admission fix merged in
 [#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755);
-atomic placement and the remaining design are not implemented or installed-qualified.
+The explicit atomic placement and affirmative-start provider source merged in
+[#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859).
+Admitted caller/startup integration, the remaining design and installed/native
+qualification remain open.
+The [explicit caller boundary](../../../plugins/agent-dispatch/docs/pool-claim-start.md)
+adds negotiated allocator requests and opt-in current-worker acceptance;
+automatic supervisor/prompt migration and startup policy remain separate gates.
 Existing submission/conversation phases and their custodians remain unchanged.
 
 **Priority clarification (2026-10-31):** drive the
@@ -222,6 +228,14 @@ live claim token. No new blanket ACK or executor appointment is created.
       publisher or admission caller is enabled.
       Fresh owner publication, external atomicity, mixed writers and placement remain separate
       acceptance gates.
+- [x] Land and source-qualify explicit atomic configured-pool placement and
+      affirmative worker start in
+      [#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859).
+      Transactional claim/capacity, current workspace/native and caller
+      conditions, receipt/release retirement, routing and historical accounting
+      have coupled queue/API/source coverage. Admitted caller migration,
+      bounded startup decisions/exhaustion, selected counters/backoffs,
+      suspended recovery and installed qualification remain unchecked above.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
@@ -2025,3 +2039,61 @@ twenty-seven selectors with cleanup verified. The current-head review, required
 checks and actual merge remain open. Caller migration, bounded startup policy,
 unknown-effect exhaustion and the full parent/native acceptance remain separate
 required gates; this correction activates no runtime.
+
+### 2026-11-02 - Explicit atomic claim/start provider merged
+
+[#9859](https://github.com/ThomasMichon/copilot-extensions/pull/9859) is actually
+squash-merged to `dev` as `da6db5171438f3167d308158b5bd4b85d1b4a8fb`, from final
+source `5c55589ff154feaf4cb8d5139aee0e30499d8a7f`. The provider now supports
+transactional configured-pool selection, reservation/slot acquisition and
+allocator-owned `CLAIMED` before workspace/native startup, with affirmative
+current-worker `STARTED`. Receipt-first binding, exact retirement, retained
+execution host, current routing, historical capacity and replay conditions are
+qualified at the source/API tier. Shared and task-scoped callers preserve
+explicit expected-owner conditions. Empty pool releases cannot age-force-fail
+without qualified absence; unassigned legacy recovery and visible old-provider
+holds remain distinct.
+
+The final bounded coupled matrix passes **1636 controls**, one existing skip,
+across31selectors with cleanup verified. Three current authority/storage/recovery
+owners pass mypy; inherited reservation/lifecycle mixin debt remains explicitly
+unqualified. Install, documentation, lint and changed-module guards pass.
+The actual current bot review is COMMENTED; the Maintainer assessed the repeated
+unsupported owner-token objection against current source and exercised a narrow
+authorized override. Remaining described failures are corrected by current
+source/regressions, not waived; no reviewer approval was fabricated and no
+reviewer-owned thread was author-resolved. The managed direct merge verified
+current head, required CI and provider-authorized completion.
+
+Only the provider source item receives completion credit. The comprehensive
+implementation and validation items remain open. Next is admitted caller/startup
+integration through existing supervision owners: complete effective publication
+and runtime support, retained claim/start episodes, bounded reachable-worker
+decisions and exhaustion, including unknown no-handle/no-receipt effects without
+indefinite CLAIMED or prematurely freed capacity. Selected three-attempt,
+five-minute nudge, thirty-minute decision and1/3/6/12-hour cooldown semantics,
+suspended recovery, declined/submitter closeout and installed/native
+qualification still require implementation and acceptance. Both the parent
+effort and this amendment remain Active; this merge activates no runtime.
+
+### 2026-11-02 - Explicit allocator and worker callers prepared
+
+The explicit allocator client now negotiates the running provider before
+placement and validates the transactional task/reservation/assignment result.
+Unknown outcomes never trigger a legacy reservation, a newer catalog request
+or another spawn. Active replay remains `reserved=false` custody evidence.
+
+An opt-in `start --pool-generation` caller accepts the actual current worker
+and native incarnation without first taking a second execution claim.
+Its additive health advertisement needs only ordinary API-read authority,
+not the allocator's control credential. A versioned start-body field requires
+the actual pool assignment inside the transition transaction; it cannot
+silently accept a legacy interactive claim. Ordinary starts and task-only
+projection remain distinct, and projected workers reject the new fleet option.
+No ordinary supervisor, publisher or seed prompt is automatically switched.
+
+The bounded five-selector caller/placement/replay/CLI matrix passes **473
+controls** with cleanup verified; focused new-caller typing and changed Python
+lint pass. Current-head review and actual merge remain open. The selected
+startup attempts, decision nudges/exhaustion/cooldowns, automatic caller/cohort
+migration and all remaining parent/native gates are still required.
