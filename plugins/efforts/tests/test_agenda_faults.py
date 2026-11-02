@@ -394,3 +394,411 @@ def test_malformed_import_cursor_is_diagnostic(
         STORE.mutate(tmp_path, request({"operation": "init", "documents": documents}, 0, "init"))
     with pytest.raises(AGENDA.AgendaError, match="no accepted initialization|uninitialized"):
         STORE.read(tmp_path)
+
+
+@pytest.fixture
+def provider_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    import agenda_provider
+
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "agenda_contract.py").write_text("CONTRACT_VERSIONS = (1, 2)\n")
+    (package / "__main__.py").write_text(
+        "import argparse\n"
+        "def build_parser():\n"
+        " p=argparse.ArgumentParser(); s=p.add_subparsers(dest='command')\n"
+        " a=s.add_parser('agenda-publish')\n"
+        " a.add_argument('--contract-version',type=int,choices=(1,2),default=1)\n"
+        " a.add_argument('--json',action='store_true'); return p\n")
+    health = {"capabilities": ["worktree-agendas-v2"],
+              "worktrees": {"status": "ready", "generation": "a" * 32}}
+    health_file = tmp_path / "health.json"
+    health_file.write_text(json.dumps(health))
+    calls = tmp_path / "calls.json"
+    mode = tmp_path / "reply-mode.txt"
+    mode.write_text("ok")
+    (package / "worktrees_client.py").write_text(
+        "import json\nfrom pathlib import Path\n"
+        f"HEALTH=Path({str(health_file)!r}); CALLS=Path({str(calls)!r}); MODE=Path({str(mode)!r})\n"
+        "def read_health(): return json.loads(HEALTH.read_text())\n"
+        "class Client:\n"
+        " def _request(self, action, payload, **bounds):\n"
+        "  CALLS.write_text(json.dumps({'action':action,'payload':payload,'bounds':bounds}))\n"
+        "  if MODE.read_text()=='unsupported':\n"
+        "   return {'ok':False,'contract_version':2,'error':{'code':'unsupported','message':'fixture unsupported'}}\n"
+        "  b=payload['observation']; s=b['source']\n"
+        "  return {'ok':True,'contract_version':2,'generation':payload['expected_generation'],\n"
+        "   'sequence':19,'project':payload['project'],'worktree_id':s['worktree'],\n"
+        "   'session_id':s['session'],'availability':'observed','observation':b}\n"
+        "def _control_client(): return Client()\n")
+    monkeypatch.setattr(agenda_provider, "PROVIDER",
+        f"import sys; sys.path.insert(0, {str(tmp_path)!r})\n" + agenda_provider.PROVIDER)
+    return {"package": package, "calls": calls, "mode": mode, "health": health_file,
+            "adapter": agenda_provider}
+
+
+def v2_observation(home: Path) -> bytes:
+    observation = STORE.delivery_record(home)[1]
+    observation["version"] = 2
+    observation["snapshot"]["cursor_version"] = 4
+    observation["source"]["session"] = "fixture-head"
+    return (STORE.encode(observation) + "\n").encode()
+
+
+def test_provider_v2_selected_interpreter_negotiates_then_sends_exact_payload(
+    home: Path, provider_fixture: dict[str, Any]
+) -> None:
+    payload = v2_observation(home)
+    reply = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", payload)
+    assert reply["ok"] and reply["contract_version"] == 2 and reply["sequence"] == 19
+    calls = json.loads(provider_fixture["calls"].read_text())
+    assert calls == {"action": "agenda-publish", "payload": {
+        "contract_version": 2, "project": "fixture-project",
+        "expected_generation": "a" * 32, "observation": json.loads(payload)},
+        "bounds": {"max_response_bytes": 35 * 1024, "total_timeout": 1.0}}
+
+
+@pytest.mark.parametrize("unsupported", ["declaration", "capability", "unready", "generation", "parser"])
+def test_provider_v2_missing_support_never_enters_publication(
+    home: Path, provider_fixture: dict[str, Any], unsupported: str
+) -> None:
+    if unsupported == "declaration":
+        (provider_fixture["package"] / "agenda_contract.py").write_text("CONTRACT_VERSIONS=(1,)\n")
+    elif unsupported == "parser":
+        (provider_fixture["package"] / "__main__.py").write_text(
+            "import argparse\ndef build_parser(): return argparse.ArgumentParser()\n")
+    else:
+        health = json.loads(provider_fixture["health"].read_text())
+        if unsupported == "capability":
+            health["capabilities"] = ["worktree-agendas-v1"]
+        elif unsupported == "unready":
+            health["worktrees"]["status"] = "draining"
+        else:
+            health["worktrees"]["generation"] = "invalid"
+        provider_fixture["health"].write_text(json.dumps(health))
+    result = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", v2_observation(home))
+    assert result["ok"] is False and result["error"]["message"]
+    assert not provider_fixture["calls"].exists()
+
+
+def test_provider_v2_structured_unsupported_is_visible(
+    home: Path, provider_fixture: dict[str, Any]
+) -> None:
+    provider_fixture["mode"].write_text("unsupported")
+    result = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", v2_observation(home))
+    assert result["error"]["code"] == "unsupported"
+    assert provider_fixture["calls"].exists()
+
+
+def test_provider_probe_uses_actual_build_parser_without_main_project_option() -> None:
+    import ast
+    import agenda_provider
+
+    # This fixture requires the source provider test context. It never imports
+    # a real host endpoint or enters the provider's operational main routine.
+    main = pytest.importorskip("agent_worktrees.__main__", reason="actual provider test dependencies unavailable")
+    tree = ast.parse(agenda_provider.PROVIDER)
+    parse_call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "parse_args")
+    argv = ast.literal_eval(parse_call.args[0])
+    assert argv == ["agenda-publish", "--contract-version", "2", "--json"]
+    parsed = main.build_parser().parse_args(argv)
+    assert parsed.command == "agenda-publish" and parsed.contract_version == 2
+    with pytest.raises(SystemExit):
+        main.build_parser().parse_args([*argv, "--project", "fixture-project"])
+
+
+def test_provider_isolated_child_ignores_cwd_and_pythonpath_shadow_modules(
+    home: Path, provider_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shadow = home / "untrusted-cwd"
+    shadow.mkdir()
+    touched = home / "shadow-executed"
+    malicious = f"open({str(touched)!r},'w').write('executed')\nraise RuntimeError('shadow import')\n"
+    (shadow / "json.py").write_text(malicious)
+    (shadow / "re.py").write_text(malicious)
+    package = shadow / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text(malicious)
+    monkeypatch.chdir(shadow)
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    result = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", v2_observation(home))
+    assert result["ok"] is True
+    assert not touched.exists()
+    assert provider_fixture["calls"].exists()
+
+
+@pytest.mark.parametrize(("initial", "replacement", "expected"), [
+    ("result = 0\nif False:\n    result = 1\nresult = 2\n",
+     "result = 0\nif False:\n    result = 1\n    result = 2\n", "source"),
+    ('{"label":"a b"}', '{"label":"a  b"}', "config"),
+])
+def test_context_input_preserves_behavior_changing_whitespace(
+    tmp_path: Path, initial: str, replacement: str, expected: str
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit
+    if expected == "source":
+        before: dict[str, Any] = {}
+        after: dict[str, Any] = {}
+        exec(initial, before)
+        exec(replacement, after)
+        assert before["result"] == 2 and after["result"] == 0
+    else:
+        assert json.loads(initial)["label"] != json.loads(replacement)["label"]
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, replacement)["transition"]["decision"] == "revisit-admitted"
+
+
+@pytest.mark.parametrize(("initial_kind", "next_kind", "initial", "replacement", "admitted"), [
+    ("observation", "observation", "condition ready", " condition \n ready ", False),
+    ("observation", "input", "condition ready", " condition \n ready ", False),
+    ("input", "observation", "same input", "same input", False),
+    ("input", "observation", "same input", "same  input", True),
+    ("input", "input", {"nested": ["a b"]}, {"nested": ["a  b"]}, True),
+    ("insight", "input", {"nested": ["a b"]}, {"nested": [" a  b "]}, False),
+])
+def test_context_subject_input_policy_is_anchored_against_kind_churn(
+    tmp_path: Path, initial_kind: str, next_kind: str, initial: Any,
+    replacement: Any, admitted: bool
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    baseline = context(initial)
+    baseline["facts"][0]["kind"] = initial_kind
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    proposed = context(replacement)
+    proposed["facts"][0]["kind"] = next_kind
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": proposed,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "Input change matters only under its original subject policy.",
+                     "evidence_refs": ["actual-input"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == ("revisit-admitted" if admitted else "not-admitted")
+    state = STORE.read(tmp_path)
+    assert state["documents"]["cursor"]["item_state"][item]["visits"] == (2 if admitted else 1)
+
+
+def test_context_prose_policy_remains_anchored_after_subject_omission(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    configured = board()
+    for definition in configured["items"].values():
+        definition["relevant_subjects"].append("condition")
+    baseline = context({"input": "A"})
+    baseline["facts"].append({"kind": "observation", "subject": "condition",
+        "value": "condition ready", "evidence_ref": "initial-prose"})
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": configured, "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    changed = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": context({"input": "B"}),
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "Input B changes feasible behavior.", "evidence_refs": ["input-B"]},
+        "approach": {"action": "Run parent"}})
+    assert changed["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    proposed = context({"input": "B"})
+    proposed["facts"].append({"kind": "input", "subject": "condition",
+        "value": " condition \n ready ", "evidence_ref": "renamed-input-label"})
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": current(tmp_path)[2], "context": proposed,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["condition"],
+                     "causal_change": "A changed label cannot redefine inherited prose as raw input.",
+                     "evidence_refs": ["renamed-label"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == "not-admitted"
+
+
+def test_context_raw_input_known_content_is_not_forgotten_after_omission(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    configured = board()
+    for definition in configured["items"].values():
+        definition["relevant_subjects"].append("source")
+    original_source = "if False:\n    result = 1\nresult = 2\n"
+    baseline = context({"input": "A"})
+    baseline["facts"].append({"kind": "input", "subject": "source",
+        "value": original_source, "evidence_ref": "original-source"})
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": configured, "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    changed = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": context({"input": "B"}),
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "Changed B input.", "evidence_refs": ["input-B"]},
+        "approach": {"action": "Run parent"}})
+    assert changed["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    proposed = context({"input": "B"})
+    proposed["facts"].append({"kind": "observation", "subject": "source",
+        "value": original_source, "evidence_ref": "same-source-new-kind"})
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": current(tmp_path)[2], "context": proposed,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["source"],
+                     "causal_change": "Same preserved source cannot become novel by changing kind.",
+                     "evidence_refs": ["new-label"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == "not-admitted"
+
+
+def test_context_raw_delimiter_whitespace_preserves_actual_split_behavior(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit
+    initial = {"delimiter": ",", "text": "a b"}
+    replacement = {"delimiter": " ", "text": "a b"}
+    assert initial["text"].split(initial["delimiter"]) == ["a b"]
+    assert replacement["text"].split(replacement["delimiter"]) == ["a", "b"]
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, replacement)["transition"]["decision"] == "revisit-admitted"
+
+
+@pytest.mark.parametrize(("initial", "replacement"), [
+    (",", " "), (" ", "\t"), ("\n", "\r\n"),
+    ({"nested": [","]}, {"nested": [" "]}),
+    ({"nested": [{"separator": "\t"}]}, {"nested": [{"separator": "  "}]}),
+])
+def test_context_raw_whitespace_only_values_remain_meaningful_and_known(
+    tmp_path: Path, initial: Any, replacement: Any
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit, current
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    admitted = revisit(tmp_path, replacement)
+    assert admitted["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    rejected = revisit(tmp_path, initial)
+    assert rejected["transition"]["reason_code"] == "previously-used-context"
+    item = current(tmp_path)[1]
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]["visits"] == 2
+
+
+@pytest.mark.parametrize("kind", ["input", "observation", "insight"])
+def test_context_raw_empty_content_is_valid_and_prose_empty_is_invalid(
+    tmp_path: Path, kind: str
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS
+    baseline = context("")
+    baseline["facts"][0]["kind"] = kind
+    initial = v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "empty")
+    if kind == "input":
+        assert STORE.mutate(tmp_path, initial)[0]["persisted"] is True
+        return
+    with pytest.raises(AGENDA.AgendaError, match="normalized-empty"):
+        STORE.mutate(tmp_path, initial)
+    baseline["facts"][0]["value"] = " \t\n"
+    req = v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "whitespace")
+    with pytest.raises(AGENDA.AgendaError, match="normalized-empty"):
+        STORE.mutate(tmp_path, req)
+
+
+def test_context_prose_blank_revisit_rejects_without_partial_acceptance(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    baseline = context("known condition")
+    baseline["facts"][0]["kind"] = "observation"
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    proposed = context(" \t\n")
+    # A kind change cannot turn this lineage's original prose into raw input.
+    before = STORE.read(tmp_path)
+    accepted = STORE.history(tmp_path)
+    with pytest.raises(AGENDA.AgendaError, match="normalized-empty"):
+        update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+            "predecessor_attempt_id": attempt, "context": proposed,
+            "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                         "causal_change": "Whitespace is not new prose information.", "evidence_refs": ["changed-label"]},
+            "approach": {"action": "Run parent"}})
+    assert STORE.read(tmp_path) == before and STORE.history(tmp_path) == accepted
+
+
+@pytest.mark.parametrize(("initial", "replacement"), [
+    ({"flag": True}, {"flag": None}),
+    ({"enabled": True, "other": "x"}, {"other": "x"}),
+    ({"id": 1}, {"id": 2}),
+    ({"flag": None}, {}),
+    (None, {}), ({}, []), ([], ""), ("", None),
+    ({"nested": [{"id": 1, "flag": True}]}, {"nested": [{"id": 2, "flag": None}]}),
+])
+def test_context_complete_raw_json_admits_changed_payload_and_refuses_known_return(
+    tmp_path: Path, initial: Any, replacement: Any
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit, current, expand, update
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    original_records = STORE.read(tmp_path)["records"]
+    outcome(tmp_path)
+    root = current(tmp_path)
+    child = expand(tmp_path, ["nested"])["transition"]
+    outcome(tmp_path, "done")
+    update(tmp_path, {"operation": "return", "frame_id": child["frame_id"],
+        "expansion_id": child["expansion_id"], "acceptance_ref": "child accepted", "evidence": proof()})
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]["decompositions"] == 1
+    admitted = revisit(tmp_path, replacement)
+    assert admitted["transition"]["decision"] == "revisit-admitted"
+    state = STORE.read(tmp_path)
+    assert state["documents"]["cursor"]["item_state"][root[1]]["decompositions"] == 0
+    assert all(state["records"][identity] == value for identity, value in original_records.items())
+    outcome(tmp_path)
+    known_return = revisit(tmp_path, initial)
+    assert known_return["transition"]["reason_code"] == "previously-used-context"
+
+
+@pytest.mark.parametrize("key", ["id", "uuid", "timestamp", "session", "revision", "metadata"])
+def test_context_payload_metadata_names_are_data_but_outer_references_are_not(
+    tmp_path: Path, key: str
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit, current, update
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context({key: 1}), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, {key: 2})["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    same = context({key: 2}, evidence_ref="brand-new-reference", kind="observation")
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": same,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": [],
+                     "causal_change": "Changing evidence and kind labels does not change the payload.",
+                     "evidence_refs": ["brand-new-reference"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == "not-admitted"
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]["visits"] == 2
+
+
+def test_context_prose_nested_omission_readdition_retains_conservative_knowledge(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit, current
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context({"nested": {"input": "A", "condition": "ready"}}, kind="observation"),
+        "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, {"nested": {"input": "B"}})["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    before = STORE.read(tmp_path)
+    result = revisit(tmp_path, {"nested": {"input": "B", "condition": "ready"}})
+    assert result["transition"]["reason_code"] == "previously-known-facts"
+    item = current(tmp_path)[1]
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]["attempts"] == (
+        before["documents"]["cursor"]["item_state"][item]["attempts"])
+
+
+def test_context_raw_null_and_observed_absence_have_distinct_behavior(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit
+    initial, absent = {"flag": None}, {}
+    assert initial.get("flag", True) is None and absent.get("flag", True) is True
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, absent)["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    assert revisit(tmp_path, initial)["transition"]["reason_code"] == "previously-used-context"

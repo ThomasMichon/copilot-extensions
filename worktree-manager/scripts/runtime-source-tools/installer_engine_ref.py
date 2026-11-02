@@ -328,5 +328,8 @@ def rewrite_to_local(script_path: Path, ext: str) -> bool:
     if count != 1:
         return False
     if rewritten != text:
-        script_path.write_text(rewritten, encoding="utf-8")
+        with script_path.open(
+            "w", encoding="utf-8", newline="\r\n" if ext == "ps1" else "\n",
+        ) as stream:
+            stream.write(rewritten)
     return True

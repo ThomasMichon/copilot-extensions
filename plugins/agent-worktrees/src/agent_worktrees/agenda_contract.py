@@ -8,6 +8,8 @@ import re
 from datetime import datetime, timedelta
 
 CAPABILITY = "worktree-agendas-v1"
+V2_CAPABILITY = "worktree-agendas-v2"
+CONTRACT_VERSIONS = (1, 2)
 BODY_BYTES = 32 * 1024
 FRAME_BYTES = 35 * 1024
 MAX_SEQUENCE = (1 << 63) - 1
@@ -32,10 +34,25 @@ class AgendaError(ValueError):
         self.code = code
 
 
-def failure(code: str, message: str) -> dict:
+def contract_version(value) -> int:
+    if type(value) is not int or value not in CONTRACT_VERSIONS:
+        raise AgendaError("unsupported agenda contract version")
+    return value
+
+
+def error_version(payload) -> int:
+    value = payload.get("contract_version") if isinstance(payload, dict) else None
+    return value if type(value) is int and value in CONTRACT_VERSIONS else 1
+
+
+def capability(version: int) -> str:
+    return CAPABILITY if contract_version(version) == 1 else V2_CAPABILITY
+
+
+def failure(code: str, message: str, *, version: int = 1) -> dict:
     return {
         "ok": False,
-        "contract_version": 1,
+        "contract_version": contract_version(version),
         "error": {"code": code, "message": message[:1024] or code},
     }
 
@@ -127,8 +144,7 @@ def selection(payload: dict) -> tuple[str, str, str | None]:
     from . import config as cfg
 
     exact(payload, {"contract_version", "project", "worktree_id", "session_id"})
-    if type(payload["contract_version"]) is not int or payload["contract_version"] != 1:
-        raise AgendaError("unsupported agenda contract version")
+    contract_version(payload["contract_version"])
     project = identity(payload["project"], "project")
     if cfg._PROJECT_NAME_RE.fullmatch(project) is None:
         raise AgendaError("invalid project")
@@ -161,11 +177,11 @@ def _revisit_timestamp(value) -> None:
         raise AgendaError("next revisit timestamp must include a timezone")
 
 
-def observation(body: dict) -> str:
+def observation(body: dict, *, version: int | None = None) -> str:
     bounded(body, depth=4)
     exact(body, {"schema", "version", "source", "revision", "committed_at", "snapshot"})
     if body["schema"] != "efforts.agenda-observation" or (
-        type(body["version"]) is not int or body["version"] != 1
+        type(body["version"]) is not int or body["version"] not in (1, 2)
     ):
         raise AgendaError("unsupported committed agenda schema")
     source = body["source"]
@@ -184,14 +200,12 @@ def observation(body: dict) -> str:
         type(snapshot["revision"]) is not int or snapshot["revision"] != revision
     ):
         raise AgendaError("snapshot identity or revision mismatch")
-    if not isinstance(snapshot["status"], str) or snapshot["status"] not in {
-        "working",
-        "waiting",
-        "steering",
-        "complete",
-    }:
+    statuses = {"working", "waiting", "complete"}
+    statuses.add("steering" if body["version"] == 1 else "replanning")
+    if not isinstance(snapshot["status"], str) or snapshot["status"] not in statuses:
         raise AgendaError("invalid snapshot status")
-    if type(snapshot["cursor_version"]) is not int or snapshot["cursor_version"] not in (1, 2):
+    cursors = (1, 2) if body["version"] == 1 else (4,)
+    if type(snapshot["cursor_version"]) is not int or snapshot["cursor_version"] not in cursors:
         raise AgendaError("invalid cursor version")
     for field in ("stack", "exit_criteria", "queued", "notes", "deferred", "due_rechecks"):
         if not isinstance(snapshot[field], list):
@@ -215,18 +229,22 @@ def observation(body: dict) -> str:
             raise AgendaError(f"invalid snapshot {field}")
     if snapshot["next_revisit_at"] is not None:
         _revisit_timestamp(snapshot["next_revisit_at"])
-    return encode(body, BODY_BYTES)
+    encoded = encode(body, BODY_BYTES)
+    if version is not None and contract_version(version) == 1 and body["version"] != 1:
+        raise AgendaError("cursor-4 observation requires worktree-agendas-v2", "unsupported")
+    return encoded
 
 
 def validate_reply(result: dict, request: dict, generation: str) -> dict:
     exact(result, REPLY_FIELDS)
     selection(request)
+    version = contract_version(request["contract_version"])
     hex_id(result["generation"], "response generation")
     if (
         result["ok"] is not True
         or type(result["contract_version"]) is not int
         or (
-            result["contract_version"] != 1
+            result["contract_version"] != version
             or result["generation"] != generation
             or any(result[key] != request[key] for key in ("project", "worktree_id", "session_id"))
             or type(result["sequence"]) is not int
@@ -244,7 +262,7 @@ def validate_reply(result: dict, request: dict, generation: str) -> dict:
     }:
         raise AgendaError("invalid agenda availability", "invalid-response")
     if availability == "observed":
-        observation(body)
+        observation(body, version=version)
         if body["source"]["worktree"] != request["worktree_id"] or (
             body["source"]["session"] != request["session_id"] or request["session_id"] is None
         ):

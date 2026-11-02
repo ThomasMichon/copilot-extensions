@@ -123,6 +123,8 @@ def helper_closure(
         package = "" if name.startswith("@") else (
             name if path.name == "__init__.py" else name.rpartition(".")[0]
         )
+        if relative.startswith("tools/"):
+            package = ".".join(("tools", *path.relative_to(root / "tools").parts[:-1]))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 pending.extend(alias.name for alias in node.names)

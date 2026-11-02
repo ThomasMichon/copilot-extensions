@@ -166,7 +166,8 @@ def _schema(db: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def transaction(home: Path, *, create: bool = False, write: bool = False) -> Iterator[sqlite3.Connection]:
+def transaction(home: Path, *, create: bool = False, write: bool = False,
+                store_version: int | None = None) -> Iterator[sqlite3.Connection]:
     home = safe_path(home, directory=True)
     if not home.is_dir():
         raise AgendaError("explicit state home must already exist")
@@ -191,8 +192,10 @@ def transaction(home: Path, *, create: bool = False, write: bool = False) -> Ite
             if version == 0 and not create and (home / agenda_migration.RECOVERY).exists():
                 raise AgendaError("initialization interrupted; retry the saved init request in "
                                   "agenda.init-recovery.json; never restore stale cursor.json")
-            if version not in (0, 1) or (version == 0 and not create):
+            if version not in (0, 1, 2) or (version == 0 and not create):
                 raise AgendaError("unsupported or uninitialized agenda store version")
+            if store_version is not None and version not in (0, store_version):
+                raise AgendaError("request and store execution policy versions disagree; no automatic migration")
             if version == 0 and db.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
                 raise AgendaError("refusing an unrelated SQLite database")
@@ -205,7 +208,11 @@ def transaction(home: Path, *, create: bool = False, write: bool = False) -> Ite
                     os.close(fd)
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if create:
-                _schema(db)
+                if store_version == 2:
+                    from agenda_store_v2 import schema
+                    schema(db)
+                else:
+                    _schema(db)
             yield db
             db.execute("COMMIT")
         finally:
@@ -220,6 +227,9 @@ def transaction(home: Path, *, create: bool = False, write: bool = False) -> Ite
 
 
 def _state(db: sqlite3.Connection, home: Path) -> dict[str, Any]:
+    if db.execute("PRAGMA user_version").fetchone()[0] == 2:
+        from agenda_store_v2 import state
+        return state(db, home)
     row = db.execute("SELECT store_id, revision, committed_at, documents, metadata FROM state").fetchone()
     if row is None:
         raise AgendaError("agenda store has no accepted initialization")
@@ -266,6 +276,12 @@ def mutate(home: Path, request: dict[str, Any], *, session: str | None = None,
            actor: str | None = None, publisher_configured: bool = False,
            import_home: Path | None = None) -> tuple[dict[str, Any], bool]:
     home = safe_path(home, directory=True)
+    if isinstance(request, dict) and type(request.get("version")) is int and request["version"] == 2:
+        if import_home is not None:
+            raise AgendaError("new execution mode does not import or migrate active legacy lanes")
+        from agenda_store_v2 import mutate as mutate_v2
+        return mutate_v2(home, request, session=session, actor=actor,
+                         publisher_configured=publisher_configured)
     if import_home is not None:
         import_home = safe_path(import_home, directory=True)
     fields(request, {"schema", "version", "expected_revision", "operation_id", "change"})
@@ -308,7 +324,7 @@ def mutate(home: Path, request: dict[str, Any], *, session: str | None = None,
             initial_cursor = _object(_object(change["documents"], "documents").get("cursor"),
                                      "initial cursor")
         _revision(initial_cursor.get("revision"), "initial imported revision", increment=True)
-    with transaction(home, create=initializing, write=True) as db:
+    with transaction(home, create=initializing, write=True, store_version=1) as db:
         prior = db.execute("SELECT request, result FROM operations WHERE operation_id=?",
                            (operation_id,)).fetchone()
         if prior:

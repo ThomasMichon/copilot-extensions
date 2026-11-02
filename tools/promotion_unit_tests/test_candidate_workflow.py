@@ -37,7 +37,7 @@ def test_real_candidate_workflow_freezes_once_before_units_and_artifacts():
     units = "\n".join(step.get("run", "") for step in jobs["source-units"]["steps"])
     assert '"$RUNNER_TEMP/candidate/tools/run-promotion-unit-tests.py"' in units
     assert '--development-root "$GITHUB_WORKSPACE"' in units and '--candidate-tree "$CANDIDATE_TREE"' in units
-    assert jobs["source-units"]["timeout-minutes"] == 5
+    assert jobs["source-units"]["timeout-minutes"] == 20
     assert "source-units" not in jobs["build-python-artifacts"]["needs"]
     assert jobs["python-artifacts"]["permissions"]["id-token"] == "write"
     assert "id-token" not in jobs["build-python-artifacts"]["permissions"]

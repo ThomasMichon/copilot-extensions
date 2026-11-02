@@ -26,12 +26,16 @@ fallback, and cross-platform policy producers:
 | [**planning-efforts**](skills/planning-efforts/SKILL.md) | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
 | [**efforts-setup**](skills/efforts-setup/SKILL.md) | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
 | [**driving-backlog-burndown**](skills/driving-backlog-burndown/SKILL.md) | Execution: charter a scoped backlog recovery, maintain the item/owner ledger, supervise original owners through verified outcomes, and preserve state across native rollover or explicit transfer. Ships charter, dashboard, checkpoint and handoff templates; no scheduler or runtime is started. |
-| [**driving-effort-agendas**](skills/driving-effort-agendas/SKILL.md) | Opt-in execution aide: coarse nodes, explicit exits and bounded root/child/deferred chains. Supplies a standalone transactional Python CLI/store, optional committed-observation publisher and compatible legacy read-only helper; no hook or service is required. |
+| [**driving-effort-agendas**](skills/driving-effort-agendas/SKILL.md) | Opt-in execution aide: accepted tail queues, scoped subqueues, saved continuations and explicit context-qualified source CLI. Retains the transactional store and strict legacy count policy; installed copies must support the selected contract. No hook or service is required. |
 
 The optional agenda helper is invoked directly from the skill's payload path
 using an existing Python 3 interpreter and an explicit journal/state-home path.
 The [managed command contract](skills/driving-effort-agendas/references/managed-agenda.md)
 owns `read`/`next`/`check`/`history` and explicit `init`/semantic `update`/`publish`.
+The [field contract](skills/driving-effort-agendas/references/field-contract.md)
+distinguishes exact enums/identifiers from prose/raw JSON and documents literal
+text versus Markdown rendering; accepted string punctuation does not imply a
+rich-text renderer.
 SQLite transactions preserve full state/history, stable retry results and finite
 budgets. Optional argv-only delivery is separate from durable acceptance.
 The legacy inspector remains read-only. Explicit quiescent same-home adoption
@@ -44,6 +48,18 @@ tasks or proves source completion.
 There is no global agenda binstub; CLI/App/ACP invocation requires a tool host
 with process execution and an existing Python interpreter. Manual use remains
 available for unmanaged homes; migration is explicit, never automatic.
+
+The [queue/continuation procedure](skills/driving-effort-agendas/references/context-qualified-continuations.md)
+requires relevant new context and a viable changed approach for productive
+revisits, not a numerical count or changed metadata. Unchanged repetition calls
+for bounded autonomous recovery, not default Operator steering. Original links,
+returns, history and independent resource/authority/completion gates remain.
+Existing cursor 1/2 and request 1 keep strict legacy admission. The
+[context-qualified source CLI](skills/driving-effort-agendas/references/context-qualified-commands.md)
+uses explicit fresh adoption with cursor 4/store generation 2/request 2,
+rich immutable identity records and qualified replanning decisions rather than
+implicit attempts. Installed copies may predate it; no automatic update or
+active-lane migration is implied. The version-3 refusal marker is never executable state.
 
 Its optional version-2 cursor preserves full deferred branch/return state,
 original budgets, pending decision packets and real attempt/revisit times.

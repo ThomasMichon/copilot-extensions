@@ -52,6 +52,11 @@ def test_main_parser_and_lazy_dispatch_are_owned_and_strict(name):
         main.build_parser().parse_args([*argv, "--unknown"])
     with pytest.raises(SystemExit):
         main.build_parser().parse_args([*argv, "--jso"])
+    selected = main.build_parser().parse_args([*argv, "--contract-version", "2"])
+    assert selected.contract_version == 2
+    assert args.contract_version == 1
+    with pytest.raises(SystemExit):
+        main.build_parser().parse_args([*argv, "--contract-version", "3"])
 
 
 def test_actual_main_global_project_selection(monkeypatch, capsys):
@@ -102,6 +107,64 @@ def test_read_uses_existing_authenticated_client_and_forwards_exact_reply(monkey
     assert json.loads(capsys.readouterr().out) == reply()
     assert calls[1][0:2] == ("agenda-read", request())
     assert calls[1][2]["total_timeout"] == 1.0
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_v2_cli_negotiates_live_capability_before_sending_versioned_action(
+    monkeypatch,
+    capsys,
+    supported,
+):
+    calls = []
+
+    class Client:
+        def _request(self, action, payload=None, **bounds):
+            calls.append((action, payload))
+            if action == "health":
+                caps = [contract.CAPABILITY]
+                if supported:
+                    caps.append(contract.V2_CAPABILITY)
+                return {
+                    "capabilities": caps,
+                    "worktrees": {
+                        "status": "ready",
+                        "generation": "a" * 32,
+                    },
+                }
+            assert payload["contract_version"] == 2
+            return {**reply(), "contract_version": 2}
+
+    monkeypatch.setattr(cli, "_control_client", Client)
+    monkeypatch.setattr(cli.cfg, "project_name", lambda: "project")
+    status = cli.cmd_agenda(
+        SimpleNamespace(
+            command="agenda-read",
+            contract_version=2,
+            worktree="full-id",
+            session="head",
+            json=True,
+        )
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["contract_version"] == 2
+    if supported:
+        assert status == 0 and result["ok"] is True
+        assert [action for action, _ in calls] == ["health", "agenda-read"]
+    else:
+        assert status == 1 and result["error"]["code"] == "unsupported"
+        assert [action for action, _ in calls] == ["health"]
+
+
+def test_v2_receiver_rejects_unnegotiated_headers_and_wrong_error_version():
+    selected = {**request(), "contract_version": 2}
+    receiver = cli.Receiver(selected, "a" * 32)
+    with pytest.raises(contract.AgendaError):
+        receiver.receive({"type": "snapshot", **reply()})
+    with pytest.raises(contract.AgendaError):
+        receiver.receive({"type": "error", **contract.failure("unready", "legacy error")})
+    receiver.receive({"type": "snapshot", **reply(), "contract_version": 2})
+    receiver.receive({"type": "error", **contract.failure("unready", "new error", version=2)})
+    assert receiver.closed
 
 
 @pytest.mark.parametrize(

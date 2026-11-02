@@ -29,6 +29,31 @@ def _workflow():
         "run": 'sha="$(git rev-parse origin/dev)"\ngit merge-base --is-ancestor "$sha" origin/dev',
     })
     jobs["source-units"]["permissions"] = {"contents": "read"}
+    jobs["source-units"]["timeout-minutes"] = 20
+    jobs["source-units"]["needs"].append("compose-candidate")
+    jobs["source-units"]["steps"].extend([{
+        "name": "Import the frozen candidate without recomposition",
+        "env": {
+            "DEV_SHA": "${{ needs.gate.outputs.sha }}",
+            "MAIN_BEFORE": "${{ needs.gate.outputs.main_before }}",
+            "CANDIDATE_SHA": "${{ needs.compose-candidate.outputs.candidate_sha }}",
+        },
+        "run": (
+            'python reviewed-helpers/tools/promotion_frozen_candidate.py '
+            '--repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" '
+            '--dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" '
+            '--candidate-sha "$CANDIDATE_SHA" --checkout "$RUNNER_TEMP/candidate"'
+        ),
+    }, {
+        "run": 'python "$RUNNER_TEMP/candidate/tools/typecheck.py" --prepare',
+        "timeout-minutes": 6,
+    }, {
+        "run": 'python "$RUNNER_TEMP/candidate/tools/typecheck.py" --enforced',
+        "timeout-minutes": 6,
+    }, {
+        "name": "Execute only the admitted candidate units once",
+        "run": 'python "$RUNNER_TEMP/candidate/tools/run-promotion-unit-tests.py"',
+    }])
     jobs["python-artifacts"]["needs"].append("source-units")
     jobs["publish-python-artifacts"]["permissions"] = {"attestations": "write", "id-token": "write"}
     jobs["publish-python-artifacts"]["steps"].extend([
@@ -50,6 +75,39 @@ def test_source_selected_producer_and_verifier_follow_one_admitted_revision():
         "promotion_source_archive.py": b'parser.add_argument("--directory", required=True)',
         "publish_python_artifacts.py": b'parser.add_argument("--complete-source-dir")',
     })
+
+
+def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence():
+    workflow = _workflow()
+    control.verify_candidate_typechecking(workflow)
+    assert "typecheck.py" in control.helper_implementations(workflow)
+    for fault in (
+        "missing", "order", "ignored", "wrong-input", "skip", "job-timeout",
+        "step-shell", "job-shell", "workflow-shell",
+    ):
+        invalid = deepcopy(workflow)
+        job = invalid["jobs"]["source-units"]
+        steps = job["steps"]
+        if fault == "missing":
+            steps.pop(3)
+        elif fault == "order":
+            steps[1], steps[3] = steps[3], steps[1]
+        elif fault == "ignored":
+            steps[3]["continue-on-error"] = True
+        elif fault == "wrong-input":
+            steps[1]["run"] = "echo skipped frozen import"
+        elif fault == "skip":
+            steps[3]["if"] = "false"
+        elif fault == "job-timeout":
+            job["timeout-minutes"] = 5
+        elif fault == "step-shell":
+            steps[3]["shell"] = 'bash -c \'bash "$0"; exit 0\' {0}'
+        elif fault == "job-shell":
+            job["defaults"] = {"run": {"shell": 'bash -c \'bash "$0"; exit 0\' {0}'}}
+        else:
+            invalid["defaults"] = {"run": {"shell": 'bash -c \'bash "$0"; exit 0\' {0}'}}
+        with pytest.raises(UnitEvidenceError, match="candidate MyPy"):
+            control.verify_candidate_typechecking(invalid)
 
 
 @pytest.mark.parametrize("fault", [
@@ -151,6 +209,10 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
     spec.loader.exec_module(cli)
     prepared = _workflow()
     main = deepcopy(prepared)
+    main["jobs"]["source-units"]["steps"] = [
+        step for step in main["jobs"]["source-units"]["steps"]
+        if "typecheck.py" not in step.get("run", "")
+    ]
     main["jobs"]["main-only"] = {
         "needs": ["gate", "source-units"],
         "steps": [
@@ -159,6 +221,8 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
         ],
     }
     _source(tmp_path, ".github/workflows/validate-and-promote.yml", yaml.safe_dump(prepared).encode())
+    _source(tmp_path, "tools/promotion_frozen_candidate.py", b'parser.add_argument("--dev-sha", required=True)')
+    _source(tmp_path, "tools/typecheck.py", b'parser.add_argument("--enforced", action="store_true")')
     _source(tmp_path, "tools/main_only.py", b'parser.add_argument("--main-input", required=True)')
     _source(tmp_path, "tools/promotion-unit-manifest.json", b"{}")
     monkeypatch.setattr(cli, "ROOT", tmp_path)
@@ -173,7 +237,10 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
     monkeypatch.setattr(subprocess, "run", read_git)
     if provided:
         assert cli.main() == 0
-        assert json.loads(capsys.readouterr().out)["active_compatible"] is True
+        result = json.loads(capsys.readouterr().out)
+        assert result["active_compatible"] is True
+        assert result["candidate_types_active"] is False
+        assert result["candidate_types_prepared"] is True
     else:
         with pytest.raises(UnitEvidenceError, match="main_only.py missing required inputs: --main-input"):
             cli.main()

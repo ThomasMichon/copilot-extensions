@@ -189,8 +189,8 @@ def _materialize_human_output_into(
     if not helper.exists():
         shutil.copyfile(canonical_helper, helper)
     expected = ier.human_output_json(script)
-    if not declaration.is_file() or declaration.read_text(encoding="utf-8") != expected:
-        declaration.write_text(expected, encoding="utf-8")
+    if not declaration.is_file() or declaration.read_bytes().decode("utf-8") != expected:
+        declaration.write_bytes(expected.encode("utf-8"))
         return [f"OK   {declaration} <- materialized native output contract"]
     return []
 

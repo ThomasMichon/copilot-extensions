@@ -76,6 +76,36 @@ The execution request:
 These requests contain no private source identifiers; their intent and uncertainty
 are preserved rather than replaced with a preselected implementation.
 
+### Implementation clarification - complete raw inputs
+
+The coordinator asked:
+
+> A real design choice remains before merge: should a previously unseen complete input configuration count as new context even when it combines individually known values?
+
+The choices were:
+
+- `whole-input`: "Use complete input configurations (recommended); retain strict knowledge/prose guards"
+- `leaf-knowledge`: "Require newly learned leaf facts even for input configurations; revisit the representation/design"
+
+The operator selected:
+
+> whole-input
+
+This accepts complete raw-input comparison, including previously unobserved
+configurations of known values. It does not declare causal relevance proven or
+relax outer metadata, knowledge/prose, history, review or action-authority gates.
+
+### Implementation clarification - field contracts
+
+The operator additionally requested:
+
+> We want to be clear about which fields accept Markdown and which don't. And also which fields expect enum-type values and which allow arbitrary prose
+
+Document field-level enum vocabularies, identifiers/references, prose and raw
+JSON separately. Distinguish a validator accepting Markdown characters as literal
+text from a consumer actually interpreting/rendering Markdown; this request is
+contract clarity, not implicit authorization to introduce a new formatting mode.
+
 ## Scope Approvals
 
 - **Allowed:** generic vision/effort updates, source implementation, bounded
@@ -93,12 +123,17 @@ are preserved rather than replaced with a preselected implementation.
 - **Judgment:** schema acceptance can validate structure, prior-attempt links and
   supplied evidence changes, not prove that a reasoning claim is meaningful.
   Measured inputs and agent judgment remain qualified rather than conflated.
+- **Raw-input clarification:** compare each declared input's complete JSON value,
+  including nulls, empty values, member names and membership. A never-observed
+  configuration may qualify even when its individual leaves were known.
+  Previously observed complete inputs and omitted/restored outer facts remain
+  non-progress; knowledge/prose and caller metadata keep their anti-churn guards.
 
 ## Plan
 
 ### Phase 1 - Reviewed vision and continuation contract
 
-- [ ] Review and merge the vision extension and this renewed effort before code.
+- [x] Review and merge the vision extension and this renewed effort before code.
 - [x] Reconcile bounded core, wire and guidance evidence; select the minimal
   existing-state extension with explicit policy and mixed-version behavior.
 - [x] Adopt a separate owned agenda lane through the current source CLI and
@@ -106,31 +141,33 @@ are preserved rather than replaced with a preselected implementation.
 
 ### Phase 2 - Queue and context-qualified admission
 
-- [ ] Support ordinary tail append and in-scope decomposition into subordinate
+- [x] Support ordinary tail append and in-scope decomposition into subordinate
   queues, preserving sibling order and saved parent continuations.
-- [ ] Record stable work/attempt lineage and prior-context relationships.
+- [x] Record stable work/attempt lineage and prior-context relationships.
   Productive revisits can exceed a legacy numerical threshold under the new
   explicit policy without erasing visit history.
-- [ ] Require a relevant context change and changed approach for a productive
+- [x] Require a relevant context change and changed approach for a productive
   revisit; distinguish structurally supplied evidence from semantic judgment.
-- [ ] Detect unchanged/cosmetic repetition and provide a concrete autonomous
+- [x] Detect unchanged/cosmetic repetition and provide a concrete autonomous
   investigation/refinement/waiting path, not default Operator steering.
-- [ ] Preserve atomic acceptance, idempotent original results, roots, evidence,
+- [x] Preserve atomic acceptance, idempotent original results, roots, evidence,
   pending/deferred work and independent explicit bounds on all movement paths.
 
 ### Phase 3 - Guidance and optional observation
 
-- [ ] Update concise ambient and on-demand guidance, examples and owned CLI
+- [x] Update concise ambient and on-demand guidance, examples and owned CLI
   invocation so agents use the intended queue/continuation policy.
-- [ ] Keep old-policy lanes readable and correctly enforced; gate new required
+- [x] Document field-level value/format contracts, including exact enum
+  vocabularies, free-form prose, raw JSON and Markdown acceptance/rendering.
+- [x] Keep old-policy lanes readable and correctly enforced; gate new required
   policy/state against old writers and independently installed consumers.
-- [ ] Extend the existing projection only where the new state requires it,
+- [x] Extend the existing projection only where the new state requires it,
   preserving separate capability negotiation, bounded frames and existing
   generation/head/store, retry, cancellation and retirement fences.
 
 ### Phase 4 - Measured validation and reviewed completion
 
-- [ ] Run bounded targeted and real connected tests for the exact acceptance
+- [x] Run bounded targeted and real connected tests for the exact acceptance
   matrix; obtain independent critique on the cohesive implementation.
 - [ ] Add required changefiles and drive every implementation PR through
   current-head review, required CI and actual merge.
@@ -140,27 +177,29 @@ are preserved rather than replaced with a preselected implementation.
 
 ## Validation Plan
 
-- [ ] Tail-appended work retains order; multiple/nested sub-queues execute before
+- [x] Tail-appended work retains order; multiple/nested sub-queues execute before
   the saved parent and unwind without losing siblings, roots or links.
-- [ ] An actual CLI/store sequence revisits the same stable item beyond the old
+- [x] An actual CLI/store sequence revisits the same stable item beyond the old
   threshold with distinct relevant context and a changed approach; history
   retains every occurrence and no Operator-steering result is generated solely
   from the count.
-- [ ] Identical/cosmetic evidence, timestamps, sessions, definition revisions and
+- [x] Identical/cosmetic evidence, timestamps, sessions, definition revisions and
   recreated node IDs do not manufacture progress or reset a stalled lineage.
-- [ ] Rejected/no-progress movement leaves state/history unchanged or records an
+- [x] Rejected/no-progress movement leaves state/history unchanged or records an
   explicitly accepted non-executing recovery decision; it never looks complete.
-- [ ] Autonomous diagnosis/refinement and waiting/other authorized work preserve
+- [x] Autonomous diagnosis/refinement and waiting/other authorized work preserve
   the blocked continuation; real permission/human decisions remain separate gates.
-- [ ] Return, defer, recheck, restore, fork and interrupted mutation preserve
+- [x] Return, defer, recheck, restore, fork and interrupted mutation preserve
   context baselines, evidence, original idempotent results and all explicit bounds.
-- [ ] Old-policy readers/writers retain their behavior; unsupported new required
+- [x] Old-policy readers/writers retain their behavior; unsupported new required
   state fails visibly across manual/managed and independently installed peers.
-- [ ] A real synthetic held consumer observes committed continuation state
+- [x] A real synthetic held consumer observes committed continuation state
   without agenda-file polling or mutation replay; prior source/sequence/retirement
   and process/cancellation controls continue to pass.
-- [ ] The coordinator's adopted lane demonstrates current-next-action and
+- [x] The coordinator's adopted lane demonstrates current-next-action and
   preserved continuation at meaningful boundaries without an automatic turn driver.
+- [x] Field-contract guidance agrees with the actual validators and consumers;
+  literal Markdown characters are not misrepresented as interpreted formatting.
 - [ ] Public artifacts remain generic, review/CI pass and source completion is
   distinguished from promotion, installation and active-agent adoption.
 
@@ -190,6 +229,252 @@ These are design recommendations subject to review, not additional operator
 grants, native qualification or claims of implementation.
 
 ## Journal
+
+### 2026-11-01 - Waiting outcome recommendation correction
+
+- Current-head review found that an outcome mapped to `wait` closed its attempt
+  but retained the old execution command in `next_action`. The durable result
+  already prevents another outcome, so recommending the old command is stale
+  and could suggest an unsafe replay.
+- The outcome branch now recommends non-executing recheck/context qualification.
+  Actual CLI regressions cover blocked/replan outcome-to-`next`, retain the
+  original attempt/result and idempotent acceptance, reject repeated outcomes
+  without mutation, and require a qualified revisit for a new attempt.
+- The coordinator's combined packet passed 316 cases with two explicit
+  dependency/platform skips; the actual connected/literal-widget packet passed
+  six cases without skips. Both verified cleanup, and Ruff passed. Fresh review,
+  required CI, merge and canonical completion remain open.
+
+### 2026-11-01 - Whole-input and field-contract validation
+
+- Implemented the operator-selected complete-input policy without new schema
+  fields: raw nulls, empty values, membership and payload `id` keys remain data;
+  whole-value history still refuses known returns. Prose retains conservative
+  knowledge guards and outer fact omission cannot manufacture novelty.
+- Added the linked field contract distinguishing exact enum vocabularies,
+  author-defined outcome names, references, prose, numbers/timestamps and raw
+  JSON. No agenda data field promises Markdown rendering. CLI output is
+  JSON/plain text and Companion appends provider data as literal `Text`, not
+  Markdown or Rich markup.
+- Coordinator regressions exercise actual CLI prose preservation, author-defined
+  outcomes and rejection of prose/Markdown-decorated enum tokens. The combined
+  core/fault/store/guidance/producer packet passed 314 cases with two explicit
+  dependency/platform skips.
+- The joined run initially caught its own obsolete fixture: it changed raw
+  payload UUID/time fields while expecting metadata-only refusal. The corrected
+  fixture keeps the complete payload unchanged and varies outer provenance,
+  preserving every original no-attempt/history assertion. The actual connected
+  chain and a real Textual literal-Markdown/Rich-markup case then passed all six
+  selected cases without skips. Both runs verified cleanup; Ruff passed.
+- Independent field-guide inspection confirms the literal rendering path and
+  shared text validation. The guide links to the operation/schema owners rather
+  than introducing a new formatting flag. Fresh review, required CI, merge and
+  canonical completion remain open.
+
+### 2026-11-01 - Complete raw-input semantics decision
+
+- The latest review has no open findings, but its summary flagged structured
+  deletions/nulls. Actual store assessment confirmed the concern: a raw null
+  replacement and an `id`-only payload can be rejected as empty, while a
+  meaningful member deletion can be refused as previously known facts.
+- The coordinator recommends completing the lineage-anchored distinction:
+  treat declared raw input as the whole observed JSON value, including nulls,
+  empty values, member names and membership; retain normalized knowledge
+  comparison for prose and outer facts. Returning to a known whole input remains
+  non-progress, and omitting/restoring an outer fact cannot manufacture novelty.
+- The operator explicitly selected `whole-input` after the clarification
+  recorded in Request. A never-observed raw configuration combining known leaf
+  values counts as changed input, not newly learned individual facts. Source
+  implementation and regressions must now follow that selected distinction.
+  Causal relevance remains attributable judgment, and this decision grants no
+  additional action authority.
+- The operator also requested explicit Markdown and enum/prose field contracts.
+  The guidance owner is tracing validator and presentation behavior and will
+  publish a linked field reference rather than relying on ambiguous `string`
+  descriptions. The completed clarification and validation are recorded above.
+
+### 2026-11-01 - Structured whitespace value follow-up
+
+- The next review found a tightly coupled raw-input edge: the nonempty/knowledge
+  helper still stripped whitespace-only string leaves after semantic
+  normalization preserved them. A structured delimiter change from comma to
+  space could therefore be refused despite changing the actual split result.
+- The shared predicate now retains nonempty raw strings, including whitespace
+  leaves. Regressions exercise the actual split result, scalar/nested whitespace,
+  historical reappearance refusal and prose-blank rejection without partial
+  acceptance. Cosmetic prose is normalized upstream; empty content remains
+  invalid.
+- The coordinator's combined packet passed 293 cases with two explicit
+  dependency/platform skips; the actual isolated connected sequence passed five
+  cases without skips. Both verified cleanup, and Ruff passed. Fresh review,
+  required CI, merge and canonical completion remain open.
+
+### 2026-11-01 - Significant input content correction
+
+- Current-head review accepted numeric normalization but identified another
+  coupled context-admission defect: recursively collapsing raw source or
+  configuration whitespace can erase behavior-changing edits. Input strings now
+  retain exact content recursively; prose retains cosmetic normalization.
+  The subject's first lineage occurrence fixes that policy across later kind
+  churn and omission, without adding schema fields.
+- Reproductions demonstrate an indentation edit changing the executed result
+  from 2 to 0 and a significant config-string edit. Both now admit a revisit;
+  prose whitespace, kind churn and restored known content retain no-progress
+  guards. The coordinator packet passed 283 cases with two explicit
+  dependency/platform skips; the actual isolated connected sequence passed five
+  cases without skips. Cleanup and Ruff passed. Fresh review, required CI, merge
+  and canonical completion remain open.
+- The already-corrected policy thread now has an explicit resolution backed by
+  its commit, test locations and passing producer packet; no redundant source
+  change or waived review finding is implied.
+
+### 2026-11-01 - Context novelty review follow-up
+
+- The next current-head review exposed two additional novelty loopholes:
+  equivalent numeric representations could create new signatures, and dropping
+  then restoring an already-known fact could appear novel when whole bundles
+  differed. Both need same-lineage regressions and corrections before merge.
+- Exact integer-ratio comparison now normalizes numeric equivalence in equality
+  and historical signatures without rounding large integers or conflating
+  booleans. Novelty checks retain scoped known leaves/structure across the full
+  item lineage, including nested facts; dropping and re-adding known information
+  cannot create another attempt or reset decomposition bounds.
+- Reproductions first failed as incorrectly admitted revisits. Corrected
+  regressions preserve genuine changed-input positives, prior attempts/history
+  and explicit counters. The coordinator's combined packet passed 274 cases with
+  two explicit dependency/platform skips; the actual isolated connected sequence
+  passed five cases without skips. Both bounded runs verified cleanup.
+  Fresh review, required CI, merge and canonical completion remain open.
+- The policy assertion finding was carried over despite its actual correction
+  and passing existing producer packet. An inline response anchors the fix to
+  its commit and test locations; no redundant producer rewrite is warranted.
+
+### 2026-11-01 - First implementation review corrections
+
+- Review identified four coupled defects: stale ambient-policy assertions,
+  provider imports exposed to the invoking checkout, boolean/number equality
+  erasing meaningful context changes, and oversized observations dispatched as
+  legacy records before their pending-delivery reason was handled.
+- The policy tests now exercise the intended semantics and the existing
+  1,024-byte bound, including valid manifest-version extremes. The bounded
+  producer packet passed 65 cases with one explicit PowerShell-unavailable skip;
+  that run does not claim live cross-producer parity.
+- Both publication subprocesses now use isolated Python startup. The outer
+  adapter explicitly binds its trusted payload directory; the selected provider
+  uses its interpreter's own installed context, not checkout imports or ambient
+  `PYTHONPATH`. Shadow-module regressions verify no checkout side effects.
+- Context qualification and integrity checks now compare canonical JSON values,
+  preserving boolean/number distinctions inside nested containers without
+  crediting metadata churn. Oversized new-mode observations retain the original
+  `observation-too-large` pending reason without invoking a provider or replaying
+  their committed mutation.
+- The bounded core/fault/store packet passed 185 cases with one isolated
+  provider-dependency skip. The combined coordinator packet then passed 259 cases
+  with two explicit provider-dependency/PowerShell skips, including the existing
+  producer tests and worked guidance.
+- The connected consumer was rerun against the isolated provider invocation:
+  five joined cases passed without skips, and the complete Manager packet
+  passed 176 cases without skips. The coordinator independently repeated the
+  actual five-case joined sequence. Every bounded run verified cleanup.
+  Fresh review, required CI, merge, canonical completion and archival remain open.
+
+### 2026-11-01 - Cohesive source validation
+
+- The coordinator independently ran the final source packets: 179 passed with
+  one dependency-based skip for core/guidance/fault/store, 202 passed for provider
+  admission/runtime/CLI, and 176 passed for Manager contracts, held consumers and
+  the real end-to-end sequence. All three bounded runs verified cleanup.
+- The skipped isolated efforts test needs provider dependencies. The Manager
+  packet independently executed the actual provider parser, source CLI/store,
+  negotiated publication, resident, held relay and Textual consumer with no
+  parser substitute or skipped positive witness.
+- Both independent critique findings now have regressions: deferred append
+  refuses without changing original state/history, and v2 rejects legacy
+  `steering` while v1 retains it. Active-ancestor append and append after explicit
+  recovery remain supported. Frozen deferred custody permits unrelated assigned
+  work without letting that work mutate the preserved chain.
+- Core tests preserve legacy restore/fork history; new-mode cloning is explicitly
+  unsupported. Other new-mode work uses an explicit assignment, not a copied
+  lineage or a reset of context/budgets.
+- The coordinator's legacy-policy lane recorded implementation, validation and
+  an evidence-backed correction as semantic transitions without resetting visits
+  or misrepresenting itself as a migrated new-mode lane.
+- Ruff, public-source identifier review, installation/documentation consistency
+  and enforced typechecking passed. The enforced checker covers only its
+  admitted projects; it does not qualify every changed module. A shared
+  supervisor-use lock timeout was retried after the competing test completed;
+  no lock, process or service was removed.
+- Required PR review, CI, merge, canonical completion/archive and ownership
+  release remain open. No source result implies promotion or installed rollout.
+
+### 2026-11-01 - Integration corrections and revised validation
+
+- Independent critique found two additional admission mismatches: appending
+  into a deferred frame without recovery, and admitting the legacy `steering`
+  status in a cursor-4 observation. Scoped corrections and focused regressions
+  are required before the new mode clears integration. Active-ancestor tail
+  append and legacy status behavior remain supported.
+- Child acceptance alone intentionally does not reset no-parent-progress
+  decomposition bounds. A qualified parent revisit must supply relevant new
+  context; the revised regression and guidance make that distinction explicit.
+- The first core/legacy packet passed 215 cases, and the delivery compatibility
+  packets passed 195 provider and 153 consumer cases. These results cover their
+  captured inputs, not the subsequent integration corrections.
+- The real joined witness exposed a parser-only publication probe incorrectly
+  receiving a global project option. The selected parser probe now excludes that
+  global option while the actual control payload retains explicit project
+  selection. Committed mutation state survived the delivery rejection without
+  replay. The positive joined sequence must pass after this correction.
+- Integration inspection required truthful deferred roots, decision/revisit
+  fields, ancestor tails and saved wait/return actions. It also required alias
+  lineage guards and structural record crosslinks. Those source corrections
+  have entered the revised validation packet; their presence alone is not
+  passing evidence.
+- The explicit `assign-root` operation permits other accepted work while a
+  complete original chain remains deferred. It preserves that chain and its
+  attempts, rather than cloning it. New-mode cloning/forking is unsupported;
+  the legacy fork operation retains its existing policy and validation gate.
+- A guidance run captured a generated-state validator mismatch during those
+  edits. The validator now admits its own generated next-action field; the
+  request fixtures were not weakened. Unreached new-mode assertions remain
+  uncredited until the revised packet passes.
+- Repository installation and documentation consistency checks passed. No
+  installer, installed payload, active lane or production service was changed.
+
+### 2026-11-01 - Core contract synchronized
+
+- Accepted an explicit fresh-lane contract: request 2, `context-qualified`
+  execution policy, board 2, executable cursor 4 and SQLite generation 2.
+  Legacy lanes retain their existing policy; cursor 3 remains a non-executing
+  refusal marker. No active-lane migration or installed update is authorized.
+- Corrected the projection inventory against the source: the coarse Snapshot
+  contains 15 fields, not 17. Preserve that exact shape, report cursor 4
+  truthfully and negotiate its delivery separately from the legacy contract.
+- Frame-local ordered queues and immutable item, attempt, context and return
+  links form the selected core extension. Relevant changed inputs may make the
+  same command viable; changed evidence references or causal prose alone do
+  not manufacture novelty. Semantic relevance remains attributable judgment,
+  not a property proven by schema acceptance.
+- Independent depth, pending/deferred state and no-parent-progress decomposition
+  bounds remain separate from lifetime visit history. Unchanged revisits record
+  a non-executing replanning decision and preserve the continuation for bounded
+  investigation, refinement, waiting or other already-authorized work.
+- Core implementation, independently negotiated observation and worked guidance
+  are in progress under separate scopes. Concrete source-CLI examples, connected
+  validation, review and completion remain open.
+
+### 2026-11-01 - Reviewed implementation admission
+
+- Vision and plan [#9898](https://github.com/ThomasMichon/copilot-extensions/pull/9898)
+  received current-head Copilot approval with no findings, passed required CI and
+  merged as `deb4c22fe9c4dfc722533529a2fb8c2a9c1b8050`.
+- The same source workspace pulled forward onto that merge. The coordinator
+  reread this complete contract and retained its scope, semantic-judgment limits,
+  separate runtime authorization and all remaining validation/completion gates.
+- The owned planning lane can now follow its declared implementation transition
+  using actual review/merge evidence, rather than a cursor edit or inferred
+  approval. Core, compatibility and guidance execution remain bounded separate
+  scopes under one coordinator-owned publication flow.
 
 ### 2026-11-01 - Renewed source intake
 
