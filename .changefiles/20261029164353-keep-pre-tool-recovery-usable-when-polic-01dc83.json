@@ -1,0 +1,9 @@
+{
+  "comment": "Keep pre-tool recovery usable when policy evaluation is unavailable",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

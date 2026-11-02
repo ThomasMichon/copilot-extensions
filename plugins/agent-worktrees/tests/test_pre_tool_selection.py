@@ -74,9 +74,11 @@ assert.equal(typeof calls[0].onPermissionRequest, "function");
 const resident = process.env.AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION === "resident";
 assert.equal(Boolean(calls[0].hooks?.onPreToolUse), resident);
 if (resident) {
-  // Deliberately missing interpreter must deny through the selected callback.
+  // Missing infrastructure reports through the sole selected callback.
   const result = await calls[0].hooks.onPreToolUse({ toolName: "edit" });
-  assert.equal(result.permissionDecision, "deny");
+  assert.equal(result.permissionDecision, undefined);
+  assert.match(result.additionalContext, /policy activation unavailable/);
+  assert.match(result.additionalContext, /not authorization/);
 }
 """
     env = os.environ.copy()
