@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current test cohorts:** #10006 (native bootstrap/lock handoff), #10007 (payload source/selection) and #10010 (lead-owned lightweight fixtures/helpers). #10003 (governance/shared clients) and #10004 (runtime-profile policy) are complete.
+- **Current slice:** #10018 canonical Installation Context strict admission, integrating #10013 (POSIX fixtures/callbacks), #10014 (guest-environment family) and #10015 (lead-owned remaining native adapters). #10006, #10007 and #10010 are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** #10006 owns only `test_powershell_bootstrap.py` and `test_directory_lock_handoff.py`; #10007 owns only `test_payload_source.py` and `test_bootstrap_context_selection.py`, each family in an independent source worktree. Their diagnosis/planning milestones passed; isolated implementation and validation are authorized. The lead retains directly dependent fixture clients, the effort, shared checker controls and full completion judgment.
+- **Delegates:** #10013 owns only `test_installation_context_posix.py`; #10014 owns only the four guest-environment/revalidation test modules, each family in an independent source worktree. Their diagnosis/planning milestones passed; isolated implementation and validation are authorized. The lead owns #10015's legacy-entrypoint, path-capture and deployment-adapter contracts, directly dependent fixture clients, the effort, shared checker controls and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -114,6 +114,7 @@ rewrite.
 - [x] Strictly admit all Config Migrate source/test files with a declared YAML/stub environment (#9924).
 - [x] Strictly admit all canonical Dropin Registry source/test files; keep copies independently pending (#9930).
 - [x] Strictly admit all canonical Endpoint Rendezvous source/test files, preserving native ownership fixtures (#9933).
+- [ ] Strictly admit canonical Installation Context source, worker and every test/helper after the final fixture cohorts (#10018).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1108,3 +1109,53 @@ composition prerequisites, and review/validation rules.
   strings. Both full-project strict counts are unchanged. The fixture
   consistency test passes, and a real MyPy client control accepts `str | None`
   but rejects using that descriptor value as a definite string.
+
+### 2026-11-02 - Native/source and helper contracts merged; final test families selected
+
+- #10012 merged as `aa271cd0a6ca39857d608275d078ee8e807d7723`
+  after exact-head approval, resolution of the nullable-descriptor finding
+  and green required checks in
+  [run 41480620942](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41480620942).
+  #10006, #10007 and #10010 are complete.
+- The normal sync safely aborted a squash-history conflict. All 13 owned
+  paths were proved byte-identical upstream, and the aggregate stable patch
+  ID matched the accepted merge, before dropping only duplicate local history
+  and completing the managed sync. Unrelated upstream changes were preserved.
+- Re-reading this Plan and Validation Plan leaves library admission,
+  generated/vendored copies and portfolio qualification open. #10013 and
+  #10014 passed diagnosis/planning and own the final independent POSIX and
+  guest-environment families. #10015 selects the lead-owned remaining native
+  adapters. The latest strict baseline is 48 Linux / 51 Windows diagnostics
+  across those eight test modules; no production errors. #9807 remains open.
+
+### 2026-11-02 - Canonical Installation Context strict admission prepared
+
+- #10013 and #10014 supply typed POSIX fixtures/callbacks and guest-environment
+  boundaries. #10015 supplies native adapter/class fixtures, typed timeout-note
+  diagnostics, the real tooling import identity and the dependent optional
+  PowerShell caller. The two profile-home test children now explicitly retain
+  headless Windows launch flags. No production implementation changes.
+- The complete composed library passes strict on Linux and Windows:
+  51 physical source/test files represented by 32 checker targets each.
+  #10018 changes only its admission level from pending to strict; includes,
+  excludes, platform/interpreter targets and environment pins are unchanged.
+  The current inventory is 7,446 physical files, 14 strict / 54 pending
+  projects. Independent copies and the full campaign remain unqualified.
+- Full affected modules and checker regressions pass 357 tests, with 112
+  existing platform/tool skips and eight passing subtests, in 504.18 seconds.
+  The lead ran the complete external-isolation suite, not just the delegates'
+  filesystem-free subsets. An assertion/decorator audit preserves 448 original
+  assertion contracts and every test decorator; timeout-note assertions access
+  the same exception attribute through a typed alias.
+- After admission, all 28 enforced platform checks and all 52 checker controls
+  pass. The documented `python tools/typecheck.py lib-installation-context`
+  command passes both targets in 11.56 seconds on a prepared local environment.
+  This is a local prepared measurement, not a cold CI budget claim. Existing
+  six-minute MyPy steps and governed unit selection/budgets are unchanged.
+- Changed-file Ruff, source-copy sync, vendoring, documentation consistency,
+  installation contracts and whitespace checks pass. Documentation impact:
+  `docs/python-typechecking.md` now documents the admitted canonical scope,
+  local command and independently pending copies. Fresh-box provisioning and
+  external runtime venues do not apply to unchanged production behavior.
+  Source CI must still validate this exact candidate before merge; #9807
+  remains active.

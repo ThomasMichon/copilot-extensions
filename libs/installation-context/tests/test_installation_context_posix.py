@@ -12,10 +12,74 @@ import subprocess
 import sys
 import time
 import traceback
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypedDict, cast
 
 import pytest
 from powershell_test_host import PowerShellTestHost
+
+if TYPE_CHECKING:
+    import installation_context as context
+
+
+class _Clock(Protocol):
+    def monotonic(self) -> float: ...
+
+    def sleep(self, seconds: float, /) -> None: ...
+
+
+class _InstallationAPI(Protocol):
+    InstallationContextError: type[context.InstallationContextError]
+    _DirectoryLock: type[context._DirectoryLock]
+
+    def main(self, argv: Sequence[str] | None = None) -> int: ...
+
+    def _path_is_fully_qualified(
+        self, value: str | os.PathLike[str], *, platform: str | None = None,
+    ) -> bool: ...
+
+    def _pid_is_live(self, pid: int) -> bool: ...
+
+    def _openprocess_denied_means_live(self, last_error: int) -> bool: ...
+
+    def normalize_source(
+        self, descriptor: Mapping[str, object],
+        base_directory: str | os.PathLike[str] | None = None, *,
+        from_receipt: bool = False,
+    ) -> context.NormalizedSource: ...
+
+    def source_identity(
+        self, source: context.NormalizedSource, readable_name: str,
+    ) -> dict[str, object]: ...
+
+
+# The production module's standard-library import is not a typed re-export.
+class _InstallationModule(_InstallationAPI, Protocol):
+    @property
+    def time(self) -> _Clock: ...
+
+
+class _NormalizedVector(TypedDict):
+    kind: str
+    canonical: str
+    ref: str
+
+
+class _SourceVector(TypedDict):
+    name: str
+    descriptor: dict[str, str | None]
+    marketplaceKey: str
+    normalized: _NormalizedVector
+    record: str
+    sha256: str
+    marketplaceId: str
+
+
+if TYPE_CHECKING:
+    _module_contract: _InstallationAPI = context
+    _clock_contract: _Clock = time
+
 
 LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
@@ -81,11 +145,11 @@ RUNNERS = (
 PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
 _POWERSHELL_HOST: PowerShellTestHost | None = None
-_PYTHON_RUNNER_MODULE = None
+_PYTHON_RUNNER_MODULE: _InstallationModule | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _bounded_powershell_host() -> None:
+def _bounded_powershell_host() -> Iterator[None]:
     yield
     global _POWERSHELL_HOST
     if _POWERSHELL_HOST is not None:
@@ -150,13 +214,14 @@ def test_python_validate_rejects_rooted_but_not_fully_qualified_context(
     assert "receipt pointer must be absolute" in result.stderr.lower()
 
 
-def _load_python_module():
+def _load_python_module() -> _InstallationModule:
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    assert module.time is time
+    return cast(_InstallationModule, module)
 
 
 def _run_python_in_process(
@@ -213,11 +278,11 @@ def _is_powershell_installation_context_command(command: tuple[str, ...]) -> boo
     )
 
 
-def _vectors() -> list[dict[str, object]]:
-    return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
+def _vectors() -> list[_SourceVector]:
+    return cast(list[_SourceVector], json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"])
 
 
-def _adapter_vectors() -> list[dict[str, object]]:
+def _adapter_vectors() -> list[_SourceVector]:
     if EXHAUSTIVE_ADAPTERS:
         return _vectors()
     return [
@@ -503,7 +568,12 @@ def test_python_stamp_updates_receipt_with_generation_compare_and_swap(
 def test_python_lock_release_does_not_mask_mutation_failure(tmp_path: Path) -> None:
     module = _load_python_module()
 
-    class BrokenReleaseLock(module._DirectoryLock):
+    if TYPE_CHECKING:
+        lock_type: TypeAlias = context._DirectoryLock
+    else:
+        lock_type = module._DirectoryLock
+
+    class BrokenReleaseLock(lock_type):
         def acquire(self) -> None:
             self.acquired = True
 
@@ -537,12 +607,12 @@ def test_python_lock_release_gives_each_windows_operation_a_retry_window(
     attempts = {"unlink": 0, "rmdir": 0}
     moments = iter((0.0, 0.0, 0.6, 0.9, 1.0, 1.5))
 
-    def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def flaky_unlink(path: Path, missing_ok: bool = False) -> None:
         if path == lock.owner_path:
             attempts["unlink"] += 1
             if attempts["unlink"] < 3:
                 raise PermissionError("owner receipt is temporarily busy")
-        original_unlink(path, *args, **kwargs)
+        original_unlink(path, missing_ok=missing_ok)
 
     def flaky_rmdir(path: Path) -> None:
         if path == lock.path:
@@ -864,7 +934,7 @@ def test_validate_rejects_generation_above_portable_maximum(
     assert "exceeds the portable signed 64-bit maximum" in result.stderr
 
 
-def _assert_source_identity(actual: dict[str, object], vector: dict[str, object]) -> None:
+def _assert_source_identity(actual: dict[str, object], vector: _SourceVector) -> None:
     normalized = vector["normalized"]
     assert isinstance(normalized, dict)
     digest = str(vector["sha256"])

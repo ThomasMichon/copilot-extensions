@@ -6,13 +6,28 @@ import json
 import os
 import sys
 from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "installation_context.py"
+
+
+class _CurrentEnvironment(Protocol):
+    def __call__(
+        self, *, environment: Mapping[str, str],
+        os_profile: str | os.PathLike[str] | None, platform: str | None,
+        wsl_distro: str | None,
+    ) -> tuple[dict[str, Any], Path]: ...
+
+
+if TYPE_CHECKING:
+    import installation_context
+
+    _checked_current_environment: _CurrentEnvironment = installation_context._current_environment
 
 
 @pytest.fixture
@@ -97,17 +112,24 @@ def test_native_registry_lookup_validates_default_before_second_read(
 def guest(primitive: ModuleType, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: True)
     monkeypatch.setattr(primitive, "_guest_machine_id", lambda: "a" * 32)
-    current = primitive._current_environment
+    current = cast(_CurrentEnvironment, primitive._current_environment)
 
-    def environment(**kwargs: Any) -> tuple[dict[str, Any], Path]:
-        return current(**{**kwargs, "platform": kwargs.get("platform") or "posix"})
+    def environment(
+        *, environment: Mapping[str, str], os_profile: str | os.PathLike[str] | None,
+        platform: str | None, wsl_distro: str | None,
+    ) -> tuple[dict[str, Any], Path]:
+        return current(
+            environment=environment, os_profile=os_profile,
+            platform=platform or "posix", wsl_distro=wsl_distro,
+        )
 
     monkeypatch.setattr(primitive, "_current_environment", environment)
     return primitive
 
 
-def _current(guest: ModuleType, profile: Path, environment: dict[str, str]) -> dict:
-    return guest._current_environment(
+def _current(guest: ModuleType, profile: Path, environment: dict[str, str]) -> dict[str, Any]:
+    current = cast(_CurrentEnvironment, guest._current_environment)
+    return current(
         environment=environment, os_profile=profile, platform="posix", wsl_distro=None,
     )[0]
 
@@ -266,12 +288,12 @@ def test_guest_detection_uses_os_evidence_not_shell_variables(
             return path.as_posix() == marker
         return original_is_file(path)
 
-    def read(path: Path, *args: object, **kwargs: object) -> str:
+    def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
         if path.as_posix() == "/proc/1/cgroup":
             return cgroup
         if path.as_posix() == "/proc/sys/kernel/osrelease":
             return release
-        return original_read(path, *args, **kwargs)
+        return original_read(path, encoding=encoding, errors=errors)
 
     with monkeypatch.context() as context:
         context.setattr(primitive.sys, "platform", "linux")

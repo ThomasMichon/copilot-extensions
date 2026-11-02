@@ -145,7 +145,7 @@
         "libs/installation-context"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-installer-engine",
