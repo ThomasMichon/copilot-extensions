@@ -11,11 +11,12 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal, TypedDict, cast
 
 import pytest
 from powershell_test_host import PowerShellTestHost
@@ -36,6 +37,71 @@ IMMUTABLE_PID_ERROR = (
 )
 Runner = tuple[str, tuple[str, ...], str]
 _POWERSHELL_HOST: PowerShellTestHost | None = None
+
+
+class ReceiptLayout(TypedDict):
+    marketplace_id: str
+    plugin_id: str
+    durable: Path
+    cell: Path
+    plugin_root: Path
+    snapshots: Path
+    snapshot_root: Path
+    payload: Path
+    namespace: Path
+    install: Path
+
+
+class _PayloadIdentity(TypedDict):
+    root: str
+    version: str
+    origin: str
+    originReceipt: str | None
+
+
+class _SnapshotStampResult(TypedDict):
+    action: str
+    status: str
+    reason: str
+    provenance: str
+    snapshotRoot: str
+    snapshotId: str
+    marketplaceId: str
+    pluginId: str
+    sourceFingerprint: str
+    namespaceReceipt: str
+    installReceipt: str
+    namespaceGeneration: int
+    installGeneration: int
+    payload: _PayloadIdentity
+    operative: bool
+    snapshotChanged: bool
+    pluginRoot: str
+
+
+class _SlotProvisionResult(TypedDict):
+    action: str
+    status: str
+    reason: str
+    slotRoot: str
+    runtimeVersion: str
+    ownership: str
+    snapshotId: str
+    snapshotProvenance: str
+    marketplaceId: str
+    pluginId: str
+    sourceFingerprint: str
+    namespaceReceipt: str
+    installReceipt: str
+    namespaceGeneration: int
+    installGeneration: int
+    namespaceState: str
+    installState: str
+    slotEmpty: bool
+    activated: bool
+    operative: bool
+    slotChanged: bool
+
 
 def _supported_bash() -> str | None:
     if os.name == "nt":
@@ -165,7 +231,7 @@ INTEROPERABILITY_PAIRS = _interoperability_pairs()
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _bounded_powershell_host() -> None:
+def _bounded_powershell_host() -> Iterator[None]:
     yield
     global _POWERSHELL_HOST
     if _POWERSHELL_HOST is not None:
@@ -183,7 +249,10 @@ def _load_python_module() -> Any:
 
 
 def _vectors() -> list[dict[str, object]]:
-    return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
+    return cast(
+        list[dict[str, object]],
+        json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"],
+    )
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -214,7 +283,7 @@ def _receipt_layout(
     payload_version: str = "1.0.0",
     snapshot_id: str = "1.0.0",
     payload_root: Path | None = None,
-) -> dict[str, Path | str]:
+) -> ReceiptLayout:
     vector = _vectors()[vector_index]
     normalized = vector["normalized"]
     assert isinstance(normalized, dict)
@@ -303,7 +372,7 @@ def _flag(style: str, name: str) -> str:
 def _command(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     snapshot_id: str = "1.0.0",
     runtime_version: str = "3.4.5",
@@ -381,7 +450,7 @@ def _command(
 def _run(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     snapshot_id: str = "1.0.0",
     runtime_version: str = "3.4.5",
@@ -448,7 +517,7 @@ def _run(
 def _run_slot(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_payload_root: Path | None = None,
@@ -472,7 +541,7 @@ def _run_slot(
 
 def _run_context_validate(
     runner: Runner,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
 ) -> subprocess.CompletedProcess[str]:
     _, prefix, style = runner
     arguments = (
@@ -511,49 +580,52 @@ def _run_context_validate(
 
 
 def _stamp_with_python(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     snapshot_id: str = "1.0.0",
-) -> dict[str, object]:
+) -> _SnapshotStampResult:
     result = _run(
         REFERENCE_RUNNERS[0],
         "snapshot-stamp",
         layout,
         snapshot_id=snapshot_id,
     )
-    return json.loads(result.stdout)
+    return cast(_SnapshotStampResult, json.loads(result.stdout))
 
 
 def _provenance_path(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     snapshot_id: str = "1.0.0",
 ) -> Path:
     return Path(layout["snapshots"]) / snapshot_id / "snapshot-provenance.json"
 
 
 def _provision_slot_with_python(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_payload_root: Path | None = None,
     expected_payload_version: str | None = None,
     module: Any | None = None,
-) -> dict[str, object]:
+) -> _SlotProvisionResult:
     module = module or _load_python_module()
-    return module.provision_runtime_slot(
-        context=layout["install"],
-        expected_marketplace_id=layout["marketplace_id"],
-        expected_plugin_id=layout["plugin_id"],
-        snapshot_id="1.0.0",
-        runtime_version=runtime_version,
-        expected_payload_root=expected_payload_root,
-        expected_payload_version=expected_payload_version,
-        durable_home=layout["durable"],
-        environment={},
+    return cast(
+        _SlotProvisionResult,
+        module.provision_runtime_slot(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            snapshot_id="1.0.0",
+            runtime_version=runtime_version,
+            expected_payload_root=expected_payload_root,
+            expected_payload_version=expected_payload_version,
+            durable_home=layout["durable"],
+            environment={},
+        ),
     )
 
 
-def _payload_version(layout: dict[str, Path | str]) -> str:
+def _payload_version(layout: ReceiptLayout) -> str:
     install = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
     return str(install["payload"]["version"])
 
@@ -579,9 +651,9 @@ def _snapshot_content_digest(snapshot_root: Path) -> str:
                 )
             )
     digest = hashlib.sha256()
-    for relative, file_digest in sorted(records):
+    for encoded_relative, file_digest in sorted(records):
         digest.update(b"F\0")
-        digest.update(relative)
+        digest.update(encoded_relative)
         digest.update(b"\0")
         digest.update(file_digest.encode("ascii"))
         digest.update(b"\n")
@@ -589,7 +661,7 @@ def _snapshot_content_digest(snapshot_root: Path) -> str:
 
 
 def _build_receipt(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     completed_at: str = "2026-01-02T03:04:05Z",
@@ -624,7 +696,7 @@ def _build_receipt(
 def _run_completion(
     runner: Runner,
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_payload_root: Path | None = None,
@@ -648,7 +720,7 @@ def _run_completion(
 
 def _run_cutover(
     runner: Runner,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
     expected_namespace_generation: int | str = 1,
@@ -675,7 +747,7 @@ def _run_cutover(
 
 
 def _prepare_completion_slot(
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     *,
     runtime_version: str = "3.4.5",
 ) -> Path:
@@ -805,7 +877,7 @@ SECURITY_EXEMPLAR_INSTALLERS = (
 def _run_exemplar_slot_action(
     exemplar: tuple[str, tuple[str, ...], str],
     action: str,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     tmp_path: Path,
     *,
     include_context: bool = True,
@@ -1014,7 +1086,7 @@ def _source_runtime_functions(script: Path, style: str) -> str:
 def _run_agent_machines_snapshot_harness(
     exemplar: tuple[str, tuple[str, ...], str],
     installed_plugin: Path,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     tmp_path: Path,
     *,
     fail_before_stamp: bool = False,
@@ -1510,7 +1582,7 @@ def test_agent_machines_snapshot_publication_preserves_unowned_final_state(
 
 def _reserve_exemplar_completion_slot(
     installed_plugin: Path,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     version: str,
 ) -> None:
     snapshot_root = Path(layout["snapshot_root"])
@@ -1548,7 +1620,7 @@ def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
 def _run_exemplar_mark_complete(
     exemplar: tuple[str, tuple[str, ...], str],
     installed_plugin: Path,
-    layout: dict[str, Path | str],
+    layout: ReceiptLayout,
     tmp_path: Path,
     *,
     runtime_version: str,
@@ -4844,7 +4916,7 @@ def test_runtime_slot_completion_rejects_non_strict_nested_shapes(
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_runtime_slot_completion_requires_current_receipts_for_first_publication(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
@@ -6126,7 +6198,7 @@ def test_snapshot_validation_rejects_sidecar_only_snapshot(
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_stale_receipt_generation_rejects_republication_without_overwrite(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)
@@ -6148,7 +6220,7 @@ def test_stale_receipt_generation_rejects_republication_without_overwrite(
 @pytest.mark.parametrize("state", ("inactive", "orphaned"))
 def test_inactive_or_orphaned_receipts_reject_snapshot_validation(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     state: str,
     tmp_path: Path,
 ) -> None:
@@ -6296,7 +6368,7 @@ def test_context_validation_rejects_linked_physical_ownership_chain(
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_context_validation_rejects_linked_receipt_files(
     runner: Runner,
-    receipt_name: str,
+    receipt_name: Literal["namespace", "install"],
     tmp_path: Path,
 ) -> None:
     layout = _receipt_layout(tmp_path)

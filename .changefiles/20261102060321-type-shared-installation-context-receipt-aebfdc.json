@@ -1,0 +1,9 @@
+{
+  "comment": "Type shared Installation Context receipt fixtures and preserve concrete test-helper results.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

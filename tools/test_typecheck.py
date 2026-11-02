@@ -556,7 +556,7 @@ def test_actual_mypy_preserves_lazy_helper_callable_signatures(
 
 
 @pytest.mark.parametrize("invalid", [False, True])
-@pytest.mark.parametrize("contract", ["decorator", "cleanup"])
+@pytest.mark.parametrize("contract", ["decorator", "cleanup", "receipt-fixtures"])
 def test_actual_mypy_preserves_validation_scope_callable_signature(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     invalid: bool, contract: str,
@@ -612,6 +612,30 @@ def test_actual_mypy_preserves_validation_scope_callable_signature(
                 "cleanup('wrong')\n"
                 "wrong_return: str = cleanup(Runtime())\n"
             )
+    if contract == "receipt-fixtures":
+        fixture = typecheck.ROOT / "libs" / "installation-context" / "tests" / "test_snapshot_provenance.py"
+        (root / fixture.name).write_bytes(fixture.read_bytes())
+        source = (
+            "from pathlib import Path\n"
+            "from test_snapshot_provenance import (\n"
+            "    _receipt_layout, _stamp_with_python, _provision_slot_with_python)\n"
+            "layout = _receipt_layout(Path('test-root'))\n"
+            "payload: Path = layout['payload']\n"
+            "plugin: str = layout['plugin_id']\n"
+            "snapshot = _stamp_with_python(layout)\n"
+            "snapshot_root = Path(snapshot['snapshotRoot'])\n"
+            "generation: int = snapshot['installGeneration']\n"
+            "slot = _provision_slot_with_python(layout)\n"
+            "slot_root = Path(slot['slotRoot'])\n"
+            "changed: bool = slot['slotChanged']\n"
+        )
+        if invalid:
+            source += (
+                "layout['plugin_id'] = Path('wrong')\n"
+                "Path(snapshot['snapshotChanged'])\n"
+                "slot['slotRoot'] = False\n"
+                "layout['unexpected'] = 'wrong'\n"
+            )
     (root / "sample.py").write_text(source, encoding="utf-8")
     environment = tmp_path / "environment"
     environment.mkdir()
@@ -641,6 +665,9 @@ def test_actual_mypy_preserves_validation_scope_callable_signature(
         assert "[arg-type]" in output
         if contract == "decorator":
             assert "[assignment]" in output and "[misc]" in output
+        if contract == "receipt-fixtures":
+            assert "[typeddict-item]" in output
+            assert "[typeddict-unknown-key]" in output
     else:
         assert "Success: no issues found" in output
     assert lease.released
