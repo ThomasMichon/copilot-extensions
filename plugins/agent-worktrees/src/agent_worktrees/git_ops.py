@@ -1410,8 +1410,8 @@ def resolve_start_point(
 
     Prefers ``<remote>/<default_branch>`` (normal case), then a local
     ``<default_branch>``, then ``HEAD`` -- so a repo with no remote (or no
-    fetched default branch) still works instead of failing with
-    ``fatal: invalid reference: <remote>/<default_branch>``.
+    fetched default branch) still works instead of failing on an invalid
+    ``<remote>/<default_branch>`` reference.
     """
     upstream = f"{remote}/{default_branch}"
     if ref_exists(upstream, cwd=cwd):
@@ -1472,17 +1472,60 @@ def prepare_worktree_base(
     )
 
 
+def _commit_sha(ref: str, *, cwd: str | Path) -> str:
+    """Return the commit *ref* resolves to, or ``""`` if it does not resolve."""
+    result = git(
+        "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+        cwd=cwd, check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _branch_checked_out(branch: str, *, cwd: str | Path) -> bool:
+    """Return whether any worktree has *branch* checked out (``True`` if unknown)."""
+    listing = git("worktree", "list", "--porcelain", cwd=cwd, check=False)
+    if listing.returncode != 0:
+        return True
+    return f"branch refs/heads/{branch}" in listing.stdout.splitlines()
+
+
 def create_worktree(
     anchor: str | Path,
     worktree_path: str,
     branch: str,
     start_point: str,
 ) -> None:
-    """Create a new git worktree on a new branch."""
-    git(
-        "worktree", "add", worktree_path, "-b", branch, start_point, "--quiet",
-        cwd=anchor,
-    )
+    """Create a new git worktree on a new branch.
+
+    *branch* is created first, with git's usual upstream tracking, so a failure
+    there (e.g. the branch already exists) is re-raised untouched. If attaching
+    the worktree then fails (e.g. a required clean/smudge filter whose command
+    is unavailable), the branch this call created is deleted unless a worktree
+    has it checked out -- and only while it still points at *start_point*,
+    which ``update-ref`` checks atomically under git's ref lock, so a tip
+    another process advanced is kept. git's original error is re-raised
+    unchanged.
+    """
+    base = _commit_sha(start_point, cwd=anchor)
+    git("branch", branch, start_point, cwd=anchor)
+    try:
+        git("worktree", "add", worktree_path, branch, "--quiet", cwd=anchor)
+    except GitError:
+        try:
+            if base and not _branch_checked_out(branch, cwd=anchor):
+                deleted = git(
+                    "update-ref", "--no-deref", "-d", f"refs/heads/{branch}", base,
+                    cwd=anchor, check=False,
+                )
+                if deleted.returncode == 0:
+                    # Drop the upstream tracking set above, as ``branch -D`` would.
+                    git(
+                        "config", "--remove-section", f"branch.{branch}",
+                        cwd=anchor, check=False,
+                    )
+        except Exception:
+            pass  # Best-effort: never mask git's original error.
+        raise
 
 
 def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:
