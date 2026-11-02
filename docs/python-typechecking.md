@@ -91,9 +91,42 @@ activated consumer. Local `--enforced` uses the same pinned checker and target
 policy; `--changed` is an intentionally conservative local parity command.
 Additional project dependency contexts remain subsequent slices.
 
-## Exact-candidate release proposal
+## Fixed fragment source views
 
-The source-controller proposal prepares and checks MyPy from the imported frozen
+The canonical Installation Context project uses a checker-only composition at
+the actual `_load_fragments()` call. Its complete loader structure must match
+the qualified adapter. The literal fragment tuple determines order; every
+physical fragment must be present exactly once. The separate PowerShell worker
+remains an independent input.
+
+The view preserves physical source lines, normalizing line endings to LF and
+replacing only standalone `from __future__ import annotations` declarations with
+blank mapped lines. It refuses other future imports, changed loader semantics,
+missing/extra fragments and file-wide checker directives. Product code is
+never imported or executed. Each original source first passes non-executing
+compilation, so AST-only acceptance cannot hide runtime syntax errors. Directive
+scanning uses Python's universal-newline interpretation, including CR-only
+sources. Checker diagnostics point back to original fragment
+paths and line numbers. Input and emitted-view bytes are revalidated before a
+result is credited; temporary views are removed while holding the checker lease.
+Views live beside, not inside, the prepared venv because MyPy refuses its own
+environment as an import root.
+
+```text
+python tools/typecheck.py lib-installation-context --strict
+```
+
+This is still a **pending diagnostic probe**: neither the library's tests nor its
+remaining annotation delta is admitted by composing its namespace. Physical
+file counts remain distinct from checker-target counts. Vendored copies also
+remain independent pending inputs; the existing installation-context vendoring
+owner must qualify correspondence before any copy can inherit canonical checking.
+Other fragment families and independent package/module environments remain
+separate campaign work.
+
+## Exact-candidate release enforcement
+
+The source controller prepares and checks MyPy from the imported frozen
 candidate before emitting its unit evidence. The same candidate-local front
 door, pinned lock and project policies apply; checking Dev or recomposing a
 second candidate is not a substitute. Both steps are required and bounded inside
@@ -110,9 +143,16 @@ qualification-framework role.
 `python tools/check-release-controller-compatibility.py --main-ref origin/main`
 validates this prepared sequence and reports `candidate_types_prepared`
 separately from `candidate_types_active`. A prepared source proposal does not
-activate Main's independently owned controller. Until its reviewed adoption and
-actual provider qualification, exact-candidate release enforcement remains open
-under #9862; no source-only pass claims it is live.
+activate Main's independently owned controller. Reviewed Main adoption landed in
+#9914. [Run 41370906756](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41370906756)
+then passed both candidate MyPy steps and completed the normal generated
+promotion #9918. A separate unpublished, owner-frozen candidate passed immutable
+identity validation but its actual `--enforced` command rejected a deliberate
+type regression after fresh checker preparation; identities still validated
+afterward. The provider success, non-skippable failure contract and real
+candidate-local rejection jointly qualify #9862. No required source gate was
+bypassed to publish a deliberately invalid Dev commit or release dispatch.
+Remaining project admission and final strict-portfolio qualification stay open.
 
 For local checking of an already imported, owner-validated candidate, run the
 ordinary `--prepare` and `--enforced` commands **from that candidate checkout**,
