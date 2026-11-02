@@ -216,7 +216,7 @@ def test_actual_cold_payload_command_uses_packaged_owner_or_refuses_without_plug
         assert not root.exists(), result.stdout + result.stderr
 
 
-def cold_environment(installation, project, area):
+def cold_environment(installation, project, area, *, python_prerequisite=False):
     profile = installation.parent
     env = dict(os.environ)
     for key, relative in {
@@ -235,17 +235,30 @@ def cold_environment(installation, project, area):
         AGENT_VAULT_HOME=str(installation), UV_PYTHON_PREFERENCE="only-managed",
         UV_PYTHON_DOWNLOADS="automatic", UV_NO_PROGRESS="1",
     )
-    env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
+    if sys.platform == "linux" and env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+        # Test lifecycle supervision must not become product Python discovery.
+        lifecycle = area / "lifecycle-python"
+        subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", "--copies", str(lifecycle)],
+            check=True, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        interpreter = lifecycle / "bin/python"
+        interpreter.chmod(0o700)
+        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = str(interpreter)
     env.pop("UPDATE_DRIVER_WITNESS", None)
     if os.name == "nt":
         env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
-        isolation = subprocess.run(
-            [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
-             "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-             "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
-            env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-        )
-        assert isolation.returncode == 0, "native qualification must not expose host Python"
+        if python_prerequisite:
+            env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+            assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
+        else:
+            isolation = subprocess.run(
+                [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+                 "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                 "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
+                env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+            )
+            assert isolation.returncode == 0, "native qualification must not expose host Python"
     else:
         tools = area / "native-tools"
         tools.mkdir()
@@ -261,6 +274,45 @@ def cold_environment(installation, project, area):
             (tools / name).symlink_to(executable)
         env["PATH"] = str(tools)
     return env
+
+
+@pytest.mark.skipif(
+    os.name != "nt" and sys.platform != "linux",
+    reason="native cold environment is qualified only on Windows and Linux",
+)
+def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(area, monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
+    project = area / "project"
+    project.mkdir()
+    env = cold_environment(area / "profile/.agent-vault", project, area)
+    assert env["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+    assert env["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] == "fixture-context"
+    assert shutil.which("python", path=env["PATH"]) is None
+    assert shutil.which("python3", path=env["PATH"]) is None
+    if sys.platform == "linux":
+        interpreter = Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"])
+        assert interpreter.is_relative_to(area) and not interpreter.is_symlink()
+        assert interpreter.stat().st_uid == os.getuid()
+        assert interpreter.stat().st_mode & 0o6022 == 0
+        script = Path(__file__).resolve().parents[2] / "agent-procutil/src/agent_procutil/daemon_instances.sh"
+        result = subprocess.run(
+            [shutil.which("bash"), "-c", 'source "$1"; _di_lifecycle lease-fields 30 60',
+             "bash", str(script)],
+            env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == 0 and result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows caller-owned Python prerequisite")
+def test_cold_environment_can_supply_windows_caller_python_without_product_runtime(area):
+    project = area / "project"
+    project.mkdir()
+    installation = area / "profile/.agent-logger"
+    env = cold_environment(installation, project, area, python_prerequisite=True)
+    assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
+    assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
+    assert not installation.exists() and not any((installation.parent / "python").iterdir())
 
 
 @pytest.mark.parametrize("entry", ["payload", "primary"])

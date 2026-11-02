@@ -752,6 +752,19 @@ def test_source_guard_checks_published_contract(monkeypatch: pytest.MonkeyPatch)
     assert "Semantic footprint changes require" in problems[0]
 
 
+def test_source_guard_checks_native_manifest_read_budget(tmp_path: Path) -> None:
+    scripts = tmp_path / "plugins/agent-mcp/scripts"
+    scripts.mkdir(parents=True)
+    (scripts / PATH.name).write_bytes(PATH.read_bytes() + b" " * ((1 << 20) + 1))
+    helpers = tmp_path / "libs/installer-engine"
+    helpers.mkdir(parents=True)
+    for name in ("installer_engine_footprint.py", "installer_engine_uninstall.py"):
+        shutil.copyfile(ROOT / "libs/installer-engine" / name, helpers / name)
+    assert guard.check(tmp_path) == [
+        "agent-mcp: installed footprint invalid (Footprint manifest exceeds its read budget)",
+    ]
+
+
 def test_changed_producer_scope_cannot_hide_new_output(monkeypatch: pytest.MonkeyPatch) -> None:
     record = _record()
     record["producers"] = {"scripts/init.sh": "0" * 64}

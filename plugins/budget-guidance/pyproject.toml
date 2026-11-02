@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "budget-guidance"
-version = "0.1.101-dev1"
+version = "0.1.102-dev1"
 description = "Provider-neutral current AI usage budget posture."
 readme = "README.md"
 license = "MIT"

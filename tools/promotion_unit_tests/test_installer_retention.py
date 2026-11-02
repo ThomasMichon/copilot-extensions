@@ -153,3 +153,31 @@ def test_retained_remapping_preserves_nested_native_uri_and_escaped_forms(tmp_pa
             retained.as_posix() + "/fixture_backend.py",
             json.dumps(str(retained))[1:-1],
         ]]
+
+
+@pytest.mark.parametrize("conditional", [False, True], ids=["single", "conditional"])
+def test_non_editable_retention_freezes_only_private_source_metadata(
+    tmp_path, retention_policy, conditional,
+):
+    policy = retention_policy
+    parent = source_project(tmp_path / "parent", name="fixture-parent")
+    source_project(parent / "child", name="fixture-child")
+    mapping = '{path="child",editable=true}'
+    expected = {"path": "child", "editable": False}
+    if conditional:
+        mapping = '[{path="child",editable=true,marker="sys_platform == \'win32\'"}]'
+        expected["marker"] = "sys_platform == 'win32'"
+    manifest = parent / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\n[tool.uv.sources]\nfixture-child=" + mapping + "\n",
+        encoding="utf-8",
+    )
+    original = manifest.read_bytes()
+    with policy.retain_uv_install(
+        "attributed-uv", ["--no-config", str(parent)], non_editable=True,
+        env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(parent,),
+    ) as transaction:
+        retained = policy._toml(transaction.sources[parent] / "pyproject.toml")
+        entry = retained["tool"]["uv"]["sources"]["fixture-child"]
+        assert (entry[0] if conditional else entry) == expected
+        assert manifest.read_bytes() == original

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -706,6 +707,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     assert inputs["ssh_service"]["default"] is False
     assert inputs["update_diagnostics"]["type"] == "boolean"
     assert inputs["update_diagnostics"]["default"] is False
+    assert inputs["uv_deployment_compatibility"]["type"] == "boolean"
+    assert inputs["uv_deployment_compatibility"]["default"] is False
     routes = {
         "derived-diagnostics-posix": "ubuntu-latest",
         "derived-diagnostics-windows": "windows-latest",
@@ -748,6 +751,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
         "windows-native-process",
         "native-daemon-exit-windows",
+        "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -1042,6 +1046,44 @@ def test_logger_bootstrap_windows_keeps_disjoint_storage_packets() -> None:
     assert [shlex.split(step["run"]) for step in linux_execution] == [
         shlex.split(step["run"]) for step in execution
     ]
+
+
+def test_logger_snapshot_fixture_outer_budget_preserves_inner_deadlines() -> None:
+    source = HERE.parent / "plugins/agent-logger/tests/test_install_binstub.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    stamp = next(
+        node.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_STAMP_TIMEOUT_SECONDS"
+                for target in node.targets)
+    )
+    assert ast.unparse(stamp) == "90 if os.name == 'nt' else 60"
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "test_stamp_supports_first_use_provision_from_snapshot_only"
+    )
+    outer = next(
+        decorator.args[0] for decorator in function.decorator_list
+        if isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and decorator.func.attr == "timeout"
+    )
+    inner = [
+        ast.unparse(keyword.value)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+        for keyword in node.keywords if keyword.arg == "timeout"
+    ]
+    assert sorted(inner) == ["420", "_STAMP_TIMEOUT_SECONDS"]
+    assert ast.unparse(outer) == "630 if os.name == 'nt' else 600"
+    for allowance, stamp_limit in ((outer.body.value, stamp.body.value),
+                                   (outer.orelse.value, stamp.orelse.value)):
+        assert allowance == stamp_limit + 420 + 120
 
 
 def test_codespaces_recipes_remain_manual_and_bounded() -> None:

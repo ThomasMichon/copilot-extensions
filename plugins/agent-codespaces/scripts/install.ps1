@@ -1580,7 +1580,7 @@ function Invoke-Update {
 }
 
 function Materialize-SnapshotDependencies {
-    param([Parameter(Mandatory)][string]$SnapshotDir)
+    param([Parameter(Mandatory)][string]$SnapshotDir, [switch]$PayloadCopied)
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $libsDir = Join-Path $SnapshotDir 'libs'
     New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
@@ -1604,17 +1604,21 @@ function Materialize-SnapshotDependencies {
     $text = [IO.File]::ReadAllText($pyproject)
     foreach ($entry in $libraries.GetEnumerator()) {
         $source = Join-Path (Join-Path $PluginDir 'libs') $entry.Value
-        if (-not (Test-Path -LiteralPath (Join-Path $source 'pyproject.toml'))) {
+        $payloadLibrary = Test-Path -LiteralPath (Join-Path $source 'pyproject.toml')
+        if (-not $payloadLibrary) {
             $source = Join-Path (Join-Path $RepoRoot 'libs') $entry.Value
         }
         if (-not (Test-Path -LiteralPath (Join-Path $source 'pyproject.toml'))) {
             throw "Cannot locate required snapshot library: $($entry.Value)"
         }
         $destination = Join-Path $libsDir $entry.Value
-        if (Test-Path -LiteralPath $destination) {
-            Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
+        if (-not ($PayloadCopied -and $payloadLibrary -and
+                (Test-Path -LiteralPath (Join-Path $destination 'pyproject.toml')))) {
+            if (Test-Path -LiteralPath $destination) {
+                Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
+            }
+            Copy-InstallerStageDirectory -Source $source -Destination $destination
         }
-        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
         $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
         $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value
         $text = $text.Replace($oldLine, $newLine)
@@ -1665,13 +1669,18 @@ function Invoke-Stamp {
     } else {
         $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
         $snapTmp = "$snapDir.tmp-$PID"
-        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction Stop }
+        New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            $destination = Join-Path $snapTmp $_.Name
+            if ($_.PSIsContainer) {
+                Copy-InstallerStageDirectory -Source $_.FullName -Destination $destination
+            } else {
+                Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+            }
         }
-        Materialize-SnapshotDependencies -SnapshotDir $snapTmp
+        Materialize-SnapshotDependencies -SnapshotDir $snapTmp -PayloadCopied
         Deploy-SelfProvisioningBinstub -SnapshotSourcePath $snapTmp
         if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
