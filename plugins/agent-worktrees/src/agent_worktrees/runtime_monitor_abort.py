@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import sys
+import logging
 
 from zdd import breadcrumb, diagnostics, process_exit, publication_history, routing
 
@@ -120,16 +121,20 @@ def abort(root, record) -> bool:
             candidate = cutover.ControlClient(
                 f"http://127.0.0.1:{port}", token=token, config_dir=directory, timeout=1,
             )
-            health = candidate.health()
-            if (
-                health.get("pid") != pid or health.get("published") is not False
-                or health.get("status") != "ready"
-            ):
-                return False
+            try:
+                health = candidate.health()
+            except (OSError, ValueError) as error:
+                logging.getLogger(__name__).warning("Unpublished passive listener unavailable: %s", error)
+                if sys.platform == "darwin":
+                    raise
+                health = None
             if sys.platform == "darwin":
                 from .runtime_monitor_preparation import ACTION, CAPABILITY
 
-                if CAPABILITY not in health.get("capabilities", []):
+                if (
+                    health.get("pid") != pid or health.get("published") is not False
+                    or health.get("status") != "ready" or CAPABILITY not in health.get("capabilities", [])
+                ):
                     raise ValueError("Passive native cooperative cancellation is unsupported")
                 with routing.routing_lock(directory, deadline=time.monotonic() + 1), process_exit.open_process(pid, start) as reference:
                     if breadcrumb.read_breadcrumb(directory) != record or routing.read_table(directory, strict=True) != table:
@@ -143,6 +148,8 @@ def abort(root, record) -> bool:
                         return False
                 termination = {"identity_verified": True, "exit_confirmed": True}
             else:
+                if isinstance(health, dict) and health.get("pid") == pid and health.get("published") is True:
+                    return False
                 termination = _terminate_passive(directory, record, table, pid, start)
             if (
                 termination.get("identity_verified") is not True

@@ -732,6 +732,29 @@ def test_cached_handoff_read_retains_corrupt_project_error(owned, monkeypatch, r
         successor.shutdown()
 
 
+@pytest.mark.parametrize("prior_error", [None, "existing producer failure"])
+def test_roster_handoff_fence_preserves_previous_cached_status(owned, monkeypatch, prior_error):
+    owner, _head, elected, _path = owned
+    owner.agendas.publish(publication(owner))
+    monkeypatch.setattr(owner, "_admitted", lambda: True)
+    if prior_error:
+        owner.agendas._project_errors["project"] = prior_error
+    expected = owner.agendas.read(request())
+    rows = copy.deepcopy(owner.agendas._rows)
+    errors = copy.deepcopy(owner.agendas._project_errors)
+    sequence = owner.agendas._sequence
+    reconcile = owner.agendas.reconcile
+    def lose_election(project):
+        elected[0] = False
+        return reconcile(project)
+
+    monkeypatch.setattr(owner.agendas, "reconcile", lose_election)
+    owner.agendas.roster_changed("project")
+    assert owner.agendas.read(request()) == expected
+    assert owner.agendas._rows == rows and owner.agendas._project_errors == errors
+    assert owner.agendas._sequence == sequence
+
+
 def test_cached_handoff_reads_and_held_feed_keep_admitted_read_fence(owned, monkeypatch):
     owner, _head, elected, _path = owned
     admitted = [True]

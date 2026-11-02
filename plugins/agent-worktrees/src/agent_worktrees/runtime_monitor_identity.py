@@ -72,7 +72,6 @@ def routed_identity(
                     continue
                 raise ValueError("Live fallback monitor requires owner-led route recovery")
             endpoint = candidate
-            break
     if endpoint is None:
         return None
     pid = endpoint.pid
@@ -181,6 +180,7 @@ def publish_lock(path: Path, *, extra: dict, routing_held: bool = False) -> bool
             endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
             if (
                 endpoint is None or endpoint.pid != os.getpid()
+                or not isinstance(endpoint.process_start_time, str) or not endpoint.process_start_time
                 or endpoint.process_start_time != locks.process_start_time(os.getpid())
             ):
                 return False

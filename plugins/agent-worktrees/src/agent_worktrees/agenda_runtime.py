@@ -157,6 +157,8 @@ class AgendaRuntime:
             try:
                 self.reconcile(project)
             except (OSError, sqlite3.Error, ValueError, ProjectionUnavailable) as exc:
+                if isinstance(exc, contract.AgendaError) and exc.code == "superseded":
+                    return
                 if self._activation_error is None:
                     self._project_errors[project] = str(exc)[:1024]
                 self.feed.changed(project)

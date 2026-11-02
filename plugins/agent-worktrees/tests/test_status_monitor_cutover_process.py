@@ -328,6 +328,7 @@ with ExitStack() as custody:
     second_requester = None
     first_installer = None
     restarted = None
+    original_endpoint = None
     with (tmp_path / "process.log").open("w", encoding="utf-8") as log:
         old = subprocess.Popen(
             [sys.executable, "-B", "-c", baseline, str(started), str(release)],
@@ -510,6 +511,15 @@ with ExitStack() as custody:
             log.flush()
             table = routing.read_table(root / "status-monitor-routing")
             health = {}
+            pending = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
+            if pending is not None and type(pending.get("new_port")) is int:
+                try:
+                    health["candidate"] = smc.ControlClient(
+                        f"http://127.0.0.1:{pending['new_port']}",
+                        token=(root / "status-monitor-control.token").read_text().strip(),
+                    ).health()
+                except (OSError, ValueError) as unavailable:
+                    health["candidate"] = str(unavailable)
             for label in ("active", "previous"):
                 endpoint = (table or {}).get(label)
                 if endpoint:
@@ -521,6 +531,8 @@ with ExitStack() as custody:
                     except (OSError, ValueError) as unavailable:
                         health[label] = str(unavailable)
             for label, endpoint in (("original", original_endpoint),):
+                if endpoint is None:
+                    continue
                 try:
                     health[label] = smc.ControlClient(
                         endpoint.base_url,
@@ -530,6 +542,8 @@ with ExitStack() as custody:
                     health[label] = str(unavailable)
             pytest.fail(
                 f"{error}\nhealth={health}\nlast_original={last_original}\n"
+                f"witness={pending}\n"
+                f"baseline={(old.pid, old.poll())}\n"
                 f"restart={None if restarted is None else (restarted.pid, restarted.poll())}\n"
                 f"discovery-pid={(locks.read_lock(root / 'status-monitor.lock') or {}).get('pid')}\n"
                 f"singleton={(root / 'status-monitor-singleton.lock').read_text() if (root / 'status-monitor-singleton.lock').exists() else None}\n"
@@ -696,7 +710,7 @@ os._exit(29)
 
 
 @pytest.mark.skipif(sys.platform not in {"win32", "linux"}, reason="native passive termination contract")
-@pytest.mark.parametrize("phase", ["initial", "spawn-unrecorded", "passive", "dead-selected"])
+@pytest.mark.parametrize("phase", ["initial", "spawn-unrecorded", "registered-unbound", "passive", "dead-selected"])
 @pytest.mark.parametrize("owner", ["resident", "next-installer"])
 def test_marked_interrupted_publication_has_native_recovery(tmp_path, phase, owner):
     from agent_procutil import no_window_kwargs
@@ -739,6 +753,11 @@ from agent_worktrees.runtime_monitor_preparation import register
 from zdd import diagnostics
 root = Path(sys.argv[1])
 assert register(root, int(sys.argv[2]))
+if sys.argv[3] == "registered-unbound":
+    (root / "candidate.json").write_text(json.dumps({
+        "pid": os.getpid(), "start": diagnostics.process_start_time(os.getpid()), "port": int(sys.argv[2]),
+    }))
+    time.sleep(120)
 server = ControlServer(lambda action, payload: {
     "pid": os.getpid(), "status": "ready", "published": False,
 }, token="synthetic-native-recovery-token", port=int(sys.argv[2]))
@@ -774,7 +793,7 @@ with CutoverLock(directory):
     if phase != "initial":
         env = os.environ.copy()
         launch_environment(directory, env)
-        subprocess.Popen([sys.executable, "-B", "-c", sys.argv[3], str(root), str(port)], env=env,
+        subprocess.Popen([sys.executable, "-B", "-c", sys.argv[3], str(root), str(port), phase], env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             **no_window_kwargs())
         deadline = time.monotonic() + 15

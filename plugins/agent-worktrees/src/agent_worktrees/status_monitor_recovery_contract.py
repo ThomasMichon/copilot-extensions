@@ -313,6 +313,7 @@ def successor_healthy(
         return (
             host == expected.client_host and port == expected.port
             and type(health.get("pid")) is int and health["pid"] == expected.pid
+            and isinstance(expected.process_start_time, str) and bool(expected.process_start_time)
             and locks.process_start_time(expected.pid) == expected.process_start_time
             and serving_ready(health)
         )

@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from zdd import breadcrumb, diagnostics, routing
+from zdd import breadcrumb, diagnostics, process_exit, routing
 from zdd.cutover_lock import CutoverLock
 
 from . import locks
@@ -35,6 +35,10 @@ def recover_owned_publication(
     ):
         return False
     old = routing.Endpoint.from_dict(record.get("old")) if isinstance(record.get("old"), dict) else None
+    if (old is None) != (predecessor is None) or (
+        old is not None and old.pid != predecessor[0]
+    ):
+        return False
     new_port = record.get("new_port")
     if type(new_port) is not int or not 0 < new_port < 65536:
         return False
@@ -58,10 +62,19 @@ def recover_owned_publication(
             and health.get("published") is True
         )
         if committed:
-            routing.publish_active(
-                route_root, bind="127.0.0.1", port=new_port, pid=handle.pid,
-                process_start_time=start, demote_existing=True,
-            )
+            if active is not None and (
+                active.pid, active.process_start_time, active.port,
+            ) == (handle.pid, start, new_port):
+                routing.confirm_active(route_root, active)
+            else:
+                routing.publish_active(
+                    route_root, bind="127.0.0.1", port=new_port, pid=handle.pid,
+                    process_start_time=start, demote_existing=True,
+                )
+            if old is not None and not _retire_synchronous_predecessor(
+                route_root, old, predecessor[1],
+            ):
+                return False
         else:
             # A live formerly-published or unhealthy candidate is not a passive
             # failure. Keep custody until its service outcome can be established.
@@ -98,6 +111,35 @@ def recover_owned_publication(
             new_process_start_time=start, started_at=record.get("started_at"),
         )
     return True
+
+
+def _retire_synchronous_predecessor(
+    directory: Path, old: routing.Endpoint, native_start: str,
+) -> bool:
+    try:
+        exited = process_exit.observe_original_exit(old.pid, native_start)
+        if exited is True:
+            return True
+        if exited is not False or locks.process_start_time(old.pid) != native_start:
+            return False
+        with process_exit.open_process(old.pid, native_start) as reference:
+            client = ControlClient(old.base_url, config_dir=directory, timeout=65.0)
+            if (
+                locks.process_start_time(old.pid) != native_start
+                or client.health().get("pid") != old.pid
+                or locks.process_start_time(old.pid) != native_start
+            ):
+                return False
+            drained = client.drain(timeout=300.0, poll=0.2, force=False)
+            if drained.get("drained") is not True:
+                return False
+            if locks.process_start_time(old.pid) != native_start:
+                return reference.wait(0) is True
+            client.shutdown()
+            return reference.wait(30.0) is True
+    except (OSError, ValueError, NotImplementedError):
+        # A failed identity observation or graceful request is not native exit.
+        return False
 
 
 def _recover_async_owned(root: Path, record: dict) -> bool | Literal["committed", "rolled_back"]:

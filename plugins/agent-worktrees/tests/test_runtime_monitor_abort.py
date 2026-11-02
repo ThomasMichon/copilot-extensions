@@ -438,3 +438,35 @@ def test_native_passive_identity_refusal_never_restores_or_cancels_custody(
     assert routing.read_table(directory, strict=True) == table
     assert breadcrumb.read_breadcrumb(directory) == record
     assert retirements._records(root)[0][1]["state"] == "prepared"
+
+
+def test_conservative_preflip_history_returns_bounded_failure_with_custody(interrupted, monkeypatch):
+    from agent_worktrees import runtime_monitor_settlement as settlement
+
+    root, directory, old, record, _claim, _identities, alive, events = interrupted
+    table = routing.read_table(directory, strict=True)
+    candidate = routing.Endpoint("127.0.0.1", 41002, 202, process_start_time="2002")
+    table[publication_history.KEY] = publication_history.updated(table, {"active": candidate.to_dict()})
+    routing_persistence.write(routing.routing_table_path(directory), table)
+    record = breadcrumb.write_breadcrumb(
+        directory, state="publication-uncertain", old=old.to_dict(), new_pid=202, new_port=41002,
+        new_process_start_time="2002", pid=os.getpid(), self_retirement=True,
+        publication_witness=record["publication_witness"],
+    )
+    summary = {"action": "cutover", "self_retirement": True, "result": {
+        "ok": False, "publication_uncertain": True,
+    }}
+    monkeypatch.setattr(
+        settlement.time, "sleep", lambda delay: pytest.fail("uncertain publication retained installer guards"),
+    )
+    with pytest.raises(settlement.PublicationOutcomePending):
+        settlement.settle_monitor(
+            root, root / "candidate", summary, (101, "1001"),
+            [SimpleNamespace(pid=202, poll=lambda: None)], refused=RuntimeError,
+            candidate_serving=lambda *a: pytest.fail("uncertain publication was treated as ready"),
+        )
+    assert 202 in alive and not events
+    assert breadcrumb.read_breadcrumb(directory) == record
+    assert routing.read_table(directory, strict=True) == table
+    assert retirements._records(root)[0][1]["state"] == "prepared"
+    assert summary["result"]["publication_uncertain"] is True and summary["result"]["ok"] is False

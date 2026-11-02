@@ -205,8 +205,9 @@ def run_owned(
                 (plugin / "pyproject.toml").read_text(encoding="utf-8"),
             )["project"]["version"]
             if mode == "dev":
-                from agent_worktrees.runtime_monitor_retirements import pending_slot
+                from agent_worktrees.runtime_monitor_retirements import pending_slot, reconcile
 
+                reconcile(root, runtime=lifecycle.runtime)
                 if pending_slot(root, "dev"):
                     raise lifecycle.InstallationRefused("The previous dev resident is still retiring")
                 serving = lifecycle._monitor_identity(root)
@@ -329,9 +330,24 @@ def _release(
         if owner is None or claim["owner"] != str(owner):
             raise lifecycle.runtime.DevClaimConflict(claim)
         from agent_worktrees.runtime_monitor_retirements import (
-            cancel_prepared_release, pending_claim, pending_slot,
+            cancel_prepared_release,
+            pending_claim,
+            pending_slot,
+            reconcile,
         )
 
+        # Reconciliation owns inventory -> publication custody itself; never
+        # hold a selector publication lease while entering its nested cleanup.
+        reconcile(root, runtime=lifecycle.runtime)
+        current_claim = lifecycle.runtime.read_dev_claim(root, strict=True)
+        if current_claim is None:
+            return {
+                "runtime_version": lifecycle.runtime.current_version(root),
+                "reused": True,
+                "dev_claim_release_pending": False,
+            }
+        if current_claim != claim:
+            raise lifecycle.InstallationRefused("Dev claim changed before its settled release")
         if (
             pending_claim(root, claim) or pending_slot(root, "dev", include_cancelled=False)
         ) and not cancel_prepared_release(root, claim, guard=guard, runtime=lifecycle.runtime):

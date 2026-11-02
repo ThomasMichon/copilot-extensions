@@ -19,6 +19,7 @@ def finish(root, record, endpoint, *, promote, ready) -> bool:
     if (
         record.get("self_retirement") is not True
         or breadcrumb.read_breadcrumb(directory) != record
+        or not isinstance(endpoint.process_start_time, str) or not endpoint.process_start_time
         or (record.get("new_pid"), record.get("new_process_start_time"), record.get("new_port"))
         != (endpoint.pid, endpoint.process_start_time, endpoint.port)
         or locks.process_start_time(endpoint.pid) != endpoint.process_start_time

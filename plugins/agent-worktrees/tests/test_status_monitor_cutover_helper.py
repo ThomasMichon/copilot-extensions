@@ -577,6 +577,73 @@ def test_async_admission_qualifies_guarded_preparation_recovery(tmp_path, monkey
         assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
 
 
+@pytest.mark.parametrize("fallback", ["live", "unknown", "prepared", "retiring", "exited"])
+def test_serving_owner_does_not_hide_unretained_live_fallback(tmp_path, monkeypatch, fallback):
+    from agent_worktrees import runtime_monitor_identity as identity
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from zdd import process_exit
+
+    identities = {101: "1001", 202: "2002"}
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    monkeypatch.setattr(identity.locks, "process_start_time", identities.get)
+    monkeypatch.setattr("zdd.diagnostics._pid_alive", lambda pid: True)
+    def observe(pid, start):
+        if pid == 202 and fallback == "unknown":
+            raise PermissionError("native fallback exit is unavailable")
+        return pid == 202 and fallback == "exited"
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", observe)
+    directory = tmp_path / "status-monitor-routing"
+    routing.publish_active(directory, bind="127.0.0.1", port=41002, pid=202, process_start_time="2002")
+    routing.publish_active(
+        directory, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001", demote_existing=True,
+    )
+    if fallback in {"prepared", "retiring"}:
+        retirements.reserve(
+            tmp_path, {"pid": 202, "start": "2002", "slot": None, "release_claim": None},
+            committed=fallback == "retiring",
+        )
+    table = routing.read_table(directory, strict=True)
+    monkeypatch.setattr(identity.cutover, "load_or_create_control_token", lambda root: "synthetic-token")
+    monkeypatch.setattr(identity.cutover, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {
+        "status": "ready", "pid": 101, "runtime_prefix": str(tmp_path), "runtime_generation": "a" * 32,
+        "capabilities": [retirements.CAPABILITY, smc.guarded_recovery.CAPABILITY],
+    }))
+    if fallback in {"retiring", "exited"}:
+        assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
+    else:
+        with pytest.raises(ValueError, match="Live fallback"):
+            identity.routed_identity(tmp_path, require_async_retirement=True)
+    assert routing.read_table(directory, strict=True) == table
+
+
+@pytest.mark.parametrize("recorded,current,healthy", [
+    (None, None, False), (None, "2002", False), ("2002", None, False),
+    ("2002", "3003", False), ("2002", "2002", True),
+])
+def test_serving_successor_requires_recorded_and_live_native_birth(monkeypatch, recorded, current, healthy):
+    from agent_worktrees import status_monitor_recovery_contract as recovery
+
+    expected = routing.Endpoint("127.0.0.1", 41002, 202, process_start_time=recorded)
+    monkeypatch.setattr(recovery.locks, "process_start_time", lambda pid: current)
+    client = SimpleNamespace(health=lambda: {
+        "status": "ready", "published": True, "pid": 202,
+        "worktrees": {"status": "ready"}, "repositories": {"admitting": True},
+    })
+    assert recovery.successor_healthy("127.0.0.1", 41002, lambda url: client, expected=expected) is healthy
+
+
+def test_discovery_cannot_publish_when_both_recorded_and_native_birth_are_missing(tmp_path, monkeypatch):
+    from agent_worktrees import runtime_monitor_identity as identity
+    import os
+
+    endpoint = routing.Endpoint("127.0.0.1", 41002, os.getpid())
+    monkeypatch.setattr(identity.routing, "read_table", lambda *a, **k: {"active": endpoint.to_dict()})
+    monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(identity.locks, "write_lock", lambda *a, **k: pytest.fail("unverified discovery became ready"))
+    assert not identity.publish_lock(tmp_path / "status-monitor.lock", extra={})
+
+
 @pytest.mark.parametrize("changed", ["route", "native"])
 def test_async_predecessor_binds_publication_to_admitted_native_owner(tmp_path, monkeypatch, changed):
     from agent_worktrees import runtime_monitor_identity as identity

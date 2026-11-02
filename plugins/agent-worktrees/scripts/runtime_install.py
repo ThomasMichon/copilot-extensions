@@ -316,120 +316,12 @@ def _settle_monitor(
     root: Path, slot: Path, summary: dict,
     predecessor: tuple[int, str] | None, handles: list[subprocess.Popen],
 ) -> bool:
-    from zdd import breadcrumb
+    from agent_worktrees.runtime_monitor_settlement import settle_monitor
 
-    action = summary.get("action")
-    if action == "noop":
-        if summary.get("reason") not in ("disabled", "no-live-monitor"):
-            raise InstallationRefused(f"Monitor transition refused: {summary.get('reason')}")
-        return True
-    result = summary.get("result") or {}
-    committed = result.get("committed") is True
-    restart = summary.get("restart") or {}
-    committed = committed or (action == "restart" and (
-        restart.get("spawned") is True or restart.get("already_current") is True
-    ))
-    if result.get("committed") is True and not result.get("publication_uncertain"):
-        if result.get("ok") is not False:
-            try:
-                ready = _candidate_serving(root, slot)
-            except (OSError, ValueError, ConnectionError) as error:
-                ready = False
-                result["error"] = f"Committed serving attestation failed: {error}"
-            if not ready:
-                result["ok"] = False
-                result["error"] = result.get("error") or "Committed successor stopped serving after publication"
-        summary["result"] = result
-        return True
-    announcements: set[str] = set()
-
-    def announce(message: str) -> None:
-        if message not in announcements:
-            print(message, file=sys.stderr, flush=True)
-            announcements.add(message)
-
-    while True:
-        interrupted_record = (
-            breadcrumb.read_breadcrumb(root / "status-monitor-routing")
-            if action == "interrupted" else None
-        )
-        if action == "interrupted" and (
-            interrupted_record is not None and (
-                breadcrumb.is_stale(interrupted_record)
-                or interrupted_record.get("self_retirement") is True
-                and interrupted_record.get("state") == "committed"
-            )
-            or interrupted_record is None and breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists()
-        ):
-            result["publication_uncertain"] = True
-        if result.get("publication_uncertain"):
-            record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
-            if record is not None and record.get("self_retirement") is True and record.get("state") == "committed":
-                from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
-
-                try:
-                    recovered = recover_owned_publication(root, record, predecessor, handles)
-                except (OSError, ValueError, RuntimeError, ConnectionError) as error:
-                    recovered = False
-                    result["error"] = f"Committed monitor recovery unavailable: {error}"
-                result.update(committed=True, publication_uncertain=False, ok=recovered == "committed")
-                if recovered == "committed":
-                    result["error"] = None
-                summary["result"] = result
-                return _settle_monitor(root, slot, summary, predecessor, handles)
-            # Missing/corrupt evidence cannot settle a durable-publication
-            # failure. Only the recovery owner's terminal witness can.
-            if record is None or record.get("state") not in ("committed", "rolled_back", "failed"):
-                announce("Monitor publication is uncertain; retaining both generations for owner-led recovery")
-                if record is not None:
-                    from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
-
-                    try:
-                        recovered = recover_owned_publication(root, record, predecessor, handles)
-                        if recovered == "committed":
-                            result.update(committed=True, publication_uncertain=False, ok=True, error=None)
-                            summary["result"] = result
-                            return _settle_monitor(root, slot, summary, predecessor, handles)
-                        if recovered == "rolled_back":
-                            result.update(committed=False, publication_uncertain=False, rolled_back=True)
-                            summary["result"] = result
-                            return False
-                        if recovered:
-                            continue
-                    except (OSError, ValueError, RuntimeError, ConnectionError) as error:
-                        announce(f"Owned monitor recovery unavailable: {error}")
-                time.sleep(1)
-                continue
-            committed = record["state"] == "committed"
-            if committed:
-                result.update(committed=True, publication_uncertain=False, ok=True, error=None)
-                summary["result"] = result
-                return _settle_monitor(root, slot, summary, predecessor, handles)
-        try:
-            ready = _candidate_serving(root, slot)
-        except (OSError, ValueError, ConnectionError) as error:
-            announce(f"Monitor serving attestation unavailable: {error}")
-            time.sleep(0.2)
-            continue
-        if ready:
-            return True
-        live_handles = [handle for handle in handles if handle.poll() is None]
-        if live_handles and result.get("rolled_back"):
-            from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
-
-            record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
-            if record is not None:
-                try:
-                    recover_owned_publication(root, record, predecessor, handles)
-                except (OSError, ValueError, RuntimeError, ConnectionError) as error:
-                    announce(f"Owned monitor recovery unavailable: {error}")
-        if not live_handles:
-            # A vanished failed/restarted child is an observed failure, not
-            # an indefinitely pending success based on its spawn return.
-            if not committed or handles:
-                return False
-        announce("Retaining both generations until the candidate serves or every failed child exits")
-        time.sleep(0.2)
+    return settle_monitor(
+        root, slot, summary, predecessor, handles,
+        candidate_serving=_candidate_serving, refused=InstallationRefused,
+    )
 
 
 def _source_provenance(
@@ -692,6 +584,7 @@ def settle_candidate(
         from agent_worktrees import (
             config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment,
         )
+        from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
 
         identity = _installed_identity(candidate_slot)
         if package_version is not None:
@@ -756,7 +649,7 @@ def settle_candidate(
                     descriptor, timeout=child_timeout, base_python=base_python,
                 )
             handles: list[subprocess.Popen] = []
-            summary = {"action": "interrupted"}
+            summary = {"action": "interrupted", "self_retirement": True}
             retirement_predecessor = (
                 {
                     "pid": predecessor[0], "start": predecessor[1], "slot": serving_slot,
@@ -783,6 +676,7 @@ def settle_candidate(
                         asynchronous_retirement=True,
                         retirement_predecessor=retirement_predecessor,
                     )
+                    summary["self_retirement"] = True
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "
                         f"reason={summary.get('reason')} result={summary.get('result')}", flush=True,
@@ -795,6 +689,10 @@ def settle_candidate(
                         f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
                     )
                 deployment.publish(root, manifest)
+            except PublicationOutcomePending:
+                if helpers is not None:
+                    helpers.keep()
+                raise
             except BaseException:
                 announced = False
                 while True:
@@ -818,6 +716,10 @@ def settle_candidate(
                         if committed:
                             deployment.publish(root, manifest)
                         break
+                    except PublicationOutcomePending:
+                        if helpers is not None:
+                            helpers.keep()
+                        raise
                     except BaseException as error:
                         if not announced:
                             print(

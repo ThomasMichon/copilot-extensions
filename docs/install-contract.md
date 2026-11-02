@@ -5041,13 +5041,28 @@ withdrawing only its exact dead route while preserving retiring predecessors
 and their accepted work. An exact granted retiree's discovery record is not
 an unrouted incumbent for the next installation; uncommitted and unknown
 identities retain the original refusal. No new recovery worker is introduced.
+The marked committed recovery result can still prove rollback before a
+retirement grant: that outcome restores the prior selectors and deployment
+manifest, rather than advertising the new selection against an old route.
+If conservative pre-flip history cannot establish a safe terminal outcome,
+installation fails after a bounded recovery attempt and releases its guards.
+The selected candidate, old canonical references, helpers and witness stay
+retained; uncertainty neither triggers selector rollback nor publishes a
+successful new deployment manifest. Legacy unmarked synchronous recovery
+keeps identity-verified predecessor drain, shutdown and native-exit settlement.
+An active serving owner does not hide a second live fallback: admission also
+requires that fallback's positive exit or exact granted retirement custody.
 The installer witness also records its own native birth. Strict native
 original-exit observation, rather than PID liveness, recognizes an exited
 object with a readable birth or Darwin zombie. Matching live identity keeps
 custody; positive original exit or PID reuse permits abandoned recovery,
 and observation errors remain unknown. Passive launch carries that exact
 attempt to the child, which durably registers its own PID/birth before opening
-an endpoint. Missing-PID cancellation closes startup under the routing lease
+an endpoint. On Windows/Linux, exact native cancellation of a registered,
+never-published child does not require an HTTP listener to have started.
+Optional health diagnostics cannot veto that native proof; a positively
+published or identity-unknown candidate still refuses cancellation.
+Missing-PID cancellation closes startup under the routing lease
 before clearing custody, so a delayed child cannot silently survive the gap
 between spawn and the installer's first PID write. Same-attempt parent writes
 cannot erase an already registered candidate birth. Every parent/child phase
@@ -5075,7 +5090,9 @@ remains readable. Outgoing retirement latches actual successor readiness and
 settles all accepted work without grace-forced exit, even if the successor later
 dies. Before that latch, cached reads remain admitted through the published
 predecessor while every new write is independently fenced by current route
-ownership. Idle exit is serialized with installation through the existing
+ownership. Losing writer authority during agenda roster refresh is a handoff,
+not a producer failure: cached rows, sequence and any earlier producer error
+remain intact. Idle exit is serialized with installation through the existing
 cutover lease, rather than racing publication. Route-fenced discovery
 renewal prevents a predecessor from rewriting successor metadata; ready
 publication is advertised only after the discovery stamp succeeds. A known
@@ -5102,6 +5119,10 @@ inventory and publication guards only while the original dev claim and route
 still match and no cutover witness exists. Committed grants and foreign claims
 remain refusals. Reference cleanup occurs after publication custody is released,
 retaining live execution protection without recursively acquiring that lease.
+A rebuild or release retry first reconciles positively exited committed or
+cancelled residents under cutover custody, then rereads the claim before
+applying its inventory gates. Live, unknown, changed and prepared custody
+remains protected; cleanup never borrows an outer publication lease.
 There is no installer-owned subscription, new cleanup worker, forced unrouted
 restart or delayed daemon reaper in this path.
 Failed candidate children remain under installer custody, and uncertain durable

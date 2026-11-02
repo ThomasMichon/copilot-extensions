@@ -9,6 +9,22 @@ from agent_worktrees import runtime_monitor_completion as completion
 from zdd import breadcrumb, routing
 
 
+def test_missing_recorded_and_live_birth_cannot_grant_retirement(tmp_path, monkeypatch):
+    endpoint = routing.Endpoint("127.0.0.1", 61001, os.getpid())
+    record = {
+        "state": "committed", "self_retirement": True, "old": None,
+        "new_pid": os.getpid(), "new_port": endpoint.port, "new_process_start_time": None,
+    }
+    monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda path: record)
+    monkeypatch.setattr(completion.locks, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(routing, "read_table", lambda *a, **k: {"active": endpoint.to_dict()})
+    monkeypatch.setattr(
+        completion.retirements, "_records", lambda root: pytest.fail("unverified owner granted retirement"),
+    )
+    with pytest.raises(ValueError, match="identity changed"):
+        completion.finish(tmp_path, record, endpoint, promote=lambda: {"adopted": True}, ready=lambda: True)
+
+
 @pytest.mark.parametrize("phase", ["started", "flipped", "committed", "publication-uncertain"])
 @pytest.mark.parametrize("grant_fails", [False, True])
 def test_existing_resident_completes_retained_witness_after_owner_loss(
