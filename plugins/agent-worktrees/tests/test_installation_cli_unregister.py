@@ -113,13 +113,14 @@ def test_uninstall_removes_all_owned_wrapper_assets(fake_runtime):
     shared = fake_runtime["shared"]
     bindir = shared / "bin"
     bindir.mkdir(parents=True)
-    for name in lwa.WRAPPER_FILES:
+    names = lwa.load_manifest(Path(__file__).resolve().parents[1]).files
+    for name in names:
         (bindir / name).write_text("wrapper\n")
 
     rc = installation_cli_mod.cmd_uninstall(_uninstall_args(remove_config=False))
 
     assert rc == 0
-    assert all(not (bindir / name).exists() for name in lwa.WRAPPER_FILES)
+    assert all(not (bindir / name).exists() for name in names)
 
 
 # ── unregister ────────────────────────────────────────────────────────────

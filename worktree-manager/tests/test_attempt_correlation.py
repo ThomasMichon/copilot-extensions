@@ -11,6 +11,20 @@ from worktree_manager import engine_client as engine, relocated_launch
 ID = "a" * 32
 
 
+@pytest.fixture
+def admitted_engine(monkeypatch, tmp_path):
+    def install(resolve):
+        def request(project, args, **kwargs):
+            if args[:2] == ["agent-policy", "check"]:
+                return {
+                    "version": 1, "repository": str(tmp_path), "expose_agent": True,
+                    "sources": [], "denied_by": [], "allowed": True,
+                }
+            return resolve(project, args, **kwargs)
+        monkeypatch.setattr(engine, "run_json", request)
+    return install
+
+
 def _plan(action="exec"):
     return {
         "action": action, "worktree_id": "wt-a",
@@ -24,14 +38,14 @@ def _plan(action="exec"):
 
 @pytest.mark.parametrize("mode", ["new", "resume", "base", "bare-resume"])
 @pytest.mark.parametrize("remote", [False, True])
-def test_all_attempts_send_the_capability_and_require_a_bound_reply(monkeypatch, mode, remote):
+def test_all_attempts_send_the_capability_and_require_a_bound_reply(admitted_engine, mode, remote):
     calls = []
     def run(project, args, **kw):
         calls.append(args)
         assert "--require-launch-attempt" in args
         assert args[args.index("--launch-attempt-id") + 1] == ID
         return _plan("remote" if remote else "exec")
-    monkeypatch.setattr(engine, "run_json", run)
+    admitted_engine(run)
     result = engine.resolve_launch_plan(
         "example", new=mode == "new", base=mode == "base",
         worktree_id="wt-a" if mode in {"resume", "bare-resume"} else None,
@@ -44,7 +58,7 @@ def test_all_attempts_send_the_capability_and_require_a_bound_reply(monkeypatch,
 @pytest.mark.parametrize("damage", [
     "attempt", "missing", "version", "operation", "worktree", "phase", "extra", "wrong-owner",
 ])
-def test_inexact_receipt_never_becomes_an_executable_plan(monkeypatch, damage):
+def test_inexact_receipt_never_becomes_an_executable_plan(admitted_engine, damage):
     plan = _plan()
     receipt = plan["launch_attempt_receipt"]
     if damage == "attempt":
@@ -64,19 +78,19 @@ def test_inexact_receipt_never_becomes_an_executable_plan(monkeypatch, damage):
     else:
         receipt["text"] = "private fixture"
     calls = []
-    monkeypatch.setattr(engine, "run_json", lambda *a, **kw: calls.append(True) or plan)
+    admitted_engine(lambda *a, **kw: calls.append(True) or plan)
     with pytest.raises(engine.EngineFeatureUnavailable, match="saved attempt"):
         engine.resolve_launch_plan("example", new=True, launch_attempt_id=ID)
     assert calls == [True]
 
 
 @pytest.mark.parametrize("flag", ["--launch-attempt-id", "--require-launch-attempt", "--base"])
-def test_journaled_base_never_retries_a_weaker_plan(monkeypatch, flag):
+def test_journaled_base_never_retries_a_weaker_plan(admitted_engine, flag):
     calls = []
     def run(*args, **kwargs):
         calls.append(args)
         raise engine.EngineError("unrecognized arguments: " + flag)
-    monkeypatch.setattr(engine, "run_json", run)
+    admitted_engine(run)
     with pytest.raises(engine.EngineError):
         engine.resolve_launch_plan("example", base=True, launch_attempt_id=ID)
     assert len(calls) == 1

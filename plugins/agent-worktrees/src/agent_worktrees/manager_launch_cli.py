@@ -506,8 +506,12 @@ def _exec_worktree_manager(
 
         env.update(participant_environment())
     if platform.system() == "Windows":
+        from .terminal_launch import select_receiver
         from agent_procutil import spawn_sync_in_kill_on_close_job
 
+        prefix = [mgr] if isinstance(mgr, str) else list(mgr)
+        selected, env = select_receiver(prefix, env)
+        argv = [*selected, *argv[len(prefix):]]
         proc, job_handle = spawn_sync_in_kill_on_close_job(argv, env=env)
         try:
             try:
