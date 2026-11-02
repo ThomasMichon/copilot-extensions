@@ -43,9 +43,11 @@ scenarios this library implements).
   exit.
 
 ```python
+from typing import Any
+
 from work_coalescing_singleton import CoalescingServer
 
-def compute(kind: str, payload: dict) -> dict:
+def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     ...  # the actual (cheap, idempotent) work, keyed by the caller's `key`
 
 server = CoalescingServer(compute, linger_seconds=5.0, on_idle=lambda: os._exit(0))
@@ -109,6 +111,13 @@ result = client.call_with_fallback(
 cd libs/work-coalescing-singleton
 python -m pytest
 ```
+
+The complete canonical source and tests are admitted to strict MyPy on Linux
+and Windows analysis targets. From the repository root, run
+`python tools/typecheck.py lib-work-coalescing-singleton --prepare` once, then
+`python tools/typecheck.py lib-work-coalescing-singleton` before publication.
+Payload/result values remain an intentional dynamic JSON boundary; consumers
+own their operation-specific validation.
 
 ## Vendoring
 

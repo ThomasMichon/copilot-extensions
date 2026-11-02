@@ -8,7 +8,8 @@ The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
 Context, Lazy CLI Dispatch,
-Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe and Worktree Identity
+Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Work
+Coalescing Singleton and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
@@ -38,6 +39,7 @@ python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-repository-policy
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
+python tools/typecheck.py lib-work-coalescing-singleton
 python tools/typecheck.py lib-worktree-identity-remaining
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
@@ -128,6 +130,15 @@ without import-time I/O. YAML and receiver JSON remain validated dynamic
 boundaries. The archive builder retains its existing filesystem-distribution
 requirement at the metadata path boundary and preserves required licenses.
 The five consuming runtimes remain independently pending.
+
+Work Coalescing Singleton checks all eight canonical source/test files in the
+base environment on both targets. Protocol-agnostic payloads and computation
+results retain explicit dynamic JSON boundaries; rendezvous fields use a typed
+record. TCP handler ownership, socket overrides and the shared in-flight record
+are statically visible without changing wire validation, deadlines, coalescing
+or lifecycle behavior. Fault-injection tests retain their original assertions
+through typed callbacks and scoped monkeypatches. The three editable consumers
+remain independently pending.
 
 Lazy CLI Dispatch checks all three canonical files, including its tests and
 helper, on both declared targets. Its reflective override helpers preserve the
