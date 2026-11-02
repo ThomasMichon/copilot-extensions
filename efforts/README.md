@@ -124,7 +124,7 @@ that pattern to this repository.
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 historical; retained reset/prelaunch use reviewed Plan/Validation/Journal and open per-slice claims |
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Blocked; parked by maintainer direction, delivered slices retained | Explicit resumption required; #2423 and existing phase/ground/native owners retain complete acceptance |
-| [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
+| [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Blocked; parked by maintainer direction, source slices credited and complete acceptance retained | #1096 stays open; explicit resumption required, existing owners/claims and clean-room-only activation boundary unchanged |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
 | [Governed Python Artifact Promotion](active/governed-python-artifact-promotion/README.md) | Active | #4876 |

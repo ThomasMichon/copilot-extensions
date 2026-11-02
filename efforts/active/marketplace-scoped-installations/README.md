@@ -5,7 +5,8 @@
 - **Branch(es):** independent per-phase PRs; every implementation PR preserves
   Windows and POSIX compatibility or is an explicitly non-operative foundation
 - **Created:** 2026-08-25
-- **Status:** Active
+- **Status:** Blocked - parked by maintainer direction; delivered source credited,
+  complete acceptance retained, explicit resumption required
 - **Vision:** extends
   [`visions/plugin-services/installation-cells`](../../../visions/plugin-services/installation-cells/README.md)
   — §Features/`marketplace-scoped-runtime-and-state`,
@@ -23,6 +24,25 @@
   [#1108](https://github.com/ThomasMichon/copilot-extensions/issues/1108) ·
   [#1109](https://github.com/ThomasMichon/copilot-extensions/issues/1109) ·
   [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110)
+
+## Parked disposition - 2026-11-02
+
+The maintainer directed that this effort be updated to its current state and
+parked. This is a pause, not completion, abandonment of acceptance, or an archive.
+Further implementation and qualification under this effort require explicit
+resumption. The complete Plan, Validation Plan, original scope, narrow native
+waivers, independent issue owners, claims and source/resource custody remain
+unchanged; #1096 stays open.
+
+Merged source includes lifecycle-owned catalogs in #6546, representative native
+diagnostic coverage in #6645 and real Manager/reconciliation refusal coverage in
+#6684. The recovery-preview dependency #6703 also merged; it is not marketplace
+acceptance. These deliveries do not close remaining attributable consumers,
+scheduled/direct-installer contexts, simultaneous registration and lookup,
+native/all-copy qualification, release-content proof or authorized rollout.
+Default legacy behavior, optional coexistence and the disposable-clean-room-only
+activation restriction remain in force. Parking authorizes no persistent-host
+diagnostics, activation, migration, service change or rollout.
 
 ## Guiding Intent
 
@@ -55,6 +75,9 @@ remain outside this namespacing model.
 | Linux/WSL validation lane | POSIX shims, filesystem/service behavior, systemd/socket behavior, and clean-room validation | Isolated Linux/WSL validation per operative phase |
 
 ## Coordination
+
+The continuing responsibilities below are retained while this effort is parked;
+they do not authorize execution or transfer an incumbent owner's scope.
 
 The complete #3943 simultaneous-registration/metadata/lookup consumer lane continues
 through Phase 2/8 and assigned OPEN #1096 under the SAME
@@ -651,6 +674,25 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-11-02 - Parked with delivered source and full acceptance retained
+
+- Recorded the maintainer's direction to update and park this effort. Status is
+  Blocked, not Done; explicit resumption is required. Every existing Plan and
+  Validation Plan checkbox and the complete #2701/#3943 retained scope remain
+  unchanged. Existing implementation, native, source/resource and release owners
+  retain custody; no task or claim is abandoned or reassigned.
+- Credited merged [#6684](https://github.com/ThomasMichon/copilot-extensions/pull/6684)
+  (`c075a1cde383bbb029a5e2f6ea8e006541ffd7fc`) for the real Manager/refusal
+  coverage following the already-recorded #6546/#6645 source deliveries.
+  The separately scoped recovery-preview dependency
+  [#6703](https://github.com/ThomasMichon/copilot-extensions/pull/6703)
+  (`9b399fff72198f484763753e5bd93cff6c4241c2`) also merged; neither source
+  delivery proves the full marketplace or installed acceptance contract.
+- Remaining consumer, scheduled/direct-installer, registration/lookup,
+  native/all-copy, release-content and rollout gates stay open and paused.
+  No new diagnostic execution, test result, activation, migration, installed
+  effect or release qualification is claimed by this documentation update.
 
 ### 2026-10-23 - Direct retained acceptance from #3943
 

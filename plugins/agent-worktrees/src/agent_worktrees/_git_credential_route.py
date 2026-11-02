@@ -31,6 +31,16 @@ def read_request(stream) -> str:
             return "".join(lines)
 
 
+def router_helper(python: str = sys.executable) -> str:
+    import shlex
+
+    from .update_auth_bootstrap import module_argv
+
+    argv = module_argv("agent_worktrees._git_credential_route", python=python)
+    argv[0] = argv[0].replace("\\", "/")
+    return "!" + shlex.join(argv)
+
+
 def parse_attributes(text: str) -> dict[str, str]:
     return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
 
