@@ -241,11 +241,12 @@ owns the revised implementation and validation boundary.
 - [ ] Obtain the specific native preparation/execution approval and qualify
   that process-only stage through the original outside containment owner;
   preserve the separately unverified actual no-window/no-focus gate.
-- [ ] Wire and source-qualify the explicit process-only outside driver,
+- [x] Wire and source-qualify the explicit process-only outside driver,
   PowerShell adapter and non-owning stage through the existing containment
   owner before native execution. Preserve the four-field request, original
   clock/root/limits and outside-only final settlement; old functional
-  preparations are not process-only evidence.
+  preparations are not process-only evidence. Merged in #9909; fresh native
+  preparation and separately authorized execution remain open.
 - [ ] Remove first-party native sources, generated copies, custom compiled
   artifacts, compiler build hooks and release construction/verification
   compilation; retain normal integrity and source admission.
