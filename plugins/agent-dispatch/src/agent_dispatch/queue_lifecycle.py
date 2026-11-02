@@ -741,6 +741,9 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 raise TaskError("allocator claim has no accepted worker to perform this transition")
             if note == "start":
                 from .queue_pool_placement import require_pool_start
+                from .queue_pool_startup import require_pool_decision
+                ts = self._now(now)
+                require_pool_decision(conn, task, ts)
                 if require_pool_start(
                     conn, task, worker_id, (extra or {}).get("owner_session_id"),
                     expected_generation,
@@ -868,6 +871,9 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 params.append(val)
             params.append(task_id)
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
+            if note == "start" and to == Status.STARTED:
+                from .queue_pool_startup import reset_pool_startup
+                reset_pool_startup(conn, task_id)
             if "owner_session_id" in (extra or {}):
                 attach_machine, attach_worktree = _claimant_worktree_machine(task)
                 self._record_attachment(

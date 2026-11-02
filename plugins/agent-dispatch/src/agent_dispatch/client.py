@@ -18,6 +18,7 @@ from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 
 from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
 from .client_pool_placement import PoolPlacementClientMixin
+from .client_pool_startup import PoolStartupClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_schedules import ScheduleClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
@@ -30,7 +31,7 @@ from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(

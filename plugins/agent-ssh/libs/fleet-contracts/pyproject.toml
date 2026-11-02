@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-fleet-contracts"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Strict, bounded portable machine-fleet driver and service-routing contracts"
 readme = "README.md"
 license = "MIT"

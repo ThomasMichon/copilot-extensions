@@ -18,6 +18,7 @@ def declaration_plan(root: Path, commit: str, snapshot: codec.Snapshot) -> dict[
     updated = copy.deepcopy(snapshot.materialized)
     http = evidence.contract(updated)
     sources = {row["path"]: row for row in http["source_paths"]}
+    http.setdefault("capability_versions", {}).update(evidence.CAPABILITY_VERSIONS)
     allowed = set(evidence.AFFECTED)
     for path in sorted(allowed | sources.keys()):
         row = sources.get(path)
