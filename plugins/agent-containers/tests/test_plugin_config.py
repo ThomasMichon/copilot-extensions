@@ -707,3 +707,38 @@ def test_terminal_whole_fleet_reset_does_not_restore_shipped_values():
     assert provenance == {"/fleets/sample": {"id": "repository", "tier": "repository",
                                              "removed": True}}
     assert summaries[0]["removed"] == ["sample"]
+
+
+def test_explicit_fleets_null_resets_plugin_fleets_terminally():
+    fragment = plugin_config.PluginFragment(
+        plugin="example-harness@example", path=Path("/plugin/containers.yaml"),
+        fleets={"sample": {"image": "shipped:v1", "environment": {"SHIPPED": "1"}}},
+    )
+    layers = [
+        ({"id": "repository"}, {"fleets": {"sample": {"environment": {"REPO": "1"}}}}),
+        ({"id": "knowledge"}, {"fleets": None}),
+    ]
+    data, provenance, _, summaries = plugin_config.merge_fragments(
+        {"fleets": None}, [fragment], provenance={}, layers=[], operator_layers=layers,
+    )
+    assert data["fleets"] == {}
+    assert provenance == {"/fleets/sample": {"id": "knowledge", "removed": True}}
+    assert summaries[0]["removed"] == ["sample"]
+
+
+def test_explicit_fleets_null_then_higher_tier_redefinition(tmp_path, layered, isolated):
+    base, knowledge, machine, write = layered
+    root = _plugin(tmp_path / "plugins" / "example-harness", DRIVER_FRAGMENT)
+    isolated.append(("example-harness@example", [root]))
+    write(base, {"fleets": {"example": {"environment": {"REPO": "1"}}}})
+    write(knowledge, {"fleets": None})
+    machine_file = write(machine, {"fleets": {"example": {"size": 2}}}, machine_file=True)
+
+    cfg = load_config(strict=True)
+
+    fleet = cfg.fleets["example"]
+    assert fleet.size == 2
+    assert fleet.image is None and fleet.environment == {}
+    owners = {p: o["id"] for p, o in cfg.configuration_provenance.items()
+              if p.startswith("/fleets/example")}
+    assert owners == {"/fleets/example/size": str(machine_file)}

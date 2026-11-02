@@ -66,7 +66,8 @@ enabled plugin. Without an invoking checkout only global activation applies.
   while any non-null value is still validated.
 - An empty operator fleet entry (`example:`, `example: null` or `example: {}`)
   removes a plugin-shipped fleet entirely, including every shipped key; a
-  higher layer may define it again from scratch. The removing layer is recorded
+  higher layer may define it again from scratch. An explicit `fleets: null` in a
+  layer removes every plugin-shipped fleet the same way. The removing layer is recorded
   at `/fleets/<name>` with `removed: true`. Empty entries for fleets that no
   plugin ships keep their native meaning (a fleet with defaults).
 - The plugin whose `name@marketplace` sorts first owns a duplicated fleet name;

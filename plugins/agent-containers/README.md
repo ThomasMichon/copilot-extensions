@@ -592,7 +592,8 @@ settings -- the same resolver as `codespaceConfig` and plugin-shipped
 - An **empty fleet entry removes a plugin-shipped fleet** entirely (`example:`,
   `example: null` or `example: {}`): none of its keys are inherited, `fleet` /
   `up example` report it as not defined, and `config-sources` shows it as
-  removed by that layer. A higher layer may define the fleet again from
+  removed by that layer (an explicit `fleets: null` removes every shipped
+  fleet the same way). A higher layer may define the fleet again from
   scratch. (An empty entry for a fleet no plugin ships keeps its existing
   meaning: a fleet with default settings.)
 - Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`

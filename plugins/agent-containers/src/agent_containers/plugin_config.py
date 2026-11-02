@@ -21,7 +21,8 @@ Rules:
   global defaults, relay, dotfiles and harness settings remain operator-owned.
 * An empty operator fleet entry (``example:``, ``example: null`` or
   ``example: {}``) removes the plugin-shipped fleet entirely; a higher layer may
-  define it again from scratch. Provenance records the removing layer at
+  define it again from scratch. An explicit ``fleets: null`` in a layer
+  removes every plugin-shipped fleet the same way. Provenance records the removing layer at
   ``/fleets/<name>`` with ``removed: true``.
 * Operator configuration overrides a plugin fleet **per key**: the fleet's
   mapping is deep-merged (nested mappings such as ``environment`` merge per
@@ -398,10 +399,15 @@ def merge_fragments(
             {}, plugin_fleets[name], prefix, fragment.owner(), replayed,
         )
         for owner, values in operator_layers:
-            layer_fleets = values.get("fleets") if isinstance(values, dict) else None
-            if not isinstance(layer_fleets, dict) or name not in layer_fleets:
+            if not isinstance(values, dict) or "fleets" not in values:
                 continue
-            layer_value = layer_fleets[name]
+            layer_fleets = values["fleets"]
+            if layer_fleets is None:
+                layer_value = None  # an explicit ``fleets: null`` resets every fleet
+            elif not isinstance(layer_fleets, dict) or name not in layer_fleets:
+                continue
+            else:
+                layer_value = layer_fleets[name]
             if layer_value is None or layer_value == {}:
                 # An empty fleet entry removes the plugin-shipped fleet; a
                 # higher layer may define it again from scratch.
