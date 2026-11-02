@@ -37,7 +37,7 @@ function Get-NativePreToolStop {
     $path = $env:PRETOOL_KILLSWITCH_STATE_FILE
     if ($path -and $path -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))') { return $null }
     if (-not $path) {
-        $path = Join-Path $env:USERPROFILE '.copilot-extensions\killSwitches\pretool-killswitch.json'
+        $path = [IO.Path]::Combine($env:USERPROFILE, '.copilot-extensions\killSwitches\pretool-killswitch.json')
     }
     if (-not [IO.File]::Exists($path)) { return $false }
     try {
@@ -59,7 +59,7 @@ function Test-NativePreToolRead([object]$Payload) {
     if (-not $name) { $name = $Payload.tool_name }
     if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
     try {
-        $policy = Read-PreToolJson (Join-Path $PSScriptRoot 'hook-read-policy.json') 4096
+        $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
         if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
             ($policy.version -isnot [int] -and $policy.version -isnot [long]) -or $policy.version -ne 1 -or
             $policy.guards -isnot [Collections.IDictionary]) { return $false }
@@ -68,7 +68,7 @@ function Test-NativePreToolRead([object]$Payload) {
         foreach ($guard in $names) {
             $expected = $policy.guards[$guard]
             if ($expected -isnot [string] -or $expected -cnotmatch '^[0-9a-f]{64}$') { return $false }
-            $path = Join-Path $PSScriptRoot $guard
+            $path = [IO.Path]::Combine($PSScriptRoot, $guard)
             $info = [IO.FileInfo]::new($path)
             if (-not $info.Exists -or $info.Length -gt 131072 -or
                 ($info.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
@@ -123,9 +123,6 @@ function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnosti
 }
 
 try {
-    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }
-    catch { Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop }
-    [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
     $stop = Get-NativePreToolStop
     if ($stop -eq $true) { exit 0 }
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
@@ -134,6 +131,9 @@ try {
     $payload = ConvertFrom-PreToolJson $raw
     if ($payload -isnot [Collections.IDictionary]) { throw 'Expected an event object' }
     if ($stop -eq $false -and (Test-NativePreToolRead $payload)) { exit 0 }
+    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }
+    catch { Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop }
+    [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
     $script:preToolBoundary = 'runtime selection'
     $python = $null
     $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload", "keys-shadow-response"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload", "keys-shadow-response", "read-no-management", "active-no-management", "write-cwd", "write-cwd-fallback"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
     shell = shutil.which(native_shell)
@@ -41,11 +41,27 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     home.mkdir()
     flag = tmp_path / "pretool.json"
     env = os.environ.copy()
-    for name in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT", "PYTHONUTF8", "PYTHONIOENCODING"):
+    for name in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT", "PYTHONUTF8", "PYTHONIOENCODING",
+                 "AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION"):
         env.pop(name, None)
     env.update(HOME=str(home), USERPROFILE=str(home),
                PRETOOL_KILLSWITCH_STATE_FILE=str(flag),
                PATH=str(interpreter.parent) + os.pathsep + env.get("PATH", ""))
+    if case in {"read-no-management", "active-no-management"}:
+        flag = home / ".copilot-extensions" / "killSwitches" / "pretool-killswitch.json"
+        flag.parent.mkdir(parents=True)
+        env.pop("PRETOOL_KILLSWITCH_STATE_FILE")
+        if case == "active-no-management":
+            flag.write_text('{"active":true}', encoding="utf-8")
+    if case in {"write-cwd", "write-cwd-fallback"}:
+        cwd_marker = tmp_path / "policy-cwd"
+        (scripts / "hook_policy_process.py").write_text(
+            "import base64,json,os,sys\nfrom pathlib import Path\n"
+            + "Path(" + repr(str(observed)) + ").write_text(base64.b64decode(sys.stdin.readline()).decode('utf-8'))\n"
+            + "Path(" + repr(str(cwd_marker)) + ").write_text(os.getcwd())\n"
+            + "print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture Python path'}))\n",
+            encoding="utf-8",
+        )
     if case == "guard-drift":
         with (scripts / "anchor_write_guard.py").open("a", encoding="utf-8") as output:
             output.write("\n# changed guard implementation\n")
@@ -100,13 +116,28 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
             encoding="utf-8",
         )
     payload = {"toolName": "view" if case in {
-        "read", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
+        "read", "read-no-management", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
         "future-flag-contract", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract",
     } else "edit", "toolArgs": {"path": "non-ascii-\u00e9.txt"}}
     if case == "case-payload":
         payload["ToolName"] = "view"
     original = json.dumps(payload, ensure_ascii=False, indent=2)
     command = "& '" + str(scripts / "pre-tool-hook.ps1").replace("'", "''") + "'"
+    if case == "write-cwd-fallback":
+        command = (
+            "function global:Set-Location { param([string]$LiteralPath) "
+            "if ($LiteralPath -eq $env:USERPROFILE) { throw 'unavailable home' }; "
+            "[void]$ExecutionContext.SessionState.Path.SetLocation($LiteralPath) }; "
+            + command
+        )
+    if case in {"read-no-management", "active-no-management"}:
+        shutil.copytree(scripts, home / ".agent-worktrees" / "bin")
+        command = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]["powershell"]
+        command = (
+            "function global:Set-Location { throw 'unexpected cwd repair' }; "
+            "function global:Join-Path { throw 'unexpected Management path join' }; "
+            "function global:Test-Path { throw 'unexpected Management path test' }; " + command
+        )
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         input=original, capture_output=True, text=True, encoding="utf-8", env=env,
@@ -118,7 +149,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     if case == "malformed-response":
         assert "private-native-response-text" not in result.stderr
         assert "private-native-response-text" not in result.stdout
-    python_required = case not in {"read", "active", "context"}
+    python_required = case not in {"read", "active", "context", "read-no-management", "active-no-management"}
     assert observed.exists() is python_required, (result.stdout, result.stderr)
     if python_required:
         assert json.loads(observed.read_text(encoding="utf-8")) == payload
@@ -139,6 +170,9 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         assert "installation-context validation" in reply["additionalContext"]
     else:
         assert result.stdout == ""
+    if case in {"write-cwd", "write-cwd-fallback"}:
+        expected_cwd = home if case == "write-cwd" else Path(scripts.anchor)
+        assert Path(cwd_marker.read_text()) == expected_cwd
 
 
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
@@ -178,7 +212,9 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
          "-PayloadRoot", str(payload), "-PayloadVersion", "1.0.0",
          "-PayloadOrigin", "explicit", "-ExpectedNamespaceGeneration", "0",
          "-ExpectedInstallGeneration", "0", "-DurableHome", str(durable)],
-        capture_output=True, text=True, encoding="utf-8", timeout=30, **flags,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+        env={**os.environ, "PATH": str(interpreter.parent) + os.pathsep + os.environ.get("PATH", "")},
+        **flags,
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
     context = json.loads(result.stdout)
