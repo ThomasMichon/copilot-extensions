@@ -105,7 +105,12 @@ set but are not pool definitions.
 Each attempt requires observations from all three sources and an identified
 machine/environment. Effective worker rows need complete, scope-consistent
 normalized definitions. A missing or invalid definition cannot simply disappear
-from the pool list. Failed or cached reads, a future consumed from an earlier
+from the pool list. Explicit direct rows retain their complete definition in
+the existing spec JSON through the
+[negotiated registration boundary](pool-instances.md#direct-registrations).
+Equivalent-source deduplication compares explicit pool policy as well as launch
+behavior, so a different priority or full predicate is not erased by matching
+legacy flags. Failed or cached reads, a future consumed from an earlier
 attempt, unconfirmed declaration writes/withdrawals and duplicate source IDs
 make the entire collection unavailable. Inspecting the retained snapshot does
 not perform I/O or renew freshness; unsuccessful attempts do not expose a partial

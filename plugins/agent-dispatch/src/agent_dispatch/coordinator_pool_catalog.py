@@ -28,6 +28,7 @@ def pool_catalog_contract(
         "protocol": POOL_CATALOG_PROTOCOL,
         "supported_versions": [POOL_CATALOG_VERSION],
         "definition_versions": [POOL_DEFINITION_VERSION],
+        "registration_definition_versions": [POOL_DEFINITION_VERSION],
         "control_authority_configured": bool(control_token),
         "metadata_only": True,
         "lock_holder_verification": False,
