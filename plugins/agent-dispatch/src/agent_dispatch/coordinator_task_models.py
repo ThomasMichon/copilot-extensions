@@ -119,6 +119,7 @@ class WorkerBody(BaseModel):
 class StartBody(WorkerBody):
     expected_generation: int | None = Field(default=None, ge=0, strict=True)
     expected_owner_session_id: str | None = None
+    pool_placement_version: int | None = Field(default=None, ge=1, le=1, strict=True)
 
 
 class ActivityBody(BaseModel):

@@ -13,6 +13,7 @@ from .events import EventBus, sse_format
 from .queue import TaskQueue
 from .coordinator_task_recovery import RECOVERY_CONTRACT
 from .coordinator_pool_catalog import pool_catalog_contract
+from .queue_pool_placement import pool_placement_contract
 
 
 def _slot_descriptor(app_state: Any) -> dict:
@@ -107,6 +108,7 @@ def register_status_routes(
             "task_categories": 1,
             "exact_dedup_lookup": 1,
             "pool_catalog_transport": pool_catalog_contract(control_token),
+            "pool_placement": pool_placement_contract(),
             "task_recovery": RECOVERY_CONTRACT,
             "delegated_run_waiters": {
                 "protocol": "delegated_run_waiters/v1",

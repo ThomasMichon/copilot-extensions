@@ -6,6 +6,9 @@ the metadata expansion for the
 It is **not used by a production supervisor or allocator**. Transport
 authorization does not prove publisher OS-lock admission, complete configured
 scope membership or atomic-placement support.
+The separate [explicit claim/start boundary](pool-claim-start.md) advertises and
+negotiates those operations without changing this metadata contract or wiring
+the ordinary supervisor.
 
 ## Implemented authenticated transport
 

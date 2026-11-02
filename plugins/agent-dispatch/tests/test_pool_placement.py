@@ -17,6 +17,7 @@ from agent_dispatch.queue import Status, TaskError, TaskQueue
 from agent_dispatch.registrar import Filters
 from agent_dispatch.registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
 from agent_dispatch.queue_pool_placement import select_pool
+from agent_dispatch.queue_pool_placement import pool_placement_contract
 from agent_dispatch.workspace_binding import record_prepared
 
 
@@ -329,6 +330,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "protocol": "pool_placement/v1", "supported_versions": [1],
         "supported_drivers": ["cli"],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
+        "explicit_start_versions": [1],
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
     body = {"task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision, "driver": "cli"}
@@ -356,22 +358,33 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
 
 def test_client_emits_control_placement_and_incarnation_bound_start(q):
     requests = []
+    revision = publish(q, pool())
+    requested = task(q)
+    placed = q.place_pool_task(requested.id, reserved_by="allocator", catalog_revision=revision)
 
     def respond(request):
         requests.append(request)
+        if request.url.path == "/pool-placements/contract":
+            return httpx.Response(200, json=pool_placement_contract())
+        if request.url.path == "/pool-placements":
+            return httpx.Response(200, json={
+                "protocol": "pool_placement/v1", "version": 1, "reserved": True,
+                "reservation": asdict(placed.reservation), "assignment": asdict(placed.assignment),
+            })
         return httpx.Response(200, json={"ok": True})
 
     with DispatchClient(
         "http://example.test", token="data", control_token="control",
         transport=httpx.MockTransport(respond),
     ) as client:
-        client.place_pool_task("task", reserved_by="allocator", catalog_revision=3, driver="cli")
+        client.place_pool_task(requested.id, reserved_by="allocator", catalog_revision=revision, driver="cli")
         client.start("task", "host/worktree", owner_session_id="native", expected_generation=7)
     scheme = "Bear" + "er "
     assert requests[0].headers["Authorization"] == scheme + "control"
-    assert requests[0].url.path == "/pool-placements"
-    assert json.loads(requests[0].content)["catalog_revision"] == 3
-    assert json.loads(requests[1].content) == {
+    assert requests[0].url.path == "/pool-placements/contract"
+    assert requests[1].url.path == "/pool-placements"
+    assert json.loads(requests[1].content)["catalog_revision"] == revision
+    assert json.loads(requests[2].content) == {
         "worker_id": "host/worktree", "owner_session_id": "native",
         "expected_generation": 7, "expected_owner_session_id": None,
     }

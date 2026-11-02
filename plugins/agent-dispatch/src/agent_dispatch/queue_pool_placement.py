@@ -15,6 +15,17 @@ POOL_PLACEMENT_PROTOCOL = "pool_placement/v1"
 POOL_PLACEMENT_VERSION = 1
 
 
+def pool_placement_contract() -> dict[str, object]:
+    """Describe explicit provider support, not automatic lane admission."""
+    return {
+        "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
+        "supported_drivers": ["cli"],
+        "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
+        "explicit_start_versions": [1],
+        "automatic_lane_migration": False, "startup_retry_policy_complete": False,
+    }
+
+
 @dataclass(frozen=True)
 class PoolAssignment:
     task_id: str
