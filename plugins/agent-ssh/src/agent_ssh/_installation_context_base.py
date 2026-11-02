@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, ParamSpec, TypeVar, cast
 from urllib.parse import quote, urlsplit, urlunsplit
 
 LOCK_SCHEMA = "copilot-extensions.installation-lock"
@@ -117,9 +117,17 @@ def _fail(message: str) -> NoReturn:
     raise InstallationContextError(message)
 
 
-def _validation_scope(function: Callable[..., Any]) -> Callable[..., Any]:
+_ValidationParameters = ParamSpec("_ValidationParameters")
+_ValidationResult = TypeVar("_ValidationResult")
+
+
+def _validation_scope(
+    function: Callable[_ValidationParameters, _ValidationResult],
+) -> Callable[_ValidationParameters, _ValidationResult]:
     @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(
+        *args: _ValidationParameters.args, **kwargs: _ValidationParameters.kwargs,
+    ) -> _ValidationResult:
         depth = _VALIDATION_SCOPE_DEPTH.get()
         outermost = depth == 0
         cache_token = None
