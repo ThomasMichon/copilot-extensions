@@ -9,7 +9,7 @@ exclude-newer = "7 days"
 # Distribution name is namespaced (agent-fleet-index-adapter) to prevent
 # dependency-confusion; the import module is ``fleet_index_adapter``.
 name = "agent-fleet-index-adapter"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "machine-fleet routing-foundation service adapter: maps a validated index.search/health RouteRequest to agent-index's existing HTTP query API"
 readme = "README.md"
 license = "MIT"

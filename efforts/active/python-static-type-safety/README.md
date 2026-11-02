@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10029 canonical Repository Policy source/test contracts and guest-reader qualification. #10026 canonical Fleet Contracts admission is complete.
+- **Current slice:** #10036 canonical Fleet Index and Vault adapter source/test contracts. #10029 canonical Repository Policy admission is complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10029's canonical Repository Policy scope, shared admission/coverage manifests, documentation, the effort and full completion judgment. The Fleet Contracts worker and prior test-cohort delegates are complete.
+- **Delegates:** The lead owns #10036's canonical Fleet adapter scopes, shared admission/coverage manifests, documentation, the effort and full completion judgment. The Fleet Contracts worker and prior test-cohort delegates are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -118,7 +118,8 @@ rewrite.
 - [x] Strictly admit all four canonical Configuration Layers source/test modules (#10021).
 - [x] Strictly admit all five canonical Core Delegation source/test modules (#10025).
 - [x] Strictly admit all six canonical Fleet Contracts source/test modules (#10026).
-- [ ] Strictly admit canonical Repository Policy source/test modules, including the executable guest reader (#10029).
+- [x] Strictly admit canonical Repository Policy source/test modules, including the executable guest reader (#10029).
+- [ ] Strictly admit all canonical Fleet Index and Vault adapter source/test modules (#10036).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1345,3 +1346,38 @@ composition prerequisites, and review/validation rules.
   so that packet's manifest is unchanged; required CI still runs it.
   No live remote venue is needed for this read-only source extraction; fresh
   subprocess and installed-wheel composition are exercised locally.
+
+### 2026-11-02 - Repository Policy merged; Fleet adapters selected
+
+- #10035 merged as `f72ce614fe2004e1f811c70a7577c6b3ae3a1429`
+  after exact-head approval, zero open review threads and green required CI in
+  [run 41504133602](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41504133602).
+  #10029 is complete. Re-reading this Plan and Validation Plan leaves 50
+  pending projects and the larger completion gate open.
+- #10036 owns two small canonical adapter scopes, four files apiece. Initial
+  Linux strict probes report 53 Index and 57 Vault diagnostics, concentrated
+  in test fixtures, optional response members and validated operation-specific
+  parameter unions. Their first annotated complete-scope probes pass on both
+  targets, but behavioral validation, admission and review remain required.
+
+### 2026-11-02 - Fleet adapter strict qualification
+
+- Both complete four-file adapter scopes pass strict MyPy on Linux and
+  Windows. Backend JSON remains an explicit serialization boundary, and narrow
+  operation-specific parameter casts preserve the validated request contract
+  without adding or removing runtime checks. Positive request factories now
+  use typed constructors; existing assertions remain, with explicit non-null
+  response assertions added for narrowing.
+- The contained canonical suites pass all 24 tests without skips, including
+  the two real `agent_index.server.build_app()` HTTP round trips over an
+  OS-assigned port. Both consumer maps report no shipped consumers or physical
+  copies, consistent with these prototype libraries' documented status.
+  Neither adapter belongs to the existing promotion-unit source closure, so
+  its manifest and budget remain unchanged. No installer or first-provision
+  behavior changes, and no credential store or live remote service is touched.
+- The expanded enforced gate passes all 20 strict projects on both targets;
+  48 projects remain pending. A production AST comparison, ignoring only
+  no-op typing casts, confirms unchanged function bodies; every existing test
+  assertion, name and decorator remains. Module-size, changefile,
+  install-contract, vendoring, documentation-consistency, Ruff `F,E9` and diff
+  guards pass. Required remote CI and review remain before merge.

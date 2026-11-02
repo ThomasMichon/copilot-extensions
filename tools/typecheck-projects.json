@@ -129,7 +129,7 @@
         "libs/fleet-index-adapter"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-fleet-vault-adapter",
@@ -137,7 +137,7 @@
         "libs/fleet-vault-adapter"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-installation-context",

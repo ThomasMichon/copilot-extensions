@@ -9,7 +9,7 @@ exclude-newer = "7 days"
 # Distribution name is namespaced (agent-fleet-vault-adapter) to prevent
 # dependency-confusion; the import module is ``fleet_vault_adapter``.
 name = "agent-fleet-vault-adapter"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "machine-fleet routing-foundation service adapter: shuttles a scoped credential-relay response from a registered vault/controller machine through the Gateway"
 readme = "README.md"
 license = "MIT"
