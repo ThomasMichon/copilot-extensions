@@ -108,12 +108,27 @@ when inhibited; active work is not retrospectively terminated.
 Local qualification includes real private-fixture controller changes and
 payload copies, production virtual Configuration confirmation/cancellation and
 refresh, queue/manual/scope controls, and the available Bash argument matrix.
-Initial source qualification passed the 3,674-case actor-free packet with 465 bound sources, 214
-production coverage targets, coverage once and no observed effects inside its
-unchanged 300-second budget. The additional early-bootstrap addressed-root
-regression is included in the final current-source packet rather than credited
-to that earlier result. All 21 currently admitted strict typing projects
+Initial source qualification passed the 3,674-case actor-free packet with 465
+bound sources and 214 production coverage targets. The early-bootstrap
+addressed-root regression then passed in the committed 3,675-case packet.
+After the managed publication rebase preserved upstream admission additions,
+the complete 3,685-case packet passed with 519 bound sources, 218 production
+coverage targets, coverage once and no observed effects in 53.20 seconds inside
+the unchanged 300-second budget. Current-head provider CI also passed, including
+the full seven-day dependency-age audit with 447 declarations and no violations.
+All 21 currently admitted strict typing projects
 pass Linux and Windows static views; pending projects are not thereby admitted.
 Actual Windows shell execution, independent implementation review/required CI
 and normal source merge remain explicit publication gates. No local result
 qualifies desktop behavior, an installed update or the complete parent effort.
+
+The first native source packet refused before archive creation or test
+collection: its preflight compared a normalized Git blob with the intentional
+CRLF PowerShell checkout. No native outcomes or skips were produced. The
+operator authorized one renewed attempt using exact pinned source bytes,
+without changing the original limits or host-effect exclusions. The durable
+correction is the existing raw-object/complete-source reader, not changing
+`.gitattributes` or normalizing the checkout; `TESTING.md` and the existing
+fresh-Git source-reader regression record that distinction. The refused
+attempt remains refused, and native execution remains unqualified until the
+renewed attempt actually completes.

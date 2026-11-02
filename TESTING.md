@@ -3290,10 +3290,22 @@ inputs: independently owned Main workflows need not match a Dev proposal.
 The separate `tools/test_complete_source_native.py` witness is opt-in:
 set `COPILOT_EXTENSIONS_SOURCE_ARCHIVE_INTEGRATION=1` and run that file through
 bounded development validation. It creates a fresh temporary Git repository
-with export attributes, executable and symlink blobs, then verifies the
-actual object's complete reconstruction. It is not enrolled in required CI
+with export attributes, executable and symlink blobs, and actual CRLF PowerShell
+and LF shell checkouts, then verifies both source profiles reconstruct the
+original Git bytes without rewriting those checkouts. It is not enrolled in required CI
 or the unit-only promotion packet, and does not prove live release publication
 or Main activation.
+
+For commit-bound qualification, use the pinned raw-object reader in
+`tools/promotion_source_archive.py` and its complete-source archive verifier.
+`.gitattributes` intentionally gives `.ps1` files CRLF checkout bytes and `.sh`
+files LF, including in a WSL checkout; Git's normalized blobs are a different
+representation. Compare a snapshot's complete inventory, modes and bytes with
+the selected Git objects, not raw working-tree files. Do not normalize a
+checkout, change Git settings or weaken byte verification to reconcile them.
+Working-tree cleanliness is a separate admission question. An ordinary
+`git archive` may also apply export attributes, so it is not a substitute for
+the existing complete-source reader when every tracked blob is required.
 
 The three retained-input cardinality/remapping controls live in
 `tools/promotion_unit_tests/test_installer_retention.py` and are shared with
