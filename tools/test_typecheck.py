@@ -556,9 +556,10 @@ def test_actual_mypy_preserves_lazy_helper_callable_signatures(
 
 
 @pytest.mark.parametrize("invalid", [False, True])
+@pytest.mark.parametrize("contract", ["decorator", "cleanup"])
 def test_actual_mypy_preserves_validation_scope_callable_signature(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    invalid: bool,
+    invalid: bool, contract: str,
 ) -> None:
     """Check a client of the complete pending implementation, not library admission."""
     root = tmp_path / "source"
@@ -581,6 +582,36 @@ def test_actual_mypy_preserves_validation_scope_callable_signature(
             "local(3, True)\n"
             "wrong_return: int = local(3, enabled=True)\n"
         )
+    if contract == "cleanup":
+        source = (
+            "from collections.abc import Callable\n"
+            "from pathlib import Path\n"
+            "from installation_context import _FailedCandidateRuntime, discard_failed_runtime_slot\n"
+            "class Runtime:\n"
+            "    def discard_failed_candidate(self, root: Path, version: str, *,\n"
+            "                                 validate: Callable[[Path], None]) -> bool:\n"
+            "        validate(root)\n"
+            "        return True\n"
+            "def cleanup(runtime: _FailedCandidateRuntime) -> bool:\n"
+            "    return discard_failed_runtime_slot(\n"
+            "        runtime=runtime, context='context', expected_marketplace_id='market',\n"
+            "        expected_plugin_id='plugin', snapshot_id='snapshot', runtime_version='1',\n"
+            "        expected_ownership_sha256='digest', expected_namespace_generation=1,\n"
+            "        expected_install_generation=1, expected_payload_root='payload',\n"
+            "        expected_payload_version='1', durable_home='durable')\n"
+            "valid: bool = cleanup(Runtime())\n"
+        )
+        if invalid:
+            source += (
+                "class WrongRuntime:\n"
+                "    def discard_failed_candidate(self, root: Path, version: str, *,\n"
+                "                                 validate: Callable[[Path], None]) -> str:\n"
+                "        return 'wrong'\n"
+                "cleanup(WrongRuntime())\n"
+                "cleanup(object())\n"
+                "cleanup('wrong')\n"
+                "wrong_return: str = cleanup(Runtime())\n"
+            )
     (root / "sample.py").write_text(source, encoding="utf-8")
     environment = tmp_path / "environment"
     environment.mkdir()
@@ -607,7 +638,9 @@ def test_actual_mypy_preserves_validation_scope_callable_signature(
     output = capsys.readouterr().out
     if invalid:
         assert output.count(": error:") == 4
-        assert "[arg-type]" in output and "[assignment]" in output and "[misc]" in output
+        assert "[arg-type]" in output
+        if contract == "decorator":
+            assert "[assignment]" in output and "[misc]" in output
     else:
         assert "Success: no issues found" in output
     assert lease.released
