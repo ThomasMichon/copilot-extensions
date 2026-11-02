@@ -34,6 +34,10 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-worktrees",
       "type": "patch"
     },

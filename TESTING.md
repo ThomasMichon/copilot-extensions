@@ -2117,7 +2117,10 @@ base fingerprint and preserve an existing active selector on failure. These are
 on-demand construction controls, not additions to the eligible-unit packet.
 `tests/test_installer_content_reads.py` in the same development runner exercises
 real threaded content comparisons: four-reader/pending-work bounds, ordered
-errors, main-thread shutdown cancellation, deadline settlement, mutation refusal and cleanup. Its
+errors, main-thread shutdown cancellation, caller-thread progress, progress-sink
+failure settlement, deadline settlement, mutation refusal and cleanup. The canonical
+`installer_retained_content.py` helper is synchronized through the existing
+installer materializer; source construction retains its current progress contract. Its
 case-distinct filename control requires a case-sensitive native filesystem.
 The promotion packet's retained-input fixtures use a deterministic serial
 scheduler only for their existing overlap/remapping contracts; those unit

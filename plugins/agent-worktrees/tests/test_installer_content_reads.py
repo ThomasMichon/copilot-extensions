@@ -53,8 +53,16 @@ def test_content_map_bounds_pending_work_and_preserves_order(policy, monkeypatch
             with lock:
                 active -= 1
 
-    monkeypatch.setattr(policy._configuration, "ThreadPoolExecutor", ObservedPool)
-    assert policy._bounded_content_map(read, iter(range(12))) == list(range(0, 24, 2))
+    progress = []
+    caller = threading.get_ident()
+
+    def completed(result):
+        assert threading.get_ident() == caller
+        progress.append(result)
+
+    monkeypatch.setattr(policy._configuration._content, "ThreadPoolExecutor", ObservedPool)
+    assert policy._bounded_content_map(read, iter(range(12)), on_result=completed) == list(range(0, 24, 2))
+    assert progress == list(range(0, 24, 2))
     assert maximum == maximum_pending == 4
     assert active == pending == 0
 
@@ -109,6 +117,27 @@ def test_content_map_surfaces_enumeration_failure_after_prior_results(policy):
     assert settled == [1]
 
 
+def test_content_map_settles_readers_before_propagating_progress_failure(policy):
+    failure = OSError("progress sink failed")
+    barrier = threading.Barrier(4)
+    settled = []
+
+    def read(value):
+        try:
+            barrier.wait(timeout=5)
+            return value
+        finally:
+            settled.append(value)
+
+    def progress(_result):
+        raise failure
+
+    with pytest.raises(OSError) as caught:
+        policy._bounded_content_map(read, range(8), on_result=progress)
+    assert caught.value is failure
+    assert sorted(settled) == [0, 1, 2, 3]
+
+
 @pytest.mark.parametrize("reader_failure", [False, True])
 def test_content_map_defers_shutdown_cancellation_until_readers_settle(
     policy, monkeypatch, reader_failure,
@@ -154,7 +183,7 @@ def test_content_map_defers_shutdown_cancellation_until_readers_settle(
         released.set()
 
     releaser = threading.Thread(target=release)
-    monkeypatch.setattr(policy._configuration, "ThreadPoolExecutor", InterruptedPool)
+    monkeypatch.setattr(policy._configuration._content, "ThreadPoolExecutor", InterruptedPool)
     releaser.start()
     caught = None
     settled_at_exit = False
@@ -309,12 +338,12 @@ def test_engine_rechecks_every_admitted_source_with_bounded_reads(
     def retained(*_args, **_kwargs):
         yield SimpleNamespace(sources={source: source}, source_hashes=hashes)
 
-    monkeypatch.setattr(engine, "_source_files", lambda _packages: files)
+    monkeypatch.setattr(engine, "_source_files", lambda _packages, **_kwargs: files)
     monkeypatch.setattr(engine, "_package_roots", lambda _plugin: (source,))
-    monkeypatch.setattr(engine, "_construction_hash", lambda *_args: "admitted")
+    monkeypatch.setattr(engine, "_construction_hash", lambda *_args, **_kwargs: "admitted")
     monkeypatch.setattr(engine, "_select_uv_executable", lambda _uv: sys.executable)
     monkeypatch.setattr(engine, "retain_uv_install", retained)
-    monkeypatch.setattr(engine.runtime, "fingerprint_source", lambda _files: "retained")
+    monkeypatch.setattr(engine.runtime, "fingerprint_source", lambda _files, **_kwargs: "retained")
     monkeypatch.setattr(Path, "read_bytes", observe)
     inputs = engine.FrozenInputs(source, (source,), "admitted")
     if changed:
