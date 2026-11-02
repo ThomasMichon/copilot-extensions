@@ -107,7 +107,7 @@ def scan_directory(
         try:
             info = path.lstat()
         except OSError as exc:
-            decision = EntryDecision.indeterminate(
+            decision: EntryDecision[T] = EntryDecision.indeterminate(
                 Finding(
                     registry=registry,
                     entry=key,
