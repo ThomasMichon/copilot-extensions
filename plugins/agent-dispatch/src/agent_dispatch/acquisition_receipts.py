@@ -106,6 +106,14 @@ def bind(
         if previous and dict(previous) != receipt:
             raise TaskError("acquisition receipt is already bound to another native identity")
         if not previous:
+            if receipt["mode"] == "cli" and reservation["driver"] == "cli":
+                from .queue_pool_placement import pool_native_publication
+
+                if pool_native_publication(conn, task, reservation, receipt["native_session_id"]):
+                    conn.execute(
+                        "UPDATE spawn_reservations SET conversation_retired=0 WHERE key=?",
+                        (receipt["reservation_key"],),
+                    )
             conn.execute(
                 "INSERT INTO acquisition_receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 tuple(receipt[field] for field in (

@@ -1660,3 +1660,368 @@ No automatic publisher, config setter, ordinary caller, enrollment, activation,
 rollout, placement, unmanaged-writer adoption or protected reconciliation was
 enabled. External atomicity, mixed writers, executable rollback and every
 original Plan/Validation gate remain open; the parent remains **Active**.
+
+### 2026-10-31 - Prioritized lifecycle and agenda contract reviewed
+
+[#9848](https://github.com/ThomasMichon/copilot-extensions/pull/9848) actually
+merged as `0dcd78b31c5779c0c92357989282bc83ca8a0524` after current-head
+Copilot approval, a complete review with no active findings or inline threads,
+and all three required checks. The preceding #9843 journal was delivered.
+The amendment now prioritizes the five claim/start, failure/deadline, suspended
+recovery and submission-closeout outcomes. Finalize-before-submission is required
+for worktree-backed workers; automatic finalize-before-evaluators remains a
+separately qualified option.
+
+The worktree-owned agenda advanced through its declared reviewed-contract edge
+to claim/start implementation. This is design acceptance, not implementation or
+runtime adoption. Existing reservation/claim/start and wake/submission owners
+remain the integration seams. Nonblocking metadata identity hypotheses are
+parked rather than silently promoted into prerequisites. Every original
+Plan/Validation and installed/native gate remains open; the parent is **Active**.
+
+### 2026-11-01 - First atomic claim/start implementation prepared
+
+Prepared the explicit coordinator-owned pool placement transaction and its
+affirmative worker-start boundary. Complete configured catalog selection,
+instance capacity, retained assignment, reservation and `CLAIMED` now commit
+together in source before workspace/startup effects. A placed claim initially
+has no invented worker/native; spawn publication is not acceptance.
+Current worker start checks the recorded execution host, target worktree,
+native identity, assignment generation and existing startup/acquisition fences.
+
+Contained final validation passed **866 controls** across placement, real HTTP/client,
+reservation, queue, lifecycle, supervisor and native-owner wake tests.
+Independent source review found execution-host, target-worktree and sibling
+exclusive-contention gaps; all three were corrected with regression controls.
+Existing reset tests now preserve qualified native-retirement requirements
+instead of expecting reset to discard an accountable native or reservation.
+Ruff and all thirteen install contracts pass; the two new typed placement/catalog
+modules pass a focused type check. A broader legacy mixin/client type probe does
+not pass and is not presented as full type acceptance.
+
+This is pre-publication source evidence, not a merged or installed outcome.
+Admitted supervisor caller migration, startup/decision budgets, task-wide retry,
+suspended recovery and submission closeout remain open under the amendment.
+The parent and the active claim/start work unit remain **Active**.
+
+### 2026-11-01 - Atomic claim/start review revision prepared
+
+The #9859 revision addresses drain admission and in-flight accounting,
+historical pool capacity after failed native execution, positive CLI startup
+driver qualification, supplied-capability/repository exclusions and independent
+execution-machine recording for targeted/reused workspaces. Local review found
+an additional startup-closure gap in force-failed/rearmed retirement histories;
+capacity now independently requires completed or fenced startup, native
+retirement and reconciled transport custody.
+
+Final contained validation passed **915 controls** across thirteen lifecycle,
+workspace, native-owner, catalog and scoped-authority selectors. The exact
+controls preserve non-created ownership, wait through an in-flight drain,
+retain superseded native attempts and reject retirement-only startup release.
+Ruff, focused placement/catalog typing, the enforced admitted type scopes and
+all thirteen install contracts pass. This remains prepared source evidence:
+the current-head PR review/merge gate, admitted supervisor integration, retry
+budgets and all original parent/native qualification remain open.
+
+### 2026-11-01 - Transactional response and replacement-native revision prepared
+
+The next #9859 revision captures the reservation and matching assignment inside
+the existing allocation transaction, including replay. Exact HTTP interleavings
+advance the task to another attempt before response serialization without
+mixing reservation keys or assignment generations. The legacy two-value
+`reserve_spawn` result is preserved.
+
+Native publication and acceptance now use the shared driver-qualified retirement
+history. A distinct replacement clears only a proven handleless inherited marker;
+retired predecessors and retained-native overwrites are refused. Late replacement
+startup during release retains release intent and accountable capacity until its
+own qualified retirement. Intrinsic routing requirements match actual execution
+identities separately from hard capabilities and are rechecked at publication
+and acceptance. External targeted/reused history classification does not grant
+creation or disposal ownership.
+
+Final contained validation passed **941 controls** across the same thirteen
+lifecycle, workspace, native-owner, catalog and scoped-authority selectors.
+Ruff, focused placement/catalog typing, all admitted enforced type scopes,
+thirteen install contracts and documentation consistency pass. This is prepared
+source evidence, not current-head review approval, merge, release or running
+adoption. The claim/start work unit and canonical parent remain **Active**;
+caller migration, selected startup/retry policy and every remaining parent
+qualification gate remain open.
+
+### 2026-11-01 - Historical native release and explicit-target correction prepared
+
+The #9859 correction retains terminal pool reservations as historical records
+while `native_release_pending` accounts for their unresolved original native.
+Requesting a predecessor's release cannot resurrect another active assignment
+or replace its retained native handle. Current publication/acceptance rejects
+that native while retirement is pending, independently of the later
+exact-absence classification. The supervisor observes the historical native
+without ending or concluding a successor's workspace; startup, cleanup, rearm,
+allocation and transport fences remain independent.
+
+An explicit target with unrelated pending cleanup now refuses placement before
+claim/reservation commit; untargeted affinity can still be discarded. Final
+contained validation passed **1181 controls** across sixteen lifecycle,
+workspace, catalog, authority and recovery selectors, including active-successor
+release/replay with and without exclusivity, handle retention across terminal
+states, late handleless replacement, original startup closure, reopen and
+explicit-target refusal. Ruff, focused placement typing, the enforced admitted
+type scopes, module-size ceilings, install contracts and documentation consistency
+pass. This remains prepared source evidence: current-head review/merge,
+supervisor caller migration, retry budgets and all parent/native gates remain open.
+
+### 2026-11-01 - Historical exclusive holder and pre-acceptance host correction prepared
+
+Fresh reservation now fences an accountable historical pool holder of the same
+exclusive key under the existing write lock, including pending native release
+with spare pool capacity. Active replay remains observation-only, and a fresh
+same-task attempt waits for its pending historical retirement. Exact retirement
+permits the sibling to proceed without changing the active-owner index.
+
+The existing retained-CLI location owner prefers validated `execution_machine`,
+so failed startup before affirmative acceptance can still probe the original
+native. Accepted owner/attachment evidence remains the legacy fallback, and
+invalid recorded machine data remains unknown rather than adopting the observer.
+Final contained validation passed **1192 controls** across the same sixteen
+selectors, with eleven added sibling/exact-retirement, pre-acceptance probe and
+legacy/invalid-location controls. Focused placement typing and changed Python
+lint pass. Current-head review, actual merge, caller/startup-policy integration
+and all canonical parent/native gates remain open.
+
+### 2026-11-01 - Recovery retirement and transport-owner correction prepared
+
+Rearm and fresh-conversation authorization inspect all original pool-bound
+reservations before changing retirement markers. Three completed failed
+attempts sharing a native cannot release its capacity or exclusive key without
+qualified retirement. Legacy unassigned recovery keeps its existing contract.
+Capacity attributes unresolved sends to their recorded reservation and wake
+native/workspace; an active successor's send no longer recounts its retired
+predecessor. Unknown native targeting retains ambiguous workspace custody,
+while fresh admission still reconciles the entire execution lineage.
+Unrelated cleanup may discard optional affinity, but cannot discard an explicit
+target or required `worktree:` selector before committing `CLAIMED`.
+
+Final contained validation passed **1388 controls**, with one existing skip,
+across twenty-one placement, startup, recovery and send/wake selectors.
+Focused placement typing, all four admitted strict projects on Linux/Windows,
+changed Python lint, installation and documentation contracts pass. Broader
+legacy mixin typing is not claimed as qualified. Current-head review, actual
+merge, caller/startup-policy integration and every canonical parent/native
+gate remain open.
+
+### 2026-11-01 - Wake host normalization correction prepared
+
+Wake capacity ownership uses the same host normalization as pool workspace
+validation, so a matching pending/unknown native send remains accountable when
+the recorded execution host differs only in casing or surrounding whitespace.
+Eight owner/waiter controls record that host through the actual preparation
+boundary, reach affirmative start, retain transport capacity after native
+retirement and release it only after transport settlement.
+Final contained validation passed **1396 controls**, with one existing skip,
+across the same twenty-one selectors. The correction is source-only; current
+review/merge, caller integration and all canonical parent/native gates remain
+open.
+
+### 2026-11-01 - Release, carried routing and preparation replay correction prepared
+
+An identical release retry after qualified retirement preserves native absence
+instead of restoring pending retirement and recounting capacity/exclusivity.
+Newly returned workspace/native effects still enter accountable release, including
+a late first-native response for an originally unbound root allocation.
+Unresolved sends retain their own reservation's transport capacity independently.
+
+Pool selection now follows final carry-forward, cleanup and driver resolution
+inside the same write lock. It checks the actual workspace before committing
+the claim and slot, including a retained retry with no explicit target/affinity.
+An excluded carried checkout refuses without mutation; a matching required
+worktree may use proven carry-forward. Retained pool identity and priority
+selection remain with the existing allocator.
+
+Prepared workspace replay normalizes execution host comparison at both the
+coordinator's immutable binding and the caller's cached/returned fact checks.
+The originally recorded host spelling remains unchanged; different hosts and
+other workspace identity mismatches still refuse.
+Final contained validation passed **1436 controls**, with one existing skip,
+across twenty-two coupled selectors. Focused placement typing, all four admitted
+strict projects on Linux/Windows, changed Python lint, installation contracts
+and documentation consistency pass. Broader legacy workspace/mixin typing is
+not claimed as qualified. Current-head review, actual merge, caller/startup
+policy integration and every canonical parent/native gate remain open.
+
+### 2026-11-01 - Handleless root and pending-history correction prepared
+
+Qualified handleless-root retirement now retains its first late native even
+when workspace preparation was already recorded or the attempt failed before
+release. This clears only the root's empty-native retirement marker and
+requires fresh exact retirement of the late native; inherited replacement
+history and original startup closure remain independent.
+
+Capacity and release sweeps apply the pending-native predicate before the
+reservation result limit. Cleanup retains its existing server-side pending
+predicate, with native/cleanup results deduplicated. Regression history places
+an outstanding row behind ten thousand newer completed rows and proves it
+still consumes capacity, receives its exact native probe and remains visible
+to the cleanup owner.
+The existing list operation adds an optional pending-native filter with an
+executing response capability. Updated callers reject a legacy provider that
+silently ignores the filter; capacity-critical incompatibility remains a
+visible exhausted-capacity hold. Unfiltered old callers remain supported.
+
+Contained validation passed **1450 controls**, one existing skip, across
+twenty-three coupled selectors, including actual HTTP/client and mixed-provider
+controls. Focused placement/client typing, four admitted strict projects on
+Linux/Windows, changed Python lint, install and documentation contracts pass.
+Current-head review, actual merge, supervisor caller/startup-policy integration
+and every canonical parent/native gate remain open. No runtime was activated.
+
+### 2026-11-01 - Accountable terminal capacity and batched history correction prepared
+
+Supervisor capacity now includes pool-bound terminal attempts with unresolved
+native, startup or transport custody even before release is requested.
+The existing reservation-list boundary shares placement's classifier and
+applies it before the result limit. Its opt-in executing response capability
+and per-result marker refuse silently ignored queries from older providers.
+Legacy pending-native accounting remains separately included and deduplicated.
+
+Capacity classification batches receipts, sends and native/workspace-targeted
+wakes in one transaction snapshot. A proven native's own qualified retirement
+does not rescan its entire lineage; unresolved identities reuse only exact
+lineage selectors within that unchanged snapshot. Retired membership uses a set
+and instance counting stops once full. No history is truncated to classify an
+unresolved native, and no evidence cache survives mutation or a new operation.
+
+Contained validation passed **1467 controls**, one existing skip, across
+twenty-four coupled selectors. New controls cover failed native/no release
+intent with actual legacy-spawn refusal, old-provider capacity holds, old/new
+HTTP query behavior, outstanding capacity behind ten thousand retired pool
+attempts, and bounded SQL/classification/native-identity operation counts as
+history grows from one hundred to one thousand entries.
+Focused helper/placement/client typing, four admitted strict projects on
+Linux/Windows, changed Python lint and install/documentation contracts pass.
+Broader legacy mixin typing is not qualified. Current-head review, actual
+merge, caller/startup-policy integration and every parent/native gate remain
+open. This is source-only; it does not activate a runtime.
+
+### 2026-11-01 - Empty-origin, receipt-first and active-pool correction prepared
+
+The shared native-history owner distinguishes qualified empty allocation
+absence from a retired native identity. A successor on the same logical
+allocation may publish or retain its first native without assigning that
+native its predecessor's retirement. Incomplete startup and unknown pending
+retirement remain blocking. Empty and native retirement evidence are
+precomputed once, including for long histories of unbound inherited markers.
+
+The durable CLI acquisition receipt arrives before normal native publication.
+Its existing binding transaction therefore checks the real validated native
+against the same history before insertion, clearing only a proven inherited
+marker. Exact Bridge authority, generation, workspace, immutable receipt and
+affirmative start checks remain independent. Receipt replay cannot replace a
+bound native or revive its completed retirement.
+
+Supervisor accountability queries include active pool attempts as well as
+terminal ones. A startup-complete suspended CLI task with an unresolved waiter
+wake retains capacity even when the legacy process classifier reports no live
+process. Unassigned legacy handling is unchanged.
+
+Final contained validation passed **1504 controls**, one existing skip, across
+twenty-six coupled selectors. Fifteen new native/receipt controls cover actual
+same-dedup successor publication/release, empty-origin negative cases, real
+receipt-before-publication/start ordering, stale/foreign/retired identity
+refusals and linear retirement work at one hundred/one thousand history entries.
+Four additional owner/waiter pending/unknown controls exercise actual supervisor
+spawn refusal. Focused native/receipt typing, four admitted strict projects on
+Linux/Windows, changed Python lint and install/documentation contracts pass.
+Current-head review, actual merge, caller/startup-policy integration and all
+canonical parent/native gates remain open. No runtime was activated.
+
+### 2026-11-01 - Receipt-backed recovery and successor-history correction prepared
+
+Handleless release recovery now consults the existing reservation GET's exact
+driver-qualified native identity, including a durable acquisition receipt.
+Both ordinary and stranded sweeps, including historical pending releases,
+retain LIVE, UNKNOWN, unfinished-startup and unavailable-provider cases.
+A recorded CLI native uses its retained execution host and exact-GONE
+retirement. The force-fail write transaction independently checks native
+identity, so a stale empty read cannot discard a subsequently bound receipt.
+Unsettled transport remains accountable after native retirement.
+
+The additive `reservation-native-identity/v1` response capability expands the
+existing GET without a new endpoint or prerequisite command. Older callers
+retain their fields; new recovery callers hold visibly against an old or
+rolled-back provider rather than assuming an empty launch.
+
+Ordinary-Bridge-to-CLI resolution refuses before claim/slot publication if
+discarding the retained workspace would discard an explicit target or worktree
+requirement. An optional unassigned driver transition keeps its existing behavior.
+Snapshot-local history reuse spans distinct same-dedup successor tasks only
+when all reservations for each task prove its task predicate redundant with the
+same non-null creation predicate. Mixed/null creation history retains the
+task-specific selector, including exclusive-handle matching.
+
+Contained coupled validation passed **1536 controls**, one existing skip, across
+twenty-six selectors. New controls cover actual receipt bind/release before
+handle publication, ordinary/stranded/historical LIVE/UNKNOWN/GONE recovery,
+startup and transport retention, transactional force refusal, real HTTP identity
+and force behavior, explicit/required driver transition refusal, distinct-task
+history growth at one hundred/one thousand entries in query and high-capacity
+placement, and task-specific extra-history isolation. Focused native/storage/
+accountability/recovery typing and the four admitted Linux/Windows projects
+are separate from unqualified legacy mixin typing debt.
+Current-head review, actual merge, caller/startup-policy integration and every
+canonical parent/native gate remain open. No runtime was activated.
+
+### 2026-11-01 - Terminal receipt cleanup follow-through prepared
+
+A retained acquisition receipt is historical identity evidence after exact
+native retirement, not a request to retire the terminal attempt again.
+Receipt-backed retirement is limited to active attempts; historical
+`native_release_pending` remains independently actionable. Failed and settled
+attempts therefore reach the existing claimed/validated workspace cleanup on
+the next sweep. Two real second-sweep controls prove the cleanup claim,
+completed conclusion, absence of repeated native probes, idempotent later
+sweeps and subsequent same-dedup explicit workspace reuse.
+The coupled contained run passes **1538 controls**, one existing skip, across
+twenty-six selectors. Current-head review, actual merge, caller/startup
+integration and all canonical parent/native gates remain open; this source
+correction activates no runtime.
+
+### 2026-11-01 - Successor location and normalized exclusion correction prepared
+
+A distinct same-dedup successor retains its predecessor's validated execution
+host with the carried workspace. Pool selection intersects that location with
+unchanged task targets, intrinsic requirements and exclusions before the claim
+transaction commits; original host spelling and creation provenance remain
+independent. Optional workspace discard also discards its location constraint.
+Unknown legacy location is not inferred from creation provenance.
+
+The shared placement/workspace exclusion check compares machine selectors with
+the same strip/lower normalization as validated execution hosts. Workspace
+recording, native publication and affirmative start recheck current exclusions;
+other token dimensions retain exact matching.
+
+Twenty-eight actual successor and exclusion controls cover higher-priority
+foreign-host candidates, normalized recorded location through affirmative start,
+conflicting/unavailable/full routing, unknown legacy and unassigned reuse,
+optional workspace discard, mixed-case host exclusions and changed exclusions
+at the workspace/publication/start boundaries. The bounded coupled run passes
+**1566 controls**, one existing skip, across twenty-seven selectors with cleanup
+verified. Current-head review and actual merge remain open; caller/startup-policy
+integration, unknown-effect exhaustion and every parent/native gate remain
+required. No caller migration or runtime activation is included.
+
+### 2026-11-01 - Affirmative worker host comparison correction prepared
+
+Pool start compares the supplied worker's machine component using the existing
+execution-host normalization, while preserving the exact worktree suffix,
+recorded native, claim generation and already-bound owner. The accepted worker
+spelling is stored unchanged; pool and workspace provenance are not rewritten.
+Six actual mixed-case host starts exercise affirmative transition and exact
+idempotent replay. Six wrong-host, wrong-suffix and malformed-identity controls
+plus an existing-owner control refuse without mutation.
+
+The bounded coupled run passes **1579 controls**, one existing skip, across
+twenty-seven selectors with cleanup verified. The current-head review, required
+checks and actual merge remain open. Caller migration, bounded startup policy,
+unknown-effect exhaustion and the full parent/native acceptance remain separate
+required gates; this correction activates no runtime.

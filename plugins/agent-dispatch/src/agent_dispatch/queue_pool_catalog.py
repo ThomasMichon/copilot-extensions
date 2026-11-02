@@ -14,6 +14,7 @@ from .queue_pool_cohort import (
     PoolConfiguredCohort, QueuePoolCohortMixin, cohort_from_clock, require_cohort_scope,
 )
 from .queue_records import TaskError
+from .queue_pool_placement import PoolAssignment
 
 POOL_CATALOG_VERSION = 1
 POOL_PUBLICATION_TTL_SECONDS = 30.0
@@ -126,6 +127,8 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
             " PRIMARY KEY(machine, env, generation, revision))"
         )
         QueuePoolCohortMixin._migrate_pool_cohort(conn)
+        from .queue_pool_placement import migrate_pool_placement
+        migrate_pool_placement(conn)
 
     @staticmethod
     def _pool_scope_from_row(row: sqlite3.Row) -> PoolPublicationScope:
@@ -358,3 +361,9 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         with self._connect() as conn:
             conn.execute("BEGIN")
             return self._pool_catalog_from_conn(conn, now=ts)
+
+    def task_pool_assignment(self, task_id: str) -> PoolAssignment | None:
+        """Inspect retained placement; this does not reserve or accept work."""
+        from .queue_pool_placement import pool_assignment
+        with self._connect() as conn:
+            return pool_assignment(conn, task_id)

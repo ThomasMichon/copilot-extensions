@@ -14,7 +14,7 @@ import time
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
 from .coordinator_auth import _make_control_auth
-from .coordinator_task_models import TaskGrantBody
+from .coordinator_task_models import StartBody, TaskGrantBody
 from .events import EventBus
 from .lease import FencingGuard
 from .queue import Status, TaskQueue
@@ -141,3 +141,15 @@ def mint_task_token(
         epoch=epoch,
         generation=generation,
     )
+
+
+def start_incarnation(
+    request: Request, body: StartBody, owner_session_id: str | None,
+) -> tuple[int | None, str | None]:
+    """Keep explicit start pins subordinate to already-resolved task authority."""
+    scope = getattr(request.state, "task_scope", None)
+    if scope is None:
+        return body.expected_generation, body.expected_owner_session_id
+    if body.expected_generation is not None and scope.generation != body.expected_generation:
+        raise HTTPException(409, detail="start ownership incarnation changed")
+    return scope.generation, owner_session_id

@@ -8,7 +8,10 @@ from typing import Any
 from .ordinary_agent_facts import (
     identity, native_conflict, owner_record, validate_created, validate_resumed,
 )
-from .ordinary_native_bindings import inherited_retirement, native_bindings, retained_redrive_facts
+from .ordinary_native_bindings import (
+    RESERVATION_NATIVE_IDENTITY_PROTOCOL,
+    inherited_retirement, native_bindings, reservation_native_identity, retained_redrive_facts,
+)
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
 
@@ -19,6 +22,11 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None:
             raise TaskError("ordinary assignment has no current task/reservation")
+        native, native_error = None, None
+        try:
+            native = reservation_native_identity(conn, row)
+        except TaskError as exc:
+            native_error = str(exc)
         try:
             known, retired = native_bindings(conn, row, task)
             reconcile_retirement = inherited_retirement(conn, row, task)
@@ -32,6 +40,9 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
             except TaskError as exc:
                 redrive_error = str(exc)
     return {
+        "reservation_native_identity_protocol": RESERVATION_NATIVE_IDENTITY_PROTOCOL,
+        "reservation_native_session_id": native,
+        "reservation_native_identity_error": native_error,
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
         "inherited_retirement_reconcilable": reconcile_retirement,

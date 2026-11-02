@@ -467,6 +467,16 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING},{SpawnState.COLD}"),
                 strict=True,
             )
+            reservations.extend(self._pool_reservations(
+                state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+                native_release_pending=True, strict=True,
+            ))
+            accountable = self._pool_reservations(
+                state=",".join(sorted(SpawnState.ACTIVE | SpawnState.RELEASABLE)),
+                pool_accountable=True, strict=True,
+            )
+            accountable_keys = {row["key"] for row in accountable}
+            reservations = list({row["key"]: row for row in [*reservations, *accountable]}.values())
         except _ReservationsUnavailable as exc:
             # Capacity-critical: unlike every other _pool_reservations caller
             # (which only skips optional work on an empty result), this count
@@ -488,7 +498,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 active.append(reservation)
                 continue
-            if self._matches_pool(task) and self._reservation_has_live_process(reservation, task):
+            if self._matches_pool(task) and (
+                reservation["key"] in accountable_keys
+                or reservation.get("native_release_pending")
+                or self._reservation_has_live_process(reservation, task)
+            ):
                 active.append(reservation)
         return active
 
@@ -516,6 +530,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         *,
         state: str,
         conclusion_state: str | None = None,
+        native_release_pending: bool | None = None,
+        pool_accountable: bool = False,
         resume_requested: bool | None = None,
         strict: bool = False,
     ) -> list[dict]:
@@ -526,6 +542,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 state=state,
                 repo=self.repo,
                 conclusion_state=conclusion_state,
+                **({"native_release_pending": native_release_pending} if native_release_pending is not None else {}),
+                **({"pool_accountable": True} if pool_accountable else {}),
                 resume_requested=resume_requested,
                 limit=10000,
             )
@@ -537,6 +555,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 repo=self.repo,
                 label=label,
                 conclusion_state=conclusion_state,
+                **({"native_release_pending": native_release_pending} if native_release_pending is not None else {}),
+                **({"pool_accountable": True} if pool_accountable else {}),
                 resume_requested=resume_requested,
                 limit=10000,
             ):
@@ -1422,12 +1442,15 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 f"{SpawnState.COLD},{SpawnState.RELEASING}"
             )
         )
-        reservations.extend(
-            self._pool_reservations(
-                state=(f"{SpawnState.FAILED},{SpawnState.SETTLED}"),
-                conclusion_state=_CONCLUSION_PENDING,
-            )
-        )
+        reservations.extend(self._pool_reservations(
+            state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+            native_release_pending=True,
+        ))
+        reservations.extend(self._pool_reservations(
+            state=f"{SpawnState.FAILED},{SpawnState.SETTLED}",
+            conclusion_state=_CONCLUSION_PENDING,
+        ))
+        reservations = list({res["key"]: res for res in reservations}.values())
         for res in reservations:
             if not res.get("release_requested"):
                 continue
@@ -1436,6 +1459,19 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            from .spawn_releasing_recovery import qualified_handleless_identity, retire_historical_native
+            if not res.get("session_handle"):
+                current = qualified_handleless_identity(self, res)
+                if current is None or not current.get("release_requested"):
+                    continue
+                res = current
+            if res.get("native_release_pending") or (
+                res.get("state") in SpawnState.ACTIVE and res.get("reservation_native_session_id")
+            ):
+                released += retire_historical_native(
+                    self, res, task, native_session_id=res.get("reservation_native_session_id"),
+                )
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
             if not body_already_released and (

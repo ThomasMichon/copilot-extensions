@@ -219,13 +219,40 @@ class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, Catego
             params["repo"] = repo
         return self._unwrap(self._http.get("/tasks/mine", params=params))
 
-    def start(self, task_id: str, worker_id: str, *, owner_session_id: str | None = None) -> dict:
-        body = {"worker_id": worker_id}
+    def start(
+        self, task_id: str, worker_id: str, *, owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+    ) -> dict:
+        body: dict[str, object] = {"worker_id": worker_id}
         if owner_session_id:
             body["owner_session_id"] = owner_session_id
+        if expected_generation is not None:
+            body["expected_generation"] = expected_generation
+            body["expected_owner_session_id"] = expected_owner_session_id
         return self._unwrap(
             self._http.post(f"/tasks/{task_id}/start", json=body)
         )
+
+    def place_pool_task(
+        self, task_id: str, *, reserved_by: str, catalog_revision: int,
+        driver: str = "cli",
+    ) -> dict:
+        """Explicit allocator transaction; no workspace or process is launched here."""
+        return self._unwrap(self._http.post(
+            "/pool-placements", headers=self._control_headers(),
+            json={
+                "version": 1,
+                "task_id": task_id, "reserved_by": reserved_by,
+                "catalog_revision": catalog_revision, "driver": driver,
+            },
+        ))
+
+    def pool_placement_contract(self) -> dict:
+        """Read this executing provider's support, not a package version."""
+        return self._unwrap(self._http.get(
+            "/pool-placements/contract", headers=self._control_headers(),
+        ))
 
     def task_grant(
         self, task_id: str, worker_id: str, owner_session_id: str,
@@ -749,32 +776,6 @@ class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, Catego
     def routing_assignment_events(self, assignment_id: str) -> list[dict]:
         return self._unwrap(
             self._http.get(f"/routing-assignments/{assignment_id}/events")
-        )
-
-    def record_spawn_worktree(
-        self,
-        key: str,
-        worktree: str,
-        *,
-        ownership: str = "unknown",
-        creating_host: str | None = None,
-        driver: str | None = None,
-        allocation_project: str | None = None,
-        worktree_path: str | None = None,
-    ) -> dict:
-        """Record the reserved worktree before launching the worker session."""
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/worktree",
-                json={
-                    "worktree": worktree,
-                    "ownership": ownership,
-                    "creating_host": creating_host,
-                    "driver": driver,
-                    "allocation_project": allocation_project,
-                    "worktree_path": worktree_path,
-                },
-            )
         )
 
     def request_spawn_release(

@@ -427,6 +427,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         "  worktree_path TEXT,"
         "  conversation_retired INTEGER NOT NULL DEFAULT 0,"
         "  release_requested INTEGER NOT NULL DEFAULT 0,"
+        "  native_release_pending INTEGER NOT NULL DEFAULT 0,"
         "  release_disposition TEXT,"
         "  exclusive_released INTEGER NOT NULL DEFAULT 0,"
         "  detail TEXT,"
@@ -497,7 +498,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         row["name"]
         for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()
     }
-    for column in ("worktree_ownership", "creating_host", "driver", "agent_info"):
+    for column in ("worktree_ownership", "creating_host", "execution_machine", "driver", "agent_info"):
         if column not in reservation_columns:
             try:
                 conn.execute(f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT")
@@ -612,6 +613,15 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+    if "native_release_pending" not in reservation_columns:
+        try:
+            conn.execute(
+                "ALTER TABLE spawn_reservations "
+                "ADD COLUMN native_release_pending INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     if "exclusive_released" not in reservation_columns:
         try:
             conn.execute(
@@ -665,6 +675,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
             "  WHERE earlier.exclusive_key = spawn_reservations.exclusive_key "
             "  AND earlier.session_handle IS NOT NULL "
             "  AND earlier.release_requested = 1 "
+            "  AND earlier.native_release_pending = 0 "
             "  AND earlier.state IN (?, ?, ?) "
             "  AND earlier.reserved_at < spawn_reservations.reserved_at"
             ")",

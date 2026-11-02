@@ -15,6 +15,7 @@ standalone.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import json
 import sqlite3
@@ -727,10 +728,27 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            from .queue_pool_placement import pool_assignment
+            if (
+                note != "start" and task.status == Status.CLAIMED and task.owner is None
+                and worker_id is not None and pool_assignment(conn, task_id) is not None
+            ):
+                raise TaskError("allocator claim has no accepted worker to perform this transition")
+            if note == "start":
+                from .queue_pool_placement import require_pool_start
+                if require_pool_start(
+                    conn, task, worker_id, (extra or {}).get("owner_session_id"),
+                    expected_generation,
+                ):
+                    extra = {**(extra or {}), "owner": worker_id}
+                    task = replace(task, owner=worker_id)
             if note == "start" or note == "resume" and (extra or {}).get("owner_session_id"):
                 from .acquisition_receipts import validate_start
+                native_id = (extra or {}).get("owner_session_id")
+                if native_id is not None and not isinstance(native_id, str):
+                    raise TaskError("owner session identity must be a string")
                 validate_start(
-                    conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
+                    conn, task, native_id, start_acquisition_authority,
                 )
             try:
                 _check_expected_status(task, expected_status)

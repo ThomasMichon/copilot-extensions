@@ -15,6 +15,12 @@ log = logging.getLogger("agent-dispatch.supervisor")
 class TerminalStartupMixin:
     def _retained_cli_machine(self, reservation: dict, task: dict) -> str | None:
         """Resolve a retained native body's location, never the observer's host."""
+        execution_machine = reservation.get("execution_machine")
+        if execution_machine is not None:
+            if isinstance(execution_machine, str) and execution_machine.strip():
+                return execution_machine
+            log.warning("retained CLI execution machine is invalid for reservation %s", reservation.get("key"))
+            return None
         session = reservation.get("session_handle")
         if session and task.get("owner_session_id") == session:
             machine = _machine_from_owner(task.get("completed_by") or task.get("owner"))
