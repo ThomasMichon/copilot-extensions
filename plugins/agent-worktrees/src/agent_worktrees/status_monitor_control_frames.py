@@ -7,6 +7,7 @@ import secrets
 import select
 import sys
 
+from . import owner_observation_transport as observations
 from . import status_monitor_recovery_contract as guarded_recovery
 
 
@@ -28,6 +29,16 @@ def handle_control_request(
         ):
             return
         action = str(request.get("action") or "health")
+        if action in observations.ACTIONS:
+            try:
+                request = observations.decode_request(raw, action)
+            except observations.contract.ObservationError as error:
+                result = observations.contract.error(error.code, str(error))
+                handler.wfile.write(
+                    observations.encode_frame(result) if action == observations.FEED_ACTION
+                    else observations.encode_result(result)
+                )
+                return
         if action in {"agenda-read", "agenda-publish", "agenda-feed"}:
             from . import agenda_contract
 
@@ -40,7 +51,8 @@ def handle_control_request(
                     raise agenda_contract.AgendaError("invalid agenda control frame")
             except agenda_contract.AgendaError as exc:
                 error = agenda_contract.failure(
-                    exc.code, str(exc), version=agenda_contract.error_version(request.get("payload")),
+                    exc.code, str(exc),
+                    version=agenda_contract.error_version(request.get("payload")),
                 )
                 reply = {"type": "error", **error} if action == "agenda-feed" else {
                     "version": 1, "result": error,
@@ -65,10 +77,12 @@ def handle_control_request(
             payload = {}
         owner = handler.server.owner
         if action in {"worktrees-read", "repos-map-read", "picker-bootstrap",
-                      "agenda-read", "agenda-publish"}:
+                      "agenda-read", "agenda-publish"} | observations.POINT_ACTIONS:
             current_read = "worktrees-read" if action == "picker-bootstrap" else action
             owner._on_current_read_started(current_read)
-        if owner.stream_handle is not None and action in {"worktrees-feed", "agenda-feed"}:
+        if owner.stream_handle is not None and action in {
+            "worktrees-feed", "agenda-feed", observations.FEED_ACTION,
+        }:
             def disconnected():
                 readable, _, _ = select.select([handler.request], [], [], 0)
                 return bool(readable)
@@ -76,7 +90,15 @@ def handle_control_request(
             frames = owner.stream_handle(action, payload, disconnected)
             try:
                 for frame in frames:
-                    if action == "agenda-feed":
+                    if action == observations.FEED_ACTION:
+                        try:
+                            encoded = observations.encode_frame(frame)
+                        except observations.contract.ObservationError as error:
+                            handler.wfile.write(observations.encode_frame(
+                                observations.contract.error("invalid-response", str(error))
+                            ))
+                            return
+                    elif action == "agenda-feed":
                         from .agenda_contract import encode
 
                         encoded = encode(frame).encode("utf-8") + b"\n"
@@ -92,6 +114,15 @@ def handle_control_request(
                 frames.close()
             return
         result = handler.server.owner.handle(action, payload)
+        if action in observations.POINT_ACTIONS:
+            try:
+                encoded = observations.encode_result(result)
+            except observations.contract.ObservationError as error:
+                encoded = observations.encode_result(
+                    observations.contract.error("invalid-response", str(error))
+                )
+            handler.wfile.write(encoded)
+            return
         if not isinstance(result, dict):
             result = {}
         encoded = json.dumps(

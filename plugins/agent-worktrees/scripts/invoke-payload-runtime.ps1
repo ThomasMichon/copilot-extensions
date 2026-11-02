@@ -13,6 +13,25 @@ if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Co
 $payloadRoot = (Resolve-Path -LiteralPath $payloadRoot).Path
 . (Join-Path $payloadRoot 'bin\agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
+$passiveObservation = $false
+$skipProject = $false
+$worktreesAlias = $false
+$firstArgument = $true
+foreach ($argument in $forwardArgs) {
+    if ($firstArgument) {
+        $firstArgument = $false
+        if ($argument -ceq 'agent-worktrees') { continue }
+    }
+    if ($skipProject) { $skipProject = $false; continue }
+    if ($argument -in @('--project', '-p')) { $skipProject = $true; continue }
+    if ($argument -like '--project=*') { continue }
+    if ($argument -in @('worktree', 'worktrees') -and -not $worktreesAlias) {
+        $worktreesAlias = $true
+        continue
+    }
+    $passiveObservation = $argument -in @('worktree-observations', 'worktree-observation-history')
+    break
+}
 $scriptDir = Join-Path $payloadRoot 'scripts'
 $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps1'
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
@@ -501,7 +520,7 @@ else:
 }
 
 $python = Resolve-AgentWorktreesRuntime
-if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION -and -not $_awUpdateDiagnostic) {
+if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION -and -not $passiveObservation -and -not $_awUpdateDiagnostic) {
     Assert-PluginRuntimePublication
 }
 # Commit to self-provisioning (and, in doing so, permit the boot-trace
@@ -511,7 +530,7 @@ if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION -and -not $_awU
 # strictly before `provision-start`'s own `New-Item`, are captured on a
 # genuine first-ever launch instead of silently dropped (Copilot review
 # follow-up, PR #3310).
-$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION) -and (-not $_awUpdateDiagnostic)
+$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION) -and (-not $passiveObservation) -and (-not $_awUpdateDiagnostic)
 Write-BootTrace 'resolver-loaded'
 # Log the outer dispatcher template's own 'shim-start' phase here, now
 # that $runtimeRoot reflects whichever root (legacy or an active
@@ -530,6 +549,10 @@ if ($python) {
 if ($_awUpdateDiagnostic) {
     [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127
+}
+if ($passiveObservation) {
+    [Console]::Error.WriteLine('[agent-worktrees] observation reads require an existing runtime; self-provisioning is disabled.')
+    exit 1
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(

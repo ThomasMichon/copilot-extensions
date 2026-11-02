@@ -15,6 +15,10 @@ For optional committed current-head agenda reads, publication and held updates,
 see [the agenda projection contract](docs/worktree-agendas.md). It uses the
 existing resident owner without importing planning or UI packages.
 
+For passive selected worktree snapshots, partial observed-change history and
+held updates, see [worktree observations](docs/worktree-observations.md).
+The optional receiver does not start a host or become a canonical mutation ledger.
+
 The [prepared guarded-anchor map](docs/guarded-anchor-map.md) keeps
 cross-repository write evaluation file-only. Managed mutations and preparation
 publish caller-specific facts; `refresh-guards --repo <checkout> --json`
