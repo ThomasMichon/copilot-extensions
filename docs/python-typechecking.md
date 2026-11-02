@@ -5,10 +5,9 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Config
-Migrate, Dropin Registry and Endpoint Rendezvous source/test projects, and the
-source of Remote Login Shell, Session Liveness Probe and Worktree Identity.
-The latter libraries' remaining
-tests/helpers and the other projects are explicitly pending. Source CI and the
+Migrate, Dropin Registry, Endpoint Rendezvous, Remote Login Shell, Session
+Liveness Probe and Worktree Identity source/test projects.
+Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
 
@@ -25,6 +24,9 @@ python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
+python tools/typecheck.py lib-remote-login-shell-remaining
+python tools/typecheck.py lib-session-liveness-probe-remaining
+python tools/typecheck.py lib-worktree-identity-remaining
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
@@ -62,6 +64,12 @@ canonical source/test project, including native ownership/concurrency fixtures.
 JSON record values remain an explicit dynamic serialization boundary. This
 admission does not claim that existing malformed-record or publication-race
 tracking is resolved, nor that independent in-package variants inherit checking.
+
+The three initially admitted leaf libraries retain separate source and
+`-remaining` project names so existing local selectors remain valid. Both
+halves now use strict checking, including every canonical test/helper file.
+Invalid wire-value fixtures use `object` boundaries rather than unchecked
+`Any`; existing optional probe reasons are narrowed before substring assertions.
 
 `--enforced` is the default when no project name or selector is supplied. It
 validates the complete physical-Python inventory, then checks admitted projects

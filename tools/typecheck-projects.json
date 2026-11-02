@@ -235,7 +235,7 @@
       "exclude": [
         "libs/remote-login-shell/src"
       ],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-repository-policy",
@@ -261,7 +261,7 @@
       "exclude": [
         "libs/session-liveness-probe/src"
       ],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-single-instance-lease",
@@ -335,7 +335,7 @@
       "exclude": [
         "libs/worktree-identity/src"
       ],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-zdd",
