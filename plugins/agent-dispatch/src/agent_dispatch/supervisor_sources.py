@@ -129,9 +129,10 @@ class SupervisorSources(SupervisorPoolPublication):
     def _store_registrations(self) -> list[dict]:
         publisher = self._declaration_publisher
         epoch = publisher.withdrawal_epoch if publisher is not None else 0
+        client = self.client
 
         def read() -> tuple[int, list[dict], list[dict]]:
-            registrations = self.client.list_registrations(
+            registrations = client.list_registrations(
                 machine=self.machine, env=self.env, include_paused=False,
             )
             return epoch, registrations, copy.deepcopy(registrations)

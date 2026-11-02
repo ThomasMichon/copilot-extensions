@@ -329,7 +329,12 @@ pre-effect discard, or final worker retirement, never under an active flight.
 Source reads and declaration-publication futures launched by a send retain
 their binding too. A timed-out parent future does not retire those children;
 they remain in the existing probe/shutdown inventory and block discard or
-transport closure until they finish.
+transport closure until they finish. Registry reads capture their actual
+client before queueing, not when a worker eventually starts. Once history has
+confirmed and acknowledged the original result, unfinished children or a
+logged transport-close failure defer cleanup without withholding that result.
+The binding remains retained; later preparation and final retirement still
+require actual child completion and successful transport cleanup.
 
 `discard_unaccepted_pool_metadata_request(original)` is an explicit preparation
 operation, not an ordinary-loop caller. It requires the exact pending request,

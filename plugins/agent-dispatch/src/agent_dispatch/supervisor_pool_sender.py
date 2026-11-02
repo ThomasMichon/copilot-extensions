@@ -101,9 +101,11 @@ class SupervisorPoolSender:
         if any(not future.done() for future in binding.children):
             raise PoolPublicationError("original pool metadata source operations remain in progress")
 
-    def _close_retained_pool_metadata_client(self) -> None:
+    def _close_retained_pool_metadata_client(self, *, defer: bool = False) -> None:
         binding = self._pool_metadata_binding
         if binding is None or binding.closed:
+            return
+        if defer and any(not future.done() for future in binding.children):
             return
         self._require_pool_metadata_children_retired(binding)
         if binding.client is self.client:
@@ -113,7 +115,13 @@ class SupervisorPoolSender:
             raise PoolPublicationError("original pool metadata client still has an in-flight operation")
         close = getattr(binding.client, "close", None)
         if callable(close):
-            close()
+            try:
+                close()
+            except Exception:
+                if not defer:
+                    raise
+                log.exception("accepted pool metadata transport retirement deferred")
+                return
         binding.closed = True
 
     def _replace_pool_metadata_client(self, new_client: Any) -> None:
@@ -331,7 +339,7 @@ class SupervisorPoolSender:
                 flight.acknowledged = result
                 if self._pool_metadata_flight is flight:
                     self._pool_metadata_flight = None
-                self._close_retained_pool_metadata_client()
+                self._close_retained_pool_metadata_client(defer=True)
         except Exception as exc:
             log.warning("pool metadata result unresolved: error_type=%s", type(exc).__name__)
             if flight.future.done() and (
