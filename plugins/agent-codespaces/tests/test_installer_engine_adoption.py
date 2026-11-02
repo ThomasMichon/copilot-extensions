@@ -211,7 +211,7 @@ if expected_sources and args[:2] == ["pip", "install"]:
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
     assert private_root.name == "inputs"
-    assert private_root.parent.parent.samefile(Path(os.environ["TEST_UV_EXPECTED_TEMP_PARENT"]))
+    assert private_root.parent.parent.samefile(Path(os.environ["TEMP"]))
     assert not any(
         private_root.resolve().is_relative_to(Path(original).resolve())
         for original in expected_sources.values()
