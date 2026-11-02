@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from . import _daemon_instance_clock as lease_clock
+from ._daemon_instance_owner import assert_path_owner, mkdir_private, open_private
 from ._daemon_instance_identity import (
     birth_identity, delete_owned_file, identity_state, path_identity, retire_self, stop_identity,
 )
@@ -126,7 +127,6 @@ def _plain(path: Path, *, directory: bool = False, owned: bool = True) -> os.sta
     if owned and os.name != "nt" and info.st_uid != os.getuid():
         raise OSError("daemon instance path has a foreign owner")
     if owned and os.name == "nt":
-        from ._daemon_instance_owner import assert_path_owner
         assert_path_owner(path)
     return info
 
@@ -137,15 +137,15 @@ def _root(path: Path, *, create: bool = False) -> Path:
         raise ValueError("daemon registry root must be absolute")
     if create:
         # Reject indirection before creating anything below an existing prefix.
-        missing = []
-        current = path
+        missing, current = [], path
         while not current.exists():
             missing.append(current)
             current = current.parent
         if current.resolve(strict=True) != current:
             raise OSError("daemon registry parent is redirected")
         for entry in reversed(missing):
-            entry.mkdir(mode=0o700, exist_ok=True)
+            mkdir_private(entry, exist_ok=True)
+            _plain(entry, directory=True)
     if path.resolve(strict=True) != path:
         raise OSError("daemon registry root is redirected")
     _plain(path, directory=True)
@@ -230,7 +230,7 @@ def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False, deadline=
         except FileNotFoundError:
             pass
         _remaining(deadline)
-        descriptor = os.open(
+        descriptor = open_private(
             path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600,
         )
         try:
@@ -298,7 +298,7 @@ def _write(path: Path, record: dict[str, str]) -> None:
         raise ValueError("daemon instance record exceeds its bound")
     staging = path.with_name(path.name + "." + uuid.uuid4().hex + ".pending")
     try:
-        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = open_private(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
             stream.flush()
@@ -930,7 +930,7 @@ def _write_cursor(root, key):
         _plain(path)
     pending = root / (".reconcile." + uuid.uuid4().hex + ".pending")
     try:
-        fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = open_private(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as stream:
             stream.write(_CURSOR_HEADER + key.encode("ascii") + b"\n")
             stream.flush()

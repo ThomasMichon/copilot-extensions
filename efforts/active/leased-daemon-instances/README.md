@@ -183,6 +183,14 @@ their existing owners and guarantees.
   regenerating consumers through their normal owner.
 - [ ] Complete actual compiler-free construction and lifecycle qualification,
   update current docs and journal reviewed merged results.
+- [x] Land atomic TokenUser-owned private inventory creation and qualify the
+  four actual Windows SDK owner, binary and concurrent-cold-cache selectors
+  through reviewed source #9956.
+- [ ] Complete the retained Git-Bash Manager callback with the reviewed creator
+  in a canonical complete candidate; preserve the same-user/different-TokenOwner
+  boundary, existing-path admission and borrowed runtime anchors. See the
+  [ownership journal](journal/2026/11.02%20private-inventory-ownership.md)
+  and the existing #7028 consumer report.
 
 ## Validation Plan
 
@@ -234,6 +242,7 @@ compiler-free construction/lifecycle qualification remain open.
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
+- [2026-11-02 - private inventory creation ownership](journal/2026/11.02%20private-inventory-ownership.md)
 - [2026-11-01 - merged finite source and non-UI safety preparation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md)
 - [2026-10-30 - compiler-free finite process custody](../lean-runtime-dependencies/journal/2026/10.30%20finite-owned-process.md)
 - [2026-10-30 - compiler-free PowerShell instance custody](../lean-runtime-dependencies/journal/2026/10.30%20powershell-instance-custody.md)
