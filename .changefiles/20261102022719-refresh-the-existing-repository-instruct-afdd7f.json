@@ -1,0 +1,17 @@
+{
+  "comment": "Refresh the existing repository instruction roster to current guidance locators and reviewed offline fallbacks.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    },
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}
