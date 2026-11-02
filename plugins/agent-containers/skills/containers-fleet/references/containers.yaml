@@ -81,3 +81,20 @@ fleets:
     environment:                          # explicit non-secret values only
       MODEL_BASE_URL: http://model-proxy:8080/v1
       MODEL_NAME: local-model
+
+  example:
+    # External runtime driver: a registered driver command (drivers.d manifest
+    # or agent-containers-driver-<name> on PATH) provisions and manages the
+    # members instead of Docker. image/devcontainer_path/repo and the Docker
+    # resource keys are rejected here -- pass runtime settings through
+    # driver_options, which is forwarded verbatim (never put secrets in it).
+    # See the plugin's docs/runtime-drivers.md for the protocol.
+    driver: example-driver
+    driver_options:
+      profile: default
+    size: 2
+    workspace_folder: /workspaces/example
+    exec_user: vscode
+    # The relay needs a driver with owns_relay or ssh_transport; otherwise
+    # disable it for this fleet (dispatch fails closed while it is enabled).
+    relay_enabled: false

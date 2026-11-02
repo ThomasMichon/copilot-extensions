@@ -56,9 +56,17 @@ def _creation_flags() -> int:
     return no_window_flags()
 
 
+def _drivers():
+    from . import runtime_drivers  # lazy: optional external-runtime seam
+    return runtime_drivers
+
+
 def _docker(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
     """Run a docker CLI command, returning the CompletedProcess."""
     operation = _docker_operation_label(args)
+    if args and args[0] in {"exec", "cp"}:  # driver-owned members leave Docker here
+        if (routed := _drivers().run_routed(["docker", *args], timeout=timeout)) is not None:
+            return routed
     if args and args[0] in {"start", "stop", "unpause", "rm"}:
         from .config import load_config
         from .lifecycle_ownership import pin_lifecycle_command
@@ -132,6 +140,9 @@ class DockerContainerInfo:
     security_profile: str = TRUSTED_PROFILE
     security_policy: str | None = None
     security_image_id: str | None = None
+    # External runtime driver owning this member (None: Docker).
+    driver: str | None = None
+    driver_repo: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -140,6 +151,8 @@ class DockerContainerInfo:
     @property
     def repo(self) -> str:
         """Best-effort repo name from labels / local folder."""
+        if self.driver_repo:
+            return self.driver_repo
         if self.local_folder:
             return self.local_folder.replace("\\", "/").rstrip("/").split("/")[-1]
         return self.fleet or ""
@@ -223,26 +236,35 @@ def list_containers(
 
     Includes stopped containers by default (``-a``) so warm-but-stopped
     fleet members are visible. Filters to fleet members per
-    :func:`_is_fleet_member`.
+    :func:`_is_fleet_member`. Runtime-driver fleet members are appended;
+    Docker is optional when every configured fleet uses a driver.
     """
     args = ["ps", "--no-trunc", "--format", _PS_FORMAT]
     if all_containers:
         args.insert(1, "-a")
 
-    res = _docker(args)
-    if res.returncode != 0:
-        raise RuntimeError(
-            f"docker ps failed: {res.stderr.strip()} "
-            "Check that the Docker daemon is running and accessible."
-        )
-
     containers: list[DockerContainerInfo] = []
-    for line in res.stdout.splitlines():
-        if not line.strip():
-            continue
-        info = _row_to_info(line, config)
-        if info is not None:
-            containers.append(info)
+    fleets = (getattr(config, "fleets", None) or {}).values()  # tolerate bare inventory configs
+    driver_fleets = [f for f in fleets if getattr(f, "driver", None)]
+    try:
+        res = _docker(args)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"docker ps failed: {res.stderr.strip()} "
+                "Check that the Docker daemon is running and accessible."
+            )
+        for line in res.stdout.splitlines():
+            if not line.strip():
+                continue
+            info = _row_to_info(line, config)
+            if info is not None:
+                containers.append(info)
+    except RuntimeError:
+        if not driver_fleets or _drivers().has_docker_fleets(config):
+            raise
+        log.debug("Docker unavailable; listing runtime-driver fleets only")
+    if driver_fleets:
+        containers = _drivers().merge_driver_members(config, containers, all_containers)
     return containers
 
 
@@ -329,6 +351,8 @@ def _resolve_member_fleet(config: ContainersConfig, info: DockerContainerInfo) -
 
 def inspect_state(name: str) -> str | None:
     """Return the container's state string, or None if it does not exist."""
+    if (routed := _drivers().dispatch(name, "state"))[0]:
+        return routed[1]
     res = _docker(["inspect", "-f", "{{.State.Status}}", name])
     if res.returncode != 0:
         return None
@@ -354,6 +378,8 @@ def _parse_size(value: str) -> int:
 
 def inspect_container(name: str) -> dict:
     """Return one container's Docker inspect document."""
+    if (routed := _drivers().dispatch(name, "inspect"))[0]:
+        return routed[1]
     res = _docker(["inspect", name], timeout=30)
     if res.returncode != 0:
         detail = (res.stderr.strip() or res.stdout.strip())
@@ -653,6 +679,8 @@ def restricted_policy_errors(
 
 def start_container(name: str, timeout: float = 60.0) -> None:
     """Start a stopped container (idempotent if already running)."""
+    if _drivers().dispatch(name, "start")[0]:
+        return
     res = _docker(["start", name], timeout=timeout)
     if res.returncode != 0:
         raise RuntimeError(f"docker start {name} failed: {res.stderr.strip()}")
@@ -660,6 +688,7 @@ def start_container(name: str, timeout: float = 60.0) -> None:
 
 def unpause_container(name: str, timeout: float = 60.0) -> None:
     """Unpause a paused container so liveness and evidence can be inspected."""
+    _drivers().require_docker_member(name, "unpause")
     res = _docker(["unpause", name], timeout=timeout)
     if res.returncode != 0:
         raise RuntimeError(f"docker unpause {name} failed: {res.stderr.strip()}")
@@ -667,6 +696,8 @@ def unpause_container(name: str, timeout: float = 60.0) -> None:
 
 def stop_container(name: str, timeout: float = 60.0) -> None:
     """Stop a running container (idempotent if already stopped)."""
+    if _drivers().dispatch(name, "stop")[0]:
+        return
     res = _docker(["stop", name], timeout=timeout)
     if res.returncode != 0:
         raise RuntimeError(f"docker stop {name} failed: {res.stderr.strip()}")
@@ -679,6 +710,8 @@ def remove_container(
     timeout: float = 120.0,
 ) -> None:
     """Remove a container."""
+    if _drivers().dispatch(name, "remove", force=force)[0]:
+        return
     args = ["rm", name]
     if force:
         args.insert(1, "-f")

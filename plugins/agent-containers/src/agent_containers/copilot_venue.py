@@ -157,6 +157,10 @@ def cmd_copilot(
     ):
         print("[FAIL] --ttl-seconds applies only to attached mode", file=sys.stderr)
         return 1
+    from .config import load_config as _load_config
+    from .runtime_drivers import require_ssh_transport
+
+    require_ssh_transport(_load_config(), args.name, "The `copilot` verb")
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 
@@ -215,6 +219,11 @@ def cmd_copilot(
         relay_env: dict[str, str] = {}
         relay_port = None
         _forward, relay_enabled = config.credentials_for(target.fleet)
+        from .runtime_drivers import launch_plan
+
+        relay_enabled = launch_plan(
+            target.fleet, args.name, relay_enabled, require_ssh=True,
+        ).agent_relay
         if not args.no_relay and relay_enabled:
             host_relay_port = require_live_relay_port()
             if not relay_healthy(host_relay_port):

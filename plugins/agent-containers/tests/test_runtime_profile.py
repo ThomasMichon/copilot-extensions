@@ -545,7 +545,10 @@ def test_native_source_stamp_publishes_only_verified_complete_snapshot(
         pytest.skip(f"{host} unavailable")
     shutil.copytree(SCRIPTS, payload / "scripts")
     if receipt_change:
-        entry = payload / "scripts" / ("init.sh" if host == "bash" else "init.ps1")
+        # The bash install lock lives in the sourced transaction helper.
+        entry = payload / "scripts" / (
+            "legacy-transaction.sh" if host == "bash" else "init.ps1"
+        )
         text = entry.read_text(encoding="utf-8")
         if host == "bash":
             boundary = "_enter_install_lock() {\n"

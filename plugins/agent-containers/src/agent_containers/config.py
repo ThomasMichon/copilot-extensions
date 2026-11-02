@@ -290,6 +290,11 @@ class FleetConfig:
     # host-side trigger. The IMAGE must itself provide `systemd`/
     # `systemd-sysv`/`dbus-user-session` -- this only wires the launch.
     systemd_capable: bool = False
+    # External runtime driver (see docs/runtime-drivers.md). Unset keeps the
+    # built-in Docker runtime. ``driver_options`` is passed through verbatim
+    # to the driver on every protocol call and is never interpreted here.
+    driver: str | None = None
+    driver_options: dict[str, Any] = field(default_factory=dict)
 
     def prefix(self, fleet_name: str) -> str:
         return self.name_prefix or fleet_name
@@ -341,6 +346,12 @@ class FleetConfig:
             return self.home_size
         return "512m" if self.restricted else None
 
+    def validate_driver(self) -> None:
+        """Validate the external runtime driver keys (see runtime_drivers)."""
+        from .runtime_drivers import validate_driver_fleet
+
+        validate_driver_fleet(self)
+
     def validate_restricted(self) -> None:
         """Validate cross-field invariants; restricted fleets get extra bounds.
 
@@ -349,6 +360,7 @@ class FleetConfig:
         configuration that would silently no-op or leave a mount half-wired,
         not just a restricted-containment violation.
         """
+        self.validate_driver()
         if self.lifecycle_owner not in (
             INTERNAL_LIFECYCLE_OWNER, EXTERNAL_LIFECYCLE_OWNER,
         ):
@@ -876,6 +888,10 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
             home_folder=raw.get("home_folder"),
             systemd_capable=_strict_bool(
                 raw.get("systemd_capable", False), f"Fleet '{name}' systemd_capable"
+            ),
+            driver=raw.get("driver"),
+            driver_options=(
+                {} if raw.get("driver_options") is None else raw["driver_options"]
             ),
         )
         fleet.validate_restricted()

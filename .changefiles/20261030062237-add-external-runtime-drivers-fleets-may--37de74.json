@@ -1,0 +1,9 @@
+{
+  "comment": "Add external runtime drivers: fleets may set driver/driver_options to delegate provisioning, inventory, lifecycle, exec, streaming exec and file copy to a registered driver command over a versioned JSON protocol, with owns_relay/ssh_transport capabilities and fail-closed validation; Docker remains the unchanged default.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

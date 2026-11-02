@@ -531,7 +531,10 @@ flowchart TB
   trust-profiled venue. Trusted development members retain SSH plus host
   credential projection; restricted members use direct `docker exec`, admit no
   host authority, and gate destructive replacement on confirmed-idle liveness
-  plus an atomic host-owned rescue of allowlisted session evidence.
+  plus an atomic host-owned rescue of allowlisted session evidence. A trusted
+  fleet may run on an external runtime driver instead of Docker
+  ([`runtime-drivers.md`](../plugins/agent-containers/docs/runtime-drivers.md));
+  the resolver and leases are unchanged and dispatch routes through the driver.
 
 > **Note:** agent-mcp has no `agent-bridge send` path — it is not an inter-agent
 > transport. It is wrapped directly by an agent's `mcp-servers` config to expose

@@ -14,6 +14,7 @@ from .config import (
 )
 
 EXTERNAL_REASON = "external lifecycle owner; use the selected deployment manager"
+DRIVER_REASON = "member of a runtime-driver fleet; only its driver may manage it"
 
 
 def require_internal_fleet(fleet: FleetConfig) -> None:
@@ -28,6 +29,17 @@ def lifecycle_blocker(
     owner = labels.get(LIFECYCLE_OWNER_LABEL, INTERNAL_LIFECYCLE_OWNER)
     if owner != INTERNAL_LIFECYCLE_OWNER:
         return EXTERNAL_REASON
+    from .runtime_drivers import DRIVER_LABEL
+
+    if not labels.get(DRIVER_LABEL):
+        # A Docker container claiming a driver fleet (by label or its
+        # deterministic name) is not that fleet's member.
+        for key, fleet in config.fleets.items():
+            if getattr(fleet, "driver", None) and (
+                labels.get(FLEET_LABEL) == key
+                or (not labels.get(FLEET_LABEL) and name.startswith(fleet.prefix(key) + "-"))
+            ):
+                return DRIVER_REASON
     selected = config.fleets.get(labels.get(FLEET_LABEL, ""))
     if selected and selected.lifecycle_owner == EXTERNAL_LIFECYCLE_OWNER:
         return EXTERNAL_REASON

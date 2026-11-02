@@ -1,0 +1,9 @@
+{
+  "comment": "Run the pre-launch repository-hosting check for runtime-driver container venues through the provider's runtime proxy instead of the Docker CLI.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
