@@ -9,7 +9,6 @@ from . import (
     _new_job_name as new_name,
     _job_scope_names as scope_names,
     _publish_job_scope as publish_current,
-    _job_child_environment,
 )
 
 __all__ = [

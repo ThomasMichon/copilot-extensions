@@ -3568,7 +3568,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "5844be6846e7bcb4e7539f0bc4cdbb920c28c64b0f6d4a2a98c41c66736751df",
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "f1040cd52b1d5f2f146e72ae935039979b6b73dc090b074b3a04a2d7603ddec4",
-        "libs/agent-procutil/src/agent_procutil/_job_scopes.py": "d1ee4805f224cb9b726b1475eef23c0095e3b2cb9e8043c5c20a580b14800c42",
+        "libs/agent-procutil/src/agent_procutil/_job_scopes.py": "50e3a29b4b2720ae52189e2ecdf303cae4003e231750f02124a438af23f207e3",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py": "908a6021d730ff6c15da3ff3619e098a48ea1936c578c3d745c40d7e8e3460a4",
         "libs/agent-procutil/src/agent_procutil/_output_relay.py": "45a60124e4a87996a24b6796738c6a334bfc9312819fe2130f56ec4dddcbb989",
@@ -3824,7 +3824,7 @@
         "tools/promotion_unit_tests/test_chat_collaboration.py": "c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
         "tools/promotion_unit_tests/test_ci_contract.py": "7647bcab50ac82c4dedf740f21b49997fedd9b1e8d16d5aab5336771528ed7f4",
         "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py": "45dcd38499372b6e9cc055d05ea34b4d18f4788001fd23df6ecf3b0a684baf97",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "e56d7abb61d29e37d846c634f0fda9cc9ef30ab5eeebc732b8d9395c2a167415",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "ffddb5c6308b51f902a219da235931b766ba62cebc32b9c6d3fe01d2c63f29da",
         "tools/promotion_unit_tests/test_collector.py": "1c37ceb50ff79dd135d4f27d6fc605accfab1899a0de03455bf1abb50a882ce4",
         "tools/promotion_unit_tests/test_complete_source.py": "a7967ba6269846c143078bdb774d2103273304538708e471be5b5d81aa1091be",
         "tools/promotion_unit_tests/test_complete_source_publication.py": "bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",
@@ -3944,7 +3944,8 @@
         "tools/promotion_unit_tests/test_python_cache.py": "14faf58f606d0826c79fc63c90775eb20be9f469541d3d1bfed845a53c80154a",
         "tools/promotion_unit_tests/test_sdk_process_safety.py": "c0c99998235107f11813e2d32ccce73f1faaa8aef7aad881c1e6aa4c9daa6870",
         "libs/agent-procutil/tests/sdk_native_win32.py": "38f0102bec252be6e60975cb316d94b1b5c87ec5021d4f774fcfa525a0228c73",
-        "tools/promotion_unit_tests/test_sdk_process_commands.py": "037de71dce65b2dfa5bbe012b65492b8478f1084e43f0a505187d6c609d94c1a"
+        "tools/promotion_unit_tests/test_sdk_process_commands.py": "037de71dce65b2dfa5bbe012b65492b8478f1084e43f0a505187d6c609d94c1a",
+        "libs/agent-procutil/src/agent_procutil/owned_budget.py": "72e1ca79f9be6ed44c606f14ed12061b68f8dd0b478025374efbf279805566bd"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",
