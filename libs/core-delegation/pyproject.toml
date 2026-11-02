@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-core-delegation"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Generic client transport to delegate a Copilot CLI plugin's heavy core over a tokened, discovered IPC seam"
 readme = "README.md"
 license = "MIT"

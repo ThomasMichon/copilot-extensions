@@ -13,6 +13,8 @@ import contextlib
 import json
 import socket
 import threading
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from endpoint_rendezvous import Endpoint, write_endpoint
@@ -31,16 +33,18 @@ class _EchoServer:
     platforms) and ``unix`` (where ``AF_UNIX`` exists).
     """
 
-    def __init__(self, family: int, address, reply: dict) -> None:
+    def __init__(
+        self, family: int, address: str | tuple[str, int], reply: dict[str, Any],
+    ) -> None:
         self._reply = reply
-        self.received: dict | None = None
+        self.received: dict[str, Any] | None = None
         self._sock = socket.socket(family, socket.SOCK_STREAM)
         if family == socket.AF_INET:
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(address)
         self._sock.listen(8)
         self._sock.settimeout(0.25)
-        self.address = self._sock.getsockname()
+        self.address = cast(str | tuple[str, int], self._sock.getsockname())
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
@@ -85,9 +89,10 @@ class _EchoServer:
 # ---------------------------------------------------------------------------
 
 
-def test_tcp_resolve_and_ship_roundtrip(tmp_path):
+def test_tcp_resolve_and_ship_roundtrip(tmp_path: Path) -> None:
     server = _EchoServer(socket.AF_INET, ("127.0.0.1", 0), {"ok": True, "value": "core"})
     try:
+        assert isinstance(server.address, tuple)
         host, port = server.address
         result = delegate(
             "agent-x-core",
@@ -105,9 +110,10 @@ def test_tcp_resolve_and_ship_roundtrip(tmp_path):
     assert server.received == {"action": "get", "entry": "x"}
 
 
-def test_token_is_attached(tmp_path):
+def test_token_is_attached(tmp_path: Path) -> None:
     server = _EchoServer(socket.AF_INET, ("127.0.0.1", 0), {"ok": True})
     try:
+        assert isinstance(server.address, tuple)
         host, port = server.address
         delegate(
             "agent-x-core",
@@ -125,10 +131,11 @@ def test_token_is_attached(tmp_path):
     assert "action" in server.received
 
 
-def test_resolves_via_rendezvous_file(tmp_path):
+def test_resolves_via_rendezvous_file(tmp_path: Path) -> None:
     server = _EchoServer(socket.AF_INET, ("127.0.0.1", 0), {"ok": True, "value": "file"})
     run = tmp_path / "run"
     try:
+        assert isinstance(server.address, tuple)
         host, port = server.address
         # Advertise the running server via a rendezvous file (no override).
         write_endpoint(run, "tcp", f"{host}:{port}")
@@ -142,9 +149,9 @@ def test_resolves_via_rendezvous_file(tmp_path):
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="AF_UNIX unavailable")
 @pytest.mark.skipif(cd.delegation.IS_WINDOWS, reason="UDS server not used on Windows")
-def test_unix_resolve_and_ship_roundtrip(tmp_path):
+def test_unix_resolve_and_ship_roundtrip(tmp_path: Path) -> None:
     sock_path = str(tmp_path / "core.sock")
-    server = _EchoServer(socket.AF_UNIX, sock_path, {"ok": True, "value": "uds"})
+    server = _EchoServer(cast(int, getattr(socket, "AF_UNIX")), sock_path, {"ok": True, "value": "uds"})
     try:
         result = delegate(
             "agent-x-core",
@@ -164,12 +171,12 @@ def test_unix_resolve_and_ship_roundtrip(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_none_when_no_core_wired(tmp_path):
+def test_none_when_no_core_wired(tmp_path: Path) -> None:
     # No override, no rendezvous file, no legacy -> nothing resolves.
     assert delegate("agent-x-core", {"action": "get"}, runtime_dir=tmp_path / "run") is None
 
 
-def test_none_when_unreachable(tmp_path):
+def test_none_when_unreachable(tmp_path: Path) -> None:
     # Override points at a closed port -> connect fails -> fall through.
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -185,7 +192,7 @@ def test_none_when_unreachable(tmp_path):
     assert result is None
 
 
-def test_none_when_transport_undialable_here(tmp_path):
+def test_none_when_transport_undialable_here(tmp_path: Path) -> None:
     # accept rejects every transport -> usable() is None -> fall through.
     result = delegate(
         "agent-x-core",
@@ -197,7 +204,7 @@ def test_none_when_transport_undialable_here(tmp_path):
     assert result is None
 
 
-def test_none_when_rendezvous_file_stale(tmp_path):
+def test_none_when_rendezvous_file_stale(tmp_path: Path) -> None:
     run = tmp_path / "run"
     # A file whose recorded pid is certainly dead -> is_stale -> skipped -> None.
     write_endpoint(run, "tcp", "127.0.0.1:1", pid=2_000_000_000)
@@ -209,7 +216,7 @@ def test_none_when_rendezvous_file_stale(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_default_accept_matrix(monkeypatch):
+def test_default_accept_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cd.default_accept("tcp") is True
     assert cd.default_accept("bogus") is False
 
@@ -222,11 +229,12 @@ def test_default_accept_matrix(monkeypatch):
     assert cd.default_accept("unix") is (hasattr(socket, "AF_UNIX"))
 
 
-def test_alt_transport_selected_when_primary_undialable(tmp_path):
+def test_alt_transport_selected_when_primary_undialable(tmp_path: Path) -> None:
     # A pipe primary with a tcp alt: off Windows the pipe is undialable, so the
     # tcp alt must be chosen and dialed.
     server = _EchoServer(socket.AF_INET, ("127.0.0.1", 0), {"ok": True, "value": "alt"})
     try:
+        assert isinstance(server.address, tuple)
         host, port = server.address
         ep = Endpoint(
             transport="pipe",
@@ -246,4 +254,3 @@ def test_alt_transport_selected_when_primary_undialable(tmp_path):
 
     assert result is not None
     assert result["value"] == "alt"
-
