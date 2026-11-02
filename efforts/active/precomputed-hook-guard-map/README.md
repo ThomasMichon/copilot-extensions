@@ -364,3 +364,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
 - Re-admitted the changed shared Git parser bytes after CI rejected its prior
   anchor-guard source hash. Only that existing manifest hash changed; the unit
   nodes, source inventory, coverage requirements and gate behavior are intact.
+- Corrected the next overview's concrete alias/cherry-pick and repository-only
+  targeting concerns. Exact write names remain recognized before dashed-prefix
+  classification, configured command-local aliases reuse the existing parser's
+  potential-write policy, and repository-only operations do not treat an
+  explicit work tree as a write destination. The map, consumer, deployment and
+  relevance packet passed 214 cases with four native-capability skips.

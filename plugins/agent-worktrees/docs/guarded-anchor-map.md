@@ -125,8 +125,13 @@ A nested repository does not inherit its containing checkout's guard. Direct
 write tools match the repository common-directory identity, including linked target worktrees.
 Shell and direct-write evaluation resolve each distinct target identity only
 once per event, not once per guarded row; no identity result is retained across
-events. Shell handling retains the existing command-position/write-target heuristic; this
-change does not introduce a shell parser or extend its syntax coverage.
+events. Non-Git shell handling retains the existing command-position/write-target
+heuristic; this change does not introduce another shell parser.
+Git invocations reuse the existing anchor guard's pure argument parser.
+Repository/index targets and explicit work-tree write targets are matched
+separately; repository-only operations do not write a named work tree.
+Command-local configured aliases retain that parser's conservative potential-
+write classification rather than acquiring live Git configuration.
 
 Current kill switches, policy modes and selected-installation `allow-edits.json`
 grant expiry remain live; permission decisions are never precomputed. The

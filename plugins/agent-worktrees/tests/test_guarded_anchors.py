@@ -469,10 +469,12 @@ def test_worktree_override_preserves_git_index_repository(tmp_path, option, guar
 @pytest.mark.parametrize("command", [
     "git commit-tree HEAD",
     "git checkout-index -a",
+    "git cherry-pick HEAD",
     "git merge-base HEAD HEAD",
     "git -c alias.commit=status commit -m new",
     "git -calias.commit=status commit -m new",
     "git --config-env=alias.commit=COMMAND_VALUE commit -m new",
+    "git -c alias.save=commit save -m new",
 ])
 @pytest.mark.parametrize("guarded_repository", [False, True])
 def test_git_dashed_writes_and_builtin_alias_names_preserve_guard(tmp_path, command, guarded_repository):
@@ -490,6 +492,32 @@ def test_git_dashed_writes_and_builtin_alias_names_preserve_guard(tmp_path, comm
     }, home=tmp_path, env={}, guarded_roots=[row])
 
     assert bool(result) is (guarded_repository and "merge-base" not in command)
+
+
+@pytest.mark.parametrize("subcommand,writes_worktree", [
+    ("commit -m new", False),
+    ("add tracked.txt", False),
+    ("checkout -- tracked.txt", True),
+])
+def test_repository_only_git_operation_does_not_write_explicit_worktree(
+    tmp_path, subcommand, writes_worktree,
+):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(outside),
+        "toolArgs": {"command": (
+            f"git --git-dir '{outside / '.git'}' --work-tree '{anchor}' {subcommand}"
+        )},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is writes_worktree
 
 
 def test_map_scope_does_not_borrow_other_installation(tmp_path):

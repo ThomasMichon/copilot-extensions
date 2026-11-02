@@ -65,9 +65,10 @@ except (ImportError, OSError, SyntaxError):
     _guard_map = None
 
 try:
-    from anchor_write_guard import _git_invocation
+    from anchor_write_guard import _git_invocation, _git_subcommand_writes_worktree
 except (ImportError, OSError, SyntaxError):
     _git_invocation = None
+    _git_subcommand_writes_worktree = None
 
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
@@ -120,7 +121,7 @@ _WRITE_CMD_START = re.compile(
 _GIT_WRITE_SUBCOMMANDS = frozenset({
     "add", "commit", "apply", "checkout", "switch", "reset", "restore",
     "clean", "rm", "mv", "stash", "merge", "rebase", "pull", "cherry-pick",
-    "revert", "init",
+    "revert", "init", "__configured-alias__",
 })
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
@@ -165,9 +166,15 @@ def _git_targets(eff_seg: str, base: str, tool: str) -> list[str]:
     if _git_invocation is None:
         return []
     subcommand, _args, targets, overridden = _git_invocation(eff_seg, base, tool)
-    if not subcommand or subcommand == "merge-base" or subcommand.partition("-")[0] not in _GIT_WRITE_SUBCOMMANDS:
+    if not subcommand or subcommand == "merge-base" or (
+        subcommand not in _GIT_WRITE_SUBCOMMANDS
+        and subcommand.partition("-")[0] not in _GIT_WRITE_SUBCOMMANDS
+    ):
         return []
-    return [path for _kind, path in targets if path] + ([] if overridden else [base])
+    return [
+        path for kind, path in targets
+        if path and (kind != "work-tree" or _git_subcommand_writes_worktree(subcommand))
+    ] + ([] if overridden else [base])
 
 
 def _shell_may_write(cmd: str, tool: str) -> bool:
