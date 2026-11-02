@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -363,7 +364,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseInput(
     $source, [ref]$tokens, [ref]$errors
 )
 if ($errors.Count) { throw "Invalid installer: $errors" }
-foreach ($name in @('Get-SourceKind', 'Deploy-CopilotPlugin')) {
+foreach ($name in @('Get-SourceKind', 'Invoke-NativeCapture', 'Deploy-CopilotPlugin')) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -408,3 +409,89 @@ Deploy-CopilotPlugin
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["Updates"] == expected_updates
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize(
+    ("failure", "warning", "call_count"),
+    [
+        ("", None, 5),
+        ("plugin marketplace list", "Failed to inspect marketplaces", 1),
+        ("plugin list", "Failed to inspect plugins", 2),
+        ("plugin update agent-worktrees@copilot-extensions", "Plugin update failed", 5),
+        ("plugin uninstall agent-worktrees", "Failed to remove stale _direct", 5),
+    ],
+)
+def test_powershell_plugin_deployment_uses_native_exit_not_stderr(
+    tmp_path: Path, native_powershell: str, failure: str, warning: str | None,
+    call_count: int,
+) -> None:
+    executable = tmp_path / "copilot_fixture.py"
+    calls = tmp_path / "calls.jsonl"
+    executable.write_text(
+        "import json,os,pathlib,sys\n"
+        "command=' '.join(sys.argv[1:])\n"
+        "with pathlib.Path(os.environ['CALLS']).open('a') as log:\n"
+        "    log.write(json.dumps(command)+'\\n')\n"
+        "print('Package extraction took 10ms', file=sys.stderr, flush=True)\n"
+        "if command == os.environ['FAILURE']: sys.exit(9)\n"
+        "if command == 'plugin marketplace list': print('copilot-extensions')\n"
+        "if command == 'plugin list':\n"
+        "    print('agent-worktrees@copilot-extensions\\nagent-worktrees')\n",
+        encoding="utf-8",
+    )
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+if ($errors.Count) { throw "Invalid installer: $errors" }
+foreach ($name in @('Get-SourceKind', 'Invoke-NativeCapture', 'Deploy-CopilotPlugin')) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if (-not $functionAst) { throw "Missing installer function: $name" }
+    Invoke-Expression $functionAst.Extent.Text
+}
+function Resolve-CopilotCommand { $env:FIXTURE_PYTHON; $env:FIXTURE_COPILOT }
+function Write-ServiceOk { param($Message) }
+function Write-ServiceChanged { param($Message); $script:Changes += $Message }
+function Write-ServiceWarn { param($Message); $script:Warnings += $Message }
+function Write-ServiceErr { param($Message); throw $Message }
+$script:Warnings = @()
+$script:Changes = @()
+$PluginDir = [pscustomobject]@{Path = $env:PAYLOAD}
+Deploy-CopilotPlugin
+if ($ErrorActionPreference -ne 'Stop') { throw 'Native capture leaked its error policy' }
+[pscustomobject]@{Warnings = @($script:Warnings); Changes = @($script:Changes)} |
+    ConvertTo-Json -Compress
+"""
+    result = run_headless(
+        [native_powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+        env={
+            **os.environ, "INSTALLER": str(INSTALL_PS1), "USERPROFILE": str(tmp_path),
+            "PAYLOAD": str(tmp_path / "source"), "COPILOT_PLUGIN_STAGED_FROM": "",
+            "FIXTURE_PYTHON": sys.executable, "FIXTURE_COPILOT": str(executable),
+            "CALLS": str(calls), "FAILURE": failure,
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout)
+    assert len(calls.read_text(encoding="utf-8").splitlines()) == call_count
+    if warning is None:
+        assert outcome["Warnings"] == []
+        assert outcome["Changes"] == ["Removed stale _direct plugin install"]
+    else:
+        assert len(outcome["Warnings"]) == 1
+        assert warning in outcome["Warnings"][0]
+        assert "Removed stale _direct plugin install" not in outcome["Changes"] or (
+            failure.startswith("plugin update ")
+        )

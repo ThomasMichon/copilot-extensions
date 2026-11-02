@@ -1,0 +1,9 @@
+{
+  "comment": "Respect native Copilot exit codes when installer commands emit stderr",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
