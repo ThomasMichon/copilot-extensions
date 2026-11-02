@@ -304,7 +304,7 @@ jobs:
       - compose-candidate
     if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:
@@ -349,6 +349,12 @@ jobs:
             --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
             --candidate-sha "$CANDIDATE_SHA" \
             --checkout "$RUNNER_TEMP/candidate"
+      - name: Prepare pinned candidate MyPy environment
+        timeout-minutes: 6
+        run: python "$RUNNER_TEMP/candidate/tools/typecheck.py" --prepare
+      - name: Require admitted candidate type contracts
+        timeout-minutes: 6
+        run: python "$RUNNER_TEMP/candidate/tools/typecheck.py" --enforced
       - id: producer
         name: Record the actual unit-producing attempt
         run: printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
