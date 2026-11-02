@@ -119,6 +119,8 @@ class SupervisorPoolPublication(SupervisorPoolSender):
         own integration before any production caller can use these inputs.
         """
         with self._pool_preparation_boundary() as (lock, acquisition):
+            client = self.client
+            target = getattr(client, "base_url", None)
             reasons = []
             catalog = None
             local_recheck_revision = None
@@ -147,6 +149,8 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                     reasons.append("coordinator-input-recheck-not-fresh")
                 if before != catalog:
                     reasons.append("coordinator-inputs-changed")
+                if self.client is not client or getattr(client, "base_url", None) != target:
+                    reasons.append("coordinator-client-target-changed")
                 if not catalog.permits_scope(self.machine or "", self.env):
                     reasons.append("coordinator-configured-cohort-unavailable-or-excluded")
                 reasons.extend(self._pool_source_snapshot.reasons)
@@ -171,4 +175,13 @@ class SupervisorPoolPublication(SupervisorPoolSender):
             custody = self._pool_publisher_custody
             if custody.publisher_id != acquisition or custody.pending is not None:
                 raise PoolPublicationError("original pool publisher custody remains unsettled")
-            return custody.prepare(self.capture_pool_publication_inputs())
+            client = self.client
+            self._require_pool_metadata_target(client)
+            target = getattr(client, "base_url", None)
+            inputs = self.capture_pool_publication_inputs()
+            if self.client is not client or getattr(client, "base_url", None) != target:
+                raise PoolPublicationError("pool metadata coordinator client changed during preparation")
+            self._close_retained_pool_metadata_client()
+            request = custody.prepare(inputs)
+            self._bind_pool_metadata_request(request, client)
+            return request
