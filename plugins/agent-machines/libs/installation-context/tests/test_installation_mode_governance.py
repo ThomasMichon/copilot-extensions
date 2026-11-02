@@ -8,10 +8,229 @@ import os
 import shutil
 import subprocess
 import sys
-from contextlib import nullcontext
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
+from datetime import datetime
 from pathlib import Path
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypedDict, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    import installation_context as _production
+    from typing_extensions import Unpack
+
+
+class _SourceVector(TypedDict):
+    normalized: dict[str, str | None]
+    marketplaceId: str
+    sha256: str
+    descriptor: dict[str, object]
+    marketplaceKey: str
+
+
+class _CellLayout(TypedDict):
+    vector: _SourceVector
+    marketplace_id: str
+    durable: Path
+    cell: Path
+    plugin_root: Path
+    payload: Path
+    namespace: Path
+    install: Path
+    namespace_generation: int
+    install_generation: int
+
+
+class _Environment(TypedDict):
+    platform: str
+    homeRealPath: str
+    wslDistro: str | None
+
+
+class _EnvironmentArguments(TypedDict, total=False):
+    durable_home: str | os.PathLike[str] | None
+    environment: Mapping[str, str] | None
+    os_profile: str | os.PathLike[str] | None
+    platform: str | None
+    wsl_distro: str | None
+
+
+class _ResolveOptions(_EnvironmentArguments, total=False):
+    legacy_probe: Mapping[str, object] | None
+    policy_path: str | os.PathLike[str] | None
+    payload_root: str | os.PathLike[str] | None
+    plugin_id: str | None
+    copilot_home: str | os.PathLike[str] | None
+    project_root: str | os.PathLike[str] | None
+    context: str | os.PathLike[str] | None
+    expected_marketplace_id: str | None
+    expected_plugin_id: str | None
+    expected_payload_root: str | os.PathLike[str] | None
+    expected_cell_root: str | os.PathLike[str] | None
+    source_descriptor: Mapping[str, object] | None
+    marketplace_key: str | None
+    current_time: datetime | str | None
+    host: str | None
+    pid_is_live: Callable[[int], bool] | None
+
+
+class _ResolveArguments(_ResolveOptions):
+    legacy_root: str | os.PathLike[str]
+
+
+class _OwnershipArguments(_EnvironmentArguments):
+    context: str | os.PathLike[str]
+    expected_marketplace_id: str
+    expected_plugin_id: str
+    legacy_root: str | os.PathLike[str]
+
+
+class _AttributionArguments(_OwnershipArguments):
+    legacy_items: Sequence[Mapping[str, object]]
+
+
+class _LockedAttributionArguments(_AttributionArguments):
+    legacy_lock: AbstractContextManager[object]
+
+
+class _GenerationArguments(_OwnershipArguments):
+    expected_namespace_generation: int
+    expected_install_generation: int
+    expected_activation_generation: int
+
+
+class _DeactivationArguments(_GenerationArguments):
+    legacy_probe: Mapping[str, object]
+    expected_tombstone_activation_generation: int
+
+
+class _LockedDeactivationArguments(_DeactivationArguments):
+    legacy_lock: AbstractContextManager[object]
+
+
+class _RetirementArguments(_GenerationArguments):
+    retirement_id: str
+    legacy_items: Sequence[Mapping[str, object]]
+    health_report: Mapping[str, object]
+    legacy_lock: AbstractContextManager[object]
+
+
+class _GovernanceModule(Protocol):
+    _is_wsl_guest: Callable[[], bool]
+
+    @property
+    def InstallationContextError(self) -> type[Exception]: ...
+
+    @property
+    def _DirectoryLock(self) -> type[_production._DirectoryLock]: ...
+
+    @property
+    def MalformedDeploymentManifest(self) -> type[_production.MalformedDeploymentManifest]: ...
+
+    @property
+    def RUNTIME_DEPLOYMENT_SCHEMA(self) -> str: ...
+
+    @property
+    def RUNTIME_DEPLOYMENT_FILE(self) -> str: ...
+
+    def read_json(self, path: str | os.PathLike[str]) -> Any: ...
+
+    def read_deployment_manifest(self, path: str | os.PathLike[str]) -> Any: ...
+
+    def resolve_context(
+        self, *, payload_root: str | os.PathLike[str] | None = None,
+        plugin_id: str | None = None, copilot_home: str | os.PathLike[str] | None = None,
+        project_root: str | os.PathLike[str] | None = None,
+        durable_home: str | os.PathLike[str] | None = None,
+        context: str | os.PathLike[str] | None = None,
+        expected_marketplace_id: str | None = None, expected_plugin_id: str | None = None,
+        expected_payload_root: str | os.PathLike[str] | None = None,
+        expected_cell_root: str | os.PathLike[str] | None = None,
+        source_descriptor: Mapping[str, object] | None = None,
+        marketplace_key: str | None = None, environment: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def _deployment_owner(
+        self, resolution: Mapping[str, object], arguments: Mapping[str, object],
+    ) -> dict[str, Any]: ...
+
+    def resolve_runtime_deployment(
+        self, **arguments: Unpack[_ResolveArguments],
+    ) -> dict[str, Any]: ...
+
+    def _current_environment(
+        self, *, environment: Mapping[str, str],
+        os_profile: str | os.PathLike[str] | None,
+        platform: str | None, wsl_distro: str | None,
+    ) -> tuple[dict[str, Any], Path]: ...
+
+    def resolve_installation_mode(
+        self, **arguments: Unpack[_ResolveArguments],
+    ) -> dict[str, Any]: ...
+
+    def probe_legacy_entrypoint(
+        self, **arguments: Unpack[_ResolveArguments],
+    ) -> dict[str, Any]: ...
+
+    def enter_maintenance(
+        self, *, scope: str, owner: str, reason: str,
+        expected_duration_seconds: int, context: str | os.PathLike[str] | None = None,
+        expected_marketplace_id: str | None = None,
+        expected_plugin_id: str | None = None,
+        **arguments: Unpack[_EnvironmentArguments],
+    ) -> dict[str, Any]: ...
+
+    def compare_and_swap_activation(
+        self, *, context: str | os.PathLike[str], expected_marketplace_id: str,
+        expected_plugin_id: str, expected_namespace_generation: int,
+        expected_install_generation: int, expected_activation_generation: int,
+        activation_mode: str, activation_state: str, legacy_disposition: str,
+        legacy_probe: Mapping[str, object], legacy_root: str | os.PathLike[str] | None = None,
+        maintenance_token: str | None = None,
+        **arguments: Unpack[_EnvironmentArguments],
+    ) -> dict[str, Any]: ...
+
+    def attribute_legacy_state(
+        self, *, legacy_lock: AbstractContextManager[object],
+        maintenance_token: str | None = None,
+        **arguments: Unpack[_AttributionArguments],
+    ) -> dict[str, Any]: ...
+
+    def deactivate_installation(
+        self, *, legacy_probe: Mapping[str, object],
+        expected_tombstone_activation_generation: int | None = None,
+        expect_tombstone_absent: bool = False,
+        legacy_lock: AbstractContextManager[object] | None = None,
+        maintenance_token: str | None = None,
+        **arguments: Unpack[_GenerationArguments],
+    ) -> dict[str, Any]: ...
+
+    def retire_legacy_compatibility(
+        self, **arguments: Unpack[_RetirementArguments],
+    ) -> dict[str, Any]: ...
+
+    def recheck_loop_governance(
+        self, *, baseline: Mapping[str, object] | None = None,
+        **arguments: Unpack[_OwnershipArguments],
+    ) -> dict[str, Any]: ...
+
+    def _parse_rfc3339_utc(self, value: object, label: str) -> datetime: ...
+
+    def _maintenance_inspection(
+        self, *, profile: Path, plugin_root: Path | None,
+        current_time: datetime, host: str, pid_is_live: Callable[[int], bool],
+    ) -> dict[str, Any]: ...
+
+    def probe_remote_maintenance(
+        self, command: Sequence[str],
+    ) -> dict[str, Any]: ...
+
+
+if TYPE_CHECKING:
+    _checked_module: _GovernanceModule = _production
+
 
 LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
@@ -76,12 +295,13 @@ def _supported_bash() -> str | None:
 BASH = _supported_bash()
 
 
-def _load_module(*, native_environment: bool = False):
+def _load_module(*, native_environment: bool = False) -> _GovernanceModule:
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    loaded = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = loaded
+    spec.loader.exec_module(loaded)
+    module = cast(_GovernanceModule, loaded)
     if not native_environment:
         # In-process API fixtures describe isolated non-guest profiles.
         # Native subprocess parity uses the unchanged SDK and real observation.
@@ -101,8 +321,11 @@ def test_explicit_powershell_unavailable_fails_instead_of_skipping() -> None:
     assert "Requested installation-context PowerShell runner is unavailable" in result.stderr
 
 
-def _source_vector(index: int = 0) -> dict[str, object]:
-    return json.loads(SOURCE_FIXTURES.read_text(encoding="utf-8"))["vectors"][index]
+def _source_vector(index: int = 0) -> _SourceVector:
+    return cast(
+        _SourceVector,
+        json.loads(SOURCE_FIXTURES.read_text(encoding="utf-8"))["vectors"][index],
+    )
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -110,8 +333,8 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def _environment() -> dict[str, object]:
-    if os.name == "nt":
+def _environment() -> _Environment:
+    if sys.platform == "win32":
         profile = Path(os.environ["USERPROFILE"]).resolve()
         platform = "windows"
     else:
@@ -123,10 +346,10 @@ def _environment() -> dict[str, object]:
     current, _profile = module._current_environment(
         environment=os.environ, os_profile=profile, platform=platform, wsl_distro=None,
     )
-    return current
+    return cast(_Environment, current)
 
 
-def _api_environment(profile: Path) -> dict[str, object]:
+def _api_environment(profile: Path) -> _Environment:
     return {
         "platform": "posix",
         "homeRealPath": str(profile.resolve()),
@@ -134,7 +357,7 @@ def _api_environment(profile: Path) -> dict[str, object]:
     }
 
 
-def _profile_environment(profile: Path) -> dict[str, object]:
+def _profile_environment(profile: Path) -> _Environment:
     return {
         "platform": "windows" if os.name == "nt" else "posix",
         "homeRealPath": str(profile.resolve()),
@@ -148,7 +371,7 @@ def _cell_layout(
     vector_index: int = 0,
     namespace_generation: int = 1,
     install_generation: int = 2,
-) -> dict[str, object]:
+) -> _CellLayout:
     vector = _source_vector(vector_index)
     normalized = vector["normalized"]
     assert isinstance(normalized, dict)
@@ -223,11 +446,11 @@ def _cell_layout(
 
 
 def _activation(
-    layout: dict[str, object],
+    layout: _CellLayout,
     *,
     mode: str = "namespaced",
     state: str = "active",
-    environment: dict[str, object] | None = None,
+    environment: Mapping[str, object] | None = None,
     namespace_generation: int | None = None,
     install_generation: int | None = None,
     generation: int = 3,
@@ -296,7 +519,9 @@ def _retirement_health(*, status: str = "ready", reason: str = "cell-runtime-hea
     }
 
 
-def _policy(enabled: bool, marketplace_id: str, *, plugin_enabled=None) -> dict:
+def _policy(
+    enabled: bool, marketplace_id: str, *, plugin_enabled: bool | None = None,
+) -> dict[str, object]:
     marketplace: dict[str, object] = {"enabled": enabled}
     if plugin_enabled is not None:
         marketplace["plugins"] = {PLUGIN_ID: {"enabled": plugin_enabled}}
@@ -311,12 +536,12 @@ def _policy(enabled: bool, marketplace_id: str, *, plugin_enabled=None) -> dict:
 
 
 def _api_arguments(
-    layout: dict[str, object],
+    layout: _CellLayout,
     profile: Path,
     legacy: Path,
-    **overrides,
-) -> dict[str, object]:
-    arguments: dict[str, object] = {
+    **overrides: Unpack[_ResolveOptions],
+) -> _ResolveArguments:
+    arguments: _ResolveArguments = {
         "payload_root": layout["payload"],
         "plugin_id": PLUGIN_ID,
         "durable_home": layout["durable"],
@@ -331,12 +556,11 @@ def _api_arguments(
         "pid_is_live": lambda pid: pid == 1234,
         "environment": {},
     }
-    arguments.update(overrides)
-    return arguments
+    return {**arguments, **overrides}
 
 
 def _cli_arguments(
-    layout: dict[str, object],
+    layout: _CellLayout,
     legacy: Path,
     *,
     action: str,
@@ -371,7 +595,7 @@ def _cli_arguments(
 
 
 def _activation_cas_arguments(
-    layout: dict[str, object],
+    layout: _CellLayout,
     legacy: Path,
     *,
     expected_marketplace_id: str | None = None,
@@ -759,12 +983,12 @@ def test_python_api_rejects_non_string_mapping_keys_with_domain_error(
                 layout,
                 profile,
                 legacy,
-                legacy_probe={
+                legacy_probe=cast(Mapping[str, object], {
                     1: "invalid",
                     "declared": False,
                     "result": "unknown",
                     "checkedAt": None,
-                },
+                }),
             )
         )
 
@@ -997,7 +1221,7 @@ def test_invalid_tombstone_destinations_are_orphaned(
     state = "deactivated" if scenario == "deactivated" else "active"
     install_generation = 1 if scenario == "generation-stale" else None
     if scenario == "environment-mismatch":
-        destination_environment = dict(destination_environment)
+        destination_environment = {**destination_environment}
         destination_environment["wslDistro"] = "OtherDistro"
     destination_activation = _activation(
         destination,
@@ -1453,7 +1677,7 @@ def test_attribute_legacy_state_is_idempotent(tmp_path: Path) -> None:
     command = profile / ".local" / "bin" / PLUGIN_ID
     command.parent.mkdir(parents=True)
     command.write_text("legacy wrapper\n", encoding="utf-8")
-    arguments = dict(
+    arguments: _LockedAttributionArguments = dict(
         context=layout["install"],
         expected_marketplace_id=layout["marketplace_id"],
         expected_plugin_id=PLUGIN_ID,
@@ -1488,7 +1712,7 @@ def test_attribute_legacy_state_requires_legacy_lock_and_install_lock(tmp_path: 
     environment = _profile_environment(profile)
     legacy = profile / f".{PLUGIN_ID}"
     legacy.mkdir()
-    arguments = dict(
+    arguments: _AttributionArguments = dict(
         context=layout["install"],
         expected_marketplace_id=layout["marketplace_id"],
         expected_plugin_id=PLUGIN_ID,
@@ -1502,10 +1726,13 @@ def test_attribute_legacy_state_requires_legacy_lock_and_install_lock(tmp_path: 
     )
 
     class FailingLock:
-        def __enter__(self):
+        def __enter__(self) -> NoReturn:
             raise module.InstallationContextError("legacy lock remained busy")
 
-        def __exit__(self, exc_type, exc, tb):
+        def __exit__(
+            self, exc_type: type[BaseException] | None,
+            exc: BaseException | None, tb: TracebackType | None,
+        ) -> Literal[False]:
             return False
 
     with pytest.raises(module.InstallationContextError, match="legacy lock remained busy"):
@@ -1516,7 +1743,7 @@ def test_attribute_legacy_state_requires_legacy_lock_and_install_lock(tmp_path: 
 
     original_acquire = module._DirectoryLock.acquire
 
-    def fail_install(self):
+    def fail_install(self: _production._DirectoryLock) -> None:
         if self.kind == "install":
             raise module.InstallationContextError("Installation lock 'install' remained busy.")
         return original_acquire(self)
@@ -1629,7 +1856,7 @@ def test_deactivate_installation_is_idempotent_for_same_target(tmp_path: Path) -
         platform=str(environment["platform"]),
         wsl_distro=environment["wslDistro"],
     )
-    arguments = dict(
+    arguments: _LockedDeactivationArguments = dict(
         context=layout["install"],
         expected_marketplace_id=layout["marketplace_id"],
         expected_plugin_id=PLUGIN_ID,
@@ -1854,7 +2081,7 @@ def test_deactivate_installation_requires_legacy_lock_and_install_lock(
         platform=str(environment["platform"]),
         wsl_distro=environment["wslDistro"],
     )
-    arguments = dict(
+    arguments: _DeactivationArguments = dict(
         context=layout["install"],
         expected_marketplace_id=layout["marketplace_id"],
         expected_plugin_id=PLUGIN_ID,
@@ -1876,10 +2103,13 @@ def test_deactivate_installation_requires_legacy_lock_and_install_lock(
     )
 
     class FailingLock:
-        def __enter__(self):
+        def __enter__(self) -> NoReturn:
             raise module.InstallationContextError("legacy lock remained busy")
 
-        def __exit__(self, exc_type, exc, tb):
+        def __exit__(
+            self, exc_type: type[BaseException] | None,
+            exc: BaseException | None, tb: TracebackType | None,
+        ) -> Literal[False]:
             return False
 
     with pytest.raises(module.InstallationContextError, match="legacy lock remained busy"):
@@ -1890,7 +2120,7 @@ def test_deactivate_installation_requires_legacy_lock_and_install_lock(
 
     original_acquire = module._DirectoryLock.acquire
 
-    def fail_install(self):
+    def fail_install(self: _production._DirectoryLock) -> None:
         if self.kind == "install":
             raise module.InstallationContextError("Installation lock 'install' remained busy.")
         return original_acquire(self)
@@ -2095,7 +2325,7 @@ def test_retire_legacy_compatibility_publishes_auditable_record(tmp_path: Path) 
         platform=str(environment["platform"]),
         wsl_distro=environment["wslDistro"],
     )
-    arguments = dict(
+    arguments: _RetirementArguments = dict(
         context=layout["install"],
         expected_marketplace_id=layout["marketplace_id"],
         expected_plugin_id=PLUGIN_ID,
@@ -2525,7 +2755,7 @@ def test_diagnostic_api_never_enters_mutation(
     )
     before = _snapshot(tmp_path)
 
-    def refuse_mutation(*args, **kwargs):
+    def refuse_mutation(*args: object, **kwargs: object) -> NoReturn:
         raise AssertionError("diagnostic entered installation mutation")
 
     for name in (
@@ -2797,7 +3027,7 @@ def test_expected_on_disk_corruption_is_structured(
     assert invalid_activation.returncode == 0, invalid_activation.stderr
     assert json.loads(invalid_activation.stdout)["status"] == "invalid"
 
-    activation_value = {
+    activation_value: dict[str, Any] = {
         "schema": "copilot-extensions.installation-activation",
         "version": 1,
         "marketplaceId": layout["marketplace_id"],
@@ -3209,7 +3439,7 @@ def test_foreign_windows_wsl_and_posix_activation_receipts_fail_closed(
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     current = _environment()
-    foreign_environments = [
+    foreign_environments: list[_Environment] = [
         {
             "platform": "windows",
             "homeRealPath": r"C:\Users\example",
@@ -3355,7 +3585,7 @@ def test_activation_cas_never_overwrites_malformed_receipt(
 )
 @pytest.mark.parametrize("receipt_name", ["namespace", "install"])
 def test_activation_cas_requires_active_context_receipts(
-    tmp_path: Path, runner: str, receipt_name: str
+    tmp_path: Path, runner: str, receipt_name: Literal["namespace", "install"],
 ) -> None:
     layout = _cell_layout(tmp_path)
     legacy = tmp_path / "legacy"

@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current test cohorts:** #9998, #9999 and #10001 (integrated lock-recovery, digest-cache and snapshot-provenance test slice); #10003 (installation-mode governance) and #10004 (runtime-profile policy) are preparing independent follow-on cohorts.
+- **Current test cohorts:** #10003 (installation-mode governance and its shared fixture clients) and #10004 (runtime-profile policy); #10006 (native bootstrap/lock handoff) and #10007 (payload source/selection) are preparing follow-on cohorts. #9998, #9999 and #10001 are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** #10003 owns only `test_installation_mode_governance.py`; #10004 owns only `test_runtime_profile_policy.py`, each in an independent source worktree. Their first milestone is diagnosis and a bounded plan, not publication. #9998 and #9999 returned isolated commits for lead integration and validation. The lead retains the effort, shared checker controls and full completion judgment.
+- **Delegates:** #10003 and #10004 returned isolated implementation commits. #10006 owns only `test_powershell_bootstrap.py` and `test_directory_lock_handoff.py`; #10007 owns only `test_payload_source.py` and `test_bootstrap_context_selection.py`, each family in an independent source worktree. Their first milestone is diagnosis and a bounded plan, not publication. The lead retains directly dependent fixture clients, the effort, shared checker controls and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -1014,3 +1014,45 @@ composition prerequisites, and review/validation rules.
   venue tests do not apply to unchanged production/provisioning code.
   The governed unit packet, CI budgets and 13-strict / 55-pending admission
   counts remain unchanged. The campaign and #9807 remain active.
+
+### 2026-11-02 - Snapshot, lock and digest contracts merged
+
+- #10005 merged as `0bc0717d04f6fed35e04154d8255488dba7c14d3`
+  after exact-head approval with no findings, zero open review comments and
+  all required checks in
+  [run 41469685645](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41469685645).
+  The source worktree is pulled forward; #9998, #9999 and #10001 are complete.
+- Re-reading this Plan and Validation Plan leaves library admission, remaining
+  test/helper families, independent copies and the portfolio ratchet open.
+  The next slice is #10003/#10004's governance/profile contracts and the
+  directly dependent fixture clients exposed by their precise helper types.
+  Preserve those concrete contracts rather than widening them to conceal
+  caller debt. #9807 remains open.
+
+### 2026-11-02 - Governance/profile contracts and shared clients integrated
+
+- #10003 and #10004 supplied concrete governance/profile fixtures, keyword
+  arguments, native seams and checked module interfaces. The shared loader
+  contract includes its existing JSON/deployment clients; a protocol limited
+  to the original module would incorrectly hide valid APIs.
+- Dependent diagnostic, deployment and legacy-snapshot fixtures preserve the
+  concrete layout/environment/keyword types, and the JSON-reader storage
+  double retains the real raising callback signature. One profile cast is
+  removed because integration now proves its field is already a `Path`.
+- Full project probes report zero diagnostics in all six changed modules
+  and production on both targets. Remaining test debt is Linux 60 basic /
+  139 strict and Windows 47 basic / 127 strict. The library remains pending.
+  Combined validation of all changed modules and the directly dependent
+  deployment adapters passes 516 tests, with 127 existing platform skips,
+  in 403.04 seconds. Windows-native Python/PowerShell contracts ran; existing
+  Bash/POSIX/WSL and invalid-Windows-path cases retain their skip boundaries.
+- All 26 already-enforced platform checks, changed-file Ruff, install
+  contracts, documentation consistency, source-copy sync, vendoring and
+  whitespace checks pass. Documentation impact: below-altitude test-only
+  contracts; developer commands and operational behavior remain accurate.
+  Fresh-box and external provisioning checks are not applicable to unchanged
+  production code. The governed unit packet and CI budgets remain unchanged.
+- #10006 and #10007 select the next two native-bootstrap and source-selection
+  families in independent worktrees. Their current authorization is bounded
+  diagnosis/planning only. No project admission, production change or
+  installed-runtime rollout is included.

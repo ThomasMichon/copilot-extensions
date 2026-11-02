@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -45,7 +48,7 @@ PEER_COPIES = [
 ]
 
 
-def _snapshot(root: Path) -> dict:
+def _snapshot(root: Path) -> dict[str, tuple[bool, int, bytes | None]]:
     return {
         path.relative_to(root).as_posix(): (
             path.is_dir(), path.stat().st_mtime_ns,
@@ -55,11 +58,13 @@ def _snapshot(root: Path) -> dict:
     }
 
 
-def _host_environment(profile: Path) -> dict:
+def _host_environment(profile: Path) -> governance._Environment:
     return {**governance._profile_environment(profile), "wslDistro": None}
 
 
-def _fixture(tmp_path: Path, namespaced: bool, pointer_exists: bool) -> tuple[dict, Path, Path]:
+def _fixture(
+    tmp_path: Path, namespaced: bool, pointer_exists: bool,
+) -> tuple[governance._CellLayout, Path, Path]:
     layout = governance._cell_layout(tmp_path)
     profile = tmp_path / "profile"
     legacy = tmp_path / "legacy"
@@ -82,7 +87,7 @@ def _fixture(tmp_path: Path, namespaced: bool, pointer_exists: bool) -> tuple[di
 def _guard_mutation(module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     attempts: list[str] = []
 
-    def refuse_mutation(*args, **kwargs):
+    def refuse_mutation(*args: object, **kwargs: object) -> NoReturn:
         attempts.append("mutation")
         raise AssertionError("diagnostic consumer entered lifecycle mutation")
 
@@ -146,8 +151,14 @@ def test_peer_governance_wrapper_read_only(
     }
     current_environment = primitive._current_environment
 
-    def fixture_environment(**arguments):
-        return current_environment(**{**arguments, "os_profile": profile})
+    def fixture_environment(
+        *, environment: Mapping[str, str], os_profile: str | os.PathLike[str] | None,
+        platform: str | None, wsl_distro: str | None,
+    ) -> tuple[dict[str, Any], Path]:
+        return cast(tuple[dict[str, Any], Path], current_environment(
+            environment=environment, os_profile=profile,
+            platform=platform, wsl_distro=wsl_distro,
+        ))
 
     monkeypatch.setattr(primitive, "_current_environment", fixture_environment)
     attempts = _guard_mutation(primitive, monkeypatch)

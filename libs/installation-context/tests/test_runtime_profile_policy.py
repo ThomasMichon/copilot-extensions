@@ -7,7 +7,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
 import pytest
 
@@ -21,18 +23,86 @@ from test_installation_mode_governance import (
     _write_json,
 )
 
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    import installation_context
+
+
+class _SourceArguments(TypedDict, total=False):
+    payload_root: Path
+    plugin_id: str
+    copilot_home: Path
+    project_root: Path
+    source_descriptor: dict[str, Any] | None
+    marketplace_key: str
+    environment: dict[str, str]
+
+
+class _OptionalArguments(TypedDict, total=False):
+    legacy_probe: dict[str, object]
+
+
+class _Arguments(_OptionalArguments):
+    payload_root: Path
+    plugin_id: str
+    durable_home: Path
+    legacy_root: Path
+    source_descriptor: dict[str, Any] | None
+    marketplace_key: str
+    os_profile: Path
+    platform: str
+    wsl_distro: str | None
+    current_time: str
+    host: str
+    pid_is_live: Callable[[int], bool]
+    environment: dict[str, str]
+    copilot_home: Path
+    project_root: Path
+
+
+class _PolicyModule(Protocol):
+    @property
+    def RUNTIME_DEPLOYMENT_SCHEMA(self) -> str: ...
+
+    @property
+    def InstallationContextError(self) -> type[ValueError]: ...
+
+    def resolve_runtime_deployment(self, **arguments: Unpack[_Arguments]) -> dict[str, Any]: ...
+
+    def resolve_runtime_profile_policy(
+        self, *, backend: str | None = None, retained_backend: str | None = None,
+        existing_installation: bool = False, **arguments: Unpack[_Arguments],
+    ) -> dict[str, Any]: ...
+
+    def resolve_installation_mode(self, **arguments: Unpack[_Arguments]) -> dict[str, Any]: ...
+
+    def resolve_payload_source(self, **arguments: Unpack[_SourceArguments]) -> dict[str, Any]: ...
+
+    def _deployment_owner(
+        self, resolution: Mapping[str, Any], arguments: Mapping[str, Any],
+    ) -> dict[str, Any]: ...
+
+
+if TYPE_CHECKING:
+    _checked_module: _PolicyModule = installation_context
+
+
+_Adopter = tuple[_PolicyModule, _Arguments, Path]
+
 
 @pytest.fixture
-def adopter(tmp_path, monkeypatch):
-    module = _load_module()
+def adopter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Adopter:
+    module = cast(Callable[[], _PolicyModule], _load_module)()
     # Runtime intent is measured against this synthetic non-guest profile.
     monkeypatch.setattr(module, "_is_wsl_guest", lambda: False)
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     layout = _cell_layout(tmp_path)
+    vector = cast(dict[str, object], layout["vector"])
     profile = tmp_path / "profile"
     profile.mkdir()
     copilot = profile / ".copilot"
-    key = str(layout["vector"]["marketplaceKey"])
+    key = str(vector["marketplaceKey"])
     payload = copilot / "installed-plugins" / key / "agent-example"
     payload.mkdir(parents=True)
     project = tmp_path / "project"
@@ -40,11 +110,11 @@ def adopter(tmp_path, monkeypatch):
     _write_json(
         settings,
         {
-            "extraKnownMarketplaces": {key: {"source": layout["vector"]["descriptor"]}},
+            "extraKnownMarketplaces": {key: {"source": vector["descriptor"]}},
             "enabledPlugins": {f"agent-example@{key}": True},
         },
     )
-    arguments = _api_arguments(
+    arguments = cast(_Arguments, _api_arguments(
         layout,
         profile,
         profile / ".agent-example",
@@ -53,17 +123,19 @@ def adopter(tmp_path, monkeypatch):
         project_root=project,
         source_descriptor=None,
         platform=_profile_environment(profile)["platform"],
-    )
+    ))
     # A fresh adopter has no installation, activation, policy or approval files.
     for path in (layout["install"], layout["namespace"]):
         path.unlink()
     return module, arguments, settings
 
 
-def owned_policy(module, arguments, **profiles):
+def owned_policy(
+    module: _PolicyModule, arguments: _Arguments, **profiles: object,
+) -> tuple[Path, dict[str, Any]]:
     resolution = module.resolve_runtime_deployment(**arguments)
     path = Path(resolution["deployment"]["path"])
-    policy = {
+    policy: dict[str, Any] = {
         "schema": module.RUNTIME_DEPLOYMENT_SCHEMA,
         "version": 1,
         "owner": module._deployment_owner(resolution, arguments),
@@ -74,7 +146,7 @@ def owned_policy(module, arguments, **profiles):
     return path, policy
 
 
-def test_fresh_configured_adopter_needs_no_profile_or_approval_file(adopter):
+def test_fresh_configured_adopter_needs_no_profile_or_approval_file(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     before = sorted(arguments["os_profile"].rglob("*"))
     result = module.resolve_runtime_profile_policy(**arguments)
@@ -92,16 +164,17 @@ def test_fresh_configured_adopter_needs_no_profile_or_approval_file(adopter):
     assert module.resolve_runtime_profile_policy(**arguments) == result
 
 
-def test_pending_activation_never_selects_a_profile_for_the_legacy_root(adopter):
+def test_pending_activation_never_selects_a_profile_for_the_legacy_root(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
-    source = module.resolve_payload_source(**{
-        key: arguments[key]
+    source_arguments: Mapping[str, object] = arguments
+    source = module.resolve_payload_source(**cast(_SourceArguments, {
+        key: source_arguments[key]
         for key in (
             "payload_root", "plugin_id", "copilot_home", "project_root",
             "source_descriptor", "marketplace_key", "environment",
         )
         if key in arguments
-    })
+    }))
     _write_json(
         arguments["os_profile"] / ".copilot-extensions" / "installation-mode.json",
         _policy(True, source["marketplaceId"]),
@@ -124,7 +197,7 @@ def test_pending_activation_never_selects_a_profile_for_the_legacy_root(adopter)
     assert sorted(arguments["os_profile"].rglob("*")) == before
 
 
-def test_owner_bound_optional_policy_can_disable_source_and_select_accelerator(adopter):
+def test_owner_bound_optional_policy_can_disable_source_and_select_accelerator(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     path, _ = owned_policy(module, arguments, allowSourceFallback=False, backend="cuda12")
     before = path.read_bytes()
@@ -139,7 +212,7 @@ def test_owner_bound_optional_policy_can_disable_source_and_select_accelerator(a
     assert path.read_bytes() == before
 
 
-def test_download_origins_are_optional_canonical_and_bound_to_policy_identity(adopter):
+def test_download_origins_are_optional_canonical_and_bound_to_policy_identity(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     path, policy = owned_policy(module, arguments)
     before = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
@@ -173,7 +246,9 @@ def test_download_origins_are_optional_canonical_and_bound_to_policy_identity(ad
     ["https://[1:2:3:4:5:6:7:8:]"], ["https://[:1::2]"],
     ["https://files.example"] * 257,
 ])
-def test_invalid_download_origins_block_policy_without_mutation(adopter, origins):
+def test_invalid_download_origins_block_policy_without_mutation(
+    adopter: _Adopter, origins: object,
+) -> None:
     module, arguments, _ = adopter
     path, _ = owned_policy(module, arguments, downloadOrigins=origins)
     before = path.read_bytes()
@@ -184,7 +259,7 @@ def test_invalid_download_origins_block_policy_without_mutation(adopter, origins
     assert path.read_bytes() == before
 
 
-def test_download_origins_do_not_make_a_foreign_policy_authoritative(adopter):
+def test_download_origins_do_not_make_a_foreign_policy_authoritative(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     path, policy = owned_policy(module, arguments, downloadOrigins=["https://files.example"])
     policy["owner"]["sourceFingerprint"] = "sha256:" + "0" * 64
@@ -194,7 +269,9 @@ def test_download_origins_do_not_make_a_foreign_policy_authoritative(adopter):
     assert result["selection"] is None
 
 
-def test_policy_identity_changes_for_effective_policy_and_owner_not_file_format(adopter):
+def test_policy_identity_changes_for_effective_policy_and_owner_not_file_format(
+    adopter: _Adopter,
+) -> None:
     module, arguments, _ = adopter
     first = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
     path, policy = owned_policy(module, arguments)
@@ -207,13 +284,13 @@ def test_policy_identity_changes_for_effective_policy_and_owner_not_file_format(
     _write_json(path, policy)
     changed = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
     assert changed["policyId"] != first["policyId"]
-    other = {**arguments, "legacy_root": arguments["os_profile"] / ".other"}
+    other: _Arguments = {**arguments, "legacy_root": arguments["os_profile"] / ".other"}
     other_result = module.resolve_runtime_profile_policy(**other)["runtimeProfiles"]
     assert other_result["status"] == "ready"
     assert other_result["policyId"] != first["policyId"]
 
 
-def test_retained_accelerator_and_explicit_migration_do_not_guess_device(adopter):
+def test_retained_accelerator_and_explicit_migration_do_not_guess_device(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     retained = module.resolve_runtime_profile_policy(
         **arguments,
@@ -247,7 +324,9 @@ def test_retained_accelerator_and_explicit_migration_do_not_guess_device(adopter
         {"preferArtifact": False},
     ],
 )
-def test_malformed_or_self_authorizing_profile_configuration_refuses(adopter, profiles):
+def test_malformed_or_self_authorizing_profile_configuration_refuses(
+    adopter: _Adopter, profiles: object,
+) -> None:
     module, arguments, _ = adopter
     path, policy = owned_policy(module, arguments)
     policy["runtimeProfiles"] = profiles
@@ -259,7 +338,7 @@ def test_malformed_or_self_authorizing_profile_configuration_refuses(adopter, pr
     assert result["runtimeProfiles"]["policyId"] is None
 
 
-def test_conflicting_explicit_backend_refuses_without_mutation(adopter):
+def test_conflicting_explicit_backend_refuses_without_mutation(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     path, _ = owned_policy(module, arguments, backend="cuda12")
     before = path.read_bytes()
@@ -268,7 +347,7 @@ def test_conflicting_explicit_backend_refuses_without_mutation(adopter):
     assert path.read_bytes() == before
 
 
-def test_foreign_owner_and_missing_source_do_not_inherit_defaults(adopter):
+def test_foreign_owner_and_missing_source_do_not_inherit_defaults(adopter: _Adopter) -> None:
     module, arguments, settings = adopter
     path, policy = owned_policy(module, arguments)
     foreign = copy.deepcopy(policy)
@@ -285,7 +364,7 @@ def test_foreign_owner_and_missing_source_do_not_inherit_defaults(adopter):
     assert result["runtimeProfiles"]["selection"] is None
 
 
-def test_profile_policy_never_clears_managed_publication_gate(adopter):
+def test_profile_policy_never_clears_managed_publication_gate(adopter: _Adopter) -> None:
     module, arguments, _ = adopter
     path, policy = owned_policy(module, arguments)
     first = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]["policyId"]
@@ -305,9 +384,10 @@ def test_profile_policy_never_clears_managed_publication_gate(adopter):
     assert managed_only["runtimeProfiles"]["policyId"] != profiled["policyId"]
 
 
-def test_actual_fresh_isolated_cli_reads_configured_channel_and_cpu_default(adopter):
+def test_actual_fresh_isolated_cli_reads_configured_channel_and_cpu_default(adopter: _Adopter) -> None:
     _, arguments, _ = adopter
     command = [sys.executable, "-I", "-S", str(PYTHON_SCRIPT), "runtime-profile-policy"]
+    command_arguments: Mapping[str, object] = arguments
     for option, name in (
         ("--payload-root", "payload_root"),
         ("--plugin-id", "plugin_id"),
@@ -316,7 +396,7 @@ def test_actual_fresh_isolated_cli_reads_configured_channel_and_cpu_default(adop
         ("--durable-home", "durable_home"),
         ("--legacy-root", "legacy_root"),
     ):
-        command.extend([option, str(arguments[name])])
+        command.extend([option, str(command_arguments[name])])
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -330,7 +410,7 @@ def test_actual_fresh_isolated_cli_reads_configured_channel_and_cpu_default(adop
         capture_output=True,
         text=True,
         timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["runtimeProfiles"]["selection"] == {
@@ -344,7 +424,7 @@ def test_actual_fresh_isolated_cli_reads_configured_channel_and_cpu_default(adop
         capture_output=True,
         text=True,
         timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
     )
     assert blocked.returncode != 0
     assert "explicit migration" in blocked.stderr
