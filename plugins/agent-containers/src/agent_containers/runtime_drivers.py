@@ -342,10 +342,14 @@ class DockerDriver(RuntimeDriver):
 
 _lock = threading.Lock()
 _drivers: dict[tuple[str, str], RuntimeDriver] = {}
-# routing handle (member name or instance id) -> (driver, member name)
-_owned: dict[str, tuple[RuntimeDriver, str, str | None]] = {}
-# handles reported for different members/runtimes; never routed
-_ambiguous: set[str] = set()
+# Routing claims: handle (member name, instance id or ``<name>.<id>``) ->
+# claimant -> (driver, member name, pinned id). A claimant is
+# ``(driver name, fleet name, member name)`` for a driver member, or
+# ``(DOCKER_CLAIM, None, name)`` for a distinct Docker container sharing the
+# handle. A handle with more than one claimant is ambiguous and never routed.
+_Claimant = tuple[str, "str | None", str]
+_claims: dict[str, dict[_Claimant, tuple[RuntimeDriver | None, str, str | None]]] = {}
+DOCKER_CLAIM = "\0docker"
 
 
 @dataclass(frozen=True)
@@ -382,10 +386,6 @@ def driver_for_fleet(
     return driver
 
 
-def _runtime_key(driver: RuntimeDriver) -> tuple[str, str | None]:
-    return driver.name, getattr(driver, "fleet_name", None)
-
-
 def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
     """Record that ``info`` lives in ``driver``'s runtime.
 
@@ -397,16 +397,52 @@ def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
     if info.container_id:
         handles[info.container_id] = info.container_id
         handles[route_handle(info)] = info.container_id
+    claimant = (driver.name, getattr(driver, "fleet_name", None), info.name)
     with _lock:
         for handle, pinned in handles.items():
-            existing = _owned.get(handle)
-            if existing is not None and (
-                _runtime_key(existing[0]) != _runtime_key(driver)
-                or existing[1] != info.name
-            ):
-                _ambiguous.add(handle)
-                continue
-            _owned[handle] = (driver, info.name, pinned)
+            _claims.setdefault(handle, {})[claimant] = (driver, info.name, pinned)
+
+
+def _claim_docker(handles, name: str) -> None:
+    with _lock:
+        for handle in handles:
+            if handle:
+                _claims.setdefault(handle, {})[(DOCKER_CLAIM, None, name)] = (None, name, None)
+
+
+def _forget(predicate) -> None:
+    """Drop every claim whose ``(handle, claimant)`` matches ``predicate``."""
+    with _lock:
+        for handle in list(_claims):
+            claims = _claims[handle]
+            for claimant in [c for c in claims if predicate(handle, c)]:
+                del claims[claimant]
+            if not claims:
+                del _claims[handle]
+
+
+def reconcile(config: ContainersConfig) -> None:
+    """Forget routing for fleets that are gone or now use another driver.
+
+    Called whenever driver fleets are enumerated, so a configuration reload in
+    the same process never leaves a removed fleet's names routed to its
+    retired driver, nor a replaced driver's names ambiguous.
+    """
+    current = {name: f.driver for name, f in config.fleets.items() if f.driver}
+    _forget(lambda handle, c: c[0] != DOCKER_CLAIM and current.get(c[1]) != c[0])
+
+
+def _reconcile_listing(fleet_name: str, driver: RuntimeDriver, members) -> None:
+    """Make a successful listing the truth for its fleet's mutable names.
+
+    Names the driver no longer reports stop routing. Instance-id and
+    ``<name>.<id>`` claims are kept, so a caller still holding a previous
+    incarnation keeps being refused by the driver rather than reaching a
+    replacement or Docker.
+    """
+    reported = {m.name for m in members}
+    _forget(lambda handle, c: c[1] == fleet_name and c[0] == driver.name
+            and handle == c[2] and c[2] not in reported)
 
 
 def route_handle(info: DockerContainerInfo) -> str:
@@ -425,15 +461,16 @@ def route_handle(info: DockerContainerInfo) -> str:
 def owner_of(target: str) -> Route | None:
     """The external-driver route for member/instance ``target``, if any."""
     with _lock:
-        if target in _ambiguous:
-            raise RuntimeError(
-                f"'{target}' identifies members of more than one runtime "
-                "driver; address the member by its unique fleet name"
-            )
-        entry = _owned.get(target)
-    if entry is None:
+        claims = dict(_claims.get(target) or {})
+    drivers = [v for c, v in claims.items() if c[0] != DOCKER_CLAIM]
+    if not drivers:
         return None
-    driver, name, pinned = entry
+    if len(claims) > 1:
+        raise RuntimeError(
+            f"'{target}' identifies members of more than one runtime "
+            "driver; address the member by its unique fleet name"
+        )
+    driver, name, pinned = drivers[0]
     return Route(driver, name, pinned)
 
 
@@ -461,8 +498,7 @@ def require_docker_member(target: str, operation: str) -> None:
 
 def clear_bindings() -> None:
     with _lock:
-        _owned.clear()
-        _ambiguous.clear()
+        _claims.clear()
         _drivers.clear()
 
 
@@ -509,9 +545,11 @@ def _enumerate(
     import queue
     import time
 
+    reconcile(config)
     deadline = time.monotonic() + timeout
     results: queue.Queue = queue.Queue()
     pending: set[str] = set()
+    drivers_by_fleet: dict[str, RuntimeDriver] = {}
 
     def worker(fleet_name: str, driver: RuntimeDriver) -> None:
         try:
@@ -529,6 +567,7 @@ def _enumerate(
                 failures[fleet_name] = str(exc)
             continue
         pending.add(fleet_name)
+        drivers_by_fleet[fleet_name] = driver
         threading.Thread(target=worker, args=(fleet_name, driver), daemon=True).start()
     members: list[DockerContainerInfo] = []
     while pending:
@@ -544,6 +583,7 @@ def _enumerate(
             if failures is not None:
                 failures[fleet_name] = str(error)
         else:
+            _reconcile_listing(fleet_name, drivers_by_fleet[fleet_name], listed)
             members.extend(listed)
     for fleet_name in sorted(pending):
         log.warning("Runtime driver for fleet '%s' did not answer within %.0fs",
@@ -572,6 +612,7 @@ def merge_driver_members(
     members = list_driver_members(config)
     driver_fleets = {n for n, f in config.fleets.items() if f.driver}
     by_handle = {h: m for m in members for h in (m.name, m.container_id)}
+    _forget(lambda handle, c: c[0] == DOCKER_CLAIM)  # recomputed from this snapshot
     kept = []
     for row in containers:
         if row.fleet in driver_fleets:
@@ -582,8 +623,7 @@ def merge_driver_members(
         if clashes:
             # Distinct Docker and driver members share a handle: keep both
             # visible but refuse to route that handle anywhere.
-            with _lock:
-                _ambiguous.update({row.name, row.container_id} & set(by_handle))
+            _claim_docker({row.name, row.container_id} & set(by_handle), row.name)
         kept.append(row)
     if not all_containers:
         members = [m for m in members if m.is_running]
@@ -802,8 +842,7 @@ def scoped_member(
     member = matches[0]
     docker_id = _docker_id_for_name(name)
     if docker_id is not None and docker_id != member.container_id:
-        with _lock:
-            _ambiguous.add(name)
+        _claim_docker({name}, name)
         raise RuntimeError(
             f"'{name}' identifies both a runtime-driver member and a distinct "
             "Docker container; resolve the name collision before dispatch"

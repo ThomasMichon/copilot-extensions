@@ -1191,3 +1191,46 @@ def test_empty_operator_entry_removes_shipped_driver_routing(
     assert [c for c in fake.state()["calls"] if c["verb"] == "list"] == []
     with pytest.raises(RuntimeError, match="'example' is not defined"):
         fleet.reconcile_up(config, "example")
+
+
+def test_configuration_reload_reconciles_driver_routing_without_clearing(
+    fake, no_docker, tmp_path, monkeypatch,
+):
+    # One process, no clear_bindings(): reloads must reconcile routing.
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    lifecycle.list_containers(config)
+    old_id = runtime_drivers.owner_of("example-1").driver.inspect("example-1")["Id"]
+
+    # The fleet is removed: its names no longer route to the retired driver.
+    path = tmp_path / "containers.yaml"
+    path.write_text(yaml.safe_dump({"fleets": {}}))
+    reloaded = load_config(strict=True)
+    runtime_drivers.list_driver_members(reloaded)
+    assert runtime_drivers.owner_of("example-1") is None
+    assert runtime_drivers.owner_of(old_id) is None
+    argv = ["docker", "exec", "example-1", "true"]
+    assert runtime_drivers.stream_routed(argv) is argv  # no retired-driver route
+
+    # The fleet returns on a replacement driver: names are not ambiguous.
+    (fake.drivers / "replacement-driver.json").write_text(json.dumps({
+        "schema_version": 1, "name": "replacement-driver",
+        "command": [sys.executable, str(FAKE)],
+    }))
+    path.write_text(yaml.safe_dump({"fleets": {"example": {
+        "driver": "replacement-driver", "size": 1, "relay_enabled": False,
+    }}}))
+    replaced = load_config(strict=True)
+    runtime_drivers.list_driver_members(replaced)
+    route = runtime_drivers.owner_of("example-1")
+    assert route.driver.name == "replacement-driver"
+
+    # A member the driver stops reporting stops routing by name, while its
+    # previous incarnation id stays pinned (and is refused by the driver).
+    pinned = runtime_drivers.owner_of(f"example-1.{old_id}")
+    lifecycle.remove_container("example-1", force=True)
+    runtime_drivers.list_driver_members(replaced)
+    assert runtime_drivers.owner_of("example-1") is None
+    assert pinned is not None and runtime_drivers.owner_of(f"example-1.{old_id}") is not None
+    with pytest.raises(lifecycle.ContainerNotFoundError):
+        lifecycle.inspect_container(f"example-1.{old_id}")

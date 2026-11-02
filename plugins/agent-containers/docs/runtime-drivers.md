@@ -272,6 +272,16 @@ back to the full inventory, and one bounded `docker inspect` of the name
 refuses it as ambiguous when a distinct Docker container shares it (a
 container Docker reports with the member's own id is the same member).
 
+Routing is reconciled against the configuration and each successful listing,
+not accumulated for the life of a process. When a configuration reload removes
+a driver fleet or assigns it another driver, the retired driver's routes for
+that fleet are dropped on the next enumeration, so its names neither reach the
+old driver nor become ambiguous with the replacement. A member name the driver
+stops reporting stops routing; its instance id and `<name>.<id>` handles stay
+pinned to that driver, which refuses the stale incarnation instead of letting
+it reach a replacement member or Docker. Docker name collisions are recomputed
+from every inventory snapshot.
+
 ## Not part of the protocol
 
 Restricted posture, rescue/session-evidence capture and `unpause` remain
