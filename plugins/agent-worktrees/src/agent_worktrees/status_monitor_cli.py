@@ -782,6 +782,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             port=control_server.port, timeout=timeout, poll=poll, force=force,
         )
 
+    from . import guarded_anchors
+
+    guarded_anchors.prepare_resident()
     control_server.start()
     if not passive_mode:
         status_monitor_cutover.publish_route(control_server.port, pid=os.getpid(), version=None)

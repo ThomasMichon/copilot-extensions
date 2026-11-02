@@ -15,6 +15,12 @@ For optional committed current-head agenda reads, publication and held updates,
 see [the agenda projection contract](docs/worktree-agendas.md). It uses the
 existing resident owner without importing planning or UI packages.
 
+The [prepared guarded-anchor map](docs/guarded-anchor-map.md) keeps
+cross-repository write evaluation file-only. Managed mutations and preparation
+publish caller-specific facts; `refresh-guards --repo <checkout> --json`
+refreshes out-of-band changes without a watcher or running-service dependency.
+Missing or unusable maps fail open.
+
 Source repositories can veto managed authoring agents without losing source
 worktree and contribution operations. See
 [repository hosting policy](docs/repository-agent-policy.md) for `expose_agent`,

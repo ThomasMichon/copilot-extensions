@@ -174,6 +174,7 @@ def queue(root: Path, directory: Path):
 
 
 def run(root: Path, directory: Path, request_id: str | None = None) -> int:
+    from . import guarded_anchors
     from .local_cache_refresh import DEFAULT_TIMEOUT_S, RefreshResult, refresh_local_cache
 
     gate = _gate(directory)
@@ -208,9 +209,12 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
         _save(directory, state)
     finally:
         gate.release()
-    copy_deadline = time.monotonic() + DEFAULT_TIMEOUT_S
+    copy_deadline = None
     restart_required = False
     while True:
+        guard_diagnostic = guarded_anchors.prepare(root)
+        if copy_deadline is None:
+            copy_deadline = time.monotonic() + DEFAULT_TIMEOUT_S
         result = refresh_local_cache(root, timeout=max(0.0, copy_deadline - time.monotonic()))
         restart_required |= bool(result.changed or result.removed)
         try:
@@ -236,6 +240,12 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
                 result = replace(
                     result, status="timeout", blocking=result.blocking + 1,
                     detail="backup refresh budget exhausted with another copy requested",
+                )
+            if guard_diagnostic:
+                result = replace(
+                    result, status="partial" if result.status in ("ready", "skipped") else result.status,
+                    blocking=result.blocking + 1,
+                    detail="; ".join(filter(None, (result.detail, guard_diagnostic.strip()))),
                 )
             _log(directory, result.diagnostic)
             current.update(

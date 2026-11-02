@@ -72,6 +72,7 @@ def test_all_installers_deploy_every_py_hook():
     scripts = _py_hook_scripts() | {
         "statelessness_guard.py",
         "cross_repo_guard.py",
+        "guarded_anchor_map.py",
         "anchor_write_guard.py",
         "anchor_shell_parser.py",
         "pr_supersede_guard.py",

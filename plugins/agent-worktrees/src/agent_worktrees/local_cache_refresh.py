@@ -156,6 +156,11 @@ def prepare_for_launch(
                 result = RefreshResult("failed", blocking=1, detail=f"plugin composition failed: {exc}")
                 print(result.diagnostic, file=sys.stderr, flush=True)
                 return _report(result)
+        from . import guarded_anchors
+
+        diagnostic = guarded_anchors.prepare(repo_root)
+        if diagnostic:
+            print(diagnostic, file=sys.stderr, end="", flush=True)
         return refresh_local_cache(repo_root, timeout=None)
 
 
