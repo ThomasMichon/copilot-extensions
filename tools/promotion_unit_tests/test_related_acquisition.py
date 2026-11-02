@@ -1017,7 +1017,7 @@ def _knowledge_owner(api, monkeypatch):
         api.stub(name)
     registry = api.load("registry_paths")
     monkeypatch.setattr(registry, "installation_context", lambda: {})
-    api.stub("publication_deadline", DEFAULT_PUSH_TIMEOUT=30)
+    api.stub("publication_deadline", DEFAULT_PUSH_TIMEOUT=30, validate=lambda value: value)
     api.stub("codename_config", CodenameConfig=SimpleNamespace, parse_codename=lambda value: value)
     api.stub("pr_observation_config", ObservationConfig=SimpleNamespace, parse_observation=lambda value: value)
     api.stub("pr_publication_config", PublicationChecksConfig=SimpleNamespace,
@@ -1532,3 +1532,39 @@ def test_control_plane_caller_qualifies_actual_selected_callback(api, monkeypatc
     assert any(f.reason == "owner-coverage-unavailable" for f in owned[-1].findings)
     assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
     assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("override", [
+    {}, {"copilot_plugin_profile": "alternate.json"}, {"copilot_plugin_profile": None},
+], ids=["base", "override", "opt-out"])
+def test_tool_profile_native_repo_merge_preserves_selection_and_optout(api, monkeypatch, override):
+    owner = _knowledge_owner(api, monkeypatch).owner
+    api.load("config_sources")
+    base = {"copilot_plugin_profile": "profiles/tools.json"}
+    merged = owner._deep_merge(base, override)
+    result = owner._build_repo_config(merged, "synthetic-launch", "synthetic-worktrees")
+    assert result.copilot_plugin_profile == override.get("copilot_plugin_profile", "profiles/tools.json")
+    assert result.compose_knowledge_plugins is True
+    absent = owner._build_repo_config({}, "synthetic-launch", "synthetic-worktrees")
+    assert absent.copilot_plugin_profile is None
+    assert base == {"copilot_plugin_profile": "profiles/tools.json"}
+
+
+@pytest.mark.parametrize("value", [False, 3, [], ""], ids=["boolean", "number", "list", "empty"])
+def test_tool_profile_native_repo_parser_refuses_invalid_shapes(api, monkeypatch, value):
+    owner = _knowledge_owner(api, monkeypatch).owner
+    api.load("config_sources")
+    with pytest.raises(ValueError, match="copilot_plugin_profile"):
+        owner._build_repo_config({"copilot_plugin_profile": value}, "synthetic-launch", "synthetic-worktrees")
+
+
+def test_tool_profile_does_not_graft_through_ordinary_preferences(api, monkeypatch):
+    _knowledge_owner(api, monkeypatch)
+    composition = api.load("config_sources")
+    result = composition.ordinary_preference_values(
+        {"copilot_plugin_profile": "base.json", "headless": False},
+        {"copilot_plugin_profile": "knowledge.json", "headless": True},
+        {"copilot_plugin_profile": "machine.json"},
+        {"copilot_plugin_profile": None},
+    )
+    assert result == {"headless": True}

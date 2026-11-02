@@ -11,6 +11,7 @@
       "name": "checker",
       "include": [
         "tools/typecheck.py",
+        "tools/typecheck_source_views.py",
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py"
       ],
@@ -550,6 +551,7 @@
       ],
       "exclude": [
         "tools/typecheck.py",
+        "tools/typecheck_source_views.py",
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py"
       ],

@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from tools._admission_protocol import acquire as acquire_environment  # noqa: E402
 from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
+from tools.typecheck_source_views import INSTALLATION_ENTRY, SourceView, installation_view  # noqa: E402
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -277,12 +278,14 @@ def check_project(
     """Check one declared scope; never execute product or test code."""
     if not files:
         raise TypecheckError(f"{project.name}: selected scope has no Python files")
+    physical_count = len(files)
     path, digest = environment_path(root, project)
     python = environment_python(path)
     marker = path / ".typecheck-prepared"
     if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
         raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
     lease = acquire_environment(0, path)
+    view: SourceView | None = None
     try:
         if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
             raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
@@ -296,6 +299,16 @@ def check_project(
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
         env["MYPYPATH"] = os.pathsep.join(sorted(imports))
+        if INSTALLATION_ENTRY in files:
+            view = installation_view(
+                root, all_paths,
+                path.parent / ("source-views-" + path.name) / project.name / "installation_context.py",
+            )
+            members = {name for name, _content in view.inputs}
+            if not members <= set(files):
+                raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
+            files = (*tuple(file for file in files if file not in members), str(view.output))
+            env["MYPYPATH"] = str(view.output.parent) + os.pathsep + env["MYPYPATH"]
         targets = path / "typecheck-targets.txt"
         targets.write_text("\n".join(files) + "\n", encoding="utf-8")
         config = path / "typecheck-mypy.ini"
@@ -312,14 +325,18 @@ def check_project(
                 argv.append("--strict")
             argv.append("@" + str(targets))
             result = _run(argv, root, env=env)
-            print(f"[{project.level}] {project.name} ({platform}, {len(files)} files)")
-            print(result.stdout, end="")
+            if view is not None:
+                view.verify(root)
+            print(f"[{project.level}] {project.name} ({platform}, {physical_count} physical files, {len(files)} targets)")
+            print(view.diagnostics(result.stdout, root) if view is not None else result.stdout, end="")
             print(result.stderr, end="", file=sys.stderr)
             if result.returncode:
                 return result.returncode
         return 0
     finally:
         try:
+            if view is not None:
+                view.output.unlink(missing_ok=True)
             (path / "typecheck-targets.txt").unlink(missing_ok=True)
             (path / "typecheck-mypy.ini").unlink(missing_ok=True)
         finally:

@@ -358,8 +358,14 @@ def _resolve_base_repo(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
-    if not getattr(args, "defer_projections", False):
-        local_cache_refresh.prepare_for_launch(repo.anchor)
+    try:
+        local_cache_refresh.prepare_admitted_launch(
+            repo.anchor, defer_projections=getattr(args, "defer_projections", False), config=config,
+        )
+    except local_cache_refresh.ToolRosterAdmissionError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     _emit_plan(
         {
             "action": "exec",
@@ -632,7 +638,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             worktree_trust.prepare_for_launch(
                 record, config, defer_projections=getattr(args, "defer_projections", False),
             )
-        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+        except (permissions.FolderTrustError, ExecutionSpaceError, local_cache_refresh.ToolRosterAdmissionError) as exc:
             output.err(str(exc))
             _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
             return 3

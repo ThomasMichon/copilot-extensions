@@ -161,6 +161,13 @@ isolation or schedule automatic renewal on its own.
 
 ## Install
 
+Dispatch's direct startup resolver accepts both flat versioned environments
+(`versions/<version>/bin|Scripts/python`) and physical application environments
+(`versions/<version>/.venv/bin|Scripts/python`), preferring the latter within a
+slot. Current-version, last-known-good and complete-slot fallback order is
+unchanged. UTF-8 markers may include a Windows BOM; redirected slots and
+environment directories are refused. This does not change daemon cutover.
+
 Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)
 that separates runtime-slot readiness from service reconciliation and preserves
 observed native disablement without guessing its author.

@@ -1623,25 +1623,26 @@ def list_worktree_paths(
     *,
     cwd: str | Path,
     fail_on_error: bool = False,
+    isolated_repository: bool = False,
 ) -> list[Path]:
     """Return the on-disk paths of every worktree registered on this repo.
 
-    Parses ``git worktree list --porcelain`` -- one ``worktree <path>`` line per
+    Parses ``git worktree list --porcelain -z`` -- one NUL-delimited path per
     registered tree, including the main checkout. Returns ``[]`` if the command
     fails unless *fail_on_error* is true, in which case the Git error is raised.
-    Used by the garbage collector to tell a real, registered worktree from an
-    orphaned on-disk directory left behind by an interrupted/forced removal.
+    ``isolated_repository`` opts custody probes out of inherited Git selectors.
     """
-    res = git("worktree", "list", "--porcelain", cwd=cwd, check=False)
+    res = git("worktree", "list", "--porcelain", "-z", cwd=cwd, check=False,
+              isolated_repository=isolated_repository, input_data=b"")
     if res.returncode != 0:
         if fail_on_error:
-            detail = (res.stderr or res.stdout or "git worktree list failed").strip()
+            detail = os.fsdecode(res.stderr or res.stdout or "git worktree list failed").strip()
             raise RuntimeError(detail)
         return []
     paths: list[Path] = []
-    for line in (res.stdout or "").splitlines():
+    for line in os.fsdecode(res.stdout or b"").split("\0"):
         if line.startswith("worktree "):
-            paths.append(Path(line[len("worktree "):].strip()))
+            paths.append(Path(line[len("worktree "):]))
     return paths
 
 
