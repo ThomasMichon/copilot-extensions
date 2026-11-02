@@ -63,6 +63,41 @@ the same request pending. The existing client network timeout bounds this
 explicit synchronous operation; no daemon executor, timer or retry loop is
 introduced.
 
+### Coordinator-owned source composition
+
+Ordinary `server.build_app` now supplies its actual `RegistrarSources` to the
+coordinator. The same projection route requires a fresh observation matching
+that coordinator-local owner, including the whole pointer-file byte revision.
+An unrelated supervisor's host-local pointer file cannot replace the shared
+projection merely because its member list is equivalent. The running descriptor
+adds `configured_cohort_projection_owner: "coordinator-registrar"`; an explicit
+`create_app` embedding without a source retains `"explicit-caller"` and its
+original transport behavior. Supplying a source requires the embedding's actual
+active-route callback. No new caller field, credential, registry or RPC is added.
+
+Fresh source-owned projection requires the active route and an open existing
+drain gate. It remains counted through the write and final source recheck so a
+cutover can wait for it. Source/queue target drift and mismatched observations
+refuse through the existing structured `409` response. Accepted original history
+is checked first: a replay or history read can still account for an accepted
+write after source loss, demotion or drain, without renewing or rewriting it.
+
+The provider checks its local source immediately before and after the write.
+These are optimistic observations, **not an atomic filesystem fence**. It does
+not acquire another pointer lock across POST: an existing same-host
+`PoolCohortPreparation` client can already hold that exact lock. A managed local
+publisher can reuse the existing pointer transaction; cross-host and unmanaged
+file-writer atomicity remain an integration obligation, not a claimed guarantee.
+A source change after commit yields a refusal while retaining the accepted
+original result for recovery.
+
+Construction, health and catalog reads do not project even an absent or empty
+cohort. This source-owner binding neither starts an automatic publisher nor
+changes ordinary spawning, initial prompts, metadata freshness or allocation.
+The eventual automatic composition must use this coordinator-local source for
+the whole cohort and the existing per-scope supervisor for effective definitions.
+It must not make every host-local master an independent whole-cohort writer.
+
 A matching result is checked against the original observation/CAS, then
 confirmed in the original coordinator's accepted history before custody is
 cleared. Lost accepted responses can therefore recover after the source or
@@ -91,6 +126,10 @@ changes, exact-history recovery and declared/route-level provider rollback.
 The existing local preparation, projection, catalog transport and metadata
 sender controls retain their original semantics. These are contained source
 controls, not installed or native qualification.
+`tests/test_coordinator_pool_source.py` also exercises ordinary server composition,
+same-host client lock ownership, different host-local source bytes, active/drain
+admission, in-flight cutover accounting, source/target changes and accepted
+history recovery through the real routes.
 
 See also: [pool publication](pool-publication.md) and
 [explicit claim/start](pool-claim-start.md).

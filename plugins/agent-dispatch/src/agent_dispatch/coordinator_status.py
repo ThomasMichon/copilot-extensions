@@ -65,6 +65,7 @@ def register_status_routes(
     bus: EventBus,
     *,
     control_token: str | None = None,
+    cohort_source_owned: bool = False,
 ) -> None:
     @app.get("/health")
     def health(request: Request, repo: str | None = None) -> dict:
@@ -107,7 +108,9 @@ def register_status_routes(
             "card_draft_scope": 1,
             "task_categories": 1,
             "exact_dedup_lookup": 1,
-            "pool_catalog_transport": pool_catalog_contract(control_token),
+            "pool_catalog_transport": pool_catalog_contract(
+                control_token, source_owned=cohort_source_owned,
+            ),
             "pool_placement": pool_placement_contract(),
             "task_recovery": RECOVERY_CONTRACT,
             "delegated_run_waiters": {

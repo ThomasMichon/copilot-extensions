@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from .coordinator_auth import _make_control_auth
+from .coordinator_pool_source import CoordinatorPoolSource
 from .events import EventBus
 from .pool_instances import POOL_DEFINITION_VERSION, PoolDefinitionError, PoolInstanceDefinition
 from .queue import TaskQueue
@@ -19,7 +20,9 @@ from .registrar_configuration import ConfiguredSupervisorCohort, SupervisorScope
 POOL_CATALOG_PROTOCOL = "pool_catalog_transport/v1"
 
 
-def pool_catalog_contract(control_token: str | None) -> dict[str, object]:
+def pool_catalog_contract(
+    control_token: str | None, *, source_owned: bool = False,
+) -> dict[str, object]:
     """Describe these running routes separately from package or execution support."""
     return {
         "protocol": POOL_CATALOG_PROTOCOL,
@@ -31,6 +34,7 @@ def pool_catalog_contract(control_token: str | None) -> dict[str, object]:
         "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
         "configured_cohort_projection_versions": [1],
+        "configured_cohort_projection_owner": "coordinator-registrar" if source_owned else "explicit-caller",
         "atomic_placement": False,
     }
 
@@ -147,7 +151,8 @@ def _catalog_payload(snapshot: PoolCatalogSnapshot) -> dict[str, object]:
 
 
 def register_pool_catalog_routes(
-    app: FastAPI, queue: TaskQueue, *, control_token: str | None
+    app: FastAPI, queue: TaskQueue, *, control_token: str | None,
+    cohort_source: CoordinatorPoolSource | None = None,
 ) -> None:
     """Expand provider routes without enrolling a publisher or migrating a caller."""
     bus: EventBus = app.state.bus
@@ -204,7 +209,11 @@ def register_pool_catalog_routes(
     def project_cohort(body: ProjectConfiguredCohortBody) -> dict[str, object]:
         """Project the original whole owner observation under the existing CAS."""
         try:
-            result = queue.observe_pool_configured_cohort(
+            project = (
+                queue.observe_pool_configured_cohort if cohort_source is None
+                else cohort_source.project
+            )
+            result = project(
                 body.observation.observation(), expected_revision=body.expected_revision,
             )
         except TaskError as exc:
