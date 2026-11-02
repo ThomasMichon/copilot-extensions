@@ -712,6 +712,9 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
         assert path != target, "opened a nonregular input"
         return original_read(path)
 
+    def file_lstat(path):
+        return file_stat(path, follow_symlinks=False)
+
     original_git = static._git
 
     def git(path, *args, **kwargs):
@@ -720,6 +723,7 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
         return original_git(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", file_stat)
+    monkeypatch.setattr(Path, "lstat", file_lstat)
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
     monkeypatch.setattr(static, "_git", git)
     native = original_stat(target, follow_symlinks=False)

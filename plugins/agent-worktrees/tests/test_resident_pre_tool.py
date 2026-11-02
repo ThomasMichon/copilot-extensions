@@ -35,7 +35,7 @@ def test_resident_pre_tool_contract(case, tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in (
-        "hook-read-policy.json", "statelessness_guard.py", "cross_repo_guard.py",
+        "hook-read-policy.json", "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py",
         "anchor_write_guard.py", "pr_supersede_guard.py",
         "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
     ):

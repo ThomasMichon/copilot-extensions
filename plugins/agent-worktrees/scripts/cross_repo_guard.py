@@ -31,10 +31,9 @@ non-zero exit (a crash would DENY every tool). So this script wraps everything
 and, on ANY error or ambiguity, emits nothing and exits 0. It only denies on a
 clear write into a confirmed agent-guarded repo checkout.
 
-Guarded-root discovery is delegated to ``agent-worktrees related`` (which already
-merges the knowledge-repo config overlay + resolves local checkout paths) and
-**cached** to a short-TTL sidecar so at most the first write/shell tool call per
-window pays the subprocess cost.
+Guarded roots come only from the caller-scoped map published during managed
+preparation and mutation. Missing or unusable maps fail open; no event discovers
+topology, refreshes the map or starts a runtime.
 
 Escape hatches / modes:
   * ``CROSS_REPO_GUARD=off`` (or 0/false/no) disables it entirely.
@@ -47,24 +46,29 @@ Escape hatches / modes:
 
 from __future__ import annotations
 
-import hashlib
-import importlib.util
 import json
-import math
 import os
 import re
-import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import NamedTuple
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+
+try:
+    import guarded_anchor_map as _guard_map
+except (ImportError, OSError, SyntaxError):
+    _guard_map = None
+
+try:
+    from anchor_write_guard import _git_invocation, _git_subcommand_writes_worktree
+except (ImportError, OSError, SyntaxError):
+    _git_invocation = None
+    _git_subcommand_writes_worktree = None
 
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
@@ -80,7 +84,7 @@ PATH_ARG_KEYS = ("path", "file_path", "filePath", "filename", "fileName",
                  "target_file", "targetFile")
 CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input")
 
-# Write-ish verbs (PowerShell cmdlets + POSIX + git mutations); presence
+# Write-ish verbs (PowerShell cmdlets + POSIX); presence
 # alongside a guarded-root literal in a shell command flips a read into a
 # suspected write.
 _WRITE_VERBS = re.compile(
@@ -91,15 +95,10 @@ _WRITE_VERBS = re.compile(
         ">>?",
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
-        r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
-        r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
-        r"add|init)",
     ]),
     re.IGNORECASE,
 )
 
-_CACHE_TTL_S = 300.0
-_CACHE_VERSION = 1
 _IS_WIN = os.name == "nt"
 
 # --- Shell write-into-repo detection (segment + command-position based) --------
@@ -116,13 +115,11 @@ _WRITE_CMD_START = re.compile(
     )\b""",
     re.IGNORECASE | re.VERBOSE,
 )
-_GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
-_GIT_WRITE_SUB = re.compile(
-    r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init)\b",
-    re.IGNORECASE,
-)
-_GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
+_GIT_WRITE_SUBCOMMANDS = frozenset({
+    "add", "commit", "apply", "checkout", "switch", "reset", "restore",
+    "clean", "rm", "mv", "stash", "merge", "rebase", "pull", "cherry-pick",
+    "revert", "init", "__configured-alias__",
+})
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # command position (``sudo rm ...``, ``VAR=x git commit``). Wrapper flags that
@@ -162,6 +159,27 @@ def _cd_target(eff_seg: str, base: str) -> str | None:
     return raw if os.path.isabs(raw) else os.path.join(base, raw)
 
 
+def _git_targets(eff_seg: str, base: str, tool: str) -> list[str]:
+    if _git_invocation is None:
+        return []
+    subcommand, _args, targets, overridden = _git_invocation(eff_seg, base, tool)
+    if not subcommand or subcommand == "merge-base" or (
+        subcommand not in _GIT_WRITE_SUBCOMMANDS
+        and subcommand.partition("-")[0] not in _GIT_WRITE_SUBCOMMANDS
+    ):
+        return []
+    return [
+        path for kind, path in targets
+        if path and (kind != "work-tree" or _git_subcommand_writes_worktree(subcommand))
+    ] + ([] if overridden else [base])
+
+
+def _shell_may_write(cmd: str, tool: str) -> bool:
+    return bool(_WRITE_VERBS.search(cmd)) or any(
+        _git_targets(_effective_seg(seg), "", tool) for seg in _SHELL_SEP.split(cmd)
+    )
+
+
 def _root_token(root_str: str) -> str:
     """Regex for a repo root as a whole path token: the root itself OR a path
     INTO it, with a terminator so a sibling dir sharing the string prefix is not
@@ -197,14 +215,11 @@ def is_inside(child: str, root: str) -> bool:
 
 
 def find_repo_root(start: str) -> Path | None:
-    try:
-        here = Path(start).resolve()
-    except (OSError, ValueError):
+    if _guard_map is None:
+        print("cross-repo-guard: guard-map reader unavailable; fail-open.", file=sys.stderr)
         return None
-    for d in (here, *here.parents):
-        if (d / ".git").exists():
-            return d
-    return None
+    identity = _guard_map.repository_identity(start)
+    return Path(identity["root"]) if identity else None
 
 
 def _as_args(tool_args) -> dict:
@@ -290,313 +305,57 @@ def _deny_reason(g: dict, detail: str) -> str:
     )
 
 
-# --- Guarded-root discovery (via the related CLI, cached) ---------------------
-
-def _cache_path(
-    root: str, home: Path, *, registry_root: Path | None = None
-) -> Path:
-    h = hashlib.sha256(_canon(root).encode("utf-8", "replace")).hexdigest()[:16]
-    return (registry_root or home / ".agent-worktrees") / "cache" / f"guarded-roots.{h}.json"
-
-
-def _read_cache(path: Path) -> list[dict] | None:
-    try:
-        data = json.loads(path.read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    if data.get("version") != _CACHE_VERSION:
-        return None  # older snapshots did not attest complete discovery
-    try:
-        age = time.time() - float(data.get("computed_at", 0))
-    except (ValueError, TypeError):
-        return None
-    if not math.isfinite(age) or not 0 <= age <= _CACHE_TTL_S:
-        return None
-    roots = data.get("roots")
-    return roots if isinstance(roots, list) else None
-
-
-def _write_cache(path: Path, roots: list[dict]) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"version": _CACHE_VERSION,
-                                   "computed_at": time.time(), "roots": roots}),
-                       encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
-        pass  # a cache-write failure just means we recompute next time
-
-
-def _slot_python(slot: Path) -> Path:
-    """The runtime python inside a ``versions/<ver>`` slot, per platform."""
-    if os.name == "nt":
-        return slot / "Scripts" / "python.exe"
-    return slot / "bin" / "python"
-
-
-def _strip_nt_prefix(target: str) -> str:
-    """Strip a leading NT object-namespace prefix from a junction/symlink target.
-
-    A junction created by PowerShell ``New-Item -ItemType Junction`` reports its
-    target as ``\\??\\C:\\...`` (and some APIs as ``\\\\?\\C:\\...``); such a path
-    is not usable as a normal filesystem path. ``mklink /J`` yields a clean one.
-    """
-    for pfx in ("\\??\\", "\\\\?\\"):
-        if target.startswith(pfx):
-            return target[len(pfx):]
-    return target
-
-
-def _runtime_argv(
-    root: Path | None = None, *, allow_legacy_fallback: bool = True
-) -> list[str] | None:
-    """An argv prefix that runs the agent-worktrees CLI, WITHOUT the PATH binstubs.
-
-    The binstubs are fragile for a subprocess (#1089): ``shutil.which`` prefers
-    the ``.cmd`` over the robust ``.ps1`` on Windows, and that ``.cmd`` parses the
-    ``~/.agent-worktrees/.venv`` junction target and breaks (WinError 3) on a
-    ``\\??\\``-prefixed target -- which silently disabled this guard. Resolve the
-    runtime slot python directly instead, matching the binstubs' own authoritative
-    ``current-version`` marker model (junction-free; dotfiles #581/#1085).
-
-    Uses the sibling canonical ``versioned_runtime.py`` resolver for
-    current-version, last-known-good, and version-aware newest-complete fallback;
-    then tries the legacy ``.venv`` reparse target (read, never traversed --
-    dotfiles #637); then a PATH binstub as a last-resort belt.
-    """
-    root = root or (Path(os.path.expanduser("~")) / ".agent-worktrees")
-
-    try:
-        helper = Path(__file__).with_name("versioned_runtime.py")
-        spec = importlib.util.spec_from_file_location(
-            "_cross_repo_versioned_runtime", helper
-        )
-        if spec is not None and spec.loader is not None:
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            p = module.resolve_python(root)
-        else:
-            p = None
-        if p is not None and p.exists():
-            return [str(p), "-m", "agent_worktrees"]
-    except Exception:
-        pass
-
-    if not allow_legacy_fallback:
-        return None
-
-    # Legacy .venv reparse target (read the link, never traverse it).
-    try:
-        target = _strip_nt_prefix(os.readlink(str(root / ".venv")))
-    except OSError:
-        target = ""
-    if target:
-        p = _slot_python(Path(target))
-        if p.exists():
-            return [str(p), "-m", "agent_worktrees"]
-
-    # Last-resort belt: a PATH binstub (rarely reached).
-    exe = shutil.which("agent-worktrees")
-    return [exe] if exe else None
-
-
-_RUNTIME_UNRESOLVED_WARNED = False
-
-
-def _run_related(
-    args: list[str], cwd: str, deadline: float | None = None,
-    *, registry_root: Path | None = None,
-) -> str | None:
-    """Run ``agent-worktrees related <args>`` and return stdout, or None."""
-    argv = (
-        _runtime_argv(registry_root, allow_legacy_fallback=False)
-        if registry_root is not None else _runtime_argv()
-    )
-    if not argv and registry_root is not None:
-        raise ValueError("selected agent-worktrees runtime is unavailable")
-    if not argv:
-        global _RUNTIME_UNRESOLVED_WARNED
-        if not _RUNTIME_UNRESOLVED_WARNED:
-            _RUNTIME_UNRESOLVED_WARNED = True
-            # Make the fail-open VISIBLE: the guard denies nothing when it cannot
-            # discover guarded roots, so surface that protection is off rather
-            # than silently allowing writes (#1089).
-            print(
-                "cross-repo-guard: could not locate the agent-worktrees runtime "
-                "python; guarded-repo discovery is unavailable, so the "
-                "write-routing guard is INACTIVE (fail-open) this session.",
-                file=sys.stderr,
-            )
-        return None
-    try:
-        timeout = 20.0
-        if deadline is not None:
-            timeout = max(0.1, min(timeout, deadline - time.monotonic()))
-        proc = subprocess.run(
-            [*argv, "related", *args], cwd=cwd,
-            capture_output=True, text=True, timeout=timeout,
-            # `argv` can fall back to the PATH `.cmd` binstub (rarely reached,
-            # see `_runtime_argv`'s docstring), which Windows must interpret
-            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every preToolUse hook check.
-            creationflags=(0x08000000 if _IS_WIN else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    return proc.stdout
-
-
-class _DiscoveryResult(NamedTuple):
-    roots: list[dict]
-    complete: bool
-
-
-def _discover_guarded_roots(
-    root: str, deadline: float | None = None,
-    *, registry_root: Path | None = None,
-) -> _DiscoveryResult:
-    """Guarded related repos with a local checkout path, via the related CLI.
-
-    Guarded == ``delegate`` not in (none/empty) AND a local ``registry.path``
-    (only a repo actually present on this machine is enforceable). Mirrors the
-    retired extension's ``loadGuardedRoots``; the CLI already merges the
-    knowledge-repo config overlay + resolves paths.
-    """
-    def _run(args: list[str]) -> str | None:
-        if deadline is not None and time.monotonic() >= deadline:
-            return None
-        if registry_root is not None:
-            return _run_related(args, root, deadline, registry_root=registry_root)
-        if deadline is None:
-            return _run_related(args, root)
-        return _run_related(args, root, deadline)
-
-    list_out = _run(["list", "--json", "--repo", root])
-    if not list_out:
-        return _DiscoveryResult([], False)
-    try:
-        listing = json.loads(list_out)
-    except ValueError:
-        return _DiscoveryResult([], False)
-    if not isinstance(listing, dict) or not isinstance(listing.get("related"), list):
-        return _DiscoveryResult([], False)
-    related = listing["related"]
-    guarded: list[dict] = []
-    complete = True
-    for r in related:
-        if deadline is not None and time.monotonic() >= deadline:
-            complete = False
-            break
-        if (not isinstance(r, dict) or "delegate" not in r
-                or not isinstance(r.get("name"), str) or not r["name"]):
-            complete = False
-            continue
-        delegate = r.get("delegate")
-        if delegate is None or delegate == "" or delegate == "none":
-            continue
-        name = r.get("name")
-        if not isinstance(delegate, str) or not isinstance(name, str) or not name:
-            complete = False
-            continue
-        if "registry" in r:
-            show = r
-        else:
-            # Older runtimes list relationships without local registry paths.
-            show_out = _run(["show", name, "--json", "--repo", root])
-            try:
-                show = json.loads(show_out) if show_out else None
-            except ValueError:
-                show = None
-        if not isinstance(show, dict) or "registry" not in show:
-            complete = False
-            continue
-        registry = show["registry"]
-        if registry is not None and (
-            not isinstance(registry, dict) or "path" not in registry
-        ):
-            complete = False
-            continue
-        path = (registry or {}).get("path")
-        locus = show.get("locus")
-        if locus is None:
-            locus = r.get("locus")
-        if ((path is not None and not isinstance(path, str))
-                or (locus is not None and not isinstance(locus, dict))):
-            complete = False
-            continue
-        if path:
-            guarded.append({"name": name, "delegate": delegate,
-                            "path": path, "locus": locus})
-    if deadline is not None and time.monotonic() >= deadline:
-        complete = False
-    return _DiscoveryResult(guarded, complete)
-
-
 def load_guarded_roots(
     root: str, home: Path, deadline: float | None = None,
     *, registry_root: Path | None = None,
 ) -> list[dict]:
-    """Cached :func:`_discover_guarded_roots` (short TTL sidecar)."""
-    cache = _cache_path(root, home, registry_root=registry_root)
-    cached = _read_cache(cache)
-    if cached is not None:
-        return cached
-    result = (
-        _discover_guarded_roots(root, deadline, registry_root=registry_root)
-        if registry_root is not None else _discover_guarded_roots(root, deadline)
-    )
-    if result.complete:
-        _write_cache(cache, result.roots)
+    """Read prepared facts only; ``deadline`` remains a compatibility argument."""
+    if _guard_map is None:
+        return []
+    result = _guard_map.read_map(root, registry_root or home / ".agent-worktrees")
+    if result.status != "ready":
+        print(
+            f"cross-repo-guard: {result.status} guard map; fail-open. "
+            "Run agent-worktrees refresh-guards or prepare this checkout.",
+            file=sys.stderr,
+        )
     return result.roots
 
 
 # --- Core evaluation ----------------------------------------------------------
 
-def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
+def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") -> dict | None:
     """Return a guarded-repo hit for a shell command that WRITES into a guarded
     repo, or None. Fires only on a real write target (redirect target /
     command-position write verb argument / git mutation via ``-C <repo>`` or the
     cwd), never a path merely mentioned in an assignment, ``cd``, or a quoted
     data payload (dotfiles#1144)."""
-    if not _WRITE_VERBS.search(cmd):
+    if not _shell_may_write(cmd, tool):
         return None
     eff_cwd = cwd
+    identity_cache = {}
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
-        is_git = bool(_GIT_START.match(eff))
-        git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
-        has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for g in guarded:
             gp = g.get("path")
             if not gp:
                 continue
-            root_str = _canon(gp)
-            tok = _root_token(root_str)
             reason = _deny_reason(g, "(a shell command writes into it).")
-            # 1. A file redirect whose target is the repo (excludes fd dups).
-            if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
-                return {**g, "reason": reason}
-            # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
-            if at_write_cmd and re.search(tok, seg_hay):
-                return {**g, "reason": reason}
-            # 3a. A git mutation naming the repo via ``-C <repo>``.
-            if git_write and has_dash_c and re.search(
-                r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
-            ):
-                return {**g, "reason": reason}
-        # 3b. A repo-scoped git write (no ``-C``) targets the EFFECTIVE cwd --
-        #     catches ``cd <guarded>; git commit``.
-        if git_write and not has_dash_c and eff_cwd:
+            identity = g.get("identity") or {}
+            for root in {gp, identity.get("root", gp), g.get("registered_path", gp)}:
+                tok = _root_token(_canon(root))
+                # 1. A file redirect whose target is the repo (excludes fd dups).
+                if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
+                    return {**g, "reason": reason}
+                # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
+                if at_write_cmd and re.search(tok, seg_hay):
+                    return {**g, "reason": reason}
+        for git_cwd in _git_targets(eff, eff_cwd, tool):
             for g in guarded:
                 gp = g.get("path")
-                if gp and is_inside(eff_cwd, gp):
+                if gp and _guard_map.matches(git_cwd, g, identity_cache=identity_cache):
                     return {**g, "reason": _deny_reason(
                         g, "(a shell command writes into it).")}
         # Follow an in-command ``cd`` to a resolvable path for later segments.
@@ -608,15 +367,16 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
 
 def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | None:
     """Return the guarded repo hit (with a ``reason``), or None to allow."""
-    if not guarded:
+    if not guarded or _guard_map is None:
         return None
     if tool in WRITE_TOOLS:
         raw = _pick(args, PATH_ARG_KEYS)
         if not raw:
             return None
         abs_path = _resolve(raw, cwd)
+        identity_cache = {}
         for g in guarded:
-            if g.get("path") and is_inside(abs_path, g["path"]):
+            if g.get("path") and _guard_map.matches(abs_path, g, identity_cache=identity_cache):
                 return {**g, "reason": _deny_reason(
                     g, f"('{tool}' targeting {raw}).")}
         return None
@@ -624,7 +384,7 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | Non
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd:
             return None
-        return _shell_hit(cmd, cwd, guarded)
+        return _shell_hit(cmd, cwd, guarded, tool=tool)
     return None
 
 
@@ -660,22 +420,20 @@ def decide(payload: dict, *, env=None, home=None,
                     else payload.get("tool_input"))
     if tool in SHELL_TOOLS:
         cmd = _pick(args, CMD_ARG_KEYS)
-        if not cmd or not _WRITE_VERBS.search(cmd):
+        if not cmd or not _shell_may_write(cmd, tool):
             return None  # identical to _shell_hit's topology-independent allow
 
-    selected_root = (
-        resolve_registry_root(legacy_root=home / ".agent-worktrees", environment=env)
-        if env.get("COPILOT_EXTENSIONS_CONTEXT", "").strip() else None
+    override = env.get("AGENT_HOME", "").strip()
+    legacy_home = Path(os.path.abspath(override)) if override else home
+    selected_root = resolve_registry_root(
+        legacy_root=legacy_home / ".agent-worktrees", environment=env,
     )
     cwd = str(payload.get("cwd") or "")
     if guarded_roots is None:
         root = find_repo_root(cwd)
         if root is None:
             return None
-        guarded = (
-            load_guarded_roots(str(root), home, deadline, registry_root=selected_root)
-            if selected_root is not None else load_guarded_roots(str(root), home, deadline)
-        )
+        guarded = load_guarded_roots(str(root), home, deadline, registry_root=selected_root)
     else:
         guarded = guarded_roots
     if not guarded:
