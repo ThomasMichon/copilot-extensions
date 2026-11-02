@@ -126,6 +126,12 @@ unconsumed inputs for a later interrupt; only observed root `user.message`
 events remove them, without delivering exact inputs into a successor.
 Consumption is rechecked after each awaited metadata observation, immediately
 before replay, so a delayed root event cannot cause consumed input to be resent.
+The existing in-flight helper also observes consumption throughout the active
+poll, delivery and acknowledgement scope. If an acknowledgement failed,
+consumed polled redelivery retries that acknowledgement without another SDK
+send or interrupt. Active observations survive bounded history eviction and
+refresh the existing consumption cache for the polled inputs on exit; the
+observer always closes, including after fetch, send or acknowledgement failure.
 Rejected rollover registration cannot restore the previous native identity;
 held inputs are not acknowledged as delivered.
 The input is `prompt`-kind with `steer` delivery; there is no

@@ -149,27 +149,32 @@ def test_late_original_retry_completion_preserves_exhausted_generation_and_capac
     assert (q.get(t.id), q.pool_startup(t.id).cooldown_stage) == before
 
 
-def conclude_retry(q, client, t, r, *, verified):
+def conclude_retry(q, client, t, r, *, verified, worker="host-a/worktree"):
     client.retry_pool_startup(t.id, r.key, **arguments(t))
     with q._connect() as conn:
         conn.execute("UPDATE tasks SET require_verification=? WHERE id=?", (verified, t.id))
-    client.start_pool_task(t.id, "host-a/worktree", owner_session_id="native", expected_generation=1)
+    client.start_pool_task(t.id, worker, owner_session_id="native", expected_generation=1)
     q.complete_with_outcome(
-        t.id, "host-a/worktree", expected_generation=1, expected_owner_session_id="native",
+        t.id, worker, expected_generation=1, expected_owner_session_id="native",
     )
 
 
 @pytest.mark.parametrize("verified", [False, True])
-@pytest.mark.parametrize("identity", ["record", "event"])
+@pytest.mark.parametrize("identity", ["record", "event", "equivalent-events"])
+@pytest.mark.parametrize("worker", ["host-a/worktree", "HOST-A/worktree"])
 def test_original_completion_after_task_conclusion_preserves_task_and_budget(
-    q, api, monkeypatch, verified, identity,
+    q, api, monkeypatch, verified, identity, worker,
 ):
     t, r, clock = failed(q, api, monkeypatch)
     with controls.connected(api, []) as client:
-        conclude_retry(q, client, t, r, verified=verified)
-        if identity == "event":
+        conclude_retry(q, client, t, r, verified=verified, worker=worker)
+        if identity != "record":
             with q._connect() as conn:
                 conn.execute("UPDATE tasks SET completed_by=NULL WHERE id=?", (t.id,))
+                if identity == "equivalent-events":
+                    q._audit(conn, t.id, ts=101, from_status=Status.STARTED, to_status=Status.SUBMITTED,
+                             worker=worker.partition("/")[0].swapcase() + "/worktree",
+                             note="same normalized worker")
         before = q.get(t.id), q.pool_startup(t.id)
         assert before[0].status == (Status.SUBMITTED if verified else Status.COMPLETED)
         complete(client, t, r)
@@ -184,17 +189,19 @@ def test_original_completion_after_task_conclusion_preserves_task_and_budget(
 
 @pytest.mark.parametrize("condition", [
     "completer", "missing-completer", "ambiguous-completer", "native", "generation",
-    "revision", "held", "steer", "retired", "fenced", "cooling",
+    "revision", "held", "steer", "retired", "fenced", "cooling", "worktree-case",
 ])
 def test_concluded_retry_completion_rechecks_retained_identity_and_holds_in_write(
     q, api, monkeypatch, condition,
 ):
     t, r, clock = failed(q, api, monkeypatch)
     with controls.connected(api, []) as client:
-        conclude_retry(q, client, t, r, verified=True)
+        conclude_retry(q, client, t, r, verified=True, worker="HOST-A/worktree")
         with q._connect() as conn:
             if condition == "completer":
                 conn.execute("UPDATE tasks SET completed_by='other/worktree' WHERE id=?", (t.id,))
+            elif condition == "worktree-case":
+                conn.execute("UPDATE tasks SET completed_by='HOST-A/Worktree' WHERE id=?", (t.id,))
             elif condition in {"missing-completer", "ambiguous-completer"}:
                 conn.execute("UPDATE tasks SET completed_by=NULL WHERE id=?", (t.id,))
                 if condition == "missing-completer":
@@ -222,6 +229,18 @@ def test_concluded_retry_completion_rechecks_retained_identity_and_holds_in_writ
             complete(client, t, r)
         assert failure.value.status_code == 409
     assert (q.get(t.id), q.pool_startup(t.id), q.get_reservation(r.key)) == before
+
+
+def test_accepted_case_variant_host_recovers_original_started_receipt_without_reset(q, api, monkeypatch):
+    t, r, clock = failed(q, api, monkeypatch)
+    with controls.connected(api, []) as client:
+        client.retry_pool_startup(t.id, r.key, **arguments(t))
+        client.start_pool_task(t.id, "HOST-A/worktree", owner_session_id="native", expected_generation=1)
+        before = q.get(t.id), q.pool_startup(t.id)
+        assert before[0].owner == "HOST-A/worktree" and before[0].status == Status.STARTED
+        complete(client, t, r)
+    assert (q.get(t.id), q.pool_startup(t.id)) == before
+    assert q.get_reservation(r.key).startup_complete
 
 
 def test_concurrent_exact_retry_charges_only_one_original_invocation(q, api, monkeypatch):

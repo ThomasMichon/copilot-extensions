@@ -9,6 +9,7 @@ from typing import Any
 
 from .ordinary_native_bindings import reservation_native_identity
 from .pool_startup_retry_contract import retry_invocation
+from .queue_pool_placement import pool_worker_matches
 from .queue_pool_startup import STARTUP_ATTEMPTS, _current
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
@@ -93,17 +94,22 @@ def prepare_mutation(
         current = task.generation == binding["generation"] and (
             task.status == Status.CLAIMED and task.owner is None
             or task.status == Status.STARTED and task.owner_session_id == binding["native_id"]
-            and task.owner == f"{assignment['machine']}/{row['worktree']}"
+            and pool_worker_matches(task.owner, assignment["machine"], row["worktree"])
         )
-        completed_worker = task.completed_by
-        if task.status in {Status.SUBMITTED, Status.COMPLETED} and completed_worker is None:
+        completed_worker_matches = pool_worker_matches(
+            task.completed_by, assignment["machine"], row["worktree"],
+        )
+        if task.status in {Status.SUBMITTED, Status.COMPLETED} and task.completed_by is None:
             workers = owner._completion_event_workers(conn, task.id)
-            completed_worker = workers[0] if len(workers) == 1 else None
+            completed_worker_matches = bool(workers) and all(
+                pool_worker_matches(worker, assignment["machine"], row["worktree"])
+                for worker in workers
+            )
         concluded = (
             task.generation == binding["generation"]
             and task.status in {Status.SUBMITTED, Status.COMPLETED} and task.owner is None
             and task.owner_session_id == binding["native_id"]
-            and completed_worker == f"{assignment['machine']}/{row['worktree']}"
+            and completed_worker_matches
         )
         late = (
             task.generation == binding["generation"] + 1 and task.status == Status.QUEUED

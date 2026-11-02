@@ -357,6 +357,18 @@ def pool_native_publication(
     return False
 
 
+def pool_worker_matches(worker_id: str | None, machine: str, worktree: str | None) -> bool:
+    """Match the normalized host while retaining the exact worktree identity."""
+    from .bridge_remote import normalize_host
+
+    if not isinstance(worker_id, str):
+        return False
+    host, separator, worker_worktree = worker_id.partition("/")
+    return bool(separator) and worker_worktree == worktree and (
+        normalize_host(host) == normalize_host(machine)
+    )
+
+
 def require_pool_start(
     conn: sqlite3.Connection, task: Task, worker_id: str | None,
     native_id: object, expected_generation: int | None,
@@ -365,8 +377,6 @@ def require_pool_start(
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
         return False
-    from .bridge_remote import normalize_host
-    worker_machine, separator, worker_worktree = (worker_id or "").partition("/")
     row = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key = ?", (assignment.reservation_key,),
     ).fetchone()
@@ -380,8 +390,7 @@ def require_pool_start(
         or type(expected_generation) is not int
         or expected_generation != task.generation
         or not isinstance(native_id, str) or not native_id
-        or not separator or worker_worktree != row["worktree"]
-        or normalize_host(worker_machine) != normalize_host(assignment.machine)
+        or not pool_worker_matches(worker_id, assignment.machine, row["worktree"])
         or task.owner not in (None, worker_id)
     ):
         raise TaskError("pool start requires the current reservation, worker and native incarnation")

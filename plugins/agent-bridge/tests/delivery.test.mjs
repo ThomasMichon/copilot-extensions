@@ -561,6 +561,90 @@ test("consumed later input is not replayed after an earlier awaited SDK send", a
   assert.equal(deps.inFlight.pending.size, 0);
 });
 
+for (const boundary of ["poll", "first-metadata", "final-metadata", "abort", "replay-send", "SDK-send"]) {
+  test(`ACK failure redelivery fences consumption during ${boundary}`, async () => {
+    const message = { ...exactMessage(5),
+      delivery: ["abort", "replay-send"].includes(boundary) ? "interrupt" : "steer" };
+    const { deps } = exactHarness([message]);
+    const sent = [], acknowledged = [];
+    let failedAck = false;
+    const consume = () => {
+      deps.inFlight.observe(recorded(message));
+      for (let id = 100; id <= 150; id++) deps.inFlight.observe(recorded(exactMessage(id)));
+      assert.equal(deps.inFlight.consumed.has(message.id), false);
+    };
+    deps.post = async (_method, _path, body) => {
+      if (!failedAck) {
+        failedAck = true;
+        throw new Error("inbox ACK did not commit");
+      }
+      acknowledged.push(body.ids);
+      return true;
+    };
+    deps.session.send = async (options) => {
+      sent.push(Number(/msg-id="(\d+)"/.exec(options.prompt)[1]));
+      if (boundary === "SDK-send") consume();
+    };
+    await assert.rejects(drainInbox("s", deps), /ACK did not commit/);
+    assert.equal(deps.inFlight.consumptionObservers.size, 0);
+    if (boundary === "poll") {
+      deps.getJson = async () => { consume(); return { messages: [message] }; };
+    } else if (boundary.endsWith("metadata")) {
+      let snapshots = 0;
+      deps.session.rpc.metadata.snapshot = async () => {
+        if (++snapshots === (boundary === "first-metadata" ? 1 : 2)) consume();
+        return { sessionId: "s" };
+      };
+    } else if (boundary === "abort") {
+      deps.session.abort = async () => consume();
+    } else if (boundary === "replay-send") {
+      deps.inFlight.sent(exactMessage(4));
+      deps.session.send = async (options) => {
+        sent.push(Number(/msg-id="(\d+)"/.exec(options.prompt)[1]));
+        consume();
+      };
+    }
+    assert.deepEqual(await drainInbox("s", deps), [5]);
+    assert.equal(sent.filter((id) => id === 5).length, 1);
+    assert.deepEqual(acknowledged, [[5]]);
+    assert.equal(deps.inFlight.pending.has(5), false);
+    assert.equal(deps.inFlight.consumptionObservers.size, 0);
+  });
+}
+
+test("ACK failure redelivery keeps consumed exact input held after rollover", async () => {
+  const message = exactMessage(5);
+  const { calls, deps, rollover } = exactHarness([message]);
+  deps.post = async () => { throw new Error("inbox ACK did not commit"); };
+  await assert.rejects(drainInbox("s", deps), /ACK did not commit/);
+  calls.length = 0;
+  deps.getJson = async () => {
+    deps.inFlight.observe(recorded(message));
+    rollover();
+    return { messages: [message] };
+  };
+  deps.post = async () => { throw new Error("changed native cannot ACK"); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.equal(calls.filter(([type]) => type === "send").length, 0);
+  assert.equal(deps.inFlight.consumptionObservers.size, 0);
+});
+
+test("active consumption observation ignores nested input and closes after a poll failure", async () => {
+  const { deps } = exactHarness([exactMessage(5)]);
+  const observation = deps.inFlight.watchConsumption();
+  observation.select([5]);
+  deps.inFlight.observe({ ...recorded(exactMessage(5)), agentId: "child" });
+  assert.equal(observation.has(5), false);
+  deps.inFlight.observe(recorded(exactMessage(5)));
+  for (let id = 100; id <= 150; id++) deps.inFlight.observe(recorded(exactMessage(id)));
+  assert.equal(observation.has(5), true);
+  assert.equal(observation.has(150), false);
+  observation.close();
+  deps.getJson = async () => { throw new Error("poll unavailable"); };
+  await assert.rejects(drainInbox("s", deps), /poll unavailable/);
+  assert.equal(deps.inFlight.consumptionObservers.size, 0);
+});
+
 test("legacy alias-following messages keep their delivery behavior across a rollover", async () => {
   const message = { id: 1, sender: "peer", body: "legacy" };
   const { calls, deps, rollover } = exactHarness([message]);

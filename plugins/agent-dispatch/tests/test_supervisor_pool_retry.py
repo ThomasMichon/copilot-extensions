@@ -71,9 +71,13 @@ def test_committed_response_loss_never_sends_again_and_reconciles_only_receipt(
     assert q.pool_startup(t.id).startup_attempts == 2
 
 
-@pytest.mark.parametrize("later", ["started", "submitted", "completed", "exhausted"])
+@pytest.mark.parametrize("later,worker", [
+    ("started", "host-a/worktree"), ("submitted", "host-a/worktree"),
+    ("completed", "host-a/worktree"), ("exhausted", "host-a/worktree"),
+    ("started", "HOST-A/worktree"), ("submitted", "HOST-A/worktree"), ("completed", "HOST-A/worktree"),
+])
 def test_pending_original_receipt_can_complete_after_start_or_exhaust_without_reset(
-    q, api, monkeypatch, later,
+    q, api, monkeypatch, later, worker,
 ):
     owner, clock, t, r, probes, nudges, requests, sends = setup(q, api, monkeypatch)
     returns = [("startup_unknown", "lost send")]
@@ -91,11 +95,11 @@ def test_pending_original_receipt_can_complete_after_start_or_exhaust_without_re
                     conn.execute("UPDATE tasks SET require_verification=? WHERE id=?",
                                  (later == "submitted", t.id))
             owner.client.start_pool_task(
-                t.id, "host-a/worktree", owner_session_id="native", expected_generation=1,
+                t.id, worker, owner_session_id="native", expected_generation=1,
             )
             if later != "started":
                 q.complete_with_outcome(
-                    t.id, "host-a/worktree", expected_generation=1, expected_owner_session_id="native",
+                    t.id, worker, expected_generation=1, expected_owner_session_id="native",
                 )
                 assert q.get(t.id).status == (Status.SUBMITTED if later == "submitted" else Status.COMPLETED)
             before = q.get(t.id), q.pool_startup(t.id).startup_attempts

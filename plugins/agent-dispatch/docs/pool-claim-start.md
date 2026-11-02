@@ -201,7 +201,10 @@ only startup transport, not task acceptance. The same receipt-only reconciliatio
 also runs after the worker accepted `STARTED`, completed to `SUBMITTED` or
 `COMPLETED`, or the claim exhausted to `QUEUED`. A concluded task must retain
 the original native and generation and the assigned completing worker, recorded
-in `completed_by` or unambiguous authoritative completion events. Task holds,
+in `completed_by` or unambiguous authoritative completion events. Acceptance and
+receipt completion use the same normalized-host, exact-worktree comparison;
+host case variants do not change the stored worker, native or generation.
+Task holds,
 steering waits, retired conversations and startup fences still refuse the write.
 An exact late completion preserves the task generation, reset counters or
 cooldown already established by those independent transitions and keeps a

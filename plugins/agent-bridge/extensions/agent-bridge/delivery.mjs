@@ -105,6 +105,7 @@ export class InFlightMessages {
   constructor(limit = 50) {
     this.pending = new Map();
     this.consumed = new Set();
+    this.consumptionObservers = new Set();
     this.limit = limit;
   }
 
@@ -119,12 +120,45 @@ export class InFlightMessages {
   observe(event) {
     const id = consumedMessageId(event);
     if (id !== null) {
-      this.pending.delete(id);
-      this.consumed.add(id);
-      while (this.consumed.size > this.limit) {
-        this.consumed.delete(this.consumed.values().next().value);
-      }
+      this._rememberConsumed(id);
+      for (const observer of this.consumptionObservers) observer(id);
     }
+  }
+
+  _rememberConsumed(id) {
+    this.pending.delete(id);
+    this.consumed.delete(id);
+    this.consumed.add(id);
+    while (this.consumed.size > this.limit) {
+      this.consumed.delete(this.consumed.values().next().value);
+    }
+  }
+
+  watchConsumption() {
+    // Keep active delivery observations even when the bounded history evicts them.
+    const consumed = new Set(this.consumed);
+    const polled = new Set();
+    let selected = false;
+    const observer = (id) => {
+      if (!selected || polled.has(id)) consumed.add(id);
+    };
+    this.consumptionObservers.add(observer);
+    return {
+      has: (id) => consumed.has(id),
+      select: (ids) => {
+        for (const id of ids) polled.add(id);
+        for (const id of consumed) {
+          if (!polled.has(id)) consumed.delete(id);
+        }
+        selected = true;
+      },
+      close: () => {
+        this.consumptionObservers.delete(observer);
+        for (const id of polled) {
+          if (consumed.has(id)) this._rememberConsumed(id);
+        }
+      },
+    };
   }
 
   // The unconsumed messages older than `id`, oldest first, removed from tracking.
@@ -356,13 +390,23 @@ export function serializedRegister(
 //
 // ``mainTurn`` (a MainTurn) says whether an interrupt has a main turn to abort;
 // without one, every interrupt aborts first (the historical behavior).
-export async function drainInbox(sid, { getJson, post, session, inFlight, mainTurn,
-  pluginReadiness = false, isCurrent = () => true, log = () => {} }) {
+export async function drainInbox(sid, options) {
+  const consumption = options.inFlight.watchConsumption();
+  try {
+    return await drainObservedInbox(sid, options, consumption);
+  } finally {
+    consumption.close();
+  }
+}
+
+async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainTurn,
+  pluginReadiness = false, isCurrent = () => true, log = () => {} }, consumption) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
+  consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
   const delivered = [];
   let interrupted = false;
   const currentNative = async (msg) => {
@@ -385,6 +429,10 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
     if (!msg || typeof msg.id !== "number") continue;
     try {
       if (!await currentNative(msg) || !stillCurrent(msg)) continue;
+      if (consumption.has(msg.id)) {
+        delivered.push(msg.id);
+        continue;
+      }
       if (String(msg.kind || "").startsWith("startup:prompt:")) {
         if (!pluginReadiness || !msg.plugin_readiness) {
           log(`startup message ${msg.id} held: readiness context unavailable`);
@@ -405,6 +453,10 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
           continue;
         }
         msg = { ...msg, kind: "prompt" };
+      }
+      if (consumption.has(msg.id)) {
+        delivered.push(msg.id);
+        continue;
       }
       const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
       // One interrupt per batch: a second interrupt in the same batch must not
@@ -432,8 +484,10 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
         }
       }
       if (!await currentNative(msg) || !stillCurrent(msg)) continue;
-      await session.send(plan.options);
-      inFlight.sent(msg);
+      if (!consumption.has(msg.id)) {
+        await session.send(plan.options);
+        if (!consumption.has(msg.id)) inFlight.sent(msg);
+      }
       delivered.push(msg.id);
     } catch (e) {
       log(`deliver failed for message ${msg.id}: ${e.message}`);
