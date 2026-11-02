@@ -69,7 +69,9 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             params["env"] = env
         return self._unwrap(self._http.get("/registrations", params=params))
 
-    def _require_pool_metadata_transport(self, *, configured_cohort: bool = False) -> None:
+    def _require_pool_metadata_transport(
+        self, *, configured_cohort: bool = False, queue_identity: bool = False,
+    ) -> None:
         health = self.health()
         contract = health.get("pool_catalog_transport") if isinstance(health, dict) else None
         if not isinstance(contract, dict) or (
@@ -89,6 +91,14 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             )
         ):
             raise DispatchUpgradeRequired("running coordinator lacks original configured-cohort request fences")
+        if queue_identity and (
+            not isinstance(contract.get("queue_identity_fencing_versions"), list)
+            or not any(
+                type(version) is int and version == 1
+                for version in contract["queue_identity_fencing_versions"]
+            )
+        ):
+            raise DispatchUpgradeRequired("running coordinator lacks original queue identity request fences")
 
     def pool_catalog_metadata(self) -> dict:
         """Control-authorized preparation read, also used by opt-in maintenance."""
@@ -104,6 +114,7 @@ class RegistrationClientMixin(PoolCohortClientMixin):
         """Send the retained body only after running-peer and local admission."""
         self._require_pool_metadata_transport(
             configured_cohort=request.expected_cohort_revision is not None,
+            queue_identity=request.expected_queue_identity is not None,
         )
         body = request.to_dict()
         headers = self._control_headers()
