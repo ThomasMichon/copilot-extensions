@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify canonical Installer Readiness Python source and tests with strict MyPy on Linux and Windows.",
+  "changes": [
+    {
+      "plugin": "libs/installer-readiness",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

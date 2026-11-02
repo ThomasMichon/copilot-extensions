@@ -161,7 +161,7 @@
         "libs/installer-readiness"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-lazy-cli-dispatch",
