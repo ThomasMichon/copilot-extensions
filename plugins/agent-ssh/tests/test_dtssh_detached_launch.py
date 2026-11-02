@@ -182,3 +182,9 @@ def test_launch_accepts_a_real_python(tmp_path):
     proc = _python_check(tmp_path, [Path(sys.executable).parent])
     assert proc.returncode == 0, proc.stderr
     assert "python-ok" in proc.stdout
+
+def test_launch_python_probe_ignores_a_stale_pythonhome(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "missing-python-home"))
+    proc = _python_check(tmp_path, [Path(sys.executable).parent])
+    assert proc.returncode == 0, proc.stderr
+    assert "python-ok" in proc.stdout

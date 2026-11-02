@@ -709,7 +709,8 @@ function Assert-HostLauncherPython {
     $python = Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
         Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } | Select-Object -First 1
     if ($python) {
-        & $python.Source -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+        # Same isolation flags as the daemon-instance helper, so a stale PYTHONHOME can't fail a usable interpreter.
+        & $python.Source -I -S -B -X utf8 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
         if ($LASTEXITCODE -eq 0) { return }
     }
     throw 'The dtssh host launcher needs Python 3.10+ available as python on PATH (the Microsoft Store alias stub does not count). Install Python for this user, then rerun.'
