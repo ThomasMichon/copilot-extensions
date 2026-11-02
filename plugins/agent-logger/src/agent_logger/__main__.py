@@ -236,6 +236,29 @@ def _cmd_session_fetch(args: argparse.Namespace) -> int:
     return code
 
 
+def _cmd_metrics(args: argparse.Namespace) -> int:
+    """Measure duration and turn counts for an ordered chain of sessions.
+
+    Exit ``0`` when measured, ``1`` when the report is ``unknown`` (a session
+    is unavailable or no prompt was found), ``2`` for an invalid ``--until``.
+    The JSON report is printed either way; see ``agent_logger.metrics``.
+    """
+    from agent_logger.metrics import measure_sessions, parse_timestamp
+
+    until = None
+    if args.until is not None:
+        until = parse_timestamp(args.until)
+        if until is None:
+            print(
+                f"agent-logger metrics: invalid --until timestamp: {args.until!r}",
+                file=sys.stderr,
+            )
+            return 2
+    report = measure_sessions(args.session_ids, until=until)
+    print(json.dumps(report, indent=2))
+    return 0 if report["status"] == "measured" else 1
+
+
 def _cmd_catalog_status(_args: argparse.Namespace) -> int:
     """Report the resolved review-annotation catalog index db path."""
     cfg = load_config()
@@ -551,6 +574,23 @@ def build_parser() -> argparse.ArgumentParser:
         "(output is always JSON)",
     )
     p_session_fetch.set_defaults(func=_cmd_session_fetch)
+
+    p_metrics = sub.add_parser(
+        "metrics",
+        help="measure duration and turn counts for an ordered chain of sessions",
+    )
+    p_metrics.add_argument(
+        "session_ids", nargs="+", metavar="SESSION_ID",
+        help="session ids, oldest first (a session, then the successors it handed off to)",
+    )
+    p_metrics.add_argument(
+        "--until", metavar="TIMESTAMP",
+        help="ISO 8601 cutoff; later events are ignored (UTC when no offset is given)",
+    )
+    p_metrics.add_argument(
+        "--json", action="store_true", help="emit JSON (output is always JSON)"
+    )
+    p_metrics.set_defaults(func=_cmd_metrics)
 
     p_annotate = sub.add_parser(
         "annotate",

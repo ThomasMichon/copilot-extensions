@@ -1,0 +1,9 @@
+{
+  "comment": "Add agent-logger metrics --json: evidence-based kickoff, wall-clock and working time, and user/agent turn counts for an ordered chain of sessions, with nullable per-session metrics fields in log-writer and digest manifests",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
