@@ -4003,7 +4003,7 @@
         "tools/native_process_sources.py": "63b820b10bffb93cde5fd9fcdfc53bec691cef326f79d9f2eebb13281338434a",
         "tools/native_process_qualification.py": "4077845593a48eb3f3e4cef07832d00a96b2954c9cdf542bf5a02c0fbe2d49e7",
         "tools/promotion_unit_tests/test_native_process_stage.py": "2ab469148194d5c9f416392a3a5b316652c964a82e041a0a88903a2772f161e2",
-        "tools/promotion_unit_tests/test_native_process_driver.py": "aa45418af99503b5d2cbf41191089eb737a39c68aa70b95cd7f8a3b3a0229143"
+        "tools/promotion_unit_tests/test_native_process_driver.py": "d7979d33c53225d5c010e8e71636542b85f61fe68f44d81e63e65bf1628ee462"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",

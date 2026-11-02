@@ -101,8 +101,14 @@ def test_process_preparation_refuses_unbound_source_before_launch(tree, monkeypa
         )
 
 
-def test_required_tool_closure_contains_actual_owner_startup_imports():
-    tools = Path(sources.__file__).resolve().parent
+def test_required_tool_closure_contains_actual_owner_startup_imports(tree):
+    root, manifest = tree
+    expected = publish(root, manifest)
+    verified, _, _ = sources.load(
+        root / "tools" / sources.LAUNCHER, expected, contract.Boundary(10, UTC), lambda: 20,
+    )
+    assert verified == root
+    tools = Path(__file__).resolve().parents[1]
     names = {name for name in sources.TOOLS if name.endswith(".py")}
 
     def imports(node):
