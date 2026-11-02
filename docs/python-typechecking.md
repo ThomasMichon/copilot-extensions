@@ -8,7 +8,7 @@ The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resource
 Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
-Context, Lazy CLI Dispatch,
+Context, Installer Readiness, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
 source/test projects.
@@ -36,6 +36,7 @@ python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py lib-fleet-contracts
 python tools/typecheck.py lib-fleet-index-adapter lib-fleet-vault-adapter
 python tools/typecheck.py lib-installation-context
+python tools/typecheck.py lib-installer-readiness
 python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-repository-policy
@@ -106,6 +107,14 @@ narrow the optional PowerShell executable after the existing availability
 skip. Default-cell scope, fail-open reads, atomic writes and shell behavior are
 unchanged. The three synchronized physical Python copies remain independently
 pending until their source correspondence and consumer projects are qualified.
+
+Installer Readiness checks all ten canonical source/test files strictly on both
+declared targets in the base environment. Readiness reports and fixture records
+have concrete typed shapes; intentionally malformed inputs retain explicit
+negative-test casts. Local variable renames avoid conflicting inferred types
+without changing receipt validation, blocking decisions or repair behavior.
+Agent Machines remains an independently pending consumer; canonical admission
+does not qualify its complete project or grant installation authority.
 
 Dropin Registry uses the base checker environment and checks all six canonical
 source/test files strictly on both declared targets. Its native FIFO test skips
