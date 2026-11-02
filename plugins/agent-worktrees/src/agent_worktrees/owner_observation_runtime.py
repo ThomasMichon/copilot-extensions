@@ -10,6 +10,7 @@ from typing import Any
 
 from . import owner_observation_contract as c
 from .owner_observation_append import delivery_failed, freeze_record, prepare
+from .owner_observation_failure import MutationFailure
 from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
 
 MAX_SUBSCRIBERS = 32
@@ -194,12 +195,12 @@ class OwnerObservationRuntime:
                     record,
                     expected_source_generation=expected_source_generation,
                 )
-            except (OSError, sqlite3.Error) as error:
-                self.history.append_failed(record.key, error)
-                self._changed(record.key)
-                raise c.ObservationError(
-                    "owner source initialization failed", "journal-write-failed"
-                ) from error
+            except c.ObservationError as error:
+                if error.code == "superseded":
+                    self.close_admission("superseded")
+                elif isinstance(error, MutationFailure) and error.invalidated:
+                    self._changed(record.key)
+                raise
             self._changed(record.key)
             return result
 
@@ -246,7 +247,7 @@ class OwnerObservationRuntime:
             except c.ObservationError as error:
                 if error.code == "superseded":
                     self.close_admission("superseded")
-                elif error.code == "journal-write-failed":
+                elif isinstance(error, MutationFailure) and error.invalidated:
                     self._changed(record.key)
                 elif error.code == "cursor-unavailable":
                     self._changed(record.key)

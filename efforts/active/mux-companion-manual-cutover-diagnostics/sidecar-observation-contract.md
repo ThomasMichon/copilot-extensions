@@ -93,6 +93,13 @@ An acknowledgement containing only already-accepted events cannot clear a
 failed newer capture's invalidation. Recovery requires actual qualified
 materialization; retained history gaps remain explicit.
 
+An operation failing before its source/cursor/replacement checks establish
+admission reports an error without invalidating existing facts. Failure-driven
+invalidation requires fresh agreement with the admitted journal boundary or
+the materialized target, not a project/worktree key or a lock-timeout exception.
+If that agreement cannot be established, report the unavailable operation
+without guessing that the current projection belongs to the failed mutation.
+
 Native event identity is source, generation and record identity. A payload
 locator participates in content integrity, not identity: changed content or
 locator under one native identity conflicts rather than appending a new event.

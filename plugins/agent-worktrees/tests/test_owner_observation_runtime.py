@@ -1094,3 +1094,195 @@ def test_identity_guard_bound_is_gap_not_silent_eviction_or_empty_history(runtim
         )
         == 1
     )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "publish-current",
+        "publish-stale",
+        "publish-wrong-source",
+        "initialize-current",
+        "initialize-stale",
+        "initialize-missing-generation",
+        "refresh",
+        "reconcile",
+        "delivery-oversize",
+    ],
+)
+def test_sqlite_begin_lock_timeout_before_admission_cannot_invalidate_or_notify(
+    runtime, monkeypatch, operation
+):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    current = owner.publish(
+        record(1),
+        [event(record(1))],
+        batch_id="baseline:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    before_failures = dict(owner.history._failures)
+    before_reasons = dict(owner.history._failure_reasons)
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == current
+        with sqlite3.connect(owner.history.path, timeout=0.1) as blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            with pytest.raises(c.ObservationError) as error:
+                if operation == "delivery-oversize":
+                    capture = record(2)
+                    item = event(capture)
+                    item["payload"] = {"details": ["x" * 3500] * 9}
+                    owner.publish(
+                        capture,
+                        [item],
+                        batch_id="locked:oversize",
+                        expected_cursor=current["cursor"],
+                        post_save=True,
+                    )
+                elif operation.startswith("publish"):
+                    capture = (
+                        record(2, incarnation="record:wrong")
+                        if operation == "publish-wrong-source"
+                        else record(2)
+                    )
+                    cursor = (
+                        initial["cursor"] if operation == "publish-stale" else current["cursor"]
+                    )
+                    owner.publish(
+                        capture,
+                        [event(capture)],
+                        batch_id="locked:publication",
+                        expected_cursor=cursor,
+                        post_save=True,
+                    )
+                elif operation == "refresh":
+                    owner.initialize(replace(record(1), observed_at="2026-11-02T00:00:05Z"))
+                elif operation == "reconcile":
+                    owner.reconcile(record(2), batch_id="locked:reconcile")
+                else:
+                    expected = current["source_generation"]
+                    if operation == "initialize-stale":
+                        expected = "c" * 32
+                    elif operation == "initialize-missing-generation":
+                        expected = None
+                    owner.initialize(
+                        record(2, incarnation="record:replacement"),
+                        expected_source_generation=expected,
+                    )
+            assert error.value.code == "unavailable"
+            assert getattr(error.value, "invalidated", False) is False
+            blocker.rollback()
+        assert owner.read(request()) == current
+        assert owner.history._failures == before_failures
+        assert owner.history._failure_reasons == before_reasons
+        assert notifications == []
+        assert owner.active_count() == 1
+        assert next(stream)["type"] == "heartbeat"
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("operation", ["refresh", "replacement"])
+def test_initializer_failure_after_proven_admission_is_qualified_and_reaches_subscriber(
+    runtime, operation
+):
+    from agent_worktrees.owner_observation_failure import MutationFailure
+
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record(1))
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == initial
+        with sqlite3.connect(owner.history.path) as conn:
+            if operation == "refresh":
+                conn.execute(
+                    "CREATE TRIGGER fail_admitted BEFORE UPDATE OF qualified "
+                    "ON owner_observation_journal "
+                    "BEGIN SELECT RAISE(ABORT,'admitted refresh failure'); END",
+                )
+            else:
+                conn.execute(
+                    "CREATE TRIGGER fail_admitted BEFORE INSERT ON owner_observation_journal "
+                    "BEGIN SELECT RAISE(ABORT,'admitted replacement failure'); END",
+                )
+        with pytest.raises(MutationFailure) as error:
+            if operation == "refresh":
+                owner.initialize(replace(record(1), observed_at="2026-11-02T00:00:05Z"))
+            else:
+                owner.initialize(
+                    record(2, incarnation="record:replacement"),
+                    expected_source_generation=initial["source_generation"],
+                )
+        assert error.value.invalidated is True
+        assert error.value.code == "journal-write-failed"
+        assert next(stream)["type"] == "gap"
+        failed = next(stream)
+        assert (
+            failed["cursor"] == initial["cursor"]
+            and failed["source_generation"] == initial["source_generation"]
+        )
+        assert failed["availability"] == "unavailable" and failed["facts"] is None
+        with sqlite3.connect(owner.history.path) as conn:
+            conn.execute("DROP TRIGGER fail_admitted")
+        duplicate_refresh = owner.initialize(record(1))
+        assert duplicate_refresh["facts"] is None
+    finally:
+        stream.close()
+
+
+def test_pre_admission_lock_timeout_preserves_existing_failed_duplicate_state(
+    runtime, monkeypatch
+):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    one = record(1)
+    accepted = owner.publish(
+        one, [event(one)], batch_id="baseline:1", expected_cursor=initial["cursor"], post_save=True
+    )
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER failed_newer BEFORE INSERT ON owner_observation_entry "
+            "BEGIN SELECT RAISE(ABORT,'newer admitted failure'); END",
+        )
+    with pytest.raises(c.ObservationError):
+        owner.publish(
+            record(2),
+            [event(record(2))],
+            batch_id="newer:2",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+    before = owner.read(request())
+    failures = dict(owner.history._failures)
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute("DROP TRIGGER failed_newer")
+        conn.execute("BEGIN IMMEDIATE")
+        with pytest.raises(c.ObservationError) as error:
+            owner.publish(
+                one,
+                [event(one)],
+                batch_id="baseline:1",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "unavailable"
+        conn.rollback()
+    assert owner.read(request()) == before
+    assert owner.history._failures == failures
+    assert notifications == []
+    assert (
+        owner.publish(
+            one,
+            [event(one)],
+            batch_id="baseline:1",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )["facts"]
+        is None
+    )

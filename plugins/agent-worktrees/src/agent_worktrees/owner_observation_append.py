@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import sqlite3
 from contextlib import closing
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from . import owner_observation_contract as c
+from .owner_observation_failure import MutationFailure
 
 if TYPE_CHECKING:
-    import sqlite3
-
     from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
 
 SCHEMA = (
@@ -76,16 +76,22 @@ def delivery_failed(
     expected_cursor: str,
     error: c.ObservationError,
 ) -> None:
-    with owner._lock, closing(owner._connect(write=True)) as conn, conn:
-        conn.execute("BEGIN IMMEDIATE")
-        owner._fence(conn)
-        row = owner._row(conn, selected)
-        if row["source"] != record.source:
-            raise c.ObservationError("record source incarnation changed", "source-replaced")
-        if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
-            raise c.ObservationError("owner observation position changed", "stale-cursor")
-        owner._fence(conn)
-        owner.append_failed(record.key, error, reason="cursor-unavailable")
+    try:
+        with owner._lock, closing(owner._connect(write=True)) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            owner._fence(conn)
+            row = owner._row(conn, selected)
+            if row["source"] != record.source:
+                raise c.ObservationError("record source incarnation changed", "source-replaced")
+            if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
+                raise c.ObservationError("owner observation position changed", "stale-cursor")
+            owner._fence(conn)
+            owner.append_failed(record.key, error, reason="cursor-unavailable")
+    except (OSError, sqlite3.Error) as failure:
+        raise MutationFailure(
+            f"delivery failure could not establish admission: {type(failure).__name__}: {failure}",
+            invalidated=False,
+        ) from failure
 
 
 def append(

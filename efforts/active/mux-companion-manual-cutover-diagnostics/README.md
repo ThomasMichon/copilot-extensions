@@ -527,6 +527,23 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Admission-qualified database failure handling
+
+- Connection and transaction-lock failures before source/cursor/replacement
+  checks report operation errors without invalidating existing facts or waking
+  subscribers as changed. Runtime wrappers consume an internal invalidation
+  qualification rather than repeating unconditional failure handling.
+- Failures after admitted mutation recheck the captured journal boundary or
+  successfully materialized target before withholding facts. A source that has
+  advanced, or an admission fence that cannot be reestablished, is not guessed
+  to match; the operation reports explicit unavailability.
+- The focused owner packet passed 116 cases. Real private SQLite lock fixtures
+  cover current, stale, wrong-source and replacement requests before admission;
+  SQL-trigger failures verify admitted refresh/replacement gaps still reach held
+  readers. A locked duplicate attempt preserves existing failed-newer state.
+- This is an open source-review correction, not installed source attachment,
+  native-client acceptance or whole-parent completion.
+
 ### 2026-11-02 - Reject malformed batch metadata before invalidation
 
 - Runtime publication and reconciliation validate the batch reference before

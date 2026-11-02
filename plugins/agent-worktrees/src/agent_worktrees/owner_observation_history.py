@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import owner_observation_contract as c
+from . import owner_observation_failure as failures
 from .owner_observation_append import SCHEMA, append, delivery_failed, freeze_record, prepare
 from .owner_observation_initialize import initialize
 
@@ -313,6 +314,7 @@ class OwnerObservationHistory:
             ) from error
         with self._lock:
             admitted = False
+            boundary = None
             materialized = False
             try:
                 with closing(self._connect(write=True)) as conn, conn:
@@ -338,7 +340,10 @@ class OwnerObservationHistory:
                                 "owner observation position changed", "stale-cursor"
                             )
                         admitted = True
+                        boundary = failures.before(row)
                         materialized = append(self, conn, row, record, frozen, batch_id, digest)
+                        if materialized:
+                            boundary = failures.after(boundary, self._row(conn, selected))
                     self._fence(conn)
             except c.ObservationError as error:
                 if admitted and error.code in {"oversized", "cursor-unavailable"}:
@@ -348,10 +353,7 @@ class OwnerObservationHistory:
                     ) from error
                 raise
             except (OSError, sqlite3.Error) as error:
-                self.append_failed(record.key, error)
-                raise c.ObservationError(
-                    "ancillary owner journal append failed", "journal-write-failed"
-                ) from error
+                raise failures.qualify(self, record, boundary, error) from error
             try:
                 with closing(self._connect()) as conn:
                     self._fence(conn)
@@ -360,10 +362,7 @@ class OwnerObservationHistory:
                     self._failure_reasons.pop(record.key, None)
                 return self.snapshot(selected)[0]
             except (OSError, sqlite3.Error) as error:
-                self.append_failed(record.key, error)
-                raise c.ObservationError(
-                    "owner index delivery requires reconciliation", "journal-write-failed"
-                ) from error
+                raise failures.qualify(self, record, boundary, error) from error
 
     def delta(self, selected: c.Selection, after_cursor: str) -> tuple[dict, dict | None]:
         with self._read() as conn:
