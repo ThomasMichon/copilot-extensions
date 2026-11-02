@@ -3,7 +3,7 @@
 - **Parent:** [Lean Session Lifecycle](README.md), Phase 3
 - **Tracking:** #5579; no duplicate implementation owner or umbrella issue
 - **Created:** 2026-11-01
-- **Status:** Draft; planning only, implementation and rollout not started
+- **Status:** Active; selected-runtime admission amendment proposed before further implementation
 - **Vision:** `visions/plugin-services/README.md` - transient callbacks and
   removal of session-scaled wait-only forwarding processes
 
@@ -29,13 +29,28 @@ The subsequent planning request, verbatim:
 
 > Great. Make a mini-effort to tackle this.
 
+After the original plan merged in #9913, the operator authorized source work:
+
+> Great. Drive implementing these fixes.
+
 ## Scope Approvals
 
-This request authorizes creating the focused plan. It does not authorize
+The execution request authorizes source implementation and isolated
+qualification of this mini-effort. It does not authorize
 terminating retained launchers, migrating live sessions, updating installed
 runtimes, changing Job policy, or lifting a deployment hold. Plan approval is
 not rollout authority. The parent effort's existing implementation owner and
 the #8669 installation-independent-session owner remain unchanged.
+
+On 2026-11-02, the operator selected the admission choice, verbatim:
+
+> probe
+
+The selected form label was "Use a bounded selected-runtime capability query
+(recommended)". This selects the query direction below, including transient
+startup work, rather than constructor-owned capability metadata. The admission
+amendment clears source review before further protocol implementation; no
+installed rollout or live-session authority follows from this choice.
 
 ## Context
 
@@ -73,10 +88,44 @@ the required path passes: the optimization must preserve attach-return cleanup,
 terminal restoration and exit reporting, not hide those duties in another
 wait-only process. Keep POSIX process replacement and standalone behavior.
 
+### Selected-runtime admission amendment
+
+A response-only environment offer is not safe for an unsupported runtime:
+that peer can ignore the channel yet pass it into a daemon or detached pane,
+whose later commands inherit a deleted request. Filtering only new resident
+helpers does not fix an older peer. Do not reinterpret an invalid active
+request as permission to launch, or retain abandoned channel files to hide
+the problem.
+
+**Operator-selected direction; implementation details remain reviewable:**
+establish positive support through a bounded read-only query against the actual
+selected execution runtime before offering the channel. Independently selected
+receivers in the forwarding chain also require support before receiving it.
+Do not infer support from a newer payload, a package version string alone or
+an unqualified capability claim.
+
+Use an effect-free query for both current and supported legacy peers, never a
+flag appended after arbitrary operator arguments or `--`. Reuse the existing
+finite-process owner to bound output and lifetime and confirm descendant
+cleanup before admitting preparation. No implicit installation, network
+bootstrap, unowned timed-out child, new daemon, Task or UAC fallback is allowed.
+Explicitly unsupported peers retain legacy execution without the channel;
+malformed/unavailable queries and uncertain cleanup remain visible and do not
+authorize handoff or automatic replay.
+
+The accepted channel belongs only to the foreground preparation flow. Capture
+and forward it deliberately rather than leaving it in the environment of
+resident services, reusable workers, launched panes or non-handoff children.
+Preserve native failure results, literal empty arguments and the original
+caller state. Measure and report the query's real cold/warm startup work,
+including actual process counts; do not carry forward a claim of zero
+discovery work.
+
 ## Plan
 
 ### Slice 1 - Agree the finite handoff
 
+- [ ] Review this admission amendment before further protocol implementation.
 - [ ] Confirm the current cold/resident/provider-session and project-binstub
   consumers; agree the boundary with the existing #5579 and #8669 owners.
 - [ ] Specify the smallest structured result and shell consumption contract:
@@ -87,6 +136,8 @@ wait-only process. Keep POSIX process replacement and standalone behavior.
 
 ### Slice 2 - Remove the two Python forwarding roles
 
+- [ ] Implement selected-runtime support discovery and foreground-only channel
+  propagation, preserving unsupported-peer legacy behavior.
 - [ ] Implement the shell-owned preparation-to-attachment handoff for ordinary
   local Windows creation and resume, including existing-session joins.
 - [ ] Retain terminal input/output, Ctrl+C, post-exit versus detach behavior,
@@ -107,6 +158,16 @@ wait-only process. Keep POSIX process replacement and standalone behavior.
 
 ## Validation Plan
 
+- [ ] Actual selected-runtime support, not latest-payload metadata, gates the
+  channel. Both mixed-version directions preserve legacy operation without
+  leaking a request into later sessions.
+- [ ] Queries are effect-free for current/legacy peers, bounded and owned;
+  missing/malformed/unavailable results, timeout and failed cleanup cannot
+  admit handoff or silently trigger installation, retry or a second session.
+- [ ] No channel reaches resident or pane children. Repeated/concurrent later
+  launches cannot reuse an expired offer after foreground completion.
+- [ ] Cold/warm capability-query measurements classify every transient process
+  and retain the zero persistent-forwarder requirement after attachment.
 - [ ] After creation and resume/attach are ready, actual process observations
   show zero persistent Python workers or interpreter trampolines serving the
   two forwarding roles; transient preparation/helpers are classified separately.
@@ -134,3 +195,13 @@ wait-only process. Keep POSIX process replacement and standalone behavior.
   launch-lifetime gap, not evidence of duplicate Manager mux daemons.
 - Captured the operator's required Python lifetime and preferred shorter chain.
   No runtime edits, live-session changes or deployment were performed.
+
+### 2026-11-02 - Admission amendment proposed
+
+- The original plan cleared review in #9913. Isolated implementation work
+  exposed the unsupported-peer environment-inheritance flaw described above.
+- Captured the exact `probe` selection and its source-only bounds. The query
+  amendment is proposed before implementation, not proof of an implemented
+  capability surface or completed qualification.
+- The broader parent gates and the #8669 owner's scope remain unchanged.
+  No installed runtime, live session or deployment hold has been changed.
