@@ -247,6 +247,65 @@ def test_between_check_expiry_retains_failed_lifetime_close_without_settlement(m
         getattr(protocol, "_lifetime_readers", set()).difference_update(fds)
 
 
+def test_typed_no_target_guardian_refusal_settles_after_lifetime_closure_and_retains_ask(monkeypatch, capsys):
+    import importlib.util
+    from pathlib import Path
+    from agent_procutil import SyncProcessLaunchError, _caller_owned as protocol
+
+    scripts = Path(__file__).resolve().parents[3] / "plugins" / "agent-worktrees" / "scripts"
+    loaded = {}
+    for name in ("hook_client", "hook_pre_policy", "hook_policy_process"):
+        spec = importlib.util.spec_from_file_location(name, scripts / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setitem(sys.modules, name, module)
+        loaded[name] = module
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    monkeypatch.setattr(loaded["hook_policy_process"], "_watch_legacy_parent",
+                        lambda stop: SimpleNamespace(join=lambda **kwargs: None))
+    local_os = SimpleNamespace(**vars(os))
+    local_os.name = "posix"
+    monkeypatch.setattr(protocol, "os", local_os)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    failure = SyncProcessLaunchError(FileNotFoundError(2, "fixture missing cwd"))
+    descriptors = []
+    original_pipe = os.pipe
+    before_writers, before_readers = set(protocol._lifetime_writers), set(protocol._lifetime_readers)
+    def pipe():
+        values = original_pipe()
+        descriptors.extend(values)
+        return values
+    def refuse(argv, **kwargs):
+        raise failure
+    monkeypatch.setattr(local_os, "pipe", pipe)
+    monkeypatch.setattr(protocol, "_run_owned", refuse)
+    settled = []
+    real_run = owned_process.run_caller_owned
+    def observe(*args, **kwargs):
+        original = kwargs["on_settled"]
+        def closed():
+            assert protocol._lifetime_writers == before_writers
+            assert protocol._lifetime_readers == before_readers
+            for descriptor in descriptors:
+                with pytest.raises(OSError):
+                    os.fstat(descriptor)
+            settled.append(True)
+            original()
+        kwargs["on_settled"] = closed
+        try:
+            return real_run(*args, **kwargs)
+        except SyncProcessLaunchError as error:
+            assert error is failure
+            raise
+    monkeypatch.setattr(owned_process, "run_caller_owned", observe)
+    assert loaded["hook_policy_process"].execute(
+        b"{}", legacy=True,
+        initial_decision={"permissionDecision": "ask", "permissionDecisionReason": "confirmed fixture"},
+    ) == 0
+    assert settled == [True] and len(descriptors) == 2
+    assert __import__("json").loads(capsys.readouterr().out)["permissionDecision"] == "ask"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job preparation")
 @pytest.mark.parametrize("phase", ["environment", "allocation", "configuration"])
 def test_native_precreation_refusal_notifies_once_after_releasing_job(monkeypatch, phase):

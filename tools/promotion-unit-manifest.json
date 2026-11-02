@@ -3558,7 +3558,7 @@
         "libs/agent-procutil/setup.py": "fc307f6a4c180344b0f95a8f31d7db63747e56549d55bd32221f3185a89e39b1",
         "libs/agent-procutil/src/agent_procutil/__init__.py": "29b9447c1fa1d713d4ef5d9d0e55d384faa8e79da28b8f5787d935f1e69f135c",
         "libs/agent-procutil/src/agent_procutil/_async.py": "1f7bcc621579282062a2d5117daed8a9f0201f4d2c4b44105328a5cd71ccbd26",
-        "libs/agent-procutil/src/agent_procutil/_caller_owned.py": "e81a7c9af9312ead550e87d23329f99015601408f5ce9f55c37e1a815f951ed1",
+        "libs/agent-procutil/src/agent_procutil/_caller_owned.py": "97bf5cfb885dce33d2261efae9756aafc4f7cba14dccf4979888f4927bc05507",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "ed08eea8cda3d1b096c15b498be558ae1283120c204c1563d8519f052f3de656",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "cefaa53b33187c2ee4cacc3e1179116fbe03e182b43b73f1d87152205a522942",

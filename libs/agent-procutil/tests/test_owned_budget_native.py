@@ -84,6 +84,29 @@ def test_normal_legacy_completion_stops_its_native_caller_watch(monkeypatch, cap
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX guardian refusal")
+def test_missing_guardian_cwd_notifies_only_after_lifetime_descriptors_close(tmp_path):
+    from agent_procutil import SyncProcessLaunchError, _caller_owned
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import run_caller_owned
+
+    before = (set(_caller_owned._lifetime_readers), set(_caller_owned._lifetime_writers))
+    settled = []
+    def observe():
+        assert before == (set(_caller_owned._lifetime_readers), set(_caller_owned._lifetime_writers))
+        settled.append(True)
+    with pytest.raises(SyncProcessLaunchError) as caught:
+        run_caller_owned(
+            [sys.executable, "-c", "raise AssertionError('missing cwd must never launch')"],
+            cwd=tmp_path / "missing", timeout=5,
+            max_stdout_bytes=32, max_stderr_bytes=32,
+            budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+            on_settled=observe,
+        )
+    assert caught.value.errno == 2 and settled == [True]
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX enclosing group")
 @pytest.mark.parametrize("outcome", ["timeout", "caller-exit"])
 def test_borrowed_observations_keep_one_deadline_and_enclosing_descendant_custody(tmp_path, outcome):

@@ -16,6 +16,7 @@ import threading
 import time
 from typing import Callable
 
+from agent_procutil import SyncProcessLaunchError
 from agent_procutil.owned_process import (
     OutputLimitExceeded,
     OwnedCleanupError,
@@ -342,6 +343,9 @@ def run(
         except _PreparationTimeout as error:
             preparation_refused = True
             raise subprocess.TimeoutExpired(argv, timeout) from error
+        except SyncProcessLaunchError:
+            preparation_refused = True
+            raise
         except subprocess.TimeoutExpired as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
         except OutputLimitExceeded as error:
