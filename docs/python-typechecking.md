@@ -183,6 +183,7 @@ Views live beside, not inside, the prepared venv because MyPy refuses its own
 environment as an import root.
 
 ```text
+python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-installation-context --strict
 ```
 
@@ -193,6 +194,13 @@ remain independent pending inputs; the existing installation-context vendoring
 owner must qualify correspondence before any copy can inherit canonical checking.
 Other fragment families and independent package/module environments remain
 separate campaign work.
+
+Bounded preparatory changes can reduce this project's measured debt without
+activating it. Its always-raising failure helper uses `NoReturn`, native
+platform fields retain explicit types, and differently shaped descriptor/path
+traversal helpers have distinct local names. These contracts do not waive
+remaining diagnostics or qualify a subset by filtering errors. The complete
+project stays pending until its full basic or strict check passes.
 
 ## Exact-candidate release enforcement
 
