@@ -645,3 +645,77 @@ def test_context_raw_input_known_content_is_not_forgotten_after_omission(tmp_pat
                      "evidence_refs": ["new-label"]},
         "approach": {"action": "Run parent"}})
     assert result["transition"]["decision"] == "not-admitted"
+
+
+def test_context_raw_delimiter_whitespace_preserves_actual_split_behavior(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit
+    initial = {"delimiter": ",", "text": "a b"}
+    replacement = {"delimiter": " ", "text": "a b"}
+    assert initial["text"].split(initial["delimiter"]) == ["a b"]
+    assert replacement["text"].split(replacement["delimiter"]) == ["a", "b"]
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, replacement)["transition"]["decision"] == "revisit-admitted"
+
+
+@pytest.mark.parametrize(("initial", "replacement"), [
+    (",", " "), (" ", "\t"), ("\n", "\r\n"),
+    ({"nested": [","]}, {"nested": [" "]}),
+    ({"nested": [{"separator": "\t"}]}, {"nested": [{"separator": "  "}]}),
+])
+def test_context_raw_whitespace_only_values_remain_meaningful_and_known(
+    tmp_path: Path, initial: Any, replacement: Any
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit, current
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    admitted = revisit(tmp_path, replacement)
+    assert admitted["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    rejected = revisit(tmp_path, initial)
+    assert rejected["transition"]["reason_code"] == "previously-used-context"
+    item = current(tmp_path)[1]
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]["visits"] == 2
+
+
+@pytest.mark.parametrize("kind", ["input", "observation", "insight"])
+def test_context_empty_content_stays_invalid_but_raw_whitespace_is_not_empty(
+    tmp_path: Path, kind: str
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS
+    baseline = context("")
+    baseline["facts"][0]["kind"] = kind
+    with pytest.raises(AGENDA.AgendaError, match="normalized-empty"):
+        STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+            "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "empty"))
+    baseline["facts"][0]["value"] = " \t\n"
+    req = v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "whitespace")
+    if kind == "input":
+        assert STORE.mutate(tmp_path, req)[0]["persisted"] is True
+    else:
+        with pytest.raises(AGENDA.AgendaError, match="normalized-empty"):
+            STORE.mutate(tmp_path, req)
+
+
+def test_context_prose_blank_revisit_rejects_without_partial_acceptance(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    baseline = context("known condition")
+    baseline["facts"][0]["kind"] = "observation"
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    proposed = context(" \t\n")
+    # A kind change cannot turn this lineage's original prose into raw input.
+    before = STORE.read(tmp_path)
+    accepted = STORE.history(tmp_path)
+    with pytest.raises(AGENDA.AgendaError, match="normalized-empty"):
+        update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+            "predecessor_attempt_id": attempt, "context": proposed,
+            "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                         "causal_change": "Whitespace is not new prose information.", "evidence_refs": ["changed-label"]},
+            "approach": {"action": "Run parent"}})
+    assert STORE.read(tmp_path) == before and STORE.history(tmp_path) == accepted

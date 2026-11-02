@@ -38,7 +38,7 @@ def semantic(value: Any, *, raw_input: bool = False) -> Any:
 
 def nonempty(value: Any) -> bool:
     if isinstance(value, str):
-        return bool(value.strip())
+        return bool(value)
     if value is None or value == "" or value == {} or value == []:
         return False
     if isinstance(value, (list, dict)):

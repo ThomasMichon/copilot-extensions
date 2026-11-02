@@ -191,6 +191,22 @@ grants, native qualification or claims of implementation.
 
 ## Journal
 
+### 2026-11-01 - Structured whitespace value follow-up
+
+- The next review found a tightly coupled raw-input edge: the nonempty/knowledge
+  helper still stripped whitespace-only string leaves after semantic
+  normalization preserved them. A structured delimiter change from comma to
+  space could therefore be refused despite changing the actual split result.
+- The shared predicate now retains nonempty raw strings, including whitespace
+  leaves. Regressions exercise the actual split result, scalar/nested whitespace,
+  historical reappearance refusal and prose-blank rejection without partial
+  acceptance. Cosmetic prose is normalized upstream; empty content remains
+  invalid.
+- The coordinator's combined packet passed 293 cases with two explicit
+  dependency/platform skips; the actual isolated connected sequence passed five
+  cases without skips. Both verified cleanup, and Ruff passed. Fresh review,
+  required CI, merge and canonical completion remain open.
+
 ### 2026-11-01 - Significant input content correction
 
 - Current-head review accepted numeric normalization but identified another
