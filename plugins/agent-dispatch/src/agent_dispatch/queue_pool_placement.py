@@ -88,6 +88,24 @@ def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | 
     return PoolAssignment(**dict(row)) if row is not None else None
 
 
+def _execution_excluded(
+    task: Task, *, machine: str, env: str, registration_id: str,
+    capabilities: frozenset[str], worktree: str | None,
+) -> bool:
+    from .bridge_remote import normalize_host
+    tokens = {
+        f"pool:{registration_id}", f"machine:{machine}", f"env:{env}",
+        f"repo:{task.repo}", *capabilities,
+    }
+    if worktree is not None:
+        tokens.add(f"worktree:{worktree}")
+    return bool(tokens.intersection(task.excludes)) or any(
+        token.startswith("machine:")
+        and normalize_host(token.removeprefix("machine:")) == normalize_host(machine)
+        for token in task.excludes
+    )
+
+
 def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     capabilities = pool.filters.permit.get("capabilities", frozenset())
     worktree = task.target_worktree or task.affinity.get("worktree")
@@ -99,13 +117,10 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
         return False
     if not machine_matches(task.target_machine, pool.machine):
         return False
-    tokens = {
-        f"pool:{pool.registration_id}", f"machine:{pool.machine}", f"env:{pool.env}",
-        f"repo:{task.repo}", *capabilities,
-    }
-    if tokens.intersection(task.excludes):
-        return False
-    if worktree and f"worktree:{worktree}" in task.excludes:
+    if _execution_excluded(
+        task, machine=pool.machine, env=pool.env, registration_id=pool.registration_id,
+        capabilities=capabilities, worktree=worktree,
+    ):
         return False
     attrs: dict[str, object] = {
         "repo": task.repo, "machine": pool.machine, "env": pool.env,
@@ -266,11 +281,10 @@ def require_pool_workspace(
         registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
     ) is None:
         raise TaskError("pool workspace conflicts with current task requirements")
-    if {
-        f"worktree:{worktree}", f"pool:{assignment.registration_id}",
-        f"machine:{assignment.machine}", f"env:{assignment.env}",
-        f"repo:{task.repo}", *capabilities,
-    }.intersection(task.excludes):
+    if _execution_excluded(
+        task, machine=assignment.machine, env=assignment.env,
+        registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
+    ):
         raise TaskError("pool workspace is excluded by current task routing")
 
 

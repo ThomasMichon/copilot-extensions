@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agent_dispatch.queue import SpawnReservation, Status, TaskError, TaskQueue
 from tests import test_pool_placement as placement_controls
-from tests.test_pool_placement import place, pool, publish, task
+from tests.test_pool_placement import place, pool, publish, record_native, task
 
 q = placement_controls.q
 
@@ -129,3 +131,60 @@ def test_discarded_optional_driver_workspace_does_not_pin_new_claim(q: TaskQueue
     assert replacement.execution_machine is None
     assert replacement.creating_host is None
     assert q.task_pool_assignment(successor.id).machine == "host-b"
+
+
+@pytest.mark.parametrize("machine", ["host-a", "HOST-A"])
+@pytest.mark.parametrize("excluded", ["machine:host-a", "machine:HOST-A", "machine: Host-A "])
+def test_normalized_machine_exclusion_refuses_before_claim(
+    q: TaskQueue, machine: str, excluded: str,
+) -> None:
+    publish(q, pool(machine=machine))
+    requested = task(q, excludes=[excluded])
+    with pytest.raises(TaskError, match="no eligible pool"):
+        place(q, requested)
+    assert q.get(requested.id) == requested
+    assert q.list_reservations(task_id=requested.id) == []
+    assert q.task_pool_assignment(requested.id) is None
+    assert place(q, task(q))[1]
+
+
+@pytest.mark.parametrize("boundary", ["workspace", "publication", "start"])
+@pytest.mark.parametrize("excluded", ["machine:HOST-A", "machine: Host-A "])
+def test_changed_machine_exclusion_blocks_actual_execution_without_mutation(
+    q: TaskQueue, boundary: str, excluded: str,
+) -> None:
+    publish(q, pool())
+    requested = task(q)
+    reservation, _ = place(q, requested)
+    if boundary != "workspace":
+        record_native(q, reservation)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET excludes = ? WHERE id = ?", (json.dumps([excluded]), requested.id),
+        )
+    task_before = q.get(requested.id)
+    reservation_before = q.get_reservation(reservation.key)
+    assignment_before = q.task_pool_assignment(requested.id)
+    with pytest.raises(TaskError, match="excluded"):
+        if boundary == "workspace":
+            q.record_spawn_worktree(
+                reservation.key, "worktree", ownership="created", creating_host="host-a",
+                execution_machine="host-a", driver="cli",
+            )
+        elif boundary == "publication":
+            q.record_spawn(reservation.key, session_handle="native", worktree="worktree")
+        else:
+            q.start(
+                requested.id, "host-a/worktree", owner_session_id="native",
+                expected_generation=task_before.generation,
+            )
+    assert q.get(requested.id) == task_before
+    assert q.get_reservation(reservation.key) == reservation_before
+    assert q.task_pool_assignment(requested.id) == assignment_before
+
+
+def test_normalized_machine_exclusion_selects_a_different_free_host(q: TaskQueue) -> None:
+    publish(q, pool(priority=10), pool(machine="host-b"))
+    requested = task(q, excludes=["machine: HOST-A "])
+    assert place(q, requested)[1]
+    assert q.task_pool_assignment(requested.id).machine == "host-b"

@@ -157,6 +157,9 @@ Placement intersects the retained host with current machine targets, requirement
 and exclusions before committing the claim or slot. It does not replace those
 selectors or infer a legacy execution host from creation provenance. Discarding
 an optional workspace also discards its execution-host constraint.
+Machine exclusions use the same strip/lower host normalization at placement,
+workspace recording, native publication and affirmative start. Other exclusion
+dimensions and capability tokens keep their existing exact matching.
 Workspace recording and start both recheck that execution machine and current exclusions
 against the retained supplied capabilities and current intrinsic requirements.
 Retained CLI liveness and cleanup use the validated recorded execution machine

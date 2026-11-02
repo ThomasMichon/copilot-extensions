@@ -1985,3 +1985,27 @@ The coupled contained run passes **1538 controls**, one existing skip, across
 twenty-six selectors. Current-head review, actual merge, caller/startup
 integration and all canonical parent/native gates remain open; this source
 correction activates no runtime.
+
+### 2026-11-01 - Successor location and normalized exclusion correction prepared
+
+A distinct same-dedup successor retains its predecessor's validated execution
+host with the carried workspace. Pool selection intersects that location with
+unchanged task targets, intrinsic requirements and exclusions before the claim
+transaction commits; original host spelling and creation provenance remain
+independent. Optional workspace discard also discards its location constraint.
+Unknown legacy location is not inferred from creation provenance.
+
+The shared placement/workspace exclusion check compares machine selectors with
+the same strip/lower normalization as validated execution hosts. Workspace
+recording, native publication and affirmative start recheck current exclusions;
+other token dimensions retain exact matching.
+
+Twenty-eight actual successor and exclusion controls cover higher-priority
+foreign-host candidates, normalized recorded location through affirmative start,
+conflicting/unavailable/full routing, unknown legacy and unassigned reuse,
+optional workspace discard, mixed-case host exclusions and changed exclusions
+at the workspace/publication/start boundaries. The bounded coupled run passes
+**1566 controls**, one existing skip, across twenty-seven selectors with cleanup
+verified. Current-head review and actual merge remain open; caller/startup-policy
+integration, unknown-effect exhaustion and every parent/native gate remain
+required. No caller migration or runtime activation is included.
