@@ -205,6 +205,46 @@ def test_process_packet_reports_no_desktop_observation_or_qualification(process_
     assert not (Path(request["output"]) / "visibility-result.json").exists()
 
 
+def test_process_adapter_preserves_original_worker_origin_after_source_verification(
+    process_fixture: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, events, _ = process_fixture
+    request["deadline"], request["original_start_monotonic"] = 175, 10
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 40)
+    original = runner.run_workers
+
+    def workers(request, root, api, deadline, start, report, **kwargs):
+        assert start == 10 and deadline == 175
+        return original(request, root, api, deadline, start, report, **kwargs)
+
+    monkeypatch.setattr(runner, "run_workers", workers)
+    assert runner.process_safety(request) == 0
+    assert events.count("worker-04-close") == 1
+
+
+@pytest.mark.parametrize("origin", [True, float("nan"), 0, 41, 9])
+def test_process_adapter_refuses_invalid_or_extended_original_clock(
+    process_fixture: tuple, monkeypatch: pytest.MonkeyPatch, origin: float,
+) -> None:
+    request, events, _ = process_fixture
+    request["deadline"], request["original_start_monotonic"] = 175, origin
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 40)
+    with pytest.raises(runner.ObservationBlocked, match="original"):
+        runner.process_safety(request)
+    assert events == []
+
+
+def test_original_worker_cutoff_cannot_restart_at_process_admission(
+    process_fixture: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, events, _ = process_fixture
+    request["deadline"], request["original_start_monotonic"] = 175, 10
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 160)
+    with pytest.raises(runner.ObservationBlocked, match="expired"):
+        runner.process_safety(request)
+    assert events == ["process-owner"]
+
+
 @pytest.mark.parametrize("admission", ["refused", "expired"])
 def test_process_owner_admission_never_launches_workers_after_refusal_or_deadline(
     process_fixture: tuple, monkeypatch: pytest.MonkeyPatch, admission: str,
