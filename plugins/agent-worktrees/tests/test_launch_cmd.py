@@ -51,6 +51,118 @@ def test_plain_launch_appends_allow_all():
     assert cmd[-2:] == ["--allow-all", "--experimental"]
 
 
+@pytest.mark.parametrize("recovery", [False, True])
+def test_normal_permissions_omits_generated_approval_without_changing_preferences(
+    tmp_path, monkeypatch, recovery,
+):
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "claude-sonnet-5", "effortLevel": "medium"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    config = _config()
+    config.repos["ext"] = dataclasses.replace(
+        config.default_repo, launch_recovery={"linux": ["copilot"]},
+    )
+    args = _args([])
+    args.normal_permissions = True
+    args.recovery = recovery
+    command = _inner_command(m._build_launch_cmd(config, args, "/w/wt"))
+    assert "--allow-all" not in command
+    assert "--experimental" in command
+    assert command[command.index("--model") + 1] == "claude-sonnet-5"
+    assert command[command.index("--reasoning-effort") + 1] == "medium"
+    assert "-C=/w/wt" in command
+
+
+@pytest.mark.parametrize("source", ["template", "passthrough", "profile"])
+@pytest.mark.parametrize("flag", [
+    "--allow-all", "--yolo", "--allow-all-tools", "--allow-all-paths",
+    "--allow-all-urls", "--allow-tool=shell", "--allow-url=https://example.com",
+    "--no-ask-user",
+])
+def test_normal_permissions_rejects_conflicting_permission_flags(source, flag):
+    config = _config({"linux": ["copilot", flag]} if source == "template" else None)
+    args = _args([flag] if source == "passthrough" else [])
+    args.normal_permissions = True
+    profile = cfg.CopilotProfile(
+        name="fixture", label="Fixture", copilot_args=[flag] if source == "profile" else [],
+    )
+    with pytest.raises(m.LaunchPreflightError, match="normal-permissions"):
+        m._build_launch_cmd(config, args, "/w/wt", profile=profile)
+
+
+@pytest.mark.parametrize("value", ["--allow-all", "--yolo", "--acp"])
+def test_normal_permissions_preserves_literal_prompt_values(value):
+    args = _args(["--prompt", value, "--", "--allow-all"])
+    args.normal_permissions = True
+    command = _inner_command(m._build_launch_cmd(_config(), args, "/w/wt"))
+    assert command[command.index("--prompt") + 1] == value
+    assert command[-2:] == ["--", "--allow-all"]
+    assert "--allow-all" not in command[:command.index("--")][3:]
+
+
+@pytest.mark.parametrize("template", [
+    ["copilot", "--acp", "--stdio"], ["custom-launcher"], ["bash", "/custom/setup.sh"],
+])
+def test_normal_permissions_refuses_unqualified_launchers(template):
+    args = _args([])
+    args.normal_permissions = True
+    with pytest.raises(m.LaunchPreflightError, match="normal-permissions"):
+        m._build_launch_cmd(_config({"linux": template}), args, "/w/wt")
+
+
+@pytest.mark.parametrize("command", ["resolve", "embody", "copilot"])
+def test_normal_permissions_is_an_explicit_native_launch_option(command):
+    args = m.build_parser().parse_args([command, "--normal-permissions"])
+    assert args.normal_permissions is True
+    baseline = m.build_parser().parse_args([command])
+    assert baseline.normal_permissions is False
+
+
+@pytest.mark.parametrize("selection", [
+    [], ["--new"], ["--base", "--machine", "remote"],
+    ["--worktree-id", "fixture", "--restore"],
+    ["--worktree-id", "fixture", "--bare-resume"],
+])
+def test_normal_permissions_resolve_refuses_unqualified_modes_before_configuration(
+    monkeypatch, capfd, selection,
+):
+    args = m.build_parser().parse_args(["resolve", "--normal-permissions", *selection])
+    monkeypatch.setattr(m.cfg, "load_config", lambda: pytest.fail("must refuse before effects"))
+    assert m.cmd_resolve(args) == 3
+    assert "normal-permissions" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_normal_permissions_preserves_normalized_posix_launch(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    config = _hook_config(copilot_path={"linux": "/usr/bin/copilot"})
+    config.repos["ext"] = dataclasses.replace(config.default_repo, anchor=str(tmp_path))
+    args = _args([])
+    args.normal_permissions = True
+    command = _inner_command(m._build_launch_cmd(config, args, str(tmp_path)))
+    assert "default-setup.sh" in command[1]
+    assert command[command.index("--copilot-path") + 1] == "/usr/bin/copilot"
+    assert "--allow-all" not in command
+    assert "--experimental" in command
+
+
+@pytest.mark.parametrize("platform_name,suffix", [("Windows", "ps1"), ("Linux", "sh")])
+def test_normal_permissions_refuses_legacy_setup(monkeypatch, tmp_path, platform_name, suffix):
+    monkeypatch.setattr(m.platform, "system", lambda: platform_name)
+    setup = tmp_path / "tools" / "setup" / f"setup.{suffix}"
+    setup.parent.mkdir(parents=True)
+    setup.write_text("legacy launcher\n", encoding="utf-8")
+    config = _hook_config()
+    config.repos["ext"] = dataclasses.replace(config.default_repo, anchor=str(tmp_path))
+    args = _args([])
+    args.normal_permissions = True
+    with pytest.raises(m.LaunchPreflightError, match="normal-permissions"):
+        m._build_launch_cmd(config, args, str(tmp_path))
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("normalized", [False, True])
 def test_process_launcher_binds_the_actual_native_command(tmp_path, monkeypatch, normalized):
@@ -1601,8 +1713,9 @@ def test_bash_setup_rejects_missing_native_option_values(option):
     ("--prompt", None, False), ("--prompt", "-C", False), ("-p", "-C", False),
     ("--prompt", None, True),
 ])
+@pytest.mark.parametrize("normal_permissions", [False, True])
 def test_pinned_resume_directory_survives_normalized_powershell_launch(
-    tmp_path, monkeypatch, prompt_option, prompt, literal_tail,
+    tmp_path, monkeypatch, prompt_option, prompt, literal_tail, normal_permissions,
 ):
     from agent_procutil import no_window_kwargs
     from agent_worktrees import installer
@@ -1657,7 +1770,9 @@ def test_pinned_resume_directory_survives_normalized_powershell_launch(
         arguments += [prompt_option, prompt]
     if literal_tail:
         arguments += ["--", "-C", "/literal-data"]
-    command = m._build_launch_cmd(config, _args(arguments), str(selected))
+    args = _args(arguments)
+    args.normal_permissions = normal_permissions
+    command = m._build_launch_cmd(config, args, str(selected))
     seed = "seed's literal $value"
     command = _inner_command(with_seed(with_resume(command, "synthetic-anchor-origin"), seed))
     completed = subprocess.run(
@@ -1668,8 +1783,9 @@ def test_pinned_resume_directory_survives_normalized_powershell_launch(
     assert completed.returncode == 0, completed.stdout + completed.stderr
     received = json.loads(argv_marker.read_text(encoding="utf-8"))
     boundary = arguments.index("--") if literal_tail else len(arguments)
+    approval = [] if normal_permissions else ["--allow-all"]
     assert received == [
-        "-C", str(selected), *arguments[:boundary], "--allow-all", "--experimental",
+        "-C", str(selected), *arguments[:boundary], *approval, "--experimental",
         "--resume=synthetic-anchor-origin", "--interactive", seed, *arguments[boundary:],
     ]
     assert Path(cwd_marker.read_text(encoding="utf-8").strip()) == selected

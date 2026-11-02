@@ -430,11 +430,19 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
 
     interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
     verdict = None
-    if not args.dry_run:
+    if not args.dry_run or getattr(args, "normal_permissions", False):
         try:
             verdict = sessions.verify_worktree_active(record)
         except Exception:
             verdict = None
+    if getattr(args, "normal_permissions", False) and (
+        verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok or verdict.active
+    ):
+        from .launch_passthrough import NORMAL_PERMISSIONS_LIVE_ERROR
+
+        output.err(NORMAL_PERMISSIONS_LIVE_ERROR)
+        _emit_plan({"action": "error", "error": NORMAL_PERMISSIONS_LIVE_ERROR, "exit_code": 3})
+        return 3
     try:
         staged_seed = seed_for_attempt(record.yaml_path, record, args, verdict=verdict)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:

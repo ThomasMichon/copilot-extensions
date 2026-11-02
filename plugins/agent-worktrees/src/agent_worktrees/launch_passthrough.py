@@ -5,10 +5,24 @@ from __future__ import annotations
 import argparse
 
 REJECTED_COPILOT_ARGS = ("--acp", "--stdio", "-p", "--prompt", "-i", "--interactive")
+NORMAL_PERMISSIONS_LIVE_ERROR = (
+    "--normal-permissions requires a stopped target; new launch arguments cannot "
+    "establish or change the permissions of an already-running session"
+)
+
+
+def add_normal_permissions_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--normal-permissions", action="store_true",
+        help="For this local native launch only, omit generated blanket approval. "
+        "Refuse permission-grant flags, unattended mode, custom/legacy launchers, "
+        "ACP and already-running sessions. Existing defaults remain unchanged.",
+    )
 
 
 def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
     """Register the launch-passthrough flags shared by `embody` and `copilot`."""
+    add_normal_permissions_arg(p)
     p.add_argument(
         "--copilot-process-launcher", default=None, metavar="PATH",
         help="One-launch executable wrapper for direct Copilot or normalized "

@@ -76,6 +76,27 @@ def native_option_tokens(command, *, passthrough_start: int):
     return result
 
 
+def validate_normal_permissions(command, native_options, error_type) -> None:
+    """Qualify the native argv before suppressing generated permission grants."""
+    conflict = next(
+        (flag for flag in native_options if flag.startswith("--allow-") or flag in {
+            "--yolo", "--no-ask-user", "--no-sandbox", "--trust-all-tools",
+        }),
+        None,
+    )
+    if conflict:
+        raise error_type(f"--normal-permissions conflicts with {conflict}")
+    if "--acp" in native_options:
+        raise error_type("--normal-permissions cannot govern ACP protocol permissions")
+    if _normalized_setup_index(command) is None and (
+        not command or PureWindowsPath(command[0]).stem.casefold() != "copilot"
+    ):
+        raise error_type(
+            "--normal-permissions requires a direct Copilot command or the owned "
+            "normalized setup launcher; custom and legacy launchers are unqualified"
+        )
+
+
 def bind_execution_directory(
     command, work_dir: str, error_type, *, passthrough_start: int = 1, native_suffix=(),
 ):

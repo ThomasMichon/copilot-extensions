@@ -532,6 +532,37 @@ requires separately qualified peer support; source publication alone does not
 activate different-worktree launch parallelism. The new lease is distinct from
 seed/native admission and the Windows mux check/create lease.
 
+### Per-launch native permission mode
+
+`resolve`, `embody` and `copilot` accept the explicit `--normal-permissions`
+opt-in. It suppresses the launch builder's generated `--allow-all` for that
+invocation only. Omitting the option preserves existing launch defaults; no
+repository configuration, user setting or permission store is rewritten.
+Directory binding, model/effort/context preferences and extension loading remain
+unchanged.
+
+The option qualifies direct Copilot commands and the owned normalized setup
+launcher on Windows and POSIX. It refuses `--allow-*`, `--yolo`,
+`--no-ask-user` and legacy permission-bypass flags in the launch template,
+passthrough or selected profile, rather than silently deleting them. Literal
+prompt values and arguments after `--` are not interpreted as permission flags.
+ACP, custom/legacy launchers and explicit restart are unqualified. `resolve`
+requires an explicit existing local target (`--worktree-id`, `--codename` or
+`--base`); remote, New, picker and restore paths refuse. Create a worktree
+separately before resolving its launch.
+
+An already-running target is refused, including a mux creation race: new argv
+cannot establish an incumbent's permission state, and no prompt is delivered to
+it. This is an argv-construction mode, not proof of effective permissions:
+existing Copilot settings, approvals, hook/environment behavior and the selected
+executable remain independent inputs. A preview is not execution evidence.
+
+This is a provider-first additive opt-in; existing callers emit no new syntax.
+Discover support from `resolve --help`, `embody --help` or `copilot --help` on the
+exact selected runtime, not a newer payload's package version. Older runtimes
+strictly reject the new option. An unsupported runtime or rollback must be
+reported, never retried without the option or silently downgraded.
+
 ### Explicit restart Resume
 
 `embody --worktree-id <exact-id> --restart-request <json> --json` is a separate,

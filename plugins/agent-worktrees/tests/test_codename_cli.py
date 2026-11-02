@@ -88,7 +88,7 @@ class TestCreateAssignsCodename:
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
         _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
-        result = m._create_worktree_core(config)
+        result = m._create_worktree_core(config, build_launch_plan=False)
 
         worktree_id = result["worktree"]["id"]
         rec = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
@@ -103,8 +103,8 @@ class TestCreateAssignsCodename:
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
         _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
-        first = m._create_worktree_core(config)
-        second = m._create_worktree_core(config)
+        first = m._create_worktree_core(config, build_launch_plan=False)
+        second = m._create_worktree_core(config, build_launch_plan=False)
 
         assert first["worktree"]["codename"] != second["worktree"]["codename"]
 

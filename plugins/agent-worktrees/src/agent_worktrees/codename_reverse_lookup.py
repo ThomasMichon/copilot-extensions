@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import claimant
@@ -270,3 +271,24 @@ def resolve_codename_cross_machine_unique(
     if len(matches) > 1:
         raise AmbiguousCodenameError(codename, matches)
     return matches[0]
+
+
+def resolve_local_target(
+    codename: str, *, resolve_local: Callable[[str], str | None],
+) -> tuple[str | None, str | None]:
+    """Resolve a local id, reporting missing, remote or ambiguous matches."""
+    resolved_id = resolve_local(codename)
+    if resolved_id is not None:
+        return resolved_id, None
+    try:
+        remote = resolve_codename_cross_machine_unique(codename)
+    except AmbiguousCodenameError as exc:
+        return None, str(exc)
+    if remote is not None:
+        return None, (
+            f"Codename '{codename}' resolves to worktree "
+            f"'{remote.worktree_id}' on machine '{remote.machine}', not this "
+            f"machine. Resolve/embody it there directly (e.g. SSH to "
+            f"'{remote.machine}') -- remote launch is not supported."
+        )
+    return None, f"No worktree found with codename '{codename}'"

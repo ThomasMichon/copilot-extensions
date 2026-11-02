@@ -229,6 +229,33 @@ class TestCmdEmbody:
         assert out["created"] is False and out["resumed"] is True
         assert out["session"] == "wt-wtY" and out["new_pane"] == "%1"
 
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_normal_permissions_refuses_existing_mux_before_seed_delivery(
+        self, monkeypatch, capfd, tmp_path, dry_run,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtY")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtY.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": "/w/wtY"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane", lambda *a, **k: pytest.fail("must not deliver a seed"),
+        )
+        monkeypatch.setattr(
+            sessions, "mux_new_session", lambda *a, **k: pytest.fail("must not spawn"),
+        )
+        rc = m.cmd_embody(_ns(
+            worktree_id="wtY", seed="not delivered", normal_permissions=True, dry_run=dry_run,
+        ))
+        assert rc == 3
+        out = json.loads(capfd.readouterr().out)
+        assert "created" not in out and "resumed" not in out
+        assert "normal-permissions" in out["error"]
+
     def test_resume_delivers_pending_seed_left_by_an_external_pane_creator(
         self, monkeypatch, capfd, tmp_path,
     ):
@@ -881,6 +908,32 @@ class TestCmdEmbody:
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(sessions, "resolve_resume_target", lambda rec: "head-1")
 
+    @pytest.mark.parametrize("phase", ["recheck", "join"])
+    def test_normal_permissions_refuses_worktree_creation_races(
+        self, monkeypatch, capfd, tmp_path, phase,
+    ):
+        from agent_worktrees import embody_completion
+
+        self._stub_existing(monkeypatch, tmp_path)
+        probes = iter([False, phase == "recheck"])
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: next(probes))
+
+        def join(*a, **k):
+            assert phase == "join", "must refuse before mux creation"
+            return {"ok": True, "created": False, "session": "wt-wtR"}
+
+        monkeypatch.setattr(sessions, "mux_new_session", join)
+        monkeypatch.setattr(
+            embody_completion, "complete_launch",
+            lambda *a, **k: pytest.fail("must not complete or deliver a seed"),
+        )
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", normal_permissions=True, seed="do not send",
+        )) == 3
+        result = json.loads(capfd.readouterr().out)
+        assert "normal-permissions" in result["error"]
+        assert "created" not in result and "resumed" not in result
+
     @pytest.mark.parametrize(
         "extra, resumed",
         [
@@ -1265,6 +1318,39 @@ class TestCmdEmbodyAnchor:
         assert out["created"] is False and out["resumed"] is True
         assert out["anchor"] is True
         assert out["new_pane"] == "%2"
+
+    @pytest.mark.parametrize("phase", ["initial", "recheck", "join"])
+    def test_normal_permissions_refuses_anchor_reuse_and_creation_races(
+        self, monkeypatch, capfd, phase,
+    ):
+        _stub_anchor_config(monkeypatch)
+        probes = iter([phase == "initial", phase == "recheck"])
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: next(probes))
+        def join(*a, **k):
+            assert phase == "join", "must refuse before mux creation"
+            return {"ok": True, "created": False, "session": "wt-anchor-example-web"}
+        monkeypatch.setattr(sessions, "mux_new_session", join)
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane", lambda *a, **k: pytest.fail("must not deliver a seed"),
+        )
+        assert m.cmd_embody(_ns(
+            anchor=True, normal_permissions=True, seed="do not send",
+        )) == 3
+        result = json.loads(capfd.readouterr().out)
+        assert "normal-permissions" in result["error"]
+        assert "created" not in result
+
+    def test_normal_permissions_preflight_failure_is_structured(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        def refuse(*a, **k):
+            raise m.LaunchPreflightError("--normal-permissions conflicts with --allow-all")
+        monkeypatch.setattr(m, "_build_launch_cmd", refuse)
+        monkeypatch.setattr(
+            sessions, "mux_new_session", lambda *a, **k: pytest.fail("must not spawn"),
+        )
+        assert m.cmd_embody(_ns(anchor=True, normal_permissions=True)) == 3
+        assert "normal-permissions" in json.loads(capfd.readouterr().out)["error"]
 
     def test_anchor_seeds_the_first_turn(self, monkeypatch, capfd):
         _stub_anchor_config(monkeypatch)

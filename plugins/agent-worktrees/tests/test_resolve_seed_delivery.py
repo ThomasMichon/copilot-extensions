@@ -273,6 +273,33 @@ def test_live_open_held_backend_admission_preserves_intent_and_refuses_mutation(
 
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("verdict", [
+    LiveVerdict(active=True, mux_live=True), LiveVerdict(probes_ok=False), None,
+])
+def test_normal_permissions_refuses_live_or_uncertain_resolution_before_seed_mutation(
+    tmp_path, monkeypatch, capfd, surface, verdict,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    launch_seed_state.stage(record.yaml_path, kind="new", text="retain the original")
+    before = launch_seed_state.state_path(record.yaml_path).read_bytes()
+    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        normal_permissions=True, seed="must not replace",
+    )
+    assert code == 3
+    assert "normal-permissions" in plan["error"]
+    assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
+    assert tracking.load_record(record.yaml_path).resume_count == 0
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
 def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
     tmp_path, monkeypatch, capfd, surface,
 ):

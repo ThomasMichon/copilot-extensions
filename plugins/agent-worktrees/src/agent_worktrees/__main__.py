@@ -131,7 +131,7 @@ from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
 from . import state_root as state_root_mod  # noqa: F401 -- compatibility re-export
 from .copilot_launch_prefs import resolve_launch_pref_flags
-from .process_launcher import apply_process_launcher, bind_execution_directory, native_option_tokens, quote_powershell_command
+from .process_launcher import apply_process_launcher, bind_execution_directory, native_option_tokens, quote_powershell_command, validate_normal_permissions
 from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
 # front_door_cli's own names are re-exported eagerly (not deferred to
 # _load_full_command_surface() below) because main() calls several of them
@@ -2183,6 +2183,9 @@ def _build_launch_cmd(
     cmd.extend(profile_args)
     generated = []
     native_options = native_option_tokens(cmd, passthrough_start=passthrough_start)
+    normal_permissions = getattr(args, "normal_permissions", False)
+    if normal_permissions:
+        validate_normal_permissions(cmd, native_options, LaunchPreflightError)
 
     # Auto-approve everything so worktree sessions run without any
     # confirmation prompts.  --allow-all is equivalent to
@@ -2193,12 +2196,13 @@ def _build_launch_cmd(
     # explicitly for installed extensions to appear.  Skip ACP sessions for
     # the all-permissions flag only (agent-bridge manages permissions over
     # the protocol) and never duplicate a flag the caller already supplied.
+    # Explicit normal-permission launches retain native permission prompts.
     # ACP detection inspects the complete command assembled so far (not just
     # copilot_args/profile args), so a configured `launch` template that
     # embeds `--acp` directly is detected too -- same class of gap as the
     # duplicate-flag check below, applied uniformly.
     is_acp = "--acp" in native_options
-    if not is_acp and not any(
+    if not normal_permissions and not is_acp and not any(
         flag in native_options for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
         generated.append("--allow-all")
