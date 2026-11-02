@@ -268,3 +268,10 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   publication. Seven phase-specific controls prove a later refresh recovers
   every caller and its original guard. The complete map packet passed 57 cases
   with one native FIFO capability skip.
+- Replaced error-suppressing Git path predicates with bounded native metadata
+  observations. Unreadable nested Git markers no longer fall through to a
+  parent repository; unavailable or nonregular common-directory markers no
+  longer invent a linked worktree's common identity. Three controls retain
+  the unavailable result and recover the correct identity after repair.
+  The combined map, standalone consumer and deployment-contract packet passed
+  95 cases with one native FIFO capability skip.

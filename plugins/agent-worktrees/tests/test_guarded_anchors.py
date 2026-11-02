@@ -56,6 +56,70 @@ def test_missing_map_is_unavailable_not_complete_empty(tmp_path):
     assert result.status == "ready" and result.roots == []
 
 
+def test_git_marker_probe_failure_cannot_fall_back_to_parent_repository(tmp_path, monkeypatch):
+    reader = _load("guarded_anchor_map")
+    parent = _repo(tmp_path / "parent")
+    nested = _repo(parent / "nested")
+    marker = nested / ".git"
+    original_stat, original_lstat = Path.stat, Path.lstat
+
+    def unavailable(path, *args, **kwargs):
+        if path == marker:
+            raise PermissionError("synthetic unreadable Git marker")
+        return original_stat(path, *args, **kwargs)
+
+    def unavailable_lstat(path, *args, **kwargs):
+        if path == marker:
+            raise PermissionError("synthetic unreadable Git marker")
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", unavailable)
+    monkeypatch.setattr(Path, "lstat", unavailable_lstat)
+    assert reader.repository_identity(nested / "new.txt") is None
+    monkeypatch.setattr(Path, "stat", original_stat)
+    monkeypatch.setattr(Path, "lstat", original_lstat)
+    assert reader.repository_identity(nested / "new.txt")["root"] == reader.canonical(nested)
+
+
+@pytest.mark.parametrize("damage", ["unreadable", "nonregular"])
+def test_linked_common_directory_probe_failure_cannot_publish_local_git_identity(tmp_path, monkeypatch, damage):
+    reader = _load("guarded_anchor_map")
+    anchor = _repo(tmp_path / "anchor", bare=True)
+    gitdir = anchor / "worktrees" / "linked"
+    gitdir.mkdir(parents=True)
+    (gitdir / "HEAD").write_text("ref: refs/heads/main\n")
+    common = gitdir / "commondir"
+    common.write_text("../..\n")
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / ".git").write_text(f"gitdir: {gitdir}\n")
+    original_stat, original_lstat = Path.stat, Path.lstat
+
+    def unavailable(path, *args, **kwargs):
+        if path == common:
+            raise PermissionError("synthetic unreadable common-directory marker")
+        return original_stat(path, *args, **kwargs)
+
+    def unavailable_lstat(path, *args, **kwargs):
+        if path == common:
+            raise PermissionError("synthetic unreadable common-directory marker")
+        return original_lstat(path, *args, **kwargs)
+
+    if damage == "unreadable":
+        monkeypatch.setattr(Path, "stat", unavailable)
+        monkeypatch.setattr(Path, "lstat", unavailable_lstat)
+    else:
+        common.unlink()
+        common.mkdir()
+    assert reader.repository_identity(linked / "new.txt") is None
+    monkeypatch.setattr(Path, "stat", original_stat)
+    monkeypatch.setattr(Path, "lstat", original_lstat)
+    if damage == "nonregular":
+        common.rmdir()
+        common.write_text("../..\n")
+    assert reader.repository_identity(linked / "new.txt")["common_dir"] == reader.canonical(anchor)
+
+
 def test_map_reader_and_bounded_writer_complete_during_publication(tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     import threading

@@ -79,6 +79,16 @@ def _text(path: Path) -> str:
     return raw.decode("utf-8").removesuffix("\n").removesuffix("\r")
 
 
+def _path_mode(path: Path) -> int:
+    try:
+        info = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return 0
+    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        info = path.stat()
+    return info.st_mode
+
+
 def repository_identity(start: str | Path) -> dict | None:
     """Nearest checkout/common directory, including new targets and bare roots.
 
@@ -89,9 +99,10 @@ def repository_identity(start: str | Path) -> dict | None:
         here = Path(canonical(start))
         for root in (here, *here.parents):
             marker = root / ".git"
-            if marker.is_dir():
+            marker_mode = _path_mode(marker)
+            if stat.S_ISDIR(marker_mode):
                 git_dir = marker
-            elif marker.is_file():
+            elif stat.S_ISREG(marker_mode):
                 text = _text(marker)
                 if not text.lower().startswith("gitdir:"):
                     return None
@@ -101,21 +112,30 @@ def repository_identity(start: str | Path) -> dict | None:
                 git_dir = Path(pointer)
                 if not git_dir.is_absolute():
                     git_dir = root / git_dir
-            elif (root / "HEAD").is_file() and (root / "objects").is_dir() and (root / "refs").is_dir():
+            elif marker_mode:
+                return None
+            elif (
+                stat.S_ISREG(_path_mode(root / "HEAD"))
+                and stat.S_ISDIR(_path_mode(root / "objects"))
+                and stat.S_ISDIR(_path_mode(root / "refs"))
+            ):
                 git_dir = root
             else:
                 continue
-            if not (git_dir / "HEAD").is_file():
+            if not stat.S_ISREG(_path_mode(git_dir / "HEAD")):
                 return None
             common = git_dir
-            if (git_dir / "commondir").is_file():
+            common_mode = _path_mode(git_dir / "commondir")
+            if common_mode:
+                if not stat.S_ISREG(common_mode):
+                    return None
                 pointer = _text(git_dir / "commondir")
                 if not pointer:
                     return None
                 common = Path(pointer)
                 if not common.is_absolute():
                     common = git_dir / common
-            if not common.is_dir():
+            if not stat.S_ISDIR(_path_mode(common)):
                 return None
             return {
                 "root": canonical(root), "git_dir": canonical(git_dir),
