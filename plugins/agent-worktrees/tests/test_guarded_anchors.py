@@ -440,6 +440,47 @@ def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer, 
     assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
 
 
+def test_transient_checkout_identity_failure_retains_scope_for_later_refresh(producer, monkeypatch):
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    monkeypatch.setattr(p.module, "_reader", lambda: p.reader)
+    original = p.reader.repository_identity
+    selected = p.reader.canonical(p.callers[0])
+    monkeypatch.setattr(p.reader, "repository_identity", lambda path: (
+        None if p.reader.canonical(path) == selected else original(path)
+    ))
+    with pytest.raises(p.module.GuardPublicationError, match="checkout identity is unavailable"):
+        p.module.refresh(registry_root=p.root)
+    assert p.reader.map_path(p.callers[0], p.root).is_file()
+    monkeypatch.setattr(p.reader, "repository_identity", original)
+    assert p.module.refresh(registry_root=p.root)["published"] == 2
+    assert p.reader.read_map(p.callers[0], p.root).status == "ready"
+
+
+def test_unavailable_registered_identity_is_not_a_removed_caller(producer, monkeypatch):
+    from agent_worktrees import repos
+
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    original_root = repos.registered_entry_root
+    original_local = repos.RepoEntry.local_path
+    monkeypatch.setattr(repos.RepoEntry, "local_path", lambda entry: (
+        str(p.callers[0]) if entry.name == "first" else original_local(entry)
+    ))
+
+    def unavailable(entry):
+        if entry.name == "first":
+            raise repos.RepositoryResolutionError("synthetic unavailable registered path")
+        return original_root(entry)
+
+    monkeypatch.setattr(repos, "registered_entry_root", unavailable)
+    with pytest.raises(p.module.GuardPublicationError, match="registration identity is unavailable"):
+        p.module.refresh(registry_root=p.root)
+    assert p.reader.map_path(p.callers[0], p.root).is_file()
+    monkeypatch.setattr(repos, "registered_entry_root", original_root)
+    assert p.module.refresh(registry_root=p.root)["published"] == 2
+
+
 @pytest.mark.parametrize("operation", ["refresh", "managed_write"])
 def test_publication_lock_order_allows_registry_owned_nested_work(producer, monkeypatch, operation):
     from concurrent.futures import ThreadPoolExecutor

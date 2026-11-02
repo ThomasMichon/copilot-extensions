@@ -60,15 +60,22 @@ def build_snapshot(caller: str, root: Path, generation: str) -> dict:
     registry_path = root / "repos.yaml"
     registry = read_registry(registry_path, strict=True)
     project = None
+    registration_unavailable = False
     for name, entry in registry.repos.items():
         try:
             registered = reader.repository_identity(repos.registered_entry_root(entry))
         except repos.RepositoryResolutionError:
+            registration_unavailable |= bool(entry.local_path())
+            continue
+        if registered is None:
+            registration_unavailable = True
             continue
         if registered and registered["common_dir"] == identity["common_dir"]:
             project = name
             break
     if project is None:
+        if registration_unavailable:
+            raise GuardPublicationError("caller registration identity is unavailable")
         raise CallerNotRegistered("caller has no available selected-registry registration")
     configuration = cfg.load_config(
         cfg.project_dir(project) / "config.yaml", project=project,
@@ -177,11 +184,16 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
     for caller in sorted(selected):
         identity = reader.repository_identity(caller)
         if identity is None or identity["root"] != caller:
-            if caller in explicit:
-                errors.append(f"{caller}: caller checkout identity is unavailable")
-                continue
-            reader.map_path(caller, root).unlink(missing_ok=True)
-            continue  # Removed caller checkouts withdraw their obsolete view.
+            if caller not in explicit:
+                try:
+                    Path(caller).stat()
+                except FileNotFoundError:
+                    reader.map_path(caller, root).unlink(missing_ok=True)
+                    continue
+                except OSError:
+                    pass
+            errors.append(f"{caller}: caller checkout identity is unavailable")
+            continue
         try:
             _atomic_write(reader.map_path(caller, root), json.dumps({
                 "schema": reader.SCHEMA, "version": reader.VERSION,

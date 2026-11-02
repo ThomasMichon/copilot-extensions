@@ -222,3 +222,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   nonblocking POSIX opens and post-open checks. The focused packet passed 33
   cases with one native-FIFO capability skip; synthetic FIFO-type rejection
   runs for all three readers on every platform.
+- Addressed the next overview's transient-identity warning even though it had
+  no inline open issue. Unreadable checkout or registered-anchor metadata no
+  longer retires a prepared caller. Two regressions prove later refresh restores
+  the complete inventory. The focused packet passed 36 cases with one native
+  FIFO capability skip.
