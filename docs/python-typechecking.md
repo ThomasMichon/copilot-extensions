@@ -242,6 +242,15 @@ the qualified adapter. The literal fragment tuple determines order; every
 physical fragment must be present exactly once. The separate PowerShell worker
 remains an independent input.
 
+When that canonical loader is in the physical inventory, every project also
+receives the faithful view as an import root. A consumer can therefore import
+the public flat `installation_context` module without selecting its loader or
+fragments as owned targets. Import delivery does not transfer their ownership,
+add them to the consumer's reported targets, or certify their implementation:
+the canonical project retains its separate strict check. Imported views use
+the same byte/membership verification, source mapping and lease-bound cleanup;
+no stub, private-fragment import or missing-import suppression is substituted.
+
 The view preserves physical source lines, normalizing line endings to LF and
 replacing only standalone `from __future__ import annotations` declarations with
 blank mapped lines. It refuses other future imports, changed loader semantics,

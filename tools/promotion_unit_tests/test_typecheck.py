@@ -57,9 +57,10 @@ def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
     assert checker.main(["--enforced", "--require-complete"]) == 2
 
 
+@pytest.mark.parametrize("with_dependency", [False, True])
 def test_candidate_checker_preserves_checker_failure_and_environment_custody(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_dependency: bool,
+) -> None:
     project = checker.Project(
         "admitted",
         ("admitted.py",),
@@ -80,6 +81,20 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
     python.write_bytes(b"fixture; never executed")
     (environment / ".typecheck-prepared").write_bytes(digest.encode() + b"\n")
     events = []
+    paths = ("admitted.py",)
+    if with_dependency:
+        root = Path(__file__).resolve().parents[2]
+        directory = Path(views.INSTALLATION_ENTRY).parent
+        inputs = [
+            path for path in (root / directory).glob("*.py")
+            if path.name == "installation_context.py"
+            or path.name.startswith("_installation_context_")
+        ]
+        for source in inputs:
+            destination = tmp_path / source.relative_to(root)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source.read_bytes())
+        paths = (*paths, *(path.relative_to(root).as_posix() for path in inputs))
 
     class Lease:
         def __init__(self, path: Path, *, service: str):
@@ -98,6 +113,10 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
         assert "--strict" in argv and "--check-untyped-defs" in argv
         assert Path(argv[-1][1:]).read_text(encoding="utf-8") == "admitted.py\n"
         assert "PYTHONPATH" not in env and "PYTHONHOME" not in env
+        if with_dependency:
+            view = environment.parent / ("source-views-" + environment.name) / "admitted"
+            assert env["MYPYPATH"].startswith(str(view))
+            assert (view / "installation_context.py").is_file()
         return subprocess.CompletedProcess(argv, 7, "fixture checker refusal\n", "")
 
     monkeypatch.setattr(admission, "SingleInstance", Lease)
@@ -107,13 +126,15 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
             tmp_path,
             project,
             ("admitted.py",),
-            all_paths=("admitted.py",),
+            all_paths=paths,
         )
         == 7
     )
     assert events == ["acquired", "released"]
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
+    view = environment.parent / ("source-views-" + environment.name) / "admitted"
+    assert not (view / "installation_context.py").exists()
 
 
 def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(tmp_path):
