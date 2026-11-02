@@ -73,15 +73,31 @@ def validate(
         raise contract.ObservationError(
             "owner response qualified facts for another head", "invalid-response"
         )
-    if history and (
-        value["type"] != "history-page"
-        or value["source_generation"] != request["source_generation"]
-        or value["before_cursor"] != request["before_cursor"]
-        or len(value["entries"]) > request["limit"]
-    ):
-        raise contract.ObservationError(
-            "owner page changed the requested boundary", "invalid-response"
-        )
+    if history:
+        gap = value["type"] == "gap"
+        boundary = value.get("base_cursor" if gap else "before_cursor")
+        if (
+            value["type"] not in {"history-page", "gap"}
+            or value["source_generation"] != request["source_generation"]
+            or boundary != request["before_cursor"]
+            or (not gap and len(value["entries"]) > request["limit"])
+        ):
+            raise contract.ObservationError(
+                "owner page changed the requested boundary", "invalid-response"
+            )
+        if gap:
+            try:
+                scope = source(value)
+                before = None if boundary is None else contract.sequence(boundary, scope)
+                floor = contract.sequence(value["history_floor"], scope)
+                if floor > contract.sequence(value["cursor"], scope) or (
+                    value["reason"] == "retention" and (before is None or before > floor)
+                ):
+                    raise contract.ObservationError("gap contradicts its retained boundary")
+            except contract.ObservationError as error:
+                raise contract.ObservationError(
+                    f"invalid owner history gap: {error}", "invalid-response"
+                ) from error
     return value
 
 

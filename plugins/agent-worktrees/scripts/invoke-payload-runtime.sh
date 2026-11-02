@@ -13,7 +13,12 @@ _aw_update_entry_dir="$PAYLOAD_ROOT/bin"
 _aw_passive_observation=0
 _aw_skip_project=0
 _aw_worktrees_alias=0
+_aw_first_argument=1
 for _aw_arg in "$@"; do
+    if [[ "$_aw_first_argument" == 1 ]]; then
+        _aw_first_argument=0
+        [[ "$_aw_arg" != agent-worktrees ]] || continue
+    fi
     if [[ "$_aw_skip_project" == 1 ]]; then
         _aw_skip_project=0
         continue

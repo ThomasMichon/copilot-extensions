@@ -43,7 +43,8 @@ credentials or fall back to a durable roster cache.
 
 Both payload dispatchers suppress first-use self-provisioning for these reads,
 including the `worktree`/`worktrees` namespace aliases and explicit project
-prefixes. With an existing runtime but no receiver, the command emits an
+prefixes, with or without the leading `agent-worktrees` compatibility prefix.
+With an existing runtime but no receiver, the command emits an
 unavailable error rather than starting one. Without a project context it emits
 a structured `project-unavailable` error. An explicit project name is a
 read-only namespace selection, not evidence that adoption occurred.
@@ -90,6 +91,9 @@ explicit gaps and connection-only heartbeats. Its 0.5-second heartbeat is inside
 the CLI's five-second communication budget. The client rejects wrong selection,
 changed owner generation, regressing positions and invalid base boundaries.
 Backward pages do not consume a live delivery cursor.
+An expired before boundary is returned as the provider's source-qualified
+`gap`, retaining its floor, reason and reconciliation metadata rather than
+turning an expected retention response into a transport error.
 
 Cold selection returns explicit `unready`, retains bounded demand and wakes
 the existing producer. The request itself does not materialize a snapshot or

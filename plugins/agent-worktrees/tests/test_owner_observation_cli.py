@@ -264,6 +264,67 @@ def test_real_follow_relay_delivers_frames_without_waiting_for_eof(store, monkey
     assert [item["action"] for item in state.requests] == ["health", FEED_ACTION]
 
 
+def retained_gap(store):
+    store.max_entries = 1
+    initial, _gap = store.snapshot(selected())
+    first = store.publish(
+        record(1), [event(record(1))], batch_id="batch:1",
+        expected_cursor=initial["cursor"], post_save=True,
+    )
+    store.publish(
+        record(2), [event(record(2))], batch_id="batch:2",
+        expected_cursor=first["cursor"], post_save=True,
+    )
+    gap = store.page(selected(), first["source_generation"], first["cursor"])
+    assert gap["type"] == "gap" and gap["reason"] == "retention"
+    return first, gap
+
+
+def test_real_history_cli_preserves_retention_gap_and_reconciliation(store, monkeypatch, capsys):
+    first, gap = retained_gap(store)
+
+    def answer(incoming):
+        return [{"version": 1, "result": health() if incoming["action"] == "health" else gap}]
+
+    with endpoint(answer) as (peer, state):
+        monkeypatch.setattr(cli, "_control_client", lambda: peer)
+        monkeypatch.setattr(cli.cfg, "project_name", lambda: "project")
+        assert cli.cmd_observations(args(
+            "--source-generation", first["source_generation"],
+            "--before-cursor", first["cursor"], history=True,
+        )) == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out) == gap and output.err == ""
+    assert [item["action"] for item in state.requests] == ["health", HISTORY_ACTION]
+
+
+@pytest.mark.parametrize("fault", ["selection", "resident", "journal", "boundary", "foreign", "floor"])
+def test_history_gap_still_requires_exact_scope_generation_and_retained_boundary(store, fault):
+    first, gap = retained_gap(store)
+    payload = {
+        **{key: value for key, value in request().items() if key != "after_cursor"},
+        "source_generation": first["source_generation"],
+        "before_cursor": first["cursor"],
+        "limit": 1,
+    }
+    original = client.source(gap)
+    if fault == "selection":
+        payload["worktree_id"] = "other-worktree"
+    elif fault == "resident":
+        gap["resident_generation"] = "c" * 32
+    elif fault == "journal":
+        payload["source_generation"] = "d" * 32
+    elif fault == "boundary":
+        payload["before_cursor"] = contract.position(original, 0)
+    elif fault == "foreign":
+        foreign = contract.position(replace(original, worktree_id="other-worktree"), 1)
+        gap["base_cursor"] = payload["before_cursor"] = foreign
+    else:
+        gap["base_cursor"] = payload["before_cursor"] = contract.position(original, 2)
+    with pytest.raises(contract.ObservationError):
+        client.validate(gap, payload, "a" * 32, history=True)
+
+
 @pytest.mark.parametrize("fault", [False, True])
 def test_missing_project_has_structured_error_without_endpoint_or_provision(
     monkeypatch, capsys, fault

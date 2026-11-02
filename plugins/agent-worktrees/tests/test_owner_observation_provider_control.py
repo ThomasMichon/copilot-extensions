@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import socket
 import threading
@@ -251,3 +252,75 @@ def test_bad_parent_point_result_is_not_forwarded_as_success(served, monkeypatch
     monkeypatch.setattr(server, "_handle", lambda action, payload: {"ok": True, "worktrees": []})
     result = rpc(server, wire.READ_ACTION, request())
     assert result["type"] == "error" and result["error"]["code"] == "invalid-response"
+
+
+@pytest.mark.parametrize("action", [wire.READ_ACTION, wire.HISTORY_ACTION])
+def test_actual_monitor_dispatch_preserves_reads_until_handoff_revokes_admission(
+    tmp_path, monkeypatch, action,
+):
+    from agent_worktrees import __main__ as main
+    from agent_worktrees import worktrees_runtime
+    from agent_worktrees.status_monitor_handover import MonitorHandover
+
+    election = {"writer": True, "reader": True}
+    owners = []
+    monkeypatch.setattr(main, "_monitor_lock_path", lambda: tmp_path / "monitor.lock")
+    monkeypatch.setattr(main, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(main, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(main.locks, "write_lock", lambda _path, extra=None: True)
+    monkeypatch.setattr(
+        control, "active_generation_for_pid", lambda pid: 42 if election["writer"] else None,
+    )
+    monkeypatch.setattr(control, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
+    monkeypatch.setattr(MonitorHandover, "read_admitted", lambda self: election["reader"])
+    monkeypatch.setattr(
+        main, "_monitor_sweep", lambda *a, **k: pytest.fail("fixture must shut down before sweep"),
+    )
+
+    def owner_factory(*args, **kwargs):
+        owner = WorktreesRuntime(*args, **kwargs)
+        monkeypatch.setattr(owner.agendas, "roster_changed", lambda project: None)
+        owners.append(owner)
+        return owner
+
+    monkeypatch.setattr(worktrees_runtime, "WorktreesRuntime", owner_factory)
+    results = []
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            self.handle = handle
+
+        def start(self):
+            assert self.handle("promote", {}) == {"adopted": True}
+            owner = owners[0]
+            assert owner.observation_read(request())["error"]["code"] == "unready"
+            owner.publish("project", [row()], observed_at=1)
+            current = owner.observation_read(request())
+            payload = request()
+            if action == wire.HISTORY_ACTION:
+                payload.pop("after_cursor")
+                payload.update(
+                    source_generation=current["source_generation"], before_cursor=None, limit=64,
+                )
+            election["writer"] = False
+            result = self.handle(action, payload)
+            assert result["type"] == ("history-page" if action == wire.HISTORY_ACTION else "snapshot")
+            assert self.handle("worktrees-read", {"contract_version": 1, "project": "project"})["ok"]
+            assert owner.observation_status()["status"] == "ready"
+            election["reader"] = False
+            assert self.handle(action, payload)["error"]["code"] == "superseded"
+            results.append(result)
+            self.handle("shutdown", {})
+
+        def current_read_count(self, action="worktrees-read"):
+            return 0
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(control, "ControlServer", Control)
+    assert main.cmd_status_monitor(argparse.Namespace(interval=1, passive=True)) == 0
+    assert len(results) == 1

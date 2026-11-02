@@ -625,7 +625,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if action in {"agenda-read", "agenda-publish"}:
             return worktrees_runtime.agenda_handle(action, payload)
         if action in {OBSERVATION_READ_ACTION, OBSERVATION_HISTORY_ACTION}:
-            if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+            if not handover.read_admitted():
                 worktrees_runtime.close_admission("superseded")
             return (
                 worktrees_runtime.observation_history(payload)

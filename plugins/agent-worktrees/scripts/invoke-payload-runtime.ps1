@@ -16,7 +16,12 @@ if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $passiveObservation = $false
 $skipProject = $false
 $worktreesAlias = $false
+$firstArgument = $true
 foreach ($argument in $forwardArgs) {
+    if ($firstArgument) {
+        $firstArgument = $false
+        if ($argument -ceq 'agent-worktrees') { continue }
+    }
     if ($skipProject) { $skipProject = $false; continue }
     if ($argument -in @('--project', '-p')) { $skipProject = $true; continue }
     if ($argument -like '--project=*') { continue }

@@ -29,6 +29,8 @@ ORDINARY = [
     ["init", "--project", "worktree-observations"],
     ["--project", "worktree-observation-history", "init"],
 ]
+INVOCATIONS += [["agent-worktrees", *argv] for argv in INVOCATIONS]
+ORDINARY += [["agent-worktrees", *argv] for argv in ORDINARY]
 
 
 def posix_harness() -> str:
