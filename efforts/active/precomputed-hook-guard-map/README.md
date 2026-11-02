@@ -299,3 +299,10 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   Read-only shell commands and disabled write events fail a regression if they
   traverse Git metadata. The map and pre-tool relevance packet passed 121
   cases with four explicit native-capability skips.
+- Removed inventory-wide `realpath` traversal from map validation. Canonical
+  physical paths and the separately retained registered alias are validated as
+  data; only the caller and relevant event targets need current filesystem
+  identity. A 20-root control fails if inventory paths are probed.
+  Common Git identity also requires its object/ref directories, with two
+  missing-metadata and recovery controls. The combined map, consumer and
+  deployment-contract packet passed 101 cases with one native FIFO skip.

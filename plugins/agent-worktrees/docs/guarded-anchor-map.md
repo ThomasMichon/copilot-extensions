@@ -95,8 +95,13 @@ Version 1 uses schema `agent-worktrees.guarded-anchors`, canonical `source_root`
 and `registry_root` bindings, the caller's filesystem Git identity, a producer
 generation, and `inventory_authority: complete`. The producer also retains its
 caller registration name as `source_project` for retry/retirement bookkeeping.
-Each guarded row contains its
-name, delegate, local path, locus and Git identity. A valid complete empty list
+Each guarded row contains its name, delegate, canonical local `path`, locus and
+Git identity. New publications also retain the validated registry spelling in
+`registered_path`, so shell targets recognize a registered symlink/junction
+alias and its physical checkout. Older rows without that field remain readable.
+Row validation checks lexical shape and canonical identity consistency without
+probing every guarded path; current Git identity is acquired only for the caller
+and relevant event targets. A valid complete empty list
 means no guarded local anchors were observed. Missing, foreign, malformed,
 oversized, unsupported-version, incomplete or otherwise unusable maps fail open;
 they never cause acquisition or an infrastructure-shaped deny.
@@ -104,7 +109,9 @@ they never cause acquisition or an infrastructure-shaped deny.
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,
 bare repositories and the nearest nested repository/submodule. No Git
-subprocess, object scan, index/config read or RPC is needed.
+subprocess, object scan, index/config read or RPC is needed. Missing common Git
+directories and unreadable or nonregular markers yield unavailable identity;
+they do not fall through to a containing repository.
 Git pointer reads remove only the line terminator and format separator, not
 meaningful spaces in a repository/common-directory path.
 A nested repository does not inherit its containing checkout's guard. Direct

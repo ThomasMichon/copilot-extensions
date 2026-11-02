@@ -81,6 +81,41 @@ def test_git_marker_probe_failure_cannot_fall_back_to_parent_repository(tmp_path
     assert reader.repository_identity(nested / "new.txt")["root"] == reader.canonical(nested)
 
 
+@pytest.mark.parametrize("missing", ["objects", "refs"])
+def test_repository_identity_requires_common_git_metadata(tmp_path, missing):
+    reader = _load("guarded_anchor_map")
+    caller = _repo(tmp_path / "caller")
+    (caller / ".git" / missing).rmdir()
+    assert reader.repository_identity(caller / "new.txt") is None
+    (caller / ".git" / missing).mkdir()
+    assert reader.repository_identity(caller / "new.txt")["root"] == reader.canonical(caller)
+
+
+def test_map_validation_does_not_probe_inventory_paths(tmp_path, monkeypatch):
+    reader = _load("guarded_anchor_map")
+    caller = _repo(tmp_path / "caller")
+    registry = tmp_path / "registry"
+    roots = []
+    for index in range(20):
+        target = os.path.normcase(os.path.abspath(tmp_path / f"unrelated-{index}"))
+        roots.append({
+            "name": f"target-{index}", "delegate": "agent-bridge", "path": target,
+            "registered_path": target + "-alias", "locus": None,
+            "identity": {"root": target, "git_dir": target + os.sep + ".git", "common_dir": target + os.sep + ".git"},
+        })
+    path = reader.map_path(caller, registry)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(_snapshot(reader, caller, registry, roots)))
+    original = os.path.realpath
+
+    def no_inventory_probe(value, *args, **kwargs):
+        assert not any(os.fspath(value).startswith(row["path"]) for row in roots), "inventory filesystem traversal"
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", no_inventory_probe)
+    assert reader.read_map(caller, registry).status == "ready"
+
+
 @pytest.mark.parametrize("damage", ["unreadable", "nonregular"])
 def test_linked_common_directory_probe_failure_cannot_publish_local_git_identity(tmp_path, monkeypatch, damage):
     reader = _load("guarded_anchor_map")
@@ -462,7 +497,8 @@ def test_registered_alias_and_physical_shell_targets_remain_guarded(producer, mo
     ))
     p.module.refresh(p.callers, registry_root=p.root)
     rows = p.reader.read_map(p.callers[0], p.root).roots
-    assert rows[0]["path"] == os.path.abspath(alias)
+    assert rows[0]["path"] == p.reader.canonical(p.target)
+    assert rows[0]["registered_path"] == os.path.abspath(alias)
     assert rows[0]["identity"]["root"] == p.reader.canonical(p.target)
     guard = _load("cross_repo_guard")
     for root in (alias, p.target):

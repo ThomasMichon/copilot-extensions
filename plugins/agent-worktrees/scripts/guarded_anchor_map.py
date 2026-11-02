@@ -137,6 +137,11 @@ def repository_identity(start: str | Path) -> dict | None:
                     common = git_dir / common
             if not stat.S_ISDIR(_path_mode(common)):
                 return None
+            if not (
+                stat.S_ISDIR(_path_mode(common / "objects"))
+                and stat.S_ISDIR(_path_mode(common / "refs"))
+            ):
+                return None
             return {
                 "root": canonical(root), "git_dir": canonical(git_dir),
                 "common_dir": canonical(common),
@@ -185,6 +190,13 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
                 or any(not isinstance(row.get(key), str) or not row[key]
                        for key in ("name", "delegate", "path"))
                 or row["delegate"] == "none" or not os.path.isabs(row["path"])
+                or (
+                    "registered_path" in row
+                    and (
+                        not isinstance(row["registered_path"], str)
+                        or not os.path.isabs(row["registered_path"])
+                    )
+                )
                 or not isinstance(row.get("locus"), (dict, type(None)))
                 or not isinstance(row.get("identity"), dict)
                 or any(not isinstance(row["identity"].get(key), str)
@@ -192,7 +204,7 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
                        for key in ("root", "git_dir", "common_dir"))
             ):
                 raise ValueError("invalid guarded anchor")
-            if row["identity"]["root"] != canonical(row["path"]):
+            if row["identity"]["root"] != os.path.normcase(os.path.abspath(row["path"])):
                 raise ValueError("guarded anchor path and identity disagree")
         return MapRead("ready", data["roots"])
     except FileNotFoundError:

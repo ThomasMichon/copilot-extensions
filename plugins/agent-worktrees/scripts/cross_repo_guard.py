@@ -325,7 +325,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
                 continue
             reason = _deny_reason(g, "(a shell command writes into it).")
             identity = g.get("identity") or {}
-            for root in {gp, identity.get("root", gp)}:
+            for root in {gp, identity.get("root", gp), g.get("registered_path", gp)}:
                 tok = _root_token(_canon(root))
                 # 1. A file redirect whose target is the repo (excludes fd dups).
                 if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
