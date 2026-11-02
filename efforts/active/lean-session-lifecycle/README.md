@@ -69,6 +69,10 @@ The operator approved the slug and two-slice scope.
 
 > Ideally, we use the affirmative trigger-handoff to call some register command callback somehow, so we don't need to continuously poll for handoffs. We also should avoid spawning things "just to wait". Draft plans and build fixes for these issues
 
+The 2026-11-01 focused Picker request and mini-effort are captured verbatim in
+[Picker Launch Handoff](picker-launch-handoff.md). That sub-plan elaborates
+Phase 3 without replacing this effort or taking over adjacent ownership.
+
 ## Plan
 
 ### Phase 1 - Reviewed design and coordination
@@ -100,6 +104,8 @@ The operator approved the slug and two-slice scope.
   effort with the merged outcome.
 
 ### Phase 3 - Remove wait-only launch layers
+
+Focused mini-effort: [Picker Launch Handoff](picker-launch-handoff.md).
 
 - [ ] Establish the per-session launch contract for muxed, non-muxed,
   resumed, new-window, and remote paths before changing ownership.
@@ -286,3 +292,14 @@ two measured forwarding roles, with live process-tree evidence.)_
   (`resolve_active_plugins()` lost its `include_projects` kwarg, breaking
   `local_cache_refresh.py`), discovered incidentally while validating this
   slice and verified via `git stash` against plain `dev` before filing.
+
+### 2026-11-01 - Picker launch handoff mini-effort
+
+- Added [Picker Launch Handoff](picker-launch-handoff.md) as the bounded Phase 3
+  proposal under #5579, preserving the original Request and existing ownership.
+- The operator expects Picker Python to exit after launch/resume. The proposed
+  first target is a shell-owned handoff, with direct PSMux attachment a preferred
+  follow-on simplification only if lifecycle duties remain covered.
+- Planning only: no runtime implementation, retained-session migration, process
+  termination or installed rollout. The parent Plan and Validation Plan remain
+  open; creating this sub-plan is not completion of the launch-reduction work.
