@@ -18,6 +18,43 @@ from worktree_manager import engine_client as ec
 from worktree_manager import companion_client as cc
 from worktree_manager import handoff_client as hc
 from worktree_manager import mux_companion as companion
+from worktree_manager.companion_timeline_widget import SubwayTimeline
+from textual.widgets import Button, TabbedContent
+
+
+def test_timeline_alternate_view_keeps_initial_summary_and_unknown_history(monkeypatch) -> None:
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: companion._CompanionData(
+        worktree={"id": "selected", "repo": "example", "path": "/synthetic"},
+    ))
+
+    def unexpected_provider(*args, **kwargs):
+        pytest.fail("an unattached timeline attempted a provider command")
+
+    monkeypatch.setattr(ec, "run_json", unexpected_provider)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd="/synthetic")
+        async with app.run_test(size=(100, 36)) as pilot:
+            await pilot.pause()
+            views = app.query_one("#views", TabbedContent)
+            timeline = app.query_one(SubwayTimeline)
+            assert views.active == "summary-tab" and not timeline.demand_visible
+            views.active = "timeline-tab"
+            await pilot.pause()
+            assert timeline.demand_visible and not timeline.window.events
+            assert not timeline.window.sources
+            assert "unknown" in "".join(
+                segment.text for segment in timeline.render_line(timeline.size.height - 1)
+            ).lower()
+            assert app.query_one("#cutover-btn", Button).disabled
+            assert str(app.query_one("#view-btn", Button).label) == "Show Summary pane"
+            views.active = "summary-tab"
+            await pilot.pause()
+            assert not timeline.demand_visible
+            await pilot.press("escape")
+        assert not app.is_running
+
+    asyncio.run(check())
 
 
 def _bundle(worktree_id="wt-ab12", *, confirmed=True):

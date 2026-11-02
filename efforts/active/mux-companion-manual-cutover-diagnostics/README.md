@@ -527,6 +527,38 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Sidecar foundation source qualification
+
+- Authored the bounded typed timeline, virtual Line-API renderer and caller-owned
+  controller. Timeline is an alternate Companion tab; Summary remains initial.
+  Owner feeds are not attached yet, so current facts are not fabricated as history.
+- Added owner-fenced observation/history primitives and preserved optional SDK
+  start metadata with bounded evidence. Neither owner capability is advertised
+  by this foundation; writer, CLI, membership and consumer attachment remain open.
+- Focused isolated packets passed: 39 core/policy/controller cases, 65
+  model/layout/widget/app cases, 62 owner projection cases and 111 Bridge cases.
+  Required install-contract checks and the admitted type cohort passed; the four
+  independent new timeline core/model modules also passed strict checking.
+- Fixed actual Textual mount-context and delegated-message sender failures,
+  teardown ordering, stale sticky context, source-generation lane reservations
+  and a full-window scan in line painting. Source tests retain byte-limited
+  history continuation, explicit integrity reconciliation and unknown capacity.
+- This is tested source awaiting review, not a source merge or deployment.
+  Qualified pre-window measurement, attached push feeds, native clients,
+  performance measurement and all original parent/Relay gates remain open.
+
+### 2026-11-02 - Reviewed Sidecar source admission
+
+- Plan [#9960](https://github.com/ThomasMichon/copilot-extensions/pull/9960)
+  received current-head Copilot approval with no open issues, passed required
+  CI and merged as `c05dcb4dca059e4fff482a3c8816633814c54fa6`.
+- Re-read this complete parent contract and both linked plan/observation
+  documents, then pulled the retained source workspace forward. S0 admission
+  is complete; the bounded model/renderer/policy source slice can begin.
+- Source execution does not settle any original manual/head/native/Relay gate
+  or qualify an unknown pre-window denominator. No installed rollout, live
+  rebinding, runtime threshold change or process action was performed.
+
 ### 2026-11-02 - Live Sidecar implementation amendment
 
 - Continued under #8811 after verifying the retained source venue, current

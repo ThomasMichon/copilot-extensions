@@ -1,0 +1,294 @@
+"""Pure admission, bounded-window and lineage display controls."""
+
+from dataclasses import replace
+
+import pytest
+
+from worktree_manager.companion_timeline_contract import (
+    Availability, Completeness, HistoryPage, LiveDelta, MAX_EXPANDED_GROUPS,
+    MAX_LANES, Qualification, RelationKind, TimelineRelation,
+)
+from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
+from _companion_timeline_fixtures import event, position, snapshot, token
+
+
+def test_atomic_snapshot_delta_deduplication_and_cursor_fences():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    first = tuple(event(source, number) for number in range(3))
+    assert model.apply_snapshot(snapshot(source, first)).applied
+    assert model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (event(source, 3),),
+    )).applied
+    assert [item.event_id for item in model.events] == [f"event-{number}" for number in range(4)]
+    duplicate = LiveDelta(source, position(source, "live-1"), position(source, "live-2"), (first[0],))
+    assert model.apply_delta(duplicate).applied
+    assert model.events[0] == first[0]
+    before = model.events
+    result = model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-3"), (),
+    ))
+    assert not result.applied and result.code is ResultCode.CURSOR_MISMATCH
+    assert model.events == before
+
+
+def test_content_proofs_survive_display_eviction_and_unavailability():
+    source = token()
+    model = TimelineWindow(max_events=2)
+    model.bind(source)
+    first = tuple(event(source, number) for number in range(3))
+    assert model.apply_snapshot(snapshot(source, first)).evicted == 1
+    assert first[0] not in model.events
+    conflict = replace(first[0], summary="Changed immutable event")
+    result = model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (conflict,),
+    ))
+    assert result.code is ResultCode.CONTENT_CONFLICT
+    unavailable = replace(snapshot(source, (), before=None), availability=Availability.UNAVAILABLE, position=None)
+    assert model.apply_snapshot(unavailable).applied and not model.events
+    result = model.apply_snapshot(snapshot(source, (conflict,), cursor="live-new"))
+    assert result.code is ResultCode.CONTENT_CONFLICT
+    assert not model.events
+
+
+def test_rebind_epoch_and_head_fence_late_pages_without_fake_empty_success():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    model.apply_snapshot(snapshot(source, (event(source, 5),)))
+    assert model.request_history(source, position(source, "older-0")).applied
+    page = HistoryPage(source, position(source, "older-0"), None, (event(source, 4),), Completeness.COMPLETE)
+    renewed = token(1)
+    model.bind(renewed)
+    result = model.prepend_page(page)
+    assert not result.applied and result.code is ResultCode.STALE_TOKEN
+    assert model.events[0].event_id == "event-5"
+    successor = token(2, head="head-b")
+    model.bind(successor)
+    assert not model.events
+    result = model.apply_snapshot(snapshot(source, (event(source, 5),)))
+    assert result.code is ResultCode.STALE_TOKEN
+    assert model.sources[successor.identity.source_key].availability is Availability.UNKNOWN
+    assert model.bind(renewed).code is ResultCode.STALE_TOKEN
+
+
+def test_history_prepend_has_exact_pending_boundary_and_retains_live_position():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    model.apply_snapshot(snapshot(source, tuple(event(source, number) for number in range(5, 8))))
+    before = position(source, "older-0")
+    page = HistoryPage(source, before, None, tuple(event(source, number) for number in range(3, 6)), Completeness.COMPLETE)
+    assert not model.prepend_page(page).applied
+    assert model.request_history(source, before).applied
+    assert model.apply_delta(LiveDelta(source, position(source, "live-0"), position(source, "live-1"), (event(source, 8),))).applied
+    assert model.prepend_page(page).applied
+    assert [item.event_id for item in model.events] == [f"event-{number}" for number in range(3, 9)]
+    assert model.sources[source.identity.source_key].position == position(source, "live-1")
+    assert model.sources[source.identity.source_key].before is None
+
+
+def test_byte_and_proof_limits_are_explicit_and_do_not_evict_evidence():
+    source = token()
+    first = event(source, 1)
+    model = TimelineWindow(max_bytes=first.encoded_size, max_proofs=2)
+    model.bind(source)
+    assert model.apply_snapshot(snapshot(source, (first,))).applied
+    assert model.apply_delta(LiveDelta(source, position(source, "live-0"), position(source, "live-1"), (event(source, 2),))).applied
+    assert model.encoded_size <= first.encoded_size
+    before = model.events
+    result = model.apply_delta(LiveDelta(source, position(source, "live-1"), position(source, "live-2"), (event(source, 3),)))
+    assert not result.applied and result.code is ResultCode.LIMIT
+    assert model.events == before
+
+
+def test_actor_lanes_overflow_and_expansion_limits_remain_stable():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number, actor=f"actor-{number}") for number in range(40))
+    model.apply_snapshot(snapshot(source, rows))
+    assert model.lane_count == MAX_LANES
+    assert model.lane(rows[-1]) == MAX_LANES - 1
+    original_lane = model.lane(rows[0])
+    for item in rows[:MAX_EXPANDED_GROUPS]:
+        assert model.toggle_expansion(item.ref).applied
+    assert model.toggle_expansion(rows[MAX_EXPANDED_GROUPS].ref).code is ResultCode.LIMIT
+    assert model.lane(rows[0]) == original_lane
+
+
+@pytest.mark.parametrize("availability", [Availability.HEAD_CHANGED, Availability.UNAVAILABLE])
+def test_current_context_excludes_unobserved_snapshots(availability: Availability) -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    observed = snapshot(source, (event(source, 0),))
+    assert model.apply_snapshot(observed).applied
+    assert model.context() == (observed.purpose, observed.effort_ref, observed.creation_context)
+    assert model.apply_snapshot(replace(
+        observed, availability=availability, events=(), position=None, before=None,
+    )).applied
+    assert model.context() == (None, None, None)
+    renewed = token(1, head="head-b")
+    assert model.bind(renewed).applied
+    current = replace(snapshot(renewed, (event(renewed, 1),)), purpose="Current assignment.")
+    assert model.apply_snapshot(current).applied
+    assert model.context() == (current.purpose, current.effort_ref, current.creation_context)
+
+
+def test_unavailable_context_preserves_other_observed_source() -> None:
+    source = token()
+    other = token(key="other-source")
+    model = TimelineWindow()
+    model.bind(source)
+    observed = snapshot(source, (event(source, 0),))
+    assert model.apply_snapshot(observed).applied
+    model.bind(other)
+    retained = replace(
+        snapshot(other, (event(other, 1),)),
+        purpose="Other observed purpose.", effort_ref="other-effort",
+        creation_context="Other observed creation.",
+    )
+    assert model.apply_snapshot(retained).applied
+    assert model.apply_snapshot(replace(
+        observed, availability=Availability.UNAVAILABLE, events=(), position=None, before=None,
+    )).applied
+    assert model.context() == (retained.purpose, retained.effort_ref, retained.creation_context)
+    assert model.sources[other.identity.source_key].availability is Availability.OBSERVED
+
+
+def test_generation_replacement_releases_only_its_lanes_and_reuses_holes() -> None:
+    source = token()
+    other = token(key="other-source")
+    model = TimelineWindow()
+    model.bind(source)
+    old_rows = tuple(event(source, number, actor=f"old-{number}") for number in range(30))
+    assert model.apply_snapshot(snapshot(source, old_rows)).applied
+    model.bind(other)
+    retained = event(other, 100, actor="retained")
+    assert model.apply_snapshot(snapshot(other, (retained,))).applied
+    retained_state = model.sources[other.identity.source_key]
+    assert model.lane(retained) == 30
+    renewed = token(1, generation="generation-b")
+    assert model.bind(renewed).applied
+    fresh = tuple(event(renewed, number, actor=f"fresh-{number}") for number in range(2))
+    assert model.apply_snapshot(snapshot(renewed, fresh)).applied
+    assert [model.lane(row) for row in fresh] == [0, 1]
+    assert model.lane(retained) == 30 and model.lane_count == 31
+    assert model.sources[other.identity.source_key] == retained_state
+    assert model.event(retained.ref) == retained
+    assert all(ref.generation != source.identity.generation
+               for ref in model._proofs if ref.source_key == source.identity.source_key)
+    assert len(set(model._lanes.values())) == len(model._lanes) == 3
+
+
+def test_full_source_generation_replacement_starts_fresh_without_empty_lanes() -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number, actor=f"old-{number}") for number in range(32))
+    assert model.apply_snapshot(snapshot(source, rows)).applied
+    assert model.lane_count == MAX_LANES
+    renewed = token(1, generation="generation-b")
+    assert model.bind(renewed).applied
+    fresh = event(renewed, 100, actor="fresh")
+    assert model.apply_snapshot(snapshot(renewed, (fresh,))).applied
+    assert model.lane(fresh) == 0 and model.lane_count == 1
+
+
+def test_display_eviction_preserves_actor_lane_reservations() -> None:
+    source = token()
+    model = TimelineWindow(max_events=1)
+    model.bind(source)
+    first = event(source, 0, actor="first")
+    assert model.apply_snapshot(snapshot(source, (first,))).applied
+    second = event(source, 1, actor="second")
+    assert model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (second,),
+    )).applied
+    assert model.event(first.ref) is None
+    assert model.lane(first) == 0 and model.lane(second) == 1 and model.lane_count == 2
+
+
+def test_unknown_references_are_not_followed_and_source_scope_is_exact():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    parent = event(source, 0)
+    child = replace(event(source, 1), relations=(
+        TimelineRelation(RelationKind.PARENT, Qualification.REPORTED, parent.ref),
+    ))
+    model.apply_snapshot(snapshot(source, (parent, child)))
+    assert model.children(parent.ref) == (child,)
+    other = replace(source, identity=replace(source.identity, project="other"))
+    assert model.bind(other).code is ResultCode.STALE_TOKEN
+    assert model.events == (parent, child)
+
+
+def test_history_eviction_preserves_pinned_viewport_and_live_head():
+    source = token()
+    model = TimelineWindow(max_events=3)
+    model.bind(source)
+    original = tuple(event(source, number) for number in range(3, 6))
+    model.apply_snapshot(snapshot(source, original))
+    model.pin_viewport(original[0].ref)
+    model.request_history(source, position(source, "older-0"))
+    result = model.prepend_page(HistoryPage(
+        source, position(source, "older-0"), None,
+        tuple(event(source, number) for number in range(3)), Completeness.COMPLETE,
+    ))
+    assert result.applied and result.evicted == 3
+    assert model.event(original[0].ref) == original[0]
+    assert model.event(original[-1].ref) == original[-1]
+    assert len(model.events) == 3
+
+
+def test_more_than_5000_lifetime_events_keep_the_visible_window_bounded():
+    source = token()
+    model = TimelineWindow(max_events=64)
+    model.bind(source)
+    first = event(source, 0)
+    model.apply_snapshot(snapshot(source, (first,)))
+    current = position(source, "live-0")
+    for start in range(1, 5501, 64):
+        next_position = position(source, f"live-{start}")
+        rows = tuple(event(source, number) for number in range(start, min(5501, start + 64)))
+        assert model.apply_delta(LiveDelta(source, current, next_position, rows)).applied
+        current = next_position
+        assert len(model.events) <= 64 and model.encoded_size <= model.max_bytes
+    assert len(model._proofs) == 5501
+    assert not model.reconciliation_required
+    assert model.events[-1].event_id == "event-5500"
+    assert model.event(first.ref) is None
+    result = model.apply_delta(LiveDelta(
+        source, current, position(source, "conflicting-replay"), (replace(first, summary="Changed evicted event"),),
+    ))
+    assert result.code is ResultCode.CONTENT_CONFLICT
+
+
+def test_integrity_limit_requires_explicit_baseline_reconciliation_not_epoch_eviction():
+    source = token()
+    model = TimelineWindow(max_events=2, max_proofs=3)
+    model.bind(source)
+    rows = tuple(event(source, number) for number in range(3))
+    model.apply_snapshot(snapshot(source, rows))
+    before = model.events
+    result = model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (event(source, 3),),
+    ))
+    assert result.code is ResultCode.LIMIT and not result.applied
+    assert model.events == before and len(model._proofs) == 3
+    assert source.identity.source_key in model.reconciliation_required
+    assert model.sources[source.identity.source_key].availability is Availability.UNAVAILABLE
+    renewed = token(1)
+    assert not model.bind(renewed).applied
+    assert len(model._proofs) == 3
+    assert not model.request_history(source, position(source, "older-0")).applied
+    # A deliberately new observer baseline is not a silent in-generation proof
+    # eviction. The parent must first obtain this owner-qualified current snapshot.
+    fresh = TimelineWindow(max_events=2)
+    fresh.bind(renewed)
+    assert fresh.apply_snapshot(snapshot(renewed, (event(renewed, 3),), cursor="current-owner-baseline")).applied
+    assert fresh.events[-1].event_id == "event-3"
+    assert model.events == before

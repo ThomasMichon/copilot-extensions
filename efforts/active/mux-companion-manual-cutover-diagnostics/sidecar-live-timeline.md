@@ -5,9 +5,12 @@ Coordination: #8811. Standing intent: [Mux Companion](../../../visions/mux-compa
 Related presentation: [timeline guidance](timeline-guidance.md).
 Proposed data boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: proposed implementation/validation amendment.** Normal review and
-actual merge admit source execution. This document does not claim that the new
-widget, observation feeds or compaction classifier are already implemented.
+**Status: reviewed implementation/validation plan; source execution active.**
+Plan #9960 merged after current-head approval and required CI. The new widget,
+observation feeds and classifier remain subject to the unchecked gates below.
+The foundation source now includes a tested alternate Timeline view and
+unattached owner projection/evidence primitives. Its first source review does
+not complete feed, qualified-measurement, joined-app or native acceptance.
 
 ## Guiding intent
 
@@ -207,7 +210,7 @@ and verify cancellation, rather than silently changing the hosting policy.
 
 ### S0 - Reviewed admission
 
-- [ ] Land this plan, its proposed contract and the vision extension through
+- [x] Land this plan, its proposed contract and the vision extension through
   normal review before source execution.
 - [x] Retain existing source/native claims and bind the coordinator to the
   parent's declared Step 7. A planning binding is not execution admission.

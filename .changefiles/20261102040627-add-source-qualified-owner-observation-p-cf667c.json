@@ -1,0 +1,9 @@
+{
+  "comment": "Add source-qualified owner observation projection, bounded replay and history primitives",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

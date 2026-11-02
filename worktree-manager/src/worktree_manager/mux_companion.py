@@ -52,6 +52,7 @@ from . import companion_attention as ca
 from .companion_topology import topology_view
 from . import handoff_client as hc
 from .companion_agenda import agenda_text, subscribe
+from .companion_timeline_widget import CompanionTimelinePanel
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -420,6 +421,7 @@ class MuxCompanionApp(App):
         self._agenda_generation = 0
         self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
+        self._timeline_panel = CompanionTimelinePanel(id="timeline")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -429,6 +431,8 @@ class MuxCompanionApp(App):
             with TabPane("Summary", id="summary-tab"):
                 with VerticalScroll():
                     yield Static(id="summary")
+            with TabPane("Timeline", id="timeline-tab"):
+                yield self._timeline_panel
             with TabPane("Claims", id="claims-tab"):
                 yield Static(id="claims-evidence")
                 yield DataTable(id="claims")
@@ -455,6 +459,7 @@ class MuxCompanionApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._timeline_panel.set_demand_visible(False)
         self._reload()
         self.set_interval(5, self._poll_attention)
         if self._cli_pane and all(self._observer_identity):
@@ -597,6 +602,8 @@ class MuxCompanionApp(App):
         )
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if self._timeline_panel.is_mounted:
+            self._timeline_panel.set_demand_visible(event.pane.id == "timeline-tab")
         if event.pane.id == "topology-tab" and not self._loading:
             if self._observation_owner is not self._data:
                 self._load_observations()
