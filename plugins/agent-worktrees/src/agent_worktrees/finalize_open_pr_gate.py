@@ -605,7 +605,7 @@ def other_pr_branches_unreachable_from_upstream(
 
 
 def merged_pr_block_message(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str | tuple[str, ...], *, cwd: str,
 ) -> str:
     """Compose ``_pr_finalize_precondition``'s merged-but-blocked message,
     distinguishing a *confirmed* later commit from an *unverifiable* merge
@@ -632,7 +632,11 @@ def merged_pr_block_message(
         if count is not None:
             checked.add(ref)
             if count > 0:
-                return f"Worktree/{record.worktree_id}: PR merged but carries further commits."
+                return (
+                    f"Worktree/{record.worktree_id}: PR merged but carries further commits: "
+                    f"ref '{ref}' has {count} commit(s) beyond its merged head "
+                    f"{head_sha} and {', '.join((upstream,) if isinstance(upstream, str) else upstream)}."
+                )
     return (
         f"Worktree/{record.worktree_id}: PR merged, but its merge boundary "
         f"can't be verified (unresolvable head_sha/upstream/checkout ref) -- "
