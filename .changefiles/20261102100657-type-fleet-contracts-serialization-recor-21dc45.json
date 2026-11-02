@@ -1,0 +1,13 @@
+{
+  "comment": "Type Fleet Contracts serialization records and canonical test fixtures",
+  "changes": [
+    {
+      "plugin": "libs/fleet-contracts",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

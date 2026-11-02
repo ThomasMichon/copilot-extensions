@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10025 canonical Core Delegation source/test contracts and strict admission. #10021 canonical Configuration Layers admission is complete; #10026 owns Fleet Contracts diagnosis before implementation.
+- **Current slice:** #10026 canonical Fleet Contracts implementation and qualification. #10025 canonical Core Delegation admission is complete; the lead is selecting another independent library slice.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10025's canonical Core Delegation scope, the effort, shared checker controls and full completion judgment. One Fleet Contracts worker owns #10026's separate diagnosis-only scope; implementation is not yet authorized. Prior test-cohort delegates are complete.
+- **Delegates:** One Fleet Contracts worker owns #10026's six canonical modules and release changefile in isolation. The lead owns integration, shared admission/coverage manifests, documentation, the effort and full completion judgment. Prior test-cohort delegates are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -116,7 +116,8 @@ rewrite.
 - [x] Strictly admit all canonical Endpoint Rendezvous source/test files, preserving native ownership fixtures (#9933).
 - [x] Strictly admit canonical Installation Context source, worker and every test/helper after the final fixture cohorts (#10018).
 - [x] Strictly admit all four canonical Configuration Layers source/test modules (#10021).
-- [ ] Strictly admit all five canonical Core Delegation source/test modules (#10025).
+- [x] Strictly admit all five canonical Core Delegation source/test modules (#10025).
+- [ ] Strictly admit all six canonical Fleet Contracts source/test modules (#10026).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1264,3 +1265,43 @@ composition prerequisites, and review/validation rules.
   `docs/python-typechecking.md` records strict scope, JSON/native boundaries,
   the local command and the native test distinction. Review and exact-candidate
   source CI remain required; #9807 and the full effort stay open.
+
+### 2026-11-02 - Core Delegation merged; Fleet Contracts implementation selected
+
+- #10027 merged as `5748427341387d616c1be4803f6e0e5cdecc1154`
+  after exact-head approval with no findings, zero open review threads and green
+  required CI in
+  [run 41495532516](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41495532516).
+  #10025 is complete; all five canonical files are now strictly enforced.
+  The managed source sync passed. Re-reading this Plan and Validation Plan
+  leaves 52 pending projects and the larger completion gate open.
+- #10026's independent Fleet Contracts diagnosis confirms six canonical files
+  and 180 strict diagnostics on each target: 12 source and 168 test diagnostics.
+  One bounded source/test implementation is selected. Its worker owns only
+  those canonical modules and the library/SSH release changefile; the lead
+  retains shared admission, source-hash, documentation and final integration
+  checks. The existing Fleet unit closure and execution budget must be preserved.
+- The lead continues the shared-library ratchet while that isolated
+  implementation proceeds. No installed runtime rollout is part of either
+  slice, and #9807 remains open.
+
+### 2026-11-02 - Fleet Contracts strict integration
+
+- Integrated the isolated source/test annotations and library/SSH changefile.
+  All six canonical files pass strict MyPy on Linux and Windows; the expanded
+  enforced gate passes for 17 strict projects, with 51 projects still pending.
+  The worker reports 201 canonical tests, 201 promotion-adapter tests and 219
+  SSH consumer tests passing. The lead independently verified strict admission;
+  whole-packet validation and review remain required.
+- Refreshed exactly four existing Fleet source hashes in the promotion
+  manifest. A structural comparison proves all other packet data unchanged:
+  no node, source, coverage-target or budget expansion. This is canonical
+  library admission, not activation of the independently pending SSH runtime.
+- The lead's contained whole-packet run passes all 3,665 selected nodes in
+  241.047 seconds, with the existing 16 deselections and no failures or skips.
+  Coverage, exact-source admission, effect audit and owned cleanup pass under
+  the original 300-second budget. Module-size, changefile, install-contract,
+  vendoring, documentation-consistency, Ruff `F,E9` and diff guards pass.
+  Fresh-machine and live-venue lanes are not applicable to this annotation-only
+  library admission: no installer, provisioning or transport behavior changes.
+  Required remote CI and review remain pending before merge.
