@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Lock
 
 from .client import DispatchClient
+from .client_errors import DispatchError
 from .pool_publication_custody import PoolPublicationError
 from .queue import TaskQueue
 from .queue_pool_cohort import PoolConfiguredCohort, _encode_observation
@@ -65,6 +66,7 @@ class PoolCohortPreparation:
         self._lock = Lock()
         self._pending: PoolCohortProjectionRequest | None = None
         self._settled: tuple[PoolCohortProjectionRequest, PoolConfiguredCohort] | None = None
+        self._projection_admitted = False
 
     def _coordinator_target(self) -> Path | str:
         if isinstance(self._queue, DispatchClient):
@@ -136,7 +138,17 @@ class PoolCohortPreparation:
                 coordinator_path,
             )
             self._pending = request
+            self._projection_admitted = False
             return request
+
+    def discard_unaccepted(self, request: PoolCohortProjectionRequest) -> None:
+        """Release local preparation or a confirmed no-effect original refusal."""
+        with self._state():
+            if self._pending is not request:
+                raise PoolPublicationError("cohort discard requires the original pending request")
+            if self._projection_admitted:
+                raise PoolPublicationError("original cohort projection may have been accepted")
+            self._pending = None
 
     def _acknowledge(
         self,
@@ -215,6 +227,7 @@ class PoolCohortPreparation:
     @contextmanager
     def _original_source_boundary(self, request: PoolCohortProjectionRequest) -> Iterator[None]:
         self._require_original_source(request)
+        self._projection_admitted = True
         yield
         self._require_original_source(request)
 
@@ -238,16 +251,36 @@ class PoolCohortPreparation:
                 return retained
             try:
                 with _pointer_transaction(request.source_path.parent):
+                    prior_admission = self._projection_admitted
                     if isinstance(self._queue, DispatchClient):
-                        result = self._queue.observe_pool_configured_cohort(
-                            request.observation, expected_revision=request.expected_revision,
-                            boundary=lambda: self._original_source_boundary(request),
-                        )
-                    else:
-                        with self._original_source_boundary(request):
+                        try:
                             result = self._queue.observe_pool_configured_cohort(
                                 request.observation, expected_revision=request.expected_revision,
+                                boundary=lambda: self._original_source_boundary(request),
                             )
+                        except DispatchError as exc:
+                            if exc.is_pool_catalog_rejection("cohort-project"):
+                                # This route can refuse after committing its source recheck.
+                                retained = self._queue.recover_pool_configured_cohort(
+                                    request.observation,
+                                    expected_revision=request.expected_revision,
+                                )
+                                if self._coordinator_target() != request.coordinator_path:
+                                    raise PoolPublicationError(
+                                        "cohort refusal lost the original coordinator target"
+                                    ) from exc
+                                if retained is None:
+                                    self._projection_admitted = prior_admission
+                            raise
+                    else:
+                        with self._original_source_boundary(request):
+                            try:
+                                result = self._queue.observe_pool_configured_cohort(
+                                    request.observation, expected_revision=request.expected_revision,
+                                )
+                            except TaskError:
+                                self._projection_admitted = prior_admission
+                                raise
                     self._acknowledge(request, result)
                     return result
             except RegistrarError as exc:

@@ -94,6 +94,7 @@ class SupervisorSources(SupervisorPoolPublication):
             future = self._read_pool().submit(read)
             self._discovery_futures[key] = future
             self._probe_inflight.add(future)
+        self._track_pool_metadata_future(future)
         try:
             result = future.result(timeout=max(0.0, deadline - time.monotonic()))
         except Exception:

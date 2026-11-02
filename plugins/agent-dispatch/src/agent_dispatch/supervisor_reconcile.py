@@ -243,6 +243,7 @@ class BoundedReconciliation(SupervisorSources):
         finally:
             if self._declaration_publisher.future is not None:
                 self._probe_inflight.add(self._declaration_publisher.future)
+                self._track_pool_metadata_future(self._declaration_publisher.future)
 
     def _receipt_pool(self) -> Executor:
         if self._receipt_executor is None:

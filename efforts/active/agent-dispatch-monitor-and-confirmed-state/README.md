@@ -264,6 +264,15 @@ live claim token. No new blanket ACK or executor appointment is created.
       in [#10059](https://github.com/ThomasMichon/copilot-extensions/pull/10059).
       Fresh queued legacy spawning cannot bypass projected cohort placement;
       ordinary publication/caller migration and installed qualification remain open.
+- [x] Bind fresh configured-cohort projection to the coordinator's actual
+      registrar and active/drain owner in
+      [#10072](https://github.com/ThomasMichon/copilot-extensions/pull/10072).
+      The [source receipt](journal/2026/11.02-coordinator-source-projection.md)
+      preserves accepted-history recovery, explicit embedding compatibility and
+      the still-open automatic publication/caller/native gates.
+- [ ] Land and integrate [original publication-target and unaccepted-request custody](journal/2026/11.02-publication-request-custody.md)
+      before enabling the existing reconciliation cadence. Explicit source
+      preparation is not an automatic publisher or a complete caller migration.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,

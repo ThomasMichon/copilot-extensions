@@ -272,6 +272,15 @@ leaves the original request pending. A later history-only recovery can account
 for an accepted write even when the post-write source recheck refused settlement.
 It does not relabel that accepted historical result as current-source attestation.
 
+`discard_unaccepted(original)` can release preparation that never crossed the
+write boundary. It also permits a local transaction's rolled-back `TaskError`,
+or a structured `cohort-project` rejection only after original-target history
+confirms no result. That route can reject **after** committing: such a result
+remains pending for explicit recovery, not discard. A generic status, missing
+current result or later refusal cannot clear an earlier ambiguous POST.
+The existing custody mutex serializes discard with the entire synchronous
+projection; a running projection cannot be replaced by a newer source.
+
 The pointer lock serializes only cooperating registrar writers. An unmanaged
 writer can still race a source read or replace the file; no transaction spans
 the external file and coordinator database. A post-write refusal preserves
@@ -306,6 +315,31 @@ on the next invocation, which recovers the same original request immediately
 rather than requiring another invocation to discard the old failure.
 Validated acknowledgment stays on that request-bound flight, so a delayed
 waiter cannot acknowledge an old result against a newer pending request.
+
+Preparation binds the original client object and, for the concrete HTTP client,
+its bound base URL. Reconnection may replace the ordinary coordinator client,
+but retains an unresolved request's original transport instead of closing it
+under its future. Recovery uses only that transport; an identical catalog at a
+different target cannot settle the request. A fresh POST refuses if the daemon
+has switched clients. Changed targets also refuse later preparation from an
+already-settled publisher position; reconnect alone does not establish queue
+continuity or authorize re-enrollment. No new store or endpoint-identity protocol
+is introduced. The retained client closes after acknowledgment, confirmed
+pre-effect discard, or final worker retirement, never under an active flight.
+Source reads and declaration-publication futures launched by a send retain
+their binding too. A timed-out parent future does not retire those children;
+they remain in the existing probe/shutdown inventory and block discard or
+transport closure until they finish.
+
+`discard_unaccepted_pool_metadata_request(original)` is an explicit preparation
+operation, not an ordinary-loop caller. It requires the exact pending request,
+no live future and no successful unacknowledged result. Never-admitted requests
+and structured `begin`/`publish` transaction refusals can be discarded. Only the
+actual catalog rejection envelope establishes that rollback; generic `409`,
+disconnects and malformed responses remain ambiguous. A later definite refusal
+does not erase an earlier unknown POST. Discard preserves the last accepted
+position, cohort/definition attribution and original coordinator target.
+These seams do not automatically retry, migrate or activate publication.
 
 Recovery first reads the unfiltered catalog through the negotiated client. An
 already-accepted original generation/revision is parsed and checked against all
