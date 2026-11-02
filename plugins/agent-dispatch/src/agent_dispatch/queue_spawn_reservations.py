@@ -643,6 +643,12 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         f"reservation {key} is 'releasing' with a recorded native identity; "
                         "independently verify exact absence before --confirmed-absent"
                     )
+                if conn.execute(
+                    "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key=?", (key,),
+                ).fetchone() is not None:
+                    raise TaskError(
+                        "pool release requires independently verified exact absence before force failure"
+                    )
             if preserve_releasing and row["state"] == SpawnState.RELEASING:
                 to_state = SpawnState.RELEASING
                 exclusive_released = None
@@ -806,8 +812,9 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         ``force`` is an explicit, audited operator override for a
         ``releasing`` reservation with neither a recorded ``session_handle``
         nor driver-qualified native identity (including acquisition receipts).
-        A genuinely empty attempt has no identity for an exact-absence probe
-        and would otherwise sit ``releasing`` forever (copilot-extensions#3179).
+        An unassigned legacy empty attempt may use this age-recovery path.
+        A pool-bound attempt requires independently confirmed absence even
+        without a handle or receipt; missing identity does not prove no launch.
 
         ``confirmed_absent`` additionally permits ``force`` to override a
         **handle-carrying** ``releasing`` row once the caller has

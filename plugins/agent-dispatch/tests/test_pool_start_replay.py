@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import SpawnReservation, Status, Task, TaskError, TaskQueue
+from agent_dispatch.task_scope import TASK_SCOPE_HEADER
 from tests import test_pool_placement as placement_controls
 from tests.test_pool_placement import headers, place, pool, publish, record_native, task
 
@@ -112,6 +113,23 @@ def test_http_initial_start_preserves_claimed_owner_incarnation_fence(
         url, headers=headers(), json={**body, "expected_owner_session_id": "native"},
     )
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("expected_owner", [None, "native", "different-native"])
+@pytest.mark.parametrize("scoped", [False, True])
+def test_http_start_replay_keeps_explicit_owner_condition_under_both_authorities(
+    q: TaskQueue, placed_start: StartFixture, expected_owner: str | None, scoped: bool,
+) -> None:
+    client, url, requested, _, body = placed_start
+    first = client.post(url, headers=headers(), json=body)
+    assert first.status_code == 200, first.text
+    before = snapshot(q, requested.id)
+    response = client.post(
+        url, json={**body, "expected_owner_session_id": expected_owner},
+        headers={TASK_SCOPE_HEADER: first.json()["task_token"]} if scoped else headers(),
+    )
+    assert response.status_code == (409 if expected_owner == "different-native" else 200), response.text
+    assert snapshot(q, requested.id) == before
 
 
 @pytest.mark.parametrize("started", [False, True])

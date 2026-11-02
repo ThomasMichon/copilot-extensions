@@ -312,6 +312,7 @@ def test_force_fail_rechecks_receipt_identity_after_stale_empty_snapshot(
         **asdict(released), "reservation_native_session_id": None,
         "reservation_native_identity_error": None,
         "reservation_native_identity_protocol": "reservation-native-identity/v1",
+        "reservation_pool_bound": False,
     })
 
     def fail(key: str, **kwargs: Any) -> dict:

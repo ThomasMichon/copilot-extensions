@@ -22,6 +22,9 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None:
             raise TaskError("ordinary assignment has no current task/reservation")
+        pool_bound = conn.execute(
+            "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key=?", (key,),
+        ).fetchone() is not None
         native, native_error = None, None
         try:
             native = reservation_native_identity(conn, row)
@@ -43,6 +46,7 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         "reservation_native_identity_protocol": RESERVATION_NATIVE_IDENTITY_PROTOCOL,
         "reservation_native_session_id": native,
         "reservation_native_identity_error": native_error,
+        "reservation_pool_bound": pool_bound,
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
         "inherited_retirement_reconcilable": reconcile_retirement,

@@ -91,8 +91,8 @@ def recover_stranded_releasing_reservations(
     A missing handle can still have a durable acquisition receipt. Such a native
     uses the existing startup fence and exact-absence retirement path; LIVE,
     UNKNOWN and unavailable identity evidence retain custody. Only a genuinely
-    empty attempt may use age-based force-fail, whose write transaction checks
-    identity again against concurrent publication (copilot-extensions#3179).
+    empty unassigned legacy attempt may use age-based force-fail, whose write
+    transaction checks native and pool custody again against concurrent changes.
     """
     now = time.time() if now is None else now
     recovered = 0
@@ -125,6 +125,9 @@ def recover_stranded_releasing_reservations(
             recovered += retire_historical_native(
                 supervisor, current, task, native_session_id=native,
             )
+            continue
+        if current.get("reservation_pool_bound") is not False:
+            log.warning("release %s retains pool or unqualified placement custody", key)
             continue
         try:
             supervisor.client.fail_spawn(

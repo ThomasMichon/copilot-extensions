@@ -151,7 +151,10 @@ and native owner. If that response is lost, the unchanged initial payload
 (including an absent or null expected owner) can replay the already-`STARTED`
 result only for the same validated current worker, native and generation.
 An explicit mismatched expected owner still refuses, and the initial transition
-retains its strict ownership-incarnation fence. Replay leaves task timestamps,
+retains its strict ownership-incarnation fence.
+Both shared/control and task-scoped requests preserve that explicit condition;
+resolving the authenticated owner does not discard a caller's non-null owner pin.
+Replay leaves task timestamps,
 attachments, reservation and capacity unchanged; an existing hold remains
 intact, while release, cooling, retirement and startup fences still refuse.
 Preparation records `execution_machine` independently of
@@ -204,6 +207,13 @@ UNKNOWN, unsupported old-provider responses and identity errors retain custody.
 Only a positively empty identity may use bounded force-fail, which rechecks
 receipts in the state-transition write transaction. Native retirement alone
 does not settle unresolved transport custody.
+The same reservation GET exposes `reservation_pool_bound` from its immutable
+binding in that read transaction. A handleless, receiptless pool release remains
+accountable until independently qualified absence; age cannot force it failed
+and free capacity. The mutation transaction independently enforces that fence
+against stale unassigned snapshots. Only a positively observed unassigned legacy
+attempt retains automatic age-based empty-release recovery; missing binding
+support leaves a visible hold instead of assuming legacy custody.
 Once a receipt-backed attempt is terminal and has no pending native release,
 the receipt remains historical identity evidence, not a reason to retire it
 again. Subsequent sweeps use the existing claimed and validated workspace

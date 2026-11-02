@@ -146,10 +146,12 @@ def mint_task_token(
 def start_incarnation(
     request: Request, body: StartBody, owner_session_id: str | None,
 ) -> tuple[int | None, str | None]:
-    """Keep explicit start pins subordinate to already-resolved task authority."""
+    """Preserve explicit conditional start pins within resolved task authority."""
     scope = getattr(request.state, "task_scope", None)
     if scope is None:
         return body.expected_generation, body.expected_owner_session_id
     if body.expected_generation is not None and scope.generation != body.expected_generation:
+        raise HTTPException(409, detail="start ownership incarnation changed")
+    if body.expected_owner_session_id is not None and body.expected_owner_session_id != owner_session_id:
         raise HTTPException(409, detail="start ownership incarnation changed")
     return scope.generation, owner_session_id
