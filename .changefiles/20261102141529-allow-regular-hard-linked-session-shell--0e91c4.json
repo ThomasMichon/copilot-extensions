@@ -1,0 +1,9 @@
+{
+  "comment": "Allow regular hard-linked session-shell inputs while retaining independent launch-owned copies and rejecting path redirection",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
