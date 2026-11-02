@@ -33,8 +33,15 @@ class CallerRegistrationUnavailable(GuardPublicationError):
 
 
 def _reader():
-    source = Path(__file__).resolve().parents[2] / "scripts" / "guarded_anchor_map.py"
-    if not source.is_file():
+    package = Path(__file__).resolve().parent
+    # An installed runtime reads the copy it ships, so the guard map never depends on
+    # which bin/ publication scope (wrappers vs resolvers) last ran, or on a stale bin/.
+    candidates = (
+        package / "_runtime_assets" / "scripts" / "guarded_anchor_map.py",
+        package.parents[1] / "scripts" / "guarded_anchor_map.py",
+    )
+    source = next((path for path in candidates if path.is_file()), None)
+    if source is None:
         from . import config as cfg
 
         source = cfg.install_dir() / "bin" / "guarded_anchor_map.py"

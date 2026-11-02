@@ -94,6 +94,7 @@ class SupervisorSources(SupervisorPoolPublication):
             future = self._read_pool().submit(read)
             self._discovery_futures[key] = future
             self._probe_inflight.add(future)
+        self._track_pool_metadata_future(future)
         try:
             result = future.result(timeout=max(0.0, deadline - time.monotonic()))
         except Exception:
@@ -128,9 +129,10 @@ class SupervisorSources(SupervisorPoolPublication):
     def _store_registrations(self) -> list[dict]:
         publisher = self._declaration_publisher
         epoch = publisher.withdrawal_epoch if publisher is not None else 0
+        client = self.client
 
         def read() -> tuple[int, list[dict], list[dict]]:
-            registrations = self.client.list_registrations(
+            registrations = client.list_registrations(
                 machine=self.machine, env=self.env, include_paused=False,
             )
             return epoch, registrations, copy.deepcopy(registrations)

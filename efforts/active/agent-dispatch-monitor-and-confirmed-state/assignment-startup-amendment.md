@@ -29,6 +29,10 @@ The [legacy admission fence receipt](journal/2026/11.02-configured-admission-fen
 records [#10059](https://github.com/ThomasMichon/copilot-extensions/pull/10059):
 fresh legacy queued spawning refuses after projection without activating the
 ordinary publisher or migrating worker prompts.
+The [coordinator-source receipt](journal/2026/11.02-coordinator-source-projection.md)
+records [#10072](https://github.com/ThomasMichon/copilot-extensions/pull/10072):
+fresh explicit projection is bound to the coordinator's actual registrar and
+active/drain owner, without enabling automatic publication or worker migration.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -125,7 +129,10 @@ is a bounded provider composition, not automatic publication. Before enabling
 the existing reconciliation cadence, resolve unaccepted versus ambiguous
 original requests, preserve original client targets through reconnect, include
 all futures in existing shutdown accounting and explicitly refuse unsupported
-peers. Ordinary allocator and initial-prompt migration remain required.
+peers. The [request-custody source slice](journal/2026/11.02-publication-request-custody.md)
+addresses original-target recovery and confirmed-unaccepted supersession;
+it does not enable that cadence. Ordinary allocator and initial-prompt migration
+remain required.
 
 ## Current foundations and discrepancy
 
