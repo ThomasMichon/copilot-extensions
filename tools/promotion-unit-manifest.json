@@ -3549,7 +3549,11 @@
         "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[changed]",
         "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[missing]",
         "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[failed]",
-        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[renamed]"
+        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[renamed]",
+        "tools/promotion_unit_tests/test_native_process_driver.py::test_process_preparation_refuses_unbound_source_before_launch[missing-observation]",
+        "tools/promotion_unit_tests/test_native_process_driver.py::test_process_preparation_refuses_unbound_source_before_launch[changed-observation]",
+        "tools/promotion_unit_tests/test_native_process_driver.py::test_process_preparation_refuses_unbound_source_before_launch[foreign-observation]",
+        "tools/promotion_unit_tests/test_native_process_driver.py::test_required_tool_closure_contains_actual_owner_startup_imports"
     ],
     "sources": {
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3996,10 +4000,10 @@
         "libs/agent-procutil/src/agent_procutil/owned_budget.py": "72e1ca79f9be6ed44c606f14ed12061b68f8dd0b478025374efbf279805566bd",
         "tools/native_process_stage.py": "e5302f428f783f9ff8d273d91a6d8b5078dc45a81849ab5751a48c2e656d4544",
         "tools/native_process_artifacts.py": "010b85899b1937c09ac74e12b5cb092b5483edcce83b5d29af7bdd14645a7eb2",
-        "tools/native_process_sources.py": "7ff66417c49a2838e8296dc41db5f5efc6ea354f1159d48d48013a5539dd04b9",
+        "tools/native_process_sources.py": "63b820b10bffb93cde5fd9fcdfc53bec691cef326f79d9f2eebb13281338434a",
         "tools/native_process_qualification.py": "4077845593a48eb3f3e4cef07832d00a96b2954c9cdf542bf5a02c0fbe2d49e7",
         "tools/promotion_unit_tests/test_native_process_stage.py": "2ab469148194d5c9f416392a3a5b316652c964a82e041a0a88903a2772f161e2",
-        "tools/promotion_unit_tests/test_native_process_driver.py": "31b2cc2757e9ecc8539b31324fc6b7b9e527086b718044bef8eaf5fc7acaab4a"
+        "tools/promotion_unit_tests/test_native_process_driver.py": "aa45418af99503b5d2cbf41191089eb737a39c68aa70b95cd7f8a3b3a0229143"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",

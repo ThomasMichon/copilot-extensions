@@ -23,7 +23,8 @@ TOOLS = (
     "native_process_artifacts.py",
     "native_qualification_receiver.py", "native_qualification_contract.py",
     "plugin_test_containment.py", "plugin_test_environment.py",
-    "plugin_test_containment_posix.py", "native_test_paths.py", LAUNCHER,
+    "plugin_test_containment_posix.py", "plugin_test_containment_observation.py",
+    "native_test_paths.py", LAUNCHER,
 )
 SDK_HELPERS = (
     "sdk_visibility.py", "sdk_visibility_sources.py", "sdk_visibility_cases.py",
