@@ -2,6 +2,10 @@
   "comment": "Bound retained-source content verification to four concurrent readers while preserving full comparisons, ordered failures, deadlines, and settled cleanup.",
   "changes": [
     {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-containers",
       "type": "patch"
     },
@@ -58,7 +62,7 @@
       "type": "patch"
     },
     {
-      "plugin": "update-driver",
+      "plugin": "libs/update-driver",
       "type": "patch"
     }
   ]
