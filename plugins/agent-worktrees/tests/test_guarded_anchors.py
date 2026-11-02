@@ -435,6 +435,10 @@ def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer, 
     with pytest.raises(KeyboardInterrupt):
         p.module.refresh(registry_root=p.root)
     assert all(p.reader.map_path(caller, p.root).is_file() for caller in p.callers)
+    assert [
+        json.loads(p.reader.map_path(caller, p.root).read_text())["source_project"]
+        for caller in p.callers
+    ] == ["first", "second"]
     monkeypatch.setattr(p.module, "_atomic_write", original_write)
     assert p.module.refresh(registry_root=p.root)["published"] == 2
     assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
@@ -526,6 +530,30 @@ def test_removed_registered_caller_is_retired_but_explicit_request_errors(produc
     assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
     assert p.module.refresh()["published"] == 1
     assert p.reader.read_map(p.callers[0], p.root).status == "missing"
+
+
+def test_removed_caller_retires_even_when_unrelated_registration_is_unavailable(producer, monkeypatch):
+    from agent_worktrees import repos
+
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    p.module.refresh(p.callers)
+    original_root = repos.registered_entry_root
+    original_local = repos.RepoEntry.local_path
+    monkeypatch.setattr(repos.RepoEntry, "local_path", lambda entry: (
+        str(p.target) if entry.name == "target" else original_local(entry)
+    ))
+
+    def unavailable(entry):
+        if entry.name == "target":
+            raise repos.RepositoryResolutionError("synthetic unrelated unavailable path")
+        return original_root(entry)
+
+    monkeypatch.setattr(repos, "registered_entry_root", unavailable)
+    p.module.managed_write(lambda: p.registry.repos.pop("first"))
+    assert p.reader.read_map(p.callers[0], p.root).status == "missing"
+    assert p.reader.read_map(p.callers[1], p.root).status == "ready"
+    assert p.module.refresh()["published"] == 1
 
 
 def test_initial_resident_preparation_refreshes_views_and_reports_unavailability(producer, monkeypatch, capsys):

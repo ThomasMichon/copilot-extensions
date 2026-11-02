@@ -227,3 +227,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   longer retires a prepared caller. Two regressions prove later refresh restores
   the complete inventory. The focused packet passed 36 cases with one native
   FIFO capability skip.
+- Retained the caller's registration name through complete snapshots and every
+  tombstone stage. This distinguishes a removed caller from an unrelated
+  unavailable checkout without relaxing caller-identity failure handling.
+  The combined removal/outage regression and interruption binding assertions
+  passed in the focused packet: 37 cases, one native FIFO capability skip.

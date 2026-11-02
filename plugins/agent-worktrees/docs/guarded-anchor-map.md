@@ -56,6 +56,10 @@ failure. Windows readers permit share-delete; the existing atomic writer's
 bounded retries cover transient replacement conflicts while a read finishes.
 Automatically rediscovered callers whose registration was removed are retired;
 an explicitly requested unregistered caller still reports an error.
+Snapshots and tombstones retain the caller's `source_project` registration
+binding. Removal of that named registration remains distinguishable from an
+unrelated unavailable checkout; unrelated acquisition failures cannot keep a
+removed caller poisoning later publications.
 Transient checkout or registered-anchor metadata failures retain the caller's
 retry scope and report unavailable acquisition. An unreadable identity is not
 proof that registration or the checkout disappeared.
@@ -69,7 +73,9 @@ inputs. Hook consumption with a missing reader still fails open.
 
 Version 1 uses schema `agent-worktrees.guarded-anchors`, canonical `source_root`
 and `registry_root` bindings, the caller's filesystem Git identity, a producer
-generation, and `inventory_authority: complete`. Each guarded row contains its
+generation, and `inventory_authority: complete`. The producer also retains its
+caller registration name as `source_project` for retry/retirement bookkeeping.
+Each guarded row contains its
 name, delegate, local path, locus and Git identity. A valid complete empty list
 means no guarded local anchors were observed. Missing, foreign, malformed,
 oversized, unsupported-version, incomplete or otherwise unusable maps fail open;

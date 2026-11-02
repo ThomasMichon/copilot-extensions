@@ -45,7 +45,7 @@ def _reader():
     return module
 
 
-def build_snapshot(caller: str, root: Path, generation: str) -> dict:
+def build_snapshot(caller: str, root: Path, generation: str, prior_project: str | None = None) -> dict:
     """Acquire one caller's effective overlays; never union other callers."""
     from . import config as cfg
     from .related_acquisition import (
@@ -74,6 +74,8 @@ def build_snapshot(caller: str, root: Path, generation: str) -> dict:
             project = name
             break
     if project is None:
+        if prior_project is not None and prior_project not in registry.repos:
+            raise CallerNotRegistered("caller has no available selected-registry registration")
         if registration_unavailable:
             raise GuardPublicationError("caller registration identity is unavailable")
         raise CallerNotRegistered("caller has no available selected-registry registration")
@@ -119,7 +121,7 @@ def build_snapshot(caller: str, root: Path, generation: str) -> dict:
     return {
         "schema": reader.SCHEMA, "version": reader.VERSION,
         "source_root": identity["root"], "registry_root": reader.canonical(root),
-        "source_identity": identity,
+        "source_identity": identity, "source_project": project,
         "inventory_authority": "complete", "generation": generation,
         "observed_at": time.time(),
         # AcquisitionReport has no reusable owner-input closure. This is a
@@ -145,7 +147,7 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
         except (OSError, ValueError):
             data = {}
         scope = {
-            key: data[key] for key in ("source_root", "registry_root")
+            key: data[key] for key in ("source_root", "registry_root", "source_project")
             if isinstance(data, dict) and isinstance(data.get(key), str)
         }
         _atomic_write(path, json.dumps({
@@ -159,6 +161,7 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
     reader = _reader()
     explicit = {reader.canonical(caller) for caller in callers}
     selected = set(explicit)
+    prior_projects = {}
     old_paths = []
     for path in directory.glob("*.json") if include_prepared else ():
         old_paths.append(path)
@@ -171,10 +174,25 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
                 and reader.map_path(source, root) == path
             ):
                 selected.add(source)
+                project = data.get("source_project")
+                if isinstance(project, str) and project:
+                    prior_projects[source] = project
         except (OSError, ValueError, TypeError):
             pass  # Corrupt prior views are withdrawn, never retained as facts.
     if not include_prepared:
         old_paths = [reader.map_path(caller, root) for caller in selected]
+        for caller in selected:
+            try:
+                data = _view_data(reader.map_path(caller, root), reader)
+                if (
+                    isinstance(data, dict) and data.get("source_root") == caller
+                    and data.get("registry_root") == reader.canonical(root)
+                ):
+                    project = data.get("source_project")
+                    if isinstance(project, str) and project:
+                        prior_projects[caller] = project
+            except (OSError, ValueError, TypeError):
+                pass
     # Withdraw before acquisition: even an interrupted or failed producer must
     # not leave the old policy looking current after a managed mutation.
     _withdraw_views(directory, paths=old_paths, reader=reader)
@@ -198,9 +216,10 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
             _atomic_write(reader.map_path(caller, root), json.dumps({
                 "schema": reader.SCHEMA, "version": reader.VERSION,
                 "source_root": caller, "registry_root": reader.canonical(root),
+                "source_project": prior_projects.get(caller),
                 "inventory_authority": "unavailable", "generation": generation,
             }))
-            snapshot = build_snapshot(caller, root, generation)
+            snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
             encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > reader.MAX_BYTES:
                 raise GuardPublicationError("guard map exceeds its byte bound")
