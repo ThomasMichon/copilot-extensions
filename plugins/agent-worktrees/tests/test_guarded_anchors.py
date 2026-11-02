@@ -331,6 +331,7 @@ def test_nested_repository_does_not_inherit_parent_guard(tmp_path):
 @pytest.mark.parametrize("tool,args", [
     ("edit", {"path": "new.txt"}),
     ("powershell", {"command": "git commit -m first; git commit -m second"}),
+    ("powershell", {"command": "git -C . commit -m first; git -C . commit -m second"}),
 ])
 def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path, monkeypatch, tool, args):
     guard = _load("cross_repo_guard")
@@ -352,6 +353,36 @@ def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path,
     for event in range(2):
         assert guard.evaluate(tool, args, str(outside), roots) is None
         assert len(observed) == event + 1
+
+
+@pytest.mark.parametrize("kind", ["anchor", "linked", "nested"])
+@pytest.mark.parametrize("relative", [False, True])
+def test_literal_git_directory_uses_repository_identity(tmp_path, kind, relative):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded space")
+    target = anchor
+    if kind == "nested":
+        target = _repo(anchor / "nested space")
+    elif kind == "linked":
+        target = tmp_path / "linked space"
+        target.mkdir()
+        gitdir = anchor / ".git" / "worktrees" / "linked"
+        gitdir.mkdir(parents=True)
+        (gitdir / "HEAD").write_text("ref: refs/heads/main\n")
+        (gitdir / "commondir").write_text("../..\n")
+        (target / ".git").write_text(f"gitdir: {gitdir}\n")
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+    raw = os.path.relpath(target, tmp_path) if relative else str(target)
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": f"git -C '{raw}' commit -m new"},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is (kind != "nested")
 
 
 def test_map_scope_does_not_borrow_other_installation(tmp_path):

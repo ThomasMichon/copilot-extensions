@@ -320,3 +320,10 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   The focused five-case packet and complete 26-case worker packet pass.
   Rebased onto current Dev while preserving the native stderr handling fix;
   regenerated only the combined installer's existing admission hash.
+- Replaced literal `git -C` path-prefix detection with event-local Git
+  identity matching. Relative and quoted directory arguments preserve linked
+  checkout protection while independent nested repositories remain unguarded.
+  Repeated directory options resolve relative to the preceding option.
+  The full map, standalone consumer and deployment packet passed 108 cases
+  with one native FIFO capability skip, including six directory-identity
+  regressions and the existing 20-root identity-cost control.

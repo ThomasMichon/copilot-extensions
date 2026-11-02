@@ -89,7 +89,7 @@ _WRITE_VERBS = re.compile(
         ">>?",
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
-        r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
+        r"""git\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)\s+)*(?:apply|commit|checkout|switch|reset|"""
         r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
         r"add|init)",
     ]),
@@ -119,6 +119,9 @@ _GIT_WRITE_SUB = re.compile(
     re.IGNORECASE,
 )
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
+_GIT_DASH_C_TARGET = re.compile(
+    r"""(?:^|\s)-C\s+(?:"([^"]*)"|'([^']*)'|([^\s"';&|]+))""", re.IGNORECASE,
+)
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # command position (``sudo rm ...``, ``VAR=x git commit``). Wrapper flags that
@@ -156,6 +159,19 @@ def _cd_target(eff_seg: str, base: str) -> str | None:
     if not raw or "$" in raw or "%" in raw or raw.startswith("~"):
         return None
     return raw if os.path.isabs(raw) else os.path.join(base, raw)
+
+
+def _git_target(eff_seg: str, base: str) -> str | None:
+    target = base
+    found = False
+    for match in _GIT_DASH_C_TARGET.finditer(eff_seg):
+        found = True
+        raw = next(value for value in match.groups() if value is not None)
+        if "$" in raw or "%" in raw or raw.startswith("~"):
+            return None
+        if raw:
+            target = raw if os.path.isabs(raw) else os.path.join(target, raw)
+    return target if found else None
 
 
 def _root_token(root_str: str) -> str:
@@ -333,17 +349,11 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
                 # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
                 if at_write_cmd and re.search(tok, seg_hay):
                     return {**g, "reason": reason}
-                # 3a. A git mutation naming the repo via ``-C <repo>``.
-                if git_write and has_dash_c and re.search(
-                    r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
-                ):
-                    return {**g, "reason": reason}
-        # 3b. A repo-scoped git write (no ``-C``) targets the EFFECTIVE cwd --
-        #     catches ``cd <guarded>; git commit``.
-        if git_write and not has_dash_c and eff_cwd:
+        git_cwd = _git_target(eff, eff_cwd) if has_dash_c else eff_cwd
+        if git_write and git_cwd:
             for g in guarded:
                 gp = g.get("path")
-                if gp and _guard_map.matches(eff_cwd, g, identity_cache=identity_cache):
+                if gp and _guard_map.matches(git_cwd, g, identity_cache=identity_cache):
                     return {**g, "reason": _deny_reason(
                         g, "(a shell command writes into it).")}
         # Follow an in-command ``cd`` to a resolvable path for later segments.
