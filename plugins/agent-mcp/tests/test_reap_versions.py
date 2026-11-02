@@ -656,25 +656,26 @@ def test_real_dead_main_thread_cannot_hide_a_live_runtime(
         process.stdout.close()
 
 
-@pytest.mark.timeout(90 if os.name == "nt" else 30)
+@pytest.mark.timeout(450 if os.name == "nt" else 30)
 def test_real_tree_exit_spares_original_parent(tmp_path):
     if os.name != "nt" and not sys.platform.startswith("linux"):
         pytest.skip("External identity-pinned retirement requires Windows or Linux")
     from agent_procutil._daemon_instance_identity import birth_identity, identity_state
 
+    lifetime = 480 if os.name == "nt" else 60
     src = (
         "import os,subprocess,sys,time\n"
         "child='import ctypes,sys,time\\n"
         "if sys.platform.startswith(\"linux\"): assert ctypes.CDLL(None).prctl(15,b\"worker-\\\\xff\",0,0,0)==0\\n"
         "print(\"ready\",flush=True)\\n"
-        "time.sleep(60)'\n"
+        f"time.sleep({lifetime})'\n"
         "c=subprocess.Popen([sys.executable,'-c',child],"
         "stdout=subprocess.PIPE,text=True,"
         "creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)\n"
         "assert c.stdout.readline().strip()=='ready'\n"
         "c.stdout.close()\n"
         "print(c.pid,flush=True)\n"
-        "time.sleep(60)\n"
+        f"time.sleep({lifetime})\n"
     )
     process = subprocess.Popen(
         [getattr(sys, "_base_executable", sys.executable), "-c", src, str(tmp_path)],

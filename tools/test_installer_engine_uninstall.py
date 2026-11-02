@@ -26,6 +26,30 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 HOST = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
 
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ownership census adapter")
+def test_ownership_census_receives_its_full_allowance(monkeypatch, tmp_path):
+    calls = []
+    rows = [{"pid": os.getpid(), "birth": "inspector"}, {"pid": 42, "birth": "original"}]
+
+    def run(payload, command, **kwargs):
+        calls.append((payload, command, kwargs))
+        return "owned census"
+
+    def inspect(root, shell, module, run, *, descendants):
+        assert root == tmp_path and shell == HOST and module == "agent_mcp"
+        assert descendants is True
+        assert run(["native-census"]) == "owned census"
+        return rows
+
+    monkeypatch.setattr(MODULE, "_dependency", lambda *_: tmp_path / "native.py")
+    monkeypatch.setattr(MODULE, "_load", lambda _: SimpleNamespace(inspect_processes=inspect))
+    monkeypatch.setattr(MODULE, "_run", run)
+    profile = MODULE.Profile((), (), (), (), "agent_mcp")
+    assert MODULE.inspect_processes(tmp_path, tmp_path, HOST, profile, descendants=True) == rows
+    assert calls == [(tmp_path, ["native-census"], {"timeout": 180})]
+
+
 @pytest.mark.parametrize("plugin", ("agent-bridge", "agent-dispatch", "agent-vault",
                                   "budget-guidance", "agent-mcp", "agent-logger"))
 def test_non_index_global_comments_do_not_authorize_removal(
@@ -627,11 +651,11 @@ function Get-Process {{
     return $result
 }}
 """
-    def inspect(owner, argv):
+    def inspect(owner, argv, **kwargs):
         native = "[Diagnostics.Process]::GetProcessById($processId)"
         assert argv[-1].count(native) == 1
         program = argv[-1].replace(native, "(Get-Process -Id $processId)")
-        return run(owner, [*argv[:-1], prelude + program])
+        return run(owner, [*argv[:-1], prelude + program], **kwargs)
 
     monkeypatch.setattr(MODULE, "_run", inspect)
     with pytest.raises(RuntimeError, match="Cannot inspect a current-user candidate process"):

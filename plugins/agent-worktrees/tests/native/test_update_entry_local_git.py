@@ -164,6 +164,7 @@ def _poison_old_runtime(home: Path, failing: bool) -> None:
     "front", ["posix", "powershell", "cmd", "payload-powershell", "payload-cmd", "git-sh"],
 )
 @pytest.mark.parametrize("runtime", ["missing", "failing"])
+@pytest.mark.timeout(90 if os.name == "nt" else 45)
 def test_update_entry_native_local_git(
     tmp_path: Path, request: pytest.FixtureRequest, front: str, runtime: str,
 ) -> None:

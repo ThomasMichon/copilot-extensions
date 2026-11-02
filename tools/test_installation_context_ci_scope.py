@@ -274,6 +274,12 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
         step for step in job["steps"] if step.get("name", "").startswith("Qualify ")
     ]
     commands = [step["run"] for step in families]
+    retirement = next(
+        step for step in families if step["name"] == "Qualify MCP identity-pinned runtime tree retirement"
+    )
+    assert retirement["run"].endswith(
+        "--subsuite-timeout ${{ runner.os == 'Windows' && 600 || 300 }}"
+    )
     expected = {
         "tests/test_update_auth.py", "tests/test_update_driver.py",
         "tests/test_update_launch_cli.py", "tests/test_update_entry.py",
@@ -311,6 +317,8 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
             assert "runner.os == 'Linux'" in step["if"]
         else:
             assert arguments[:2] == ["python", "tools/run-plugin-tests.py"]
+            if step is not retirement:
+                assert "--subsuite-timeout" not in arguments
             target = arguments[2]
             assert target in required
             if target not in {"agent-machines", "update-driver"}:
