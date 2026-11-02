@@ -661,6 +661,14 @@ def test_failed_committed_activation_settles_without_waiting_for_readiness(
     )
 
 
+def test_committed_successor_death_never_rolls_back_retirement_custody(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: False)
+    summary = {"action": "cutover", "result": {"committed": True, "ok": True}}
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
+    assert summary["result"]["committed"] and not summary["result"]["ok"]
+    assert "stopped serving" in summary["result"]["error"]
+
+
 def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner(
     driver, tmp_path, monkeypatch,
 ):
@@ -797,7 +805,11 @@ def test_reported_commit_or_restart_cannot_hide_actual_child_failure(
             return 1
 
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
-    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is False
+    committed = summary["action"] == "cutover"
+    assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is committed
+    if committed:
+        assert summary["result"]["ok"] is False
+        assert "stopped serving" in summary["result"]["error"]
 
 
 def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path, monkeypatch, capsys):

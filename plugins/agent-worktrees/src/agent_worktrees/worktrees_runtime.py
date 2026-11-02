@@ -92,7 +92,7 @@ def owner_generation(db_path: Path) -> str | None:
 class WorktreesRuntime:
     """No request callback loads records or waits for the owner's state lock."""
 
-    def __init__(self, db_path: Path, *, wake=None, now=time.monotonic, elected=None) -> None:
+    def __init__(self, db_path: Path, *, wake=None, now=time.monotonic, elected=None, admitted=None) -> None:
         from .worktrees_feed import WorktreesFeed
 
         self.store = WorktreesProjection(db_path)
@@ -108,10 +108,15 @@ class WorktreesRuntime:
         self._wake = wake
         self._now = now
         self._elected = elected
+        self._admitted = admitted
         self.feed = WorktreesFeed(self)
         from .agenda_runtime import AgendaRuntime
 
         self.agendas = AgendaRuntime(self)
+
+    @property
+    def _read_elected(self):
+        return self._elected if self._admitted is None else self._admitted
 
     def activate(self) -> None:
         with self._activation_lock:
@@ -203,7 +208,7 @@ class WorktreesRuntime:
         from . import picker_bootstrap_runtime
         from .execution_spaces import ExecutionSpaceError
 
-        if self._elected is not None and not self._elected():
+        if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
             if not self._admitting:
@@ -213,7 +218,7 @@ class WorktreesRuntime:
             result = picker_bootstrap_runtime.build(payload)
         except (ExecutionSpaceError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
             return self._failure("unavailable", str(error))
-        if self._elected is not None and not self._elected():
+        if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
             if not self._admitting or self.store.generation != generation:
@@ -249,7 +254,7 @@ class WorktreesRuntime:
             project, selection = request_selection(payload)
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
-        if self._elected is not None and not self._elected():
+        if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
             if not self._admitting:
@@ -296,7 +301,7 @@ class WorktreesRuntime:
                 if not self._admitting:
                     raise ProjectionUnavailable("current-roster publisher is not admitted")
             try:
-                self.store.publish(project, rows, observed_at=observed_at)
+                self.store.publish(project, rows, observed_at=observed_at, authority_check=self._elected)
                 self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:
                 if self.store.superseded:

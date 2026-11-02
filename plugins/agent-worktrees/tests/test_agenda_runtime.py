@@ -536,7 +536,7 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
     original = owner.agendas._fence
     injected = [False]
 
-    def fence(conn=None, expected=None):
+    def fence(conn=None, expected=None, *, read=False):
         if conn is not None and not conn.in_transaction and not injected[0]:
             injected[0] = True
             with sqlite3.connect(owner.store.db_path) as db:
@@ -554,7 +554,7 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
                     )
             if lost_authority == "election":
                 elected[0] = False
-        return original(conn, expected)
+        return original(conn, expected, read=read)
 
     monkeypatch.setattr(owner.agendas, "_fence", fence)
     if operation == "reconcile":

@@ -104,36 +104,9 @@ def process_start_time(pid: int) -> str | None:
 
 
 def _start_time_darwin(pid: int) -> str | None:
-    import ctypes
+    from zdd.darwin_identity import birth_time
 
-    # Public proc_bsdinfo ABI from XNU bsd/sys/proc_info.h.
-    class BsdInfo(ctypes.Structure):
-        _fields_ = [
-            (name, ctypes.c_uint32) for name in (
-                "flags", "status", "exit_status", "pid", "parent_pid",
-                "uid", "gid", "real_uid", "real_gid", "saved_uid", "saved_gid", "reserved",
-            )
-        ] + [
-            ("command", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
-            ("files", ctypes.c_uint32), ("group", ctypes.c_uint32),
-            ("job_count", ctypes.c_uint32), ("tty_device", ctypes.c_uint32),
-            ("tty_group", ctypes.c_uint32), ("nice", ctypes.c_int32),
-            ("start_seconds", ctypes.c_uint64), ("start_microseconds", ctypes.c_uint64),
-        ]
-
-    try:
-        query = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_pidinfo
-        query.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
-        query.restype = ctypes.c_int
-        info = BsdInfo()
-        size = ctypes.sizeof(info)
-        if query(pid, 3, 0, ctypes.byref(info), size) != size:
-            return None
-    except (OSError, AttributeError):
-        return None
-    if info.pid != pid or not info.start_seconds or info.start_microseconds >= 1_000_000:
-        return None
-    return f"{info.start_seconds}:{info.start_microseconds}"
+    return birth_time(pid)
 
 
 def _start_time_windows(pid: int) -> str | None:

@@ -98,16 +98,20 @@ def monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:
 def publish_lock(path: Path, *, extra: dict) -> bool:
     """Renew discovery only while this exact native owner holds the route."""
     directory = path.parent / "status-monitor-routing"
-    with routing.routing_lock(directory, deadline=time.monotonic() + 5.0):
-        table = routing.read_table(directory, strict=True)
-        raw = table.get("active") if isinstance(table, dict) else None
-        endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-        if (
-            endpoint is None or endpoint.pid != os.getpid()
-            or endpoint.process_start_time != locks.process_start_time(os.getpid())
-        ):
-            return False
-        written = locks.write_lock(path, extra=extra)
-        if not written:
-            logging.getLogger(__name__).error("Monitor discovery publication failed")
-        return written
+    try:
+        with routing.routing_lock(directory, deadline=time.monotonic() + 5.0):
+            table = routing.read_table(directory, strict=True)
+            raw = table.get("active") if isinstance(table, dict) else None
+            endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            if (
+                endpoint is None or endpoint.pid != os.getpid()
+                or endpoint.process_start_time != locks.process_start_time(os.getpid())
+            ):
+                return False
+            written = locks.write_lock(path, extra=extra)
+            if not written:
+                logging.getLogger(__name__).error("Monitor discovery publication failed")
+            return written
+    except (OSError, ValueError, routing.RoutingLockTimeout, routing.ActivePublicationRefused) as error:
+        logging.getLogger(__name__).error("Monitor discovery publication deferred: %s", error)
+        return False

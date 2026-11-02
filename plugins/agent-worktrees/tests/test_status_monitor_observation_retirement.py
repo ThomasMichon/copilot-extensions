@@ -52,9 +52,11 @@ def test_retirement_settles_observations_after_workers_and_before_authority_rele
             receipts=SimpleNamespace(wait_idle=record("receipts-idle")),
             worktree_status_runtime=runtime, managed_mux_runtime=runtime,
             lock="unused.lock", original_error=original, finish_observation_custody=finish,
+            retirement_guard=SimpleNamespace(release=record("guard-release")),
         )
     assert caught.value is expected
     assert attempts == 2 and settled
     assert events.index("agenda-feed-closed") < events.index("cleanup")
     assert events.index("workers-settled") < events.index("cleanup")
-    assert events[-1] == "route-release"
+    assert events[-2:] == ["route-release", "guard-release"]
+    assert events.count("guard-release") == 1

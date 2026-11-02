@@ -157,15 +157,15 @@ def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> Proces
 
 
 def _validate_identity(pid: int, expected_start_time: str) -> None:
+    from .darwin_identity import valid_start_time
+
     if (
         type(pid) is not int
         or not 0 < pid <= 0xFFFFFFFF
-        or not isinstance(expected_start_time, str)
-        or not 0 < len(expected_start_time) <= 64
-        or not expected_start_time.isascii()
-        or not expected_start_time.isdecimal()
+        or not valid_start_time(expected_start_time)
+        or len(expected_start_time) > 64
     ):
-        raise ValueError("process identity requires a positive PID and ASCII decimal start token")
+        raise ValueError("process identity requires a positive PID and native birth token")
 
 
 def open_process(

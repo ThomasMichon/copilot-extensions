@@ -18,13 +18,15 @@ def _endpoint(raw: object) -> dict | None:
         return None
     pid, port = raw.get("pid"), raw.get("port")
     start, bind = raw.get("process_start_time"), raw.get("bind")
+    from .darwin_identity import valid_start_time
+
     generation = raw.get("generation", 0)
     if (
         not isinstance(bind, str) or len(bind) > 255
         or type(port) is not int or not 0 < port < 65536
         or (pid is not None and (type(pid) is not int or not 0 < pid < 2**32))
         or (start is not None and (
-            not isinstance(start, str) or len(start) > 64 or not start.isascii() or not start.isdigit()
+            not valid_start_time(start) or len(start) > 64
         ))
         or type(generation) is not int or not 0 <= generation < 2**63
     ):

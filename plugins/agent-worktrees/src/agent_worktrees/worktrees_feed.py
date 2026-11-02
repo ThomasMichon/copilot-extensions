@@ -168,7 +168,7 @@ class WorktreesFeed:
                         reason = subscriber["closed"]
                     if changed or reason is not None:
                         break
-                    if self._owner._elected is not None and not self._owner._elected():
+                    if self._owner._read_elected is not None and not self._owner._read_elected():
                         self._owner.close_admission("superseded")
                         break
                     yield {

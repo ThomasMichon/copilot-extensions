@@ -299,7 +299,10 @@ class WorktreesProjection:
                 self._claim(conn, expected_generation)
             self._activated = True
 
-    def publish(self, project: str, rows: Iterable[dict], *, observed_at: float) -> None:
+    def publish(
+        self, project: str, rows: Iterable[dict], *, observed_at: float,
+        authority_check: Callable[[], bool] | None = None,
+    ) -> None:
         project = _identity(project, name="project")
         if (
             type(observed_at) not in (int, float)
@@ -367,6 +370,8 @@ class WorktreesProjection:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.executescript(_SCHEMA + INDEX_SCHEMA + observations.SCHEMA)
                 conn.execute("BEGIN IMMEDIATE")
+                if authority_check is not None and not authority_check():
+                    raise ProjectionUnavailable("projection publication is no longer elected")
                 self._claim(conn, None)
                 removed = (
                     set(previous.rows) - encoded.keys() if previous is not None

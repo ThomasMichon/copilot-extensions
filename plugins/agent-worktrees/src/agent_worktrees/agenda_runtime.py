@@ -47,9 +47,10 @@ class AgendaRuntime:
         self._unsubscribe = None
         self.feed = AgendaFeed(self)
 
-    def _fence(self, conn=None, expected=None) -> None:
+    def _fence(self, conn=None, expected=None, *, read=False) -> None:
         owner = self.owner
-        if owner._elected is not None and not owner._elected():
+        elected = owner._read_elected if read else owner._elected
+        if elected is not None and not elected():
             raise contract.AgendaError("resident is no longer elected", "superseded")
         with owner._lock:
             if not owner._admitting:
@@ -332,7 +333,9 @@ class AgendaRuntime:
         try:
             project, wid, _session = contract.selection(request)
             with self.owner._activation_lock, self._lock:
-                self._fence(expected=self._generation)
+                self._fence(expected=self._generation, read=True)
+                if self.owner._elected is not None and not self.owner._elected():
+                    return self._reply(request)
                 self._request_project(project)
                 pending, updates = self._refresh_pending()
                 key = project, wid

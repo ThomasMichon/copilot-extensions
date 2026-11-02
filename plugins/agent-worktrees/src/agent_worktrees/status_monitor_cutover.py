@@ -850,12 +850,25 @@ def activate_after_update(
                 print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
             return handle
 
+        published_successor = None
+
         def activate_successor(endpoint: routing.Endpoint) -> None:
+            nonlocal retirement_complete, published_successor
+            if reserved:
+                retirement_complete = not retirements.commit(
+                    smr._aw_runtime_home(), retirement_predecessor,
+                )
+            published_successor = endpoint
             if make_client(endpoint.base_url).promote().get("adopted") is not True:
                 raise ValueError("status-monitor successor refused promotion")
 
         def healthy_successor(host: str, port: int) -> bool:
             return _health_check(host, port, require_async_retirement=True)
+
+        def serving_successor(host: str, port: int) -> bool:
+            return published_successor is not None and guarded_recovery.successor_healthy(
+                host, port, make_client, expected=published_successor,
+            )
 
         orch = CutoverOrchestrator(
             routing_dir(),
@@ -869,6 +882,7 @@ def activate_after_update(
             **options,
             self_retirement=asynchronous_retirement,
             activate_successor=activate_successor if asynchronous_retirement else None,
+            serving_health_check=serving_successor if asynchronous_retirement else None,
         )
         if spawned_handles is not None:
             print("Monitor transition: entering native cutover", flush=True)
@@ -878,14 +892,7 @@ def activate_after_update(
             force=False,
         )
         if reserved:
-            if result.committed:
-                try:
-                    if not retirements.commit(smr._aw_runtime_home(), retirement_predecessor):
-                        retirement_complete = True
-                except (OSError, ValueError, RuntimeError) as error:
-                    result.ok = False
-                    result.error = f"Committed retirement publication failed: {error}"
-            elif not result.publication_uncertain:
+            if not result.committed and not result.publication_uncertain:
                 retirements.cancel(smr._aw_runtime_home(), retirement_predecessor)
         if reserved and (result.committed or result.publication_uncertain):
             result.retirement_pending = not retirement_complete

@@ -119,10 +119,10 @@ class Endpoint:
     @classmethod
     def from_dict(cls, data: dict) -> Endpoint | None:
         try:
+            from .darwin_identity import valid_start_time
+
             start_time = data.get("process_start_time")
-            if start_time is not None and (
-                not isinstance(start_time, str) or not start_time.isdigit()
-            ):
+            if start_time is not None and not valid_start_time(start_time):
                 return None
             return cls(
                 bind=str(data["bind"]),
@@ -418,7 +418,9 @@ def _publish_active_unlocked(
     from .diagnostics import process_start_time as read_process_start_time
 
     if process_start_time is not None:
-        if not isinstance(process_start_time, str) or not process_start_time.isdigit():
+        from .darwin_identity import valid_start_time
+
+        if not valid_start_time(process_start_time):
             raise ValueError("process_start_time must be a non-empty numeric string")
         if pid is None or pid <= 0:
             raise ValueError("process_start_time requires a positive pid")
@@ -641,11 +643,11 @@ def withdraw_active_guarded(
     """
     if not callable(refuse_current):
         raise TypeError("exact withdrawal requires an authority validator")
+    from .darwin_identity import valid_start_time
+
     if (
         not isinstance(expected_active, Endpoint) or type(expected_active.pid) is not int
-        or expected_active.pid <= 0 or not isinstance(expected_active.process_start_time, str)
-        or not expected_active.process_start_time.isascii()
-        or not expected_active.process_start_time.isdecimal()
+        or expected_active.pid <= 0 or not valid_start_time(expected_active.process_start_time)
         or Endpoint.from_dict(expected_active.to_dict()) != expected_active
     ):
         raise ActivePublicationRefused("exact withdrawal requires native process identity")

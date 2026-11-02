@@ -4983,22 +4983,33 @@ is an explicit refusal, not unsafe self-exit, a synchronous fallback or a
 package-version guess. Route commitment precedes any promotion
 callback that can admit work. A failure after that frontier preserves the
 possibly admitted successor and remains an explicit failed commit-forward result.
-Before changing selectors or releasing installer retention, the owner persists
-fsynced birth-identified retirement intent and canonical runtime references,
-including for a compatible resident that holds no runtime lease. Interrupted
-reference publication remains discoverable from that intent. Proven precommit
+Before changing selectors or releasing installer retention, the owner reserves
+the canonical runtime reference first, then persists fsynced birth-identified
+retirement intent, including for a compatible resident that holds no runtime
+lease. An interruption between these writes leaves discoverable execution
+protection, not an unprotected intent or a claim-release grant. Reference
+capacity is checked by the canonical publisher before intent is written. Proven precommit
 rollback cancels only exact custody, without releasing a deferred dev claim.
 Retirement records distinguish prepared, retiring and cancelled intent.
 Preparation retains code and demand but cannot release a claim, even if the old
-process exits before publication. Only parent-proven commitment enables cleanup.
+process exits before publication. Only durable publication enables the matching
+retirement grant, before promotion can open successor admission. If the installer
+exits at that boundary, the selected resident's existing loop completes the
+exact birth-identified publication under the cutover lease, enables its grant
+and promotes itself. The attributable witness remains until serving readiness
+is confirmed; failed completion remains visible and retryable.
 Cancellation is fsynced before cleanup and revokes the claim grant while keeping
 execution protection for any still-live code. Completed retirement is an
 idempotent commit outcome, not a missing-record loop.
 The elected successor remains needed while
 those identities are live or unknown and reconciles them in its existing loop.
 Only positive native exit releases references, even when the old birth token
-remains readable. Outgoing retirement requires actual successor readiness and
-settles all accepted work without grace-forced exit. Route-fenced discovery
+remains readable. Outgoing retirement latches actual successor readiness and
+settles all accepted work without grace-forced exit, even if the successor later
+dies. Before that latch, cached reads remain admitted through the published
+predecessor while every new write is independently fenced by current route
+ownership. Idle exit is serialized with installation through the existing
+cutover lease, rather than racing publication. Route-fenced discovery
 renewal prevents a predecessor from rewriting successor metadata; ready
 publication is advertised only after the discovery stamp succeeds. A known
 failed-but-committed activation settles as an error without indefinitely holding

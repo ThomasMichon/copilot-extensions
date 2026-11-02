@@ -201,11 +201,12 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
 
 
 @pytest.mark.timeout(300)
-def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path):
+@pytest.mark.parametrize("failure", ["none", "successor", "installer"])
+def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path, failure):
     from agent_procutil import no_window_kwargs
     from agent_worktrees import classify_daemon
     from agent_worktrees.status_monitor_cli import _SELF_RETIRE_MAX_GRACE_S
-    from zdd import diagnostics, routing
+    from zdd import breadcrumb, diagnostics, routing
 
     home = tmp_path / "home"
     home.mkdir()
@@ -229,16 +230,20 @@ from agent_worktrees import classify_daemon, repository_map, status_monitor_cli
 status_monitor_cli._SELF_RETIRE_MAX_GRACE_S = 0.2
 started, release = map(Path, sys.argv[1:3])
 options = sys.argv[3:]
-if "--passive" in options:
-    original_start = repository_map.RepositoryMapRuntime.start
-    def paused_start(self, interval):
-        original_start(self, interval)
-        for _ in range(2400):
-            if started.with_suffix(".loop-release").exists():
-                return
-            threading.Event().wait(0.1)
-        raise TimeoutError("resident loop was not released")
-    repository_map.RepositoryMapRuntime.start = paused_start
+original_start = repository_map.RepositoryMapRuntime.start
+def paused_start(self, interval):
+    original_start(self, interval)
+    barrier = (
+        started.with_suffix(".loop-release") if "--passive" in options
+        else started.parent / "promotion-started" if started.name == "started"
+        else None
+    )
+    for _ in range(2400):
+        if barrier is None or barrier.exists():
+            return
+        threading.Event().wait(0.1)
+    raise TimeoutError("resident loop was not released")
+repository_map.RepositoryMapRuntime.start = paused_start
 original = classify_daemon.start_server
 def start_server(compute, **kwargs):
     def held(kind, payload):
@@ -252,7 +257,7 @@ def start_server(compute, **kwargs):
         return compute(kind, payload)
     return original(held, **kwargs)
 classify_daemon.start_server = start_server
-sys.argv = ["agent_worktrees", "status-monitor", "--interval", "1", *options]
+sys.argv = ["agent_worktrees", "status-monitor", "--interval", "2", *options]
 runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
 """
     installation = """
@@ -269,6 +274,15 @@ def controlled_spawn(argv, env, **kwargs):
         [argv[0], "-c", sys.argv[4], sys.argv[2], sys.argv[3], *options], env, **kwargs,
     )
 cutover.spawn_monitor = controlled_spawn
+if len(sys.argv) > 7 and sys.argv[7] == "installer":
+    from agent_worktrees import runtime_monitor_retirements
+    def owner_exits_before_grant(*args, **kwargs):
+        Path(sys.argv[5]).touch()
+        import threading
+        while not Path(sys.argv[6]).exists():
+            threading.Event().wait(0.1)
+        os._exit(29)
+    runtime_monitor_retirements.commit = owner_exits_before_grant
 if len(sys.argv) > 6:
     started, release = map(Path, sys.argv[5:7])
     make_client = cutover._make_client
@@ -298,12 +312,11 @@ with ExitStack() as custody:
     identities = {}
     request_result = {}
     second_result = {}
+    last_original = {}
     requester = None
     second_requester = None
-    demand = None
-    demand_thread = None
-    demand_stop = threading.Event()
     first_installer = None
+    restarted = None
     with (tmp_path / "process.log").open("w", encoding="utf-8") as log:
         old = subprocess.Popen(
             [sys.executable, "-B", "-c", baseline, str(started), str(release)],
@@ -321,19 +334,6 @@ with ExitStack() as custody:
             old_pid = record["pid"]
             original_endpoint = routing.read_active_endpoint(root / "status-monitor-routing")
             identities[old_pid] = diagnostics.process_start_time(old_pid)
-            demand_host, demand_port = record["worktree_status_endpoint"].split(":")
-            demand = (demand_host, int(demand_port), record["worktree_status_token"])
-            classify_daemon.wcs_client.subscribe(*demand, "async-install-demand")
-
-            def keep_demand():
-                while not demand_stop.wait(1):
-                    try:
-                        classify_daemon.wcs_client.subscribe(*demand, "async-install-demand", timeout=2)
-                    except classify_daemon.wcs_client.DaemonUnavailable:
-                        return
-
-            demand_thread = threading.Thread(target=keep_demand, daemon=True)
-            demand_thread.start()
             host, port, token = classify_daemon.endpoint_from_rendezvous(record)
 
             def request(endpoint, result, key):
@@ -348,17 +348,33 @@ with ExitStack() as custody:
             first_installer = subprocess.Popen(
                 [sys.executable, "-B", "-c", installation, str(output),
                  str(second_started), str(second_release), baseline,
-                 str(promotion_started), str(promotion_release)],
+                 str(promotion_started), str(promotion_release), failure],
                 env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
                 stdout=log, stderr=log, **no_window_kwargs(),
             )
             _wait_for(promotion_started.exists, timeout=60, message="successor promotion did not reach its barrier")
+            pending_endpoint = routing.read_active_endpoint(root / "status-monitor-routing")
+            pending_health = smc.ControlClient(
+                pending_endpoint.base_url,
+                token=(root / "status-monitor-control.token").read_text().strip(),
+            ).health()
+            assert pending_health["published"] is False
+            assert pending_health["worktrees"]["status"] == "unready"
             time.sleep(4)
             assert old.poll() is None
             assert smc.ControlClient(
                 original_endpoint.base_url,
                 token=(root / "status-monitor-control.token").read_text().strip(),
             ).health()["status"] == "ready"
+            previous_client = smc.ControlClient(
+                original_endpoint.base_url,
+                token=(root / "status-monitor-control.token").read_text().strip(),
+            )
+            previous_client.worktrees_read({"contract_version": 1, "project": "fixture"})
+            assert previous_client.health()["worktrees"]["status"] == "ready"
+            assert previous_client._request("repos-map-read", {
+                "repository_map_version": 1, "scope": str(tmp_path.resolve()),
+            }).get("error", {}).get("code") != "superseded"
             requester = threading.Thread(
                 target=request, args=((host, port, token), request_result, "first-accepted"),
                 daemon=True,
@@ -366,9 +382,22 @@ with ExitStack() as custody:
             requester.start()
             _wait_for(started.exists, message="baseline did not accept the held request")
             promotion_release.touch()
-            assert first_installer.wait(timeout=60) == 0, (tmp_path / "process.log").read_text()
-            result = _read_json(output)["result"]
-            assert result["ok"] and result["committed"] and result["retirement_pending"]
+            exit_code = first_installer.wait(timeout=60)
+            if failure == "installer":
+                assert exit_code == 29
+                second_loop.touch()
+                _wait_for(
+                    lambda: (locks.read_lock(root / "status-monitor.lock") or {}).get("pid") != old_pid,
+                    message="selected resident did not complete its departed installer's publication",
+                )
+                _wait_for(
+                    lambda: breadcrumb.read_breadcrumb(root / "status-monitor-routing") is None,
+                    message="completed resident did not retire the recovered publication witness",
+                )
+            else:
+                assert exit_code == 0, (tmp_path / "process.log").read_text()
+                result = _read_json(output)["result"]
+                assert result["ok"] and result["committed"] and result["retirement_pending"]
             assert requester.is_alive() and old.poll() is None, request_result
             successor = routing.read_active_endpoint(root / "status-monitor-routing")
             assert successor is not None and successor.pid != old_pid
@@ -410,9 +439,31 @@ with ExitStack() as custody:
             assert health["published"] is True and health["status"] == "ready"
             assert health["predecessorRetirement"]["pending"] is True
             assert requester.is_alive() and second_requester.is_alive()
-            demand_stop.set()
-            demand_thread.join(timeout=5)
-            classify_daemon.wcs_client.release(*demand, "async-install-demand")
+            if failure == "successor":
+                _wait_for(
+                    lambda: previous_client.health()["status"] == "draining",
+                    timeout=_SELF_RETIRE_MAX_GRACE_S + 15,
+                    message="first resident never reached the ready-successor drain boundary",
+                )
+                killed = diagnostics.terminate_pid_if_identity(
+                    third.pid, identities[third.pid], exit_timeout=10,
+                )
+                assert killed.get("exit_confirmed") is True
+                assert requester.is_alive() and second_requester.is_alive()
+                restarted = subprocess.Popen(
+                    [sys.executable, "-B", "-c", baseline, str(third_started), str(tmp_path / "restart-release")],
+                    env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+                    stdout=log, stderr=log, **no_window_kwargs(),
+                )
+                _wait_for(
+                    lambda: (
+                        ((routing.read_table(root / "status-monitor-routing") or {}).get("active") or {}).get("pid")
+                        not in (None, third.pid, old_pid, successor.pid)
+                    ),
+                    message="old cold-start lease blocked replacement after successor death",
+                )
+                restarted_endpoint = routing.read_active_endpoint(root / "status-monitor-routing")
+                identities[restarted_endpoint.pid] = diagnostics.process_start_time(restarted_endpoint.pid)
             retirement_deadline = time.monotonic() + _SELF_RETIRE_MAX_GRACE_S + 15
             release.touch()
             second_release.touch()
@@ -422,7 +473,20 @@ with ExitStack() as custody:
             second_requester.join(timeout=15)
             assert not requester.is_alive() and request_result.get("completed") is True
             assert not second_requester.is_alive() and second_result.get("completed") is True
-            assert old.wait(timeout=max(1, retirement_deadline - time.monotonic())) == 0
+            def original_exited():
+                if old.poll() is not None:
+                    return True
+                try:
+                    last_original.update(previous_client.health())
+                except (OSError, ValueError):
+                    pass
+                return False
+
+            _wait_for(
+                original_exited, timeout=max(1, retirement_deadline - time.monotonic()),
+                message=f"original resident did not retire after accepted work; last health={last_original}",
+            )
+            assert old.wait(timeout=10) == 0
             _wait_for(
                 lambda: not diagnostics._pid_alive(successor.pid),
                 timeout=max(1, retirement_deadline - time.monotonic()),
@@ -442,8 +506,19 @@ with ExitStack() as custody:
                         ).health()
                     except (OSError, ValueError) as unavailable:
                         health[label] = str(unavailable)
+            for label, endpoint in (("original", original_endpoint),):
+                try:
+                    health[label] = smc.ControlClient(
+                        endpoint.base_url,
+                        token=(root / "status-monitor-control.token").read_text().strip(),
+                    ).health()
+                except (OSError, ValueError) as unavailable:
+                    health[label] = str(unavailable)
             pytest.fail(
-                f"{error}\nhealth={health}\n"
+                f"{error}\nhealth={health}\nlast_original={last_original}\n"
+                f"restart={None if restarted is None else (restarted.pid, restarted.poll())}\n"
+                f"discovery-pid={(locks.read_lock(root / 'status-monitor.lock') or {}).get('pid')}\n"
+                f"singleton={(root / 'status-monitor-singleton.lock').read_text() if (root / 'status-monitor-singleton.lock').exists() else None}\n"
                 f"{(tmp_path / 'process.log').read_text(encoding='utf-8')}"
             )
         finally:
@@ -452,11 +527,6 @@ with ExitStack() as custody:
             second_release.touch()
             second_loop.touch()
             third_loop.touch()
-            demand_stop.set()
-            if demand_thread is not None:
-                demand_thread.join(timeout=5)
-            if demand is not None:
-                classify_daemon.wcs_client.release(*demand, "async-install-demand")
             if requester is not None:
                 requester.join(timeout=15)
             if second_requester is not None:
@@ -469,6 +539,8 @@ with ExitStack() as custody:
             if old.poll() is None:
                 old.terminate()
             old.wait(timeout=10)
+            if restarted is not None:
+                restarted.wait(timeout=10)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only windowless-parent contract")

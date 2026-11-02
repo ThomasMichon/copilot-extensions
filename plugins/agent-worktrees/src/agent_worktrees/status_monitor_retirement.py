@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import logging
 
 from . import locks, resident_push, status_monitor_cutover
 
@@ -56,16 +57,22 @@ def retire_monitor(
     close_request_surfaces, control_server, receipts, worktree_status_runtime,
     managed_mux_runtime, lock, original_error, allocation_linker=None,
     finish_observation_custody=None,
+    retirement_guard=None,
 ) -> None:
     error = original_error
     traceback = error.__traceback__ if error is not None else None
     pending = []
+    reported = set()
 
     def attempt(operation, *, retry=True):
         nonlocal error, traceback
         try:
             operation()
         except BaseException as exc:
+            detail = (getattr(operation, "__qualname__", type(operation).__name__), str(exc))
+            if detail not in reported:
+                reported.add(detail)
+                logging.getLogger(__name__).error("Monitor retirement cleanup pending at %s: %s", *detail)
             if error is None:
                 error, traceback = exc, exc.__traceback__
             if retry:
@@ -113,5 +120,12 @@ def retire_monitor(
     except BaseException as exc:
         if error is None:
             error, traceback = exc, exc.__traceback__
+    finally:
+        if retirement_guard is not None:
+            try:
+                retirement_guard.release()
+            except BaseException as exc:
+                if error is None:
+                    error, traceback = exc, exc.__traceback__
     if error is not None:
         raise error.with_traceback(traceback)

@@ -185,6 +185,19 @@ def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(
     assert breadcrumb.read_breadcrumb(tmp_path)["old"]["pid"] == 111
 
 
+def test_post_promotion_requires_serving_not_merely_passive_health(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=lambda endpoint: None,
+        serving_health_check=lambda host, port: False,
+    )
+    result = orch.run(health_timeout=0.1)
+    assert result.committed and not result.ok and not handle.terminated
+    assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
+
+
 @pytest.mark.parametrize("recovery_write_fails", [False, True])
 def test_self_retirement_publication_is_irreversible_before_flipped_record(
     tmp_path, monkeypatch, recovery_write_fails,

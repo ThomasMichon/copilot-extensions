@@ -10,7 +10,6 @@ import os
 import re
 import sys
 import tempfile
-from contextlib import nullcontext
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
@@ -20,6 +19,7 @@ from zdd import diagnostics, routing
 from . import locks, tracking
 
 CAPABILITY = "status-monitor-async-retirement-v1"
+_REFERENCE_PREFIX = "worktrees-monitor-retirement:"
 
 
 @lru_cache(maxsize=1)
@@ -38,7 +38,11 @@ def _runtime() -> ModuleType:
 
 def _owner(pid: int, start: str) -> str:
     digest = hashlib.sha256(f"{pid}:{start}".encode()).hexdigest()
-    return f"worktrees-monitor-retirement:{digest}"
+    return _REFERENCE_PREFIX + digest
+
+
+def _reference_owner(pid: int, start: str) -> str:
+    return f"{_REFERENCE_PREFIX}v2:{pid}:{start}"
 
 
 def _validate(record: dict, path: Path) -> None:
@@ -138,11 +142,16 @@ def capture(root: Path, *, identity: tuple[int, str, str | None] | None = None) 
     return {"pid": pid, "start": start, "slot": slot, "release_claim": None}
 
 
-def _write_record(path: Path, record: dict) -> None:
-    """Flush recoverable intent before publishing the canonical deletion barrier."""
+def _record_text(record: dict) -> str:
     content = json.dumps(record)
     if len(content.encode("utf-8")) > 32768:
         raise ValueError("Monitor retirement record exceeds its bound")
+    return content
+
+
+def _write_record(path: Path, record: dict) -> None:
+    """Fsync full intent only after its canonical deletion barrier is durable."""
+    content = _record_text(record)
     fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -160,13 +169,68 @@ def _write_record(path: Path, record: dict) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def _reference_owners(record: dict) -> tuple[str, str]:
+    return (
+        _reference_owner(record["pid"], record["start"]),
+        _owner(record["pid"], record["start"]),
+    )
+
+
+def _owned_references(root: Path, record: dict, helper: ModuleType) -> dict[str, list[str]]:
+    references = helper._leases.read_runtime_references(root)
+    owned = {
+        owner: references[owner] for owner in _reference_owners(record) if owner in references
+    }
+    if any(versions != [record["slot"]] for versions in owned.values()):
+        raise RuntimeError("Monitor retirement references changed before custody mutation")
+    return owned
+
+
 def _retain(root: Path, record: dict, helper: ModuleType) -> None:
-    owner = _owner(record["pid"], record["start"])
-    previous = helper._leases.read_runtime_references(root).get(owner, [])
-    if previous not in ([], [record["slot"]]):
-        raise RuntimeError("Monitor retirement references changed before reservation")
-    if not previous:
-        helper._leases.replace_runtime_references(root, owner, [record["slot"]], expected=[])
+    if not _owned_references(root, record, helper):
+        helper._leases.replace_runtime_references(
+            root,
+            _reference_owner(record["pid"], record["start"]),
+            [record["slot"]],
+            expected=[],
+        )
+
+
+def _orphans(
+    root: Path, records: list[tuple[Path, dict]], runtime: ModuleType | None
+) -> list[dict]:
+    evidence = root / "runtime-references.json"
+    if not evidence.exists() and not evidence.is_symlink():
+        return []
+    helper = runtime if runtime is not None else _runtime()
+    known = {
+        owner: record["slot"] for _path, record in records for owner in _reference_owners(record)
+    }
+    orphans = []
+    for owner, versions in helper._leases.read_runtime_references(root).items():
+        if owner in known:
+            if versions != [known[owner]]:
+                raise RuntimeError("Monitor retirement references changed before custody mutation")
+            continue
+        if not owner.startswith(_REFERENCE_PREFIX):
+            continue
+        match = re.fullmatch(
+            re.escape(_REFERENCE_PREFIX) + r"v2:([1-9][0-9]*):([0-9]+(?::[0-9]+)*)", owner
+        )
+        if match is None or len(versions) != 1:
+            raise RuntimeError("Unidentifiable monitor retirement reference remains pending")
+        pid, start = int(match[1]), match[2]
+        record = {
+            "version": 1,
+            "pid": pid,
+            "start": start,
+            "slot": versions[0],
+            "release_claim": None,
+            "state": "cancelled",
+        }
+        _validate(record, root / (_owner(pid, start).rsplit(":", 1)[1] + ".json"))
+        orphans.append(record)
+    return orphans
 
 
 def reserve(
@@ -176,7 +240,7 @@ def reserve(
     runtime: ModuleType | None = None,
     committed: bool = False,
 ) -> bool:
-    """Publish recoverable intent and barriers before caller custody is released.
+    """Publish canonical barriers before full intent or caller custody is released.
 
     An exception does not transfer custody: the caller must retain its existing
     installation/retention ownership until retry or proven rollback succeeds.
@@ -196,6 +260,7 @@ def reserve(
     owner = _owner(record["pid"], record["start"])
     path = directory / (owner.rsplit(":", 1)[1] + ".json")
     _validate(record, path)
+    _record_text(record)
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
         records = dict(_records(root))
         existing = records.get(path)
@@ -215,24 +280,9 @@ def reserve(
                 raise RuntimeError("Monitor dev release custody changed before reservation")
             if existing["state"] == "retiring":
                 record["state"] = "retiring"
-        helper = (
-            (runtime if runtime is not None else _runtime())
-            if record["slot"] is not None
-            else None
-        )
-        custody = (
-            helper._kernel_lease(root, record["slot"], kind="retention", shared=True)
-            if helper is not None
-            else nullcontext()
-        )
-        with custody:
-            if helper is not None:
-                previous = helper._leases.read_runtime_references(root).get(owner, [])
-                if previous not in ([], [record["slot"]]):
-                    raise RuntimeError("Monitor retirement references changed before reservation")
-            _write_record(path, record)
-            if helper is not None:
-                _retain(root, record, helper)
+        if record["slot"] is not None:
+            _retain(root, record, runtime if runtime is not None else _runtime())
+        _write_record(path, record)
     return True
 
 
@@ -241,8 +291,7 @@ def _completed_commit(root: Path, record: dict, runtime: ModuleType | None) -> b
         raise RuntimeError("Monitor retirement reservation is missing before confirmed exit")
     helper = runtime if runtime is not None else _runtime()
     with helper._publication_lease(root):
-        owner = _owner(record["pid"], record["start"])
-        if helper._leases.read_runtime_references(root).get(owner, []):
+        if _owned_references(root, record, helper):
             raise RuntimeError("Missing monitor retirement still owns runtime references")
         if record["release_claim"] is not None and (
             helper.current_version(root) == "dev"
@@ -295,21 +344,6 @@ def _exit_state(record: dict) -> bool | None:
     return not alive
 
 
-def _exited(record: dict) -> bool:
-    exited = _exit_state(record)
-    if exited is None:
-        raise RuntimeError("Monitor predecessor native identity is unavailable")
-    return exited
-
-
-def _self(record: dict) -> bool:
-    return (
-        record["pid"] == os.getpid()
-        and locks.process_start_time(record["pid"]) == record["start"]
-        and diagnostics._pid_alive(record["pid"])
-    )
-
-
 def _demand(record: dict, exited: bool | None) -> bool:
     if exited is None:
         raise RuntimeError("Monitor predecessor native identity is unavailable")
@@ -317,29 +351,65 @@ def _demand(record: dict, exited: bool | None) -> bool:
 
 
 def _remove_reference(root: Path, record: dict, helper: ModuleType) -> None:
-    owner = _owner(record["pid"], record["start"])
-    previous = helper._leases.read_runtime_references(root).get(owner, [])
-    if previous not in ([], [record["slot"]]):
-        raise RuntimeError("Monitor retirement references changed before release")
-    if previous:
+    for owner, previous in _owned_references(root, record, helper).items():
         helper._leases.replace_runtime_references(root, owner, [], expected=previous)
+
+
+def _cancelled_status(
+    root: Path,
+    record: dict,
+    runtime: ModuleType | None,
+) -> tuple[bool, bool]:
+    if record["slot"] is None:
+        return True, False
+    helper = runtime if runtime is not None else _runtime()
+    if not _owned_references(root, record, helper):
+        return True, False
+    exited = _exit_state(record)
+    if exited is True:
+        _remove_reference(root, record, helper)
+        return True, False
+    return False, _demand(record, exited)
+
+
+def _cancel_missing(root: Path, record: dict, runtime: ModuleType | None) -> bool:
+    evidence = root / "runtime-references.json"
+    if record["slot"] is None or not (evidence.exists() or evidence.is_symlink()):
+        return False
+    helper = runtime if runtime is not None else _runtime()
+    if not _owned_references(root, record, helper):
+        return False
+    _cancelled_status(root, {**record, "state": "cancelled"}, helper)
+    return True
 
 
 def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = True) -> bool:
     """Keep the elected successor needed; settle only positively exited identities."""
     records = _records(root)
-    if not records:
+    orphans = _orphans(root, records, runtime)
+    if not records and not orphans:
         return False
     if not cleanup:
         pending = False
-        for _path, record in records:
+        for record in [record for _path, record in records] + orphans:
             if _demand(record, _exit_state(record)):
                 pending = True
         return pending
     pending = False
     directory = root / "status-monitor-retirements"
+    directory.mkdir(exist_ok=True)
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
-        for path, record in _records(root):
+        records = _records(root)
+        for record in _orphans(root, records, runtime):
+            _done, needed = _cancelled_status(root, record, runtime)
+            pending = needed or pending
+        for path, record in records:
+            if record["state"] == "cancelled":
+                done, needed = _cancelled_status(root, record, runtime)
+                if done:
+                    path.unlink()
+                pending = needed or pending
+                continue
             exited = _exit_state(record)
             if record["state"] == "prepared" or exited is not True:
                 if record["slot"] is not None:
@@ -371,9 +441,10 @@ def pending_slot(root: Path, slot: str, *, include_cancelled: bool = True) -> bo
     """Protect retained code by default; new releases may exclude revoked grants."""
     if type(include_cancelled) is not bool:
         raise ValueError("Cancelled retirement visibility must be explicit")
+    records = _records(root)
     return any(
         record["slot"] == slot and (include_cancelled or record["state"] != "cancelled")
-        for _path, record in _records(root)
+        for record in [record for _path, record in records] + _orphans(root, records, None)
     )
 
 
@@ -389,15 +460,14 @@ def cancel(root: Path, predecessor: dict, *, runtime: ModuleType | None = None) 
     """Cancel exact custody after the parent has proven precommit rollback."""
     record = {"version": 1, **predecessor, "state": "prepared"}
     directory = root / "status-monitor-retirements"
-    owner = _owner(record["pid"], record["start"])
-    path = directory / (owner.rsplit(":", 1)[1] + ".json")
+    path = directory / (_owner(record["pid"], record["start"]).rsplit(":", 1)[1] + ".json")
     _validate(record, path)
     if not directory.exists():
-        return False
+        return _cancel_missing(root, record, runtime)
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
         existing = dict(_records(root)).get(path)
         if existing is None:
-            return False
+            return _cancel_missing(root, record, runtime)
         if {**existing, "state": "prepared"} != record:
             raise RuntimeError("Monitor retirement custody changed before cancellation")
         if existing["state"] == "retiring":
@@ -405,24 +475,11 @@ def cancel(root: Path, predecessor: dict, *, runtime: ModuleType | None = None) 
         record["state"] = "cancelled"
         if existing["state"] != "cancelled":
             _write_record(path, record)
-        if record["slot"] is not None:
-            helper = runtime if runtime is not None else _runtime()
-            previous = helper._leases.read_runtime_references(root).get(owner, [])
-            if previous not in ([], [record["slot"]]):
-                raise RuntimeError("Monitor retirement references changed before cancellation")
-        exited = _exit_state(record)
-        if exited is not True:
-            if record["slot"] is not None:
-                _retain(root, record, helper)
-            if dict(_records(root)).get(path) != record:
-                raise RuntimeError("Monitor retirement custody changed during cancellation")
-            _demand(record, exited)
-            return True
-        if record["slot"] is not None:
-            _remove_reference(root, record, helper)
+        done, _needed = _cancelled_status(root, record, runtime)
         if dict(_records(root)).get(path) != record:
             raise RuntimeError("Monitor retirement custody changed during cancellation")
-        path.unlink()
+        if done:
+            path.unlink()
     return True
 
 

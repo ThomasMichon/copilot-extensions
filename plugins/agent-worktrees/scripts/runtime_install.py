@@ -358,7 +358,17 @@ def _settle_monitor(
     committed = committed or (action == "restart" and (
         restart.get("spawned") is True or restart.get("already_current") is True
     ))
-    if committed and result.get("ok") is False and not result.get("publication_uncertain"):
+    if result.get("committed") is True and not result.get("publication_uncertain"):
+        if result.get("ok") is not False:
+            try:
+                ready = _candidate_serving(root, slot)
+            except (OSError, ValueError, ConnectionError) as error:
+                ready = False
+                result["error"] = f"Committed serving attestation failed: {error}"
+            if not ready:
+                result["ok"] = False
+                result["error"] = result.get("error") or "Committed successor stopped serving after publication"
+        summary["result"] = result
         return True
     announcements: set[str] = set()
 
@@ -394,6 +404,10 @@ def _settle_monitor(
                 time.sleep(1)
                 continue
             committed = record["state"] == "committed"
+            if committed:
+                result.update(committed=True, publication_uncertain=False)
+                summary["result"] = result
+                return _settle_monitor(root, slot, summary, predecessor, handles)
         try:
             ready = _candidate_serving(root, slot)
         except (OSError, ValueError, ConnectionError) as error:
@@ -746,7 +760,6 @@ def settle_candidate(
                     "release_claim": release_dev_claim if serving_slot == "dev" else None,
                 } if predecessor is not None and not already_serving else None
             )
-            retirement_complete = False
             try:
                 if retirement_predecessor is not None:
                     from agent_worktrees import runtime_monitor_retirements as retirements
@@ -774,8 +787,6 @@ def settle_candidate(
                     committed = _settle_monitor(root, candidate_slot, summary, predecessor, handles)
                 if not committed:
                     raise InstallationRefused("Monitor cutover rolled back; previous selection restored")
-                if retirement_predecessor is not None:
-                    retirement_complete = not retirements.commit(root, retirement_predecessor, runtime=runtime)
                 if summary.get("action") == "cutover" and (summary.get("result") or {}).get("ok") is not True:
                     raise InstallationRefused(
                         f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
@@ -803,8 +814,6 @@ def settle_candidate(
                             runtime.activate(root, version, link_free=True)
                         if committed:
                             deployment.publish(root, manifest)
-                            if retirement_predecessor is not None:
-                                retirement_complete = not retirements.commit(root, retirement_predecessor, runtime=runtime)
                         break
                     except BaseException as error:
                         if not announced:
@@ -830,11 +839,9 @@ def settle_candidate(
             "runtime_generation": identity["build_info"].get("runtime_generation"),
             "deployment_manifest_published": True,
             "helpers_published": helpers is not None,
-            "retirement_pending": (
-                not retirement_complete and (summary.get("result") or {}).get("retirement_pending") is True
-            ),
+            "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
             "dev_claim_release_pending": (
-                not retirement_complete and release_dev_claim is not None and serving_slot == "dev"
+                release_dev_claim is not None and serving_slot == "dev"
                 and (summary.get("result") or {}).get("retirement_pending") is True
             ),
             "runtime_python": str(runtime.slot_python(root, version)),

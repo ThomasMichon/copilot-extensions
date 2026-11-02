@@ -55,9 +55,11 @@ class PeerIdentity:
     principal: str
 
     def __post_init__(self) -> None:
+        from .darwin_identity import valid_start_time
+
         if (
             type(self.pid) is not int or self.pid <= 0
-            or not isinstance(self.start_time, str) or not self.start_time.isdigit()
+            or not valid_start_time(self.start_time)
             or not isinstance(self.principal, str) or not self.principal
         ):
             raise PrivateIPCError(Refusal.IDENTITY)

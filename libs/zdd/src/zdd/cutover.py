@@ -115,6 +115,7 @@ class CutoverOrchestrator:
         predecessor_health_check: Callable[[str, int], bool] | None = None,
         self_retirement: bool = False,
         activate_successor: Callable[[Endpoint], None] | None = None,
+        serving_health_check: Callable[[str, int], bool] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
@@ -141,6 +142,7 @@ class CutoverOrchestrator:
         self.on_published = on_published
         self.self_retirement = self_retirement
         self.activate_successor = activate_successor
+        self.serving_health_check = serving_health_check
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -703,7 +705,9 @@ class CutoverOrchestrator:
                     new_pid=new_pid, started_at=started_at,
                 )
                 activate_successor(successor)
-                if not self._await_health(new_port, health_timeout, poll, health_check):
+                if not self._await_health(
+                    new_port, health_timeout, poll, self.serving_health_check or health_check,
+                ):
                     raise CutoverError("published successor did not become ready")
                 result.ok = True
                 result.steps.append("successor ready; predecessor retirement is asynchronous")
@@ -767,9 +771,10 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
-                result.retirement_requested = conditional is not None or self.drain_before_publish
+                result.retirement_requested = self.drain_before_publish
                 if conditional:
                     conditional.retire_predecessor()
+                    result.retirement_requested = True
                 else:
                     retirement = old_client.shutdown()
                     if self.drain_before_publish and (

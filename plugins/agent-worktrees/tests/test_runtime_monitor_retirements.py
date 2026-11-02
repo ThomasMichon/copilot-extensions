@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -192,7 +193,7 @@ def test_inventory_rejection_is_nonmutating_and_existing_updates_are_allowed(ret
     assert runtime._leases.read_runtime_references(root) == references
 
 
-def test_failed_reference_publication_keeps_recoverable_durable_intent(retained, monkeypatch):
+def test_failed_reference_publication_leaves_no_intent_to_poison_rollback(retained, monkeypatch):
     root, runtime, _identities, _alive = retained
     publish = runtime._leases.replace_runtime_references
     with monkeypatch.context() as scoped:
@@ -203,15 +204,15 @@ def test_failed_reference_publication_keeps_recoverable_durable_intent(retained,
         scoped.setattr(runtime._leases, "replace_runtime_references", fail)
         with pytest.raises(OSError, match="reference write interrupted"):
             retirements.reserve(root, _predecessor(), runtime=runtime)
-    assert len(retirements._records(root)) == 1
+    assert not retirements._records(root)
     assert not runtime._leases.read_runtime_references(root)
-    assert retirements.reconcile(root, runtime=runtime)
-    assert runtime._leases.read_runtime_references(root)
+    assert not retirements.cancel(root, _predecessor(), runtime=runtime)
+    assert not retirements.reconcile(root, runtime=runtime)
     assert runtime._leases.replace_runtime_references is publish
 
 
-def test_record_write_failure_publishes_no_undiscoverable_reference(retained, monkeypatch):
-    root, runtime, _identities, _alive = retained
+def test_record_write_failure_keeps_discoverable_barrier_across_real_gc(retained, monkeypatch):
+    root, runtime, identities, alive = retained
 
     def fail(*args):
         raise OSError("record write interrupted")
@@ -220,7 +221,19 @@ def test_record_write_failure_publishes_no_undiscoverable_reference(retained, mo
     with pytest.raises(OSError, match="record write interrupted"):
         retirements.reserve(root, _predecessor(), runtime=runtime)
     assert not retirements._records(root)
+    assert runtime._leases.read_runtime_references(root)
+    with runtime._kernel_lease(root, "legacy", kind="retention", shared=False, timeout=0):
+        pass
+    runtime.gc(root, min_age_days=0)
+    assert (root / "versions" / "legacy").is_dir()
+    assert retirements.pending_slot(root, "legacy")
+    assert not retirements.pending_slot(root, "legacy", include_cancelled=False)
+    assert retirements.reconcile(root, runtime=runtime)
+    identities.pop(101)
+    alive.remove(101)
+    assert not retirements.reconcile(root, runtime=runtime)
     assert not runtime._leases.read_runtime_references(root)
+    assert "legacy" in runtime.gc(root, min_age_days=0)
 
 
 def test_reference_write_failure_after_publication_remains_discoverable(retained, monkeypatch):
@@ -235,12 +248,12 @@ def test_reference_write_failure_after_publication_remains_discoverable(retained
         scoped.setattr(runtime._leases, "replace_runtime_references", fail)
         with pytest.raises(OSError, match="outcome unknown"):
             retirements.reserve(root, _predecessor(), runtime=runtime)
-    assert len(retirements._records(root)) == 1
+    assert not retirements._records(root)
     assert runtime._leases.read_runtime_references(root)
     assert retirements.reserve(root, _predecessor(), runtime=runtime)
 
 
-def test_record_intent_is_fsynced_before_reference_publication(retained, monkeypatch):
+def test_canonical_reference_is_durable_before_full_intent_is_fsynced(retained, monkeypatch):
     root, runtime, _identities, _alive = retained
     fsync = os.fsync
     events = []
@@ -252,13 +265,23 @@ def test_record_intent_is_fsynced_before_reference_publication(retained, monkeyp
     publish = runtime._leases.replace_runtime_references
 
     def references(*args, **kwargs):
-        assert "sync" in events
-        assert len(retirements._records(root)) == 1
+        assert not retirements._records(root)
         publish(*args, **kwargs)
+        events.append("reference")
+
+    write = retirements._write_record
+
+    def intent(path, record):
+        assert "sync" in events and "reference" in events
+        assert runtime._leases.read_runtime_references(root)
+        events.append("intent")
+        write(path, record)
 
     monkeypatch.setattr(retirements.os, "fsync", sync)
     monkeypatch.setattr(runtime._leases, "replace_runtime_references", references)
+    monkeypatch.setattr(retirements, "_write_record", intent)
     assert retirements.reserve(root, _predecessor(), runtime=runtime)
+    assert events[-1] == "sync"
 
 
 def test_reused_own_pid_settles_original_identity(retained, monkeypatch):
@@ -360,11 +383,13 @@ def test_cancel_failed_reference_cleanup_keeps_record(retained, monkeypatch):
 def test_cancel_changed_reference_custody_is_preserved(retained):
     root, runtime, _identities, _alive = retained
     retirements.reserve(root, _predecessor(), runtime=runtime)
-    owner = retirements._owner(101, "1001")
+    owner = retirements._reference_owner(101, "1001")
     runtime._leases.replace_runtime_references(root, owner, ["current"], expected=["legacy"])
     with pytest.raises(RuntimeError, match="references changed"):
         retirements.cancel(root, _predecessor(), runtime=runtime)
-    assert retirements.pending_slot(root, "legacy")
+    with pytest.raises(RuntimeError, match="references changed"):
+        retirements.pending_slot(root, "legacy")
+    assert retirements._records(root)[0][1]["slot"] == "legacy"
     assert runtime._leases.read_runtime_references(root)[owner] == ["current"]
 
 
@@ -614,3 +639,136 @@ def test_missing_completed_dev_record_still_refuses_selected_dev(retained, monke
     monkeypatch.setattr(runtime, "current_version", lambda root: "dev")
     with pytest.raises(RuntimeError, match="dev grant is not settled"):
         retirements.commit(root, predecessor, runtime=runtime)
+
+
+@pytest.mark.parametrize("native_state", ["self", "unknown"])
+def test_orphan_barrier_never_grants_dev_release_or_artificial_self_demand(
+    retained, monkeypatch, native_state
+):
+    root, runtime, identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+
+    def fail(*args):
+        raise OSError("full intent interrupted")
+
+    monkeypatch.setattr(retirements, "_write_record", fail)
+    with pytest.raises(OSError, match="intent interrupted"):
+        retirements.reserve(
+            root, _predecessor(slot="dev", claim=claim), runtime=runtime, committed=True
+        )
+    if native_state == "self":
+        monkeypatch.setattr(retirements.os, "getpid", lambda: 101)
+        assert not retirements.reconcile(root, runtime=runtime)
+    else:
+        identities.pop(101)
+        state = retirements.ResidentRetirements(root)
+        state.refresh()
+        assert state.pending and "native identity" in state.error
+    assert runtime._leases.read_runtime_references(root)
+    alive.remove(101)
+    assert not retirements.reconcile(root, runtime=runtime)
+    assert runtime.read_dev_claim(root, strict=True) == claim
+    assert not runtime._leases.read_runtime_references(root)
+
+
+def test_unidentifiable_legacy_orphan_retains_barrier_and_reports_error(retained):
+    root, runtime, identities, alive = retained
+    owner = retirements._owner(101, "1001")
+    runtime._leases.replace_runtime_references(root, owner, ["legacy"], expected=[])
+    identities.pop(101)
+    alive.remove(101)
+    state = retirements.ResidentRetirements(root)
+    state.refresh()
+    assert state.pending and "Unidentifiable" in state.error
+    assert runtime._leases.read_runtime_references(root)[owner] == ["legacy"]
+    runtime.gc(root, min_age_days=0)
+    assert (root / "versions" / "legacy").is_dir()
+
+
+def _reference_bytes(runtime, owners):
+    return len(
+        json.dumps(
+            {
+                "schema": runtime._leases._REFERENCES_SCHEMA,
+                "version": 1,
+                "owners": owners,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ).encode("ascii")
+    )
+
+
+@pytest.mark.parametrize("capacity", ["owners", "bytes"])
+def test_shared_reference_capacity_rejection_cannot_poison_intent_or_cancel(retained, capacity):
+    root, runtime, _identities, _alive = retained
+    owners = {}
+    limit = runtime._leases._REFERENCES_LIMIT
+    for index in range(256):
+        prefix = f"other:{index}:"
+        owner = prefix if capacity == "owners" else prefix + "x" * (256 - len(prefix))
+        if (
+            capacity == "bytes"
+            and _reference_bytes(runtime, {**owners, owner: ["current"]}) > limit
+        ):
+            break
+        runtime._leases.replace_runtime_references(root, owner, ["current"], expected=[])
+        owners[owner] = ["current"]
+    if capacity == "bytes":
+        padding = [
+            "padding:" + "x" * length
+            for length in range(249)
+            if _reference_bytes(runtime, {**owners, "padding:" + "x" * length: ["current"]})
+            <= limit
+        ]
+        if padding:
+            owner = padding[-1]
+            runtime._leases.replace_runtime_references(root, owner, ["current"], expected=[])
+            owners[owner] = ["current"]
+        assert len(owners) < 256
+        assert (
+            _reference_bytes(
+                runtime, {**owners, retirements._reference_owner(101, "1001"): ["legacy"]}
+            )
+            > limit
+        )
+    else:
+        assert len(owners) == 256
+    with pytest.raises(ValueError, match="runtime reference evidence exceeds"):
+        retirements.reserve(root, _predecessor(), runtime=runtime)
+    assert not retirements._records(root)
+    assert not retirements.cancel(root, _predecessor(), runtime=runtime)
+    assert not retirements.cancel(root, _predecessor(), runtime=runtime)
+    assert runtime._leases.read_runtime_references(root) == owners
+    path = (
+        root
+        / "status-monitor-retirements"
+        / (retirements._owner(101, "1001").split(":")[1] + ".json")
+    )
+    predecessor = _predecessor(slot="current")
+    retirements._write_record(path, {"version": 1, **predecessor, "state": "prepared"})
+    assert retirements.cancel(root, predecessor, runtime=runtime)
+    assert not retirements._records(root)
+    assert runtime._leases.read_runtime_references(root) == owners
+
+
+def test_matching_legacy_hashed_reference_does_not_need_new_capacity(retained):
+    root, runtime, _identities, alive = retained
+    directory = root / "status-monitor-retirements"
+    directory.mkdir()
+    owner = retirements._owner(101, "1001")
+    runtime._leases.replace_runtime_references(root, owner, ["legacy"], expected=[])
+    path = directory / (owner.split(":")[1] + ".json")
+    retirements._write_record(path, {"version": 1, **_predecessor(), "state": "retiring"})
+    for index in range(255):
+        runtime._leases.replace_runtime_references(
+            root, f"other:{index}", ["current"], expected=[]
+        )
+    assert retirements.reserve(root, _predecessor(), runtime=runtime)
+    assert len(runtime._leases.read_runtime_references(root)) == 256
+    assert retirements._reference_owner(
+        101, "1001"
+    ) not in runtime._leases.read_runtime_references(root)
+    alive.remove(101)
+    assert not retirements.reconcile(root, runtime=runtime)
+    assert owner not in runtime._leases.read_runtime_references(root)

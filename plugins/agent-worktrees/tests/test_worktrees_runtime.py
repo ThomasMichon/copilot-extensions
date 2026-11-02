@@ -95,6 +95,25 @@ def test_worktrees_runtime_authenticated_transport_and_drain(tmp_path):
         owner.shutdown()
 
 
+def test_stale_writer_is_fenced_without_closing_admitted_cached_reads(tmp_path):
+    election = {"writer": True, "reader": True}
+    owner = runtime.WorktreesRuntime(
+        tmp_path / "current.sqlite3",
+        elected=lambda: election["writer"], admitted=lambda: election["reader"],
+    )
+    owner.activate()
+    owner.publish("project", [{"id": "first"}], observed_at=1)
+    election["writer"] = False
+    for _ in range(2):
+        with pytest.raises(projection.ProjectionUnavailable, match="no longer elected"):
+            owner.publish("project", [{"id": "wrong"}], observed_at=2)
+        assert not owner.store.superseded
+        assert owner.handle(request())["worktrees"] == [{"id": "first"}]
+    election["reader"] = False
+    assert owner.handle(request())["error"]["code"] == "superseded"
+    owner.shutdown()
+
+
 def test_worktrees_runtime_old_publisher_cannot_reactivate_after_takeover(tmp_path):
     path = tmp_path / "current.sqlite3"
     old = runtime.WorktreesRuntime(path)

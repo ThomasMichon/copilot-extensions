@@ -15,9 +15,11 @@ root imports, `from zdd import *`, and canonical object identities are preserved
 this changes import work, not routing, cutover or process-retirement policy.
 
 `CutoverOrchestrator` also supports opt-in `self_retirement=True` with an
-`activate_successor(endpoint)` callback. It health-gates and publishes the
+`activate_successor(endpoint)` callback and optional `serving_health_check`.
+It health-gates and publishes the
 candidate and commits the durable route before invoking the adopter's promotion
-callback, which may open admission. It then verifies readiness without contacting
+callback, which may open admission. It then verifies serving readiness (using
+the separate check when preparation health is not sufficient) without contacting
 the predecessor. Publication itself is irreversible in this mode, including
 failure of the intervening transition record. A postcommit promotion/readiness failure remains an explicit
 failed, committed result; it never disposes of a possibly admitted successor or
@@ -36,7 +38,10 @@ changing its selector: supersession waits for a genuinely ready successor, and
 accepted work cannot be discarded on a grace deadline. Unsupported incumbents
 are an explicit refusal, not a silent synchronous downgrade. Recovery records
 include the full predecessor endpoint so uncertain publication can be reconciled
-against its original native identity.
+against its original native identity. Once a ready successor is observed,
+outgoing retirement must remain latched even if that successor later dies.
+On macOS, native birth identity uses the process start seconds and microseconds;
+the same bounded token is accepted by routing and receiver-bound protocols.
 
 ## What's inside
 

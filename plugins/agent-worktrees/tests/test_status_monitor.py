@@ -4355,7 +4355,7 @@ def test_promotion_refuses_failed_discovery_without_advertising_ready_publicatio
     assert replies == [{"adopted": False, "error": "monitor discovery publication refused"}]
 
 
-def test_status_monitor_recovers_repository_map_after_transient_owner_check(tmp_path, monkeypatch):
+def test_status_monitor_keeps_repository_map_available_until_handoff_is_ready(tmp_path, monkeypatch):
     from agent_worktrees import self_retire, status_monitor_cutover as smc
 
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
@@ -4399,13 +4399,13 @@ def test_status_monitor_recovers_repository_map_after_transient_owner_check(tmp_
         generations.append(result["projection"]["generation"])
         if len(generations) == 1:
             elected[0] = None
-            assert handles[0]("repos-map-read", request)["error"]["code"] == "superseded"
+            assert handles[0]("repos-map-read", request)["ok"] is True
             health = handles[0]("health", {})
             assert health["worktrees"]["status"] == "ready"
-            assert health["repositories"]["admitting"] is False
+            assert health["repositories"]["admitting"] is True
             elected[0] = 42
         else:
-            assert len(generations) == 2 and generations[1] != generations[0]
+            assert len(generations) == 2 and generations[1] == generations[0]
             assert handles[0]("shutdown", {}) == {"shutdown": True}
             elected[0] = None
         return 1

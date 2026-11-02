@@ -107,13 +107,20 @@ code until positive native exit. This is not a new daemon or delayed reaper.
 The outgoing runtime must also support readiness-gated retirement without
 grace-forced exit of accepted work. An incapable or unrouted live predecessor
 refuses installation before selector mutation; skipping a forced restart cannot
-make its older self-exit behavior safe. The elected resident persists retirement
-intent before references, cancels exact custody only after proven precommit
+make its older self-exit behavior safe. The owner reserves canonical execution
+protection before persisting retirement intent, cancels exact custody only after proven precommit
 rollback, and keeps a pending dev claim through duplicate release attempts.
 Prepared intent cannot execute a retirement grant. Commitment enables native-exit
 cleanup; durable cancellation revokes that grant before releasing any protection.
 An already-completed retirement is an idempotent outcome. Selected live dev code
 cannot be reconstructed, and a reselected dev runtime keeps its claim.
+Cached predecessor reads remain available until a ready-successor handoff is
+latched; route ownership independently fences every new write. Once latched,
+retirement cannot reopen merely because the successor dies. The selected
+resident completes an interrupted committed install through its existing loop,
+retaining the witness until its grant and serving readiness are durable. See
+the [install contract](../install-contract.md) for the custody and idle-exit
+serialization boundaries.
 
 ## Bounded cold takeover
 

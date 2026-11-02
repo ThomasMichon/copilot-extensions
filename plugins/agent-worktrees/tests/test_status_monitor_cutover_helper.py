@@ -328,6 +328,9 @@ class _FakeDaemon:
             return {
                 "status": "draining" if self.draining else "ready",
                 "capabilities": [CAPABILITY] if self.async_retirement else [],
+                "pid": self.pid, "published": self.promoted,
+                "worktrees": {"status": "ready" if self.promoted else "unready"},
+                "repositories": {"admitting": self.promoted},
             }
         if action == "promote":
             self.promoted = True
@@ -401,6 +404,8 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
         smc, "routed_monitor_identity", lambda *args, **kwargs: (101, "1001", None),
     )
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
+    monkeypatch.setattr(smc.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
     monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
     monkeypatch.setattr(
         "agent_worktrees.status_monitor_reap_stale.schedule_delayed_daemon_health_reap",
@@ -434,6 +439,8 @@ def test_async_installation_refuses_unrouted_predecessor_without_termination(tmp
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
     monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: None)
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
+    monkeypatch.setattr(smc.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
     monkeypatch.setattr(runtime, "_status_monitor_enabled", lambda: True)
     monkeypatch.setattr(
         runtime, "_restart_status_monitor",
@@ -569,6 +576,27 @@ def test_lock_renewal_is_fenced_by_the_native_route_owner(tmp_path, monkeypatch)
     assert not identity.publish_lock(path, extra={}) and not writes
     state["pid"] = os.getpid()
     assert identity.publish_lock(path, extra={}) and writes == [path]
+
+
+@pytest.mark.parametrize("phase", ["cold", "promotion"])
+def test_darwin_routing_and_discovery_use_the_same_birth_token(tmp_path, monkeypatch, phase):
+    import os
+    from contextlib import nullcontext
+    from agent_worktrees import runtime_monitor_identity as identity
+    from zdd import darwin_identity, diagnostics
+
+    monkeypatch.setattr(diagnostics.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(darwin_identity, "birth_time", lambda pid: "1001:22")
+    pid = os.getpid()
+    token = diagnostics.process_start_time(pid)
+    assert token == identity.locks.process_start_time(pid) == "1001:22"
+    endpoint = routing.Endpoint("127.0.0.1", 61001, pid, "new", 1 if phase == "cold" else 2, token)
+    monkeypatch.setattr(identity.routing, "routing_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(identity.routing, "read_table", lambda *a, **k: {"active": endpoint.to_dict()})
+    writes = []
+    monkeypatch.setattr(identity.locks, "write_lock", lambda path, **kwargs: writes.append(path) or True)
+    assert identity.publish_lock(tmp_path / "status-monitor.lock", extra={})
+    assert len(writes) == 1
 
 
 def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):

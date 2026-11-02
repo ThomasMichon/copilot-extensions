@@ -7,14 +7,17 @@ import json
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
 
 def test_routing_only_import_leaves_unrelated_daemon_modules_unloaded():
+    source = str(Path(__file__).resolve().parents[1] / "src")
     completed = subprocess.run(
         [sys.executable, "-I", "-c",
-         "import json,sys; from zdd import routing; print(json.dumps(sorted(sys.modules)))"],
+         "import json,sys; sys.path.insert(0, sys.argv[1]); "
+         "from zdd import routing; print(json.dumps(sorted(sys.modules)))", source],
         capture_output=True, text=True, check=True, timeout=10,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
