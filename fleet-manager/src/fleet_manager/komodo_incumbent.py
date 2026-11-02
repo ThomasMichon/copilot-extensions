@@ -327,7 +327,7 @@ class KomodoIncumbentMaterialization:
         }
         for path in (*self.retained_files, username_path, self.admin_password):
             remote = self._storage_entry(path, observed)
-            if remote is not None:
+            if remote is not None and path not in (username_path, self.admin_password):
                 files[str(path)] = dict(remote)
                 continue
             ordinary_path(path)

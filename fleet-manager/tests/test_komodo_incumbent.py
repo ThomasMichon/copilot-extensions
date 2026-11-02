@@ -262,6 +262,45 @@ def test_original_storage_rejects_unrelated_volume_before_calling_its_owner(incu
     assert not requests
 
 
+@pytest.mark.parametrize("source", ["username", "configured-username", "password"])
+def test_original_storage_does_not_replace_overlapping_local_login_rereads(incumbent, source):
+    material = incumbent.material
+    configured = source == "configured-username"
+    original = (incumbent.files["core_config"] if configured else
+                material.admin_password if source == "password" else material.admin_username)
+    if configured:
+        original.write_bytes(b'init_admin_username = "original-admin"\n')
+    local = material.keys / original.name
+    original.rename(local)
+    retained = tuple(local if path == original else path for path in material.retained_files)
+    if local not in retained:
+        retained += (local,)
+    encoded = decode(material.encoded)
+    if configured:
+        encoded["mounts"]["core"][1]["Source"] = str(local)
+    changes = {"admin_username": KomodoConfigUsername(local) if configured else local}
+    if source == "password":
+        changes = {"admin_password": local}
+    material = replace(material, retained_files=retained, encoded=canonical(encoded), **changes)
+    storage, snapshot, _ = _observed_storage(SimpleNamespace(
+        material=material, volumes=incumbent.volumes))
+    armed = False
+
+    def read(request):
+        if armed:
+            content = (b'init_admin_username = "changed-admin"\n' if configured else
+                       b"changed-original-login-material")
+            local.write_bytes(content)
+            snapshot["entries"][str(local)].update(
+                sha256=hashlib.sha256(content).hexdigest(), size=len(content))
+        return storage.read(request)
+
+    material = replace(material, storage=replace(storage, read=read))
+    armed = True
+    with pytest.raises(PlanError, match="login changed during observation"):
+        material.evidence()
+
+
 def _socket_mount(material, source):
     value = decode(material.encoded)
     value["mounts"]["periphery"].append({
