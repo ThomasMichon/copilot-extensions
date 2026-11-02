@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -28,7 +29,7 @@ def _finding(entry: str, reason: str, *, status: str = "inactive") -> Finding:
     )
 
 
-def test_finding_is_json_friendly_and_fingerprint_stable():
+def test_finding_is_json_friendly_and_fingerprint_stable() -> None:
     finding = Finding(
         registry="demo.d",
         entry="/x.json",
@@ -51,7 +52,7 @@ def test_finding_is_json_friendly_and_fingerprint_stable():
     json.dumps(finding.to_dict())
 
 
-def test_entry_decision_invariants():
+def test_entry_decision_invariants() -> None:
     assert EntryDecision.active("value").status is EntryStatus.ACTIVE
     assert EntryDecision.advisory("value", _finding("x", "legacy")).findings
     assert EntryDecision.inactive(_finding("x", "bad")).value is None
@@ -74,7 +75,7 @@ def test_entry_decision_invariants():
         )
 
 
-def test_scan_absent_is_authoritative_empty(tmp_path):
+def test_scan_absent_is_authoritative_empty(tmp_path: Path) -> None:
     snapshot = scan_directory(
         tmp_path / "absent",
         lambda _path: EntryDecision.active("unused"),
@@ -84,7 +85,7 @@ def test_scan_absent_is_authoritative_empty(tmp_path):
     assert snapshot.reconcile({"old": "value"}) == {}
 
 
-def test_scan_non_directory_is_indeterminate_and_keeps_previous(tmp_path):
+def test_scan_non_directory_is_indeterminate_and_keeps_previous(tmp_path: Path) -> None:
     path = tmp_path / "registry"
     path.write_text("not a directory", encoding="utf-8")
     snapshot = scan_directory(
@@ -97,7 +98,7 @@ def test_scan_non_directory_is_indeterminate_and_keeps_previous(tmp_path):
     assert snapshot.reconcile({"old": "value"}) == {"old": "value"}
 
 
-def test_broken_registry_symlink_is_indeterminate_not_absent(tmp_path):
+def test_broken_registry_symlink_is_indeterminate_not_absent(tmp_path: Path) -> None:
     root = tmp_path / "registry"
     try:
         root.symlink_to(tmp_path / "missing", target_is_directory=True)
@@ -112,15 +113,15 @@ def test_broken_registry_symlink_is_indeterminate_not_absent(tmp_path):
     assert snapshot.reconcile({"old": "value"}) == {"old": "value"}
 
 
-def test_nonzero_reparse_tag_is_recognized():
-    class FakeStat:
-        st_file_attributes = 0
-        st_reparse_tag = 1
+def test_nonzero_reparse_tag_is_recognized() -> None:
+    info = create_autospec(os.stat_result, instance=True)
+    info.st_file_attributes = 0
+    info.st_reparse_tag = 1
 
-    assert _is_reparse(FakeStat()) is True
+    assert _is_reparse(info) is True
 
 
-def test_complete_scan_is_sorted_and_isolates_entry_verdicts(tmp_path):
+def test_complete_scan_is_sorted_and_isolates_entry_verdicts(tmp_path: Path) -> None:
     (tmp_path / "b.json").write_text("inactive", encoding="utf-8")
     (tmp_path / "a.json").write_text("active", encoding="utf-8")
     (tmp_path / "ignore.txt").write_text("ignored", encoding="utf-8")
@@ -145,7 +146,7 @@ def test_complete_scan_is_sorted_and_isolates_entry_verdicts(tmp_path):
     assert [finding.reason for finding in snapshot.findings] == ["invalid-entry"]
 
 
-def test_entry_oserror_is_indeterminate_and_retains_only_that_prior_value(tmp_path):
+def test_entry_oserror_is_indeterminate_and_retains_only_that_prior_value(tmp_path: Path) -> None:
     good = tmp_path / "good.json"
     unreadable = tmp_path / "unreadable.json"
     removed = tmp_path / "removed.json"
@@ -179,7 +180,7 @@ def test_entry_oserror_is_indeterminate_and_retains_only_that_prior_value(tmp_pa
     )
 
 
-def test_complete_empty_scan_removes_previous(tmp_path):
+def test_complete_empty_scan_removes_previous(tmp_path: Path) -> None:
     snapshot = scan_directory(
         tmp_path,
         lambda _path: EntryDecision.active("unused"),
@@ -189,7 +190,7 @@ def test_complete_empty_scan_removes_previous(tmp_path):
     assert snapshot.reconcile({"old": "value"}) == {}
 
 
-def test_suffix_matching_directory_is_definitively_invalid(tmp_path):
+def test_suffix_matching_directory_is_definitively_invalid(tmp_path: Path) -> None:
     entry = tmp_path / "not-a-file.json"
     entry.mkdir()
     called = False
@@ -210,8 +211,9 @@ def test_suffix_matching_directory_is_definitively_invalid(tmp_path):
     assert snapshot.findings[0].reason == "invalid-entry"
 
 
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are unavailable")
-def test_fifo_is_rejected_without_calling_classifier(tmp_path):
+def test_fifo_is_rejected_without_calling_classifier(tmp_path: Path) -> None:
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFOs are unavailable")
     entry = tmp_path / "blocking.json"
     os.mkfifo(entry)
     called = False
@@ -231,7 +233,7 @@ def test_fifo_is_rejected_without_calling_classifier(tmp_path):
     assert snapshot.decisions[str(entry)].status is EntryStatus.INACTIVE
 
 
-def test_symlink_or_reparse_entry_is_rejected(tmp_path):
+def test_symlink_or_reparse_entry_is_rejected(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("valid", encoding="utf-8")
     entry = tmp_path / "linked.json"
@@ -250,7 +252,7 @@ def test_symlink_or_reparse_entry_is_rejected(tmp_path):
     assert snapshot.findings[0].reason == "invalid-entry"
 
 
-def test_indeterminate_snapshot_keeps_previous():
+def test_indeterminate_snapshot_keeps_previous() -> None:
     snapshot: ScanSnapshot[str] = ScanSnapshot(
         registry="demo.d",
         authority=ScanAuthority.INDETERMINATE,
@@ -259,7 +261,7 @@ def test_indeterminate_snapshot_keeps_previous():
     assert snapshot.reconcile({"old": "value"}) == {"old": "value"}
 
 
-def test_warning_tracker_caps_deduplicates_and_reports_recovery():
+def test_warning_tracker_caps_deduplicates_and_reports_recovery() -> None:
     findings = tuple(_finding(f"/{i}.json", "missing-target") for i in range(5))
     tracker = WarningTracker(limit=2, repeat_after_seconds=60)
     first = tracker.select(findings, now=100)
@@ -279,7 +281,7 @@ def test_warning_tracker_caps_deduplicates_and_reports_recovery():
     assert recovered.recovered == 4
 
 
-def test_warning_tracker_deduplicates_same_batch_when_repeat_is_zero():
+def test_warning_tracker_deduplicates_same_batch_when_repeat_is_zero() -> None:
     finding = _finding("/same.json", "missing-target")
     batch = WarningTracker(limit=10, repeat_after_seconds=0).select(
         (finding, finding),
@@ -289,7 +291,7 @@ def test_warning_tracker_deduplicates_same_batch_when_repeat_is_zero():
     assert batch.suppressed == 0
 
 
-def test_warning_reason_change_is_not_reported_as_entry_recovery():
+def test_warning_reason_change_is_not_reported_as_entry_recovery() -> None:
     tracker = WarningTracker()
     missing = _finding("/same.json", "missing-target")
     invalid = _finding("/same.json", "invalid-entry")
@@ -300,14 +302,14 @@ def test_warning_reason_change_is_not_reported_as_entry_recovery():
     assert tracker.select((), now=2).recovered == 1
 
 
-def test_warning_tracker_validates_limits():
+def test_warning_tracker_validates_limits() -> None:
     with pytest.raises(ValueError):
         WarningTracker(limit=-1)
     with pytest.raises(ValueError):
         WarningTracker(repeat_after_seconds=-1)
 
 
-def test_warning_fingerprint_ignores_rendering_metadata_but_not_reason_or_target():
+def test_warning_fingerprint_ignores_rendering_metadata_but_not_reason_or_target() -> None:
     base = Finding(
         registry="demo.d",
         entry="/entry.json",
@@ -355,7 +357,7 @@ def test_warning_fingerprint_ignores_rendering_metadata_but_not_reason_or_target
     }
 
 
-def test_atomic_write_text_replaces_exact_entry(tmp_path):
+def test_atomic_write_text_replaces_exact_entry(tmp_path: Path) -> None:
     path = tmp_path / "registry" / "entry.json"
     atomic_write_text(path, "one")
     assert path.read_text(encoding="utf-8") == "one"
