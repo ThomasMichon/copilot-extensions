@@ -167,7 +167,7 @@ def _git_targets(eff_seg: str, base: str, tool: str) -> list[str]:
     subcommand, _args, targets, overridden = _git_invocation(eff_seg, base, tool)
     if subcommand not in _GIT_WRITE_SUBCOMMANDS:
         return []
-    return [path for _kind, path in targets if path] if targets or overridden else [base]
+    return [path for _kind, path in targets if path] + ([] if overridden else [base])
 
 
 def _root_token(root_str: str) -> str:

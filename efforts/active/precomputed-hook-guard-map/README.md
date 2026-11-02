@@ -341,3 +341,9 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   implicit cwd and unrelated-repository cases. The map, standalone consumer,
   deployment and relevance packet passed 180 cases with four native-capability
   skips. Existing message, linked/nested and identity-cost controls remain green.
+- Addressed the next review overview's index-repository warning despite its
+  absence of inline issues. A work-tree-only override changes file targets,
+  not the repository owning Git's index; matching now retains the current
+  repository alongside explicit work-tree targets unless Git's repository/cwd
+  was explicitly overridden. Four work-tree controls and the complete focused
+  Git identity/message/options packet passed 27 cases.

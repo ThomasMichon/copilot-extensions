@@ -434,6 +434,25 @@ def test_git_global_options_preserve_write_repository(tmp_path, options, guarded
     assert bool(result) is guarded_target
 
 
+@pytest.mark.parametrize("option", ["--work-tree '{outside}'", "--work-tree='{outside}'"])
+@pytest.mark.parametrize("guarded_repository", [False, True])
+def test_worktree_override_preserves_git_index_repository(tmp_path, option, guarded_repository):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(anchor if guarded_repository else outside),
+        "toolArgs": {"command": f"git {option.format(outside=outside)} rm tracked.txt"},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is guarded_repository
+
+
 def test_map_scope_does_not_borrow_other_installation(tmp_path):
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
