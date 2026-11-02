@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-containers"
-version = "0.2.178-dev1"
+version = "0.2.179-dev1"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -27,12 +27,23 @@ dependencies = [
     "agent-zdd",
     "agent-session-liveness-probe",
     "agent-plugin-resolve",
+    "agent-plugin-activation",
+    "agent-dropin-registry",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
 agent-configuration-layers = { path = "libs/configuration-layers" }
 agent-repository-policy = { path = "libs/repository-policy" }
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
+# Identity-verified active-plugin discovery (module ``plugin_activation``),
+# used to find plugin-shipped ``containersConfig`` fleet fragments -- the same
+# resolver agent-codespaces and agent-worktrees use for their plugin-shipped
+# config. dropin-registry and single-instance-lease are its own transitive
+# dependencies.
+agent-plugin-activation = { path = "libs/plugin-activation" }
+agent-dropin-registry = { path = "libs/dropin-registry" }
+agent-single-instance-lease = { path = "libs/single-instance-lease" }
 # Shared OpenSSH process/config primitives used by the trusted-fleet
 # transport. This is a `uv`-editable canonical reference
 # (vendor-pointer-generalization effort, Phase 1): `path` escapes this

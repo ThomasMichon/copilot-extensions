@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from typing import TextIO, cast
 
 import pytest
 
@@ -30,14 +31,14 @@ def command(script: str) -> list[str]:
     return [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
 
 
-def invoke(script: str) -> subprocess.CompletedProcess:
+def invoke(script: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command(f"$ErrorActionPreference='Stop'; . {quoted(NATIVE)}; {script}"),
         capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
     )
 
 
-def test_python_custody_excludes_native_without_rewriting_diagnostics(tmp_path):
+def test_python_custody_excludes_native_without_rewriting_diagnostics(tmp_path: Path) -> None:
     path = tmp_path / "operation.lock"
     path.write_text("diagnostics stay readable", encoding="ascii")
     with OperationLock(path):
@@ -52,7 +53,9 @@ def test_python_custody_excludes_native_without_rewriting_diagnostics(tmp_path):
 
 
 @pytest.mark.parametrize("crash", [False, True])
-def test_native_custody_excludes_python_and_releases_on_close_or_death(tmp_path, crash):
+def test_native_custody_excludes_python_and_releases_on_close_or_death(
+    tmp_path: Path, crash: bool,
+) -> None:
     path = tmp_path / "operation.lock"
     script = (
         f"$ErrorActionPreference='Stop'; . {quoted(NATIVE)}; "
@@ -64,8 +67,9 @@ def test_native_custody_excludes_python_and_releases_on_close_or_death(tmp_path,
         command(script), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, **pu.no_window_kwargs(),
     )
-    receipt = queue.Queue()
-    reader = threading.Thread(target=lambda: receipt.put(child.stdout.readline()), daemon=True)
+    receipt: queue.Queue[str] = queue.Queue()
+    child_stdout = cast(TextIO, child.stdout)
+    reader = threading.Thread(target=lambda: receipt.put(child_stdout.readline()), daemon=True)
     try:
         reader.start()
         line = receipt.get(timeout=25)
@@ -90,7 +94,7 @@ def test_native_custody_excludes_python_and_releases_on_close_or_death(tmp_path,
             job.close()
 
 
-def test_native_local_handles_and_hardlinks_share_one_reservation(tmp_path):
+def test_native_local_handles_and_hardlinks_share_one_reservation(tmp_path: Path) -> None:
     path = tmp_path / "operation.lock"
     path.touch()
     alias = tmp_path / "alias.lock"
@@ -108,7 +112,7 @@ def test_native_local_handles_and_hardlinks_share_one_reservation(tmp_path):
 @pytest.mark.parametrize("kind", [
     "relative", "drive-relative", "current-drive-rooted", "directory", "missing-parent",
 ])
-def test_native_rejects_unowned_paths(tmp_path, kind):
+def test_native_rejects_unowned_paths(tmp_path: Path, kind: str) -> None:
     path = {
         "relative": Path("operation.lock"),
         "drive-relative": Path("C:operation.lock"),
@@ -125,7 +129,7 @@ def test_native_rejects_unowned_paths(tmp_path, kind):
         assert not path.parent.exists()
 
 
-def test_native_read_only_assertion_never_transfers_owner_thread_authority(tmp_path):
+def test_native_read_only_assertion_never_transfers_owner_thread_authority(tmp_path: Path) -> None:
     path = tmp_path / "execution.lock"
     result = invoke(
         r"""

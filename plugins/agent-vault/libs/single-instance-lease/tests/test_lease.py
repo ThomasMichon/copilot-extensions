@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from multiprocessing.synchronize import Event
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +18,7 @@ from single_instance_lease import (
 )
 
 
-def test_acquire_and_release_roundtrip(tmp_path):
+def test_acquire_and_release_roundtrip(tmp_path: Path) -> None:
     lease = SingleInstance(tmp_path, service="svc")
     assert not lease.held
     lease.acquire()
@@ -29,7 +31,7 @@ def test_acquire_and_release_roundtrip(tmp_path):
     lease.release()
 
 
-def test_second_acquire_same_process_conflicts_posix(tmp_path):
+def test_second_acquire_same_process_conflicts_posix(tmp_path: Path) -> None:
     # On POSIX, flock is per-open-file-description; a second SingleInstance opens
     # its own descriptor and must be refused. (msvcrt on Windows is per-process
     # for the same file, so this same-process assertion is POSIX-only.)
@@ -47,7 +49,7 @@ def test_second_acquire_same_process_conflicts_posix(tmp_path):
     b.release()
 
 
-def test_port_key_lets_active_and_passive_coexist(tmp_path):
+def test_port_key_lets_active_and_passive_coexist(tmp_path: Path) -> None:
     active = SingleInstance(tmp_path, service="svc", port=9000)
     passive = SingleInstance(tmp_path, service="svc", port=9001)
     active.acquire()
@@ -59,14 +61,14 @@ def test_port_key_lets_active_and_passive_coexist(tmp_path):
     passive.release()
 
 
-def test_explicit_lock_name_overrides(tmp_path):
+def test_explicit_lock_name_overrides(tmp_path: Path) -> None:
     lease = SingleInstance(tmp_path, service="svc", port=1, lock_name="custom.lock")
     lease.acquire()
     assert lease.lock_path.name == "custom.lock"
     lease.release()
 
 
-def test_service_name_sanitized_into_filename(tmp_path):
+def test_service_name_sanitized_into_filename(tmp_path: Path) -> None:
     lease = SingleInstance(tmp_path, service="Weird Name/../x")
     lease.acquire()
     # no path separators or spaces leak into the filename
@@ -76,24 +78,24 @@ def test_service_name_sanitized_into_filename(tmp_path):
     lease.release()
 
 
-def test_read_owner_pid_records_holder(tmp_path):
+def test_read_owner_pid_records_holder(tmp_path: Path) -> None:
     lease = SingleInstance(tmp_path, service="svc")
     lease.acquire()
     assert read_owner_pid(lease.lock_path) == os.getpid()
     lease.release()
 
 
-def test_read_owner_pid_missing_file_is_none(tmp_path):
+def test_read_owner_pid_missing_file_is_none(tmp_path: Path) -> None:
     assert read_owner_pid(tmp_path / "nope.lock") is None
 
 
-def test_context_manager(tmp_path):
+def test_context_manager(tmp_path: Path) -> None:
     with SingleInstance(tmp_path, service="svc") as lease:
         assert lease.held
     assert not lease.held
 
 
-def _hold_lock(lock_dir: str, ready, release) -> None:
+def _hold_lock(lock_dir: str, ready: Event, release: Event) -> None:
     lease = SingleInstance(lock_dir, service="svc")
     lease.acquire()
     ready.set()
@@ -101,7 +103,7 @@ def _hold_lock(lock_dir: str, ready, release) -> None:
     lease.release()
 
 
-def test_cross_process_exclusion_and_reclaim(tmp_path):
+def test_cross_process_exclusion_and_reclaim(tmp_path: Path) -> None:
     # A lock held by another process blocks us; when that process dies the
     # kernel frees the lock and we can acquire it (liveness-reconciled).
     ctx = mp.get_context("spawn")

@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+from collections.abc import Callable, Mapping
 
 # A loopback connect to a live successor returns in well under a millisecond;
 # this bounds the probe so a slow/unreachable successor never blocks the caller
@@ -124,11 +125,11 @@ def _client_host(bind: str) -> str:
 
 
 def is_superseded(
-    table: dict | None,
+    table: Mapping[str, object] | None,
     my_pid: int,
     my_generation: int,
     *,
-    is_listening=is_listening,  # injectable TCP-probe collaborator
+    is_listening: Callable[[str, int], bool] = is_listening,
 ) -> bool:
     """Has a live, strictly-newer daemon generation superseded us?
 

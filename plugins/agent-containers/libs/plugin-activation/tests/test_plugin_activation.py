@@ -1,0 +1,1694 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+from dropin_registry import EntryStatus, ScanAuthority
+
+from plugin_activation import (
+    ActivePlugin,
+    normalize_remote,
+    resolve_active_plugins,
+    resolver,
+    state,
+)
+
+
+def _write_json(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _plugin(
+    root: Path,
+    marketplace: str,
+    name: str,
+    *,
+    source: str | None = None,
+    plugin_root: str | None = None,
+) -> Path:
+    market = root / ".ai"
+    manifest: dict[str, object] = {
+        "name": marketplace,
+        "plugins": [{"name": name, "source": source or f"./{name}"}],
+    }
+    if plugin_root is not None:
+        manifest["metadata"] = {"pluginRoot": plugin_root}
+    _write_json(market / ".claude-plugin" / "marketplace.json", manifest)
+    plugin = market / (plugin_root or "") / (source or name)
+    _write_json(plugin / ".claude-plugin" / "plugin.json", {"name": name})
+    return plugin.resolve()
+
+
+def _settings(
+    repo: Path,
+    marketplace: str,
+    name: str,
+    *,
+    enabled: object = True,
+) -> Path:
+    path = repo / ".github" / "copilot" / "settings.json"
+    _write_json(
+        path,
+        {
+            "extraKnownMarketplaces": {
+                marketplace: {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {f"{name}@{marketplace}": enabled},
+        },
+    )
+    return path
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _register_project(
+    home: Path,
+    name: str,
+    repo: Path,
+    remote: str,
+    *,
+    actual_remote: str | None = None,
+    bare: bool = False,
+) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q", *(["--bare"] if bare else []))
+    _git(repo, *(["--git-dir", str(repo)] if bare else []),
+         "remote", "add", "origin", actual_remote or remote)
+    aw = home / ".agent-worktrees"
+    aw.mkdir(parents=True, exist_ok=True)
+    projects_path = aw / "projects.yaml"
+    repos_path = aw / "repos.yaml"
+    projects = (
+        yaml.safe_load(projects_path.read_text(encoding="utf-8"))
+        if projects_path.exists()
+        else {"projects": {}}
+    )
+    projects["projects"][name] = {"config_dir": f"~/.{name}"}
+    projects_path.write_text(yaml.safe_dump(projects), encoding="utf-8")
+    repos = (
+        yaml.safe_load(repos_path.read_text(encoding="utf-8"))
+        if repos_path.exists()
+        else {"repos": {}}
+    )
+    from plugin_activation._project_roots import _platform_key
+
+    platform_key = _platform_key()
+    repos["repos"][name] = {
+        platform_key: str(repo),
+        "remote": remote,
+        "class": "worktree",
+    }
+    repos_path.write_text(yaml.safe_dump(repos), encoding="utf-8")
+
+
+def _installed(home: Path, marketplace: str, name: str, *, manifest_name=None) -> Path:
+    root = home / ".copilot" / "installed-plugins" / marketplace / name
+    _write_json(root / "plugin.json", {"name": manifest_name or name})
+    return root.resolve()
+
+
+def _prior(source: str = "demo@local") -> ActivePlugin:
+    name, marketplace = source.split("@", 1)
+    return ActivePlugin(
+        source=source,
+        name=name,
+        marketplace=marketplace,
+        root=Path("prior"),
+        scopes=("project:prior",),
+    )
+
+
+def test_explicit_project_resolves_repository_only_activation_without_registry_scan(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    root = _installed(home, "market", "customizing-copilot")
+    _write_json(repo / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"customizing-copilot@market": True, "unrelated@market": True},
+    })
+    monkeypatch.setattr(
+        resolver, "_verified_project_roots",
+        lambda *_args: pytest.fail("explicit project discovery must not scan other registered projects"),
+    )
+    real_installed = resolver._installed_root
+    visited = []
+
+    def installed(copilot_home, source):
+        visited.append(source)
+        return real_installed(copilot_home, source)
+
+    monkeypatch.setattr(resolver, "_installed_root", installed)
+    report = resolve_active_plugins(
+        home=home, project_root=repo, plugin_names=("customizing-copilot",),
+    )
+    plugin = report.active["customizing-copilot@market"]
+    assert plugin.root_for_scope("project:current") == root
+    assert plugin.root_for_scope("global") is None
+    assert visited == ["customizing-copilot@market"]
+
+
+def test_explicit_project_retains_directory_marketplace_identity_validation(tmp_path):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    root = _plugin(repo, "local", "customizing-copilot")
+    _settings(repo, "local", "customizing-copilot")
+    report = resolve_active_plugins(
+        home=home, include_projects=False, project_root=repo,
+        plugin_names=("customizing-copilot",),
+    )
+    assert report.active["customizing-copilot@local"].root_for_scope("project:current") == root
+    _write_json(root / ".claude-plugin" / "plugin.json", {"name": "foreign"})
+    refused = resolve_active_plugins(
+        home=home, include_projects=False, project_root=repo,
+        plugin_names=("customizing-copilot",),
+    )
+    assert not refused.active
+
+
+@pytest.mark.parametrize("source_kind", ["directory", "local"])
+def test_local_manifest_mapping_preserves_registered_source_identity(tmp_path, source_kind):
+    from plugin_resolve import marketplace_manifest_name, read_repo_settings
+
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    root = _plugin(repo, "canonical-catalog", "demo")
+    path = _settings(repo, "local-alias", "demo")
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings["extraKnownMarketplaces"]["local-alias"]["source"].update(
+        source=source_kind, manifestName="canonical-catalog", stableId="installation-id",
+    )
+    _write_json(path, settings)
+    assert marketplace_manifest_name("local-alias", read_repo_settings(repo)) == "canonical-catalog"
+
+    report = resolve_active_plugins(home=home, project_root=repo, include_projects=False)
+
+    assert "demo@local-alias" in report.active, report.findings
+    selected = report.active["demo@local-alias"]
+    assert selected.source == "demo@local-alias"
+    assert selected.marketplace == "local-alias"
+    assert selected.root_for_scope("project:current") == root
+    assert "demo@canonical-catalog" not in report.active
+
+
+@pytest.mark.parametrize("mapping", [
+    {},
+    {"stableId": "local-alias"},
+    {"manifestName": "different-catalog"},
+    {"manifestName": None},
+    {"manifestName": ""},
+    {"manifestName": False},
+])
+def test_local_manifest_mapping_refuses_unmapped_wrong_or_invalid_identity(tmp_path, mapping):
+    repo = tmp_path / "current"
+    _plugin(repo, "canonical-catalog", "demo")
+    path = _settings(repo, "local-alias", "demo")
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings["extraKnownMarketplaces"]["local-alias"]["source"].update(mapping)
+    _write_json(path, settings)
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert not report.active
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("failure", [
+    "foreign-plugin", "missing-plugin", "escaping-source", "linked-manifest",
+])
+def test_mapped_local_catalog_retains_payload_owner_refusals(tmp_path, failure):
+    repo = tmp_path / "current"
+    plugin = _plugin(repo, "canonical-catalog", "demo")
+    path = _settings(repo, "local-alias", "demo")
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings["extraKnownMarketplaces"]["local-alias"]["source"]["manifestName"] = "canonical-catalog"
+    _write_json(path, settings)
+    catalog = repo / ".ai" / ".claude-plugin" / "marketplace.json"
+    if failure == "foreign-plugin":
+        _write_json(plugin / ".claude-plugin" / "plugin.json", {"name": "foreign"})
+    elif failure == "missing-plugin":
+        (plugin / ".claude-plugin" / "plugin.json").unlink()
+    elif failure == "escaping-source":
+        _write_json(repo / "foreign" / "plugin.json", {"name": "demo"})
+        document = json.loads(catalog.read_text(encoding="utf-8"))
+        document["plugins"][0]["source"] = "../foreign"
+        _write_json(catalog, document)
+    else:
+        target = tmp_path / "linked-catalog.json"
+        target.write_bytes(catalog.read_bytes())
+        catalog.unlink()
+        try:
+            catalog.symlink_to(target)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"native symlink creation unavailable: {exc}")
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert not report.active
+    assert any(f.reason in {"identity-mismatch", "missing-target"} for f in report.findings)
+
+
+def test_local_manifest_mapping_is_checked_per_source_with_a_shared_cache(tmp_path):
+    repo = tmp_path / "current"
+    plugin = _plugin(repo, "canonical-catalog", "demo")
+    _write_json(repo / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {
+            alias: {"source": {
+                "source": "directory", "path": "./.ai", "manifestName": expected,
+            }}
+            for alias, expected in (
+                ("correct-alias", "canonical-catalog"), ("wrong-alias", "foreign"),
+            )
+        },
+        "enabledPlugins": {"demo@correct-alias": True, "demo@wrong-alias": True},
+    })
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert report.active["demo@correct-alias"].root == plugin
+    assert "demo@wrong-alias" not in report.active
+
+
+def test_remote_source_cannot_use_manifest_mapping_to_select_a_local_root(tmp_path):
+    repo = tmp_path / "current"
+    _plugin(repo, "canonical-catalog", "demo")
+    _write_json(repo / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {"local-alias": {"source": {
+            "source": "github", "repo": "example/catalog", "path": "./.ai",
+            "manifestName": "canonical-catalog",
+        }}},
+        "enabledPlugins": {"demo@local-alias": True},
+    })
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert not report.active
+    assert any(f.reason == "missing-target" for f in report.findings)
+
+
+@pytest.mark.parametrize("local_override", [False, True])
+def test_explicit_project_false_overrides_global_activation_without_changing_global_scan(
+    tmp_path, local_override,
+):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    source = "customizing-copilot@market"
+    root = _installed(home, "market", "customizing-copilot")
+    _write_json(home / ".copilot" / "settings.json", {"enabledPlugins": {source: True}})
+    settings = repo / ".github" / "copilot" / "settings.json"
+    _write_json(settings, {"enabledPlugins": {source: local_override}})
+    if local_override:
+        _write_json(settings.with_name("settings.local.json"), {"enabledPlugins": {source: False}})
+    global_report = resolve_active_plugins(home=home, include_projects=False)
+    assert global_report.active[source].root_for_scope("global") == root
+    scoped = resolve_active_plugins(home=home, project_root=repo)
+    assert not scoped.active
+    assert scoped.reconcile({source: _prior(source)}) == {}
+
+
+def test_unreadable_project_precedence_does_not_authorize_global_fallback(tmp_path):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    source = "customizing-copilot@market"
+    _installed(home, "market", "customizing-copilot")
+    _write_json(home / ".copilot" / "settings.json", {"enabledPlugins": {source: True}})
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{")
+    report = resolve_active_plugins(home=home, project_root=repo)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert not report.active
+    prior = {source: _prior(source)}
+    assert report.reconcile(prior) == prior
+
+
+def test_remote_normalization_for_network_forms():
+    expected = "network:github.com/example/repo"
+    assert normalize_remote("https://github.com/example/repo.git") == expected
+    assert normalize_remote("git@github.com:example/repo.git") == expected
+    assert normalize_remote("github.com:example/repo.git") == expected
+    assert normalize_remote("ssh://git@github.com/example/repo.git") == expected
+    assert normalize_remote("https://GITHUB.COM/example/repo/") == expected
+    assert normalize_remote("https://github.com/Example/repo.git") != expected
+
+
+def test_remote_normalization_for_local_paths():
+    windows = "file:c:\\src\\example\\repo"
+    assert normalize_remote(r"C:\Src\Example\repo.GIT") == windows
+    assert normalize_remote("file:///C:/Src/Example/repo.git") == windows
+    assert normalize_remote("file:C:/Src/Example/repo.git") == windows
+    assert normalize_remote(r"file:C:\Src\Example\repo.git") == windows
+    unc = "file:\\\\server\\share\\repo"
+    assert normalize_remote(r"\\SERVER\Share\repo.git") == unc
+    assert normalize_remote("file://server/Share/repo.git") == unc
+    assert normalize_remote("file:////server/Share/repo.git") == unc
+    assert normalize_remote("/srv/Example/repo.git") == "file:/srv/Example/repo"
+    assert normalize_remote("file:///srv/Example/repo.git") == (
+        "file:/srv/Example/repo"
+    )
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        "https://[bad",
+        "https://example.com:bad/repo",
+        "https://example.com/repo.git?identity=one",
+        "https://example.com/repo.git#fragment",
+        "",
+        None,
+    ],
+)
+def test_remote_normalization_is_fail_safe(remote):
+    assert normalize_remote(remote) is None
+
+
+def test_no_settings_or_project_registry_is_absent(tmp_path):
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.ABSENT
+    assert report.active == {}
+    assert report.reconcile({"demo@local": _prior()}) == {}
+
+
+def test_global_local_plugin_is_active(tmp_path):
+    plugin = _plugin(tmp_path / ".copilot", "local", "demo")
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"demo@local": True},
+        },
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.active["demo@local"].root == plugin
+    assert report.active["demo@local"].scopes == ("global",)
+    assert report.active["demo@local"].live_roots == (
+        resolver.ActivePluginRoot(plugin, ("global",), "directory"),
+    )
+
+
+def test_global_only_resolution_does_not_visit_project_registry(tmp_path, monkeypatch):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+
+    def unrelated_projects(_home):
+        raise AssertionError("global-only lookup must not verify unrelated projects")
+
+    monkeypatch.setattr(resolver, "_verified_project_roots", unrelated_projects)
+    report = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.active["demo@local"].root_for_scope("global") == installed
+    assert report.active["demo@local"].scopes == ("global",)
+
+
+def test_global_only_resolution_cannot_select_a_project_override(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+    repo = tmp_path / "project"
+    _register_project(tmp_path, "project", repo, "https://github.com/example/project.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    report = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert report.active["demo@local"].root_for_scope("global") == installed
+    assert report.active["demo@local"].root_for_scope("project:project") is None
+
+
+@pytest.mark.parametrize("mode", ["active", "disabled", "absent", "indeterminate"])
+def test_filtered_reconciliation_preserves_excluded_plugins(tmp_path, mode):
+    if mode != "absent":
+        settings = (
+            {"enabledPlugins": {"demo@local": mode == "active"}}
+            if mode != "indeterminate"
+            else {"enabledPlugins": "invalid"}
+        )
+        _write_json(tmp_path / ".copilot" / "settings.json", settings)
+    installed = _installed(tmp_path, "local", "demo")
+    previous = {
+        source: _prior(source)
+        for source in ("demo@local", "demo@other", "unrelated@local")
+    }
+
+    report = resolve_active_plugins(
+        home=tmp_path, include_projects=False, plugin_names=("demo",)
+    )
+    reconciled = report.reconcile(previous)
+
+    assert reconciled["unrelated@local"] is previous["unrelated@local"]
+    assert "unrelated@local" not in report.active
+    if mode == "active":
+        assert reconciled["demo@local"].root == installed
+        assert "demo@other" not in reconciled
+    elif mode == "indeterminate":
+        assert reconciled == previous
+    else:
+        assert reconciled == {"unrelated@local": previous["unrelated@local"]}
+
+
+def test_empty_plugin_filter_preserves_entire_previous_roster(tmp_path):
+    previous = {"demo@local": _prior()}
+    report = resolve_active_plugins(
+        home=tmp_path, include_projects=False, plugin_names=()
+    )
+    assert report.active == {}
+    assert report.reconcile(previous) == previous
+
+
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("malformed_source", ["unrelated@local", "demo@local"])
+def test_filtered_settings_authority_checks_only_selected_plugin_entries(
+    tmp_path, override, malformed_source
+):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": False}},
+    )
+    settings_name = "settings.local.json" if override else "settings.json"
+    _write_json(
+        tmp_path / ".copilot" / settings_name,
+        {"enabledPlugins": {"demo@local": False, malformed_source: "invalid"}},
+    )
+    previous = {
+        source: _prior(source) for source in ("demo@local", "unrelated@local")
+    }
+    report = resolve_active_plugins(
+        home=tmp_path, include_projects=False, plugin_names=("demo",)
+    )
+
+    if malformed_source == "demo@local":
+        assert report.authority is ScanAuthority.INDETERMINATE
+        assert report.reconcile(previous) == previous
+        assert any(f.reason == "invalid-entry" for f in report.findings)
+    else:
+        assert report.authority is ScanAuthority.COMPLETE
+        assert report.reconcile(previous) == {
+            "unrelated@local": previous["unrelated@local"]
+        }
+        assert not report.findings
+    unfiltered = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert unfiltered.authority is ScanAuthority.INDETERMINATE
+
+
+def test_filtered_project_settings_preserve_scoped_authority(tmp_path):
+    repo = tmp_path / "project"
+    _register_project(tmp_path, "project", repo, "https://github.com/example/project.git")
+    _write_json(
+        repo / ".github" / "copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": False, "unrelated@local": "invalid"}},
+    )
+    previous = {
+        source: _prior(source) for source in ("demo@local", "unrelated@local")
+    }
+    report = resolve_active_plugins(home=tmp_path, plugin_names=("demo",))
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.reconcile(previous) == {
+        "unrelated@local": previous["unrelated@local"]
+    }
+    assert not report.findings
+
+
+def test_local_override_disables_base_setting(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    _write_json(
+        tmp_path / ".copilot" / "settings.local.json",
+        {"enabledPlugins": {"demo@local": False}},
+    )
+    _installed(tmp_path, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.active == {}
+    assert report.decisions == {}
+
+
+@pytest.mark.parametrize("value", ["false", 1, None])
+def test_non_boolean_override_is_indeterminate(tmp_path, value):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    _write_json(
+        tmp_path / ".copilot" / "settings.local.json",
+        {"enabledPlugins": {"demo@local": value}},
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+    assert any(f.reason == "invalid-entry" for f in report.findings)
+
+
+def test_malformed_local_override_is_indeterminate(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    override = tmp_path / ".copilot" / "settings.local.json"
+    override.write_text("{", encoding="utf-8")
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+    assert any(f.entry == str(override) and f.status == "indeterminate" for f in report.findings)
+
+
+def test_unreadable_global_settings_is_indeterminate(tmp_path, monkeypatch):
+    settings = tmp_path / ".copilot" / "settings.json"
+    _write_json(settings, {"enabledPlugins": {"demo@local": True}})
+    original = state._open_state_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == settings:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(state, "_open_state_text", denied)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": _prior()})
+
+
+def test_registered_project_plugin_is_active(tmp_path):
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    plugin = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.active["demo@local"].root == plugin
+    assert report.active["demo@local"].scopes == ("project:demo-repo",)
+
+
+def test_shared_marketplace_is_read_once_per_resolve_call(tmp_path, monkeypatch):
+    """picker-performance-and-responsiveness Phase 4: two enabled plugins
+    naming the SAME marketplace must parse that marketplace's manifest JSON
+    only once per `resolve_active_plugins()` call, not once per plugin --
+    this was the measured dominant cold-boot cost (a marketplace shared by
+    N plugins paid N full re-reads; see the effort's Journal for the
+    original ~10.5-12.4s -> ~7.7-9.1s profiled fix)."""
+    market = tmp_path / ".copilot" / ".ai"
+    _write_json(
+        market / ".claude-plugin" / "marketplace.json",
+        {
+            "name": "local",
+            "plugins": [
+                {"name": "demo-one", "source": "./demo-one"},
+                {"name": "demo-two", "source": "./demo-two"},
+            ],
+        },
+    )
+    for plugin_name in ("demo-one", "demo-two"):
+        _write_json(
+            market / plugin_name / ".claude-plugin" / "plugin.json",
+            {"name": plugin_name},
+        )
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"demo-one@local": True, "demo-two@local": True},
+        },
+    )
+
+    read_calls: list[Path] = []
+    original_read_text = Path.read_text
+
+    def counting_read_text(path: Path, *args, **kwargs):
+        if path.name == "marketplace.json":
+            read_calls.append(path)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    report = resolve_active_plugins(home=tmp_path)
+
+    assert report.authority is ScanAuthority.COMPLETE
+    assert set(report.active) == {"demo-one@local", "demo-two@local"}
+    # The whole point of the fix: ONE read of the shared manifest for TWO
+    # plugins, not two. `_marketplace_manifest` and `load_marketplace` are
+    # separate read call sites that each independently cache now, so this
+    # allows at most one read per call site (<=2 total), strictly less than
+    # the 4 reads (2 plugins x 2 call sites) the uncached code paid.
+    assert len(read_calls) <= 2, (
+        f"expected the shared marketplace manifest to be read at most once "
+        f"per call site across both plugins, got {len(read_calls)} reads: "
+        f"{read_calls}"
+    )
+
+
+def test_wrong_registered_remote_cannot_authorize(tmp_path):
+    repo = tmp_path / "src" / "demo-repo"
+    _register_project(
+        tmp_path,
+        "demo-repo",
+        repo,
+        "https://github.com/example/expected.git",
+        actual_remote="https://github.com/example/other.git",
+    )
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert "demo@local" not in report.active
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_malformed_registered_remote_is_indeterminate(tmp_path):
+    repo = tmp_path / "src" / "demo-repo"
+    _register_project(
+        tmp_path,
+        "demo-repo",
+        repo,
+        "https://[bad",
+        actual_remote="https://github.com/example/demo-repo.git",
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+    assert any(f.reason == "registry-indeterminate" for f in report.findings)
+
+
+def test_query_qualified_registered_remote_is_indeterminate(tmp_path):
+    repo = tmp_path / "src" / "demo-repo"
+    _register_project(
+        tmp_path,
+        "demo-repo",
+        repo,
+        "https://git.example/repo.git?identity=trusted",
+        actual_remote="https://git.example/repo.git?identity=other",
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+
+
+def test_project_git_timeout_is_indeterminate(tmp_path, monkeypatch):
+    repo = tmp_path / "src" / "demo-repo"
+    _register_project(
+        tmp_path,
+        "demo-repo",
+        repo,
+        "https://github.com/example/demo-repo.git",
+    )
+
+    def timeout(*_args):
+        raise subprocess.TimeoutExpired("git", 10)
+
+    monkeypatch.setattr(resolver, "_git", timeout)
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+    assert any(f.reason == "registry-indeterminate" for f in report.findings)
+
+
+def test_missing_repos_for_adopted_projects_is_indeterminate(tmp_path):
+    aw = tmp_path / ".agent-worktrees"
+    aw.mkdir()
+    (aw / "projects.yaml").write_text(
+        yaml.safe_dump({"projects": {"demo": {"config_dir": "~/.demo"}}}),
+        encoding="utf-8",
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "registry-indeterminate" for f in report.findings)
+
+
+def test_malformed_projects_registry_is_indeterminate(tmp_path):
+    aw = tmp_path / ".agent-worktrees"
+    aw.mkdir()
+    (aw / "projects.yaml").write_text("projects: [", encoding="utf-8")
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.reconcile({"demo@local": _prior()})
+
+
+def test_git_environment_is_sanitized(monkeypatch):
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'remote.origin.url=bad'")
+    monkeypatch.setenv("GIT_DIR", "bad")
+    env = resolver._clean_git_env()
+    assert "GIT_CONFIG_PARAMETERS" not in env
+    assert "GIT_DIR" not in env
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+
+
+def test_git_executable_is_resolved_once_per_process(monkeypatch, tmp_path):
+    """picker-performance-and-responsiveness Phase 4 (remaining item):
+    ``_git`` must not rescan ``PATH`` on every call -- a cold Picker boot
+    calls it ~17-18 times during project/root discovery alone."""
+    resolver._GIT_WHICH_CACHE.clear()
+    which_calls = []
+
+    def fake_which(name):
+        which_calls.append(name)
+        return "/usr/bin/git"
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n")
+
+    monkeypatch.setattr(resolver.shutil, "which", fake_which)
+    monkeypatch.setattr(resolver.subprocess, "run", fake_run)
+    resolver._git(tmp_path, "status")
+    resolver._git(tmp_path, "status")
+    assert which_calls == ["git"]  # only resolved once, not once per call
+    resolver._GIT_WHICH_CACHE.clear()
+
+
+def test_bare_anchor_probe_is_one_combined_git_call(tmp_path):
+    """``git_root``'s bare-anchor fallback must fold ``--is-bare-repository``
+    and ``--absolute-git-dir`` into a single ``git rev-parse`` call rather
+    than two separate subprocess spawns."""
+    from plugin_activation.bare_anchor import git_root
+
+    root = tmp_path / "anchor"
+    root.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(_root: Path, *args: str) -> str:
+        calls.append(args)
+        if args == ("rev-parse", "--show-toplevel"):
+            raise subprocess.CalledProcessError(128, ["git", *args])
+        if args == ("rev-parse", "--is-bare-repository", "--absolute-git-dir"):
+            return f"true\n{root}"
+        raise AssertionError(f"unexpected git invocation: {args}")
+
+    result = git_root(root, fake_git, lambda a, b: a.samefile(b))
+    assert result == root.resolve()
+    assert calls == [
+        ("rev-parse", "--show-toplevel"),
+        ("rev-parse", "--is-bare-repository", "--absolute-git-dir"),
+    ]
+
+
+def test_bare_anchor_probe_rejects_non_bare_repo_with_one_combined_call(tmp_path):
+    from plugin_activation.bare_anchor import git_root
+
+    root = tmp_path / "not-a-bare-anchor"
+    root.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(_root: Path, *args: str) -> str:
+        calls.append(args)
+        if args == ("rev-parse", "--show-toplevel"):
+            raise subprocess.CalledProcessError(128, ["git", *args])
+        return f"false\n{root / '.git'}"
+
+    with pytest.raises(subprocess.CalledProcessError):
+        git_root(root, fake_git, lambda a, b: a == b)
+    assert len(calls) == 2  # still just the fallback's one combined probe
+
+
+def test_project_local_root_wins_over_convergent_installed_payload(tmp_path):
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    installed = _installed(tmp_path, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    active = report.active["demo@local"]
+    assert active.root != installed
+    assert active.root == (repo / ".ai" / "demo").resolve()
+    assert [(item.root, item.scopes, item.kind) for item in active.live_roots] == [
+        (active.root, ("project:demo-repo",), "directory"),
+    ]
+
+
+def test_mixed_global_installed_and_project_local_roots_are_explicit(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    local = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    active = resolve_active_plugins(home=tmp_path).active["demo@local"]
+
+    assert active.root == local
+    assert active.root_for_scope("global") == installed
+    assert active.root_for_scope("project:demo-repo") == local
+    assert [(item.root, item.scopes, item.kind) for item in active.live_roots] == [
+        (local, ("project:demo-repo",), "directory"),
+        (installed, ("global",), "installed"),
+    ]
+
+
+def test_installed_payload_cannot_mask_distinct_local_roots(tmp_path):
+    for name in ("one", "two"):
+        repo = tmp_path / "src" / name
+        _register_project(
+            tmp_path,
+            name,
+            repo,
+            f"https://github.com/example/{name}.git",
+        )
+        _plugin(repo, "local", "demo")
+        _settings(repo, "local", "demo")
+    _installed(tmp_path, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    assert "demo@local" not in report.active
+    assert report.decisions["demo@local"].status is EntryStatus.INACTIVE
+    assert any(f.reason == "root-ambiguous" for f in report.findings)
+
+
+def test_installed_payload_requires_exact_manifest_identity(tmp_path):
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    local = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    _installed(tmp_path, "local", "demo", manifest_name="other")
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active["demo@local"].root == local
+    assert report.decisions["demo@local"].status is EntryStatus.ACTIVE_WITH_ADVISORY
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_unreadable_installed_payload_is_advisory_when_all_scopes_are_local(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    local = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    installed = _installed(tmp_path, "local", "demo")
+    manifest = installed / "plugin.json"
+    original = state._open_state_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == manifest:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(state, "_open_state_text", denied)
+    report = resolve_active_plugins(home=tmp_path)
+
+    assert report.active["demo@local"].root == local
+    assert report.decisions["demo@local"].status is EntryStatus.ACTIVE_WITH_ADVISORY
+    assert any(
+        finding.reason == "entry-indeterminate"
+        and finding.status == "advisory"
+        for finding in report.decisions["demo@local"].findings
+    )
+
+
+def test_unreadable_installed_payload_is_indeterminate_when_fallback_is_needed(
+    tmp_path,
+    monkeypatch,
+):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@catalog": True}},
+    )
+    installed = _installed(tmp_path, "catalog", "demo")
+    manifest = installed / "plugin.json"
+    original = state._open_state_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == manifest:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(state, "_open_state_text", denied)
+    report = resolve_active_plugins(home=tmp_path)
+
+    assert "demo@catalog" not in report.active
+    assert report.decisions["demo@catalog"].status is EntryStatus.INDETERMINATE
+
+
+def test_installed_payload_does_not_mask_unreadable_local_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    copilot = tmp_path / ".copilot"
+    _plugin(copilot, "local", "demo")
+    _write_json(
+        copilot / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"demo@local": True},
+        },
+    )
+    _installed(tmp_path, "local", "demo")
+    manifest = copilot / ".ai" / ".claude-plugin" / "marketplace.json"
+    original = state._open_state_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == manifest:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(state, "_open_state_text", denied)
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.decisions["demo@local"].status is EntryStatus.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        {"source": []},
+        {"source": {"source": [], "path": "./.ai"}},
+        {"source": {"source": "directory", "path": []}},
+        {"source": {"source": "", "path": "./.ai"}},
+        {"source": {"source": "unsupported", "path": "./.ai"}},
+    ],
+)
+@pytest.mark.parametrize("has_installed", [False, True])
+def test_malformed_marketplace_evidence_is_indeterminate(
+    tmp_path,
+    definition,
+    has_installed,
+):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {"local": definition},
+            "enabledPlugins": {"demo@local": True},
+        },
+    )
+    if has_installed:
+        _installed(tmp_path, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    prior = _prior()
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.decisions["demo@local"].status is EntryStatus.INDETERMINATE
+    assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
+    assert any(f.reason == "invalid-entry" for f in report.findings)
+
+
+def test_remote_marketplace_can_use_exact_installed_payload(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@catalog": True}},
+    )
+    installed = _installed(tmp_path, "catalog", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    active = report.active["demo@catalog"]
+    assert active.root == installed
+    assert active.live_roots == (
+        resolver.ActivePluginRoot(installed, ("global",), "installed"),
+    )
+
+
+def test_disabled_everywhere_does_not_resurrect_installed_payload(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": False}},
+    )
+    _installed(tmp_path, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert report.findings == ()
+
+
+@pytest.mark.parametrize(
+    ("source", "plugin_root"),
+    [("../outside/demo", None), ("demo", "../outside")],
+)
+def test_local_marketplace_paths_cannot_escape(tmp_path, source, plugin_root):
+    copilot = tmp_path / ".copilot"
+    market = copilot / ".ai"
+    outside = copilot / "outside" / "demo"
+    _write_json(outside / "plugin.json", {"name": "demo"})
+    manifest: dict[str, object] = {
+        "name": "local",
+        "plugins": [{"name": "demo", "source": source}],
+    }
+    if plugin_root:
+        manifest["metadata"] = {"pluginRoot": plugin_root}
+    _write_json(market / ".claude-plugin" / "marketplace.json", manifest)
+    _write_json(
+        copilot / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"demo@local": True},
+        },
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    assert "demo@local" not in report.active
+    assert any(
+        f.reason == "identity-mismatch" and "escapes" in (f.detail or "")
+        for f in report.findings
+    )
+
+
+def test_local_marketplace_symlink_escape_is_rejected(tmp_path):
+    copilot = tmp_path / ".copilot"
+    market = copilot / ".ai"
+    outside = copilot / "outside"
+    _write_json(outside / "plugin.json", {"name": "demo"})
+    _write_json(
+        market / ".claude-plugin" / "marketplace.json",
+        {
+            "name": "local",
+            "plugins": [{"name": "demo", "source": "./demo"}],
+        },
+    )
+    try:
+        (market / "demo").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+    _write_json(
+        copilot / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"demo@local": True},
+        },
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    assert "demo@local" not in report.active
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_duplicate_local_plugin_entries_are_ambiguous(tmp_path):
+    copilot = tmp_path / ".copilot"
+    market = copilot / ".ai"
+    _write_json(
+        market / ".claude-plugin" / "marketplace.json",
+        {
+            "name": "local",
+            "plugins": [
+                {"name": "demo", "source": "first"},
+                {"name": "demo", "source": "second"},
+            ],
+        },
+    )
+    _write_json(market / "first" / "plugin.json", {"name": "demo"})
+    _write_json(market / "second" / "plugin.json", {"name": "demo"})
+    _write_json(
+        copilot / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"demo@local": True},
+        },
+    )
+    report = resolve_active_plugins(home=tmp_path)
+    assert "demo@local" not in report.active
+    assert any(f.reason == "root-ambiguous" for f in report.findings)
+
+
+@pytest.mark.parametrize("bare", [False, True])
+def test_registered_identity_memo_survives_processes_and_invalidates_config(tmp_path, bare):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git", bare=bare)
+    root = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    program = """
+import json, sys
+from plugin_activation import resolve_active_plugins, resolver
+original = resolver._git
+calls = []
+def counted(*args):
+    calls.append(args[1:])
+    return original(*args)
+resolver._git = counted
+report = resolve_active_plugins(home=sys.argv[1])
+print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sys.path))}
+
+    def scan():
+        completed = subprocess.run(
+            [sys.executable, "-c", program, str(tmp_path)],
+            capture_output=True, text=True, check=True, env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return json.loads(completed.stdout)
+
+    cold, warm = scan(), scan()
+    assert root.is_dir()
+    assert cold["active"] == warm["active"] == ["demo@local"]
+    assert cold["calls"] > 0
+    assert warm["calls"] == 0, (cold, warm)
+    _git(repo, *(["--git-dir", str(repo)] if bare else []),
+         "remote", "set-url", "origin", "https://github.com/other/demo.git")
+    changed = scan()
+    assert changed["calls"] > 0
+    assert changed["active"] == []
+
+
+def test_registered_identity_memo_keeps_registry_and_settings_live(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    settings = _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    _write_json(settings, {"enabledPlugins": {"demo@local": False}})
+    assert resolve_active_plugins(home=tmp_path).active == {}
+    assert calls == []
+    registry = tmp_path / ".agent-worktrees" / "repos.yaml"
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    data["repos"]["demo"]["remote"] = "https://github.com/other/demo.git"
+    registry.write_text(yaml.safe_dump(data), encoding="utf-8")
+    report = resolve_active_plugins(home=tmp_path)
+    assert calls
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("indirection", ["include", "includeIf", "worktree"])
+def test_registered_identity_memo_reprobes_indirect_git_config(tmp_path, monkeypatch, indirection):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    if indirection == "worktree":
+        _git(repo, "config", "core.worktree", str(repo))
+    else:
+        key = "include.path" if indirection == "include" else "includeIf.gitdir:/**.path"
+        _git(repo, "config", key, str(tmp_path / "optional.gitconfig"))
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert calls
+
+
+def test_registered_identity_memo_invalidates_new_worktree_config(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    _git(repo, "config", "extensions.worktreeConfig", "true")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    _git(repo, "config", "--worktree", "url.https://github.com/other/.insteadOf", "https://github.com/example/")
+    report = resolve_active_plugins(home=tmp_path)
+    assert calls
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_registered_identity_memo_does_not_publish_changed_probe_inputs(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    original = resolver._git
+    calls = []
+
+    def change_after_probe(root, *args):
+        calls.append(args)
+        result = original(root, *args)
+        if args == ("remote", "get-url", "origin"):
+            _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
+        return result
+
+    monkeypatch.setattr(resolver, "_git", change_after_probe)
+    resolve_active_plugins(home=tmp_path)
+    calls.clear()
+    report = resolve_active_plugins(home=tmp_path)
+    assert calls
+    assert report.active == {}
+
+
+@pytest.mark.parametrize("entry", ["HEAD", "objects", "refs"])
+def test_registered_identity_memo_reprobes_lost_repository_structure(tmp_path, monkeypatch, entry):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    path = repo / ".git" / entry
+    path.rename(path.with_name(entry + ".removed"))
+    assert resolve_active_plugins(home=tmp_path).active == {}
+    assert calls
+
+
+@pytest.mark.parametrize("raw", ["not-json", '{"version":1,"verified":[]}', None])
+def test_registered_identity_memo_missing_or_invalid_is_not_replayed(tmp_path, monkeypatch, raw):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    memo = tmp_path / ".agent-worktrees" / "cache" / "project-identities.json"
+    if raw is None:
+        memo.unlink()
+    else:
+        memo.write_text(raw, encoding="utf-8")
+    _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert resolve_active_plugins(home=tmp_path).active == {}
+    assert calls
+
+
+def test_registered_identity_memo_write_failure_keeps_fresh_probes(tmp_path, monkeypatch, caplog):
+    from plugin_activation import _project_identity
+
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    def denied(*_args, **_kwargs):
+        raise PermissionError("test memo publication refusal")
+
+    monkeypatch.setattr(_project_identity, "write_json_object_atomic", denied)
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    cold_count = len(calls)
+    assert cold_count > 0
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert len(calls) == 2 * cold_count
+    assert "could not be published" in caplog.text
+
+
+def test_registered_identity_memo_reprobes_linked_gitfile(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial")
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "--detach", str(linked), "HEAD")
+    registry = tmp_path / ".agent-worktrees" / "repos.yaml"
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    from plugin_activation._project_roots import _platform_key
+    data["repos"]["demo"][_platform_key()] = str(linked)
+    registry.write_text(yaml.safe_dump(data), encoding="utf-8")
+    _plugin(linked, "local", "demo")
+    _settings(linked, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert calls
+    _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
+    assert resolve_active_plugins(home=tmp_path).active == {}
+
+
+@pytest.mark.parametrize("owner_result", [False, "unavailable"])
+def test_registered_identity_memo_reprobes_when_owner_eligibility_changes(tmp_path, monkeypatch, owner_result):
+    from plugin_activation import _project_identity
+
+    repo = tmp_path / "repo"
+    _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+
+    def no_owner_evidence(*_args):
+        if owner_result == "unavailable":
+            raise PermissionError("test ownership query refusal")
+        return owner_result
+
+    monkeypatch.setattr(_project_identity, "_owned_directory", no_owner_evidence)
+    original = resolver._git
+    calls = []
+    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert calls
+
+
+@pytest.mark.parametrize("memo", ["cold", "warm", "changed"])
+def test_project_identity_memo_unit_work_counts(tmp_path, monkeypatch, memo):
+    from plugin_activation import _project_roots
+
+    monkeypatch.setattr(_project_roots, "_platform_key", lambda: "synthetic")
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    documents = {
+        "projects.yaml": {"projects": {"demo": {}}},
+        "repos.yaml": {"repos": {"demo": {
+            _project_roots._platform_key(): str(root),
+            "remote": "https://github.com/example/demo.git",
+        }}},
+    }
+    monkeypatch.setattr(_project_roots, "_load_yaml_object", lambda path: (
+        ScanAuthority.COMPLETE, documents[path.name], [],
+    ))
+    monkeypatch.setattr(_project_roots, "identity_inputs", lambda *_: "a" * 64)
+    previous = {} if memo == "cold" else {str(root): ("a" if memo == "warm" else "b") * 64}
+    monkeypatch.setattr(_project_roots, "read_identities", lambda _: previous)
+    written = []
+    monkeypatch.setattr(_project_roots, "write_identities", lambda path, value: written.append(value))
+    monkeypatch.setattr(resolver, "_git_executable", lambda: "synthetic-git")
+    calls = []
+
+    def git(_root, *args):
+        calls.append(args)
+        return str(root) if args == ("rev-parse", "--show-toplevel") else "https://github.com/example/demo.git"
+
+    monkeypatch.setattr(resolver, "_git", git)
+    roots, findings, authority = _project_roots._verified_project_roots(tmp_path)
+    assert roots == [("demo", root)]
+    assert findings == []
+    assert authority is ScanAuthority.COMPLETE
+    assert calls == ([] if memo == "warm" else [
+        ("rev-parse", "--show-toplevel"), ("remote", "get-url", "origin"),
+    ])
+    assert written == ([] if memo == "warm" else [{str(root): "a" * 64}])
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout):
+    from plugin_activation import _project_roots
+
+    monkeypatch.setattr(_project_roots, "_platform_key", lambda: "synthetic")
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    documents = {
+        "projects.yaml": {"projects": {"demo": {}}},
+        "repos.yaml": {"repos": {"demo": {
+            _project_roots._platform_key(): str(root),
+            "remote": "https://github.com/example/demo.git",
+        }}},
+    }
+    monkeypatch.setattr(_project_roots, "_load_yaml_object", lambda path: (
+        ScanAuthority.COMPLETE, documents[path.name], [],
+    ))
+    monkeypatch.setattr(_project_roots, "identity_inputs", lambda *_: "a" * 64)
+    monkeypatch.setattr(_project_roots, "read_identities", lambda _: {str(root): "b" * 64})
+    written = []
+    monkeypatch.setattr(_project_roots, "write_identities", lambda path, value: written.append(value))
+    monkeypatch.setattr(resolver, "_git_executable", lambda: "synthetic-git")
+
+    def refused(*_args):
+        if timeout:
+            raise subprocess.TimeoutExpired("synthetic-git", 10)
+        raise subprocess.CalledProcessError(128, "synthetic-git")
+
+    monkeypatch.setattr(resolver, "_git", refused)
+    roots, findings, authority = _project_roots._verified_project_roots(tmp_path)
+    assert roots == []
+    assert written == [{}]
+    assert authority is (ScanAuthority.INDETERMINATE if timeout else ScanAuthority.COMPLETE)
+    assert [finding.reason for finding in findings] == [
+        "registry-indeterminate" if timeout else "identity-mismatch",
+    ]
+
+
+
+@pytest.mark.parametrize("rewrite", ["replace", "in-place-restored-mtime"])
+def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypatch, rewrite):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    config = repo / ".git" / "config"
+    initial = config.read_bytes()
+    initial_time = config.stat().st_mtime_ns
+    original = resolver._git
+
+    def transient_match(root, *args):
+        if args != ("remote", "get-url", "origin"):
+            return original(root, *args)
+        if rewrite == "replace":
+            _git(repo, "remote", "set-url", "origin", expected)
+        else:
+            config.write_bytes(initial.replace(wrong.encode(), expected.encode()))
+        try:
+            return original(root, *args)
+        finally:
+            config.write_bytes(initial)
+            final_time = initial_time if rewrite == "in-place-restored-mtime" else initial_time + 1_000_000_000
+            os.utime(config, ns=(config.stat().st_atime_ns, final_time))
+
+    monkeypatch.setattr(resolver, "_git", transient_match)
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert config.read_bytes() == initial
+    monkeypatch.setattr(resolver, "_git", original)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def _synthetic_identity_input_files(tmp_path, monkeypatch):
+    from plugin_activation import _project_identity
+
+    root = tmp_path / "synthetic-root"
+    root.mkdir()
+    config = tmp_path / "synthetic-config.txt"
+    config.write_bytes(b"original source bytes")
+    executable = tmp_path / "synthetic-git"
+    executable.write_bytes(b"not executed")
+    lstat, read_bytes = Path.lstat, Path.read_bytes
+
+    def synthetic_stat(path, *args, **kwargs):
+        if path in root.parents:
+            return lstat(root.parent)
+        if path in (root / "objects", root / "refs"):
+            return lstat(root)
+        if path in (root / "HEAD", root / "config"):
+            return lstat(config)
+        return lstat(path, *args, **kwargs)
+
+    def synthetic_read(path):
+        if path == root / "HEAD":
+            return b"synthetic head input"
+        if path == root / "config":
+            return read_bytes(config)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "lstat", synthetic_stat)
+    monkeypatch.setattr(Path, "read_bytes", synthetic_read)
+    monkeypatch.setattr(_project_identity, "_owned_directory", lambda *_: True)
+    monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: ())
+    return root, config, executable
+
+
+@pytest.mark.parametrize("changed", ["file", "directory", "ancestor"])
+def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch, changed):
+    from plugin_activation import _project_identity
+
+    root, config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    original = config.read_bytes()
+    target = config if changed == "file" else root if changed == "directory" else root.parent
+    initial_time = target.stat().st_mtime_ns
+    before = _project_identity.identity_inputs(root, "expected", str(executable))
+    if changed == "file":
+        config.write_bytes(b"different intermediate bytes")
+        config.write_bytes(original)
+    os.utime(target, ns=(target.stat().st_atime_ns, initial_time + 1_000_000_000))
+    after = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert config.read_bytes() == original
+    assert before is not None and after is not None
+    assert before != after
+
+
+@pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
+def test_project_identity_memo_unit_rejects_legacy_origin(tmp_path, monkeypatch, legacy_dir):
+    from plugin_activation import _project_identity
+
+    root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    legacy = root / legacy_dir / "origin"
+    legacy.parent.mkdir()
+    legacy.write_bytes(b"synthetic legacy source")
+    assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
+
+
+@pytest.mark.parametrize("mutation", ["worktree-config", "gitdir-swap", "root-swap", "ancestor-swap"])
+def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkeypatch, mutation):
+    container = tmp_path / "container" if mutation == "ancestor-swap" else tmp_path
+    container.mkdir(exist_ok=True)
+    repo = container / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    gitdir = repo / ".git"
+    if mutation == "worktree-config":
+        _git(repo, "config", "extensions.worktreeConfig", "true")
+        directory = gitdir
+    else:
+        matching = tmp_path / "matching"
+        matching.mkdir()
+        matching_repo = matching / "repo" if mutation == "ancestor-swap" else matching
+        matching_repo.mkdir(exist_ok=True)
+        _git(matching_repo, "init", "-q")
+        _git(matching_repo, "remote", "add", "origin", expected)
+        directory = repo if mutation == "gitdir-swap" else tmp_path
+    initial_time = directory.stat().st_mtime_ns
+    root_mtime = repo.stat().st_mtime_ns
+    container_mtime = container.stat().st_mtime_ns
+    original = resolver._git
+
+    def transient_match(root, *args):
+        if args != ("remote", "get-url", "origin"):
+            return original(root, *args)
+        if mutation == "worktree-config":
+            volatile = gitdir / "config.worktree"
+            volatile.write_text('[url "https://github.com/example/"]\n    insteadOf = https://github.com/other/\n', encoding="utf-8")
+        elif mutation == "gitdir-swap":
+            gitdir.rename(repo / ".git-saved")
+            (matching / ".git").rename(gitdir)
+        elif mutation == "root-swap":
+            repo.rename(repo.with_name("repo-saved"))
+            matching.rename(repo)
+        else:
+            container.rename(container.with_name("container-saved"))
+            matching.rename(container)
+        try:
+            return original(root, *args)
+        finally:
+            if mutation == "worktree-config":
+                volatile.unlink()
+            elif mutation == "gitdir-swap":
+                gitdir.rename(matching / ".git")
+                (repo / ".git-saved").rename(gitdir)
+            elif mutation == "root-swap":
+                repo.rename(matching)
+                repo.with_name("repo-saved").rename(repo)
+                os.utime(repo, ns=(repo.stat().st_atime_ns, root_mtime))
+            else:
+                container.rename(matching)
+                container.with_name("container-saved").rename(container)
+                os.utime(container, ns=(container.stat().st_atime_ns, container_mtime))
+            os.utime(directory, ns=(directory.stat().st_atime_ns, initial_time + 1_000_000_000))
+
+    monkeypatch.setattr(resolver, "_git", transient_match)
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    monkeypatch.setattr(resolver, "_git", original)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
+def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legacy_dir):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected)
+    _git(repo, "remote", "remove", "origin")
+    legacy = repo / ".git" / legacy_dir / "origin"
+    legacy.parent.mkdir(exist_ok=True)
+
+    def set_legacy(url):
+        text = f"URL: {url}\nPull: refs/heads/main:refs/heads/main\n" if legacy_dir == "remotes" else f"{url}#main\n"
+        legacy.write_text(text, encoding="utf-8")
+
+    set_legacy(expected)
+    try:
+        actual = _git(repo, "remote", "get-url", "origin")
+    except subprocess.CalledProcessError:
+        pytest.skip("selected Git has no legacy origin reader")
+    if actual != expected:
+        pytest.skip("selected Git does not expose this legacy URL form")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    set_legacy(wrong)
+    assert resolve_active_plugins(home=tmp_path).active == {}
+
+
+def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
+    from plugin_activation import _project_identity
+
+    root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    state = [1]
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(_project_identity, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: (state[0],))
+    before = _project_identity.identity_inputs(root, "expected", str(executable))
+    state[0] += 1
+    after = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert before is not None and after is not None and before != after
+
+    def unavailable(_):
+        raise PermissionError("synthetic native change-stamp refusal")
+
+    monkeypatch.setattr(_project_identity, "_windows_write_version", unavailable)
+    assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
+
+
+@pytest.mark.parametrize("failure", ["none", "open", "query", "close"])
+def test_project_identity_memo_unit_windows_handle_cleanup(monkeypatch, failure):
+    from plugin_activation import _project_identity
+
+    closed = []
+
+    def open_file(_path):
+        if failure == "open":
+            raise OSError("synthetic open refusal")
+        return 42
+
+    def read_version(handle):
+        assert handle == 42
+        if failure == "query":
+            raise OSError("synthetic native change-stamp refusal")
+        return 5, 7, 123
+
+    def close(handle):
+        closed.append(handle)
+        return failure != "close"
+
+    monkeypatch.setattr(_project_identity, "_windows_file_api", lambda: (open_file, read_version, close))
+    if failure == "none":
+        assert _project_identity._windows_write_version(Path("synthetic")) == (5, 7, 123)
+    else:
+        with pytest.raises(OSError):
+            _project_identity._windows_write_version(Path("synthetic"))
+    assert closed == ([] if failure == "open" else [42])

@@ -1,6 +1,7 @@
 """Tests for the reconcile-set reaper."""
 
 from __future__ import annotations
+from collections.abc import Callable
 
 from single_instance_lease import (
     reconcile_set_reap,
@@ -8,12 +9,12 @@ from single_instance_lease import (
 )
 
 
-def _collector():
+def _collector() -> tuple[list[int], Callable[[int], None]]:
     killed: list[int] = []
     return killed, killed.append
 
 
-def test_reaps_strays_but_spares_active_and_self():
+def test_reaps_strays_but_spares_active_and_self() -> None:
     killed, terminate = _collector()
     res = reconcile_set_reap(
         [10, 20, 30, 40],
@@ -28,9 +29,9 @@ def test_reaps_strays_but_spares_active_and_self():
     assert res.ok
 
 
-def test_dead_pids_are_skipped_not_terminated():
+def test_dead_pids_are_skipped_not_terminated() -> None:
     killed, terminate = _collector()
-    alive = {10: True, 30: False}
+    alive: dict[int | None, bool] = {10: True, 30: False}
     res = reconcile_set_reap(
         [10, 30],
         active_pid=None,
@@ -43,7 +44,7 @@ def test_dead_pids_are_skipped_not_terminated():
     assert killed == [10]
 
 
-def test_verify_gate_defeats_pid_reuse():
+def test_verify_gate_defeats_pid_reuse() -> None:
     killed, terminate = _collector()
     # 30 is alive but is NOT our service anymore (pid reused) -> verify says no.
     res = reconcile_set_reap(
@@ -59,8 +60,8 @@ def test_verify_gate_defeats_pid_reuse():
     assert killed == [10]
 
 
-def test_terminate_failure_is_fail_soft():
-    def terminate(pid):
+def test_terminate_failure_is_fail_soft() -> None:
+    def terminate(pid: int) -> None:
         if pid == 10:
             raise PermissionError("nope")
 
@@ -76,7 +77,7 @@ def test_terminate_failure_is_fail_soft():
     assert res.ok is False
 
 
-def test_duplicate_and_invalid_pids_ignored():
+def test_duplicate_and_invalid_pids_ignored() -> None:
     killed, terminate = _collector()
     res = reconcile_set_reap(
         [10, 10, 0, -5, 10],
@@ -89,7 +90,7 @@ def test_duplicate_and_invalid_pids_ignored():
     assert killed == [10]
 
 
-def test_self_pid_defaults_to_current_process():
+def test_self_pid_defaults_to_current_process() -> None:
     import os
 
     _killed, terminate = _collector()
@@ -103,7 +104,7 @@ def test_self_pid_defaults_to_current_process():
     assert res.reaped == [12345]
 
 
-def test_superseded_pids_from_table_harvests_previous():
+def test_superseded_pids_from_table_harvests_previous() -> None:
     table = {
         "active": {"pid": 100, "generation": 8, "port": 1, "bind": "127.0.0.1"},
         "previous": {"pid": 90, "generation": 7, "port": 2, "bind": "127.0.0.1"},
@@ -111,7 +112,7 @@ def test_superseded_pids_from_table_harvests_previous():
     assert superseded_pids_from_table(table, active_pid=100) == {90}
 
 
-def test_superseded_pids_from_table_includes_stale_active():
+def test_superseded_pids_from_table_includes_stale_active() -> None:
     # The recorded active pid differs from who the caller knows is live -> it is
     # a stale record and becomes a candidate.
     table = {
@@ -121,7 +122,7 @@ def test_superseded_pids_from_table_includes_stale_active():
     assert superseded_pids_from_table(table, active_pid=100) == {55, 44}
 
 
-def test_superseded_pids_from_table_no_active_pid_excludes_active():
+def test_superseded_pids_from_table_no_active_pid_excludes_active() -> None:
     table = {
         "active": {"pid": 55, "generation": 6, "port": 1, "bind": "127.0.0.1"},
         "previous": {"pid": 44, "generation": 5, "port": 2, "bind": "127.0.0.1"},
@@ -130,6 +131,6 @@ def test_superseded_pids_from_table_no_active_pid_excludes_active():
     assert superseded_pids_from_table(table) == {44}
 
 
-def test_superseded_pids_from_table_handles_junk():
+def test_superseded_pids_from_table_handles_junk() -> None:
     assert superseded_pids_from_table(None) == set()
     assert superseded_pids_from_table({"active": "x", "previous": {"pid": "y"}}) == set()

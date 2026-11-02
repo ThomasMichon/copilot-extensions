@@ -59,7 +59,7 @@ def wire_owner(owner: Any) -> Any:
 
 
 @pytest.mark.parametrize("operation", ["begin", "publish"])
-def test_lost_reply_reconnect_recovers_only_original_client_and_closes_it_after_ack(
+def test_lost_reply_reconnect_recovers_same_queue_and_closes_original_after_ack(
     wire_owner: Any, operation: str,
 ) -> None:
     daemon, queue, original, replacement, paths, gate = wire_owner
@@ -86,14 +86,16 @@ def test_lost_reply_reconnect_recovers_only_original_client_and_closes_it_after_
     result = daemon.send_pool_metadata_request()
     assert result == expected and bodies == [request.to_dict()]
     assert paths == [
-        ("original.test", "GET", "/health"), ("original.test", "GET", "/pool-catalog"),
+        ("replacement.test", "GET", "/health"), ("replacement.test", "GET", "/pool-catalog"),
     ]
     assert original._http.is_closed and not replacement._http.is_closed
     assert daemon._pool_publisher_custody.settled == (request, expected)
     paths.clear()
-    with pytest.raises(PoolPublicationError, match="target changed after settlement"):
-        daemon.prepare_pool_metadata_request()
-    assert not paths
+    gate.clear()
+    newer = daemon.prepare_pool_metadata_request()
+    assert newer.expected_queue_identity == request.expected_queue_identity
+    daemon.send_pool_metadata_request()
+    assert paths[-1] == ("replacement.test", "POST", "/pool-catalog/scopes/publish")
 
 
 def test_inflight_original_post_survives_reconnect_and_stays_in_shutdown_inventory(

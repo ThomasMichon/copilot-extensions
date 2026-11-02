@@ -129,6 +129,7 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
         "copilot_venue": ["add_copilot_subparser", "add_plugin_selection_arguments"],
         "forward_keeper": ["add_subparser"],
         "workspace": ["add_workspace_subparsers"],
+        "plugin_config": ["add_subparsers"],
     }.items():
         module(f"{provider}.{child}", **dict.fromkeys(names, lambda parser: None))
     cli = load(provider, "__main__", "agent-containers")

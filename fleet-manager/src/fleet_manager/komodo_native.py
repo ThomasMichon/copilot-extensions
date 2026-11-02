@@ -144,6 +144,8 @@ class KomodoNative:
     def verify_storage(self, material: KomodoMaterial, *, deadline: float) -> None:
         if type(material) is not KomodoIncumbentMaterialization:
             return
+        if material.storage is not None and material.storage.daemon_id != self.tooling.daemon_id:
+            raise PlanError("Komodo observed storage belongs to another daemon")
         material.evidence()
         volumes = material.volumes()
         if not volumes:

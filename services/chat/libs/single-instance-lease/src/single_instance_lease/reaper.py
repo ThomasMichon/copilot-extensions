@@ -24,7 +24,7 @@ never fail a cutover.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from .supersession import pid_alive
@@ -100,7 +100,7 @@ def reconcile_set_reap(
 
 
 def superseded_pids_from_table(
-    table: dict | None,
+    table: Mapping[str, object] | None,
     *,
     active_pid: int | None = None,
 ) -> set[int]:

@@ -39,6 +39,7 @@ class PoolMetadataBinding:
     post_admitted: bool = False
     closed: bool = False
     children: set[Future] = field(default_factory=set)
+    retained_clients: list[Any] = field(default_factory=list)
 
 
 class SupervisorPoolSender:
@@ -70,16 +71,19 @@ class SupervisorPoolSender:
         self._pool_metadata_binding = PoolMetadataBinding(
             request, client, getattr(client, "base_url", None),
         )
-        if self._pool_metadata_owner is None:
-            self._pool_metadata_owner = self._pool_metadata_binding
+        self._pool_metadata_owner = self._pool_metadata_binding
 
-    def _require_pool_metadata_target(self, client: Any) -> None:
+    def _require_pool_metadata_target(self, client: Any, catalog: PoolCatalogRead | None) -> None:
         owner = self._pool_metadata_owner
+        identity = None if owner is None else owner.request.expected_queue_identity
+        if identity is not None and (catalog is None or catalog.queue_identity != identity):
+            raise PoolPublicationError("pool publisher queue identity changed after settlement")
         if owner is not None and (
             getattr(client, "base_url", None) != owner.target
             or owner.target is None and client is not owner.client
         ):
-            raise PoolPublicationError("pool publisher coordinator target changed after settlement")
+            if identity is None or catalog is None or catalog.queue_identity != identity:
+                raise PoolPublicationError("pool publisher coordinator target changed after settlement")
 
     def _original_pool_metadata_binding(self, request: PoolMetadataRequest) -> PoolMetadataBinding:
         binding = self._pool_metadata_binding
@@ -96,6 +100,55 @@ class SupervisorPoolSender:
             binding.children = {child for child in binding.children if not child.done()}
             binding.children.add(future)
 
+    def _read_original_pool_metadata(
+        self, binding: PoolMetadataBinding, deadline: float,
+    ) -> tuple[Any, dict]:
+        """Move a quiescent transport only after reading the same durable queue."""
+        self._original_pool_metadata_binding(binding.request)
+        client = binding.client
+        target = binding.target
+        identity = binding.request.expected_queue_identity
+        move = (
+            self.client is not client and identity is not None
+            and getattr(self.client, "base_url", None) is not None
+            and not any(not child.done() for child in binding.children)
+        )
+        if move:
+            with self._pool_request_state(deadline):
+                client = self.client
+                move = client is not binding.client
+                self._require_pool_metadata_children_retired(binding)
+                for retained in tuple(binding.retained_clients):
+                    if retained is client or retained is binding.client:
+                        continue
+                    close = getattr(retained, "close", None)
+                    if callable(close):
+                        close()
+                    binding.retained_clients.remove(retained)
+                if move and not any(retained is client for retained in binding.retained_clients):
+                    binding.retained_clients.append(client)
+            target = getattr(client, "base_url", None)
+        observed = client.pool_catalog_metadata()
+        catalog = PoolCatalogRead.from_dict(observed)
+        if identity is not None and catalog.queue_identity != identity:
+            raise PoolPublicationError("original pool metadata queue identity changed")
+        self._original_pool_metadata_binding(binding.request)
+        if getattr(client, "base_url", None) != target or move and self.client is not client:
+            raise PoolPublicationError("pool metadata coordinator client changed during continuation")
+        if move:
+            with self._pool_request_state(deadline):
+                self._original_pool_metadata_binding(binding.request)
+                if self.client is not client or getattr(client, "base_url", None) != target:
+                    raise PoolPublicationError("pool metadata coordinator client changed during continuation")
+                self._require_pool_metadata_children_retired(binding)
+                binding.retained_clients = [
+                    retained for retained in binding.retained_clients if retained is not client
+                ]
+                binding.retained_clients.append(binding.client)
+                binding.client = client
+                binding.target = target
+        return client, observed
+
     @staticmethod
     def _require_pool_metadata_children_retired(binding: PoolMetadataBinding) -> None:
         if any(not future.done() for future in binding.children):
@@ -103,26 +156,37 @@ class SupervisorPoolSender:
 
     def _close_retained_pool_metadata_client(self, *, defer: bool = False) -> None:
         binding = self._pool_metadata_binding
-        if binding is None or binding.closed:
+        if binding is None or binding.closed and not binding.retained_clients:
             return
         if defer and any(not future.done() for future in binding.children):
             return
         self._require_pool_metadata_children_retired(binding)
-        if binding.client is self.client:
+        if binding.client is self.client and not binding.retained_clients:
             return
         flight = self._pool_metadata_flight
         if flight is not None and not flight.future.done():
             raise PoolPublicationError("original pool metadata client still has an in-flight operation")
-        close = getattr(binding.client, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                if not defer:
-                    raise
-                log.exception("accepted pool metadata transport retirement deferred")
-                return
-        binding.closed = True
+        clients = [*binding.retained_clients, *([] if binding.closed else [binding.client])]
+        for client in clients:
+            if client is self.client:
+                binding.retained_clients = [
+                    retained for retained in binding.retained_clients if retained is not client
+                ]
+                continue
+            close = getattr(client, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    if not defer:
+                        raise
+                    log.exception("accepted pool metadata transport retirement deferred")
+                    return
+            binding.retained_clients = [
+                retained for retained in binding.retained_clients if retained is not client
+            ]
+            if client is binding.client:
+                binding.closed = True
 
     def _replace_pool_metadata_client(self, new_client: Any) -> None:
         deadline = time.monotonic() + self._reconcile_call_budget
@@ -132,10 +196,13 @@ class SupervisorPoolSender:
             binding = self._pool_metadata_binding
             custody = self._pool_publisher_custody
             retained = (
-                binding is not None and binding.client is old and not binding.closed
+                binding is not None and not binding.closed
                 and (
-                    custody is not None and custody.pending is binding.request
-                    or any(not future.done() for future in binding.children)
+                    any(client is old for client in binding.retained_clients)
+                    or binding.client is old and (
+                        custody is not None and custody.pending is binding.request
+                        or any(not future.done() for future in binding.children)
+                    )
                 )
             )
         if old is not new_client and not retained:
@@ -245,11 +312,9 @@ class SupervisorPoolSender:
             binding = self._original_pool_metadata_binding(request)
             binding_token = self._pool_send_binding.set(binding)
             prior_admission = binding.post_admitted
-            client = binding.client
             # An accepted original result can be accounted even after release.
-            observed = client.pool_catalog_metadata()
+            client, observed = self._read_original_pool_metadata(binding, deadline)
             self._original_pool_metadata_binding(request)
-            PoolCatalogRead.from_dict(observed)
             scope = next(
                 (item for item in observed["scopes"] if
                  (item["machine"], item["env"]) == (request.inputs.machine, request.inputs.env)),

@@ -36,6 +36,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import BinaryIO, TextIO
 
 _DEFAULT_LOGGER = logging.getLogger("single_instance_lease")
 
@@ -65,7 +66,7 @@ class AlreadyRunningError(RuntimeError):
         super().__init__(f"another instance ({who}) already holds {lock_path}")
 
 
-def _acquire_os_lock(fh) -> None:  # fh: an open file object
+def _acquire_os_lock(fh: BinaryIO | TextIO) -> None:
     """Take an exclusive, non-blocking OS lock. Raises OSError on contention."""
     if sys.platform == "win32":
         import msvcrt
@@ -79,7 +80,7 @@ def _acquire_os_lock(fh) -> None:  # fh: an open file object
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
-def _release_os_lock(fh) -> None:  # fh: an open file object
+def _release_os_lock(fh: BinaryIO | TextIO) -> None:
     """Best-effort release of the OS lock (kernel also frees it on exit)."""
     try:
         if sys.platform == "win32":
@@ -148,7 +149,7 @@ class SingleInstance:
             stem = _sanitize(service)
             lock_name = f"{stem}.lock" if port is None else f"{stem}.{port}.lock"
         self.lock_path = Path(lock_dir) / lock_name
-        self._fh = None
+        self._fh: TextIO | None = None
 
     def acquire(self) -> None:
         """Acquire the lease or raise :class:`AlreadyRunningError`."""
