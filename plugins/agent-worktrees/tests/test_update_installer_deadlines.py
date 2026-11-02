@@ -35,17 +35,17 @@ def test_dispatch_effective_default_and_overrides(environment, expected):
         ("install.ps1", r"AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '(\d+)'"),
         ("install.sh", r"AGENT_DISPATCH_INSTALL_DEADLINE_SEC=(\d+)"),
     ]:
-        match = re.search(pattern, (payload / "scripts" / script).read_text())
+        match = re.search(pattern, (payload / "scripts" / script).read_text(encoding="utf-8"))
         assert match and int(match[1]) == default
     assert runtime._installer_timeout("agent-dispatch", environment, payload) == expected
 
 
 @pytest.mark.parametrize("environment,expected", [
-    ({}, 930),
-    ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "700"}, 730),
+    ({}, 2130),
+    ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "700"}, 1930),
     ({"AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "600",
-      "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "700"}, 630),
-    ({"AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "0"}, 510),
+      "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "700"}, 1830),
+    ({"AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "0"}, 1710),
 ])
 def test_worktrees_native_and_outer_watchdogs_share_the_selected_budget(environment, expected):
     payload = Path(__file__).resolve().parents[2] / "agent-worktrees"
@@ -54,7 +54,7 @@ def test_worktrees_native_and_outer_watchdogs_share_the_selected_budget(environm
         ("install.ps1", r"AGENT_WORKTREES_INSTALL_DEADLINE_SEC = '(\d+)'"),
         ("install.sh", r"AGENT_WORKTREES_INSTALL_DEADLINE_SEC=(\d+)"),
     ]:
-        match = re.search(pattern, (payload / "scripts" / script).read_text())
+        match = re.search(pattern, (payload / "scripts" / script).read_text(encoding="utf-8"))
         assert match and int(match[1]) == declared
     assert runtime._installer_timeout("agent-worktrees", environment, payload) == expected
 
@@ -68,26 +68,28 @@ def test_worktrees_native_and_outer_watchdogs_share_the_selected_budget(environm
 ])
 def test_actual_native_watchdog_resolves_default_and_overrides(native_powershell, environment, expected):
     script = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
-    source = script.read_text()
+    source = script.read_text(encoding="utf-8")
     default = re.search(r"(?m)^if \(-not \$env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC.*$", source)
-    watchdog = re.search(
-        r"(?ms)^\s+\$__wdDeadline = 480\n.*?(?=^\s+\$__selfStageArgs =)", source,
+    assert default and "$__wdBudget = Get-InstallWatchdogBudget" in source
+    helper = str(script.with_name("installer-watchdog.ps1")).replace("'", "''")
+    payload = str(script.parent.parent).replace("'", "''")
+    command = (
+        f". '{helper}'\n{default[0]}\n"
+        f"$budget = Get-InstallWatchdogBudget -Payload '{payload}' -Name 'agent-worktrees'\n"
+        "$budget | ConvertTo-Json -Compress"
     )
-    assert default and watchdog
-    command = default[0] + "\n" + watchdog[0] + "\n[Console]::Out.WriteLine($__wdDeadline)"
     child_environment = dict(os.environ)
     for key in ("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"):
         child_environment.pop(key, None)
     child_environment.update(environment)
-    # The copied watchdog resolves the plugin name normally acquired during staging.
-    command = "$__selfStageName='agent-worktrees'\n" + command
     result = subprocess.run(
         [native_powershell, "-NoProfile", "-NonInteractive", "-Command", command],
         env=child_environment, capture_output=True, text=True, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
-    assert int(result.stdout.strip()) == expected
+    budget = json.loads(result.stdout)
+    assert budget == {"BuildSec": expected, "CutoverSec": 1200}
 
 
 @pytest.mark.parametrize("name,minimum", [

@@ -114,9 +114,9 @@ def test_machine_gate_contract_rejects_actual_source_regressions(
 
 @pytest.mark.parametrize("function", ["plan_registered", "plan_module"])
 @pytest.mark.parametrize("before,after", [
-    ("if runtime._machine_gate_blocks(name, scope, gate_context):", "if False:"),
-    ("if runtime._machine_gate_blocks(name, scope, gate_context):",
-     "if not force and runtime._machine_gate_blocks(name, scope, gate_context):"),
+    ("if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):", "if False:"),
+    ("if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):",
+     "if not multi_index and not force and runtime._machine_gate_blocks(name, scope, gate_context):"),
     ("status=runtime.MACHINE_GATED_SKIP, eligible=False", 'status="SKIPPED (current)"'),
 ])
 def test_machine_gate_contract_rejects_each_planner_bypass(
