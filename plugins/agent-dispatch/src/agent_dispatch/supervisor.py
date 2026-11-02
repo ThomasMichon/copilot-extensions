@@ -1460,9 +1460,16 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 continue
             if not self._matches_pool(task):
                 continue
-            if res.get("native_release_pending"):
-                from .spawn_releasing_recovery import retire_historical_native
-                released += retire_historical_native(self, res, task)
+            from .spawn_releasing_recovery import qualified_handleless_identity, retire_historical_native
+            if not res.get("session_handle"):
+                current = qualified_handleless_identity(self, res)
+                if current is None or not current.get("release_requested"):
+                    continue
+                res = current
+            if res.get("native_release_pending") or res.get("reservation_native_session_id"):
+                released += retire_historical_native(
+                    self, res, task, native_session_id=res.get("reservation_native_session_id"),
+                )
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
             if not body_already_released and (

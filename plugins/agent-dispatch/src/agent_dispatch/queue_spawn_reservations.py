@@ -493,6 +493,10 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     break
             agent_info = None
             if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge" and driver != "ordinary-bridge":
+                if task.target_worktree is not None or (
+                    carried_worktree is not None and f"worktree:{carried_worktree}" in task.requires
+                ):
+                    raise TaskError("driver transition cannot discard explicit or required target worktree")
                 carried_worktree = carried_session = None
                 carried_path = carried_host = carried_driver = None
                 worktree_ownership = None
@@ -576,6 +580,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         exclusive_released: bool | None = None,
         preserve_releasing: bool = False,
         guard: Callable[[sqlite3.Row], None] | None = None,
+        require_no_native: bool = False,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -621,6 +626,13 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 except TaskError:
                     conn.execute("COMMIT")
                     raise
+            if require_no_native and row["state"] == SpawnState.RELEASING:
+                from .ordinary_native_bindings import reservation_native_identity
+                if reservation_native_identity(conn, row) is not None:
+                    raise TaskError(
+                        f"reservation {key} is 'releasing' with a recorded native identity; "
+                        "independently verify exact absence before --confirmed-absent"
+                    )
             if preserve_releasing and row["state"] == SpawnState.RELEASING:
                 to_state = SpawnState.RELEASING
                 exclusive_released = None
@@ -782,10 +794,10 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         release.
 
         ``force`` is an explicit, audited operator override for a
-        ``releasing`` reservation with no recorded ``session_handle``, which
-        no automatic exact-absence proof (:meth:`retire_spawn`) could ever
-        confirm and would otherwise sit ``releasing`` forever
-        (copilot-extensions#3179).
+        ``releasing`` reservation with neither a recorded ``session_handle``
+        nor driver-qualified native identity (including acquisition receipts).
+        A genuinely empty attempt has no identity for an exact-absence probe
+        and would otherwise sit ``releasing`` forever (copilot-extensions#3179).
 
         ``confirmed_absent`` additionally permits ``force`` to override a
         **handle-carrying** ``releasing`` row once the caller has
@@ -804,8 +816,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
 
         The eligibility check runs inside the same transaction as the state
         transition (via ``_update_reservation``'s ``guard``), not a separate
-        preceding query -- a concurrent ``record_spawn`` attaching a handle
-        in between would otherwise let ``--force`` race past a live handle.
+        preceding query -- concurrent handle or receipt publication must not
+        let ``--force`` race past a live native.
         """
         allowed_from = (SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})) | frozenset(
             {SpawnState.FAILED}
@@ -838,6 +850,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             claim_token=claim_token,
             release_requested=release_requested,
             guard=guard,
+            require_no_native=force and not confirmed_absent,
             now=now,
         )
 

@@ -23,6 +23,16 @@ class ReservationAccountability:
         self.transport = ReservationTransportSnapshot(conn)
         self.tasks: dict[str, Task] = {}
         self.retired: dict[tuple[Any, ...], frozenset[str]] = {}
+        # Only erase a task selector when its entire history is already included
+        # by the creation selector, including the exclusive-handle subquery.
+        self.task_creations = {
+            row["task_id"]: row["creation_key"]
+            for row in conn.execute(
+                "SELECT task_id, MIN(creation_key) AS creation_key FROM spawn_reservations "
+                "GROUP BY task_id HAVING COUNT(*)=COUNT(creation_key) "
+                "AND COUNT(DISTINCT creation_key)=1"
+            )
+        }
 
     def accountable(self, row: sqlite3.Row) -> bool:
         if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
@@ -40,7 +50,9 @@ class ReservationAccountability:
         if native is None:
             return bool(row["session_handle"])
         key = (
-            row["worktree"], row["allocation_reservation_key"], row["task_id"],
+            row["worktree"], row["allocation_reservation_key"],
+            None if row["creation_key"] is not None
+            and self.task_creations.get(row["task_id"]) == row["creation_key"] else row["task_id"],
             row["creation_key"], row["exclusive_key"],
             row["key"] if not row["worktree"] else None,
         )

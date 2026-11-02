@@ -23,16 +23,24 @@ from tests.test_supervisor import QueueBackedClient
 q = placement_controls.q
 
 
-def failed_native(q):
+def failed_native(q, **task_kwargs):
     publish(q, pool())
-    original, _ = place(q, task(q, labels=["review"]))
+    original, _ = place(q, task(q, labels=["review"], **task_kwargs))
     record_native(q, original)
     q.record_spawn(original.key, session_handle="native", startup_complete=True, startup_revision=1)
     q.fail_spawn(original.key)
     return q.get_reservation(original.key)
 
 
-def history(q, original, count, *, retired=True):
+def history(q, original, count, *, retired=True, distinct_tasks=False):
+    task_ids = [original.task_id] * count
+    if distinct_tasks:
+        q.abandon(original.task_id, permitted=True, reason="synthetic historical request")
+        task_ids = []
+        for _ in range(count):
+            successor = task(q, dedup_key=q.get(original.task_id).dedup_key)
+            task_ids.append(successor.id)
+            q.abandon(successor.id, permitted=True, reason="synthetic successor request")
     with q._connect() as conn:
         template = dict(conn.execute(
             "SELECT * FROM spawn_reservations WHERE key=?", (original.key,),
@@ -47,7 +55,7 @@ def history(q, original, count, *, retired=True):
         conn.executemany(
             f"INSERT INTO spawn_reservations ({','.join(columns)}) "
             f"VALUES ({','.join(':' + column for column in columns)})",
-            [{**template, "key": f"history:{index}", "attempt": index + 2,
+            [{**template, "key": f"history:{index}", "attempt": index + 2, "task_id": task_ids[index],
               "session_handle": f"retired:{index}" if retired else "native"}
              for index in range(count)],
         )
@@ -178,11 +186,12 @@ def test_accountability_filter_preserves_unassigned_legacy_behavior(q):
 
 @pytest.mark.parametrize("count", [100, 1000])
 @pytest.mark.parametrize("retired", [False, True])
-def test_history_work_is_batched_not_one_lineage_scan_per_row(q, monkeypatch, count, retired):
+@pytest.mark.parametrize("distinct_tasks", [False, True])
+def test_history_work_is_batched_not_one_lineage_scan_per_row(q, monkeypatch, count, retired, distinct_tasks):
     from agent_dispatch import queue_pool_accountability as accounting
     from agent_dispatch import ordinary_native_bindings as natives
-    original = failed_native(q)
-    history(q, original, count, retired=retired)
+    original = failed_native(q, dedup_key="logical-history")
+    history(q, original, count, retired=retired, distinct_tasks=distinct_tasks)
     q.request_spawn_release(original.key)
     q.retire_spawn(original.key, exact_absence=True)
     queries, classifications, identities = [], [], []
@@ -211,7 +220,7 @@ def test_history_work_is_batched_not_one_lineage_scan_per_row(q, monkeypatch, co
 
     monkeypatch.setattr(q, "_connect", counted_connect)
     assert q.list_reservations(pool_accountable=True, limit=1) == []
-    assert len(queries) <= 10
+    assert len(queries) <= 11
     assert len(classifications) <= 1
     assert sum(classifications) <= count + 1
     assert len(identities) <= 3 * (count + 1)
@@ -222,11 +231,38 @@ def test_history_work_is_batched_not_one_lineage_scan_per_row(q, monkeypatch, co
     queries.clear()
     with q._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        assert select_pool(conn, candidate, (pool(),)) == pool()
-    assert len(queries) <= 12
+        definition = pool(capacity=count + 2)
+        assert select_pool(conn, candidate, (definition,)) == definition
+    assert len(queries) <= 13
     assert len(classifications) <= 1
     assert sum(classifications) <= count + 1
     assert len(identities) <= 3 * (count + 1)
+
+
+@pytest.mark.parametrize("extra_creation", [None, "other-creation"])
+def test_distinct_task_cache_preserves_task_specific_extra_history(q, extra_creation):
+    original = failed_native(q, dedup_key="logical-history")
+    history(q, original, 2, retired=False, distinct_tasks=True)
+    with q._connect() as conn:
+        first = dict(conn.execute(
+            "SELECT * FROM spawn_reservations WHERE key='history:0'",
+        ).fetchone())
+        extra = {
+            **first, "key": "extra-history", "attempt": 100,
+            "creation_key": extra_creation, "conversation_retired": 1,
+            "allocation_reservation_key": "extra-history",
+        }
+        conn.execute(
+            f"INSERT INTO spawn_reservations ({','.join(extra)}) "
+            f"VALUES ({','.join(':' + column for column in extra)})", extra,
+        )
+    visible = {r.key for r in q.list_reservations(pool_accountable=True, limit=-1)}
+    assert "history:0" not in visible
+    assert "history:1" in visible and original.key in visible
+    with q._connect() as conn:
+        accounting = ReservationAccountability(conn)
+        rows = conn.execute("SELECT * FROM spawn_reservations WHERE key LIKE 'history:%'").fetchall()
+        assert [accounting.accountable(row) for row in rows] == [False, True]
 
 
 def test_transport_snapshot_matches_existing_native_and_workspace_owner_rules(q):

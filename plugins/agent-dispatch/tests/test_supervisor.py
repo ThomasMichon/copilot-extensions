@@ -128,10 +128,11 @@ class QueueBackedClient:
             raise DispatchError(409, str(exc)) from exc
 
     def get_reservation(self, key):
+        from agent_dispatch.ordinary_agent_storage import reservation_native_facts
         reservation = self._q.get_reservation(key)
         if reservation is None:
             raise DispatchError(404, f"no such reservation: {key}")
-        return asdict(reservation)
+        return {**asdict(reservation), **reservation_native_facts(self._q, key)}
 
     def attachments(self, task_id):
         return [asdict(item) for item in self._q.attachment_history(task_id)]

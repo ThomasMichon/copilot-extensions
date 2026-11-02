@@ -1934,3 +1934,39 @@ spawn refusal. Focused native/receipt typing, four admitted strict projects on
 Linux/Windows, changed Python lint and install/documentation contracts pass.
 Current-head review, actual merge, caller/startup-policy integration and all
 canonical parent/native gates remain open. No runtime was activated.
+
+### 2026-11-01 - Receipt-backed recovery and successor-history correction prepared
+
+Handleless release recovery now consults the existing reservation GET's exact
+driver-qualified native identity, including a durable acquisition receipt.
+Both ordinary and stranded sweeps, including historical pending releases,
+retain LIVE, UNKNOWN, unfinished-startup and unavailable-provider cases.
+A recorded CLI native uses its retained execution host and exact-GONE
+retirement. The force-fail write transaction independently checks native
+identity, so a stale empty read cannot discard a subsequently bound receipt.
+Unsettled transport remains accountable after native retirement.
+
+The additive `reservation-native-identity/v1` response capability expands the
+existing GET without a new endpoint or prerequisite command. Older callers
+retain their fields; new recovery callers hold visibly against an old or
+rolled-back provider rather than assuming an empty launch.
+
+Ordinary-Bridge-to-CLI resolution refuses before claim/slot publication if
+discarding the retained workspace would discard an explicit target or worktree
+requirement. An optional unassigned driver transition keeps its existing behavior.
+Snapshot-local history reuse spans distinct same-dedup successor tasks only
+when all reservations for each task prove its task predicate redundant with the
+same non-null creation predicate. Mixed/null creation history retains the
+task-specific selector, including exclusive-handle matching.
+
+Contained coupled validation passed **1536 controls**, one existing skip, across
+twenty-six selectors. New controls cover actual receipt bind/release before
+handle publication, ordinary/stranded/historical LIVE/UNKNOWN/GONE recovery,
+startup and transport retention, transactional force refusal, real HTTP identity
+and force behavior, explicit/required driver transition refusal, distinct-task
+history growth at one hundred/one thousand entries in query and high-capacity
+placement, and task-specific extra-history isolation. Focused native/storage/
+accountability/recovery typing and the four admitted Linux/Windows projects
+are separate from unqualified legacy mixin typing debt.
+Current-head review, actual merge, caller/startup-policy integration and every
+canonical parent/native gate remain open. No runtime was activated.

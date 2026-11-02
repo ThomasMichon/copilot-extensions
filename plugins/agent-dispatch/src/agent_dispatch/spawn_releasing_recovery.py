@@ -1,12 +1,4 @@
-"""Recover a ``RELEASING`` spawn reservation that never carried a
-session_handle and has sat past a bounded age with no automatic recovery.
-
-Extracted as its own coherent responsibility, mirroring
-:mod:`agent_dispatch.spawn_cold_recovery`'s ``COLD`` sweep for the same
-module-size-discipline reason (``AGENTS.md``). ``supervisor`` below is a
-:class:`agent_dispatch.supervisor.Supervisor` instance; this module has no
-dependency on that class beyond the attributes it reads.
-"""
+"""Recover aged handleless releases without losing receipt-backed native custody."""
 
 from __future__ import annotations
 
@@ -15,6 +7,7 @@ import time
 from typing import Any
 
 from .client import DispatchError
+from .ordinary_native_bindings import RESERVATION_NATIVE_IDENTITY_PROTOCOL
 from .queue import SpawnState
 
 log = logging.getLogger("agent-dispatch.supervisor")
@@ -27,7 +20,32 @@ log = logging.getLogger("agent-dispatch.supervisor")
 STRANDED_RELEASING_TIMEOUT_SECONDS = 600.0
 
 
-def retire_historical_native(supervisor: Any, reservation: dict, task: dict) -> int:
+def qualified_handleless_identity(supervisor: Any, reservation: dict) -> dict | None:
+    """Refresh exact identity; legacy missing fields are not proof of absence."""
+    key = reservation["key"]
+    try:
+        current = supervisor.client.get_reservation(key)
+    except DispatchError as exc:
+        log.warning("release %s identity remains unavailable: %s", key, exc)
+        return None
+    if (
+        current.get("reservation_native_identity_protocol") != RESERVATION_NATIVE_IDENTITY_PROTOCOL
+        or "reservation_native_session_id" not in current
+        or "reservation_native_identity_error" not in current
+        or current["reservation_native_identity_error"]
+    ):
+        log.warning("release %s lacks qualified native identity evidence", key)
+        return None
+    native = current["reservation_native_session_id"]
+    if native is not None and (not isinstance(native, str) or not native):
+        log.warning("release %s has invalid native identity evidence", key)
+        return None
+    return current
+
+
+def retire_historical_native(
+    supervisor: Any, reservation: dict, task: dict, *, native_session_id: str | None = None,
+) -> int:
     """Observe the original native, never conclude its successor's workspace."""
     if (
         reservation.get("startup_complete") is not True
@@ -39,6 +57,8 @@ def retire_historical_native(supervisor: Any, reservation: dict, task: dict) -> 
     from . import tracking
     from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
     handle = reservation.get("session_handle")
+    if not handle and reservation.get("driver") == "cli":
+        handle = native_session_id
     if not isinstance(handle, str) or not handle:
         return 0
     fleet = _parse_fleet_body_handle(handle)
@@ -66,35 +86,13 @@ def retire_historical_native(supervisor: Any, reservation: dict, task: dict) -> 
 def recover_stranded_releasing_reservations(
     supervisor: Any, *, now: float | None = None
 ) -> int:
-    """Force-fail a ``RELEASING`` reservation that never recorded a
-    session_handle and has sat past :data:`STRANDED_RELEASING_TIMEOUT_SECONDS`.
+    """Reconcile identity before applying the bounded empty-launch recovery.
 
-    ``reserve_spawn`` treats any ``RELEASING`` reservation as still active --
-    by design, since a release/cleanup call in flight might yet succeed --
-    and keys that check on ``exclusive_key``, not ``task_id``, so a stuck one
-    blocks every future task sharing that key, not just its own retry
-    (copilot-extensions#3179). The CLI's own ``reservations fail --force``
-    already carries the correct judgment for exactly this shape, spelled out
-    in its own help text: a RELEASING reservation with **no recorded
-    session_handle** has nothing an automatic exact-absence proof could ever
-    confirm either way (there's no handle to check liveness against), so
-    without this sweep it would otherwise sit ``releasing`` forever, the
-    *same* way a handle-carrying one gets genuinely liveness-checked by
-    :meth:`Supervisor.reconcile_reserving` and friends -- it just never had
-    that path cover it, because none of the existing gone/idle verdict
-    checks have anything to probe. Confirmed live: one such reservation
-    (from a spawn that crashed before ever recording a handle) sat
-    ``releasing`` for 8+ hours, permanently blocking a PR review's
-    ``exclusive_key`` across three separate fresh task recreations despite
-    the lane having free concurrency the entire time -- `reserve_spawn`
-    doctor/diagnosis tooling reported it
-    "healthy" the whole time, since it was never designed to look here.
-
-    Deliberately narrower than the manual ``--force`` escape hatch: this
-    sweep only ever acts when ``session_handle`` is genuinely absent (never
-    ``--confirmed-absent``'s stronger claim about a *recorded* handle) and
-    only past the bounded age above, so a release call that's merely still
-    in flight is never cut off early.
+    A missing handle can still have a durable acquisition receipt. Such a native
+    uses the existing startup fence and exact-absence retirement path; LIVE,
+    UNKNOWN and unavailable identity evidence retain custody. Only a genuinely
+    empty attempt may use age-based force-fail, whose write transaction checks
+    identity again against concurrent publication (copilot-extensions#3179).
     """
     now = time.time() if now is None else now
     recovered = 0
@@ -116,6 +114,17 @@ def recover_stranded_releasing_reservations(
         except DispatchError:
             continue  # task vanished; leave the reservation for a human
         if not supervisor._matches_pool(task):
+            continue
+        current = qualified_handleless_identity(supervisor, res)
+        if current is None:
+            continue
+        if current.get("state") != SpawnState.RELEASING or current.get("session_handle"):
+            continue
+        native = current["reservation_native_session_id"]
+        if native is not None:
+            recovered += retire_historical_native(
+                supervisor, current, task, native_session_id=native,
+            )
             continue
         try:
             supervisor.client.fail_spawn(

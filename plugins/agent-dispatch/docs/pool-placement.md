@@ -113,8 +113,12 @@ one database snapshot, retaining per-reservation/native transport attribution.
 An identity's own qualified retirement needs no repeated lineage scan.
 Unresolved identities reuse classification only for the exact workspace,
 task, creation, allocation-origin and exclusive selectors within that unchanged
-snapshot; placement stops counting once an instance is full. No cache survives
-a mutation or another query/transaction.
+snapshot. Distinct successor tasks may share retirement classification only
+when a snapshot-wide check proves every reservation for each task has the same
+non-null creation key: the task predicate then adds no history beyond the
+creation predicate, including exclusive-handle matching. Mixed or null creation
+history retains the task-specific selector. Placement stops counting once an
+instance is full. No cache survives a mutation or another query/transaction.
 
 `GET /spawn-reservations?native_release_pending=true` (or `false`) advertises
 the executing filter contract in
@@ -167,12 +171,29 @@ before inserting a first receipt and clears a proven inherited marker in that
 same transaction. The newly bound native cannot inherit its predecessor's
 retirement. Exact Bridge authority, task generation, workspace and immutable
 receipt fences still apply; binding or launch alone never performs `STARTED`.
+Handleless release sweeps first read the executing provider's
+`reservation_native_identity_protocol: reservation-native-identity/v1` and exact driver-qualified
+`reservation_native_session_id` and `reservation_native_identity_error` from
+the reservation GET. A receipt-backed CLI native uses its recorded host and
+the existing completed/fenced-startup plus exact-GONE retirement path; LIVE,
+UNKNOWN, unsupported old-provider responses and identity errors retain custody.
+Only a positively empty identity may use bounded force-fail, which rechecks
+receipts in the state-transition write transaction. Native retirement alone
+does not settle unresolved transport custody.
+This is an additive expansion of the existing reservation GET; older callers
+ignore the extra fields. Roll out the provider first, then the new recovery
+caller. Rolling back that provider leaves new callers holding handleless
+recovery visibly rather than interpreting missing support as an empty launch;
+no legacy field or operation is removed.
 Release identity checks use the original reservation's immutable pool binding,
 not its successor's current routing. A release cannot overwrite a retained native
 handle, including on failed or settled attempts. Unrelated pending cleanup may
 discard an optional affinity, but cannot discard an explicit target or a
 `worktree:` requirement and commit a claim for a different workspace: placement
 refuses before reserving a slot.
+The same refusal applies when an ordinary-Bridge-to-CLI driver transition
+would discard an explicit target or required retained workspace; optional,
+unassigned transitions retain their previous behavior.
 A spawn record, reachability or delivery receipt is not an
 acceptance. Failed or stale starts leave the claim and slot intact.
 

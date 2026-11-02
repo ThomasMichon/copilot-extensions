@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from typing import Any
+from dataclasses import asdict
 
 import pytest
+from fastapi.testclient import TestClient
 
-from agent_dispatch import acquisition_receipts
-from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch import acquisition_receipts, tracking
+from agent_dispatch.client import DispatchClient, DispatchError
+from agent_dispatch.coordinator import create_app
+from agent_dispatch.queue import SpawnState, Status, TaskError, TaskQueue
+from agent_dispatch.supervisor import Supervisor
 from tests import test_pool_placement as placement_controls
 from tests.test_pool_placement import (
     place, pool, publish, record_native, retired_predecessor_retry, task,
 )
+from tests.test_supervisor import QueueBackedClient
 
 q = placement_controls.q
 
@@ -207,3 +213,146 @@ def test_empty_origin_and_unbound_inherited_markers_use_linear_retirement_work(
         evidence = natives.native_binding_evidence(conn, row, q.get(t.id))
     assert evidence.qualified_empty and evidence.known == evidence.retired == ()
     assert len(calls) <= 4 * (count + 2)
+
+
+def bound_handleless_release(q: TaskQueue, *, startup_closed: bool = True) -> tuple[Any, Any]:
+    publish(q, pool())
+    t = task(q)
+    reservation, _ = place(q, t)
+    receipt = receipt_for(q, t, reservation, native="receipt-native")
+    acquisition_receipts.bind(q, receipt, evidence=authority(receipt))
+    released = q.request_spawn_release(
+        reservation.key, finished_startup_revision=1 if startup_closed else None,
+    )
+    assert released.session_handle is None
+    return t, released
+
+
+@pytest.mark.parametrize("verdict", [tracking.LIVE, tracking.UNKNOWN, tracking.GONE])
+@pytest.mark.parametrize("startup_closed", [False, True])
+@pytest.mark.parametrize("sweep", ["stranded", "ordinary", "historical"])
+def test_stranded_receipt_native_is_probed_not_age_force_failed(
+    q: TaskQueue, verdict: str, startup_closed: bool, sweep: str,
+) -> None:
+    if sweep == "historical":
+        publish(q, pool())
+        t = task(q)
+        reservation, _ = place(q, t)
+        receipt = receipt_for(q, t, reservation, native="receipt-native")
+        acquisition_receipts.bind(q, receipt, evidence=authority(receipt))
+        q.fail_spawn(reservation.key)
+        released = q.request_spawn_release(
+            reservation.key, finished_startup_revision=1 if startup_closed else None,
+        )
+        assert released.native_release_pending
+    else:
+        t, released = bound_handleless_release(q, startup_closed=startup_closed)
+    probes = []
+    supervisor = Supervisor(
+        QueueBackedClient(q), machine="observer", supervisor_id="allocator",
+        spawn_fn=lambda _: pytest.fail("no spawn"),
+        verdict_fn=lambda *args: probes.append(args) or verdict,
+        attempt_conclusion_fn=lambda *args, **kw: pytest.fail("no workspace conclusion"),
+    )
+    # An unfinished caller can only be fenced by its existing startup protocol.
+    supervisor._retain_terminal_startup = lambda *args: None
+    retired = startup_closed and verdict == tracking.GONE
+    recover = (
+        supervisor.recover_stranded_releasing_reservations if sweep == "stranded"
+        else supervisor.release_requested_bodies
+    )
+    assert recover(now=701) == int(retired)
+    assert probes == ([("worktree", "host-a", "receipt-native")] if startup_closed else [])
+    current = q.get_reservation(released.key)
+    assert current.session_handle is None and current.state == (
+        SpawnState.FAILED if retired or sweep == "historical" else SpawnState.RELEASING
+    )
+    assert current.native_release_pending is (sweep == "historical" and not retired)
+    assert q.get(t.id).status == Status.CLAIMED
+    if retired:
+        assert place(q, task(q))[1]
+    else:
+        with pytest.raises(TaskError, match="capacity"):
+            place(q, task(q))
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_unknown_receipt_lookup_retains_stranded_release(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch, caplog: Any, legacy: bool,
+) -> None:
+    _, released = bound_handleless_release(q)
+    client = QueueBackedClient(q)
+
+    def unknown(_key: str) -> dict:
+        if legacy:
+            return asdict(released)
+        raise DispatchError(503, "identity read unavailable")
+
+    monkeypatch.setattr(client, "get_reservation", unknown)
+    supervisor = Supervisor(client, spawn_fn=lambda _: pytest.fail("no spawn"))
+    assert supervisor.recover_stranded_releasing_reservations(now=701) == 0
+    assert q.get_reservation(released.key) == released
+    assert "identity" in caplog.text
+
+
+def test_force_fail_rechecks_receipt_identity_after_stale_empty_snapshot(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, released = bound_handleless_release(q)
+    client = QueueBackedClient(q)
+    monkeypatch.setattr(client, "get_reservation", lambda _key: {
+        **asdict(released), "reservation_native_session_id": None,
+        "reservation_native_identity_error": None,
+        "reservation_native_identity_protocol": "reservation-native-identity/v1",
+    })
+
+    def fail(key: str, **kwargs: Any) -> dict:
+        try:
+            return asdict(q.fail_spawn(key, **kwargs))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
+
+    monkeypatch.setattr(client, "fail_spawn", fail)
+    supervisor = Supervisor(client, spawn_fn=lambda _: pytest.fail("no spawn"))
+    assert supervisor.recover_stranded_releasing_reservations(now=701) == 0
+    assert q.get_reservation(released.key) == released
+    with pytest.raises(TaskError, match="recorded native identity"):
+        q.fail_spawn(released.key, force=True)
+    assert q.get_reservation(released.key) == released
+
+
+def test_receipt_identity_is_exposed_and_force_guarded_over_real_http(q: TaskQueue) -> None:
+    _, released = bound_handleless_release(q)
+    app = create_app(q)
+    with TestClient(app) as http:
+        dispatch = DispatchClient.__new__(DispatchClient)
+        dispatch._http = http
+        snapshot = dispatch.get_reservation(released.key)
+        assert snapshot["reservation_native_identity_protocol"] == "reservation-native-identity/v1"
+        assert snapshot["reservation_native_session_id"] == "receipt-native"
+        assert "receipt-native" in snapshot["known_native_session_ids"]
+        assert snapshot["reservation_native_identity_error"] is None
+        assert snapshot["session_handle"] is None
+        response = http.post(f"/spawn-reservations/{released.key}/fail", json={"force": True})
+        assert response.status_code == 409 and "native identity" in response.json()["detail"]
+    assert q.get_reservation(released.key) == released
+
+
+def test_receipt_retirement_does_not_drop_unsettled_transport_accountability(q: TaskQueue) -> None:
+    t, released = bound_handleless_release(q)
+    with q._connect() as conn:
+        conn.execute(
+            "INSERT INTO wake_outbox"
+            " (id,task_id,generation,wake_seq,owner,owner_session_id,"
+            " status,attempts,created_at,updated_at,execution_send_state)"
+            " VALUES ('wake',?,0,1,'host-a/worktree','receipt-native',"
+            " 'pending',0,1,1,'unknown')", (t.id,),
+        )
+    supervisor = Supervisor(
+        QueueBackedClient(q), verdict_fn=lambda *args: tracking.GONE,
+        spawn_fn=lambda _: pytest.fail("no spawn"),
+    )
+    assert supervisor.recover_stranded_releasing_reservations(now=701) == 1
+    assert q.get_reservation(released.key).state == SpawnState.FAILED
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))

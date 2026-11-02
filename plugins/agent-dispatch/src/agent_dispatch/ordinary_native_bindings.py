@@ -9,6 +9,8 @@ from typing import Any
 from .ordinary_agent_facts import identity
 from .queue_records import SpawnState, Status, TaskError
 
+RESERVATION_NATIVE_IDENTITY_PROTOCOL = "reservation-native-identity/v1"
+
 
 def is_native_retired(row: Any) -> bool:
     """Use the reservation owner's marker or completed exact-absence release."""

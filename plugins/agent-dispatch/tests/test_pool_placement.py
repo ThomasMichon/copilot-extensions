@@ -820,6 +820,35 @@ def test_retired_predecessor_cannot_be_republished_as_a_replacement(q):
     assert current.state == before.state and current.startup_revision == before.startup_revision
 
 
+@pytest.mark.parametrize("selector", ["target", "required", "none"])
+def test_ordinary_bridge_to_cli_cannot_discard_explicit_worktree_before_claim(q, selector):
+    original_task = task(q, dedup_key="logical-driver-transition")
+    original, _ = q.reserve_spawn(original_task.id, driver="ordinary-bridge")
+    q.record_spawn_worktree(
+        original.key, "worktree", ownership="created", creating_host="host-a",
+        execution_machine="host-a", driver="ordinary-bridge",
+    )
+    q.request_spawn_release(original.key, finished_startup_revision=1)
+    q.retire_spawn(original.key, exact_absence=True, conclusion_state="skipped")
+    q.abandon(original_task.id, permitted=True, reason="synthetic prior request")
+    publish(q, pool())
+    successor = task(
+        q, dedup_key="logical-driver-transition",
+        **({"target_worktree": "worktree"} if selector == "target" else
+           {"requires": ["worktree:worktree"]} if selector == "required" else {}),
+    )
+    if selector == "none":
+        replacement, reserved = place(q, successor)
+        assert reserved and replacement.worktree is None
+        assert q.get(successor.id).status == Status.CLAIMED
+    else:
+        with pytest.raises(TaskError, match="driver transition cannot discard"):
+            place(q, successor)
+        assert q.get(successor.id) == successor
+        assert q.task_pool_assignment(successor.id) is None
+        assert q.list_reservations(task_id=successor.id) == []
+
+
 def test_late_exact_retirement_of_a_carried_native_prevents_retry_acceptance(q):
     publish(q, pool(capacity=2))
     t = task(q)
