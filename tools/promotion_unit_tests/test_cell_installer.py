@@ -34,6 +34,10 @@ _original = _load(
 def canonical_source_identity(monkeypatch):
     monkeypatch.setitem(sys.modules, "versioned_runtime_source", _identity)
     monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", InlinePool)
+    runtime = importlib.import_module("versioned_runtime")
+    monkeypatch.setattr(
+        runtime._runtime_component("versioned_runtime_source"), "ThreadPoolExecutor", InlinePool,
+    )
 
 
 class InlinePool:

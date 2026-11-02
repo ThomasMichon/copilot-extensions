@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -14,6 +15,18 @@ spec = importlib.util.spec_from_file_location(
 original = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = original
 spec.loader.exec_module(original)
+
+
+@pytest.fixture(autouse=True)
+def actor_free_registry_owner(monkeypatch, tmp_path):
+    if sys.platform != "win32":
+        return
+    from agent_procutil import _daemon_instance_owner as owner
+
+    def owned(path):
+        assert Path(path).resolve().is_relative_to(tmp_path.resolve())
+
+    monkeypatch.setattr(owner, "assert_path_owner", owned)
 
 for name in (
     "test_expired_lifecycle_lock_never_creates_or_deletes_inventory_files",

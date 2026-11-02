@@ -126,6 +126,27 @@ Installed wrappers require the resolver's declared
 helper returns an explicit readiness error rather than assuming it suppresses
 writes. These modes do not grant installation or publication permission.
 
+## Frozen source fingerprints (Python API)
+
+`fingerprint_source(paths, *, file_hashes=None, on_file=None)` retains the same framed
+aggregate digest. An optional empty dictionary collects resolved regular-file
+paths and SHA256 digests from those same reads, so a consumer needing both
+proofs does not reopen the files. Consume the collected values only after the
+whole call succeeds; a nonempty collector is refused. Parent resolution is
+shared only within that call, never as persistent admission evidence.
+The optional `on_file(path, data)` callback receives regular-file bytes already
+being hashed. Callback errors propagate; callers own cleanup and must wait for
+the complete fingerprint before treating collected bytes as admitted evidence.
+The installer engine buffers that first pass with a 32 MiB in-memory ceiling
+and disk spill for larger graphs, then copies only after the full baseline is
+complete. It independently rechecks the source file set, source content and
+frozen content afterward; the buffer closes before frozen-tree validation.
+Read-only Windows scans may prefetch four regular files at a time, while
+framing and per-file digest collection remain ordered. Calls with `on_file`
+keep sequential reads and callbacks on the caller thread, preserving the
+complete-before-copy admission barrier. All paths still read every byte;
+worker read failures propagate rather than becoming cached evidence.
+
 ## Construction ownership (Python API)
 
 `construction_lease(root, version, *, timeout=60.0, poll_interval=0.05)` is a

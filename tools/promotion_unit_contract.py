@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
@@ -22,7 +24,23 @@ class UnitEvidenceError(ValueError):
     """The declared unit packet or its observed evidence is incomplete."""
 
 
-def decode_json(text: str | bytes) -> object:
+def read_bounded(stream: BinaryIO, limit: int) -> bytes:
+    """Read at most limit plus one byte from a blocking file with bounded buffers."""
+    chunks = []
+    remaining = limit + 1
+    while remaining > 0:
+        requested = min(remaining, 1 << 20)
+        chunk = stream.read(requested)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+        if len(chunk) < requested:
+            break
+    return b"".join(chunks)
+
+
+def decode_json(text: str | bytes, *, finite: bool = False) -> object:
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -31,7 +49,21 @@ def decode_json(text: str | bytes) -> object:
             result[key] = value
         return result
 
-    return json.loads(text, object_pairs_hook=unique)
+    if not finite:
+        return json.loads(text, object_pairs_hook=unique)
+
+    def number(token):
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError("unit evidence contains a nonfinite number")
+        return value
+
+    def constant(_token):
+        raise ValueError("unit evidence contains a nonfinite number")
+
+    return json.loads(
+        text, object_pairs_hook=unique, parse_float=number, parse_constant=constant,
+    )
 
 
 def relative_file(value: object) -> str:

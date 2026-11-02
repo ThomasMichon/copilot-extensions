@@ -48,6 +48,7 @@ def _portable_artifact_open(tmp_path, monkeypatch):
         assert Path(path).resolve().is_relative_to(tmp_path.resolve())
         return os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
 
+    # Native Windows sharing is qualified separately; retained byte checks stay real.
     monkeypatch.setattr(artifacts, "_open_artifact", open_fixture)
 
 

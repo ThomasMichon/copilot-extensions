@@ -40,6 +40,51 @@ if TYPE_CHECKING:
     from installer_engine import FrozenInputs
 
 
+def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(extras, tuple) or any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", name) is None
+        for name in extras
+    ):
+        raise ValueError("Runtime extras must be an immutable tuple of ordinary extra names")
+    normalized = tuple(sorted(re.sub(r"[-_.]+", "-", name).lower() for name in extras))
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("Runtime extras contain duplicate selections")
+    if not normalized:
+        return ()
+    data = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))
+    groups = data.get("project", {}).get("optional-dependencies", {})
+    if not isinstance(groups, dict):
+        raise ValueError("Runtime optional dependencies must be a table")
+    declared = [re.sub(r"[-_.]+", "-", name).lower() for name in groups]
+    if len(set(declared)) != len(declared):
+        raise ValueError("Runtime optional dependencies have ambiguous extra names")
+    missing = set(normalized) - set(declared)
+    if missing:
+        raise ValueError(f"Runtime extras are not declared: {', '.join(sorted(missing))}")
+    return normalized
+
+
+def revalidate_input_content(engine: ModuleType, inputs: FrozenInputs) -> None:
+    if (
+        engine._package_roots(inputs.plugin) != inputs.packages
+        or engine._wheel_construction_hash(
+            engine._construction_hash(
+                engine._source_files(inputs.packages), inputs.extras, inputs.local_packages,
+            ),
+            inputs.wheel_inputs,
+        ) != inputs.payload_hash
+    ):
+        raise RuntimeError("Runtime inputs changed from expected frozen content")
+
+
+def check_dev_owner(runtime: ModuleType, root: Path, owner: str) -> None:
+    with runtime._publication_lease(root):
+        claim = runtime.read_dev_claim(root, strict=True)
+        if claim is None or claim["owner"] != owner:
+            raise RuntimeError("Development construction requires this owner's explicit dev claim")
+
+
 @contextmanager
 def retained_input_graph(
     inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
@@ -94,11 +139,13 @@ def retained_input_graph(
     ) as transaction:
         if set(transaction.sources) != set(inputs.packages):
             raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
+        file_hashes: dict[Path, str] = {}
         if (
             engine._package_roots(inputs.plugin) != inputs.packages
             or engine._source_files(inputs.packages, on_progress=on_progress) != files
             or engine._construction_hash(
                 files, inputs.extras, inputs.local_packages, on_progress=on_progress,
+                file_hashes=file_hashes,
             ) != inputs.payload_hash
         ):
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
@@ -106,7 +153,7 @@ def retained_input_graph(
             raise RuntimeError("Retained UV inputs do not cover the runtime source files")
         changed = []
         for path in files:
-            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]:
+            if file_hashes[path] != transaction.source_hashes[path]:
                 changed.append(path)
             else:
                 on_progress()

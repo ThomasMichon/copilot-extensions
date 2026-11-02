@@ -16,7 +16,8 @@ import stat
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from promotion_unit_contract import (
-    CANDIDATE_PROFILE, MAX_UNIT_EVIDENCE_FILE_BYTES, UnitEvidenceError, admit_manifest, decode_json, manifest_digest,
+    CANDIDATE_PROFILE, MAX_UNIT_EVIDENCE_FILE_BYTES, UnitEvidenceError, admit_manifest,
+    decode_json, manifest_digest, read_bounded,
     relative_file, source_sha, verify_observations, verify_sources,
 )
 
@@ -66,14 +67,13 @@ def _read_file(directory: Path, name: str) -> tuple[bytes, dict]:
                 before.st_dev, before.st_ino,
             ):
                 raise UnitEvidenceError(f"packet file changed during opening: {name}")
-            raw = stream.read(MAX_UNIT_EVIDENCE_FILE_BYTES + 1)
+            raw = read_bounded(stream, MAX_UNIT_EVIDENCE_FILE_BYTES)
         if len(raw) > MAX_UNIT_EVIDENCE_FILE_BYTES:
             raise UnitEvidenceError(f"packet file exceeds its size limit: {name}")
     except OSError as exc:
         raise UnitEvidenceError(f"cannot read packet file {name}: {exc}") from exc
     try:
-        data = decode_json(raw)
-        json.dumps(data, allow_nan=False)
+        data = decode_json(raw, finite=True)
     except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise UnitEvidenceError(f"invalid packet JSON in {name}: {exc}") from exc
     except ValueError as exc:

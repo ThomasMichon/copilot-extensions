@@ -16,13 +16,17 @@ from pathlib import Path
 
 from packaging.version import Version
 
+# Installed control code must support the frozen-source mode-owner contract.
+MODE_OWNER_ABI = 1
+
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py",
     "runtime_install_driver.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
-    "installer_dependency_config.py", "registry_root.py", "command_binding.py", "command_lifecycle.py",
+    "installer_dependency_config.py", "installer_dependency_arguments.py",
+    "registry_root.py", "command_binding.py", "command_lifecycle.py",
     "installer_source_build.py", "installer_source_wheel_cache.py",
 )
 
@@ -156,10 +160,14 @@ def verify_installed_origins() -> None:
         if source_wheels is not None and name in source_wheels:
             wheel = source_wheels[name]
             digest = wheel["sha256"].removeprefix("sha256:")
+            archive = origin.get("archive_info")
             valid_origin = (
                 "dir_info" not in origin
                 and distribution.version == wheel["version"]
-                and origin.get("archive_info", {}).get("hashes") == {"sha256": digest}
+                and isinstance(archive, dict)
+                and set(archive) <= {"hash", "hashes"}
+                and archive.get("hash", "sha256=" + digest) == "sha256=" + digest
+                and (archive == {} or archive.get("hashes") == {"sha256": digest})
                 and str(origin.get("url", "")).endswith("#sha256=" + digest)
             )
         if (

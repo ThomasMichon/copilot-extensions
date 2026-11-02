@@ -700,7 +700,10 @@ stat_file_metadata() {
     local path="$1" follow="${2:-false}" result
     ensure_kernel_name
     if [[ "$KERNEL_NAME" == Darwin ]]; then
-        if [[ "$follow" == true ]]; then
+        if [[ "$follow" == true && "$path" =~ ^/dev/fd/([0-9]+)$ ]]; then
+            # fdescfs path identity can differ from the opened file's identity.
+            stat -f '%HT|%d|%i|%z|%m|%c' <&"${BASH_REMATCH[1]}" 2>/dev/null
+        elif [[ "$follow" == true ]]; then
             stat -L -f '%HT|%d|%i|%z|%m|%c' "$path" 2>/dev/null
         else
             stat -f '%HT|%d|%i|%z|%m|%c' "$path" 2>/dev/null

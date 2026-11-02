@@ -73,6 +73,20 @@ runtime assets, including declared local and external dependencies, remain
 fingerprinted. Completed numbered slots remain immutable; genuine content
 changes require a new published generation rather than an in-place rebuild.
 
+Explicit `install.{ps1,sh} dev` iterations select an immutable
+`versions/dev-<source-sha256>` generation, not a rewritten `versions/dev`.
+The source fingerprint covers the declared transitive local package graph.
+Unchanged healthy target content is reused without reinstalling into it; the
+existing temporary control bootstrap and out-of-slot reconciliation still run.
+An edit builds a separate non-editable environment and leaves the previous
+one intact.
+The worktree claim retains its original release target across iterations.
+Installed `dev-status` and `dev-release --owner <worktree>` remain available
+after that worktree is removed. A failed restore keeps the claim for retry.
+The source hash does not yet bind the complete external dependency/build
+assembly; that qualification remains tracked in
+[#5472](https://github.com/ThomasMichon/copilot-extensions/issues/5472).
+
 Start a Copilot CLI session and ask: *"set up agent-worktrees"*
 
 Or run the init script directly:

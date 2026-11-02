@@ -788,10 +788,31 @@ jobs:
           print(f"OS: {platform.platform()}", flush=True)
           PY
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Select the supported native installation-management Bash
+        if: ${{ matrix.mode == 'namespaced' }}
+        env:
+          NATIVE_OS: ${{ runner.os }}
+        run: |
+          if [ "$NATIVE_OS" = macOS ]; then
+            prefix="$(brew --prefix bash)"
+            if ! test -x "$prefix/bin/bash"; then
+              HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install bash
+            fi
+            test -x "$prefix/bin/bash"
+            printf '%s\n' "$prefix/bin" >> "$GITHUB_PATH"
+            export PATH="$prefix/bin:$PATH"
+          fi
+          bash --noprofile --norc -c '
+            ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))) ||
+              { printf "%s\n" "Native installation management requires Bash 4.4+" >&2; exit 1; }
+            printf "Management Bash: %s (%s)\n" "$BASH" "$BASH_VERSION"
+          '
       - name: Qualify isolated native development lifecycle
         env:
           RUNTIME_MODE: ${{ matrix.mode }}
-        run: python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_dev_live.py -k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700
+        run: |
+          python tools/run-plugin-tests.py installation-context --test-file tests/test_digest_cache_hardening.py -k darwin_metadata --timeout 120 --plugin-timeout 240
+          python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_dev_live.py -k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700
 
   immutable-runtime-macos:
     if: ${{ inputs.immutable_runtime }}

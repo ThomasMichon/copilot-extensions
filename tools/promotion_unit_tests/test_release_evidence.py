@@ -136,11 +136,87 @@ def test_actual_file_boundary_is_shared_by_local_reads_and_hosted_archive_admiss
         packet.MAX_UNIT_EVIDENCE_FILE_BYTES == receipt_contract.MAX_UNIT_EVIDENCE_FILE_BYTES
         == evidence.MAX_UNIT_EVIDENCE_FILE_BYTES == reuse.MAX_UNIT_EVIDENCE_FILE_BYTES == limit
     )
+    probe = tmp_path / "small.json"
+    probe_raw = b'{"ok":1}\n'
+    probe.write_bytes(probe_raw)
+    original_open = type(probe).open
+    requested_reads = []
+
+    class ObservedRead:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def read(self, requested):
+            requested_reads.append(requested)
+            return self.stream.read(requested)
+
+    def observed_open(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        return ObservedRead(stream) if path == probe else stream
+
+    with monkeypatch.context() as patch:
+        patch.setattr(type(probe), "open", observed_open)
+        assert packet._read_file(tmp_path, probe.name) == (probe_raw, {"ok": 1})
+        assert receipt_contract.regular_bytes(tmp_path, probe.name) == probe_raw
+    assert requested_reads and max(requested_reads) <= 1 << 20
+
+    for reader in ("packet", "regular"):
+        for extra, oversized in ((b" " * 16, False), (b" " * 64, True)):
+            probe.write_bytes(probe_raw)
+            grew = False
+
+            def growing_open(path, *args, **kwargs):
+                nonlocal grew
+                if path == probe and args == ("rb",) and not grew:
+                    grew = True
+                    with original_open(path, "ab") as output:
+                        output.write(extra)
+                return original_open(path, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(type(probe), "open", growing_open)
+                patch.setattr(packet, "MAX_UNIT_EVIDENCE_FILE_BYTES", 64)
+
+                def read_probe():
+                    if reader == "packet":
+                        return packet._read_file(tmp_path, probe.name)[0]
+                    return receipt_contract.regular_bytes(tmp_path, probe.name, max_bytes=64)
+
+                if oversized:
+                    with pytest.raises(ValueError, match="limit|bound"):
+                        read_probe()
+                else:
+                    assert read_probe() == probe_raw + extra
+    probe.unlink()
     prefix, suffix = b'{"padding":"', b'"}'
     raw = prefix + b"x" * (limit - len(prefix) - len(suffix)) + suffix
     path = tmp_path / "coverage.json"
     path.write_bytes(raw)
-    observed, value = packet._read_file(tmp_path, "coverage.json")
+    with monkeypatch.context() as patch:
+        patch.setattr(packet.json, "dumps", lambda *_a, **_k: pytest.fail(
+            "packet reads must not serialize a second evidence-sized buffer",
+        ))
+        observed, value = packet._read_file(tmp_path, "coverage.json")
+        finite_path = tmp_path / "finite.json"
+        finite_path.write_bytes(b'{"nested":[{"number":1.25,"literal":"NaN"}]}')
+        assert packet._read_file(tmp_path, "finite.json")[1]["nested"][0] == {
+            "number": 1.25, "literal": "NaN",
+        }
+        for token in (b"NaN", b"Infinity", b"-Infinity", b"1e1000", b"-1e1000"):
+            finite_path.write_bytes(b'{"nested":[{"number":' + token + b'}]}')
+            with pytest.raises(ValueError, match="nonfinite"):
+                packet._read_file(tmp_path, "finite.json")
+        finite_path.unlink()
     assert observed == raw and len(value["padding"]) == limit - len(prefix) - len(suffix)
     del observed, value
     assert receipt_contract.regular_bytes(tmp_path, "coverage.json", max_bytes=limit) == raw

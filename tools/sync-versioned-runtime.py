@@ -61,6 +61,7 @@ INSTALLER_INSTANCE_NAMES = (
 )
 DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
 DEPENDENCY_CONFIG = DEPENDENCY_POLICY.with_name("installer_dependency_config.py")
+DEPENDENCY_ARGUMENTS = DEPENDENCY_POLICY.with_name("installer_dependency_arguments.py")
 
 # Canonical parameterized shell resolvers (uniform-runtime-resolution, #765). The
 # one marker-only way a binstub / hook / service launcher resolves the versioned
@@ -139,7 +140,9 @@ def main() -> int:
     if not CANONICAL.exists():
         print(f"canonical missing: {CANONICAL.relative_to(REPO)}", file=sys.stderr)
         return 1
-    if any(source.is_symlink() or not source.is_file() for source in (DEPENDENCY_POLICY, DEPENDENCY_CONFIG)):
+    if any(source.is_symlink() or not source.is_file() for source in (
+        DEPENDENCY_POLICY, DEPENDENCY_CONFIG, DEPENDENCY_ARGUMENTS,
+    )):
         print("canonical installer dependency policy component missing or linked", file=sys.stderr)
         return 1
 
@@ -154,6 +157,7 @@ def main() -> int:
     canonical_bytes = CANONICAL.read_bytes()
     policy_bytes = DEPENDENCY_POLICY.read_bytes()
     config_bytes = DEPENDENCY_CONFIG.read_bytes()
+    arguments_bytes = DEPENDENCY_ARGUMENTS.read_bytes()
     component_bytes = {}
     for name in COMPONENT_NAMES:
         source = CANONICAL.with_name(name)
@@ -167,6 +171,7 @@ def main() -> int:
         pairs.append((canonical_bytes, plugin / "scripts" / VRT_NAME))
         pairs.append((policy_bytes, plugin / "scripts" / DEPENDENCY_POLICY.name))
         pairs.append((config_bytes, plugin / "scripts" / DEPENDENCY_CONFIG.name))
+        pairs.append((arguments_bytes, plugin / "scripts" / DEPENDENCY_ARGUMENTS.name))
         pairs.extend((data, plugin / "scripts" / name) for name, data in component_bytes.items())
         if plugin.name in BUILD_HELPER_CONSUMERS:
             helper = RESOLVER_DIR / "standalone_build.py"

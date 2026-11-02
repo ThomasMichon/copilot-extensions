@@ -1586,13 +1586,32 @@ performed. This is an explicit native lane, not additional required PR CI.
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
-`immutable_runtime=true` runs only `tests/test_python_runtime_dev_live.py` through
-the canonical isolated `agent-worktrees` plugin runner. Its four native matrix
+`immutable_runtime=true` runs `tests/test_python_runtime_dev_live.py` through
+the canonical isolated `agent-worktrees` plugin runner, preceded by the focused
+installation-context descriptor-metadata regression. That regression retains an
+open file's identity across path replacement without trusting its fdescfs entry.
+The legacy lifecycle fixture declares its disposable directory marketplace and
+verifies that the original command binding survives removal of the source.
+Its four native matrix
 cells use two explicit jobs with literal Linux (`ubuntu-latest`) and macOS
 (`macos-latest`) runner routes, each with a `legacy`/`namespaced` mode matrix
 and fail-fast disabled. Python and `UV_PYTHON` are 3.11,
 matching the supported first-adopter floor. No host-state opt-in, live
 installation or service deployment is used.
+
+Namespaced installation management requires Bash 4.4+. The macOS namespaced
+cell selects Homebrew Bash and records its actual version;
+it does not weaken the guard or skip the case. Legacy macOS keeps stock Bash.
+The Worktrees installer carries its already-selected Bash into context queries,
+staged children and helper publication instead of rediscovering a different
+`bash` after a PATH change. Missing supported native tooling fails qualification.
+Only that disposable optional macOS namespaced cell installs a missing Homebrew
+Bash, without Homebrew auto-update or installation cleanup. Existing Bash is reused;
+legacy macOS and all other cells never install it. Canonical test-dependency
+seasoning and the Bash version guard remain unchanged. Copied POSIX
+fixtures redirect the SDK's current `canonical_path_into` account-home seam;
+they leave the source SDK and the runner's actual account profile unchanged.
+The PowerShell transport uses the already-redirected Python SDK resolution.
 
 ```bash
 gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \
@@ -1609,6 +1628,9 @@ The workflow definition's dispatch ref is distinct from the source SHA tested.
 Each matrix cell runs:
 
 ```bash
+python tools/run-plugin-tests.py installation-context \
+  --test-file tests/test_digest_cache_hardening.py -k darwin_metadata \
+  --timeout 120 --plugin-timeout 240
 python tools/run-plugin-tests.py agent-worktrees \
   --test-file tests/test_python_runtime_dev_live.py -k <legacy-or-namespaced> \
   --timeout 2500 --plugin-timeout 2700
@@ -2891,6 +2913,11 @@ named Windows UV commands through real guarded SDK/Python-owned installs.
 Named controls use an owned child's fixture-only PATH; external `*-system`
 qualification retains the target's actual PATH and verifies it is unchanged.
 
+`tools/test_installer_dependency_policy.py` also exercises real Windows UV
+configuration probes beyond the native subprocess cwd limit. Plain cwd,
+relative/inline `--directory` and `UV_WORKING_DIR` retain the selected project's
+stricter cutoff while UV starts from a short native cwd.
+
 Repository-tool installer-sync and vendor-guard link controls use the shared
 `native_file_symlink` fixture. Only Windows error 1314, raised by actual file-link
 creation, produces an explicit missing-privilege skip; other failures propagate.
@@ -3169,6 +3196,15 @@ native symlink/aliased-parent controls remain in the existing integration suites
 The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
+Packet JSON rejects nonfinite numbers during decoding, including nested values
+and exponent overflow, without serializing another evidence-sized buffer.
+Local packet and qualification reads use at most one-MiB input chunks instead
+of reserving their full file allowance for every small source read. The existing
+file-boundary regression retains full-size archive/readback coverage and checks
+small-file allocations and growth across the unchanged byte limit.
+The retained client-resource units substitute fixture-confined artifact handles
+at the native open boundary. Resource framing, hashing and retention remain real;
+these units do not qualify Windows read-sharing fences.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process
@@ -5178,6 +5214,19 @@ only declared driver audit files, the known PowerShell startup cache and Python
 bytecode for existing payload modules are accounted separately. Driver requests
 must finish nonzero without unresolved execution. Same-size/same-mtime source,
 runtime and command mutations remain detected.
+
+The payload-lifecycle controls retain the complete process-helper package,
+including its lazy Job-accounting module. Windows deadline and early-parent-exit
+checks require an empty owned Job before admission releases. The source-only
+test target prepares the update driver and binds its transitive source bodies
+to the test-cache key. Real-installer fixtures materialize the complete
+execution closure once while retaining each preflight refusal and product-byte
+snapshot.
+
+Retained-control origin validation uses the constructor's PEP 610 archive
+contract. Empty `archive_info` retains the exact hash-pinned URL and version
+binding; an explicit wrong hash, contradictory hash fields or unsupported
+archive metadata remains a refusal.
 
 The copied-pane boundary controls are an explicit, non-serving native lane:
 

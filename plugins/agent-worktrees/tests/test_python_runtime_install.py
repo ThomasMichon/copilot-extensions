@@ -967,7 +967,10 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert (package / "_build_info.py").read_text(encoding="utf-8") == content
 
 
-@pytest.mark.parametrize("missing", [None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py"])
+@pytest.mark.parametrize("missing", [
+    None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
+    "installer_dependency_arguments.py",
+])
 def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monkeypatch, missing):
     import agent_worktrees
     from agent_worktrees import runtime_candidate as installer, update_stage

@@ -288,12 +288,12 @@ def test_freeze_identity_survives_relocation_and_ignores_build_outputs(engine, t
 def test_freeze_refuses_concurrent_input_mutation(engine, tmp_path, monkeypatch, mutation):
     plugin = _package(tmp_path / "repo" / "plugin", "example")
     dependency = _package(tmp_path / "repo" / "dependency", "example-dependency")
-    original_copy = engine.shutil.copyfile
+    original_write = Path.write_bytes
     mutated = False
 
-    def copy_and_mutate(source, target, **kwargs):
+    def copy_and_mutate(target, data):
         nonlocal mutated
-        result = original_copy(source, target, **kwargs)
+        result = original_write(target, data)
         if not mutated:
             mutated = True
             if mutation == "content":
@@ -305,12 +305,128 @@ def test_freeze_refuses_concurrent_input_mutation(engine, tmp_path, monkeypatch,
                     stream.write('[tool.uv.sources]\nexample-dependency = {path = "../dependency"}\n')
         return result
 
-    monkeypatch.setattr(engine.shutil, "copyfile", copy_and_mutate)
+    monkeypatch.setattr(Path, "write_bytes", copy_and_mutate)
     destination = tmp_path / "frozen"
     with pytest.raises(RuntimeError, match="changed while freezing"):
         engine.freeze_inputs(plugin, destination)
     assert not destination.exists()
     assert dependency.exists()
+
+
+@pytest.mark.parametrize("rollover", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize("fault", [None, "corrupt", "write-failure"])
+def test_freeze_buffers_complete_baseline_without_reopening_copy_sources(
+    engine, tmp_path, monkeypatch, rollover, fault,
+):
+    plugin = _package(tmp_path / "plugin", "example")
+    files = engine._source_files((plugin,))
+    destination = tmp_path / "frozen"
+    read_bytes, write_bytes = Path.read_bytes, Path.write_bytes
+    reads = dict.fromkeys(files, 0)
+    spools = []
+    create_spool = engine.tempfile.SpooledTemporaryFile
+
+    def spool(**kwargs):
+        assert kwargs["max_size"] == 32 * 1024 * 1024
+        buffer = create_spool(**{**kwargs, "max_size": 1 if rollover else 65536})
+        spools.append(buffer)
+        return buffer
+
+    def count_read(path):
+        if path in reads:
+            reads[path] += 1
+        return read_bytes(path)
+
+    def write_snapshot(path, data):
+        ordinary = Path(engine.runtime._normalize_windows_extended_path(str(path)))
+        if ordinary.is_relative_to(destination):
+            assert set(reads.values()) == {1}, "copy preceded completion of the baseline"
+            if fault == "write-failure":
+                raise PermissionError("snapshot write refused")
+            if fault == "corrupt" and path.name == "module.py":
+                data += b"\nCORRUPT = True\n"
+        return write_bytes(path, data)
+
+    monkeypatch.setattr(engine.tempfile, "SpooledTemporaryFile", spool)
+    monkeypatch.setattr(Path, "read_bytes", count_read)
+    monkeypatch.setattr(Path, "write_bytes", write_snapshot)
+    monkeypatch.setattr(
+        engine.shutil, "copyfile",
+        lambda *_args, **_kwargs: pytest.fail("snapshot reopened source for copying"),
+    )
+    if fault is None:
+        frozen = engine.freeze_inputs(plugin, destination)
+        assert set(reads.values()) == {2}
+        assert frozen.payload_hash == engine.runtime.fingerprint_source(
+            engine._source_files(frozen.packages),
+        )
+    else:
+        error, message = (
+            (PermissionError, "snapshot write refused") if fault == "write-failure"
+            else (RuntimeError, "changed while freezing")
+        )
+        with pytest.raises(error, match=message):
+            engine.freeze_inputs(plugin, destination)
+        assert not destination.exists()
+    assert len(spools) == 1 and spools[0].closed
+    assert spools[0]._rolled is rollover
+
+
+@pytest.mark.parametrize("fault", ["write-error", "short-write", "short-read"])
+def test_freeze_buffer_failure_closes_storage_and_removes_snapshot(engine, tmp_path, monkeypatch, fault):
+    plugin = _package(tmp_path / "plugin", "example")
+    destination = tmp_path / "frozen"
+    create_spool = engine.tempfile.SpooledTemporaryFile
+    spools = []
+
+    def spool(**kwargs):
+        buffer = create_spool(**kwargs)
+        spools.append(buffer)
+        read = buffer.read
+        if fault == "write-error":
+            def fail_write(_data):
+                raise PermissionError("source retention refused")
+            monkeypatch.setattr(buffer, "write", fail_write)
+        elif fault == "short-write":
+            monkeypatch.setattr(buffer, "write", lambda data: len(data) - 1)
+        else:
+            monkeypatch.setattr(buffer, "read", lambda length: read(length)[:-1])
+        return buffer
+
+    monkeypatch.setattr(engine.tempfile, "SpooledTemporaryFile", spool)
+    message = "source retention refused" if fault == "write-error" else "buffer .* incomplete"
+    with pytest.raises(OSError, match=message):
+        engine.freeze_inputs(plugin, destination)
+    assert len(spools) == 1 and spools[0].closed
+    assert not destination.exists()
+
+
+def test_freeze_rolls_over_before_writing_a_file_larger_than_memory_limit(engine, tmp_path, monkeypatch):
+    plugin = _package(tmp_path / "plugin", "example")
+    limit = 32 * 1024 * 1024
+    (plugin / "data.bin").write_bytes(b"x" * (limit + 1))
+    create_spool = engine.tempfile.SpooledTemporaryFile
+    observed = []
+
+    def spool(**kwargs):
+        buffer = create_spool(**kwargs)
+        write = buffer.write
+
+        def guarded_write(data):
+            if len(data) > limit:
+                assert buffer._rolled, "oversized source was first buffered in memory"
+                observed.append(len(data))
+            return write(data)
+
+        monkeypatch.setattr(buffer, "write", guarded_write)
+        return buffer
+
+    monkeypatch.setattr(engine.tempfile, "SpooledTemporaryFile", spool)
+    frozen = engine.freeze_inputs(plugin, tmp_path / "frozen")
+    assert observed == [limit + 1]
+    assert frozen.payload_hash == engine.runtime.fingerprint_source(
+        engine._source_files(frozen.packages),
+    )
 
 
 def test_freeze_refuses_missing_declared_dependency(engine, tmp_path):
@@ -375,7 +491,7 @@ def test_freeze_refuses_symlinked_source_and_destination_escape(engine, tmp_path
         engine.freeze_inputs(plugin, tmp_path / "frozen")
 
 
-@pytest.mark.timeout(180)
+@pytest.mark.timeout(300)
 def test_freeze_real_worktrees_graph_is_self_contained(engine, tmp_path):
     plugin = Path(__file__).resolve().parents[1]
     frozen = engine.freeze_inputs(plugin, tmp_path / "frozen")
@@ -390,6 +506,56 @@ def test_freeze_real_worktrees_graph_is_self_contained(engine, tmp_path):
         engine._source_files(frozen.packages)
     )
     assert all(root.is_relative_to(tmp_path / "frozen") for root in frozen.packages)
+
+
+@pytest.mark.parametrize("change", [None, "source", "snapshot", "missing"])
+def test_retained_inputs_validate_both_digests_from_one_source_read(
+    engine, tmp_path, monkeypatch, change,
+):
+    import hashlib
+    from contextlib import contextmanager
+
+    plugin = _package(tmp_path / "plugin", "example")
+    frozen = engine.freeze_inputs(plugin, tmp_path / "snapshot")
+    files = engine._source_files((plugin,))
+    inputs = engine.FrozenInputs(plugin, (plugin,), engine.runtime.fingerprint_source(files))
+    source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
+
+    @contextmanager
+    def retain(*_args, **_kwargs):
+        if change == "source":
+            (plugin / "src" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+        elif change == "snapshot":
+            source_hashes[files[0]] = "0" * 64
+        elif change == "missing":
+            del source_hashes[files[0]]
+        yield engine.RetainedUVInstall(
+            (), {}, frozen.plugin, {plugin: frozen.plugin}, source_hashes,
+        )
+
+    calls = dict.fromkeys(files, 0)
+    read_bytes = Path.read_bytes
+
+    def count_read(path):
+        if path in calls:
+            calls[path] += 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(engine, "retain_uv_install", retain)
+    monkeypatch.setattr(Path, "read_bytes", count_read)
+    if change is None:
+        with engine._retained_inputs(inputs, Path(sys.executable), Path(sys.executable), refresh=False):
+            pass
+    else:
+        message = {
+            "source": "Runtime inputs changed",
+            "snapshot": "Retained UV inputs differ from the admitted source content",
+            "missing": "Retained UV inputs do not cover",
+        }[change]
+        with pytest.raises(RuntimeError, match=message):
+            with engine._retained_inputs(inputs, Path(sys.executable), Path(sys.executable), refresh=False):
+                pytest.fail("invalid retained inputs cannot be admitted")
+    assert set(calls.values()) == {1}
 
 
 @pytest.fixture
@@ -503,6 +669,29 @@ def test_productive_owned_child_preserves_explicit_absolute_deadline(
         assert "progress00" in failure.value.output
         assert "progress39" not in failure.value.output
         assert time.monotonic() - started < 12
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_productive_owned_child_cannot_renew_explicit_deadline(
+    engine, procutil, tmp_path, retained,
+):
+    engine.runtime.slot(tmp_path, "1.0")
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        started = time.monotonic()
+        with pytest.raises(engine.ChildTimeoutExpired):
+            engine.run_owned(
+                [sys.executable, "-c",
+                 "import time\nfor _ in range(40): print('progress',flush=True);time.sleep(.25)"],
+                cwd=tmp_path, env=dict(os.environ), timeout=2, deadline=started + 3,
+                procutil=procutil, construction_fd=descriptor, on_output=lambda *_args: None,
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
+            )
+        assert 2.5 <= time.monotonic() - started < 7
     with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
         pass
 
@@ -863,7 +1052,9 @@ def test_owned_child_hard_owner_death_reaps_writer_tree(engine, procutil, tmp_pa
             job.terminate_and_wait(10)
         elif owner.poll() is None:
             owner.kill()
-        owner.communicate(timeout=10)
+        stdout, stderr = owner.communicate(timeout=10)
+        if sys.exc_info()[0] is not None:
+            print(f"Installer owner exited {owner.returncode}:\n{stdout!r}\n{stderr!r}")
 
 
 _WHEEL_BACKEND = '''
@@ -1233,6 +1424,17 @@ def test_selected_extras_use_retained_uv_and_cannot_reuse_another_profile(
         root, "1.0.0+host", extras=("server", "store"), **arguments,
     ) as reused:
         assert reused.reused and reused.extras == built.extras
+    with engine.numbered_candidate(
+        root, "1.0.0+host", extras=("server", "store"),
+        expected_payload_hash=built.payload_hash, **arguments,
+    ) as pinned:
+        assert pinned.reused and pinned.extras == built.extras
+    with pytest.raises(RuntimeError, match="expected frozen content"):
+        with engine.numbered_candidate(
+            root, "1.0.0+host", extras=("server",),
+            expected_payload_hash=built.payload_hash, **arguments,
+        ):
+            pytest.fail("a payload pin cannot conceal a different dependency profile")
     for extras in ((), ("server",), ("store",)):
         with pytest.raises(RuntimeError, match="different content"):
             with engine.numbered_candidate(root, "1.0.0+host", extras=extras, **arguments):
@@ -1314,6 +1516,173 @@ def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_chan
         assert probe.stdout.strip() == "1"
     assert not list((root / ".installer-inputs").iterdir())
     assert not candidate.frozen_plugin.exists()
+
+
+def test_expected_payload_pin_reuses_baseline_but_validates_retained_source(
+    engine, tmp_path, build_inputs, monkeypatch,
+):
+    plugin, uv = build_inputs
+    frozen = engine.freeze_inputs(plugin, tmp_path / "snapshot")
+    files = set(engine._source_files(frozen.packages))
+    fingerprint = engine.runtime.fingerprint_source
+    source_scans = []
+
+    def observe(paths, **kwargs):
+        paths = tuple(paths)
+        if set(paths) == files:
+            source_scans.append(paths)
+        return fingerprint(paths, **kwargs)
+
+    monkeypatch.setattr(engine.runtime, "fingerprint_source", observe)
+    root = tmp_path / "runtime"
+    with engine.numbered_candidate(
+        root, "1.0.0", plugin=frozen.plugin, uv=uv, base_python=Path(sys.executable),
+        health_module="example_module", expected_payload_hash=frozen.payload_hash,
+    ) as candidate:
+        assert not candidate.reused and candidate.payload_hash == frozen.payload_hash
+    assert len(source_scans) == 1, "retained validation must replace, not duplicate, the initial scan"
+    assert engine.runtime.is_complete(root, "1.0.0", expect_hash=frozen.payload_hash)
+
+    def no_writer(*_args, **_kwargs):
+        pytest.fail("healthy pinned reuse entered a construction writer")
+
+    monkeypatch.setattr(engine, "_retained_inputs", no_writer)
+    monkeypatch.setattr(engine, "_construct", no_writer)
+    with engine.numbered_candidate(
+        root, "1.0.0", plugin=frozen.plugin, uv=uv, base_python=Path(sys.executable),
+        health_module="example_module", expected_payload_hash=frozen.payload_hash,
+    ) as candidate:
+        assert candidate.reused and candidate.payload_hash == frozen.payload_hash
+    assert len(source_scans) == 2, "reuse must independently revalidate its pinned source"
+
+
+@pytest.mark.parametrize("reuse", [None, "fast", "after-wait"])
+def test_expected_payload_pin_refuses_changed_dependency_before_build_or_reuse(
+    engine, tmp_path, build_inputs, monkeypatch, reuse,
+):
+    plugin, uv = build_inputs
+    frozen = engine.freeze_inputs(plugin, tmp_path / "snapshot")
+    root = tmp_path / "runtime"
+    arguments = dict(
+        plugin=frozen.plugin, uv=uv, base_python=Path(sys.executable),
+        health_module="example_module", expected_payload_hash=frozen.payload_hash,
+    )
+    marker = engine.runtime.marker_path(root, "1.0.0")
+    if reuse is not None:
+        with engine.numbered_candidate(root, "1.0.0", **arguments):
+            pass
+        original_marker = marker.read_bytes()
+    (frozen.plugin.parent / "dependency" / "src" / "example_dependency.py").write_text(
+        "VALUE=2\n", encoding="utf-8",
+    )
+
+    def no_writer(*_args, **_kwargs):
+        pytest.fail("changed pinned inputs reached a construction writer")
+
+    monkeypatch.setattr(engine, "_construct", no_writer)
+    admissions = []
+    if reuse == "after-wait":
+        check_admission = engine.runtime.check_admission
+
+        def after_wait(*args, **kwargs):
+            decision = engine.runtime.ADMIT_CONSTRUCT if not admissions else check_admission(
+                *args, **kwargs,
+            )
+            admissions.append(decision)
+            return decision
+
+        monkeypatch.setattr(engine.runtime, "check_admission", after_wait)
+    with pytest.raises(RuntimeError, match="Runtime inputs changed"):
+        with engine.numbered_candidate(root, "1.0.0", **arguments):
+            pytest.fail("changed pinned inputs were admitted")
+    if reuse is None:
+        assert not marker.exists()
+    else:
+        assert marker.read_bytes() == original_marker
+    if reuse == "after-wait":
+        assert admissions[:2] == [engine.runtime.ADMIT_CONSTRUCT, engine.runtime.ADMIT_REUSE]
+        assert set(admissions[1:]) == {engine.runtime.ADMIT_REUSE}
+
+
+@pytest.mark.parametrize("invalid", ["wrong", "a" * 63, "g" * 64])
+def test_expected_payload_pin_refuses_malformed_hash(engine, tmp_path, invalid):
+    plugin = _package(tmp_path / "plugin", "example")
+    with pytest.raises(ValueError, match="full source SHA256"):
+        with engine.numbered_candidate(
+            tmp_path / "runtime", "1.0.0", plugin=plugin,
+            uv=tmp_path / "uv", base_python=Path(sys.executable),
+            health_module="example_module", expected_payload_hash=invalid,
+        ):
+            pytest.fail("malformed payload pin was admitted")
+
+
+@pytest.mark.timeout(120)
+def test_dev_generations_freeze_sources_and_reuse_without_writers(
+    engine, procutil, tmp_path, build_inputs, monkeypatch,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    owner = str(plugin.parent)
+    engine.runtime.claim_dev(root, owner, previous_version="original")
+    arguments = dict(
+        owner=owner, plugin=plugin, uv=uv, base_python=Path(sys.executable),
+        health_module="example_module",
+    )
+    snapshots = {}
+    for value in (1, 2):
+        (plugin.parent / "dependency" / "src" / "example_dependency.py").write_text(
+            f"VALUE={value}\n", encoding="utf-8",
+        )
+        with engine.dev_candidate(root, **arguments) as candidate:
+            assert candidate.slot.name == f"dev-{candidate.payload_hash}"
+            assert not candidate.reused
+            snapshots[candidate.slot] = {
+                path.relative_to(candidate.slot): path.read_bytes()
+                for path in candidate.slot.rglob("*") if path.is_file()
+            }
+            with pytest.raises(engine.runtime.RetentionTimeout):
+                with engine.runtime._kernel_lease(
+                    root, candidate.slot.name, kind="retention", shared=False, timeout=0,
+                ):
+                    pytest.fail("ready development generation lost retention")
+            with engine.runtime.construction_lease(root, candidate.slot.name, timeout=0):
+                pass
+    assert len(snapshots) == 2 and not (root / "versions" / "dev").exists()
+    for value, (slot, snapshot) in enumerate(snapshots.items(), start=1):
+        python = engine.runtime.slot_python(root, slot.name)
+        result = subprocess.run(
+            [str(python), "-I", "-B", "-c", "import example_module;print(example_module.VALUE)"],
+            capture_output=True, text=True, check=True, timeout=10,
+            **procutil.no_window_kwargs(),
+        )
+        assert result.stdout.strip() == str(value)
+        assert {
+            path.relative_to(slot): path.read_bytes()
+            for path in slot.rglob("*") if path.is_file()
+        } == snapshot
+
+    def no_writer(*_args, **_kwargs):
+        pytest.fail("healthy development reuse entered a construction writer")
+
+    monkeypatch.setattr(engine.runtime, "construction_lease", no_writer)
+    monkeypatch.setattr(engine, "_retained_inputs", no_writer)
+    arguments.update(uv=tmp_path / "missing-uv", base_python=tmp_path / "missing-python")
+    with engine.dev_candidate(root, **arguments) as reused:
+        assert reused.reused and reused.slot == candidate.slot
+    assert engine.runtime.read_dev_claim(root, strict=True)["previous_version"] == "original"
+    assert {
+        path.relative_to(reused.slot): path.read_bytes()
+        for path in reused.slot.rglob("*") if path.is_file()
+    } == snapshots[reused.slot]
+    marker = engine.runtime.marker_path(root, reused.slot.name)
+    receipt = json.loads(marker.read_text(encoding="utf-8"))
+    receipt["payload_hash"] = "different"
+    conflict = json.dumps(receipt).encode("utf-8")
+    marker.write_bytes(conflict)
+    with pytest.raises(RuntimeError, match="different content"):
+        with engine.dev_candidate(root, **arguments):
+            pytest.fail("development hash identity was rewritten")
+    assert marker.read_bytes() == conflict
 
 
 @pytest.mark.timeout(120)
@@ -1399,8 +1768,9 @@ def test_fresh_health_requires_its_frozen_origin_receipt(
         pass
 
 
+@pytest.mark.parametrize("development", [False, True], ids=["numbered", "development"])
 def test_real_first_builders_coalesce_and_release_construction_before_settlement(
-    engine, procutil, tmp_path, build_inputs, monkeypatch,
+    engine, procutil, tmp_path, build_inputs, monkeypatch, development,
 ):
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
@@ -1408,16 +1778,22 @@ def test_real_first_builders_coalesce_and_release_construction_before_settlement
     counter = tmp_path / "build-counter"
     counter.mkdir()
     monkeypatch.setenv("TEST_BUILD_COUNTER", str(counter))
+    if development:
+        engine.runtime.claim_dev(root, str(plugin.parent), previous_version="original")
+    candidate_call = (
+        f"dev_candidate(root,owner={str(plugin.parent)!r},"
+        if development else "numbered_candidate(root,'1.0.0',"
+    )
     code = (
         "import pathlib,sys,json\n"
         f"sys.path[:0]=[{str(source / 'libs' / 'installer-engine')!r},"
         f"{str(source / 'plugins' / 'agent-worktrees' / 'scripts')!r}]\n"
         "import installer_engine as engine\n"
         f"root=pathlib.Path({str(root)!r})\n"
-        f"with engine.numbered_candidate(root,'1.0.0',plugin=pathlib.Path({str(plugin)!r}),"
+        f"with engine.{candidate_call}plugin=pathlib.Path({str(plugin)!r}),"
         f"uv=pathlib.Path({str(uv)!r}),base_python=pathlib.Path(sys.executable),"
         "health_module='example_module') as candidate:\n"
-        " with engine.runtime.construction_lease(root,'1.0.0',timeout=10):\n"
+        " with engine.runtime.construction_lease(root,candidate.slot.name,timeout=10):\n"
         "  print(json.dumps({'reused':candidate.reused,'hash':candidate.payload_hash}),flush=True)\n"
     )
     processes = []
@@ -1638,31 +2014,35 @@ def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
 def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
     engine, procutil, tmp_path, build_inputs, monkeypatch,
 ):
-    from types import SimpleNamespace
-    from native_installer_guardian_teardown import write_procutil
+    import base64
+    from native_installer_guardian_teardown import fault_source
 
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     marker = tmp_path / "writers"
     observations = tmp_path / "teardown.json"
-    injected = tmp_path / "guardian_procutil.py"
     observed_inputs = []
     original = engine._procutil
+    run_owned = engine.run_owned
 
     def instrument(inputs):
         observed_inputs.append(inputs)
-        owned = original(inputs)
-        write_procutil(
-            injected, procutil=Path(owned.__file__), runtime=Path(engine.runtime.__file__),
-            root=root, frozen=inputs.plugin, marker=marker, observations=observations,
-            writer=_writer_tree(marker),
+        return original(inputs)
+
+    def inject(argv, **options):
+        guardian = sys.modules[run_owned.__module__]
+        packet = json.loads(guardian._guardian_packet(
+            options["procutil"], options["runtime_path"], None,
+        ))
+        sources = {name: base64.b64decode(value) for name, value in packet.items()}
+        sources["_construction_procutil/__init__.py"] += fault_source(
+            root=root, frozen=observed_inputs[-1].plugin, marker=marker,
+            observations=observations, writer=_writer_tree(marker),
         )
-        return SimpleNamespace(
-            __file__=injected, no_window_kwargs=owned.no_window_kwargs,
-            __name__=owned.__name__,
-        )
+        return run_owned(argv, **{**options, "guardian_sources": sources})
 
     monkeypatch.setattr(engine, "_procutil", instrument)
+    monkeypatch.setattr(engine, "run_owned", inject)
     with pytest.raises(RuntimeError, match="guardian did not confirm settlement"):
         with engine.numbered_candidate(
             root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),

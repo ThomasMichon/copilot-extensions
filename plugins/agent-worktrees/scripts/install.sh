@@ -197,7 +197,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 "$__aw_admission_python" "${__aw_admission_args[@]}" \
                     --check-lifecycle --lifecycle-operation "$__aw_admission_operation" || exit $?
             else
-                __aw_admission_bash="$(type -P -- bash)" || exit 1
+                __aw_admission_bash="$BASH"
                 __aw_admission_bash="$(cd "$(dirname "$__aw_admission_bash")" && pwd -P)/$(basename "$__aw_admission_bash")"
                 if [[ "$__aw_action" == stamp ]]; then
                     __aw_admission_args+=(--deferred-runtime)
@@ -251,7 +251,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         if [[ -n "$__aw_context_python" ]]; then
             "$__aw_context_python" -I -S -B -X utf8 "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
         else
-            bash "$__aw_context_helper" "$@"
+            "$BASH" "$__aw_context_helper" "$@"
         fi
     }
     __aw_runtime_inputs="${AGENT_WORKTREES_RUNTIME_INPUTS:-$PLUGIN_DIR}"
@@ -510,7 +510,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         __aw_install_root=$4
         shift 4
         set -m
-        bash "$__aw_staged_entry" "$@" &
+        "$BASH" "$__aw_staged_entry" "$@" &
         __aw_child=$!
         set +m
         __aw_watcher=""
@@ -565,14 +565,14 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         exit "$__aw_rc"
 CONTEXT_INSTALL_WATCHDOG
         )"
-        exec bash -c "$__aw_watchdog" bash \
+        exec "$BASH" -c "$__aw_watchdog" bash \
             "$__aw_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")" \
             "$__aw_stage" "$__aw_deadline" "$__aw_install_root" "$@"
     fi
 fi
 
 if [[ "$__aw_action" == uninstall ]]; then
-    __aw_uninstall_shell="$(type -P bash)" || exit 1
+    __aw_uninstall_shell="$BASH"
     __aw_uninstall_shell="$(cd "$(dirname "$__aw_uninstall_shell")" && pwd -P)/$(basename "$__aw_uninstall_shell")"
     __aw_uninstall_args=(
         -I -S -B -X utf8 "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-state.py")"
@@ -1283,7 +1283,7 @@ _deploy_python_runtime() {
     if [[ "$ACTION" != dev-release ]]; then
         local publisher scope=resolvers
         [[ "$ACTION" != install && "$ACTION" != update ]] || scope=wrappers
-        publisher="$(type -P bash)" || return 1
+        publisher="$BASH"
         case "${OSTYPE:-}" in
             msys*|cygwin*) [[ "$publisher" == *.exe || ! -f "$publisher.exe" ]] || publisher+=".exe" ;;
         esac

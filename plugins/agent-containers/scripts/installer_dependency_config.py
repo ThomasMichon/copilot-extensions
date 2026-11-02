@@ -17,32 +17,9 @@ import time as clock
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path, PureWindowsPath
+from installer_dependency_arguments import argument_pairs as argument_pairs, balanced as balanced, uv_command
 
 _WINDOWS = os.name == "nt"
-
-
-def argument_pairs(arguments, value_options, *, error_type):
-    """Distinguish UV option values from source operands."""
-    iterator = iter(arguments)
-    positional = False
-    for argument in iterator:
-        if positional or not argument.startswith("-"):
-            yield "", argument
-        elif argument == "--":
-            positional = True
-        else:
-            option, separator, value = argument.partition("=")
-            if (not argument.startswith("--") and len(argument) > 2
-                    and argument[:2] in value_options):
-                option, separator, value = argument[:2], "=", argument[2:]
-            if option in value_options:
-                if not separator:
-                    value = next(iterator, "")
-                if not value or value.startswith("--"):
-                    raise error_type("dependency installation option has no value")
-                yield option, value
-            else:
-                yield option, value
 
 
 def immutable_install_arguments(arguments, pairs, *, error_type):
@@ -115,14 +92,14 @@ def verify_retained_sources(
 def prepare_uv_install(
     uv, arguments, *, environment, cwd, now, trusted_source_roots, projection,
     operation, deadline, native_target, compile_inputs, source_inputs, select_uv,
-    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless,
+    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless, value_options,
 ):
     remaining_timeout(deadline, error_type=error_type)
     if native_target and environment.get("UV_PYTHON_PLATFORM"):
         raise error_type("native source lock export cannot override its selected target")
     if operation in ("compile", "source-compile"):
         arguments = compile_inputs(arguments, environment, cwd, trusted_source_roots, operation)
-    source_inputs(
+    base, *_ = source_inputs(
         arguments, environment, cwd, trusted_source_roots,
         **({"operation": operation} if operation != "install" else {}),
     )
@@ -130,10 +107,14 @@ def prepare_uv_install(
     uv = select_uv(uv)
     probe_arguments = [arg for arg in arguments if arg != "--quiet" and not re.fullmatch(r"-q+", arg)]
     native_operation = "compile" if operation == "source-compile" else operation
+    command, probe_cwd = uv_command(
+        uv, ["--show-settings", *probe_arguments], cwd=cwd, directory=base,
+        operation=native_operation, windows=os.name == "nt", argument_pairs=argument_pairs,
+        value_options=value_options,
+    )
     try:
         result = subprocess.run(
-            [uv, "pip", native_operation, "--show-settings", *probe_arguments],
-            capture_output=True, text=True, env=environment, cwd=cwd,
+            command, capture_output=True, text=True, env=environment, cwd=probe_cwd,
             timeout=remaining_timeout(deadline, error_type=error_type, cap=settings_timeout),
             creationflags=headless,
         )
@@ -162,6 +143,7 @@ def prepare_uv_install(
               and argument not in ("--reinstall", "--force-reinstall")):
             cleaned.append(argument)
     return [*cleaned, *admitted]
+
 
 # native-executable:begin
 def physical_executable(path: str) -> str | None:
