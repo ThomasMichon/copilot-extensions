@@ -180,6 +180,11 @@ UNKNOWN, unsupported old-provider responses and identity errors retain custody.
 Only a positively empty identity may use bounded force-fail, which rechecks
 receipts in the state-transition write transaction. Native retirement alone
 does not settle unresolved transport custody.
+Once a receipt-backed attempt is terminal and has no pending native release,
+the receipt remains historical identity evidence, not a reason to retire it
+again. Subsequent sweeps use the existing claimed and validated workspace
+cleanup path; terminal historical attempts with `native_release_pending`
+still require their original native retirement first.
 This is an additive expansion of the existing reservation GET; older callers
 ignore the extra fields. Roll out the provider first, then the new recovery
 caller. Rolling back that provider leaves new callers holding handleless

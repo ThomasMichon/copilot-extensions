@@ -1970,3 +1970,18 @@ accountability/recovery typing and the four admitted Linux/Windows projects
 are separate from unqualified legacy mixin typing debt.
 Current-head review, actual merge, caller/startup-policy integration and every
 canonical parent/native gate remain open. No runtime was activated.
+
+### 2026-11-01 - Terminal receipt cleanup follow-through prepared
+
+A retained acquisition receipt is historical identity evidence after exact
+native retirement, not a request to retire the terminal attempt again.
+Receipt-backed retirement is limited to active attempts; historical
+`native_release_pending` remains independently actionable. Failed and settled
+attempts therefore reach the existing claimed/validated workspace cleanup on
+the next sweep. Two real second-sweep controls prove the cleanup claim,
+completed conclusion, absence of repeated native probes, idempotent later
+sweeps and subsequent same-dedup explicit workspace reuse.
+The coupled contained run passes **1538 controls**, one existing skip, across
+twenty-six selectors. Current-head review, actual merge, caller/startup
+integration and all canonical parent/native gates remain open; this source
+correction activates no runtime.

@@ -92,9 +92,14 @@ def test_incomplete_empty_root_cannot_authorize_successor_publication(q: TaskQue
     assert q.get_reservation(successor.key) == before
 
 
-def receipt_for(q: TaskQueue, t: Any, reservation: Any, native: str = "replacement") -> dict[str, Any]:
+def receipt_for(
+    q: TaskQueue, t: Any, reservation: Any, native: str = "replacement", *, ownership: str = "reused",
+) -> dict[str, Any]:
     q.record_spawn_worktree(
-        reservation.key, "worktree", ownership="reused", execution_machine="host-a", driver="cli",
+        reservation.key, "worktree", ownership=ownership, execution_machine="host-a", driver="cli",
+        creating_host="host-a" if ownership == "created" else None,
+        allocation_project="example" if ownership == "created" else None,
+        worktree_path="/workspace" if ownership == "created" else None,
     )
     return {
         "reservation_key": reservation.key, "task_id": t.id,
@@ -215,14 +220,17 @@ def test_empty_origin_and_unbound_inherited_markers_use_linear_retirement_work(
     assert len(calls) <= 4 * (count + 2)
 
 
-def bound_handleless_release(q: TaskQueue, *, startup_closed: bool = True) -> tuple[Any, Any]:
+def bound_handleless_release(
+    q: TaskQueue, *, startup_closed: bool = True, ownership: str = "reused",
+    disposition: str = "failed",
+) -> tuple[Any, Any]:
     publish(q, pool())
-    t = task(q)
+    t = task(q, dedup_key="receipt-work")
     reservation, _ = place(q, t)
-    receipt = receipt_for(q, t, reservation, native="receipt-native")
+    receipt = receipt_for(q, t, reservation, native="receipt-native", ownership=ownership)
     acquisition_receipts.bind(q, receipt, evidence=authority(receipt))
     released = q.request_spawn_release(
-        reservation.key, finished_startup_revision=1 if startup_closed else None,
+        reservation.key, finished_startup_revision=1 if startup_closed else None, disposition=disposition,
     )
     assert released.session_handle is None
     return t, released
@@ -356,3 +364,42 @@ def test_receipt_retirement_does_not_drop_unsettled_transport_accountability(q: 
     assert q.get_reservation(released.key).state == SpawnState.FAILED
     with pytest.raises(TaskError, match="capacity"):
         place(q, task(q))
+
+
+@pytest.mark.parametrize("disposition", ["failed", "settled"])
+def test_retired_receipt_runs_guarded_cleanup_on_second_sweep_and_unblocks_reuse(
+    q: TaskQueue, disposition: str,
+) -> None:
+    t, released = bound_handleless_release(q, ownership="created", disposition=disposition)
+    probes, conclusions = [], []
+
+    def conclude(*args: Any) -> dict:
+        current = q.get_reservation(released.key)
+        assert current.cleanup_claim_token
+        q.validate_spawn_conclusion_claim(released.key, current.cleanup_claim_token)
+        conclusions.append(args)
+        return {"action": "primed"}
+
+    supervisor = Supervisor(
+        QueueBackedClient(q), machine="host-a", spawn_fn=lambda _: pytest.fail("no spawn"),
+        verdict_fn=lambda *args: probes.append(args) or tracking.GONE,
+        attempt_conclusion_fn=conclude,
+    )
+    assert supervisor.release_requested_bodies(now=100) == 1
+    retired = q.get_reservation(released.key)
+    assert retired.state == disposition and retired.conclusion_state == "pending"
+    assert not retired.native_release_pending and retired.session_handle is None
+    assert conclusions == []
+    assert supervisor.release_requested_bodies(now=101) == 0
+    current = q.get_reservation(released.key)
+    assert current.state == disposition and current.conclusion_state == "complete"
+    assert current.cleanup_claim_expires_at == 0
+    assert len(conclusions) == 1
+    assert conclusions[0][0] == "worktree" and conclusions[0][2] == released.key
+    assert probes == [("worktree", "host-a", "receipt-native")]
+    assert supervisor.release_requested_bodies(now=102) == 0
+    assert len(conclusions) == 1
+    q.abandon(t.id, permitted=True, reason="synthetic prior request")
+    successor = task(q, dedup_key="receipt-work", target_worktree="worktree")
+    reservation, reserved = place(q, successor)
+    assert reserved and reservation.worktree == "worktree"

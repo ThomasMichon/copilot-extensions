@@ -1466,7 +1466,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 if current is None or not current.get("release_requested"):
                     continue
                 res = current
-            if res.get("native_release_pending") or res.get("reservation_native_session_id"):
+            if res.get("native_release_pending") or (
+                res.get("state") in SpawnState.ACTIVE and res.get("reservation_native_session_id")
+            ):
                 released += retire_historical_native(
                     self, res, task, native_session_id=res.get("reservation_native_session_id"),
                 )
