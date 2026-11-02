@@ -1,0 +1,9 @@
+{
+  "comment": "Type PowerShell bootstrap and directory lock handoff test boundaries",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
