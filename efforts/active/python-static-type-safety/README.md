@@ -1208,3 +1208,11 @@ composition prerequisites, and review/validation rules.
   Fresh provisioning and external-venue runtime tests do not apply to this
   type-contract-only slice. Exact-candidate source CI and review remain required
   before merge; #9807 remains active.
+- The first source-CI unit job correctly rejected stale admission hashes for
+  the two edited canonical source files. After reviewing their pure unit/import
+  closure, only those two hashes were refreshed; the 3,665 nodes, 458 source
+  entries, 209 coverage targets and 300-second budget were preserved exactly.
+  The complete existing packet then passed locally in 234.78 seconds under
+  owned process containment, with coverage recorded and cleanup/audit complete.
+  Its 16 non-admitted collected cases remain deselected by the unchanged exact
+  whitelist. Updated-head review and source CI remain required.
