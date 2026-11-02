@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -632,3 +632,39 @@ composition prerequisites, and review/validation rules.
   production budgets, enablement and review gates are unchanged. No installed
   rollout occurred. The typing worktree is pulled forward for #9953's fresh
   assessment; the full strict-typing campaign remains active.
+
+### 2026-11-02 - Lazy CLI Dispatch merged; Bootstrap Killswitch selected
+
+- #9953 merged as `a67a668ebe832c5f31d48f6b747e4dd85fb450e4`
+  after a genuine exact-head Copilot approval with no findings, its regression
+  thread resolved and all required checks in
+  [run 41432933210](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41432933210).
+  No review exception was used. The repaired file-read guidance restored
+  the normal review flow.
+- The source worktree is pulled forward after a backup and exact stable
+  patch equivalence proved all four local commits were present in the merged
+  squash. Eleven projects are strict and 57 remain pending.
+- #9964 selects all three canonical Bootstrap Killswitch Python files.
+  Its initial Linux strict probe reports 28 diagnostics across the source
+  helper and two shell-contract test files. The slice preserves default-cell
+  scope, fail-open reads, atomic publication, parser dispatch and shell
+  behavior; physical consumer copies retain independent pending typing
+  ownership. No switch activation or installed-runtime rollout is requested.
+- The candidate passes strict checking for all three files on both declared
+  targets, and all 24 admitted analysis targets pass. State records use
+  `dict[str, object]`; the parser-installed handler retains its existing
+  callable dispatch through a narrow cast. Fixture annotations and optional
+  executable assertions preserve the existing shell availability skips.
+- All ten shell controls pass under PowerShell 7 and again under Windows
+  PowerShell 5.1. The 27 CLI/hook consumer controls pass, and the separately
+  enabled cached-manifest hook integration passes real subprocess/IPC
+  stop/restore and fallback behavior. All state is redirected into test-owned
+  temporary paths. The native Bash lane is not run on this Windows host;
+  its only changes are fixture/return annotations, not the shell guard.
+- Existing source synchronization updates exactly three Python copies.
+  Their own typing ownership remains pending; no unit-source digest, node,
+  decision target or packet budget changes. Ruff, install contract and the
+  complete 13-adopter synchronization check pass. This proposes 12 strict
+  projects and 56 pending projects; hosted source/packet CI and normal review
+  remain required. Annotation-only runtime changes do not require a separate
+  provisioning clean room or installed-runtime rollout.

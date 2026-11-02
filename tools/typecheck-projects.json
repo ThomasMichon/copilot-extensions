@@ -56,7 +56,7 @@
         "libs/bootstrap-killswitch"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-config-migrate",
