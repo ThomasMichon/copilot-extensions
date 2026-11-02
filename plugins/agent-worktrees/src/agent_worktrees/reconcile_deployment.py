@@ -146,7 +146,7 @@ HOOK_SHIM_FILES = (
     "deregister-session.ps1", "deregister-session.sh",
     "anchor-hygiene-check.ps1", "anchor-hygiene-check.sh",
     "provision-check.ps1", "provision-check.sh",
-    "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py",
+    "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py",
     "pr_supersede_guard.py",
     "registry_root.py",
     "hook_client.py", "hook_pre_policy.py", "hook_policy_process.py",

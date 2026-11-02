@@ -15,6 +15,7 @@ _NO_PROJECT_COMMANDS = {
     "forks",
     "copilot-identity",
     "related",
+    "refresh-guards",
     "install",
     "register",
     "hook",

@@ -296,7 +296,10 @@ def read_related_grafted_report(anchors: list[str | Path]) -> AcquisitionReport[
     return AcquisitionReport("related-graft", value, tuple(observations))
 
 
-def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
+def source_anchors(
+    base_anchor, *, installed_anchors=None, observations=None,
+    configuration=None, activation_report=None,
+):
     from configuration_layers import ConfigurationError
 
     from . import config_sources
@@ -304,7 +307,7 @@ def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
     from . import related_cli as cli
 
     try:
-        config = cli.cfg.load_config(
+        config = configuration if configuration is not None else cli.cfg.load_config(
             include_control_plane_related_pr=False, include_knowledge_preferences=False,
         )
         if observations is None:
@@ -352,7 +355,10 @@ def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
         elif observations is None:
             discovered = r.installed_plugin_related_anchors()
         else:
-            plugin_report = r.installed_plugin_related_anchors_report()
+            plugin_report = (
+                r.installed_plugin_related_anchors_report(report=activation_report)
+                if activation_report is not None else r.installed_plugin_related_anchors_report()
+            )
             discovered = plugin_report.value
             observations.extend(plugin_report.observations)
         plugins = [p for p in discovered if key(p) not in existing]
@@ -373,10 +379,14 @@ def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
 
 def _related_config_source_anchors_report(
     base_anchor: str, *, installed_anchors: list[str] | None = None,
+    configuration=None, activation_report=None,
 ) -> AcquisitionReport[list[str]]:
     """Report source selection only; no registry checkout paths are resolved here."""
     observations = []
-    value = source_anchors(base_anchor, installed_anchors=installed_anchors, observations=observations)
+    value = source_anchors(
+        base_anchor, installed_anchors=installed_anchors, observations=observations,
+        configuration=configuration, activation_report=activation_report,
+    )
     return AcquisitionReport("related-source-anchors", value, tuple(observations))
 
 

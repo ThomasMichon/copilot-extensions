@@ -27,7 +27,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     scripts.mkdir()
     for name in (
         "pre-tool-hook.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1", "hook_policy_process.py",
-        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
+        "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     observed = tmp_path / "python-ran"

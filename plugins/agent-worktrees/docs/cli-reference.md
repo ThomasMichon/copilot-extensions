@@ -1381,6 +1381,7 @@ to the effort after release.
 |------------|-------------|
 | `services` | Service discovery, staleness checks, passthrough to installers |
 | `repos` | Repos registry -- list, find, add, clone, srcroot, `sync`, `account`/`account-for` (owner→gh-login map), `allow-edits` (break-glass edit grants) |
+| `refresh-guards [--repo PATH] [--json]` | Explicitly publish caller-scoped [guard facts](guarded-anchor-map.md) after out-of-band edits; no service startup or hook-time discovery |
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |

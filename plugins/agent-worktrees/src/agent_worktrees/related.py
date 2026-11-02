@@ -618,7 +618,12 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
                 lines.append("    pr: {}")
             lines.append("")
 
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from .guarded_anchors import managed_write
+
+    managed_write(
+        lambda: path.write_text("\n".join(lines) + "\n", encoding="utf-8"),
+        caller=None if _looks_like_plugin_anchor(Path(anchor)) else anchor,
+    )
 
 
 # ---------------------------------------------------------------------------

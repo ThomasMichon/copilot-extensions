@@ -78,6 +78,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from registry_root import resolve_registry_root
 from anchor_shell_parser import (
+    GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
@@ -350,7 +351,7 @@ def _git_invocation(
             has_repo_override = has_repo_override or lower == "--git-dir"
             if index + 1 < len(tokens):
                 value = tokens[index + 1]
-                targets[lower[2:]] = _resolve(value, git_cwd)
+                targets[lower[2:]] = value
             index += 2
             continue
         matched_target = False
@@ -359,7 +360,7 @@ def _git_invocation(
                 has_repo_override = has_repo_override or option == "--git-dir"
                 value = _unquote_shell_token(token.split("=", 1)[1])
                 if value:
-                    targets[option[2:]] = _resolve(value, git_cwd)
+                    targets[option[2:]] = value
                 matched_target = True
                 break
         if matched_target:
@@ -374,6 +375,9 @@ def _git_invocation(
         if lower.startswith("--exec-path="):
             index += 1
             continue
+        if lower in _GIT_GLOBAL_LONG_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
         if any(
             lower.startswith(option + "=")
             for option in _GIT_GLOBAL_LONG_OPTIONS_WITH_VALUE
@@ -383,14 +387,20 @@ def _git_invocation(
         if token.startswith("-"):
             index += 1
             continue
-        subcommand = "__configured-alias__" if lower in configured_aliases else lower
+        subcommand = "__configured-alias__" if (
+            lower in configured_aliases and lower not in _GIT_READ_BUILTINS
+            and not _git_subcommand_is_write(lower)
+        ) else lower
         resolved_targets = _git_resolved_targets(
             targets, git_cwd, git_cwd_overridden, subcommand,
         )
         return subcommand, tokens[index + 1:], resolved_targets, has_repo_override
     if index < len(tokens):
         subcommand = tokens[index].lower()
-        if subcommand in configured_aliases:
+        if (
+            subcommand in configured_aliases and subcommand not in _GIT_READ_BUILTINS
+            and not _git_subcommand_is_write(subcommand)
+        ):
             subcommand = "__configured-alias__"
         resolved_targets = _git_resolved_targets(
             targets, git_cwd, git_cwd_overridden, subcommand,
@@ -410,7 +420,7 @@ def _git_resolved_targets(
     git_cwd_overridden: bool,
     subcommand: str,
 ) -> list[tuple[str, str]]:
-    resolved = list(targets.items())
+    resolved = [(kind, _resolve(path, git_cwd)) for kind, path in targets.items()]
     if "git-dir" in targets:
         if (
             "work-tree" not in targets
