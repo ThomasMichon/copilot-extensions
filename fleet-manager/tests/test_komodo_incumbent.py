@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import os
 from pathlib import Path
+import stat
 import sys
 import time
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from fleet_manager.komodo_repair import KomodoRepairOwner
 from fleet_manager.komodo_repair_selection import KomodoRepairSelection
 from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, render_profile
 from fleet_manager.komodo_selection import KomodoSelection
+from fleet_manager.komodo_storage import KomodoIncumbentStorage
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.planning import PlanError, canonical, decode, digest
@@ -127,6 +129,137 @@ def test_incumbent_observation_retains_originals_without_synthesizing_fresh_cred
     selected["images"]["mongo"]["version"] = "7.0.45"
     with pytest.raises(PlanError, match="cannot render"):
         render_profile(KomodoDeclaration.from_dict(selected), material, owner="a" * 64)
+
+
+def _observed_storage(incumbent):
+    material = incumbent.material
+    roots = {Path(volume["Mountpoint"]) for volume in incumbent.volumes}
+    files = {path for path in material.retained_files if any(root in path.parents for root in roots)}
+    for role in ("core", "periphery"):
+        path = material.keys / (role + ".pub")
+        path.write_bytes(PUBLIC_PEM[role].encode("utf-8"))
+        files.add(path)
+    entries = {}
+    for path in roots | files:
+        info = path.stat()
+        entries[str(path)] = {
+            "device": info.st_dev, "inode": info.st_ino, "uid": 0, "gid": 0,
+            "mode": (stat.S_IFREG | (0o644 if path.suffix == ".pub" else 0o600)
+                     if path in files else stat.S_IFDIR | 0o700),
+            "nlink": 1 if path in files else 2,
+        }
+        if path in files:
+            entries[str(path)]["size"] = info.st_size
+            entries[str(path)]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    snapshot = {"entries": entries, "public": dict(PUBLIC_PEM)}
+    requests = []
+
+    def read(request):
+        requests.append(decode(request))
+        return canonical({
+            "request": digest(decode(request)), "valid_until": int(time.time()) + 60,
+            **snapshot,
+        })
+
+    storage = KomodoIncumbentStorage(
+        "original-daemon", tuple((path, 0, 0) for path in sorted(files)), read)
+    return storage, snapshot, requests
+
+
+def test_original_storage_observation_never_traverses_host_volume_paths(incumbent, monkeypatch):
+    storage, snapshot, requests = _observed_storage(incumbent)
+    roots = {Path(volume["Mountpoint"]) for volume in incumbent.volumes}
+    for method in ("stat", "lstat"):
+        original = getattr(Path, method)
+
+        def guarded(path, *args, _original=original, **kwargs):
+            if any(path == root or root in path.parents for root in roots):
+                raise PermissionError("host caller cannot traverse original volume")
+            return _original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, method, guarded)
+    material = replace(incumbent.material, storage=storage)
+    before = material.evidence()
+    assert before["storage_daemon"] == "original-daemon"
+    assert before["files"][str(material.keys / "core.key")]["uid"] == 0
+    assert identity_digest(material) == digest({name: value.strip() for name, value in PUBLIC_PEM.items()})
+    assert requests and all(request["volumes"] == incumbent.volumes for request in requests)
+    assert b"original-private-key-fixture" not in material.profile()
+    snapshot["entries"][str(material.keys / "core.key")]["inode"] = (
+        max(item["inode"] for item in snapshot["entries"].values()) + 1)
+    assert material.evidence() != before
+    snapshot["entries"][str(material.keys / "core.key")]["mode"] |= 0o040
+    with pytest.raises(PlanError, match="custody"):
+        material.evidence()
+
+
+@pytest.mark.parametrize("change", [
+    "stale", "request", "missing", "extra", "uid", "symlink", "links", "public", "private-mode",
+    "empty-key", "oversize", "alias",
+])
+def test_original_storage_observation_refuses_unproved_or_changed_evidence(incumbent, change):
+    storage, snapshot, _ = _observed_storage(incumbent)
+    key = str(incumbent.material.keys / "core.key")
+    if change == "missing":
+        snapshot["entries"].pop(key)
+    elif change == "extra":
+        snapshot["entries"][key + "-other"] = dict(snapshot["entries"][key])
+    elif change == "uid":
+        snapshot["entries"][key]["uid"] = 42
+    elif change == "symlink":
+        snapshot["entries"][key]["mode"] = stat.S_IFLNK | 0o600
+    elif change == "links":
+        snapshot["entries"][key]["nlink"] = 2
+    elif change == "public":
+        snapshot["public"]["core"] = "not the retained public bytes"
+    elif change == "private-mode":
+        snapshot["entries"][key]["mode"] |= 0o004
+    elif change == "empty-key":
+        snapshot["entries"][key]["size"] = 0
+    elif change == "oversize":
+        snapshot["entries"][key]["size"] = 1024 * 1024 + 1
+    elif change == "alias":
+        other = snapshot["entries"][str(incumbent.material.keys / "periphery.key")]
+        other["device"], other["inode"] = (
+            snapshot["entries"][key]["device"], snapshot["entries"][key]["inode"])
+    else:
+        original = storage.read
+
+        def read(request):
+            value = decode(original(request))
+            value["valid_until" if change == "stale" else "request"] = (
+                int(time.time()) - 1 if change == "stale" else "0" * 64)
+            return canonical(value)
+
+        storage = replace(storage, read=read)
+    with pytest.raises(PlanError, match="storage"):
+        replace(incumbent.material, storage=storage)
+
+
+def test_original_storage_cannot_cover_unselected_file_owners(incumbent):
+    storage, _, _ = _observed_storage(incumbent)
+    with pytest.raises(PlanError, match="original volume owners"):
+        replace(incumbent.material, storage=replace(storage, file_owners=storage.file_owners[:-1]))
+
+
+def test_original_storage_cannot_be_observed_through_another_native_daemon(incumbent, monkeypatch):
+    storage, _, requests = _observed_storage(incumbent)
+    material = replace(incumbent.material, storage=storage)
+    requests.clear()
+    monkeypatch.setattr("fleet_manager.komodo_native.sys", SimpleNamespace(platform="linux"))
+    native = KomodoNative(SimpleNamespace(daemon_id="another-daemon"))
+    with pytest.raises(PlanError, match="another daemon"):
+        native.verify_storage(material, deadline=time.monotonic() + 10)
+    assert not requests
+
+
+def test_original_storage_rejects_unrelated_volume_before_calling_its_owner(incumbent):
+    storage, _, requests = _observed_storage(incumbent)
+    value = decode(incumbent.material.encoded)
+    value["volumes"].append({**value["volumes"][0], "Name": "unrelated-volume"})
+    with pytest.raises(PlanError, match="unrelated storage"):
+        replace(incumbent.material, storage=storage, encoded=canonical(value))
+    assert not requests
 
 
 def _socket_mount(material, source):

@@ -10,6 +10,7 @@ import stat
 from .artifact_staging import _bytes
 from .komodo_declaration import SERVICES
 from .komodo_profile import KomodoMaterialization, ordinary_path
+from .komodo_storage import KomodoIncumbentStorage, storage_path
 from .planning import PlanError, canonical, decode, digest
 from .private_state import read_private_file
 
@@ -127,6 +128,7 @@ class KomodoIncumbentMaterialization:
     encoded: bytes
     topology: bytes | None = None
     docker_socket_source: str | None = None
+    storage: KomodoIncumbentStorage | None = None
 
     def __post_init__(self) -> None:
         if type(self.encoded) is not bytes or type(self.retained_files) is not tuple:
@@ -159,6 +161,8 @@ class KomodoIncumbentMaterialization:
                     or socket_mounts[0][1].get("Source") != self.docker_socket_source
                     or socket_mounts[0][1].get("Destination") != "/var/run/docker.sock"):
                 raise PlanError("Komodo incumbent socket binding requires one exact native Periphery mount")
+        if self.storage is not None and type(self.storage) is not KomodoIncumbentStorage:
+            raise PlanError("Komodo incumbent requires its code-registered storage owner")
         volumes = {}
         for volume in value["volumes"]:
             if (not isinstance(volume, dict) or volume.get("Driver") != "local"
@@ -172,8 +176,11 @@ class KomodoIncumbentMaterialization:
                            for char in volume["Name"])):
                 raise PlanError("Komodo incumbent volume name is invalid")
             path = Path(volume["Mountpoint"])
-            ordinary_path(path)
-            if not path.is_dir():
+            if self.storage is not None:
+                storage_path(path)
+            else:
+                ordinary_path(path)
+            if self.storage is None and not path.is_dir():
                 raise PlanError("Komodo incumbent volume storage is unavailable")
             volumes[volume["Name"]] = volume
         used = set()
@@ -184,8 +191,10 @@ class KomodoIncumbentMaterialization:
             for mount in mounts:
                 source = (self.docker_socket if mount["Source"] == self.docker_socket_source
                           else Path(mount["Source"]))
-                ordinary_path(source)
-                if not source.exists():
+                remote = self.storage is not None and mount["Type"] == "volume"
+                if not remote:
+                    ordinary_path(source)
+                if not remote and not source.exists():
                     raise PlanError("Komodo incumbent mount source is unavailable")
                 if mount["Type"] == "volume":
                     name = mount.get("Name")
@@ -221,10 +230,26 @@ class KomodoIncumbentMaterialization:
                 raise PlanError("Komodo incumbent configured username requires retained Core configuration")
         if self.topology is not None:
             incumbent_topology(self.topology)
-        ordinary_path(self.keys)
-        if not self.keys.is_dir():
+        if self.storage is None:
+            ordinary_path(self.keys)
+        if self.storage is None and not self.keys.is_dir():
             raise PlanError("Komodo incumbent retained identity is unavailable")
         self.evidence()
+
+    def storage_observation(self) -> dict | None:
+        if self.storage is None:
+            return None
+        selected = decode(self.encoded)
+        roots = {Path(volume["Mountpoint"]) for volume in selected["volumes"]}
+        files = {path for path in self.retained_files if any(root in path.parents for root in roots)}
+        return self.storage.observe(
+            mounts=selected["mounts"], volumes=selected["volumes"], files=files,
+            private_files=files - {self.keys / (name + ".pub") for name in ("core", "periphery")},
+            keys=self.keys)
+
+    @staticmethod
+    def _storage_entry(path: Path, observed: dict | None) -> dict | None:
+        return observed["entries"].get(str(path)) if observed is not None else None
 
     def socket_evidence(self) -> dict | None:
         if self.docker_socket_source is None:
@@ -279,15 +304,20 @@ class KomodoIncumbentMaterialization:
         socket = self.socket_evidence()
         credentials = self.credential_bytes()
         selected = decode(self.encoded)
+        observed = self.storage_observation()
         paths = {}
         for mounts in selected["mounts"].values():
             for mount in mounts:
                 path = (self.docker_socket if mount["Source"] == self.docker_socket_source
                         else Path(mount["Source"]))
-                ordinary_path(path)
-                info = path.stat()
                 name = mount["Source"] if mount["Source"] == self.docker_socket_source else str(path)
-                paths[name] = {"device": info.st_dev, "inode": info.st_ino}
+                remote = self._storage_entry(path, observed)
+                if remote is None:
+                    ordinary_path(path)
+                    info = path.stat()
+                    paths[name] = {"device": info.st_dev, "inode": info.st_ino}
+                else:
+                    paths[name] = dict(remote)
         files = {}
         username_path = (self.admin_username.config if type(self.admin_username) is KomodoConfigUsername
                          else self.admin_username)
@@ -296,6 +326,10 @@ class KomodoIncumbentMaterialization:
             username_path, self.admin_password,
         }
         for path in (*self.retained_files, username_path, self.admin_password):
+            remote = self._storage_entry(path, observed)
+            if remote is not None:
+                files[str(path)] = dict(remote)
+                continue
             ordinary_path(path)
             info = path.stat()
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
@@ -318,7 +352,10 @@ class KomodoIncumbentMaterialization:
                 "device": info.st_dev, "inode": info.st_ino,
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
-        info = self.keys.stat()
+        remote_keys = self._storage_entry(self.keys, observed)
+        if remote_keys is None:
+            info = self.keys.stat()
+            remote_keys = {"device": info.st_dev, "inode": info.st_ino}
         result = {
             "incumbent": digest({
                 "schema": selected["schema"], "version": selected["version"],
@@ -326,11 +363,13 @@ class KomodoIncumbentMaterialization:
                 "volumes": {volume["Name"]: volume for volume in selected["volumes"]},
             }),
             "paths": paths, "files": files,
-            "keys": {"path": str(self.keys), "device": info.st_dev, "inode": info.st_ino},
+            "keys": {"path": str(self.keys), **remote_keys},
             "credentials": digest({
                 name: hashlib.sha256(raw).hexdigest() for name, raw in credentials.items()
             }),
         }
+        if observed is not None:
+            result["storage_daemon"] = self.storage.daemon_id
         if self.topology is not None:
             result["topology"] = digest(incumbent_topology(self.topology))
         if type(self.admin_username) is KomodoConfigUsername:
