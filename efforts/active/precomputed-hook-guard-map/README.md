@@ -281,3 +281,12 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   an unreadable global layer, retains unavailable caller maps and restores
   both callers' effective guards after repair. The focused producer and
   configuration-source packet passed seven cases.
+- Preserved the registered lexical alias alongside canonical Git identity.
+  Shell target matching now recognizes both paths without resolving the whole
+  inventory during an event. A real native junction control covers redirects,
+  write cmdlets and `git -C` through both spellings, retaining read-only access.
+  The combined packet passed 95 cases with one FIFO skip; its generated hook
+  hash assertion required regeneration and then passed with the alias control.
+- Re-admitted the changed configuration-source bytes in the existing unit
+  manifest after CI rejected the old hash. Source verification passes without
+  changing the unit inventory, coverage targets or required gate behavior.

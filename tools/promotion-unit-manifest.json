@@ -4073,7 +4073,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
         "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "52694e0aa66929aa9be40c07407fe177344162d3772d2ec5bf0a21c48be68ba8",
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "1956b67878baa8cde2ffc2689847f47b7d3f8cdf5abcd7e56386e80d7b6da801",
-        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "1f03b5b5320fa0b80b14ffde30e02099cbb6f29449f58998358bab4fd818db46",
+        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "095473422ebd99bc1b3155c21ac505d4e6834b44eb0570d995b13475f7da71b1",
         "plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py": "2385210a728f529d107e321c3d4fb41edc4968937d3d32f32ae2b9c62576fb27",
         "plugins/agent-worktrees/src/agent_worktrees/config.py": "607b4b4015200f34097dd641b538900c94adaf5ea7c80b17c43cfaff4aeab9e1",
         "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py": "bbd221022396cda6d02a6c6afbe4e73803a2277d8c3e6fb35eff547937c1e445",

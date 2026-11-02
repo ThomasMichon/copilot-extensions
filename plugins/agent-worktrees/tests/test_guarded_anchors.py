@@ -430,6 +430,49 @@ def test_preparation_does_not_recompute_other_prepared_callers(producer, monkeyp
     assert other_path.read_bytes() == other
 
 
+def test_registered_alias_and_physical_shell_targets_remain_guarded(producer, monkeypatch):
+    import shutil
+
+    from agent_worktrees import repos
+
+    p = producer
+    alias = p.target.parent / "registered-alias"
+    if os.name == "nt":
+        powershell = shutil.which("powershell.exe")
+        if powershell is None:
+            pytest.skip("native junction creator unavailable")
+        completed = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-Command",
+             "New-Item -ItemType Junction -Path $env:GUARD_LINK -Target $env:GUARD_TARGET -ErrorAction Stop | Out-Null"],
+            env={**os.environ, "GUARD_LINK": str(alias), "GUARD_TARGET": str(p.target)},
+            capture_output=True, text=True, timeout=15, creationflags=0x08000000,
+        )
+        assert completed.returncode == 0, completed.stderr
+    else:
+        alias.symlink_to(p.target, target_is_directory=True)
+    original_root = repos.registered_entry_root
+    monkeypatch.setattr(repos, "registered_entry_root", lambda entry: (
+        alias if entry.name == "target" else original_root(entry)
+    ))
+    p.module.refresh(p.callers, registry_root=p.root)
+    rows = p.reader.read_map(p.callers[0], p.root).roots
+    assert rows[0]["path"] == os.path.abspath(alias)
+    assert rows[0]["identity"]["root"] == p.reader.canonical(p.target)
+    guard = _load("cross_repo_guard")
+    for root in (alias, p.target):
+        for command in (
+            f"Set-Content -Path '{root / 'new.txt'}' -Value new",
+            f"echo new > '{root / 'new.txt'}'",
+            f"git -C '{root}' commit -m new",
+        ):
+            hit = guard.evaluate("powershell", {"command": command}, str(p.callers[0]), rows)
+            assert hit is not None and hit["name"] == "target", command
+        assert guard.evaluate(
+            "powershell", {"command": f"Get-Content '{root / 'existing.txt'}'"},
+            str(p.callers[0]), rows,
+        ) is None
+
+
 def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkeypatch):
     p = producer
     p.module.refresh(p.callers, registry_root=p.root)

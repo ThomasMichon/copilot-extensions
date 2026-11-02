@@ -323,20 +323,21 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict]) -> dict | None:
             gp = g.get("path")
             if not gp:
                 continue
-            root_str = _canon(gp)
-            tok = _root_token(root_str)
             reason = _deny_reason(g, "(a shell command writes into it).")
-            # 1. A file redirect whose target is the repo (excludes fd dups).
-            if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
-                return {**g, "reason": reason}
-            # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
-            if at_write_cmd and re.search(tok, seg_hay):
-                return {**g, "reason": reason}
-            # 3a. A git mutation naming the repo via ``-C <repo>``.
-            if git_write and has_dash_c and re.search(
-                r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
-            ):
-                return {**g, "reason": reason}
+            identity = g.get("identity") or {}
+            for root in {gp, identity.get("root", gp)}:
+                tok = _root_token(_canon(root))
+                # 1. A file redirect whose target is the repo (excludes fd dups).
+                if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
+                    return {**g, "reason": reason}
+                # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
+                if at_write_cmd and re.search(tok, seg_hay):
+                    return {**g, "reason": reason}
+                # 3a. A git mutation naming the repo via ``-C <repo>``.
+                if git_write and has_dash_c and re.search(
+                    r"(?:^|\s)-C\s+[\"']?" + tok, seg_hay, re.IGNORECASE
+                ):
+                    return {**g, "reason": reason}
         # 3b. A repo-scoped git write (no ``-C``) targets the EFFECTIVE cwd --
         #     catches ``cd <guarded>; git commit``.
         if git_write and not has_dash_c and eff_cwd:
