@@ -118,9 +118,9 @@ the unchanged 300-second budget. Current-head provider CI also passed, including
 the full seven-day dependency-age audit with 447 declarations and no violations.
 All 21 currently admitted strict typing projects
 pass Linux and Windows static views; pending projects are not thereby admitted.
-Actual Windows shell execution, independent implementation review/required CI
-and normal source merge remain explicit publication gates. No local result
-qualifies desktop behavior, an installed update or the complete parent effort.
+Independent implementation review/required CI and normal source merge remain
+explicit publication gates. No source result qualifies desktop behavior, an
+installed update or the complete parent effort.
 
 The first native source packet refused before archive creation or test
 collection: its preflight compared a normalized Git blob with the intentional
@@ -130,13 +130,27 @@ without changing the original limits or host-effect exclusions. The durable
 correction is the existing raw-object/complete-source reader, not changing
 `.gitattributes` or normalizing the checkout; `TESTING.md` and the existing
 fresh-Git source-reader regression record that distinction. The refused
-attempt remains refused, and native execution remains unqualified until the
-renewed attempt actually completes.
+attempt remains refused.
 
 The renewed attempt also refused before test collection: native Git would not
 trust the source repository through its cross-OS path. No ownership exception
 or Git-setting change was applied. Source preparation therefore stays with
 the Linux Git owner, producing the canonical complete-tree archive and
 inventory for independent native verification. The file-only source input
-reconstructs the exact pinned tree and preserves checkout bytes; it does not
-authorize another native attempt or qualify unperformed tests.
+reconstructs the exact pinned tree and preserves checkout bytes; source
+preparation alone does not authorize another native attempt or qualify
+unperformed tests.
+
+A separately authorized provided-input attempt then passed the actual Windows
+source-contract packet: 33 passed and 11 explicit POSIX-only Bash skips.
+All 11 launch modes passed through both `pwsh` and `powershell`, and all 11
+canonical controller/scope/payload cases passed. The 49 collected cases
+selected 44 and explicitly deselected the observer and four long handoff cases.
+The pinned implementation's selected product, controller and test bytes match
+the current draft. The complete 13,096-entry source archive was independently
+verified before effects and preserved afterward. The 184.53-second group
+included source preparation and owned cleanup inside the unchanged 300-second
+group and 30-second item limits; runner, group and supervisor exited zero.
+Private fixture state, application bytes, provided inputs and the two earlier
+refusals were preserved. No desktop observation, production setting,
+installation, service operation or rollout was performed.
