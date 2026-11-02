@@ -1029,6 +1029,10 @@ jobs:
           --test-file tests/test_first_install_bootstrap.py
           -k "prepared_bootstrap_loads_actual_installer_without_source
           or installed_bootstrap_payload_has_release_owned_sources"
+      - name: Real materialized Worktrees graph with the original cold watchdog
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/native/test_retained_worktrees_construction.py --timeout 600
 
   candidate-profiles-windows:
     if: ${{ inputs.candidate_profiles }}

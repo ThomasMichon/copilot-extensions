@@ -2125,6 +2125,11 @@ case-distinct filename control requires a case-sensitive native filesystem.
 The promotion packet's retained-input fixtures use a deterministic serial
 scheduler only for their existing overlap/remapping contracts; those unit
 results do not qualify concurrency.
+The existing native candidate-profile lane also runs
+`tests/native/test_retained_worktrees_construction.py`: a real materialized
+Worktrees graph, an empty private UV cache, installed provenance preparation,
+full installed health and settled retained-source cleanup under the original
+480-second cold-construction watchdog. It never publishes a runtime selector.
 The candidate-engine file also exercises explicit `local_packages` role closures against real
 UV and fresh interpreters: client-only omission, a service's transitive local
 closure, complete source retention, immutable reuse without construction tools,
