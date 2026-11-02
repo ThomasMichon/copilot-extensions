@@ -2,7 +2,7 @@
   "comment": "Admit all canonical Docker Resource Producer source and tests to strict MyPy while preserving identity, transport and cleanup contracts.",
   "changes": [
     {
-      "plugin": "docker-resource-producer",
+      "plugin": "libs/docker-resource-producer",
       "type": "patch"
     }
   ]
