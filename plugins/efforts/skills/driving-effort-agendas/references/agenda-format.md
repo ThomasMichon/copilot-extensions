@@ -7,6 +7,10 @@ The [managed CLI/store](managed-agenda.md) now supplies transactional semantic
 updates and stale-write enforcement for explicitly initialized homes.
 [Version-2 deferred branches](deferred-branches.md) extend the
 cursor while preserving version-1 boards and legacy cursors.
+This page documents the strict legacy format, not context-qualified cursor 4.
+For queue/subqueue reasoning and the separately versioned policy, see
+[context-qualified continuations](context-qualified-continuations.md). Do not
+change a version label or erase visit history to bypass legacy admission.
 
 ## Reviewed definition
 
@@ -117,8 +121,10 @@ Restore only after reconciling current authority, progress and original limits.
 
 If the defect is not a prerequisite, park it instead and continue the original
 feature. If repeated detours produce no parent progress or the depth budget is
-exhausted, the next action is a bounded replan/steering decision, not a deeper
-child.
+exhausted, preserve the continuation and investigate/refine within current
+authority, wait, or choose other already-assigned work; do not push a deeper
+child. Legacy numerical bounds still apply. An Operator question requires an
+actual decision, permission or safety gate, not the count by itself.
 
 ## Adoption and recovery
 

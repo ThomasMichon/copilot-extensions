@@ -2515,7 +2515,7 @@ def test_explicit_context_session_start_never_uses_legacy_fallback(
     assert hook_client._fallback_session_start(payload, tmp_path) == {}
 
 
-def test_invalid_explicit_context_denies_before_guard_fallback(
+def test_invalid_explicit_context_reports_unavailable_before_guard_fallback(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
@@ -2540,8 +2540,9 @@ def test_invalid_explicit_context_denies_before_guard_fallback(
 
     result = hook_client._fallback_pre({}, tmp_path)
 
-    assert result["permissionDecision"] == "deny"
-    assert "invalid" in result["permissionDecisionReason"]
+    assert "permissionDecision" not in result
+    assert "installation-context validation failed" in result["additionalContext"]
+    assert "not authorization" in result["additionalContext"]
 
 
 def test_explicit_context_session_end_uses_payload_client():

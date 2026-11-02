@@ -3,6 +3,14 @@ if ($env:AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION -ceq 'resident') { exit 0 }
 $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
 
+$script:preToolBoundary = 'entry'
+
+function Write-PreToolUnavailable([string]$Boundary) {
+    [Console]::Out.Write((@{ additionalContext = (
+        '[agent-worktrees pre-tool] Boundary: ' + $Boundary + '. Effect: this component could not evaluate policy; missing evidence is not authorization. This hook did not execute the tool; independent policy decisions remain in force. Next: inspect the selected installation pre-tool files and existing repairing-worktrees guidance; use its catalog command read-only doctor only if available. Retry: do not repeat the tool solely for this warning; inspect its result first, and retry evaluation only after this boundary changes.'
+    ) } | ConvertTo-Json -Compress))
+}
+
 function ConvertFrom-PreToolJson([string]$Text) {
     if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
     if ($PSVersionTable.PSVersion.Major -ge 6) {
@@ -122,16 +130,16 @@ try {
     if ($stop -eq $true) { exit 0 }
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    if ($stop -eq $false) {
-        try {
-            $payload = ConvertFrom-PreToolJson $raw
-            if (Test-NativePreToolRead $payload) { exit 0 }
-        } catch { }
-    }
+    $script:preToolBoundary = 'event JSON'
+    $payload = ConvertFrom-PreToolJson $raw
+    if ($payload -isnot [Collections.IDictionary]) { throw 'Expected an event object' }
+    if ($stop -eq $false -and (Test-NativePreToolRead $payload)) { exit 0 }
+    $script:preToolBoundary = 'runtime selection'
     $python = $null
     $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
     $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $script:preToolBoundary = 'installation-context validation'
         $validator = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
         if (-not [IO.File]::Exists($validator)) { throw 'Required installation-context validator is unavailable' }
         $owner = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) { $env:AGENT_WORKTREES_PAYLOAD_ROOT }
@@ -147,6 +155,7 @@ try {
             -not [IO.Path]::IsPathRooted($context.pluginRoot)) { throw 'Invalid installation-context runtime root' }
         $runtimeRoot = $context.pluginRoot
     }
+    $script:preToolBoundary = 'runtime selection'
     if ([IO.File]::Exists($resolver)) {
         $previousRoot = $env:AGENT_RT_ROOT
         try {
@@ -167,9 +176,11 @@ try {
             Select-Object -First 1 -ExpandProperty Source
     }
     $client = Join-Path $PSScriptRoot 'hook_policy_process.py'
+    $script:preToolBoundary = 'policy interpreter or hook_policy_process.py'
     if (-not $python -or -not [IO.File]::Exists($client)) {
         throw 'Required pre-tool policy interpreter/client/runner is unavailable'
     }
+    $script:preToolBoundary = 'policy worker execution'
     $diagnostic = ''
     $previousPythonEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
     try {
@@ -179,6 +190,7 @@ try {
         [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousPythonEncoding, 'Process')
     }
     if ($LASTEXITCODE -ne 0) { throw "Pre-tool policy client exited $LASTEXITCODE" }
+    $script:preToolBoundary = 'policy worker response'
     if (-not $result -or -not $result.Trim() -or $utf8.GetByteCount($result) -gt 65536) {
         throw 'Strict pre-tool policy returned no bounded response'
     }
@@ -201,7 +213,7 @@ try {
     if ($diagnostic) { [Console]::Error.Write($diagnostic) }
     [Console]::Out.Write($result)
 } catch {
-    [Console]::Error.WriteLine('agent-worktrees preToolUse: policy evaluation failed; repair its owning installation')
-    [Console]::Out.Write('{"permissionDecision":"deny","permissionDecisionReason":"agent-worktrees pre-tool policy is unavailable; repair its owning installation"}')
+    [Console]::Error.WriteLine('agent-worktrees preToolUse: ' + $script:preToolBoundary + ' unavailable')
+    Write-PreToolUnavailable $script:preToolBoundary
 }
 exit 0

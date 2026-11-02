@@ -66,11 +66,19 @@ def _start_time_darwin(pid: int) -> str | None:
     return f"{info.start_seconds}:{info.start_microseconds}"
 
 
-def _start_time_windows(pid: int) -> str | None:
+def process_is_alive(pid: int, birth: str) -> bool:
+    """Require the original birth and native live state, not a retained dead PID."""
+    if not isinstance(birth, str) or not birth:
+        return False
+    if platform.system() == "Windows":
+        return _start_time_windows(pid, require_live=True) == birth
+    return process_start_time(pid) == birth
+
+
+def _windows_kernel():
     import ctypes
     from ctypes import wintypes
 
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     k32.OpenProcess.restype = wintypes.HANDLE
@@ -84,27 +92,120 @@ def _start_time_windows(pid: int) -> str | None:
         ctypes.POINTER(wintypes.FILETIME),
     ]
     k32.GetProcessTimes.restype = wintypes.BOOL
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    return k32
 
-    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+
+def _windows_handle_birth(k32, handle) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    creation, exit_, kernel, user = (wintypes.FILETIME() for _ in range(4))
+    if not k32.GetProcessTimes(
+        handle, ctypes.byref(creation), ctypes.byref(exit_),
+        ctypes.byref(kernel), ctypes.byref(user),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return str((creation.dwHighDateTime << 32) | creation.dwLowDateTime)
+
+
+def _start_time_windows(pid: int, *, require_live: bool = False) -> str | None:
+    k32 = _windows_kernel()
+    access = 0x1000 | (0x100000 if require_live else 0)
+    handle = k32.OpenProcess(access, False, pid)
     if not handle:
         return None
     try:
-        creation = wintypes.FILETIME()
-        exit_ = wintypes.FILETIME()
-        kernel = wintypes.FILETIME()
-        user = wintypes.FILETIME()
-        ok = k32.GetProcessTimes(
-            handle, ctypes.byref(creation), ctypes.byref(exit_),
-            ctypes.byref(kernel), ctypes.byref(user),
-        )
-        if not ok:
+        birth = _windows_handle_birth(k32, handle)
+        if require_live and k32.WaitForSingleObject(handle, 0) != 0x102:
             return None
-        ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
-        return str(ticks)
+        return birth
     except OSError:
         return None
     finally:
         k32.CloseHandle(handle)
+
+
+def open_windows_caller_lifetime():
+    """Pin the original caller across only the selected, known venv redirector.
+
+    CPython's redirector waits for the real interpreter after its own caller
+    exits. Match its actual image to the selected venv before crossing that
+    one link; retain both native objects and reject reused-parent birth order.
+    This observation never assigns a Job or attests descendant settlement.
+    """
+    import ctypes
+    import os
+    import sys
+    from ctypes import wintypes
+
+    k32 = _windows_kernel()
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    k32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+    ]
+    k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    handles = []
+
+    def close():
+        errors = []
+        while handles:
+            if not k32.CloseHandle(handles.pop()):
+                errors.append(ctypes.WinError(ctypes.get_last_error()))
+        if errors:
+            raise errors[0]
+
+    def pin(pid):
+        if pid <= 1 or pid == os.getpid():
+            raise ProcessLookupError("original caller identity unavailable")
+        handle = k32.OpenProcess(0x1000 | 0x100000, False, pid)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        handles.append(handle)
+        return handle
+
+    def image(handle):
+        value, size = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+        if not k32.QueryFullProcessImageNameW(handle, 0, value, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return value.value
+
+    def live():
+        return bool(handles) and all(k32.WaitForSingleObject(handle, 0) == 0x102 for handle in handles)
+
+    try:
+        parent_pid = os.getppid()
+        parent = pin(parent_pid)
+        parent_birth = int(_windows_handle_birth(k32, parent))
+        current = k32.GetCurrentProcess()
+        if parent_birth > int(_windows_handle_birth(k32, current)) or not live():
+            raise ProcessLookupError("original parent identity changed")
+        selected = Path(sys.executable)
+        if os.path.samefile(image(parent), selected) and not os.path.samefile(image(current), selected):
+            if not (selected.parent.parent / "pyvenv.cfg").is_file() or not os.path.samefile(image(current), sys._base_executable):
+                raise ProcessLookupError("selected venv interpreter identity changed")
+
+            class ProcessBasicInformation(ctypes.Structure):
+                _fields_ = [
+                    ("reserved", ctypes.c_void_p), ("peb", ctypes.c_void_p),
+                    ("reserved2", ctypes.c_void_p * 2), ("pid", ctypes.c_size_t),
+                    ("parent_pid", ctypes.c_size_t),
+                ]
+            query = ctypes.WinDLL("ntdll").NtQueryInformationProcess
+            query.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p,
+                              wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
+            query.restype = wintypes.LONG
+            info, size = ProcessBasicInformation(), wintypes.ULONG()
+            if query(parent, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(size)) < 0 or info.pid != parent_pid:
+                raise ProcessLookupError("venv redirector caller identity unavailable")
+            caller = pin(info.parent_pid)
+            if int(_windows_handle_birth(k32, caller)) > parent_birth or not live():
+                raise ProcessLookupError("venv redirector caller identity changed")
+        return live, close
+    except BaseException:
+        close()
+        raise
 
 
 def _start_time_posix(pid: int) -> str | None:

@@ -11,7 +11,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Context-Qualified Agenda Continuations](active/context-qualified-agenda-continuations/README.md) | Active; vision extension and reviewed renewed contract before implementation | #9897; queue/sub-queue continuation and meaningful revisits; predecessor source retained, no rollout |
 | [Python Static Type Safety](active/python-static-type-safety/README.md) | Active; reviewed plan merged, checker foundation before incremental CI/project activation | #9807/#9831; strict all-Python completion, common local/CI commands, existing dependency/source/release owners retained; no runtime rollout |
 | [Model-Guided Skill Selection](active/model-guided-skill-selection/README.md) | Active; native SDK witnesses and model preflight recorded, guided comparison and implementation pending | #9809; existing customization, SDK and model-policy owners; no parallel catalog or shared rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
@@ -155,6 +154,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Context-Qualified Agenda Continuations](2026/11/01%20context-qualified-agenda-continuations/README.md) | Done; explicit queue/stack and context-qualified source, complete raw-input policy and enum/prose/Markdown field contract merged in #9902 after review and required CI | #9897 retains immediate archive/issue/ownership settlement; normal promotion #3336 and authorized adoption separate; #8811 broader custody retained; no rollout |
 | [Agenda CLI and Live Updates](2026/11/01%20agenda-cli-live-updates/README.md) | Done; standalone transactional commands, bounded held resident delivery and connected consumer merged in #9869 after review and required CI | #9855; normal promotion #3336 and authorized adoption separate; #8811 broader custody retained; no rollout |
 | [Agent Configuration Reference](2026/11/01%20agent-configuration-reference/README.md) | Done; all fourteen owner references, four-tier consumers and downstream examples published after review and required CI | #9776/#9801/#9823; preserves #2350/#4205 broader ownership and external contributor work, no rollout |
 | [Deferred Agenda Continuation](2026/10/31%20deferred-agenda-continuation/README.md) | Done; reversible deferred branches, bounded due/response inspection and decision-ready preparation merged with approval and required CI in #9786 | #9777; promotion remains #3336, installed rollout separately authorized; no polling daemon or effect execution |

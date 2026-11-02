@@ -271,9 +271,11 @@ class AgendaRuntime:
             availability = "head-changed"
         elif body is not None:
             availability = "observed" if body["source"]["session"] == session else "not-published"
+        if availability == "observed":
+            contract.observation(body, version=request["contract_version"])
         return {
             "ok": True,
-            "contract_version": 1,
+            "contract_version": request["contract_version"],
             "generation": self._generation,
             "sequence": self._sequence,
             "project": project,
@@ -343,10 +345,12 @@ class AgendaRuntime:
                 return self._reply(request)
         except contract.AgendaError as exc:
             self._restore_pending(pending)
-            return contract.failure(exc.code, str(exc))
+            return contract.failure(exc.code, str(exc), version=contract.error_version(request))
         except (OSError, sqlite3.Error, ProjectionUnavailable, ValueError) as exc:
             self._restore_pending(pending)
-            return contract.failure("unavailable", str(exc))
+            return contract.failure(
+                "unavailable", str(exc), version=contract.error_version(request)
+            )
 
     def publish(self, payload) -> dict:
         pending = set()
@@ -355,7 +359,8 @@ class AgendaRuntime:
                 payload, {"contract_version", "project", "expected_generation", "observation"}
             )
             body = payload["observation"]
-            encoded = contract.observation(body)
+            version = contract.contract_version(payload["contract_version"])
+            encoded = contract.observation(body, version=version)
             body = json.loads(encoded)
             request = {
                 "contract_version": payload["contract_version"],
@@ -437,10 +442,12 @@ class AgendaRuntime:
                     return self._reply(request)
         except contract.AgendaError as exc:
             self._restore_pending(pending)
-            return contract.failure(exc.code, str(exc))
+            return contract.failure(exc.code, str(exc), version=contract.error_version(payload))
         except (OSError, sqlite3.Error, ProjectionUnavailable, ValueError) as exc:
             self._restore_pending(pending)
-            return contract.failure("unavailable", str(exc))
+            return contract.failure(
+                "unavailable", str(exc), version=contract.error_version(payload)
+            )
 
     def stream(self, payload, disconnected):
         return self.feed.stream(payload, disconnected)

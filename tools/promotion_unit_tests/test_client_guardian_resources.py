@@ -74,11 +74,16 @@ def test_accounting_resource_defers_native_binding_and_reuses_one_layout(monkeyp
             raise AssertionError(f"portable resource accessed native bindings: {name}")
 
     monkeypatch.setitem(sys.modules, "ctypes", NoNativeImport("ctypes"))
-    monkeypatch.setitem(sys.modules, "promotion_lazy_accounting_fixture", ModuleType(
-        "promotion_lazy_accounting_fixture",
-    ))
+    package_name = "promotion_lazy_accounting_fixture"
+    monkeypatch.setitem(sys.modules, package_name, ModuleType(package_name))
+    _load_source(
+        package_name,
+        ROOT / "libs/agent-procutil/src/agent_procutil/__init__.py",
+    )
+    adapter_name = package_name + "._windows_job_types"
+    monkeypatch.setitem(sys.modules, adapter_name, ModuleType(adapter_name))
     module = _load_source(
-        "promotion_lazy_accounting_fixture",
+        adapter_name,
         ROOT / "libs/agent-procutil/src/agent_procutil/_windows_job_types.py",
     )
     assert "_JobBasicAccountingInformation" not in vars(module)

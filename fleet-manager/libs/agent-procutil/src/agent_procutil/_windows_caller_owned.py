@@ -316,38 +316,61 @@ def _environment_block(environment):
     return ctypes.create_unicode_buffer("\0".join(entries) + "\0\0")
 
 
-def spawn(argv: list[str], **kwargs):
+def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=None, **kwargs):
     """Create the target in its caller-owned Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
 
     from . import _job_scopes
 
+    if command_deadline is not None and (
+        type(command_deadline) not in (int, float) or not math.isfinite(command_deadline)
+    ):
+        raise ValueError("native execution deadline must be finite")
+    if budget is not None:
+        command_deadline = (
+            budget.execution_deadline if command_deadline is None
+            else min(command_deadline, budget.execution_deadline)
+        )
     allow_breakaway = kwargs.get("allow_breakaway", False)
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
-    job_name = _job_scopes.new_name()
-    environment = _environment_block(
-        _job_scopes.child_environment(
-            kwargs.get("env"), append=job_name,
-            inherit_current=kwargs.get("inherit_job_scopes", True),
-        ),
-    )
-    cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
-    if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
-        raise ValueError("native child working directory must be NUL-free text")
-    kernel = _api()
-    handle = kernel.CreateJobObjectW(None, job_name)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-    if ctypes.get_last_error() == 183:
-        kernel.CloseHandle(handle)
-        raise OSError("owned Job identity already exists")
-    job = JobHandle(handle, name=job_name)
+    job = None
     process = None
+    creation_attempted = False
     info = _ProcessInfo()
     streams = []
+    failed_preparation = []
+
+    def release(kind, resource, close):
+        try:
+            close()
+        except BaseException as error:
+            failed_preparation.append(((kind, resource), error))
+
+    def cleanup_error():
+        return OwnedCleanupError(
+            process, job, cleanup_resources=[resource for resource, _ in failed_preparation],
+        )
+
     try:
+        job_name = _job_scopes.new_name()
+        environment = _environment_block(
+            _job_scopes.child_environment(
+                kwargs.get("env"), append=job_name,
+                inherit_current=kwargs.get("inherit_job_scopes", True),
+            ),
+        )
+        cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
+        if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
+            raise ValueError("native child working directory must be NUL-free text")
+        kernel = _api()
+        handle = kernel.CreateJobObjectW(None, job_name)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        job = JobHandle(handle, name=job_name)
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
         limit = _build_job_extended_limit_info()()
         limit.BasicLimitInformation.LimitFlags = 0x2000
         if allow_breakaway:
@@ -362,25 +385,25 @@ def spawn(argv: list[str], **kwargs):
                 if kwargs[name] == subprocess.PIPE:
                     reader, writer = os.pipe()
                     child, parent = (reader, writer) if index == 0 else (writer, reader)
-                    resources.callback(os.close, child)
+                    resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
                     try:
                         stream = os.fdopen(parent, "wb" if index == 0 else "rb", buffering=0)
                     except BaseException:
-                        os.close(parent)
+                        release("descriptor", parent, lambda: os.close(parent))
                         raise
-                    parent_streams.callback(stream.close)
+                    parent_streams.callback(release, "stream", stream, stream.close)
                 elif name == "stderr" and kwargs[name] == subprocess.STDOUT:
                     child = child_fds[1]
                     stream = None
                 elif kwargs[name] not in (subprocess.DEVNULL, None):
                     child = os.dup(kwargs[name].fileno())
-                    resources.callback(os.close, child)
+                    resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
                     stream = None
                 else:
                     child = os.open(
                         os.devnull, (os.O_RDONLY if index == 0 else os.O_WRONLY) | os.O_BINARY,
                     )
-                    resources.callback(os.close, child)
+                    resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
                     stream = None
                 child_fds.append(child)
                 streams.append(stream)
@@ -397,7 +420,9 @@ def spawn(argv: list[str], **kwargs):
                 attributes, 2, 0, ctypes.byref(size),
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
-            resources.callback(kernel.DeleteProcThreadAttributeList, attributes)
+            resources.callback(
+                release, "attributes", attributes, lambda: kernel.DeleteProcThreadAttributeList(attributes),
+            )
             for key, value in ((0x20002, handles), (0x2000D, jobs)):
                 if not kernel.UpdateProcThreadAttribute(
                     attributes, 0, key, value, ctypes.sizeof(value), None, None,
@@ -413,13 +438,19 @@ def spawn(argv: list[str], **kwargs):
             try:
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
+                if command_deadline is not None and time.monotonic() >= command_deadline:
+                    raise subprocess.TimeoutExpired(argv, 0)
+                creation_attempted = True
                 if not kernel.CreateProcessW(
                     None, command, None, None, True,
                     0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
                     environment, cwd, ctypes.byref(startup), ctypes.byref(info),
                 ):
+                    creation_attempted = False
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
+                if command_deadline is not None and time.monotonic() >= command_deadline:
+                    raise subprocess.TimeoutExpired(argv, 0)
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
@@ -429,6 +460,9 @@ def spawn(argv: list[str], **kwargs):
                     if not kernel.CloseHandle(info.hThread):
                         raise ctypes.WinError(ctypes.get_last_error())
                     info.hThread = None
+            resources.close()
+            if failed_preparation:
+                raise cleanup_error() from failed_preparation[0][1]
             # Transfer only parent streams and native custody, never inheritable child handles.
             parent_streams.pop_all()
             return process, job
@@ -437,23 +471,34 @@ def spawn(argv: list[str], **kwargs):
             process = _Process(argv, info, streams)
         if process is not None:
             try:
-                job.terminate_and_wait(2.0)
-                process.wait(2.0)
+                if budget is None:
+                    job.terminate_and_wait(2.0)
+                else:
+                    process.retire_job(job, budget.cleanup_timeout())
+                process.wait(budget.cleanup_timeout() if budget else 2.0)
             except BaseException as cleanup:
-                raise OwnedCleanupError(process, job) from cleanup
+                raise cleanup_error() from cleanup
+            if failed_preparation:
+                raise cleanup_error() from failed_preparation[0][1]
             try:
                 for stream in (process.stdin, process.stdout, process.stderr):
                     if stream is not None:
                         stream.close()
             except BaseException as cleanup:
-                raise OwnedCleanupError(process, job) from cleanup
-            if process._thread_handle:
+                raise cleanup_error() from cleanup
+            if process._thread_handle or failed_preparation:
                 # Keep the failed native handle, rather than retrying an uncertain close.
-                raise OwnedCleanupError(process, job) from error
+                raise cleanup_error() from error
             try:
                 process.close()
             except BaseException as cleanup:
-                raise OwnedCleanupError(process, job) from cleanup
-        else:
-            job.close()
+                raise cleanup_error() from cleanup
+        elif failed_preparation:
+            raise cleanup_error() from failed_preparation[0][1]
+        elif job is not None:
+            if not kernel.CloseHandle(job.handle):
+                raise cleanup_error() from ctypes.WinError(ctypes.get_last_error())
+            job._handle = None
+        if on_settled is not None and (process is not None or not creation_attempted):
+            on_settled()
         raise

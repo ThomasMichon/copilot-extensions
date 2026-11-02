@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Tiny Copilot hook client for the resident agent-worktrees monitor.
-
-The hot path is one bounded loopback request. If the monitor is unavailable,
-pre-tool safety guards run in-process from their deployed standalone modules;
-post-tool advisory work falls back to nudge_status and bind_nudge.
-"""
+"""Bounded resident hook transport with canonical standalone policy fallback."""
 
 from __future__ import annotations
 
@@ -827,17 +822,25 @@ def _merge_pre_decisions(current: dict, new: dict) -> dict:
     return result
 
 
-def _fallback_pre(payload: dict, home: Path, *, require_policy: bool = False) -> dict:
+def _pre_unavailable(boundary: str) -> dict:
+    return {"additionalContext": (
+        f"[agent-worktrees pre-tool] Boundary: {boundary}. "
+        "Effect: this component could not evaluate policy; missing evidence is not authorization. This hook did not execute the tool; independent policy decisions remain in force. Next: inspect the selected installation pre-tool files and existing repairing-worktrees guidance; use its catalog command read-only doctor only if available. Retry: do not repeat the tool solely for this warning; inspect its result first, and retry evaluation only after this boundary changes."
+    )}
+
+
+def _fallback_pre(
+    payload: dict, home: Path, *, require_policy: bool = False,
+    initial_decision=None, only_observations=False,
+) -> dict:
     policy = _load_file(Path(__file__).resolve().with_name("hook_pre_policy.py"))
     decide_policy = getattr(policy, "decide", None)
     if not callable(decide_policy):
-        return {
-            "permissionDecision": "deny",
-            "permissionDecisionReason": "Required agent-worktrees pre-tool policy helper is unavailable",
-        }
+        return _pre_unavailable("hook_pre_policy.py unavailable")
     return decide_policy(
         payload, home=home, load_sibling=_load_sibling, merge_decisions=_merge_pre_decisions,
         budget_seconds=_FALLBACK_PRE_BUDGET_S, require_policy=require_policy,
+        initial_decision=initial_decision, only_observations=only_observations,
     )
 
 
@@ -870,6 +873,8 @@ def decide(
 ) -> dict:
     home = home or Path.home()
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+    if kind == "preToolUse" and not isinstance(payload, dict):
+        return _pre_unavailable("event payload is not an object")
     if kind == "preToolUse" and require_policy:
         return _fallback_pre(payload, home, require_policy=True)
     if (
@@ -922,9 +927,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     try:
         raw = sys.stdin.read()
-        payload = json.loads(raw) if raw.strip() else {}
+        try:
+            payload = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            if kind != "preToolUse":
+                raise
+            sys.stdout.write(json.dumps(_pre_unavailable("event JSON invalid")))
+            return 0
         if not isinstance(payload, dict):
+            if kind == "preToolUse":
+                sys.stdout.write(json.dumps(_pre_unavailable("event payload is not an object")))
+                return 0
             payload = {}
+        initial = None
+        if strict_policy and "--only-pr-observations" in argv:
+            payload, initial = _load_sibling("hook_pre_policy.py").deferred_frame(payload)
         if kind == "sessionStart":
             payload = _enrich_session_payload(payload)
             # Catalog evidence must survive cancellation of slow lifecycle work.
@@ -934,8 +951,17 @@ def main(argv: list[str] | None = None) -> int:
         if kind == "postToolUse" and "--local-fallback" in argv[1:]:
             result = _fallback_post(payload, Path.home())
         elif strict_policy:
-            result = decide(kind, payload, require_policy=True)
+            result = (
+                _fallback_pre(payload, Path.home(), require_policy=True, initial_decision=initial, only_observations=True)
+                if initial is not None else decide(kind, payload, require_policy=True)
+            )
         else:
+            if kind == "preToolUse":
+                helper = _load_sibling("hook_pre_policy.py")
+                execute = getattr(helper, "execute_owned_observations", None)
+                handled = execute(payload, raw, _load_sibling, _merge_pre_decisions) if callable(execute) else None
+                if handled is not None:
+                    return handled
             result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:
@@ -953,8 +979,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif kind != "sessionEnd" and (result or strict_policy):
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
-    except Exception:
-        pass
+    except Exception as error:
+        if kind == "preToolUse":
+            hold = getattr(_load_sibling("hook_pre_policy.py"), "hold_pending", None)
+            if strict_policy and callable(hold):
+                hold(error)
+            sys.stdout.write(json.dumps(_pre_unavailable("policy client evaluation failed")))
     # sessionStart always emits exactly one JSON object -- write it here,
     # outside the try block, so an exception anywhere above still leaves
     # valid, parseable stdout for the host.

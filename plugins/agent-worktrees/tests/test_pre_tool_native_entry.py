@@ -122,9 +122,21 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     assert observed.exists() is python_required, (result.stdout, result.stderr)
     if python_required:
         assert json.loads(observed.read_text(encoding="utf-8")) == payload
-        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+        reply = json.loads(result.stdout)
+        if case in {
+            "old-client", "empty-policy", "array-response", "invalid-decision-response",
+            "invalid-context-response", "policy-error", "malformed-response", "keys-shadow-response",
+        }:
+            assert "permissionDecision" not in reply
+            assert "agent-worktrees" in reply["additionalContext"]
+            assert "not authorization" in reply["additionalContext"]
+        else:
+            assert reply["permissionDecision"] == "deny"
+            assert reply["permissionDecisionReason"] == "fixture Python path"
     elif case == "context":
-        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+        reply = json.loads(result.stdout)
+        assert "permissionDecision" not in reply
+        assert "installation-context validation" in reply["additionalContext"]
     else:
         assert result.stdout == ""
 
@@ -218,7 +230,9 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     assert result.returncode == 0, result.stderr
     reply = json.loads(result.stdout)
     if invalid_context:
-        assert reply["permissionDecision"] == "deny"
+        assert "permissionDecision" not in reply
+        assert "installation-context validation" in reply["additionalContext"]
+        assert "not authorization" in reply["additionalContext"]
         assert not observed.exists()
     else:
         assert reply == {"additionalContext": "validated cell policy"}, result.stderr
