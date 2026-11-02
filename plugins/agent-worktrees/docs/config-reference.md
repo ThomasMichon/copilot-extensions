@@ -687,6 +687,9 @@ Legacy-local equality cannot override a conflicting higher-precedence native
 selection. Personal exclusion never
 retires an unreceipted or another contributor's choice, even when it matches
 legacy personal values. Existing markerless marketplace compatibility remains.
+An empty compatibility-only guard is not a personal ownership receipt and does
+not disable legacy anchor-to-pair migration. Git family paths retain their exact
+NUL-delimited spelling, including quoted names and native trailing whitespace.
 Setting the profile to null retires only
 tool-owned unchanged values; `compose_knowledge_plugins: false` leaves tools
 active. Mixed contributor documents carry a version-2 personal guard so an

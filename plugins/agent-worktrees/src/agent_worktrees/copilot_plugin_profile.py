@@ -74,7 +74,7 @@ def _common(path: Path) -> str:
                              isolated_repository=True)
     except git_ops.GitError as exc:
         raise _error(f"cannot inspect project Git custody: {exc}") from exc
-    return _identity(Path(os.fsdecode(result.stdout).strip()))
+    return _identity(Path(os.fsdecode(result.stdout).removesuffix("\n")))
 
 
 def _family(project: str) -> _Family:

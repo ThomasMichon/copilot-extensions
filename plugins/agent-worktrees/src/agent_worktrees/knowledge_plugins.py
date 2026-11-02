@@ -534,8 +534,8 @@ def _compose_locked(
     existing = _load_json_object(output_path)
     marketplaces = _dict_setting(existing, "extraKnownMarketplaces", output_path)
     enabled = _dict_setting(existing, "enabledPlugins", output_path)
-    markerless_legacy = _OVERLAY_KEY not in existing
     previous = _managed_marker(existing, output_path)
+    markerless_legacy = previous is None or same_json_value(previous, {"version": 2, "marketplaces": {}, "enabledPlugins": {}})
     previous_marketplaces = dict(previous["marketplaces"]) if previous else {}
     previous_enabled = dict(previous["enabledPlugins"]) if previous else {}
     _retire_previous(marketplaces, previous_marketplaces)

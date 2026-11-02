@@ -1627,12 +1627,12 @@ def list_worktree_paths(
 ) -> list[Path]:
     """Return the on-disk paths of every worktree registered on this repo.
 
-    Parses ``git worktree list --porcelain`` -- one ``worktree <path>`` line per
+    Parses ``git worktree list --porcelain -z`` -- one NUL-delimited path per
     registered tree, including the main checkout. Returns ``[]`` if the command
     fails unless *fail_on_error* is true, in which case the Git error is raised.
     ``isolated_repository`` opts custody probes out of inherited Git selectors.
     """
-    res = git("worktree", "list", "--porcelain", cwd=cwd, check=False,
+    res = git("worktree", "list", "--porcelain", "-z", cwd=cwd, check=False,
               isolated_repository=isolated_repository)
     if res.returncode != 0:
         if fail_on_error:
@@ -1640,9 +1640,9 @@ def list_worktree_paths(
             raise RuntimeError(detail)
         return []
     paths: list[Path] = []
-    for line in (res.stdout or "").splitlines():
+    for line in (res.stdout or "").split("\0"):
         if line.startswith("worktree "):
-            paths.append(Path(line[len("worktree "):].strip()))
+            paths.append(Path(line[len("worktree "):]))
     return paths
 
 

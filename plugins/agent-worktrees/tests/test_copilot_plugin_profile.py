@@ -745,3 +745,56 @@ def test_rejected_tool_marketplace_cannot_enable_new_personal_dependents(family)
     assert "remote" not in result["extraKnownMarketplaces"]
     assert not result[kp._OVERLAY_KEY]["enabledPlugins"]
     assert summary["enabled_plugins"] == [] and summary["count"] == 0
+
+
+def test_tool_only_guard_does_not_disable_markerless_personal_repointing(family):
+    root, _, configuration = family()
+    anchor, pair = root.parent / "knowledge-anchor", root.parent / "knowledge-pair"
+    definition = {"source": {"source": "directory", "path": "./.ai"}}
+    for path, plugin in ((anchor, "stale@personal"), (pair, "current@personal")):
+        (path / ".ai").mkdir(parents=True)
+        _json(path / ".github" / "copilot" / "settings.json", {
+            "extraKnownMarketplaces": {"personal": definition}, "enabledPlugins": {plugin: True},
+        })
+    _json(_overlay(root), {
+        "extraKnownMarketplaces": {"personal": {
+            "source": {"source": "directory", "path": (anchor / ".ai").resolve().as_posix()}}},
+        "enabledPlugins": {"stale@personal": True},
+    })
+    tool.prepare_checkout(root, config=configuration)
+    receipt = _read(root)[tool.KEY]
+    assert _read(root)[kp._OVERLAY_KEY] == {"version": 2, "marketplaces": {}, "enabledPlugins": {}}
+    summary = kp.compose(root, pair, legacy_knowledge_path=anchor, pair_id="fixture-pair")
+    result = _read(root)
+    assert Path(result["extraKnownMarketplaces"]["personal"]["source"]["path"]) == (pair / ".ai").resolve()
+    assert result["enabledPlugins"]["current@personal"] is True
+    assert result["enabledPlugins"]["stale@personal"] is True
+    assert result["enabledPlugins"]["build@tools"] is True
+    assert result[tool.KEY] == receipt
+    assert result[kp._OVERLAY_KEY]["pairId"] == "fixture-pair"
+    assert "personal" not in summary["conflicts"]["marketplaces"]
+    assert "current@personal" not in summary["conflicts"]["enabled_plugins"]
+
+
+@pytest.mark.parametrize("name", ["caf\u00e9", "ending ", "line\nbreak"], ids=["quoted-unicode", "trailing-space", "newline"])
+def test_git_family_paths_remain_exact_through_stage_and_retirement(family, name):
+    if os.name == "nt" and (name.endswith(" ") or "\n" in name):
+        pytest.skip("This pathname requires native POSIX filesystem semantics")
+    root, worktree, configuration = family()
+    checkout = root.parent / name
+    _git(root, "config", "core.quotePath", "true")
+    _git(root, "worktree", "add", "-b", "special-path", str(checkout))
+    tool.reconcile_project("tools", root, installer.read_projects_registry(strict=True))
+    tool.prepare_checkout(checkout, config=configuration)
+    assert checkout in tool.git_ops.list_worktree_paths(cwd=root, isolated_repository=True)
+    assert _read(checkout)["enabledPlugins"]["build@tools"] is True
+    tool.retire_project("tools")
+    assert all(not _overlay(path).exists() for path in (root, worktree, checkout))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="A trailing-space directory requires native POSIX semantics")
+def test_common_directory_probe_preserves_a_bare_anchor_trailing_space(tmp_path):
+    root = tmp_path / "bare "
+    root.mkdir()
+    _git(root, "init", "--bare")
+    assert tool._common(root) == tool._identity(root)
