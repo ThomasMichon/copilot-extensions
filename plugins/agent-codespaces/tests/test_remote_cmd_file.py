@@ -68,6 +68,55 @@ class TestWriteRemoteCmdFile:
 
 
 class TestBuildSpawnCommand:
+    @pytest.mark.parametrize("option", [
+        "--allow-all", "--allow-all-tools", "--yolo", "--dangerously-skip-permissions",
+        "--trust-all-tools", "--permission-mode=bypassPermissions",
+        "--allow-tool='*'", "--sandbox disabled",
+        r"--allow-tool=\*", '--al""low-all',
+        r'&& bash -lc "copilot --acp --permission-mode=\"bypassPermissions\""',
+        r"""&& bash -lc 'sh -c "copilot --acp --allow-tool=\\*"'""",
+        r"""&& cd -- /workspaces/bash && env bash -lc 'copilot --acp --allow-tool=\*'""",
+        r"""&& env -C cd bash -lc 'copilot --acp --allow-tool=\*'""",
+        r"""&& env -C cd -- /bin/bash -lc 'copilot --acp --allow-tool=\*'""",
+    ])
+    def test_refuses_permission_bypass_before_dispatch_side_effects(self, option, tmp_path, monkeypatch):
+        dispatch = tmp_path / "dispatch"
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", dispatch)
+
+        def unexpected_dispatch():
+            pytest.fail("unsafe command reached transport construction")
+
+        monkeypatch.setattr(resolver, "dispatch_argv", unexpected_dispatch)
+        with pytest.raises(ValueError, match="permission-bypassing"):
+            resolver._build_spawn_command("cs-1", f"copilot --acp --stdio {option}")
+
+        assert not dispatch.exists()
+
+    @pytest.mark.parametrize("payload", [
+        "copilot --acp '", 'bash -lc "$ACP_COMMAND"', "bash launch.sh",
+        "copilot --acp --stdio --allow-" + "\\\n" + "all",
+        "bash -lc 'copilot --acp --stdio --allow-" + "\\\n" + "all'",
+    ])
+    def test_refuses_uninspectable_shell_before_dispatch(self, payload, tmp_path, monkeypatch):
+        dispatch = tmp_path / "dispatch"
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", dispatch)
+
+        with pytest.raises(ValueError, match="cannot inspect"):
+            resolver._build_spawn_command("cs-1", payload)
+
+        assert not dispatch.exists()
+
+    def test_preserves_scoped_permission_grant(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
+        monkeypatch.setattr(resolver, "dispatch_argv", lambda: ["/payload/bin/agent-codespaces"])
+        payload = "copilot --acp --stdio --allow-tool='shell(git status)'"
+
+        command = resolver._build_spawn_command("cs-1", payload)
+
+        assert Path(command[command.index("--remote-cmd-file") + 1]).read_text() == payload
+
     def test_uses_remote_cmd_file_not_string(self, tmp_path, monkeypatch):
         monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
         monkeypatch.setattr(resolver, "dispatch_argv", lambda: ["/payload/bin/agent-codespaces"])

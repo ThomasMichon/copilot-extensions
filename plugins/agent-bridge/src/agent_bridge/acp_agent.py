@@ -32,7 +32,6 @@ from acp import (
 from acp.agent.connection import AgentSideConnection
 from acp.schema import (
     AgentCapabilities,
-    AllowedOutcome,
     AudioContentBlock,
     ClientCapabilities,
     CloseSessionResponse,
@@ -556,12 +555,8 @@ class BridgeAgent(Agent):
             tool_call: ToolCallUpdate,
         ) -> RequestPermissionResponse:
             if not conn:
-                # No upstream connection -- auto-approve
-                return RequestPermissionResponse(
-                    outcome=AllowedOutcome(
-                        outcome="selected", option_id="allow_always",
-                    ),
-                )
+                log.warning("Permission request cancelled: upstream client is unavailable")
+                return RequestPermissionResponse(outcome={"outcome": "cancelled"})
             return await conn.request_permission(
                 options=options,
                 session_id=session_id,
