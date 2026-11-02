@@ -169,7 +169,7 @@
         "libs/lazy-cli-dispatch"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-machine-transport",
