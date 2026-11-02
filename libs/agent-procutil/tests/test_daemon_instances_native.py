@@ -22,6 +22,41 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor creation")
+def test_created_private_inventory_entries_use_token_user_owner(tmp_path: Path) -> None:
+    from agent_procutil import _daemon_instance_owner as owner
+    from agent_procutil import _daemon_instance_store as store
+
+    user = owner._current_sids(os.getpid())[0]
+    root = store._root(tmp_path / "private" / "inventory", create=True)
+    identity = "a" * 32
+    record = root / (identity + ".instance")
+    lock = record.with_suffix(".lock")
+    with store._file_lock(lock):
+        store._write(record, {"schema": "1", "instance_id": identity})
+    store._write_cursor(root, identity)
+    for path in (root.parent, root, lock, record, root / ".reconcile.cursor"):
+        user_owned = owner._path_owner_sid(path) == user
+        assert user_owned, "new private inventory entries must have the token user as owner"
+    assert store._read(record)["instance_id"] == identity
+    assert store._read_cursor(root) == identity
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows CRT descriptor handoff")
+def test_created_private_file_preserves_binary_bytes_and_noninheritance(tmp_path: Path) -> None:
+    from agent_procutil import _daemon_instance_owner as owner
+
+    path = tmp_path / "private.bin"
+    data = b"\0\r\n\xff\nraw\rbytes"
+    descriptor = owner.open_private(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    try:
+        assert not os.get_inheritable(descriptor)
+        assert os.write(descriptor, data) == len(data)
+    finally:
+        os.close(descriptor)
+    assert path.read_bytes() == data
+
+
 def test_production_source_ready_and_nonexpiry(tmp_path):
     ready = tmp_path / "ready"
     code = """
