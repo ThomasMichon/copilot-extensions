@@ -154,6 +154,7 @@ if sys.version_info < (3,11):
     print(json.dumps({"construction":"requires-python-3.11"}))
     raise SystemExit(0)
 from agent_chat_service.construction import _engine
+import tomllib
 engine=_engine()
 runtime=engine.runtime
 assert Path(engine.__file__).parent==resources
@@ -178,7 +179,13 @@ with client_candidate(root,"0.1.0+client",**arguments) as candidate:
     assert receipt["local_packages"]==list(expected)
     assert set(receipt["packages"])==set(expected)
     assert runtime.is_complete(root,candidate.slot.name,expect_hash=candidate.payload_hash)
-    assert len(engine._package_roots(candidate.frozen_plugin))==4
+    assert {
+        tomllib.loads((package/"pyproject.toml").read_text())["project"]["name"]
+        for package in engine._package_roots(candidate.frozen_plugin)
+    }=={
+        "agent-chat-service","agent-endpoint-rendezvous","agent-procutil",
+        "agent-single-instance-lease","agent-zdd",
+    }
     assert (candidate.frozen_plugin/"_standalone_runtime_build.py").is_file()
     frozen=candidate.frozen_plugin
 assert not frozen.exists()
