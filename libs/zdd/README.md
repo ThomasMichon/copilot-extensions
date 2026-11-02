@@ -16,13 +16,20 @@ this changes import work, not routing, cutover or process-retirement policy.
 
 `CutoverOrchestrator` also supports opt-in `self_retirement=True` with an
 `activate_successor(endpoint)` callback. It health-gates and publishes the
-candidate, invokes the adopter's promotion callback, verifies readiness and
-commits without contacting the predecessor. The resident owns supersession,
+candidate and commits the durable route before invoking the adopter's promotion
+callback, which may open admission. It then verifies readiness without contacting
+the predecessor. A postcommit promotion/readiness failure remains an explicit
+failed, committed result; it never disposes of a possibly admitted successor or
+rolls the route back. The resident owns supersession,
 accepted-work draining and eventual exit independently of the installer.
 `retirement_pending` reports that separation; it never certifies predecessor
 exit. This mode cannot be combined with conditional writer transfer or
 pre-publication drain. Existing adopters keep their synchronous cutover
 contract unless they explicitly opt in.
+Adopters must qualify the incoming runtime's actual capability before publication
+and keep displaced code retained independently of the installing process until
+native exit is positively observed. The library does not supply that retention
+or prove completion of accepted work.
 
 ## What's inside
 

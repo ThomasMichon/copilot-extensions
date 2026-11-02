@@ -4976,6 +4976,20 @@ installer opts into resident-owned predecessor retirement: it promotes and
 attests the published successor, then finishes without an old drain RPC or a
 predecessor-exit wait. The outgoing resident observes supersession and drains
 and retires independently; `retirement_pending` is not an exit receipt.
+The incoming monitor must advertise `status-monitor-async-retirement-v1` before
+publication; an unsupported target is an explicit refusal, not a synchronous
+fallback or package-version guess. Route commitment precedes any promotion
+callback that can admit work. A failure after that frontier preserves the
+possibly admitted successor and remains an explicit failed commit-forward result.
+Before releasing installer retention, the owner persists birth-identified
+predecessor records and canonical runtime references, including for a legacy
+resident that holds no runtime lease. The elected successor remains needed while
+those identities are live or unknown and reconciles them in its existing loop.
+Only positive native exit releases references. Dev release similarly retains
+the original claim and defers its exact-snapshot release to that resident;
+changed claims refuse cleanup, and a pending dev retirement refuses a rebuild.
+There is no installer-owned subscription, new cleanup worker, forced unrouted
+restart or delayed daemon reaper in this path.
 Failed candidate children remain under installer custody, and uncertain durable
 publication requires a terminal owner-led recovery
 witness, never a missing/corrupt breadcrumb interpreted as success. Selector

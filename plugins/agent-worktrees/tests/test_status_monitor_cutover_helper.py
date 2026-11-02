@@ -312,6 +312,7 @@ class _FakeDaemon:
         self.control = None
         self.promote_calls = 0
         self.token = token
+        self.async_retirement = True
         if port is not None:
             self.start(port)
 
@@ -322,7 +323,12 @@ class _FakeDaemon:
 
     def _handle(self, action: str, payload: dict) -> dict:
         if action == "health":
-            return {"status": "draining" if self.draining else "ready"}
+            from agent_worktrees.runtime_monitor_retirements import CAPABILITY
+
+            return {
+                "status": "draining" if self.draining else "ready",
+                "capabilities": [CAPABILITY] if self.async_retirement else [],
+            }
         if action == "promote":
             self.promoted = True
             self.promote_calls += 1
@@ -402,6 +408,69 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(tmp_p
         assert old.alive and old.busy.is_set()
         assert not old.draining and not old.shutdown_requested
         assert routing.read_table(tmp_path)["active"]["pid"] == new.pid
+    finally:
+        old.force_terminate()
+        new.force_terminate()
+
+
+def test_async_installation_never_uses_legacy_unrouted_termination(tmp_path, monkeypatch):
+    from agent_worktrees import status_monitor_runtime as runtime
+
+    new = _FakeDaemon(202)
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path)
+    monkeypatch.setattr(runtime, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: None)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
+    monkeypatch.setattr(runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(
+        runtime, "_restart_status_monitor",
+        lambda **_kwargs: pytest.fail("asynchronous installation used old-process termination"),
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.status_monitor_reap_stale.schedule_delayed_daemon_health_reap",
+        lambda: pytest.fail("asynchronous installation scheduled a second retirement owner"),
+    )
+
+    def spawn(_python, *, port):
+        new.start(port)
+        return _Handle(new)
+
+    monkeypatch.setattr(smc, "spawn_passive", spawn)
+    try:
+        result = smc.activate_after_update(
+            runtime_python="python", asynchronous_retirement=True,
+            retirement_predecessor={"pid": 101, "start": "1001", "slot": None, "release_claim": None},
+        )
+        assert result["result"]["ok"] and result["result"]["retirement_pending"]
+        assert new.promoted and new.alive
+    finally:
+        new.force_terminate()
+
+
+def test_async_installation_rejects_an_unsupported_target_before_opening_admission(tmp_path, monkeypatch):
+    old, new = _FakeDaemon(101, port=0), _FakeDaemon(202)
+    new.async_retirement = False
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=old.port, pid=old.pid)
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
+
+    def spawn(_python, *, port):
+        new.start(port)
+        return _Handle(new)
+
+    monkeypatch.setattr(smc, "spawn_passive", spawn)
+    try:
+        result = smc.activate_after_update(
+            runtime_python="python", asynchronous_retirement=True, health_timeout=0.01,
+        )
+        assert not result["result"]["ok"] and not result["result"]["committed"]
+        assert "does not support asynchronous" in result["result"]["error"]
+        assert old.alive and not old.draining and not old.shutdown_requested
+        assert not new.promoted and not new.alive
+        assert routing.read_table(tmp_path)["active"]["pid"] == old.pid
     finally:
         old.force_terminate()
         new.force_terminate()

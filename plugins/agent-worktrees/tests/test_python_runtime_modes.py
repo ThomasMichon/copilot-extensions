@@ -322,6 +322,48 @@ def test_repair_refuses_changed_governance_before_acquiring_cutover(modes, tmp_p
         )
 
 
+def test_dev_rebuild_refuses_pending_retirement_before_claim_or_construction(
+    modes, tmp_path, monkeypatch,
+):
+    from contextlib import nullcontext
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    lifecycle = modes.lifecycle
+    root, plugin = tmp_path / "runtime", tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    claim = lifecycle.runtime.claim_dev(root, "original-owner", previous_version="numbered")
+    released = []
+    monkeypatch.setattr(lifecycle, "_load_installed", lambda _slot: None)
+    monkeypatch.setattr(
+        lifecycle, "Governance",
+        lambda *_args: SimpleNamespace(
+            root=root, payload=plugin, signature=lambda: {},
+            held=lambda **_kwargs: nullcontext(),
+        ),
+    )
+    monkeypatch.setattr(
+        cutover, "_acquire_cutover_lock",
+        lambda *_args, **_kwargs: SimpleNamespace(release=lambda: released.append(True)),
+    )
+    monkeypatch.setattr(retirements, "pending_slot", lambda requested, slot: requested == root and slot == "dev")
+    monkeypatch.setattr(
+        lifecycle.engine, "dev_candidate",
+        lambda *_args, **_kwargs: pytest.fail("Retiring dev runtime was reconstructed"),
+    )
+    with pytest.raises(lifecycle.InstallationRefused, match="previous dev resident is still retiring"):
+        modes.run_owned(
+            root, plugin, payload=plugin, uv=tmp_path / "uv",
+            base_python=Path(sys.executable), mode="dev", owner=tmp_path / "new-owner",
+            expected_governance={},
+        )
+    assert lifecycle.runtime.read_dev_claim(root) == claim
+    assert released == [True]
+
+
 def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_path, monkeypatch):
     lifecycle = modes.lifecycle
     root, plugin = tmp_path / "runtime", tmp_path / "plugin"
@@ -395,11 +437,16 @@ def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_pat
 
 
 @pytest.mark.parametrize("settlement_failure", [False, True])
+@pytest.mark.parametrize("retirement_pending,retiring_dev", [
+    (False, False), (True, False), (True, True),
+])
 def test_dev_release_keeps_original_claim_until_restoration_settles(
     modes,
     tmp_path,
     monkeypatch,
     settlement_failure,
+    retirement_pending,
+    retiring_dev,
 ):
     from agent_worktrees import status_monitor_cutover as cutover
 
@@ -446,6 +493,7 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         assert events == ["enter-governance"]
         assert kwargs["governance"].active
         assert lifecycle.runtime.read_dev_claim(root)["previous_version"] == "original"
+        assert kwargs["release_dev_claim"] == lifecycle.runtime.read_dev_claim(root)
         for retained in ("original", "dev"):
             with pytest.raises(lifecycle.runtime.RetentionTimeout):
                 with lifecycle.runtime._kernel_lease(
@@ -459,7 +507,10 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         if settlement_failure:
             raise RuntimeError("unsettled cutover")
         lifecycle.runtime.activate(root, version, link_free=True)
-        return {"runtime_version": version}
+        return {
+            "runtime_version": version, "retirement_pending": retirement_pending,
+            "dev_claim_release_pending": retirement_pending and retiring_dev,
+        }
 
     monkeypatch.setattr(lifecycle, "Governance", Governance)
     monkeypatch.setattr(lifecycle, "_load_installed", lambda _slot: None)
@@ -485,8 +536,13 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         assert lifecycle.runtime.read_dev_claim(root)["owner"] == str(owner)
         assert lifecycle.runtime.current_version(root) == "dev"
     else:
-        assert modes.run_owned(root, plugin, **arguments)["reused"] is True
-        assert lifecycle.runtime.read_dev_claim(root) is None
+        result = modes.run_owned(root, plugin, **arguments)
+        assert result["reused"] is True
+        if retirement_pending and retiring_dev:
+            assert result["dev_claim_release_pending"] is True
+            assert lifecycle.runtime.read_dev_claim(root)["owner"] == str(owner)
+        else:
+            assert lifecycle.runtime.read_dev_claim(root) is None
         assert lifecycle.runtime.current_version(root) == "original"
     assert events[-2:] == ["release-cutover", "leave-governance"]
 

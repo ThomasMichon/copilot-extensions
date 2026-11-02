@@ -201,12 +201,16 @@ class CutoverOrchestrator:
             try:
                 if check(self._client_host(), port):
                     return True
+            except CutoverError:
+                raise
             except Exception:
                 pass
             self.sleep(poll)
         # one last probe at the deadline
         try:
             return bool(check(self._client_host(), port))
+        except CutoverError:
+            raise
         except Exception:
             return False
 
@@ -699,17 +703,17 @@ class CutoverOrchestrator:
                 )
                 activate_successor = self.activate_successor
                 assert activate_successor is not None
-                activate_successor(successor)
-                if not self._await_health(new_port, health_timeout, poll, health_check):
-                    raise CutoverError("published successor did not become ready")
                 result.committed = True
-                result.ok = True
                 result.retirement_pending = old is not None and old.port != new_port
-                result.steps.append("successor ready; predecessor retirement is asynchronous")
                 write_breadcrumb(
                     state="committed", old=old_dict, new_port=new_port,
                     new_pid=new_pid, started_at=started_at,
                 )
+                activate_successor(successor)
+                if not self._await_health(new_port, health_timeout, poll, health_check):
+                    raise CutoverError("published successor did not become ready")
+                result.ok = True
+                result.steps.append("successor ready; predecessor retirement is asynchronous")
                 breadcrumb.clear_breadcrumb(self.config_dir)
                 return result
 
@@ -843,7 +847,7 @@ class CutoverOrchestrator:
                     f"post-commit conditional error ({type(exc).__name__})" if conditional
                     else f"post-commit error (new daemon is live): {exc}"
                 )
-                result.ok = conditional is None and self.expected_old is None
+                result.ok = conditional is None and self.expected_old is None and not self.self_retirement
                 if conditional:
                     result.serving_endpoint = None
                 log.error("Cutover post-commit error: %s", result.error)
@@ -853,7 +857,7 @@ class CutoverOrchestrator:
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
                         error=result.error,
                     )
-                elif self.drain_before_publish or self.expected_old is not None:
+                elif self.drain_before_publish or self.expected_old is not None or self.self_retirement:
                     write_breadcrumb(
                         state="committed", old=old_dict,
                         new_port=new_port, new_pid=new_pid, started_at=started_at,

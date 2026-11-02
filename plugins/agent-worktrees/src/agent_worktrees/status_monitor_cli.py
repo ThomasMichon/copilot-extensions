@@ -178,6 +178,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     self_retire_confirms = 0
     self_retire_confirmations = 2
     self_retire_first_detected: float | None = None
+    from .runtime_monitor_retirements import ResidentRetirements
+
+    retirements = ResidentRetirements(status_monitor_runtime._aw_runtime_home())
 
     def _other_current_monitor() -> bool:
         """A *different*, live monitor on a non-superseded runtime owns the host."""
@@ -225,27 +228,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # for the next contender that opens the replacement (review finding,
     # PR #5412).
     #
-    # Scope: this claim protects only an ORDINARY cold start (the reported
-    # bug -- a burst of session-lifecycle hooks each independently deciding
-    # to spawn, with no existing owner or an existing non-superseding one).
-    # It deliberately does NOT extend to the muxless/superseded-runtime
-    # replacement path (`_other_current_monitor()`'s own two exceptions,
-    # already pre-existing code this PR doesn't touch) or the cutover/
-    # promotion lifecycle -- several attempts to extend atomic exclusivity
-    # into those paths each surfaced new, genuine concurrency/lifecycle bugs
-    # under review (dead-replacement-metadata false-positive self-retire, a
-    # second unsynchronized publish point, an abrupt exit skipping drain of
-    # in-flight work, predecessor/successor overlap far longer than any
-    # bounded wait, concurrent-handler races, and more). A replacement
-    # candidate now simply contests this SAME hard lease like any other
-    # starter: since the still-live incumbent already holds it, the
-    # replacement backs off and the incumbent keeps running until it exits
-    # on its own for an unrelated reason -- a known, disclosed regression
-    # (the muxless/superseded-runtime replacement no longer completes
-    # promptly) tracked as follow-up, not a safety bug (no duplication).
-    # Properly restoring prompt replacement needs a holistic redesign of
-    # that whole lifecycle, not incremental patches here (review findings,
-    # PR #5412; follow-up: #5453).
+    # This lease covers ordinary cold starts. Installer replacement starts a
+    # passive successor, then promotes its separately serialized route; it
+    # never force-stops the incumbent to acquire this cold-start lease.
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
 
     def _acquire_ownership_lease():
@@ -449,9 +434,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     retired_tracking_write_servers = []
 
     def _start_request_surfaces() -> bool:
-        nonlocal hook_server, classify_server, tracking_write_server
+        nonlocal hook_server, classify_server, tracking_write_server, self_retire_generation
         if admission_closed or not published_lock or shutdown_requested.is_set():
             return False
+        if self_retire_generation is None:
+            self_retire_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+        if self_retire_generation is None:
+            return False
+        retirements.refresh(cleanup=False)
         try:
             worktrees_runtime.activate()
         except (ProjectionError, ProjectionUnavailable, OSError) as exc:
@@ -635,10 +625,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     def _handle_control(action: str, payload: dict) -> dict:
         nonlocal admission_closed, published_lock
         if action == "health":
-            return guarded_recovery.monitor_health(
+            health = guarded_recovery.monitor_health(
                 worktrees_runtime, receipts, repositories_runtime, allocations=allocation_linker,
                 shutdown=shutdown_requested.is_set(), draining=admission_closed, published=published_lock,
             )
+            health["predecessorRetirement"] = retirements.health()
+            return health
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
         if action in {"agenda-read", "agenda-publish"}:
@@ -758,6 +750,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 segment_cache.settle_pending_once()
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+            if active_generation is not None:
+                retirements.refresh()
             readers_ready = (
                 worktrees_runtime.health()["worktrees"]["status"] == "ready"
                 and repositories_runtime.health()["repositories"]["admitting"]
@@ -907,6 +901,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 and not repositories_runtime.has_active_demand()
                 and not _tracking_write_busy()
                 and not allocation_linker.has_demand()
+                and not retirements.pending
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -926,6 +921,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or repositories_runtime.has_active_demand()
                         or _tracking_write_busy()
                         or allocation_linker.has_demand()
+                        or retirements.pending
                     ):
                         empty_strikes = 0
                     else:

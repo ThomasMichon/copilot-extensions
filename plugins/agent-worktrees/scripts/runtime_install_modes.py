@@ -205,6 +205,10 @@ def run_owned(
                 (plugin / "pyproject.toml").read_text(encoding="utf-8"),
             )["project"]["version"]
             if mode == "dev":
+                from agent_worktrees.runtime_monitor_retirements import pending_slot
+
+                if pending_slot(root, "dev"):
+                    raise lifecycle.InstallationRefused("The previous dev resident is still retiring")
                 if owner is None:
                     raise lifecycle.InstallationRefused(
                         "Dev construction requires an attributable owner"
@@ -378,7 +382,11 @@ def _release(
         lifecycle_slot=control_slot,
         package_version=package_version,
         governance=governance,
+        release_dev_claim=claim,
     )
+    if result.get("dev_claim_release_pending") is True:
+        result.update(reused=True, dev_claim_release_pending=True)
+        return result
     with governance.held(timeout=wait_timeout):
         if lifecycle.runtime.read_dev_claim(root, strict=True) != claim:
             raise lifecycle.InstallationRefused("Dev claim changed before its settled release")

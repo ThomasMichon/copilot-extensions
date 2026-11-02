@@ -4270,7 +4270,7 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
             replies.append(handles[0]("promote", {}))
             health = handles[0]("health", {})
             assert health["published"] is False
-            assert health["worktrees"]["status"] == "unavailable"
+            assert health["worktrees"]["status"] == ("unready" if not attempts else "unavailable")
             elected[0] = True
 
         def current_read_count(self, action="worktrees-read"):
@@ -4283,7 +4283,7 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     swept = []
 
     def sweep(*args, **kwargs):
-        assert len(attempts) == 2
+        assert len(attempts) == (1 if first_failure == "election" else 2)
         assert handles[0]("health", {})["worktrees"]["status"] == "ready"
         replies.append(handles[0]("promote", {}))
         swept.append(True)

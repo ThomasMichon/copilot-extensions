@@ -150,8 +150,19 @@ def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monke
     assert not handle.terminated
     assert breadcrumb.read_breadcrumb(tmp_path) is None
 
+    following, next_handle = _make(
+        tmp_path, healthy_ports={9291}, registry=registry, port=9291,
+        self_retirement=True, activate_successor=activate,
+    )
+    next_handle.pid = 4322
+    replaced = following.run(health_timeout=1, drain_timeout=0)
+    assert replaced.ok and replaced.committed and replaced.retirement_pending
+    assert promoted == [9290, 9291] and registry == {}
+    assert routing.read_table(tmp_path)["active"]["pid"] == next_handle.pid
+    assert not handle.terminated and not next_handle.terminated
 
-def test_self_retirement_activation_failure_preserves_the_predecessor(tmp_path, monkeypatch):
+
+def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
     registry = {}
@@ -159,15 +170,16 @@ def test_self_retirement_activation_failure_preserves_the_predecessor(tmp_path, 
     def activate(_endpoint):
         raise RuntimeError("successor refused promotion")
 
-    orch, _handle = _make(
+    orch, handle = _make(
         tmp_path, healthy_ports={9281, 9290}, registry=registry,
         self_retirement=True, activate_successor=activate,
     )
     result = orch.run(health_timeout=1)
-    assert not result.ok and not result.committed
-    assert result.rolled_back
-    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+    assert not result.ok and result.committed
+    assert not result.rolled_back and not handle.terminated
+    assert routing.read_table(tmp_path)["active"]["port"] == 9290
     assert registry.get("http://127.0.0.1:9281") is None
+    assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
 
 
 def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):

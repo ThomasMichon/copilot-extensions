@@ -479,11 +479,12 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
             driver.install(root, plugin, **arguments)
 
 
-@pytest.mark.parametrize("rollback,interrupted", [
-    (False, False), (True, False), (False, True), (True, True),
+@pytest.mark.parametrize("rollback,interrupted,activation_failed", [
+    (False, False, False), (True, False, False), (False, True, False),
+    (True, True, False), (False, False, True),
 ])
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
-    driver, tmp_path, monkeypatch, rollback, interrupted,
+    driver, tmp_path, monkeypatch, rollback, interrupted, activation_failed,
 ):
     from agent_worktrees import config as cfg, status_monitor_cutover as cutover
 
@@ -547,7 +548,11 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             pass
         if interrupted:
             raise RuntimeError("cutover interrupted")
-        return {"action": "cutover", "result": {"committed": not rollback, "rolled_back": rollback}}
+        return {"action": "cutover", "result": {
+            "ok": not rollback and not activation_failed,
+            "committed": not rollback, "rolled_back": rollback,
+            "error": "promotion response failed" if activation_failed else None,
+        }}
 
     guard = Guard()
 
@@ -595,7 +600,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(cutover, "activate_after_update", actual_transition)
     monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
     monkeypatch.setattr(driver.subprocess, "Popen", Process)
-    if rollback or interrupted:
+    if rollback or interrupted or activation_failed:
         with pytest.raises(subprocess.CalledProcessError):
             driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         expected = "1.0.0" if rollback else "2.0.0"
@@ -947,7 +952,7 @@ def test_real_installer_returns_before_resident_owned_monitor_drain(
     request_started = tmp_path / "request-started"
     request_release = tmp_path / "request-release"
     monitor_probe = """
-import importlib.util, runpy, sys, threading
+import runpy, sys, threading
 from pathlib import Path
 from agent_worktrees import classify_daemon
 started, release = map(Path, sys.argv[1:])
@@ -966,15 +971,7 @@ def controlled_server(compute, **kwargs):
     return start_server(controlled_compute, **kwargs)
 classify_daemon.start_server = controlled_server
 sys.argv = ["agent_worktrees", "status-monitor", "--interval", "1"]
-slot = Path(sys.prefix)
-spec = importlib.util.spec_from_file_location(
-    "baseline_retention", slot / ".runtime-bootstrap" / "versioned_runtime.py",
-)
-runtime = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = runtime
-spec.loader.exec_module(runtime)
-with runtime.retention_lease(slot.parent.parent, slot.name):
-    runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
+runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
 """
     try:
         with (tmp_path / "monitor.log").open("w", encoding="utf-8") as monitor_log:
@@ -1065,27 +1062,21 @@ with runtime.retention_lease(slot.parent.parent, slot.name):
                 )
                 identities[successor.pid] = diagnostics.process_start_time(successor.pid)
                 assert transition.wait(timeout=60) == 0, log.read_text(encoding="utf-8", errors="replace")
-                current = locks.read_lock(lock_path)
-                assert current["pid"] == successor.pid
-                new_host, new_port = current["worktree_status_endpoint"].split(":")
-                new_demand = (new_host, int(new_port), current["worktree_status_token"])
-                classify_daemon.wcs_client.subscribe(*new_demand, "retained-cutover-demand")
                 demand_stop.set()
                 demand_thread.join(timeout=5)
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors
-                demand_endpoint = new_demand
-                demand_stop.clear()
-                demand_thread = threading.Thread(target=keep_demand, daemon=True)
-                demand_thread.start()
                 assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
                 assert monitor.poll() is None, "installation waited for predecessor retirement"
-                for version in (old.name, installed["runtime_version"]):
-                    with pytest.raises(driver.runtime.RetentionTimeout):
-                        with driver.runtime._kernel_lease(
-                            root, version, kind="retention", shared=False, timeout=0,
-                        ):
-                            pytest.fail("resident released its live runtime generation")
+                with driver.runtime._kernel_lease(
+                    root, old.name, kind="retention", shared=False, timeout=0,
+                ):
+                    pass
+                assert old.name in {
+                    version for versions in driver.runtime._leases.read_runtime_references(root).values()
+                    for version in versions
+                }
+                assert driver.runtime.gc(root, min_age_days=0) == []
                 request_release.touch()
             hook_thread.join(timeout=15)
             assert not hook_thread.is_alive()

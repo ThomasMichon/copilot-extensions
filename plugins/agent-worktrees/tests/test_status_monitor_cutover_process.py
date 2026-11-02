@@ -200,7 +200,7 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
                 pass
 
 
-@pytest.mark.timeout(180)
+@pytest.mark.timeout(300)
 def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path):
     from agent_procutil import no_window_kwargs
     from agent_worktrees import classify_daemon
@@ -211,7 +211,10 @@ def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path
     home.mkdir()
     root = home / ".agent-worktrees"
     started, release = tmp_path / "started", tmp_path / "release"
-    observed = tmp_path / "resident-observed-generation"
+    second_started, second_release = tmp_path / "second-started", tmp_path / "second-release"
+    second_loop = second_started.with_suffix(".loop-release")
+    third_started = tmp_path / "third-started"
+    third_loop = third_started.with_suffix(".loop-release")
     output = tmp_path / "result.json"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
                AGENT_WORKTREES_STATUS_MONITOR="1")
@@ -219,22 +222,27 @@ def test_install_process_returns_before_resident_finishes_accepted_work(tmp_path
                 "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_STATUS_MONITOR_ROUTING_DIR"):
         env.pop(key, None)
     baseline = """
-import json, runpy, sys, threading
+import runpy, sys, threading
 from pathlib import Path
-from agent_worktrees import classify_daemon, self_retire
-started, release, observed = map(Path, sys.argv[1:])
-is_superseded = self_retire.is_superseded
-def observe(*args, **kwargs):
-    result = is_superseded(*args, **kwargs)
-    observed.write_text(json.dumps({"superseded": result, "generation": args[2]}))
-    return result
-self_retire.is_superseded = observe
+from agent_worktrees import classify_daemon, repository_map
+started, release = map(Path, sys.argv[1:3])
+options = sys.argv[3:]
+if "--passive" in options:
+    original_start = repository_map.RepositoryMapRuntime.start
+    def paused_start(self, interval):
+        original_start(self, interval)
+        for _ in range(2400):
+            if started.with_suffix(".loop-release").exists():
+                return
+            threading.Event().wait(0.1)
+        raise TimeoutError("resident loop was not released")
+    repository_map.RepositoryMapRuntime.start = paused_start
 original = classify_daemon.start_server
 def start_server(compute, **kwargs):
     def held(kind, payload):
         if payload.get("async_install_probe"):
             started.touch()
-            for _ in range(1200):
+            for _ in range(2400):
                 if release.exists():
                     return {"completed": True}
                 threading.Event().wait(0.1)
@@ -242,7 +250,7 @@ def start_server(compute, **kwargs):
         return compute(kind, payload)
     return original(held, **kwargs)
 classify_daemon.start_server = start_server
-sys.argv = ["agent_worktrees", "status-monitor", "--interval", "1"]
+sys.argv = ["agent_worktrees", "status-monitor", "--interval", "1", *options]
 runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
 """
     installation = """
@@ -252,6 +260,13 @@ from pathlib import Path
 from agent_worktrees import status_monitor_cutover as cutover, status_monitor_runtime as runtime
 # Preserve this source packet's import closure for the actual resident child.
 runtime._daemon_environment = lambda: dict(os.environ)
+spawn_monitor = cutover.spawn_monitor
+def controlled_spawn(argv, env, **kwargs):
+    options = argv[argv.index("status-monitor") + 1:]
+    return spawn_monitor(
+        [argv[0], "-c", sys.argv[4], sys.argv[2], sys.argv[3], *options], env, **kwargs,
+    )
+cutover.spawn_monitor = controlled_spawn
 with ExitStack() as custody:
     guard = cutover._acquire_cutover_lock(cutover.routing_dir())
     custody.callback(guard.release)
@@ -263,13 +278,15 @@ with ExitStack() as custody:
 """
     identities = {}
     request_result = {}
+    second_result = {}
     requester = None
+    second_requester = None
     demand = None
     demand_thread = None
     demand_stop = threading.Event()
     with (tmp_path / "process.log").open("w", encoding="utf-8") as log:
         old = subprocess.Popen(
-            [sys.executable, "-B", "-c", baseline, str(started), str(release), str(observed)],
+            [sys.executable, "-B", "-c", baseline, str(started), str(release)],
             env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
             stdout=log, stderr=log, **no_window_kwargs(),
         )
@@ -283,7 +300,6 @@ with ExitStack() as custody:
             )
             old_pid = record["pid"]
             identities[old_pid] = diagnostics.process_start_time(old_pid)
-            _wait_for(observed.exists, message="baseline did not observe its routed generation")
             demand_host, demand_port = record["worktree_status_endpoint"].split(":")
             demand = (demand_host, int(demand_port), record["worktree_status_token"])
             classify_daemon.wcs_client.subscribe(*demand, "async-install-demand")
@@ -299,20 +315,24 @@ with ExitStack() as custody:
             demand_thread.start()
             host, port, token = classify_daemon.endpoint_from_rendezvous(record)
 
-            def request():
+            def request(endpoint, result, key):
                 try:
-                    request_result.update(classify_daemon.wcs_client.request(
-                        host, port, token, kind=classify_daemon.KIND, key="async-install-probe",
-                        payload={"async_install_probe": True}, request_deadline_s=120,
+                    result.update(classify_daemon.wcs_client.request(
+                        *endpoint, kind=classify_daemon.KIND, key=key,
+                        payload={"async_install_probe": True}, request_deadline_s=240,
                     ))
                 except classify_daemon.wcs_client.DaemonUnavailable as error:
-                    request_result["error"] = str(error)
+                    result["error"] = str(error)
 
-            requester = threading.Thread(target=request, daemon=True)
+            requester = threading.Thread(
+                target=request, args=((host, port, token), request_result, "first-accepted"),
+                daemon=True,
+            )
             requester.start()
             _wait_for(started.exists, message="baseline did not accept the held request")
             installed = subprocess.run(
-                [sys.executable, "-B", "-c", installation, str(output)],
+                [sys.executable, "-B", "-c", installation, str(output),
+                 str(second_started), str(second_release), baseline],
                 env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
                 stdout=log, stderr=log, timeout=60, **no_window_kwargs(),
             )
@@ -323,24 +343,63 @@ with ExitStack() as custody:
             successor = routing.read_active_endpoint(root / "status-monitor-routing")
             assert successor is not None and successor.pid != old_pid
             identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+            second = locks.read_lock(root / "status-monitor.lock")
+            assert second["pid"] == successor.pid
+            second_requester = threading.Thread(
+                target=request, args=(
+                    classify_daemon.endpoint_from_rendezvous(second), second_result, "second-accepted",
+                ), daemon=True,
+            )
+            second_requester.start()
+            _wait_for(second_started.exists, message="second resident did not accept held work")
+            third_loop.touch()
+            installed = subprocess.run(
+                [sys.executable, "-B", "-c", installation, str(output),
+                 str(third_started), str(tmp_path / "third-release"), baseline],
+                env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+                stdout=log, stderr=log, timeout=60, **no_window_kwargs(),
+            )
+            assert installed.returncode == 0, (tmp_path / "process.log").read_text()
+            assert _read_json(output)["result"]["retirement_pending"]
+            third = routing.read_active_endpoint(root / "status-monitor-routing")
+            assert third is not None and third.pid not in (old_pid, successor.pid)
+            identities[third.pid] = diagnostics.process_start_time(third.pid)
+            assert requester.is_alive() and second_requester.is_alive()
+            second_loop.touch()
+            control_token = (root / "status-monitor-control.token").read_text().strip()
+            _wait_for(
+                lambda: smc.ControlClient(
+                    successor.base_url, token=control_token,
+                ).health()["status"] == "draining",
+                message="second resident forgot its generation before admitting work",
+            )
+            time.sleep(8)
             health = smc.ControlClient(
-                successor.base_url, token=(root / "status-monitor-control.token").read_text().strip(),
+                third.base_url, token=(root / "status-monitor-control.token").read_text().strip(),
             ).health()
             assert health["published"] is True and health["status"] == "ready"
-            current = locks.read_lock(root / "status-monitor.lock")
-            assert current["pid"] == successor.pid
-            new_host, new_port = current["worktree_status_endpoint"].split(":")
-            new_demand = (new_host, int(new_port), current["worktree_status_token"])
-            classify_daemon.wcs_client.subscribe(*new_demand, "async-install-demand")
-            previous_demand, demand = demand, new_demand
-            classify_daemon.wcs_client.release(*previous_demand, "async-install-demand")
+            assert health["predecessorRetirement"]["pending"] is True
+            assert requester.is_alive() and second_requester.is_alive()
+            demand_stop.set()
+            demand_thread.join(timeout=5)
+            classify_daemon.wcs_client.release(*demand, "async-install-demand")
+            retirement_deadline = time.monotonic() + _SELF_RETIRE_MAX_GRACE_S + 15
             release.touch()
+            second_release.touch()
+            second_loop.touch()
+            third_loop.touch()
             requester.join(timeout=15)
+            second_requester.join(timeout=15)
             assert not requester.is_alive() and request_result.get("completed") is True
-            assert old.wait(timeout=_SELF_RETIRE_MAX_GRACE_S + 15) == 0
+            assert not second_requester.is_alive() and second_result.get("completed") is True
+            assert old.wait(timeout=max(1, retirement_deadline - time.monotonic())) == 0
+            _wait_for(
+                lambda: not diagnostics._pid_alive(successor.pid),
+                timeout=max(1, retirement_deadline - time.monotonic()),
+                message="second resident did not independently retire",
+            )
         except (AssertionError, subprocess.TimeoutExpired) as error:
             log.flush()
-            observation = observed.read_text() if observed.exists() else "unobserved"
             table = routing.read_table(root / "status-monitor-routing")
             health = {}
             for label in ("active", "previous"):
@@ -354,11 +413,14 @@ with ExitStack() as custody:
                     except (OSError, ValueError) as unavailable:
                         health[label] = str(unavailable)
             pytest.fail(
-                f"{error}\nretirement={observation}\nhealth={health}\n"
+                f"{error}\nhealth={health}\n"
                 f"{(tmp_path / 'process.log').read_text(encoding='utf-8')}"
             )
         finally:
             release.touch()
+            second_release.touch()
+            second_loop.touch()
+            third_loop.touch()
             demand_stop.set()
             if demand_thread is not None:
                 demand_thread.join(timeout=5)
@@ -366,6 +428,8 @@ with ExitStack() as custody:
                 classify_daemon.wcs_client.release(*demand, "async-install-demand")
             if requester is not None:
                 requester.join(timeout=15)
+            if second_requester is not None:
+                second_requester.join(timeout=15)
             for pid, identity in identities.items():
                 if identity is not None:
                     diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)

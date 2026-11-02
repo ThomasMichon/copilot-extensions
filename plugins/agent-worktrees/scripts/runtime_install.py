@@ -655,6 +655,7 @@ def settle_candidate(
     base_python: Path | None = None,
     governance: Governance | None = None,
     recover_adopted_manager: bool = False,
+    release_dev_claim: dict | None = None,
 ) -> dict:
     governance = governance if governance is not None else Governance(
         root, payload,
@@ -705,6 +706,7 @@ def settle_candidate(
             snapshot = _selector_snapshot(root)
             manifest_snapshot = deployment.read_manifest(root)
             predecessor = _monitor_identity(root) if monitor_scope else None
+            serving_slot = None
             if predecessor is not None:
                 serving_slot = _monitor_slot(root, predecessor)
                 if serving_slot is not None and serving_slot not in (version, previous, selected):
@@ -752,6 +754,13 @@ def settle_candidate(
                         spawned_handles=handles,
                         transition_custody=custody,
                         asynchronous_retirement=True,
+                        retirement_predecessor=(
+                            {
+                                "pid": predecessor[0], "start": predecessor[1],
+                                "slot": serving_slot,
+                                "release_claim": release_dev_claim if serving_slot == "dev" else None,
+                            } if predecessor is not None else None
+                        ),
                     )
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "
@@ -760,6 +769,10 @@ def settle_candidate(
                     committed = _settle_monitor(root, candidate_slot, summary, predecessor, handles)
                 if not committed:
                     raise InstallationRefused("Monitor cutover rolled back; previous selection restored")
+                if summary.get("action") == "cutover" and (summary.get("result") or {}).get("ok") is not True:
+                    raise InstallationRefused(
+                        f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
+                    )
                 deployment.publish(root, manifest)
             except BaseException:
                 announced = False
@@ -804,6 +817,11 @@ def settle_candidate(
             "runtime_generation": identity["build_info"].get("runtime_generation"),
             "deployment_manifest_published": True,
             "helpers_published": helpers is not None,
+            "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
+            "dev_claim_release_pending": (
+                release_dev_claim is not None and serving_slot == "dev"
+                and (summary.get("result") or {}).get("retirement_pending") is True
+            ),
             "runtime_python": str(runtime.slot_python(root, version)),
             "payload_hash": payload_hash,
         }

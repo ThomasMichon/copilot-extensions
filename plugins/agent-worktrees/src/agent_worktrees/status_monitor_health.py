@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .runtime_identity import PROCESS_GENERATION, PROCESS_VERSION
+from .runtime_monitor_retirements import CAPABILITY
 
 
 class HealthSurface(Protocol):
@@ -18,6 +19,7 @@ def response(
     *, worktrees: HealthSurface, receipts: HealthSurface,
     repositories: HealthSurface, allocations: HealthSurface,
     admission_closed: bool, published: bool, shutdown: bool,
+    retirements: dict | None = None,
 ) -> dict:
     roster = worktrees.health()
     receipt = receipts.health()
@@ -26,6 +28,7 @@ def response(
     roster["capabilities"] = [
         *roster["capabilities"], *receipt["capabilities"],
         *repository["capabilities"], *allocation["capabilities"],
+        CAPABILITY,
     ]
     if shutdown:
         roster["worktrees"]["status"] = "shutdown"
@@ -40,4 +43,5 @@ def response(
         "allocationLinker": allocation["allocationLinker"],
         "runtime_generation": PROCESS_GENERATION, "version": PROCESS_VERSION,
         "runtime_slot": slot.name,
+        "predecessorRetirement": retirements,
     }

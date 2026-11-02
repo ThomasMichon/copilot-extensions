@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import breadcrumb, routing
-from zdd.cutover import CutoverOrchestrator
+from zdd.cutover import CutoverError, CutoverOrchestrator
 
 from . import locks, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
@@ -582,17 +582,24 @@ def start_application(*, health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S) -> i
             guard.release()
 
 
-def _health_check(host: str, port: int) -> bool:
+def _health_check(host: str, port: int, *, require_async_retirement: bool = False) -> bool:
     try:
         status = ControlClient(f"http://{host}:{port}").health()
         if status.get("status") != "ready":
             return False
+        if require_async_retirement:
+            from .runtime_monitor_retirements import CAPABILITY
+
+            if CAPABILITY not in status.get("capabilities", []):
+                raise CutoverError("Incoming monitor does not support asynchronous predecessor retirement")
         roster = status.get("worktrees")
         if not isinstance(roster, dict):
             return True
         return roster.get("status") == "ready" or (
             status.get("published") is False and roster.get("status") == "unready"
         )
+    except CutoverError:
+        raise
     except Exception:
         return False
 
@@ -686,10 +693,12 @@ def activate_after_update(
     spawned_handles: list[subprocess.Popen] | None = None,
     transition_custody: ExitStack | None = None,
     asynchronous_retirement: bool = False,
+    retirement_predecessor: dict | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
     from . import status_monitor_reap_stale
     from . import status_monitor_runtime as smr
+    from . import runtime_monitor_retirements as retirements
 
     if spawned_handles is not None:
         print("Monitor transition: validating owning guard", flush=True)
@@ -722,7 +731,10 @@ def activate_after_update(
     if spawned_handles is not None:
         restart_arguments["spawned_handles"] = spawned_handles
     lock_live = _monitor_lock_is_live()
-    if not lock_live:
+    if asynchronous_retirement:
+        retirement_predecessor = retirement_predecessor or retirements.capture(smr._aw_runtime_home())
+        routed_live = retirement_predecessor is not None
+    elif not lock_live:
         try:
             routed_live = (
                 guarded_recovery.routed_owner_present(routing_dir()) if guarded
@@ -737,16 +749,17 @@ def activate_after_update(
     else:
         routed_live = False
     if not lock_live and not routed_live:
-        if monitor_was_live:
+        if monitor_was_live and not asynchronous_retirement:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor(**restart_arguments)
             if cutover_guard is None or spawned_handles is None:
                 status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
-        summary["reason"] = "no-live-monitor"
-        return summary
+        if not monitor_was_live:
+            summary["reason"] = "no-live-monitor"
+            return summary
     active_url = _monitor_control_url_from_route()
-    if active_url is None:
+    if active_url is None and not asynchronous_retirement:
         if guarded:
             summary.update(
                 action="refused", reason="guarded-recovery-no-control-listener",
@@ -838,6 +851,9 @@ def activate_after_update(
                 "drain_before_publish": True, "on_published": activate_successor,
             }
         transition_started = True
+        reserved = asynchronous_retirement and retirements.reserve(
+            smr._aw_runtime_home(), retirement_predecessor,
+        )
         if spawned_handles is not None:
             print("Monitor transition: checking prior recovery", flush=True)
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
@@ -867,19 +883,16 @@ def activate_after_update(
         def activate_successor(endpoint: routing.Endpoint) -> None:
             if make_client(endpoint.base_url).promote().get("adopted") is not True:
                 raise ValueError("status-monitor successor refused promotion")
-            if transition_custody is not None:
-                from .runtime_monitor_demand import retain_transition_demand
 
-                transition_custody.enter_context(retain_transition_demand(
-                    routing_dir().parent, endpoint.pid,
-                ))
+        def healthy_successor(host: str, port: int) -> bool:
+            return _health_check(host, port, require_async_retirement=True)
 
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,
             version=None,
             spawn_passive=spawn,
-            health_check=health_check,
+            health_check=healthy_successor if asynchronous_retirement else health_check,
             predecessor_health_check=predecessor_health_check,
             make_client=make_client,
             pick_free_port=pick_free_port,
@@ -894,6 +907,8 @@ def activate_after_update(
             drain_timeout=drain_timeout,
             force=False,
         )
+        if reserved:
+            result.retirement_pending = True
         summary["action"] = "cutover"
         summary["result"] = result.to_dict()
     finally:
@@ -915,7 +930,9 @@ def activate_after_update(
             # meant to heal an ambiguous daemon state left behind by that
             # very failure. An owner supplying both the guard and child
             # handles instead settles those processes under retained custody.
-            if transition_started and (cutover_guard is None or spawned_handles is None):
+            if transition_started and not asynchronous_retirement and (
+                cutover_guard is None or spawned_handles is None
+            ):
                 status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 
