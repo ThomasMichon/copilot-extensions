@@ -19,6 +19,7 @@ import secrets
 import threading
 from pathlib import Path
 
+from configuration_layers import ConfigurationError
 from credential_relay import TokenRegistry
 
 from ._peer_launch import ContextRefused
@@ -101,7 +102,8 @@ def relay_profile() -> dict:
 
         cfg = load_config()
         resources = getattr(cfg, "relay_azure_resources", None) or DEFAULT_AZURE_RESOURCES
-    except ContextRefused:
+    except (ContextRefused, ConfigurationError):
+        # Owner/admission refusals must never become the default allowlist.
         raise
     except Exception:  # pragma: no cover - config optional
         log.debug("containers relay config unavailable; using defaults")

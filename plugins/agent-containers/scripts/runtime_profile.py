@@ -56,6 +56,9 @@ LIBRARIES = (
     "plugin-resolve",
     "repository-policy",
     "configuration-layers",
+    "dropin-registry",
+    "single-instance-lease",
+    "plugin-activation",
 )
 
 

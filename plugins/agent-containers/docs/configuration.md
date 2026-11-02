@@ -45,6 +45,49 @@ the native parser's ignored-key behavior, except independently strict protected
 fields. Reads are live; running containers do not change posture merely because
 a file changed. A later admitted lifecycle operation must reconcile them.
 
+## Plugin-shipped fleet fragments
+
+An active plugin may declare `"containersConfig": "<relative path>"` in its
+`plugin.json`. Such fragments form the lowest layer, **beneath the builtins and
+every tier above** (or beneath the single `AGENT_CONTAINERS_CONFIG` /
+compatibility file when no owner context applies). Activation is resolved with
+the canonical identity-verified resolver for the invoking repository: global
+activation plus that checkout's own settings, which can also disable a globally
+enabled plugin. Without an invoking checkout only global activation applies.
+
+- Fragments may define `fleets:` only (`schema_version` is accepted); other
+  top-level keys are ignored with a warning.
+- Operator values override a shipped fleet per key; nested mappings merge per
+  key. Each operator layer is replayed over the fragment in tier order, so a
+  lower tier's reset still removes shipped values before a higher tier adds to
+  that mapping. Unlike ordinary tier composition, an explicit `null` in a
+  plugin-backed fleet removes the value, so the field falls back to its
+  default/global value; such clears are exempt from per-tier value validation,
+  while any non-null value is still validated.
+- An empty operator fleet entry (`example:`, `example: null` or `example: {}`)
+  removes a plugin-shipped fleet entirely, including every shipped key; a
+  higher layer may define it again from scratch. An explicit `fleets: null` in a
+  layer removes every plugin-shipped fleet the same way. The removing layer is recorded
+  at `/fleets/<name>` with `removed: true`. Empty entries for fleets that no
+  plugin ships keep their native meaning (a fleet with defaults).
+- The plugin whose `name@marketplace` sorts first owns a duplicated fleet name;
+  the other definition is ignored as a whole, with a warning.
+- Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
+  (and `devcontainer_config` when the fragment's `devcontainer_path` is omitted
+  or null) resolve against the fragment's directory, so a later operator
+  `devcontainer_path` does not relocate it. With a non-null shipped project
+  path, `devcontainer_config` keeps its native project-relative resolution.
+- Unreadable, invalid, escaping or cyclic (self-referencing YAML anchor)
+  fragments are skipped with a warning, including in strict reads.
+
+Contributions extend `configuration_provenance` with `tier: plugin` owners
+(`source` names the plugin root and fragment path) for surviving shipped values;
+a cleared pointer keeps the clearing layer as owner and an emptied mapping is
+owned by the layer that left it empty. Contributing fragment
+IDs (`plugin:<name>@<marketplace>`) are prepended to `configuration_layers`.
+`agent-containers config-sources [--json]` prints the layers, fragments and
+per-pointer owners; `fleet --json` reports each member's `fleet_source`.
+
 ## Top-level YAML fields
 
 All fields are optional; defaults are below. `fleets` is a name→mapping.
