@@ -4,7 +4,7 @@ import os
 import time
 
 import pytest
-from zdd import breadcrumb, diagnostics, routing, routing_persistence
+from zdd import breadcrumb, diagnostics, process_exit, routing, routing_persistence
 from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
 from agent_worktrees import runtime_monitor_recovery as recovery
@@ -20,6 +20,10 @@ def owned(tmp_path, monkeypatch):
         41002: {"pid": 202, "status": "ready", "published": False},
     }
     monkeypatch.setattr(diagnostics, "process_start_time", identities.get)
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: pid in identities)
+    monkeypatch.setattr(
+        "zdd.process_exit.observe_original_exit", lambda pid, start: identities.get(pid) != start,
+    )
     monkeypatch.setattr(recovery.locks, "process_start_time", identities.get)
     old = routing.publish_active(
         route_root, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001",
@@ -53,6 +57,8 @@ def owned(tmp_path, monkeypatch):
 
     class Client:
         drained = True
+        exits = True
+        exit_reference = None
 
         def __init__(self, url, **_kwargs):
             self.port = int(url.rsplit(":", 1)[1])
@@ -68,13 +74,30 @@ def owned(tmp_path, monkeypatch):
 
         def shutdown(self):
             assert_authority()
+            assert self.exit_reference is not None
+            assert not self.exit_reference._closed
             events.append("shutdown-predecessor")
+            if self.exits:
+                identities.pop(101, None)
+            return {"shutdown": True}
 
         def undrain(self):
             assert_authority()
             events.append("undrain-predecessor")
             return {"draining": False}
 
+    def open_process(pid, start):
+        assert_authority()
+        assert (pid, start) == (101, "1001")
+        if identities.get(pid) != start:
+            raise ProcessLookupError("original native process changed")
+        reference = process_exit.ProcessExitReference(
+            pid, start, lambda timeout: identities.get(pid) != start, lambda: None,
+        )
+        Client.exit_reference = reference
+        return reference
+
+    monkeypatch.setattr(process_exit, "open_process", open_process)
     monkeypatch.setattr(recovery, "ControlClient", Client)
     return tmp_path, route_root, record, Handle(), Client, health, events, identities
 
@@ -91,8 +114,8 @@ def test_same_owner_recovers_uncertain_publication_under_native_authority(owned,
     assert terminal["publication_witness"] == record["publication_witness"]
     assert terminal["new_process_start_time"] == record["new_process_start_time"]
     assert events == (
-        ["drain-predecessor", "shutdown-predecessor"] if published else
-        ["undrain-predecessor", "terminate-candidate"]
+        ["drain-predecessor", "shutdown-predecessor"]
+        if published else ["undrain-predecessor", "terminate-candidate"]
     )
 
 
@@ -146,14 +169,152 @@ def test_rollback_preserves_route_token_when_native_birth_token_differs(owned, m
     assert restored.process_start_time == "1001"
 
 
-def test_commit_forward_requires_actual_predecessor_drain(owned):
-    root, route_root, record, handle, client, health, events, _identities = owned
+@pytest.mark.parametrize("old_state", ["exited", "reused"])
+def test_synchronous_native_old_exit_commits_without_contacting_predecessor(
+    owned, monkeypatch, old_state,
+):
+    root, route_root, record, handle, client, health, events, identities = owned
     health[41002]["published"] = True
     client.drained = False
-    assert not recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
-    assert breadcrumb.read_breadcrumb(route_root) == record
-    assert "shutdown-predecessor" not in events
-    assert handle.poll() is None
-    client.drained = True
+    if old_state == "exited":
+        identities.pop(101)
+    elif old_state == "reused":
+        identities[101] = "different"
+    original = client.health
+
+    def candidate_only(self):
+        assert self.port == 41002, "recovery contacted the predecessor"
+        return original(self)
+
+    monkeypatch.setattr(client, "health", candidate_only)
     assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
-    assert events[-1] == "shutdown-predecessor"
+    assert breadcrumb.read_breadcrumb(route_root)["state"] == "committed"
+    assert events == [] and handle.poll() is None
+
+
+@pytest.mark.parametrize("failure", [
+    "busy", "still-live", "unknown", "unavailable-reference", "wrong-health", "unattributed",
+])
+def test_synchronous_recovery_retains_custody_until_original_predecessor_exits(
+    owned, monkeypatch, failure,
+):
+    root, directory, record, handle, client, health, events, _identities = owned
+    health[41002]["published"] = True
+    if failure == "busy":
+        client.drained = False
+    elif failure == "still-live":
+        client.exits = False
+    elif failure == "wrong-health":
+        health[41001]["pid"] = 303
+    elif failure == "unattributed":
+        monkeypatch.setattr(process_exit, "observe_original_exit", lambda *_args: None)
+    else:
+        def unavailable(*_args):
+            raise PermissionError("native evidence unavailable")
+
+        monkeypatch.setattr(
+            process_exit,
+            "observe_original_exit" if failure == "unknown" else "open_process",
+            unavailable,
+        )
+    before = routing.read_table(directory, strict=True)
+    assert not recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+    assert breadcrumb.read_breadcrumb(directory) == record
+    assert routing.read_table(directory, strict=True) == before
+    assert handle.poll() is None
+    assert events == (
+        ["drain-predecessor"] if failure == "busy" else
+        ["drain-predecessor", "shutdown-predecessor"] if failure == "still-live" else []
+    )
+    if client.exit_reference is not None:
+        assert client.exit_reference._closed
+
+
+def test_synchronous_commit_preserves_selected_route_and_predecessor_fallback(owned):
+    root, directory, record, handle, _client, health, events, _identities = owned
+    health[41002]["published"] = True
+    before = routing.read_table(directory, strict=True)
+    assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+    assert routing.read_table(directory, strict=True) == before
+    assert events == ["drain-predecessor", "shutdown-predecessor"]
+
+
+def test_synchronous_recovery_never_shuts_down_a_pid_reused_during_drain(owned, monkeypatch):
+    root, directory, record, handle, client, health, events, identities = owned
+    health[41002]["published"] = True
+
+    def drain(self, **_kwargs):
+        events.append("drain-predecessor")
+        identities[101] = "different"
+        return {"drained": True}
+
+    monkeypatch.setattr(client, "drain", drain)
+    assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+    assert events == ["drain-predecessor"]
+    assert identities[101] == "different"
+    assert breadcrumb.read_breadcrumb(directory)["state"] == "committed"
+
+
+def test_synchronous_first_publication_without_predecessor_still_commits(owned):
+    root, directory, original, handle, _client, health, events, _identities = owned
+    record = breadcrumb.write_breadcrumb(
+        directory, state="publication-uncertain", old=None, new_port=41002, new_pid=202,
+        new_process_start_time="2002", publication_witness=original["publication_witness"],
+    )
+    health[41002]["published"] = True
+    assert recovery.recover_owned_publication(root, record, None, [handle])
+    assert breadcrumb.read_breadcrumb(directory)["state"] == "committed"
+    assert events == []
+
+
+@pytest.mark.parametrize("phase", ["started", "flipped"])
+@pytest.mark.parametrize("grant_fails", [False, True])
+def test_original_installer_completes_selected_async_candidate_without_legacy_rollback(
+    owned, monkeypatch, phase, grant_fails,
+):
+    from agent_worktrees import runtime_monitor_retirements as retirements
+
+    root, directory, original, handle, client, health, events, _identities = owned
+    record = breadcrumb.write_breadcrumb(
+        directory, state=phase, old=original["old"], new_port=41002, new_pid=202,
+        new_process_start_time="2002", self_retirement=True,
+    )
+    monkeypatch.setattr(retirements, "_records", lambda path: [(root / "old.json", {
+        "pid": 101, "start": "1001", "slot": None, "release_claim": None, "state": "prepared",
+    })])
+
+    def grant(*a, **k):
+        events.append("grant")
+        if grant_fails:
+            raise OSError("grant unavailable")
+        return True
+
+    def promote(self):
+        assert self.port == 41002
+        events.append("promote")
+        health[41002].update(
+            published=True, worktrees={"status": "ready"}, repositories={"admitting": True},
+        )
+        return {"adopted": True}
+
+    monkeypatch.setattr(retirements, "commit", grant)
+    monkeypatch.setattr(client, "promote", promote, raising=False)
+    original_health = client.health
+
+    def candidate_only(self):
+        assert self.port == 41002, "async recovery contacted the predecessor"
+        return original_health(self)
+
+    monkeypatch.setattr(client, "health", candidate_only)
+    if grant_fails:
+        with pytest.raises(OSError, match="grant unavailable"):
+            recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
+        assert breadcrumb.read_breadcrumb(directory)["state"] == "committed"
+        assert events == ["grant"]
+    else:
+        assert recovery.recover_owned_publication(root, record, (101, "1001"), [handle]) == "committed"
+        assert breadcrumb.read_breadcrumb(directory) is None
+        assert events == ["grant", "promote"]
+    assert handle.poll() is None
+    table = routing.read_table(directory, strict=True)
+    assert table["active"]["pid"] == 202 and table["previous"]["pid"] == 101

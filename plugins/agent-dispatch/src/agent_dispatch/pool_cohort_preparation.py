@@ -1,9 +1,9 @@
-"""Fresh registrar projection custody; no automatic publisher or activation."""
+"""Original registrar projection custody through the existing source owners."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,9 +54,12 @@ def _comparable_observation(observation: ConfiguredSupervisorCohort) -> None:
 
 
 class PoolCohortPreparation:
-    """Explicit source-only custody through the actual registrar and queue owners."""
+    """Retain one projection through the actual registrar and queue owners."""
 
-    def __init__(self, sources: RegistrarSources, queue: TaskQueue | DispatchClient) -> None:
+    def __init__(
+        self, sources: RegistrarSources, queue: TaskQueue | DispatchClient, *,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> None:
         if not isinstance(sources, RegistrarSources) or not isinstance(queue, (TaskQueue, DispatchClient)):
             raise PoolPublicationError(
                 "cohort preparation requires the registrar and queue owners"
@@ -67,6 +70,7 @@ class PoolCohortPreparation:
         self._pending: PoolCohortProjectionRequest | None = None
         self._settled: tuple[PoolCohortProjectionRequest, PoolConfiguredCohort] | None = None
         self._projection_admitted = False
+        self._checkpoint = checkpoint
 
     def _coordinator_target(self) -> Path | str:
         if isinstance(self._queue, DispatchClient):
@@ -227,6 +231,8 @@ class PoolCohortPreparation:
     @contextmanager
     def _original_source_boundary(self, request: PoolCohortProjectionRequest) -> Iterator[None]:
         self._require_original_source(request)
+        if self._checkpoint is not None:
+            self._checkpoint()
         self._projection_admitted = True
         yield
         self._require_original_source(request)

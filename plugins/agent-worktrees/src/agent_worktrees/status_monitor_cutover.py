@@ -27,26 +27,12 @@ from . import locks, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
 from .status_monitor_control_frames import handle_control_request
+from .status_monitor_health import env_timeout as _env_timeout
 from .handoff_prompt_receipt_control import ACTION as RECEIPT_ACTION, FRAME_BYTES, unique_object
 
 _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
 _CUTOVER_LOCK_TIMEOUT_S = 300.0
-
-# A resident sweep is atomic across the fleet; "busy: ['sweep']" need not mean
-# stuck. Keep the orchestrator's 300s drain default: a former 30s override
-# stranded superseded monitors (#5326). Health/drain remain machine-tunable.
-def _env_timeout(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw:
-        try:
-            parsed = float(raw)
-            if parsed > 0:
-                return parsed
-        except ValueError:
-            pass
-    return default
-
 
 _DEFAULT_HEALTH_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_HEALTH_TIMEOUT", 60.0)
 _DEFAULT_DRAIN_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_DRAIN_TIMEOUT", 300.0)
@@ -417,8 +403,8 @@ def spawn_passive(runtime_python: str, *, port: int):
         "--control-port",
         str(port),
     ]
-    from .runtime_monitor_launch import retained_monitor_argv
-
+    from .runtime_monitor_launch import preparation_environment, retained_monitor_argv
+    preparation_environment(routing_dir(), child_env)
     argv = retained_monitor_argv(argv)
     if os.name == "nt":
         argv[0], extra_env = direct_monitor_python(runtime_python)
@@ -443,51 +429,13 @@ def _monitor_lock_is_live() -> bool:
     return locks.lock_is_live(locks.read_lock(smr._monitor_lock_path()))
 
 
-def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str, str | None] | None:
+def routed_monitor_identity(
+    runtime_home: Path | None = None, *, require_async_retirement: bool = False,
+) -> tuple[int, str, str | None] | None:
     """Authenticate a stable routed owner before installer retention or cutover."""
-    from zdd import diagnostics
+    from .runtime_monitor_identity import routed_identity
 
-    directory = routing_dir() if runtime_home is None else routing_dir(runtime_home)
-    snapshot = routing.read_table(directory, strict=True)
-    endpoints = []
-    for key in ("active", "previous"):
-        raw = (snapshot or {}).get(key)
-        if raw is None:
-            continue
-        endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-        if endpoint is None or type(endpoint.pid) is not int or endpoint.pid <= 0:
-            raise ValueError(f"Routed monitor {key} identity is malformed")
-        endpoints.append((key, endpoint))
-    endpoint = None
-    for key, candidate in endpoints:
-        if diagnostics._pid_alive(candidate.pid):
-            if key != "active":
-                raise ValueError("Live fallback monitor requires owner-led route recovery")
-            endpoint = candidate
-            break
-    if endpoint is None:
-        return None
-    pid = endpoint.pid
-    if type(pid) is not int or pid <= 0:
-        raise ValueError("Routed monitor has no attributable PID")
-    if not diagnostics._pid_alive(pid):
-        return None
-    before = locks.process_start_time(pid)
-    if before is None or (
-        endpoint.process_start_time is not None and endpoint.process_start_time != before
-    ):
-        raise ValueError("Routed monitor process identity is unconfirmed")
-    client_options = {} if runtime_home is None else {"token": load_or_create_control_token(runtime_home)}
-    health = ControlClient(endpoint.base_url, **client_options).health()
-    if (
-        health.get("pid") != pid
-        or health.get("status") not in {"ready", "draining", "unavailable"}
-        or locks.process_start_time(pid) != before
-        or routing.read_table(directory, strict=True) != snapshot
-    ):
-        raise ValueError("Routed monitor identity changed during admission")
-    slot = health.get("runtime_slot")
-    return pid, before, slot if isinstance(slot, str) else None
+    return routed_identity(runtime_home, require_async_retirement=require_async_retirement)
 
 
 def start_application(*, health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S) -> int:
@@ -582,19 +530,10 @@ def start_application(*, health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S) -> i
             guard.release()
 
 
-def _health_check(host: str, port: int) -> bool:
-    try:
-        status = ControlClient(f"http://{host}:{port}").health()
-        if status.get("status") != "ready":
-            return False
-        roster = status.get("worktrees")
-        if not isinstance(roster, dict):
-            return True
-        return roster.get("status") == "ready" or (
-            status.get("published") is False and roster.get("status") == "unready"
-        )
-    except Exception:
-        return False
+def _health_check(host: str, port: int, *, require_async_retirement: bool = False) -> bool:
+    from .status_monitor_health import check_successor
+
+    return check_successor(host, port, ControlClient, require_async_retirement=require_async_retirement)
 
 
 def _make_client(base_url: str) -> ControlClient:
@@ -685,10 +624,13 @@ def activate_after_update(
     cutover_guard: SingleInstance | None = None,
     spawned_handles: list[subprocess.Popen] | None = None,
     transition_custody: ExitStack | None = None,
+    asynchronous_retirement: bool = False,
+    retirement_predecessor: dict | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
     from . import status_monitor_reap_stale
     from . import status_monitor_runtime as smr
+    from . import runtime_monitor_retirements as retirements
 
     if spawned_handles is not None:
         print("Monitor transition: validating owning guard", flush=True)
@@ -713,7 +655,7 @@ def activate_after_update(
     if refusal is not None:
         summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
         return summary
-    guarded = guarded_recovery.enabled()
+    guarded = not asynchronous_retirement and guarded_recovery.enabled()
     monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
     restart_arguments = {}
     if runtime_python is not None:
@@ -721,7 +663,15 @@ def activate_after_update(
     if spawned_handles is not None:
         restart_arguments["spawned_handles"] = spawned_handles
     lock_live = _monitor_lock_is_live()
-    if not lock_live:
+    if asynchronous_retirement:
+        if retirement_predecessor is None and retirements.retirement_only(
+            smr._aw_runtime_home(), locks.read_lock(smr._monitor_lock_path()),
+        ):
+            lock_live = monitor_was_live = False
+        routed_live = retirement_predecessor is not None or routing.read_active_endpoint(
+            routing_dir(), verify_listener=False,
+        ) is not None
+    elif not lock_live:
         try:
             routed_live = (
                 guarded_recovery.routed_owner_present(routing_dir()) if guarded
@@ -736,16 +686,17 @@ def activate_after_update(
     else:
         routed_live = False
     if not lock_live and not routed_live:
-        if monitor_was_live:
+        if monitor_was_live and not asynchronous_retirement:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor(**restart_arguments)
             if cutover_guard is None or spawned_handles is None:
                 status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
-        summary["reason"] = "no-live-monitor"
-        return summary
+        if not monitor_was_live:
+            summary["reason"] = "no-live-monitor"
+            return summary
     active_url = _monitor_control_url_from_route()
-    if active_url is None:
+    if active_url is None and not asynchronous_retirement:
         if guarded:
             summary.update(
                 action="refused", reason="guarded-recovery-no-control-listener",
@@ -779,6 +730,27 @@ def activate_after_update(
             client.transition_custody = transition_custody
             return client
     try:
+        prior = breadcrumb.read_breadcrumb(routing_dir())
+        refusal = breadcrumb.recovery_refusal(routing_dir(), prior)
+        if refusal is not None:
+            summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
+            return summary
+        if asynchronous_retirement:
+            try:
+                from .runtime_monitor_identity import async_predecessor
+
+                observed = routed_monitor_identity(
+                    smr._aw_runtime_home(), require_async_retirement=True,
+                )
+                retirement_predecessor, options = async_predecessor(
+                    smr._aw_runtime_home(), retirement_predecessor, observed=observed,
+                    incumbent_expected=bool(lock_live or monitor_was_live or retirement_predecessor),
+                )
+            except (OSError, ValueError, ConnectionError) as error:
+                summary.update(
+                    action="refused", reason=str(error), result={"ok": False, "error": str(error)},
+                )
+                return summary
         if guarded:
             try:
                 predecessor = guarded_recovery.negotiate(
@@ -837,6 +809,10 @@ def activate_after_update(
                 "drain_before_publish": True, "on_published": activate_successor,
             }
         transition_started = True
+        reserved = asynchronous_retirement and retirements.reserve(
+            smr._aw_runtime_home(), retirement_predecessor, committed=False,
+        )
+        retirement_complete = False
         if spawned_handles is not None:
             print("Monitor transition: checking prior recovery", flush=True)
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
@@ -856,23 +832,53 @@ def activate_after_update(
             reason = breadcrumb.refusal_reason(summary["passive_reap"])
             summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
             return summary
+        prepared_health = None
+
         def spawn(port: int):
+            nonlocal prepared_health
             handle = spawn_passive(py, port=port)
+            if asynchronous_retirement:
+                from .status_monitor_health import prepared_check
+
+                prepared_health = prepared_check(handle, routing_dir(), make_client)
             if spawned_handles is not None:
                 spawned_handles.append(handle)
                 print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
             return handle
+
+        published_successor = None
+
+        def activate_successor(endpoint: routing.Endpoint) -> None:
+            nonlocal retirement_complete, published_successor
+            if reserved:
+                retirement_complete = not retirements.commit(
+                    smr._aw_runtime_home(), retirement_predecessor,
+                )
+            published_successor = endpoint
+            if make_client(endpoint.base_url).promote().get("adopted") is not True:
+                raise ValueError("status-monitor successor refused promotion")
+
+        def healthy_successor(host: str, port: int) -> bool:
+            return prepared_health is not None and prepared_health(host, port)
+
+        def serving_successor(host: str, port: int) -> bool:
+            return published_successor is not None and guarded_recovery.successor_healthy(
+                host, port, make_client, expected=published_successor,
+            )
 
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,
             version=None,
             spawn_passive=spawn,
-            health_check=health_check,
+            health_check=healthy_successor if asynchronous_retirement else health_check,
             predecessor_health_check=predecessor_health_check,
             make_client=make_client,
             pick_free_port=pick_free_port,
             **options,
+            self_retirement=asynchronous_retirement,
+            activate_successor=activate_successor if asynchronous_retirement else None,
+            serving_health_check=serving_successor if asynchronous_retirement else None,
         )
         if spawned_handles is not None:
             print("Monitor transition: entering native cutover", flush=True)
@@ -881,6 +887,11 @@ def activate_after_update(
             drain_timeout=drain_timeout,
             force=False,
         )
+        if reserved:
+            if not result.committed and not result.publication_uncertain:
+                retirements.cancel(smr._aw_runtime_home(), retirement_predecessor)
+        if reserved and (result.committed or result.publication_uncertain):
+            result.retirement_pending = not retirement_complete
         summary["action"] = "cutover"
         summary["result"] = result.to_dict()
     finally:
@@ -891,18 +902,12 @@ def activate_after_update(
                 if cutover_guard is None:
                     lease.release()
         finally:
-            # Legacy callers require the async backstop, even on an unexpected
-            # exception escaping stale recovery, orchestration, or the
-            # lease release itself above (copilot-extensions#5453): the
-            # installer wrapper suppresses a raised exception from this
-            # whole function as a non-fatal failure, so without this
-            # living in its own nested `finally` (sequential with
-            # `lease.release()` would let a release failure itself skip
-            # it) any such exception would skip scheduling the one thing
-            # meant to heal an ambiguous daemon state left behind by that
-            # very failure. An owner supplying both the guard and child
-            # handles instead settles those processes under retained custody.
-            if transition_started and (cutover_guard is None or spawned_handles is None):
+            # Only legacy transitions use the delayed backstop, including when
+            # local cleanup or lease release raises. Owned asynchronous
+            # retirement never adds a second cleanup owner.
+            if transition_started and not asynchronous_retirement and (
+                cutover_guard is None or spawned_handles is None
+            ):
                 status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 

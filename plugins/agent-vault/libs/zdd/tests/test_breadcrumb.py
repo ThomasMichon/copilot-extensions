@@ -254,3 +254,37 @@ def test_reap_refuses_truthy_nonboolean_exit_evidence(tmp_path):
         tmp_path, record=record, pid_alive=lambda _: True, terminate=lambda _: "false",
     )
     assert not result["reaped"] and result["refused"]
+
+
+@pytest.mark.parametrize(
+    "state, marker",
+    [
+        ("started", True), ("flipped", True), ("committed", True),
+        ("publication-uncertain", True), ("rolled_back", "true"),
+    ],
+)
+def test_legacy_recovery_cannot_resolve_pending_self_retirement(tmp_path, state, marker):
+    import json
+
+    record = _write_aged_breadcrumb(tmp_path, new_pid=4321, age_s=9999, state=state)
+    record["self_retirement"] = marker
+    record["old"] = {"bind": "127.0.0.1", "port": 9281, "pid": 111}
+    path = breadcrumb.breadcrumb_path(tmp_path)
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("resident-owned witness must not contact or terminate a daemon")
+
+    recovery = breadcrumb.recover_stale_cutover(
+        tmp_path, make_client=forbidden, health_check=forbidden,
+    )
+    reap = breadcrumb.reap_abandoned_passive(
+        tmp_path, pid_alive=forbidden, terminate=forbidden, grace_seconds=0,
+    )
+
+    assert not recovery["recovered"] and recovery["refused"]
+    assert not reap["reaped"] and reap["refused"]
+    assert "resident completion" in recovery["reason"]
+    assert "resident completion" in reap["reason"]
+    assert path.read_bytes() == before

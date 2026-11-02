@@ -476,6 +476,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 
     from .supervisor_daemon import _self_update_settings
     from .client_authority import target_cli_args
+    from .config import load_config
 
     _su_enabled, _su_poll, _su_cooldown = _self_update_settings()
 
@@ -486,6 +487,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             env,
             poll_interval=getattr(args, "interval", 5.0),
             declared_source=declared_source,
+            pool_publication_enabled=load_config().pool_publication_enabled,
             # Rebuild the client by re-resolving the coordinator endpoint after a
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).

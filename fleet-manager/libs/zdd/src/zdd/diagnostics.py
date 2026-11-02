@@ -74,6 +74,10 @@ def process_start_time(pid: int) -> str | None:
         return None
     if platform.system() == "Windows":
         return _start_time_windows(pid)
+    if platform.system() == "Darwin":
+        from .darwin_identity import birth_time
+
+        return birth_time(pid)
     return _start_time_posix(pid)
 
 

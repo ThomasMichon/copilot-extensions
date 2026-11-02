@@ -22,6 +22,7 @@ File layout (``<config_dir>/cutover.json``)::
       "started_at": "2026-07-02T22:40:00Z",
       "updated_at": "2026-07-02T22:41:03Z",
       "pid": 12345,                     # the deploy orchestrator pid
+      "owner_process_start_time": "123456789",  # original orchestrator birth
       "old": {"bind": "127.0.0.1", "port": 9281},
       "new_port": 9282,
       "new_pid": 12401,                 # the spawn_passive daemon's own pid
@@ -51,10 +52,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from zdd import routing, routing_persistence
 from zdd.routing import format_authority
 
 log = logging.getLogger("zdd")
@@ -79,9 +83,7 @@ def breadcrumb_path(config_dir: str | os.PathLike[str]) -> Path:
 
 def _atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=False), encoding="utf-8")
-    os.replace(tmp, path)
+    routing_persistence.write(path, data)
 
 
 def _now_iso() -> str:
@@ -105,6 +107,12 @@ def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
 
 def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) -> str | None:
     """Shared refusal for existing custody that legacy paths cannot interpret."""
+    if record is not None and (
+        record.get("self_retirement") is True
+        and record.get("state") in _NON_TERMINAL | {"committed"}
+        or "self_retirement" in record and type(record["self_retirement"]) is not bool
+    ):
+        return "asynchronous cutover requires resident completion"
     if requires_owner_reconciliation(record):
         return "stateful cutover requires installation-owner reconciliation"
     if requires_conditional_recovery(record):
@@ -117,6 +125,60 @@ def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) ->
         record is not None and record.get("state") not in _NON_TERMINAL | _TERMINAL
     ):
         return "recovery state cannot be verified; owner-led recovery required"
+    return None
+
+
+def _owner_start_time(
+    config_dir: str | os.PathLike[str], pid: int, state: str, started_at: str | None,
+) -> str | None:
+    from .darwin_identity import valid_start_time
+    from .diagnostics import process_start_time
+
+    previous = read_breadcrumb(config_dir)
+    fresh_local_attempt = (
+        pid == os.getpid() and started_at is None
+        and state in ("started", "conditional-started")
+    )
+    if not fresh_local_attempt and previous is not None and previous.get("pid") == pid and (
+        started_at is None or previous.get("started_at") == started_at
+    ):
+        # Preserve even missing/invalid evidence: a later PID occupant cannot
+        # retroactively supply the original installer's birth.
+        return previous.get("owner_process_start_time")
+    if pid != os.getpid():
+        return None
+    try:
+        token = process_start_time(pid)
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return token if valid_start_time(token) else None
+
+
+def owner_exited(record: dict | None) -> bool | None:
+    """True for proven exit, False for a live birth match, otherwise None.
+
+    A missing legacy birth permits only positive native PID-absence evidence.
+    Unreadable identity/liveness and malformed records never authorize recovery.
+    """
+    from . import diagnostics, process_exit
+    from .darwin_identity import valid_start_time
+
+    if not isinstance(record, dict):
+        return None
+    pid = record.get("pid")
+    if type(pid) is not int or pid <= 0:
+        return None
+    recorded = record.get("owner_process_start_time")
+    if recorded is not None and not valid_start_time(recorded):
+        return None
+    try:
+        if recorded is not None:
+            exited = process_exit.observe_original_exit(pid, recorded)
+            return exited if type(exited) is bool else None
+        if diagnostics._pid_alive(pid) is False:
+            return True
+    except (OSError, ValueError, RuntimeError):
+        pass
     return None
 
 
@@ -133,11 +195,21 @@ def write_breadcrumb(
     publication_witness: str | None = None,
     new_process_start_time: str | None = None,
     requires_writer_reconciliation: bool = False,
+    self_retirement: bool = False,
+    _routing_locked: bool = False,
+    _routing_deadline: float | None = None,
 ) -> dict:
-    """Write/update the cutover breadcrumb atomically. Returns the record.
+    """Durably replace the cutover breadcrumb. Returns the confirmed record.
+
+    Persistence errors propagate; an unconfirmed replacement retains the
+    recoverable witness rather than granting retirement authority.
 
     ``started_at`` is preserved across updates (pass the value from the initial
     ``started`` record); ``updated_at`` is always refreshed.
+
+    ``owner_process_start_time`` captures only this process's original birth,
+    retaining it across same-attempt phase/recovery writes. A foreign ``pid``
+    never acquires a retroactive birth; missing identity remains unknown.
 
     ``new_pid`` is the pid of the passive daemon ``spawn_passive`` stood up for
     this cutover (recorded as soon as it is known -- before the health gate,
@@ -146,23 +218,57 @@ def write_breadcrumb(
     ``new_pid`` through every subsequent update for this cutover attempt (like
     ``started_at``); omitting it on a later call clears it, which is only
     correct once the cutover has resolved one way or the other.
+
+    An asynchronous child's registered birth survives a missing caller birth
+    only when the explicit attempt, original owner and candidate binding match.
+
+    The full read/merge/write holds routing authority. ``_routing_locked=True``
+    is only for a caller already holding this config directory's routing lock;
+    it borrows that authority without reacquiring the non-reentrant file lock.
+    ``_routing_deadline`` preserves a caller's tighter acquisition budget.
     """
-    record = {
-        "state": state,
-        "started_at": started_at or _now_iso(),
-        "updated_at": _now_iso(),
-        "pid": pid if pid is not None else os.getpid(),
-        "old": old,
-        "new_port": new_port,
-        "new_pid": new_pid,
-        "error": error,
-        "publication_witness": publication_witness,
-        "new_process_start_time": new_process_start_time,
-    }
-    if requires_writer_reconciliation:
-        record["requires_writer_reconciliation"] = True
-    _atomic_write(breadcrumb_path(config_dir), record)
-    return record
+    with (
+        nullcontext() if _routing_locked else
+        routing.routing_lock(
+            config_dir,
+            deadline=time.monotonic() + 5.0 if _routing_deadline is None else _routing_deadline,
+        )
+    ):
+        owner_pid = pid if pid is not None else os.getpid()
+        record = {
+            "state": state,
+            "started_at": started_at or _now_iso(),
+            "updated_at": _now_iso(),
+            "pid": owner_pid,
+            "owner_process_start_time": _owner_start_time(config_dir, owner_pid, state, started_at),
+            "old": old,
+            "new_port": new_port,
+            "new_pid": new_pid,
+            "error": error,
+            "publication_witness": publication_witness,
+            "new_process_start_time": new_process_start_time,
+        }
+        if self_retirement is True and started_at is not None and new_process_start_time is None:
+            from .darwin_identity import valid_start_time
+
+            previous = read_breadcrumb(config_dir)
+            if (
+                previous is not None and previous.get("self_retirement") is True
+                and valid_start_time(record["owner_process_start_time"])
+                and type(new_pid) is int and new_pid > 0
+                and valid_start_time(previous.get("new_process_start_time"))
+                and all(previous.get(key) == record[key] for key in (
+                    "pid", "owner_process_start_time", "started_at",
+                    "publication_witness", "new_port", "new_pid",
+                ))
+            ):
+                record["new_process_start_time"] = previous["new_process_start_time"]
+        if requires_writer_reconciliation:
+            record["requires_writer_reconciliation"] = True
+        if self_retirement:
+            record["self_retirement"] = True
+        _atomic_write(breadcrumb_path(config_dir), record)
+        return record
 
 
 def clear_breadcrumb(config_dir: str | os.PathLike[str]) -> bool:
@@ -405,7 +511,7 @@ def reap_abandoned_passive(
                 current is None or any(
                     current.get(key) != record.get(key)
                     for key in (
-                        "pid", "started_at", "old", "new_pid", "new_port",
+                        "pid", "owner_process_start_time", "started_at", "old", "new_pid", "new_port",
                         "publication_witness", "new_process_start_time",
                     )
                 )

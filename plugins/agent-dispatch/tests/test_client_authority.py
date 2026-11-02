@@ -190,7 +190,8 @@ def test_ensure_supervisor_and_registration_children_keep_local_override(monkeyp
     assert all(cmd[:4] == ["owned-python", "-m", "agent_dispatch", "--local"] for cmd in commands)
 
 
-def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch, tmp_path):
+@pytest.mark.parametrize("publication", [False, True])
+def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch, tmp_path, publication):
     import os
     from agent_dispatch import config, logging_setup, procutil, supervise_cli, supervisor_daemon
     from agent_dispatch.supervisor_daemon import supervisor_lease_scope
@@ -199,6 +200,7 @@ def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch, tmp
     monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", "0")
     monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_POOL_PUBLICATION", "1" if publication else "0")
     monkeypatch.setattr(procutil, "relocate_off_payload", lambda: None)
     monkeypatch.setattr(logging_setup, "configure_file_logging", lambda _name: None)
     monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
@@ -222,6 +224,7 @@ def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch, tmp
     ])
     assert supervise_cli._cmd_supervise_serve(invocation) == 0
     assert captured[0]["target_args"] == ("--local",)
+    assert captured[0]["pool_publication_enabled"] is publication
     status, error = supervise_cli._read_supervisor_runtime_status(supervisor_lease_scope("host", "default"))
     assert error is None and status["owner"] == {
         "pid": os.getpid(), "authority_target": supervise_cli._supervisor_authority_target(invocation),

@@ -91,7 +91,7 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             raise DispatchUpgradeRequired("running coordinator lacks original configured-cohort request fences")
 
     def pool_catalog_metadata(self) -> dict:
-        """Explicit preparation read; ordinary reconciliation never calls it."""
+        """Control-authorized preparation read, also used by opt-in maintenance."""
         self._require_pool_metadata_transport()
         result = self._unwrap(self._http.get("/pool-catalog", headers=self._control_headers()))
         PoolCatalogRead.from_dict(result)

@@ -174,7 +174,7 @@ class QueuePoolCohortMixin:
         self, observation: ConfiguredSupervisorCohort, *,
         expected_revision: int, now: float | None = None,
     ) -> PoolConfiguredCohort:
-        """CAS one whole owner observation; no caller, scan or rollout is wired."""
+        """CAS one whole owner observation without discovering members or rollout."""
         encoded = _encode_observation(observation)
         if type(expected_revision) is not int or expected_revision < 0:
             raise TaskError("pool cohort expected revision must be a nonnegative integer")

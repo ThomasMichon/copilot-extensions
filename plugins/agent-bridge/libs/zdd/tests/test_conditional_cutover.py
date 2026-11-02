@@ -112,6 +112,18 @@ def case(tmp_path, monkeypatch):
     return tmp_path, old, events, handle, snapshot, request, orch
 
 
+def test_conditional_cutover_accepts_native_bsd_birth(case, monkeypatch):
+    root, _old, events, _handle, _snapshot, request, orch = case
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: f"{pid * 10}:22")
+    old = routing.publish_active(
+        root, bind="127.0.0.1", port=61001, pid=101, version="1.0.0",
+    )
+    result = orch.run(conditional=replace(request, expected_active=old))
+    assert result.ok and result.committed and result.retirement_confirmed
+    assert events == ["spawn", "drain", "shutdown"]
+    assert routing.read_table(root)["active"]["process_start_time"] == "2020:22"
+
+
 def two_phase(case, *, prepare_change=None, activate_change=None):
     root, old, events, _, snapshot, request, orch = case
     state = {"active": False}

@@ -139,11 +139,12 @@ class PrivateReceiver:
 
     @staticmethod
     def _valid_publication(endpoint: Endpoint | None) -> bool:
+        from .darwin_identity import valid_start_time
+
         return (
             isinstance(endpoint, Endpoint)
             and type(endpoint.pid) is int and endpoint.pid > 0
-            and isinstance(endpoint.process_start_time, str)
-            and endpoint.process_start_time.isdigit()
+            and valid_start_time(endpoint.process_start_time)
             and type(endpoint.generation) is int and endpoint.generation > 0
             and type(endpoint.port) is int and 0 < endpoint.port <= 65535
             and isinstance(endpoint.bind, str) and bool(endpoint.bind)

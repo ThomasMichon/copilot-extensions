@@ -42,7 +42,7 @@ class PoolMetadataBinding:
 
 
 class SupervisorPoolSender:
-    """No tick, serve, enrollment activation or placement caller."""
+    """Original-request sends shared by explicit and opt-in master callers."""
 
     if TYPE_CHECKING:
         client: Any
@@ -147,7 +147,9 @@ class SupervisorPoolSender:
 
     def discard_unaccepted_pool_metadata_request(self, request: PoolMetadataRequest) -> None:
         """Supersede only local preparation or a definitively refused original."""
-        deadline = time.monotonic() + self._reconcile_call_budget
+        deadline = self._pool_capture_deadline.get()
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
         with self._pool_request_state(deadline):
             custody = self._pool_publisher_custody
             if custody is None or custody.pending is not request:
@@ -286,6 +288,8 @@ class SupervisorPoolSender:
         with self._pool_metadata_admission_lock:
             if self._pool_metadata_closed.is_set():
                 raise PoolPublicationError("pool metadata send admission is closed")
+            if time.monotonic() >= deadline:
+                raise PoolPublicationError("pool metadata send deadline exhausted before submission")
             future = self._read_pool().submit(self._run_pool_metadata_send, request, deadline)
             self._probe_inflight.add(future)
             flight = PoolMetadataFlight(request, future)
@@ -305,7 +309,9 @@ class SupervisorPoolSender:
         inspects the accepted catalog, then retries only under original fences.
         Returning metadata never admits a publisher for allocation.
         """
-        deadline = time.monotonic() + self._reconcile_call_budget
+        deadline = self._pool_capture_deadline.get()
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
         with self._pool_request_state(deadline):
             custody = self._pool_publisher_custody
             if custody is None or custody.pending is None:

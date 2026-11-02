@@ -33,6 +33,10 @@ The [coordinator-source receipt](journal/2026/11.02-coordinator-source-projectio
 records [#10072](https://github.com/ThomasMichon/copilot-extensions/pull/10072):
 fresh explicit projection is bound to the coordinator's actual registrar and
 active/drain owner, without enabling automatic publication or worker migration.
+The [opt-in cadence source](journal/2026/11.02-publication-cadence.md)
+connects those existing owners behind default-off activation. It does not
+migrate ordinary allocation, initial prompts, direct legacy definitions,
+cross-endpoint continuity or native adoption; review and merge remain open.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -131,7 +135,8 @@ original requests, preserve original client targets through reconnect, include
 all futures in existing shutdown accounting and explicitly refuse unsupported
 peers. The [request-custody source slice](journal/2026/11.02-publication-request-custody.md)
 addresses original-target recovery and confirmed-unaccepted supersession;
-it does not enable that cadence. Ordinary allocator and initial-prompt migration
+it merged in [#10080](https://github.com/ThomasMichon/copilot-extensions/pull/10080)
+without enabling that cadence. Ordinary allocator and initial-prompt migration
 remain required.
 
 ## Current foundations and discrepancy

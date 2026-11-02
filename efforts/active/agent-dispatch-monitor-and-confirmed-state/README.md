@@ -270,9 +270,15 @@ live claim token. No new blanket ACK or executor appointment is created.
       The [source receipt](journal/2026/11.02-coordinator-source-projection.md)
       preserves accepted-history recovery, explicit embedding compatibility and
       the still-open automatic publication/caller/native gates.
-- [ ] Land and integrate [original publication-target and unaccepted-request custody](journal/2026/11.02-publication-request-custody.md)
-      before enabling the existing reconciliation cadence. Explicit source
-      preparation is not an automatic publisher or a complete caller migration.
+- [x] Land explicit [original publication-target and unaccepted-request custody](journal/2026/11.02-publication-request-custody.md)
+      in [#10080](https://github.com/ThomasMichon/copilot-extensions/pull/10080),
+      including queued-child target binding and accepted-result recovery.
+- [ ] Integrate that custody before enabling the existing reconciliation cadence.
+      Explicit source preparation is not an automatic publisher or a complete
+      caller migration; cross-endpoint queue continuity remains a required gate.
+      The [opt-in cadence source](journal/2026/11.02-publication-cadence.md)
+      now connects the actual coordinator and per-scope master with default-off
+      activation; its review/merge and remaining ordinary integration stay open.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,

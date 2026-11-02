@@ -3,7 +3,9 @@
 `queue_pool_catalog.py` and its control-authorized coordinator routes provide
 the metadata expansion for the
 [reviewed assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering).
-It is **not used by a production supervisor or allocator**. Transport
+It is **not enabled by default or consumed by the ordinary allocator**.
+The [opt-in existing-owner cadence](pool-publication-cadence.md) composes
+coordinator and per-scope master maintenance without migrating those callers. Transport
 authorization does not prove publisher OS-lock admission, complete configured
 scope membership or atomic-placement support.
 The separate [explicit claim/start boundary](pool-claim-start.md) advertises and
@@ -218,7 +220,8 @@ reuse it for different observation data, or change the same-position retained
 scope's attribution. These are observed metadata fences, not an attestation
 of current external configuration or runtime membership.
 Missing, old or unsupported support refuses the new operation without trying a
-legacy write. **No serve-loop caller or pool activation is wired.**
+legacy write. The default-off [cadence composition](pool-publication-cadence.md)
+uses this same owner; it does not activate ordinary pool allocation.
 These source prerequisites leave the provider's
 metadata-only/false admission and placement advertisements unchanged.
 
@@ -259,8 +262,8 @@ renews freshness or erases retained publication/startup history.
 `observe_pool_configured_cohort()` likewise recovers an exact historical
 original result before applying current-state admission to a fresh write.
 
-`PoolCohortPreparation.project()` is an **explicit projection operation**,
-not an automatic publisher. It recovers an already-accepted original result
+`PoolCohortPreparation.project()` is an **explicit projection operation**, also
+used by the opt-in coordinator cadence. It recovers an already-accepted original result
 before reading current sources or attempting another write. A fresh attempt
 uses the existing registrar pointer-writer lock and rechecks the original whole
 source observation and both owner targets before and after the coordinator CAS.
@@ -286,11 +289,12 @@ writer can still race a source read or replace the file; no transaction spans
 the external file and coordinator database. A post-write refusal preserves
 custody, not a rollback of a committed projection. Unmanaged-writer exclusion,
 current-file atomicity and executing-runtime qualification remain separate
-prerequisites before admission. No automatic caller is wired to this operation.
+prerequisites before ordinary adoption. The default-off
+[coordinator cadence](pool-publication-cadence.md) reuses this same operation.
 
 This is **source-only optimistic preparation and result accounting**. No
-ordinary caller, configuration setter, membership activation or placement is
-wired. The [explicit HTTP sender](pool-cohort-transport.md) reuses this custody
+ordinary allocator, configuration setter, membership activation or placement is
+wired by preparation alone. The [explicit HTTP sender](pool-cohort-transport.md) reuses this custody
 without changing those gates. The local
 custody mutex is not an OS-lock acquisition or coordinator lease. External-file
 atomicity, admitted execution, mixed-writer exclusion and rollback remain
@@ -301,11 +305,12 @@ runtime attestation.
 
 `send_pool_metadata_request()` sends or recovers only the request already
 retained by `prepare_pool_metadata_request()`. It does not prepare another
-request, enroll automatically, run from a tick/serve loop or enable placement.
+request or enable placement. The default-off master cadence invokes this same
+operation without changing its original-request contract.
 The existing read executor carries one request-bound future in the daemon's
 probe/retirement/shutdown accounting. Concurrent callers reuse that future.
 A bounded caller timeout does not cancel, replace or forget the original RPC.
-Completed failures leave the immutable request pending; the next explicit
+Completed failures leave the immutable request pending; the next
 invocation recovers it, not a newer input revision.
 Successful completed flights stay retained until acknowledgment, including a
 timeout racing completion or an unavailable acknowledgment lock. They can
@@ -336,15 +341,15 @@ logged transport-close failure defer cleanup without withholding that result.
 The binding remains retained; later preparation and final retirement still
 require actual child completion and successful transport cleanup.
 
-`discard_unaccepted_pool_metadata_request(original)` is an explicit preparation
-operation, not an ordinary-loop caller. It requires the exact pending request,
+`discard_unaccepted_pool_metadata_request(original)` is the shared preparation
+operation used by explicit and opt-in cadence callers. It requires the exact pending request,
 no live future and no successful unacknowledged result. Never-admitted requests
 and structured `begin`/`publish` transaction refusals can be discarded. Only the
 actual catalog rejection envelope establishes that rollback; generic `409`,
 disconnects and malformed responses remain ambiguous. A later definite refusal
 does not erase an earlier unknown POST. Discard preserves the last accepted
 position, cohort/definition attribution and original coordinator target.
-These seams do not automatically retry, migrate or activate publication.
+These seams alone do not schedule retries, migrate callers or activate publication.
 
 Recovery first reads the unfiltered catalog through the negotiated client. An
 already-accepted original generation/revision is parsed and checked against all
@@ -496,9 +501,10 @@ This is a **source-only provider expansion**. Legacy list readers cannot read
 the envelope, so no existing configuration is migrated or rewritten into it
 automatically. All configuration writers and running readers must be qualified
 before an authorized adoption; provider rollback must remain fenced rather than
-silently stripping membership metadata. No CLI setter, serve/tick caller,
-runtime configuration publication, enrollment, scope withdrawal or placement
-is enabled. The health descriptor still advertises
+silently stripping membership metadata. The separate default-off
+[cadence composition](pool-publication-cadence.md) can publish and enroll from
+the existing owners; it adds no CLI setter, scope withdrawal or ordinary placement.
+The health descriptor still advertises
 `configured_scope_membership: false`. Configured intent is not evidence that
 the named runtime exists, holds its singleton or supports atomic placement.
 
@@ -535,8 +541,8 @@ readers preserve the optional attribution and reject malformed revisions.
 The existing unfenced request-custody owner cannot acknowledge a response as
 though its original request carried a cohort fence.
 
-The [explicit projection transport](pool-cohort-transport.md) is available;
-no automatic configuration publisher is wired. This
+The [explicit projection transport](pool-cohort-transport.md) and default-off
+coordinator cadence are available. This
 projection is retained metadata, not proof that an external file is still
 unchanged, that all configured writers enforce the fence, or that the named
 process holds its singleton. External atomicity, runtime publisher integration,
@@ -569,9 +575,9 @@ original acquisition at the write boundary and recovers unknown outcomes before
 changing requests. External source atomicity and installed publisher activation
 remain unqualified.
 
-The controlling registration owner must still integrate fresh configured-source
-publication through the coordinator's admission owner. The source projection
-and fences above do not install that caller. These primitives
+The default-off cadence composes fresh configured-source publication through
+the coordinator's admission owner. Ordinary adoption and endpoint continuity
+remain separate gates; the source composition does not install or activate it. These primitives
 retain every scope it enrolls; an empty store does not prove there are no
 configured pools. Scope withdrawal and
 mixed-cohort/rollback policy remain separate reviewed integration work; there
