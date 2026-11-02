@@ -589,3 +589,23 @@ composition prerequisites, and review/validation rules.
   and dependency pins. All 58 library/checker tests and both library targets
   pass; the updated test-source digest is refreshed without changing packet
   selection or budgets.
+
+### 2026-11-02 - Remaining hosted-review selectors repaired
+
+- #9953's post-fix reviews confirmed the callable regression finding was
+  resolved but deferred guidance acquisition again. The earlier catch-all
+  repair was incomplete: five other checked-in selectors still required the
+  obsolete CLI-only resolver/authentication workflow. No review document
+  reference was missing or deleted.
+- #9959 merged as `b5cf658c3b6871e471160b98594f85c020ea787a`,
+  closing #9957 after exact-head Copilot approval with no findings and all
+  required checks in
+  [run 41429360484](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41429360484).
+  Its isolated worktree is finalized. All 171 focused delivery controls,
+  eight actual offline fallback selections, offline scan and deterministic
+  regeneration pass.
+- The complete existing eight-source roster now uses current locators and
+  reviewed offline fallbacks. Enabled plugins, review gates and runtime code
+  are unchanged; no installed rollout occurred. The typing worktree is pulled
+  forward for a genuine fresh assessment of #9953. Ten projects remain strict
+  and 58 pending until that proposed admission actually merges.
