@@ -391,3 +391,43 @@ def test_source_cli_field_contract_rejects_prose_or_markdown_in_enums(tmp_path: 
     path.write_text(json.dumps(request), encoding="utf-8")
     result = lane.run("init", "--mode", "context-qualified", "--request", str(path))
     assert result.returncode == 2 and result.stderr
+
+
+@pytest.mark.parametrize(("outcome_name", "status"), [("blocked", "waiting"), ("needs-context", "replanning")])
+def test_source_cli_closed_nonadvance_outcome_recommends_recheck_not_replay(
+    tmp_path: Path, outcome_name: str, status: str
+) -> None:
+    lane = SourceLane(tmp_path)
+    lane.initialize()
+    initial = lane.read()
+    frame, item, attempt = lane.current()
+    original_action = initial["snapshot"]["next_action"]
+    accepted = lane.outcome(outcome_name)["result"]
+    original_request = json.loads(
+        (lane.requests / f"guidance-operation-{lane.operations}.json").read_text())
+    snapshot = lane.invoke("next")
+    assert snapshot["status"] == status
+    assert snapshot["next_action"] != original_action
+    assert original_action not in snapshot["next_action"]
+    assert "context" in snapshot["next_action"].lower() or "investigation" in snapshot["next_action"].lower()
+    if outcome_name == "blocked":
+        assert "recheck" in snapshot["next_action"].lower()
+        assert "do not replay" in snapshot["next_action"].lower()
+    before = lane.read()
+    history = lane.invoke("history")
+    assert lane.current() == (frame, item, attempt)
+    assert before["records"][attempt] == initial["records"][attempt]
+    assert before["records"][accepted["transition"]["result_id"]]["body"]["attempt_id"] == attempt
+    assert before["documents"]["cursor"]["item_state"][item]["visits"] == 1
+    repeat = deepcopy(original_request)
+    repeat.update(operation_id="cannot-repeat-closed-attempt", expected_revision=before["revision"])
+    path = lane.requests / "repeat-closed.json"
+    path.write_text(json.dumps(repeat))
+    result = lane.run("update", "--request", str(path), "--session", "example-head")
+    assert result.returncode == 2 and "already has an immutable outcome" in result.stderr
+    assert lane.read() == before and lane.invoke("history") == history
+    assert lane.submit(original_request)["result"] == accepted
+    assert lane.read() == before
+    qualified = lane.revisit(asset("revisit.context-qualified.example.json"))["result"]["transition"]
+    assert qualified["decision"] == "revisit-admitted" and qualified["attempt_id"] != attempt
+    assert lane.read()["documents"]["cursor"]["item_state"][item]["visits"] == 2

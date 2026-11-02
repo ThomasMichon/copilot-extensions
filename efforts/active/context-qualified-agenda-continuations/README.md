@@ -230,6 +230,21 @@ grants, native qualification or claims of implementation.
 
 ## Journal
 
+### 2026-11-01 - Waiting outcome recommendation correction
+
+- Current-head review found that an outcome mapped to `wait` closed its attempt
+  but retained the old execution command in `next_action`. The durable result
+  already prevents another outcome, so recommending the old command is stale
+  and could suggest an unsafe replay.
+- The outcome branch now recommends non-executing recheck/context qualification.
+  Actual CLI regressions cover blocked/replan outcome-to-`next`, retain the
+  original attempt/result and idempotent acceptance, reject repeated outcomes
+  without mutation, and require a qualified revisit for a new attempt.
+- The coordinator's combined packet passed 316 cases with two explicit
+  dependency/platform skips; the actual connected/literal-widget packet passed
+  six cases without skips. Both verified cleanup, and Ruff passed. Fresh review,
+  required CI, merge and canonical completion remain open.
+
 ### 2026-11-01 - Whole-input and field-contract validation
 
 - Implemented the operator-selected complete-input policy without new schema

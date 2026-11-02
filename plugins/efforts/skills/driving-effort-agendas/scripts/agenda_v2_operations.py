@@ -93,6 +93,7 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
                 cursor["status"] = "waiting" if cursor["deferred"] else "complete"
         elif transition == "wait":
             item["status"], cursor["status"] = "waiting", "waiting"
+            item["next_action"] = "Recheck current conditions and qualify changed context; do not replay the closed attempt."
         else:
             item["status"], cursor["status"] = "replanning", "replanning"
             item["next_action"] = "Bounded investigation/refinement or wait; no productive revisit admitted."
