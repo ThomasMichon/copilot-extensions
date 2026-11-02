@@ -80,6 +80,9 @@ jobs:
           --test-file tests/test_update_auth_cleanup.py
           --test-file tests/test_update_auth_probe.py
           --test-file tests/test_update_auth_usage.py
+          --test-file tests/test_git_observation_deadline.py
+          --test-file tests/test_windows_observation_custody.py
+          --test-file tests/test_atomic_observation_process.py
           --max-files-per-sub-suite 1
           --subsuite-timeout 240 --plugin-timeout 900
   worktrees-git-probes-windows:

@@ -3578,7 +3578,7 @@ same 45-second child watchdog and 60-second item guard after native cold starts
 exceeded twenty seconds. These functional allowances do not qualify startup
 latency or change the original performance-packet limits.
 The manual `Installation context full` workflow's `worktrees-git-probes`
-portfolio runs the complete nine-file Git/credential packet on hosted Linux and
+portfolio runs the complete twelve-file Git/credential/observation packet on hosted Linux and
 Windows at the exact dispatch SHA through the canonical contained runner.
 It retains two actual workers, 240 seconds per group and 900 seconds including
 preparation and cleanup. It is opt-in source qualification, not required PR CI,
