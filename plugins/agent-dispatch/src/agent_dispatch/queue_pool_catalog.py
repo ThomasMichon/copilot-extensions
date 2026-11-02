@@ -68,8 +68,20 @@ class PoolPublicationScope:
     definitions_cohort_revision: int | None
 
 
+def _required_scopes(
+    scopes: tuple[PoolPublicationScope, ...], cohort: PoolConfiguredCohort,
+) -> tuple[PoolPublicationScope, ...]:
+    observation = cohort.observation
+    if not cohort.revision or observation is None or not observation.complete:
+        return scopes
+    expected = {(member.execution_machine, member.env) for member in observation.members}
+    return tuple(scope for scope in scopes if (scope.machine, scope.env) in expected)
+
+
 @dataclass(frozen=True)
 class PoolCatalogSnapshot:
+    """All retained scopes, current required definitions and whole-catalog blockers."""
+
     version: int
     revision: int
     registration_revision: int
@@ -82,7 +94,7 @@ class PoolCatalogSnapshot:
     @property
     def ready(self) -> bool:
         """Retained metadata readiness, not current-file or execution support."""
-        return bool(self.scopes) and not self.blockers
+        return bool(_required_scopes(self.scopes, self.configured_cohort)) and not self.blockers
 
     @property
     def configured_ready(self) -> bool:
@@ -319,7 +331,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
 
     @classmethod
     def _pool_catalog_from_conn(cls, conn: sqlite3.Connection, *, now: float) -> PoolCatalogSnapshot:
-        """All expected scopes under the caller's transaction, never a subset."""
+        """Retain every scope; derive eligibility from the whole configured owner."""
         clock = conn.execute("SELECT * FROM pool_catalog_clock WHERE singleton = 1").fetchone()
         scopes = tuple(
             cls._pool_scope_from_row(row)
@@ -338,13 +350,10 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
                     f"{machine}/{env}: configured scope has not enrolled"
                     for machine, env in sorted(expected - enrolled)
                 )
-                blockers.extend(
-                    f"{machine}/{env}: enrolled scope is not configured"
-                    for machine, env in sorted(enrolled - expected)
-                )
         elif not scopes:
             blockers.append("no enrolled pool publication scopes")
-        for scope in scopes:
+        required = _required_scopes(scopes, cohort)
+        for scope in required:
             problem = (
                 scope.state if scope.state != "complete"
                 else "publication attribution mismatch"
@@ -363,7 +372,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
                 blockers.append(f"{scope.machine}/{scope.env}: {problem}")
         return PoolCatalogSnapshot(
             POOL_CATALOG_VERSION, clock["revision"], clock["registration_revision"],
-            scopes, ordered_pool_instances(value for scope in scopes for value in scope.definitions),
+            scopes, ordered_pool_instances(value for scope in required for value in scope.definitions),
             tuple(blockers), cohort, require_pool_queue_identity(conn, None),
         )
 
