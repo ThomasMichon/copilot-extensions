@@ -6,6 +6,24 @@ Intent: [single installation execution owner](../../../visions/installer/README.
 
 ## Boundary
 
+The [authoritative replacement contract](../../../visions/installer/README.md#authoritative-runtime-replacement)
+governs this plan's current objective and acceptance. Concrete conflicting writes
+receive bounded internal wait/join or replacement; neither a recorded nor a
+running old installer may create persistent refusal, indefinite queuing or a
+separate operator-recovery prerequisite. Old custody/provenance, queue/foundation
+fences and unsupported recovery are not permission gates. Preserve
+prior uncertain outcomes without replay, attempt recovery only as an optimization,
+and establish fresh incoming execution within the same addressed scope. This
+supersedes conflicting settlement prerequisites in the historical mechanism
+plan below; it does not authorize parallel writers or unrelated process actions.
+
+**Remaining completion gate:** qualify manual update through stale/unsupported
+queue and foundation state, with automatic-only inhibition intact. Prove all
+requested incoming readiness/current selections before success, independently
+of predecessor cleanup. If a single finite async retirement fallback is used,
+prove its long grace, central-role/current-generation checks and session/data
+preservation. Queue release alone does not close #7758 or the parent effort.
+
 Implement the execution side of the agreed one-owner installation contract
 against the currently supported canonical updater. Recurring enrollment,
 Autorun/user-service registration and maintenance-worker replacement remain
@@ -48,7 +66,10 @@ policy changed or recurring worker enrolled by this plan.
 6. On worker loss, retain an interrupted/uncertain outcome. Recover pending
    work under exclusive authority, but do not automatically replay an ambiguous
    active installation. Do not kill unknown descendants or reclaim authority
-   based only on age; the real process-tree/custody boundary must settle first.
+   based only on age. Coordinate actual conflicting writes through bounded
+   wait/join or replacement, not a persistent live-writer refusal. Stale
+   evidence and unavailable old settlement cannot veto fresh explicit replacement
+   or demand another operator recovery under the governing contract.
 7. Document the implemented command/status contract and migrated entry points.
    Inventory hooks, launchers and external controllers separately; do not claim
    a suite-wide migration from a Manager-only happy-path fixture.

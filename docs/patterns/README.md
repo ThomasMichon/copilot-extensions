@@ -112,6 +112,15 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Explicit runtime replacement is independent of the incumbent.** Apply
+  [authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement):
+  incoming authenticity/readiness and complete current selection define
+  installation success; old recovery, custody/provenance, capabilities, stale
+  fences and retirement are not manual-update vetoes. Preserve user state and
+  session keepers, inhibit automatic updates only, and revalidate current
+  generation/central role at each optional delayed cleanup mutation. Current
+  legacy restrictions are adoption gaps, not permanent design exceptions.
+
 - **Circumstantial hooks preserve event-time responsibility.** Instruction
   injection is a circumstance-based skill, not a replacement startup snapshot.
   Acquire reusable input-bound facts, evaluate the current trigger cheaply and

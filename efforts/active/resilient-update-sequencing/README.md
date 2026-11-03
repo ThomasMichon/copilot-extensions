@@ -13,6 +13,14 @@
 
 ## Guiding Intent
 
+This effort's objective and completion gate follow
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+manual updates cannot be vetoed by old recovery/provenance/capabilities or stale
+transactions; success is incoming readiness and all current selections, not
+predecessor settlement. Preserve user state and session keepers. Retirement is
+outgoing central self-cleanup with at most one optional finite delayed fallback,
+not recurring resident work or an installation fence.
+
 Reach a verified good, current installation without recurring manual cleanup or
 repeating expensive successful work. Discover cheap blockers first, prepare
 expensive and failure-prone inputs early, activate healthy candidates through
@@ -243,6 +251,12 @@ cold-recovery/candidate-health/verified-retained-good-generation semantics.
 
 ## Validation Plan
 
+- [ ] Qualify that target through ordinary explicit update with automatic holds,
+  missing old monitor support, stale fences and failed old recovery. Prove all
+  requested incoming health/current pointers and preserved user state/sessions;
+  report actual incoming build/auth/health failures. If delayed cleanup is
+  adopted, prove central-only roles/schedules, long grace and actual-mutation
+  protection for future/reselected generations, with no success wait for exit.
 - [ ] Resolve every directly retained #3491 Plan/Validation/continuing Coordination
   clause above at its original finite scope and evidence tier, preserving alternatives,
   same custodians and nonexpiring holds. Administrative intake is not implementation,

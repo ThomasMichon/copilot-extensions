@@ -64,9 +64,13 @@ ordinary execution admission still apply.
 Explicit operator-authorized repair remains available while automatic updates
 are inhibited. One designated install driver can carry repair-as-needed
 authority through its objective without asking again for each repair step.
-Repair uses the same serialized execution owner and never bypasses native
-exclusivity, unsettled-effect fences or protected resources. Inhibition does
-not terminate work that has already started.
+Repair uses one live execution owner and preserves protected resources.
+Stale incumbent fences, provenance and recovery protocols cannot veto explicit
+replacement; the installer's
+[authoritative runtime replacement contract](../installer/README.md#authoritative-runtime-replacement)
+governs incoming readiness, complete current selection and independent,
+central-service-only retirement. Inhibition does not terminate work that has
+already started.
 
 ### Explicit integrated coordination profile
 
@@ -855,19 +859,23 @@ to refuse the selected generation.
 Ordinary updates and repair/force-install start the incoming generation without
 requiring a prior-version existence check or matched handoff. Brief process
 overlap is preferred; it does not permit duplicate exclusive work ownership.
-If the predecessor cannot self-retire or settle within the bounded handoff,
-the authorized replacement owner may force-terminate that exact attributable
-predecessor using native identity checks and confirmed exit/write exclusion.
 The incoming owner starts and attempts handoff first. The outgoing owner sees
 that announcement and independently detects that its full generation is stale.
-New installation completion follows verified incoming readiness and authority,
-not old-process exit. After that completion, the outgoing owner attempts drain;
-the incoming owner's existing lifecycle authority waits a bounded grace period
-and force-terminates the exact predecessor if necessary. Exclusive mutations
-remain fenced throughout. Unsupported graceful cutover does not demand another
-repair flag or veto the update. It does not authorize unrelated cleanup or termination of separately
-owned sessions, children or connectivity. Unknown ownership and failed recovery
-remain explicit, never a false readiness claim.
+Conflicting admission closes/transfers or is excluded before incoming serving
+readiness when needed, without waiting for installation completion or indefinite
+old-lease release. New installation completion follows all requested incoming
+readiness and all applicable current selections, not final old-process exit.
+Outgoing central drain/self-cleanup continue independently. One optional finite
+asynchronous fallback may retire remaining outgoing central daemons and obsolete
+central-service schedules after a longer-than-cutover grace. It rechecks native
+identity, central role, installation and then-current selection at each mutation,
+never targeting future/reselected generations, session hosts/keepers,
+session-owned Bridge/agent processes, foreground clients or connectivity.
+No periodic resident reaper or old retirement proof gates installation success.
+Incoming routing/admission still prevents duplicate exclusive work.
+Unsupported graceful cutover does not demand another repair flag or veto the
+update. Unknown cleanup evidence and failed old recovery remain explicit,
+not new installation vetoes or false readiness claims.
 The replacement authority releases only the outgoing owner's endpoint
 reservations. Failed predecessor cleanup remains explicit; it does not
 restore the old selection or displace a healthy incoming owner. Rollback is for
@@ -899,8 +907,9 @@ as ordinary installation. Stale lifecycle markers cannot veto the new
 installation. Successful convergence leaves only the selected generation
 serving and old activation paths inert; unrelated services and application data
 remain untouched. The
-[installer's normal/repair contract](../installer/README.md#normal-and-repair-installation)
-owns mode selection and installer coordination.
+[installer's authoritative replacement contract](../installer/README.md#authoritative-runtime-replacement)
+owns mode selection, completion and installer coordination; recovery of the old
+transition is best effort, not a prerequisite for explicit new installation.
 
 ### crash-tolerant-service-recovery
 Consumers tolerate momentary unavailability, dropped replies and truncated
