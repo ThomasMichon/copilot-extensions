@@ -74,6 +74,7 @@ def declarations():
                 }],
             },
             "pr-gate": {
+                "name": GUARD.UNIT_GATE_NAME,
                 "runs-on": "ubuntu-latest", "needs": ["checks", "unit-tests"],
                 "steps": [{
                     "name": "Require actual admitted unit evidence when selected",
@@ -526,6 +527,13 @@ def test_required_aggregate_cannot_omit_guards_or_accept_unverified_success(tmp_
     routing, ci = declarations()
     ci["jobs"]["pr-gate"].update(change)
     assert "unit aggregate must require successful guards and the actual selected outcome" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("name", ["PR gate (required check)", "Non-PR CI summary"])
+def test_required_context_cannot_be_published_for_nonpr_events_or_removed_from_prs(tmp_path, name):
+    routing, ci = declarations()
+    ci["jobs"]["pr-gate"]["name"] = name
+    assert "only PR events may publish the required PR check context" in validate(tmp_path, routing, ci)
 
 
 def execute_gate(tmp_path, results, *, attempt="1"):
