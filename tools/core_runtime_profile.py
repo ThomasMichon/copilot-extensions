@@ -47,6 +47,25 @@ def _core_manifest(data: bytes) -> dict:
     return manifest
 
 
+def core_roots(manifest: dict, versions: dict[str, str]) -> list[str]:
+    """Render the bound core roots using their selected distribution versions."""
+    roots = []
+    for root in manifest["selection"]["roots"]:
+        if (
+            not isinstance(root, dict)
+            or set(root) != {"name", "extra", "condition"}
+            or any(not isinstance(value, str) for value in root.values())
+        ):
+            raise ProfileError("invalid core root selection")
+        name = canonicalize_name(root["name"])
+        if name not in versions:
+            raise ProfileError("core root is outside the first-party selection")
+        extra = "[" + root["extra"] + "]" if root["extra"] else ""
+        condition = "; " + root["condition"] if root["condition"] else ""
+        roots.append(str(Requirement(f"{name}{extra}=={versions[name]}{condition}")))
+    return sorted(set(roots))
+
+
 def build_core_profile(
     *,
     manifest_data: bytes,
@@ -144,27 +163,9 @@ def build_core_profile(
                     f"{name}: native lock runtime metadata differs from core inputs"
                 )
             wheels[name] = wheel, [Requirement(text) for text in wheel["requires_dist"]]
-        roots = []
-        for root in manifest["selection"]["roots"]:
-            if (
-                not isinstance(root, dict)
-                or set(root) != {"name", "extra", "condition"}
-                or any(not isinstance(value, str) for value in root.values())
-            ):
-                raise ProfileError("invalid core root selection")
-            name = canonicalize_name(root["name"])
-            if name not in first_party:
-                raise ProfileError("core root is outside the first-party selection")
-            extra = "[" + root["extra"] + "]" if root["extra"] else ""
-            condition = "; " + root["condition"] if root["condition"] else ""
-            roots.append(
-                str(
-                    Requirement(
-                        f"{name}{extra}=={wheels[name][0]['version']}{condition}"
-                    )
-                )
-            )
-        roots = sorted(set(roots))
+        roots = core_roots(
+            manifest, {name: wheels[name][0]["version"] for name in first_party},
+        )
         wanted = _reachable(wheels, roots, native["target"]["environment"], deadline)
         for name, extras in wanted.items():
             wheels[name][0]["selected_extras"] = sorted(extras)

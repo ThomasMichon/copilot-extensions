@@ -4105,6 +4105,28 @@ attestation through the existing release owner. The old subject's attestation
 cannot approve changed index bytes. No dependency bytes enter this index
 hand-off, and the default profile-only output remains unchanged.
 
+`tools/core_native_delivery.py` connects that candidate producer to the
+existing native resolver and delivery owners:
+
+```text
+python tools/core_native_delivery.py --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --core-manifest <manifest> --wheel-dir <wheels> --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
+```
+
+It composes the selected Git source, checks it against the exact core
+manifest and first-party wheels, projects the applicable core requirements
+for the running interpreter, and resolves a native wheel lock through the
+retained UV configuration. The existing feed owner requires an affirmatively
+trusted non-public HTTPS index and uses system certificates; separately
+authorized download origins can be supplied with `--download-origin`.
+The selected external wheels, first-party wheels and caller-selected
+source/notice materials are retained and checked through candidate creation.
+The output is an inert delivery envelope; its reported `approval` is
+`unattested`. Its selected Main commit establishes ancestry only, not
+authentication. Feed qualification, material clearance, source/release
+admission, attestation, publication and installation remain separate
+responsibilities. The output directory must already exist and support hard
+links; existing output is never replaced.
+
 `tools/runtime_profile_bundle.py` provides the matching repeatable transport producer:
 
 ```text

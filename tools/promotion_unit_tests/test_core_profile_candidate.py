@@ -144,6 +144,19 @@ def test_candidate_inspects_exact_external_bytes_and_binds_manifest(inputs):
     assert custody == ["verified"]
 
 
+def test_core_roots_preserve_selected_extras_conditions_and_versions(inputs):
+    manifest = inputs[0]
+    manifest["selection"]["roots"][0]["condition"] = 'sys_platform == "win32"'
+    assert producer.core_roots(manifest, {"engine": "1.0"}) == [
+        'engine[metrics]==1.0; sys_platform == "win32"'
+    ]
+
+
+def test_core_roots_cannot_select_an_unbound_distribution(inputs):
+    with pytest.raises(ProfileError, match="outside the first-party selection"):
+        producer.core_roots(inputs[0], {"other": "1.0"})
+
+
 @pytest.mark.parametrize(
     "change",
     [
