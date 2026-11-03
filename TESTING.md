@@ -3248,6 +3248,9 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+The runner explicitly preserves full parameter IDs, including on pytest 9.2,
+so collection continues to match the exact admitted node inventory.
+
 Packet input readers use bounded chunks while retaining the original byte cap
 and overflow sentinel; a tiny file must not allocate the full evidence limit.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source

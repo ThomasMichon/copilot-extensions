@@ -140,9 +140,19 @@ last-good and success records are written, not during post-success context exit.
 Direct qualification consumers, including Manager's separate self-install owner,
 retain their existing exit-time check; only this generic transaction owns its
 final verification explicitly.
-Setup and publication failures before startup retain guarded rollback. Once a
-nonempty startup action is invoked, a failure, timeout or lost reply has an
-**unknown** outcome: it may already have admitted work. The installer raises
+Application setup, startup/readiness and construction-input verification run
+outside selector-update locking. Only launcher/selector writes, the final
+success commit and guarded pre-start recovery use brief atomic updates.
+Callbacks may therefore use the existing selector owner without waiting for
+their installer to release a lock. A callback that confirms the same selected
+generation is not a competing winner; the final check accepts the canonical
+LF/CRLF marker forms, while preserving a genuinely different selection.
+Setup failures leave selection unchanged. An incomplete publication rolls back
+before its original short critical section is released, so recovery cannot
+undo a later installer's commit. Without a startup action, selection and success
+commit together in that one short update. Otherwise, once publication commits,
+a failure, timeout or lost reply has an **unknown** outcome: selected commands
+may already have admitted work. The installer raises
 `ApplicationStartupUncertain` with the selected `slot` and the original exception
 as its cause, retains selection and management launchers, and does not attempt
 native cleanup or infer that nothing started. Cancellation retains its original
