@@ -5,6 +5,9 @@ import dataclasses
 import json
 import sys
 import threading
+from pathlib import Path
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 
 import pytest
 from test_config_actions import _wait
@@ -20,6 +23,127 @@ from worktree_manager.production_picker.picker_tui.engine_focus import FocusGrou
 from worktree_manager.production_picker.picker_tui.configuration_form import ConfigurationResultScreen
 
 pytestmark = pytest.mark.contract("worktree_manager.configuration_backstage")
+
+
+def test_isolated_home_tracks_explicit_profiles_without_a_real_home_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = Path.home()
+    profile = tmp_path / "explicit-profile"
+    profile.mkdir()
+    with monkeypatch.context() as patch:
+        patch.setenv("HOME", str(profile))
+        patch.setenv("USERPROFILE", str(profile))
+        assert Path.home() == profile
+        patch.delenv("HOME")
+        patch.delenv("USERPROFILE")
+        assert Path.home() == sandbox
+
+
+@pytest.mark.parametrize("kind", ["maintenance", "bootstrap"])
+def test_production_automatic_control_cancel_save_and_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    from worktree_manager import bootstrap_policy, maintenance_policy
+
+    root = tmp_path / "manager"
+    root.mkdir()
+    path = root / "config.toml"
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    original = path.read_bytes()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    switch = tmp_path / "selected-hold.json"
+    if kind == "bootstrap":
+        switch.write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(ui.engine_client, "accept_inherited_engine_command", lambda: "")
+    monkeypatch.setattr(tasks, "ACTION_TIMEOUT", 2)
+    monkeypatch.setattr(tasks, "STRICT_OPTIONS_COMMAND_TIMEOUT", 1)
+    calls = []
+    controller = maintenance_policy if kind == "maintenance" else bootstrap_policy
+
+    def read(runtime, ctx):
+        assert threading.current_thread() is not threading.main_thread()
+        return "ready", [controller.configuration_row()], "", {}
+
+    def execute(runtime, argv, **kwargs):
+        calls.append(list(argv))
+        captured = StringIO()
+        start = argv.index("worktree_manager.installation_updates") + 1
+        with redirect_stdout(captured), redirect_stderr(captured):
+            try:
+                code = ui.main(list(argv[start:]))
+            except SystemExit as error:
+                code = error.code
+        return code == 0, captured.getvalue()
+
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_exec_list", read)
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "run_resolved", execute)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, scr)
+            scr._open_cfgmenu()
+            await pilot.pause()
+            index = next(
+                i for i, item in enumerate(scr.pivots)
+                if getattr(item.get("pivot"), "name", None) == ui.PIVOT_NAME
+            )
+            for _ in range(len(scr.pivots) + 1):
+                if scr.htab == index:
+                    break
+                scr._rotate_config_section(1)
+                await pilot.pause()
+            assert scr.htab == index, "Installation & Updates section was not reachable"
+            reg = scr._reg_pivot()
+            runtime = scr._pivot_runtime(reg)
+            runtime.ensure("")
+            await _wait(pilot, lambda: runtime.get("")[0] == "ready")
+            await _wait(pilot, lambda: len(scr._task_rows()) == 1)
+            scr.sel = ("T", 0)
+            scr.refresh()
+            await pilot.pause()
+            assert "OFF" in "\n".join(item.text.plain for item in scr.build_body(118))
+            assert scr._selected_task() is not None, (
+                scr.sel, scr.htab, scr._pivot_scope_key(), runtime.get(""),
+            )
+            scr._open_task_menu()
+            await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
+            app.screen.dismiss(1)
+            await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
+            assert ("Enable launch-time" if kind == "maintenance" else "Allow automatic") in app.screen._label
+            if kind == "bootstrap":
+                assert str(switch) in app.screen._label
+            app.screen.action_cancel()
+            await pilot.pause()
+            assert calls == [] and path.read_bytes() == original
+            assert switch.exists() is (kind == "bootstrap")
+            scr.sel = ("T", 0)
+            scr.refresh()
+            await pilot.pause()
+            scr._open_task_menu()
+            await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
+            app.screen.dismiss(1)
+            await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
+            await _wait(pilot, lambda: app.screen.query_one("#action-confirm-buttons", FocusGroup).has_focus)
+            await pilot.press("left", "enter")
+            await _wait(
+                pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending,
+            )
+            rendered = str(app.screen.query_one("#config-result", Static).render())
+            assert "No update or recurring worker was started" in rendered
+            app.screen.action_close()
+            await _wait(pilot, lambda: runtime.get("")[1][0]["enabled"] == "ON")
+            assert len(calls) == 1
+            assert controller.inspect_policy().enabled is True
+            if kind == "bootstrap":
+                assert not switch.exists() and path.read_bytes() == original
+            assert "<svg" in app.export_screenshot()
+
+    asyncio.run(run())
 
 
 def test_production_configuration_navigation_target_consent_and_refresh(tmp_path, monkeypatch):
@@ -143,6 +267,7 @@ def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_
 def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch):
     from _installation_context_fixtures import namespaced_fixture, write_json
     from worktree_manager import engine_client
+    from worktree_manager.production_picker.picker_tui import pivot_list_command
 
     home = tmp_path / "home"
     home.mkdir()
@@ -176,6 +301,10 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
         "from worktree_manager import agent_plugin_runtime as apr,installation_updates as ui\n"
         f"apr._canonical_os_profile=lambda environment:Path({str(home)!r})\n"
         f"apr._durable_home=lambda ic,environment:Path({str(home / '.copilot-extensions')!r})\n"
+        "ic=apr._load_installation_context()\n"
+        "apr._load_installation_context=lambda:ic\n"
+        # This transport fixture models an ordinary profile, not native WSL registration.
+        "ic._is_wsl_guest=lambda:False\n"
         "raise SystemExit(ui.main())\n"
     )
     monkeypatch.setenv("HOME", str(home))
@@ -187,9 +316,19 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     assert "COPILOT_EXTENSIONS_CONTEXT" not in tasks._child_process_env()
     reg = dataclasses.replace(reg, list_cmd=(sys.executable, "-B", str(wrapper), *reg.list_cmd[4:]))
     runtime = tasks.RegisteredPivotRuntime(reg)
+    observed = {}
+    original_run = pivot_list_command.run_caller_owned
+
+    def observe(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        observed["stderr"] = result.stderr
+        return result
+
+    monkeypatch.setattr(pivot_list_command, "run_caller_owned", observe)
     before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
     state, rows, error, summary = runtime._exec_list({})
-    assert state == "ready", error
+    if state != "ready":
+        pytest.fail(error + "\n" + observed.get("stderr", "no captured provider diagnostics"))
     row = next(row for row in rows if row["id"] == "guide")
     assert row["payload"] == "cell" and row["enabled"] == "active"
     assert str(install.parent) in row["source"]

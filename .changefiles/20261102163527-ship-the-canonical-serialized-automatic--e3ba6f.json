@@ -1,0 +1,9 @@
+{
+  "comment": "Ship the canonical serialized automatic-update switch controller and mutation helper",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

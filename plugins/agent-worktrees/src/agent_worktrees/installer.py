@@ -376,7 +376,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     # session-conduct injector (sessionStart additionalContext) + the preToolUse
     # guards: statelessness_guard + cross_repo_guard + anchor_write_guard +
     # pr_supersede_guard + the postToolUse disposition nudge: nudge_status.
-    for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
+    for name in ("killswitch_mutation.py", "resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
                  "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",

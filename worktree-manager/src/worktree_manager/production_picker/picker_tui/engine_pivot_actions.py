@@ -187,6 +187,12 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 from dataclasses import replace
 
                 action = replace(action, label=f"Update {rec['title']} on this machine only")
+            elif reg.name == PIVOT_NAME and action.key in {"bootstrap-on", "bootstrap-off"}:
+                from dataclasses import replace
+
+                action = replace(
+                    action, label=action.label + "\n\nAffected switch paths:\n" + rec["policy_paths"],
+                )
             if reg.placement == "config" and action.form is not None:
                 self._run_task_action(reg, action, rec)
                 return

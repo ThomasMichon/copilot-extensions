@@ -519,7 +519,10 @@ def run_plugin(
     test_files: tuple[str, ...] = (),
     selection_file: Path | None = None,
     test_profile: str = "standard",
+    junit_dir: Path | None = None,
 ) -> int:
+    if junit_dir is not None and prepare_only:
+        raise ValueError("--junit-dir requires test collection or execution")
     selection: TestSelection | None = None
     if selection_file is not None:
         if test_files or prepare_only or guards or kexpr or collect_only:
@@ -559,6 +562,11 @@ def run_plugin(
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
     plugin_started = time.monotonic()
+    report_directory = None
+    if junit_dir is not None:
+        report_directory = junit_dir.expanduser().resolve() / name
+        # A fresh plugin directory prevents retries from overwriting prior evidence.
+        report_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
@@ -628,6 +636,10 @@ def run_plugin(
             ]
             if collect_only:
                 cmd.append("--collect-only")
+            report = None
+            if report_directory is not None:
+                report = report_directory / f"group-{index:03d}.xml"
+                cmd.append(f"--junitxml={report}")
             if selection is not None:
                 cmd += [
                     "-p", "pytest_test_selection",
@@ -657,6 +669,8 @@ def run_plugin(
                 sandbox=sandbox,
                 limits=group_limits,
             )
+            if returncode == 0 and report is not None and not report.is_file():
+                raise ContainmentError(f"{name}: successful group produced no requested JUnit report: {report}")
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
@@ -708,6 +722,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--selection-file", type=Path, help="validated exact-node JSON selection; "
         "union whole test files and guards (requires exactly one named plugin)",
+    )
+    ap.add_argument(
+        "--junit-dir", type=Path, help="retain per-group JUnit XML under a fresh PLUGIN "
+        "subdirectory; never changes selection, admission or time/resource limits",
     )
     ap.add_argument(
         "--test-file", action="append", default=[], metavar="PATH",
@@ -775,6 +793,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.junit_dir is not None and (args.prepare_only or args.list_only):
+        ap.error("--junit-dir requires test collection or execution")
     try:
         validate_profile(args)
     except ValueError as exc:
@@ -914,6 +934,7 @@ def main(argv: list[str] | None = None) -> int:
                     test_files=tuple(args.test_file),
                     selection_file=args.selection_file,
                     test_profile=args.test_profile,
+                    junit_dir=args.junit_dir,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

@@ -39,14 +39,14 @@ def default_root() -> Path:
     """Manager installation/configuration root, without importing its installer."""
     env = os.environ.get("WORKTREE_MANAGER_ROOT")
     if env:
-        return Path(env)
+        return Path(env).expanduser()
     home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
     return home / ".worktree-manager"
 
 
 def config_path(root: Path | None = None) -> Path:
     """Path to the user-level config file under the install root."""
-    return (root or default_root()) / CONFIG_NAME
+    return (root or default_root()).expanduser().resolve() / CONFIG_NAME
 
 
 def _load(root: Path | None = None) -> dict:
@@ -130,13 +130,13 @@ def _write(repo: str | None, ref: str | None, root: Path | None = None) -> None:
     p = config_path(root)
     try:
         remainder = _without_source_table(p.read_text(encoding="utf-8"))
-    except OSError:
+    except FileNotFoundError:
         remainder = ""
     if not (repo or ref):
         if not remainder:
             try:
                 p.unlink()
-            except OSError:
+            except FileNotFoundError:
                 pass
             return
         content = remainder + "\n"
@@ -156,20 +156,26 @@ def set_source(
     *, repo: str | None = None, ref: str | None = None, root: Path | None = None
 ) -> tuple[str | None, str | None]:
     """Set the repo and/or ref override, preserving whichever is not provided."""
-    cur_repo, cur_ref = configured_source(root)
-    _write(
-        repo if repo is not None else cur_repo,
-        ref if ref is not None else cur_ref,
-        root,
-    )
-    return configured_source(root)
+    from .config_write_lock import config_write_lock
+
+    with config_write_lock(config_path(root)):
+        cur_repo, cur_ref = configured_source(root)
+        _write(
+            repo if repo is not None else cur_repo,
+            ref if ref is not None else cur_ref,
+            root,
+        )
+        return configured_source(root)
 
 
 def reset_source(
     *, repo: bool = False, ref: bool = False, root: Path | None = None
 ) -> None:
     """Clear the repo and/or ref override (both when neither flag is given)."""
-    cur_repo, cur_ref = configured_source(root)
-    if not repo and not ref:
-        repo = ref = True
-    _write(None if repo else cur_repo, None if ref else cur_ref, root)
+    from .config_write_lock import config_write_lock
+
+    with config_write_lock(config_path(root)):
+        cur_repo, cur_ref = configured_source(root)
+        if not repo and not ref:
+            repo = ref = True
+        _write(None if repo else cur_repo, None if ref else cur_ref, root)

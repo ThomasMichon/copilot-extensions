@@ -41,6 +41,11 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
     git("commit", "--allow-empty", "-m", "base")
     main = git("rev-parse", "HEAD").decode().strip()
     files, _identity = case()
+    files[".gitattributes"] = (
+        "100644", files[".gitattributes"][1] + b"*.ps1 text eol=crlf\n*.sh text eol=lf\n",
+    )
+    files["bin/run.ps1"] = ("100644", b"Write-Output 'source'\nexit 0\n")
+    files["bin/run.sh"] = ("100755", b"#!/bin/sh\nexit 0\n")
     records = []
     for name, (mode, raw) in files.items():
         blob = git("hash-object", "-w", "--stdin", data=raw).decode().strip()
@@ -49,6 +54,14 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
     git("commit", "-m", "candidate")
     candidate = git("rev-parse", "HEAD").decode().strip()
     tree = git("rev-parse", "HEAD^{tree}").decode().strip()
+    git("checkout-index", "--", ".gitattributes")
+    (repo / "bin").mkdir()
+    git("checkout-index", "--", "bin/run.ps1", "bin/run.sh")
+    checked_out = {name: (repo / name).read_bytes() for name in (".gitattributes", "bin/run.ps1", "bin/run.sh")}
+    assert checked_out["bin/run.ps1"] == files["bin/run.ps1"][1].replace(b"\n", b"\r\n")
+    assert checked_out["bin/run.ps1"] != git("show", f"{candidate}:bin/run.ps1")
+    assert git("show", f"{candidate}:bin/run.ps1") == files["bin/run.ps1"][1]
+    assert checked_out["bin/run.sh"] == files["bin/run.sh"][1]
     receipt = {
         "dev_sha": main, "candidate_sha": candidate, "main_before": main, "control_sha": main,
         "tree": tree, "profile": "candidate-units-v3",
@@ -86,6 +99,7 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
         raw = next(raw for name, raw in subjects.items() if name.endswith(".zip"))
         assert verify_build_archive(raw, manifest, identity=identity) == files
         assert "qualification_digest" not in manifest
+        assert {name: (repo / name).read_bytes() for name in checked_out} == checked_out
         return
     manifest = prepare_source(directory, repo=repo, index_raw=canonical_bytes(index), receipt=receipt)
     identity = {
@@ -97,3 +111,4 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
     raw = next(raw for name, raw in subjects.items() if name.endswith(".zip"))
     assert verify_source_archive(raw, manifest, identity=identity) == files
     assert manifest["tree"] == tree
+    assert {name: (repo / name).read_bytes() for name in checked_out} == checked_out

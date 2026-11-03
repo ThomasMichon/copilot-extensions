@@ -645,22 +645,8 @@ function Test-AutomaticMaintenance {
 }
 
 function Start-UpdateStage {
-    # Spawn the background stage (marketplace download + fingerprint + plan).
-    # Runs headless in a job so it never writes to the Picker's console.
-    if ($noUpdate -or -not $env:WORKTREE_BLOCKING_INSTALL) { return $null }
-    if (-not $script:LaunchAdmitted) { throw 'Launch maintenance requires target admission' }
-    Assert-LaunchTarget -Path $script:LaunchPolicyPath -Operation maintenance
-    if (-not (Test-AutomaticMaintenance)) { return $null }
-    try {
-        Write-SetupLog 'Starting background update stage (stage-update)'
-        return Start-Job -Name 'aw-stage-update' -ScriptBlock {
-            param($py)
-            & $py -m agent_worktrees stage-update --auto *> $null
-        } -ArgumentList $VenvPython
-    } catch {
-        Write-SetupLog "Update stage spawn failed: $_ (will stage inline at join)" 'WARN'
-        return $null
-    }
+    # Acquisition and application belong to the same canonical update request.
+    return $null
 }
 
 
@@ -713,8 +699,7 @@ function Invoke-SetupCommand {
 
 
 function Invoke-UpdateApply {
-    # Join the background stage and apply any pending update. Idempotent: runs
-    # its body at most once per launch.
+    # Submit canonical update --auto once; blocking mode observes the same owner.
     param($StageJob, [switch]$WithReconcile, [switch]$ShowStatus)
     if ($script:UpdateApplied) { return }
     if (-not $script:LaunchAdmitted) { throw 'Launch maintenance requires target admission' }
@@ -726,92 +711,25 @@ function Invoke-UpdateApply {
     $script:ShowLaunchStatus = [bool]$ShowStatus
     if (-not (Test-AutomaticMaintenance)) { return }
 
-    if (-not $env:WORKTREE_BLOCKING_INSTALL) {
-        $includeReconcile = $WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1'
-        if ($noUpdate -and -not $includeReconcile) { return }
-        $requestArgs = @('-m', 'agent_worktrees')
-        if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
-        $requestArgs += @('launch-update', 'automatic', '--auto', '--detach')
-        if ($noUpdate) { $requestArgs += '--no-update' }
-        if ($includeReconcile) { $requestArgs += '--with-reconcile' }
-        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
-            -Scope 'launch/maintenance' -Label 'Automatic maintenance submission'
-        return
-    }
-
-    if (-not $noUpdate) {
-        Write-SetupStatus 'Finalizing launch: applying any pending plugin and runtime updates...'
-        # Join the background stage (bounded wait). This is the step most
-        # likely to make the launch look "stuck": the marketplace download
-        # staged while the Picker was open is joined here, up to 90s.
-        if ($StageJob) {
-            Write-SetupStatus 'Waiting for the background plugin-update download to finish (up to 90s)...'
-            try { Wait-Job $StageJob -Timeout 90 | Out-Null } catch {}
-            try { Receive-Job $StageJob -ErrorAction SilentlyContinue | Out-Null } catch {}
-            try { Remove-Job $StageJob -Force -ErrorAction SilentlyContinue } catch {}
-        }
-        $statusFile = Join-Path $env:USERPROFILE '.agent-worktrees\updater-status.json'
-        $status = $null
-        if (Test-Path $statusFile) {
-            try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
-        }
-        # No usable staged result (stage failed, or a peer launch held the
-        # lock): run one inline so the marketplace pull still happens.
-        if (-not $status -or -not $status.stage_done -or $status.skipped -eq 'locked') {
-            if (-not (Test-AutomaticMaintenance)) { return }
-            Write-SetupStatus 'Background download unavailable; downloading the plugin update now...'
-            & $VenvPython -m agent_worktrees stage-update --auto *> $null
-            if (Test-Path $statusFile) {
-                try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
-            }
-        }
-        if ($status -and $status.runtime_apply_blocked) {
-            Write-SetupLog (
-                "Plugin runtime apply blocked: $($status.runtime_apply_blocked)"
-            ) 'WARN'
-        }
-
-        $applyStaged = $status -and $status.plugin_changed -and -not $status.runtime_apply_blocked
-
-        # (2) Re-derive and execute the bootstrap plan under driver custody.
-        Write-SetupStatus 'Checking bootstrap services for pending updates...'
-        $bootstrapArgs = @('-m', 'agent_worktrees')
-        if ($script:LaunchProject) { $bootstrapArgs += @('--project', $script:LaunchProject) }
-        $bootstrapArgs += @('launch-update', 'bootstrap', '--auto')
-        if ($applyStaged) { $bootstrapArgs += '--defer-worktrees' }
-        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $bootstrapArgs) `
-            -Scope 'launch/bootstrap' -Label 'Bootstrap update'
-        $reresolvedPython = Resolve-RuntimePython
-        if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
-            $script:VenvPython = $reresolvedPython
-        }
-    } else {
-        Write-SetupStatus 'Skipping plugin update check (--no-update).'
-        if ($StageJob) { try { Remove-Job $StageJob -Force -ErrorAction SilentlyContinue } catch {} }
-    }
-
-    # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
-    #     Independent of WORKTREE_NO_UPDATE; opt out with WORKTREE_NO_RECONCILE=1.
-    #     The canonical executor retains the payload/runtime two-pass plan.
-    if ($WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1') {
-        $reconcileArgs = @('-m', 'agent_worktrees')
-        if ($script:LaunchProject) { $reconcileArgs += @('--project', $script:LaunchProject) }
-        $reconcileArgs += @('launch-update', 'reconcile', '--auto')
-        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $reconcileArgs) `
-            -Scope 'launch/reconcile' -Label 'Plugin reconcile'
-        $reresolvedPython = Resolve-RuntimePython
-        if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
-            $script:VenvPython = $reresolvedPython
-        }
-    }
-    # Submit last so foreground maintenance never joins our detached install.
-    if (-not $noUpdate -and $applyStaged) {
-        $requestArgs = @('-m', 'agent_worktrees')
-        if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
-        $requestArgs += @('launch-update', 'staged', '--auto', '--status', $statusFile)
+    $includeReconcile = $WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1'
+    if ($noUpdate -and -not $includeReconcile) { return }
+    $requestArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
+    if ($noUpdate) {
+        $requestArgs += @('launch-update', 'automatic', '--auto', '--no-update', '--with-reconcile')
         if (-not $env:WORKTREE_BLOCKING_INSTALL) { $requestArgs += '--detach' }
-        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
-            -Scope 'launch/installer' -Label 'Staged runtime request (applies on the next launch)'
+    } else {
+        $requestArgs += @('update', '--auto')
+        $requestArgs += $(if ($env:WORKTREE_BLOCKING_INSTALL) { '--wait' } else { '--detach' })
+        if (-not $includeReconcile) { $requestArgs += '--skip-modules' }
+    }
+    $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
+        -Scope 'launch/maintenance' -Label 'Automatic update submission'
+    if ($env:WORKTREE_BLOCKING_INSTALL) {
+        $reresolvedPython = Resolve-RuntimePython
+        if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+            $script:VenvPython = $reresolvedPython
+        }
     }
 }
 

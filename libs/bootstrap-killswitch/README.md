@@ -23,8 +23,9 @@ other plugins' hooks that fire on the exact same session starts.
 
 ## Shape
 
-- **Canonical sources** (this directory): `bootstrap-killswitch-guard.sh` and
-  `.ps1`. Vendored byte-identically into every plugin that ships a
+- **Canonical sources** (this directory): `bootstrap-killswitch-guard.sh`,
+  `.ps1` and the stdlib-only `killswitch_mutation.py` used by Bash and the
+  optional Python CLI. Vendored byte-identically into every plugin that ships a
   `scripts/bootstrap-check.sh` (the same opt-in-by-presence pattern
   `sync-versioned-runtime.py` uses for the canonical resolver) via
   `tools/sync-bootstrap-killswitch.py`. Never edit a vendored copy directly --
@@ -72,6 +73,19 @@ bash ~/.copilot/installed-plugins/copilot-extensions/<any-adopter>/scripts/boots
 read/write the identical shared state file, so it does not matter which
 one's copy you invoke.
 
+`BOOTSTRAP_KILLSWITCH_STATE_FILE` selects an explicit override. Both controllers
+expand a leading current-user `~` before reading or mutating that path, so
+`on`, `check`, `status` and `off` cannot disagree about which hold is active.
+Relative overrides use the calling filesystem directory. Readers and writers
+normalize the parent directory before selecting the unchanged leaf name, so
+an override such as `missing/../hold.json` addresses the same file even when
+`missing` does not exist. Mutations still refuse a linked state-file leaf;
+normalization does not follow it or bypass path-bound confirmation.
+PowerShell requires
+named-user `~other` overrides to be expanded explicitly rather than guessing
+another user's home. Read-only `capabilities` discovery does not resolve or
+inspect a state path, including an unsupported override.
+
 **If `agent-machines` happens to be installed**, it additionally exposes
 this as a friendlier, discoverable subcommand (optional, not required):
 
@@ -87,6 +101,48 @@ default timeout to guess, and an auto-expiring switch could silently re-arm
 reconcile mid-diagnosis just as easily as never having the switch at all, with
 no way for the operator to know it happened. `status` always shows who set
 it, when, and why, so a forgotten switch is discoverable rather than silent.
+
+Manager's [Installation & Updates controls](../../worktree-manager/docs/configuration.md#automatic-update-controls)
+also expose this same default-installation switch. Its payload carries the
+unchanged canonical controllers and helper through `sync-bootstrap-killswitch.py`;
+the UI does not require the Machines runtime or create another state file.
+Manager's broader launch-time maintenance veto remains a separate control,
+and an independent namespaced cell cannot edit this default-installation hold.
+
+### Conditional mutation and concurrent writers
+
+The guard's read-only `capabilities` operation declares
+`copilot-extensions.bootstrap-killswitch-controller`, version `1`, with
+`conditional-mutation-v1`. Manager probes that actual bundled controller
+before changing a switch; package versions are not capability evidence.
+An unsupported or invalid response refuses the operation without an
+unconditional fallback.
+
+`on "<reason>" --expected-state <revision>` and
+`off --expected-state <revision>` add conditional Bash mutations.
+PowerShell uses `-ExpectedState <revision>` with the same verbs.
+Conditional `off` requires an explicit `BOOTSTRAP_KILLSWITCH_STATE_FILE` so
+one path's confirmation cannot accidentally clear its unconfirmed legacy
+shadow. Existing direct `on`/`off` forms remain available. No syntax is retired.
+
+The revision is SHA-256 of the UTF-8 absolute path, a NUL separator, and
+either `absent` or `present`, NUL, and the exact file bytes. Comparison and
+mutation occur while holding byte zero of the retained sibling
+`<state-file>.lock`: Python uses POSIX record locking or Windows byte locking;
+PowerShell uses `FileStream.Lock`. All canonical writers, including the
+Machines CLI, participate and refuse after a bounded five-second contention
+wait. Process exit releases the native lock; never unlink its inode as a
+stale-PID cleanup. Bash mutations require Python and the shipped helper;
+PowerShell remains Python-free.
+
+Deploy participating writers before relying on concurrent confirmations.
+An older installed writer ignores this protocol, and capability support in
+one controller does not prove that every other installed entrypoint was
+upgraded. A changed confirmation refuses visibly and retains the new audit
+hold; for a default two-path clear, an already-cleared confirmed path is not
+recreated if the other path changes. Refresh actual state before retrying.
+Rollback to an older writer loses conditional serialization, not the
+underlying hold's existing reader semantics.
 
 ## Known limitations
 

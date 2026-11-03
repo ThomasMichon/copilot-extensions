@@ -1,0 +1,13 @@
+{
+  "comment": "Serialize canonical automatic-update switch writers and ship conditional mutation support",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

@@ -80,6 +80,20 @@ def test_on_off_json_mode(tmp_path, monkeypatch, capsys) -> None:
     assert off_payload["cleared"] is True
 
 
+def test_missing_parent_segments_select_one_normalized_state_path(tmp_path, monkeypatch, capsys) -> None:
+    state_file = tmp_path / "hold.json"
+    state_file.write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "missing/../hold.json"))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(tmp_path))
+    for action in ("status", "on", "status", "off"):
+        assert _run(["bootstrap-killswitch", action, "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["path"] == str(state_file)
+        if action != "off":
+            assert payload["active"] is True
+    assert not state_file.exists() and not (tmp_path / "missing").exists()
+
+
 def test_malformed_state_file_fails_open_to_inactive(tmp_path, monkeypatch, capsys) -> None:
     state_file = tmp_path / "ks.json"
     state_file.write_text("not json at all")
