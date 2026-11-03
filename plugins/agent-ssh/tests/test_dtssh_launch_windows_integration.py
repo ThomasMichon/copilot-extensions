@@ -368,6 +368,11 @@ def test_logon_task_registers_unelevated_and_runs_windowless_in_the_users_sessio
         assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
         assert observer.focus == {}, f"foreground transitions: {observer.focus}"
     finally:
-        subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command",
-                        f"Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false -ErrorAction SilentlyContinue"],
-                       timeout=60, creationflags=_CREATE_NO_WINDOW, env=_system_env())
+        # Remove exactly this fixture task; only a genuine not-found is an acceptable absence.
+        cleanup = subprocess.run(
+            [pwsh, "-NoProfile", "-NonInteractive", "-Command",
+             f"try {{ Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false -ErrorAction Stop }} "
+             "catch { if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { "
+             "[Console]::Error.WriteLine($_.Exception.Message); exit 1 } }"],
+            capture_output=True, text=True, timeout=60, creationflags=_CREATE_NO_WINDOW, env=_system_env())
+        assert cleanup.returncode == 0, f"could not remove fixture task {task}: {cleanup.stderr.strip()}"

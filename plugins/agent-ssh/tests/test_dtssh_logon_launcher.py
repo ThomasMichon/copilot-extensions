@@ -149,6 +149,32 @@ def test_a_refused_update_does_not_keep_a_disabled_task(tmp_path, task, trigger)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_a_refused_update_with_an_unknown_task_refuses_the_fallback(tmp_path):
+    """Registration refused and the lookup failed for another reason than not-found:
+    an old task may still fire, so no Startup fallback is chosen."""
+    proc = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", _register_script(tmp_path, REFUSED + """
+function Get-ScheduledTask { param($TaskName, $ErrorAction) throw 'The RPC server is unavailable.' }
+function Unregister-ScheduledTask { param($TaskName, [switch]$Confirm, $ErrorAction) Write-Host "unregister:$TaskName" }
+""")],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert proc.returncode != 0
+    assert "whether the logon task" in proc.stderr and "RPC server is unavailable" in proc.stderr
+    assert "Not falling back to the Startup shortcut" in proc.stderr
+    assert "result:" not in proc.stdout and "unregister:" not in proc.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_a_not_found_lookup_means_no_task(tmp_path):
+    out = _register(tmp_path, REFUSED + """
+function Get-ScheduledTask { param($TaskName, $ErrorAction)
+    Write-Error -Category ObjectNotFound -Message "No MSFT_ScheduledTask objects found with property 'TaskName' equal to '$TaskName'." -ErrorAction Stop }
+""")
+    assert out[-1].endswith(" False") and "Startup-folder shortcut" in out[-1]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
 def test_a_refused_update_retires_the_old_task_before_the_fallback(tmp_path):
     """An existing task would still fire beside the shortcut with stale arguments."""
     out = _register(tmp_path, REFUSED + """

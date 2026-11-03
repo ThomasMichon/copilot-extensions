@@ -702,7 +702,11 @@ function Register-LogonTask {
         return $true
     } catch {
         $reason = $_.Exception.Message.Trim()
-        $existing = Get-LogonTask
+        try {
+            $existing = Get-LogonTask
+        } catch {
+            throw "Could not register the logon task '$LogonTaskName' ($reason). $($_.Exception.Message) Not falling back to the Startup shortcut while an old task may still fire; rerun once Task Scheduler responds."
+        }
         # Re-registering an identical task can be refused where creating it once was
         # allowed; the registered one still starts the same launcher, so keep it.
         if ($existing -and (Test-LogonTaskCurrent -Task $existing -Execute $Execute -Argument $Argument)) {
@@ -747,7 +751,14 @@ function Test-LogonTaskCurrent {
 function Get-LogonTask {
     # Where the ScheduledTasks module is unavailable, a Startup-only install stays manageable.
     if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
-    Get-ScheduledTask -TaskName $LogonTaskName -ErrorAction SilentlyContinue
+    # Only a genuine not-found means "no task"; any other failure leaves it unknown and throws,
+    # so no caller falls back to the shortcut beside a task that may still fire.
+    try {
+        return Get-ScheduledTask -TaskName $LogonTaskName -ErrorAction Stop
+    } catch {
+        if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { return $null }
+        throw "Could not tell whether the logon task '$LogonTaskName' exists: $($_.Exception.Message.Trim())"
+    }
 }
 
 function Unregister-LogonTask {
@@ -940,7 +951,9 @@ switch ($Action) {
         if ($DryRun) {
             Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
             Write-Host '[dry-run] would stop launcher + host launcher'
-            if (Get-LogonTask) { Write-Host "[dry-run] would remove logon task: $LogonTaskName" }
+            try {
+                if (Get-LogonTask) { Write-Host "[dry-run] would remove logon task: $LogonTaskName" }
+            } catch { Write-Host "[dry-run] would refuse: $($_.Exception.Message)" }
             if (Test-Path $StartupLnk) { Write-Host "[dry-run] would remove Startup shortcut: $StartupLnk" }
             if (Test-Path $CompanionConfigPath) { Write-Host "[dry-run] would remove dispatch companion config: $CompanionConfigPath" }
             Write-Host "[dry-run] existing dtssh tunnel/client state would be left intact"
@@ -1020,7 +1033,11 @@ switch ($Action) {
         } else {
             Write-Warning 'dispatch companion launch config missing'
         }
-        if (Get-LogonTask) {
+        $logonTask = $null; $logonTaskError = $null
+        try { $logonTask = Get-LogonTask } catch { $logonTaskError = $_.Exception.Message }
+        if ($logonTaskError) {
+            Write-Warning "logon task: unknown ($logonTaskError)"
+        } elseif ($logonTask) {
             Write-Host "logon task: $LogonTaskName"
         } elseif (Test-Path $StartupLnk) {
             Write-Host "startup shortcut: $StartupLnk (can start late on a busy logon; rerun install to switch to a logon task)"
