@@ -7313,6 +7313,10 @@ missing/stale receipts and busy/deadline outcomes cannot become success.
 It also exercises the legacy monitor result adapter with a fake transition,
 including failed, refused and busy outcomes and the previous-live flag.
 The native installer wrappers and actual service cutover remain separate tests.
+The daemon census also checks direct current-directory expressions with
+identifiable imports at classified resident `spawn_daemon` sites; it does not
+trace nested expression scopes or dynamic arguments, or prove that other
+computed directories are durable.
 
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
