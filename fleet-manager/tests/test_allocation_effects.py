@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
+from pathlib import Path
 import sqlite3
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import sys
 import pytest
 
 from fleet_manager.ledger import OperationLedger
+from fleet_manager import node_journal
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent
 from fleet_manager.planning import PlanError
@@ -197,6 +199,7 @@ def test_schema_one_upgrade_preserves_acceptance_and_effect_tables_without_claim
         connection.execute("DROP TABLE allocation_owners")
         connection.execute("DROP TABLE allocation_releases")
         connection.execute("DROP TABLE external_owners")
+        connection.execute("DROP TABLE external_evidence")
         connection.execute("PRAGMA user_version=1")
         connection.execute("CREATE TABLE effects(value TEXT)")
         connection.execute("INSERT INTO effects VALUES('legacy')")
@@ -210,7 +213,7 @@ def test_schema_one_upgrade_preserves_acceptance_and_effect_tables_without_claim
     with pytest.raises(PlanError, match="does not own"):
         upgraded.accept_allocation(intent, resource="workspace-1")
     with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
 
 
 @pytest.mark.parametrize("sql", [
@@ -225,6 +228,7 @@ def test_schema_upgrade_refuses_reserved_collision_or_changed_core_without_mutat
         connection.execute("DROP TABLE allocation_owners")
         connection.execute("DROP TABLE allocation_releases")
         connection.execute("DROP TABLE external_owners")
+        connection.execute("DROP TABLE external_evidence")
         connection.execute("PRAGMA user_version=1")
         connection.execute(sql)
         before = connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
@@ -237,6 +241,7 @@ def test_schema_upgrade_refuses_reserved_collision_or_changed_core_without_mutat
 
 PROCESS = """
 import json,os,sys
+sys.path.insert(0,sys.argv[3])
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent
 from fleet_manager.planning import PlanError
@@ -251,7 +256,8 @@ def effect(c):
 
 def run_process(path, intent, body):
     return subprocess.run(
-        [sys.executable, "-I", "-c", PROCESS + body, str(path), json.dumps(intent.to_dict())],
+        [sys.executable, "-I", "-c", PROCESS + body, str(path), json.dumps(intent.to_dict()),
+         str(Path(node_journal.__file__).resolve().parents[1])],
         capture_output=True, text=True, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
 

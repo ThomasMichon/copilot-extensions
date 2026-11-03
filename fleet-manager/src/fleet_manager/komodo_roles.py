@@ -1,4 +1,4 @@
-"""Komodo named-resource projection; no Core API, credentials or deployment."""
+"""Inert Komodo projection and explicitly code-selected workload composition."""
 
 from __future__ import annotations
 
@@ -20,3 +20,14 @@ class KomodoRoleProvider:
             artifact_ref=binding.artifact_ref, configuration_ref=binding.configuration_ref,
             key_refs=binding.key_refs,
         )
+
+    def execution_binding(self, owner, slot, *, role: str, installation: str):
+        """Only explicit SDK composition opts in; project() never reaches this path."""
+        from .komodo_control import workload_binding
+        from .komodo_workload import KomodoWorkloadOwner
+
+        if type(owner) is not KomodoWorkloadOwner:
+            from .planning import PlanError
+
+            raise PlanError("Komodo role execution requires the selected workload owner")
+        return workload_binding(owner, slot, role=role, installation=installation)
