@@ -113,6 +113,26 @@ def test_guard_explicit_project_on_consuming_verb_ok(monkeypatch, verb):
     m._guard_project_scope(parser, args)  # consuming verb -> no raise
 
 
+@pytest.mark.parametrize("verb", ["observe-session", "session-observation-history"])
+def test_observation_project_reaches_actual_root_dispatch(monkeypatch, verb):
+    monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
+    calls = []
+
+    def selected(args):
+        calls.append((args.command, args.project))
+
+    monkeypatch.setattr("agent_bridge.session_observation_cli._cmd", selected)
+    monkeypatch.setattr("sys.argv", [
+        "agent-bridge", "--project", "demo", verb, "session-1",
+        "--worktree-id", "worktree-1", "--contract-version", "1", "--json",
+    ])
+    try:
+        m.main()
+    finally:
+        _reset()
+    assert calls == [(verb, "demo")]
+
+
 def test_guard_no_project_is_noop(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
     parser = m.build_parser()

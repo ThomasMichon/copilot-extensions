@@ -281,11 +281,11 @@ def test_legacy_slot_has_no_invented_generation_and_malformed_evidence_is_logged
     assert "generation evidence is malformed" in caplog.text
 
 
-@pytest.mark.parametrize("lock_current,health_current", [
-    (False, False), (True, False), (True, True),
+@pytest.mark.parametrize("route_current,health_current", [
+    (False, False), (False, True), (True, False), (True, True),
 ])
 def test_equal_prefix_cannot_hide_an_old_monitor_generation(
-    engine, tmp_path, monkeypatch, lock_current, health_current,
+    engine, tmp_path, monkeypatch, route_current, health_current,
 ):
     from types import SimpleNamespace
 
@@ -299,22 +299,33 @@ def test_equal_prefix_cannot_hide_an_old_monitor_generation(
     bootstrap.mkdir(parents=True)
     generation = "a" * 32
     (bootstrap / "runtime-generation").write_text(generation + "\n", encoding="utf-8")
-    record = {
-        "prefix": str(slot), "pid": 123,
-        "runtime_generation": generation if lock_current else "b" * 32,
-    }
-    monkeypatch.setattr(locks, "read_lock", lambda _path: record)
-    monkeypatch.setattr(locks, "lock_is_live", lambda _record: True)
-    monkeypatch.setattr(
-        cutover, "live_endpoint", lambda: SimpleNamespace(pid=123, base_url="unused"),
+    from zdd import routing
+
+    pid = os.getpid()
+    birth = locks.process_start_time(pid)
+    (tmp_path / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
+    endpoint = routing.publish_active(
+        tmp_path / "status-monitor-routing", bind="127.0.0.1", port=41001, pid=pid,
+        process_start_time=birth,
     )
-    monkeypatch.setattr(cutover, "ControlClient", lambda _url: SimpleNamespace(
-        health=lambda: {
-            "status": "ready", "published": True, "pid": 123,
+    if not route_current:
+        table = routing.read_table(tmp_path / "status-monitor-routing")
+        table["active"]["process_start_time"] = "1"
+        routing.routing_table_path(tmp_path / "status-monitor-routing").write_text(
+            json.dumps(table), encoding="utf-8",
+        )
+    monkeypatch.setattr(locks, "read_lock", lambda _path: {
+        "prefix": str(slot), "pid": pid, "runtime_generation": "b" * 32,
+    })
+    def client(url, **options):
+        assert url == endpoint.base_url and options["token"] == "fixture-token"
+        return SimpleNamespace(health=lambda: {
+            "status": "ready", "published": True, "pid": pid,
+            "runtime_prefix": str(slot), "runtime_slot": slot.name,
             "runtime_generation": generation if health_current else "b" * 32,
-        },
-    ))
-    assert driver._candidate_serving(tmp_path, slot) is (lock_current and health_current)
+        })
+    monkeypatch.setattr(cutover, "ControlClient", client)
+    assert driver._candidate_serving(tmp_path, slot) is (route_current and health_current)
 
 
 @pytest.mark.parametrize("monitor_committed", [False, True])
@@ -358,7 +369,9 @@ def test_manifest_interruption_stays_under_custody_until_restore_or_commit_forwa
         cutover, "_acquire_cutover_lock",
         lambda _root: SimpleNamespace(release=lambda: released.append("cutover")),
     )
-    monkeypatch.setattr(cutover, "activate_after_update", lambda **_kwargs: {"action": "cutover"})
+    monkeypatch.setattr(cutover, "activate_after_update", lambda **_kwargs: {
+        "action": "cutover", "result": {"ok": True, "committed": True},
+    })
     monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: True)
     publish = deployment.publish
     calls = []

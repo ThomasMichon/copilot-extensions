@@ -6,6 +6,34 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = @($args)
+$passiveObservation = $false
+$skipProject = $false
+$firstArgument = $true
+$projectOptions = @('--p', '--pr', '--pro', '--proj', '--proje', '--projec', '--project')
+foreach ($argument in $forwardArgs) {
+    if ($firstArgument) {
+        $firstArgument = $false
+        if ($argument -ceq 'agent-bridge') { continue }
+    }
+    if ($skipProject) {
+        $skipProject = $false
+        continue
+    }
+    $optionName = ([string]$argument -split '=', 2)[0]
+    if ($argument -ceq '-p' -or
+        ($argument -cin $projectOptions)) {
+        $skipProject = $true
+    } elseif (($optionName -cin $projectOptions) -or
+              ($argument -clike '-p?*') -or
+              ($argument -cin @('--j', '--js', '--jso', '--json'))) {
+        continue
+    } elseif ($argument -cin @('observe-session', 'session-observation-history')) {
+        $passiveObservation = $true
+        break
+    } else {
+        break
+    }
+}
 $hasPipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
 $pipelineInput = if ($hasPipelineInput) { @(Get-Variable input -ValueOnly) } else { @() }
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_BRIDGE_PAYLOAD_ROOT', 'Process')
@@ -234,11 +262,21 @@ function Invoke-Runtime {
     exit $LASTEXITCODE
 }
 
-$runtimePython = Resolve-RuntimePython
+$runtimePython = if ($passiveObservation) {
+    Resolve-RuntimePython -TraceMode 'read-only'
+} else {
+    Resolve-RuntimePython
+}
 if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }
 
+if ($passiveObservation) {
+    [Console]::Error.WriteLine(
+        '[agent-bridge] runtime not provisioned (passive observation; no self-provision).'
+    )
+    exit 1
+}
 if ($env:AGENT_BRIDGE_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(
         '[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'

@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+from .engine_posix_process import EngineCleanupError
 
 MESSAGE = "Read-only candidate: live actions, launches and maintenance are disabled."
 
@@ -22,10 +23,13 @@ class _Reads:
         self.cancelled = threading.Event()
         self._condition = threading.Condition()
         self._active = 0
+        self._cleanup_failure: EngineCleanupError | None = None
 
     @contextmanager
     def operation(self):
         with self._condition:
+            if self._cleanup_failure is not None:
+                raise self._cleanup_failure
             if self.cancelled.is_set():
                 raise ReadOnlyError("Read-only candidate: review session is closed.")
             self._active += 1
@@ -35,6 +39,11 @@ class _Reads:
             with self._condition:
                 self._active -= 1
                 self._condition.notify_all()
+
+    def cleanup_failed(self, error: EngineCleanupError) -> None:
+        with self._condition:
+            if self._cleanup_failure is None:
+                self._cleanup_failure = error
 
     def close(self):
         with self._condition:
@@ -92,7 +101,11 @@ def run_read(argv, **kwargs):
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     reads = current().reads
     with reads.operation():
-        return engine_process.run(argv, cancelled=reads.cancelled, **kwargs)
+        try:
+            return engine_process.run(argv, cancelled=reads.cancelled, **kwargs)
+        except EngineCleanupError as exc:
+            reads.cleanup_failed(exc)
+            raise
 
 
 def refuse(screen) -> bool:

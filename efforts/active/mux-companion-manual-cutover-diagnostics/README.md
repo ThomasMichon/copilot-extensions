@@ -451,7 +451,9 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       [proposed observation contract](sidecar-observation-contract.md).
       Preserve every original parent clause, owner and evidence tier; a model,
       widget, provider or source PR alone does not complete this root.
-      S0 and S1 source delivery are merged; S2 owner/provider integration is next.
+      S0, S1 and the first S2 selected worktree receiver are merged.
+      Native mutation capture, rich agenda history and owner/consumer integration
+      remain open; the whole S2-S5 and original root gates are unchanged.
 
 ## Validation Plan
 
@@ -527,6 +529,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+- [2026-11-02 - Selected worktree receiver merged; source joins next](journal/2026/11.02-sidecar-observation-receiver.md)
 
 ### 2026-11-02 - First S2 observation receiver source qualification
 

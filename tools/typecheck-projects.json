@@ -305,7 +305,7 @@
         "libs/venue-copilot"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-versioned-runtime",

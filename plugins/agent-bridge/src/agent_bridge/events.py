@@ -11,6 +11,7 @@ SSE event log for agent-bridge sessions.
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_left, bisect_right
 import math
 import time
 from dataclasses import dataclass, field
@@ -385,6 +386,29 @@ class EventLog:
             start = max(0, end - max(0, limit))
             return (continuity, list(self._events[start:end]), start > 0)
 
+    def snapshot_observation(
+        self, *, after: int | None = None, before: int | None = None, limit: int = 64,
+    ) -> tuple[str | None, int, int, list[SseEvent]]:
+        """Read a bounded retained window and its exact range under one lock.
+
+        Visibility is not a SQLite durability barrier. Captured private tails may
+        start above one; source readers must preserve that retained floor.
+        """
+        with self._lock:
+            if not self._events:
+                return None, 0, 0, []
+            floor, head = self._events[0].id, self._events[-1].id
+            if after is not None:
+                start = bisect_right(self._events, after, key=lambda event: event.id)
+                end = min(len(self._events), start + limit)
+            else:
+                end = (
+                    bisect_left(self._events, before, key=lambda event: event.id)
+                    if before is not None else len(self._events)
+                )
+                start = max(0, end - limit)
+            return self._telemetry.log_epoch or None, floor, head, list(self._events[start:end])
+
     def snapshot_event(
         self, event_id: int, *, durable: bool = False
     ) -> tuple[str | None, SseEvent | None]:
@@ -489,6 +513,24 @@ class EventLog:
             return self.get_events(after)
         except (TimeoutError, asyncio.TimeoutError):
             return []
+        finally:
+            with self._lock:
+                if registration in self._waiters:
+                    self._waiters.remove(registration)
+
+    async def wait_for_observation(self, after: int, timeout: float = 0.5) -> None:
+        """Wait for a source change without allocating an unbounded event list."""
+        loop = asyncio.get_running_loop()
+        waiter = asyncio.Event()
+        registration = (loop, waiter)
+        with self._lock:
+            if self._events and self._events[-1].id > after:
+                return
+            self._waiters.append(registration)
+        try:
+            await asyncio.wait_for(waiter.wait(), timeout=timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            return
         finally:
             with self._lock:
                 if registration in self._waiters:

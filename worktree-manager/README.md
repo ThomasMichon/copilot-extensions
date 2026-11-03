@@ -39,19 +39,79 @@ Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 Timeline is an alternate view backed by a bounded timeline contract, virtual
 line renderer and caller-owned observation controller. Its compaction policy
 compares qualified pre-context counts without rounding; target-only capacity
-or unqualified measurements remain unknown. Owner feeds are not yet attached
-to this view: missing history stays explicit rather than being reconstructed
-from current Summary facts. Opening Timeline admits no new provider commands
-and leaves Summary as the initial view.
+or unqualified measurements remain unknown. Opening Timeline now attaches the
+selected worktree's optional owner-observation feed through the attributed
+engine command. Summary remains initial and does not wait for timeline history.
+An owned passive probe checks actual receiver support and the selected parser
+before any new verb; absent/old providers stay explicitly unavailable without
+launching or provisioning a resident.
+
+The adapter consumes `worktree-observations` point/follow responses and bounded
+`worktree-observation-history` pages. Initial history uses a bounded latest page
+and an atomic replay read before following that live barrier. Current purpose
+and effort come from qualified selected facts; creation context remains unknown
+unless its owner supplies it. Roster differences are generic `observed-change`
+records with partial sampled coverage, not fabricated creation, claim or binding
+events. A timestamp refresh or heartbeat is not a timeline milestone.
+See the [owning source contract](../plugins/agent-worktrees/docs/worktree-observations.md).
+
+Live and backward-page cursors remain independent. Browsing retains its anchor
+and unread updates; retention gaps preserve their source, floor, reason and
+reconciliation information without accepting a new live position. Head,
+resident, record-incarnation and journal replacement failures remain explicit;
+Refresh obtains a new qualified selection. Hiding Timeline retires its optional
+reader and pages, and reopening obtains a fresh snapshot. One worktree reader
+fits the controller's three-provider composition; no panel fleet poller, agenda
+or Bridge timeline adapter is added. Source support is not installed/native
+qualification or rollout.
+Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
+tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
+obtains a fresh owner-qualified snapshot and admits a separate bounded observation
+window before replacing the exhausted one. Failed, unqualified, stale or
+conflicting snapshots leave the old proof fence and cached rows intact. A retained
+browsing anchor and unread state carry into the new window where available.
+This replaces ephemeral viewer evidence, not owner history or work/resource budgets.
+Exhausted windows remain separately inspectable on the attachment for the
+observer's lifetime, never as active facts. Retention is bounded to 32 windows
+and 16 MiB of encoded rows plus integrity-evidence accounting; reaching either
+bound refuses another baseline rather than silently evicting evidence. This is
+in-memory viewer retention, not durable archival.
 Within the timeline canvas, arrow/PageUp/PageDown scrolling selects a visible
 event and Enter expands it; mouse selection is highlighted. Home browses the
 oldest loaded event and requests bounded older history. End/Follow returns
 selection to the live bottom. These controls do not change application focus
 or Escape behavior.
+Up/PageUp also request older history at the loaded top when content is too short
+to scroll. While browsing, live appends preserve the padded event/screen-row
+anchor rather than shifting it as bottom padding shrinks.
 Timeline adapters receive independent request-local stop events. Teardown waits
 for their bounded cleanup, including a naturally completed read already being
 finalized, without canceling adapter tasks or discarding their handles. Cleanup
 errors remain explicit after selection retirement.
+Disconnects, frame deadlines and invalid source replies are read failures:
+after successful resource retirement, Refresh or tab reopening can subscribe
+again. Only a typed failure of owned process/pipe retirement latches cleanup
+and blocks replacement; ordinary transport failures do not poison that gate.
+Adapters normalize read failures into `TimelineSourceError` and tag failed
+owned-resource retirement with `TimelineCleanupError`, including during stop.
+Controller terminal failures retain their source identity and exception custody
+independently of reader/page task slots for the controller's lifetime. They fence
+further reads and cooperatively stop the affected source, not healthy providers.
+Recording precedes task completion, with synchronous completed-task harvesting
+before new page admission; delayed done callbacks cannot lose the fence.
+Selection retirement and repeated close still propagate the retained failure.
+The same retirement marker covers POSIX group sweep/reaping and portable
+process/pipe cleanup; an ordinary read timeout remains distinct. Legacy Agenda
+reports terminal retirement failures without retrying its subscription or
+disabling Summary/Timeline. Its observer-local terminal gate also prevents
+Refresh from starting a replacement while custody is unresolved. Scoped engine
+readers retain terminal failures, and the base engine API preserves their type
+instead of treating them as compatibility errors or an empty result.
+Agenda's terminal gate is separate from Timeline and base-engine read custody.
+Base-engine and read-only Picker-review scopes refuse further owned reads after
+a retirement failure; compatibility fallback does not reinterpret that failure
+as an unsupported flag. POSIX capture-file/descriptor closure and streamed
+diagnostic cleanup use the same operation-local retirement classification.
 The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
 retains the provider, joined-app, native-client and installed-adoption gates.
 

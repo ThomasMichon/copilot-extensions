@@ -12,6 +12,7 @@ from agent_procutil import (
     spawn_sync_in_kill_on_close_job,
 )
 from . import engine_posix_process
+from .engine_posix_process import EngineCleanupError as EngineCleanupError, cleanup_phase as cleanup_phase
 
 OWNED_GROUP_ENV = "WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"
 _WINDOWS = os.name == "nt"
@@ -59,9 +60,10 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
         completed = True
         return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     finally:
-        if job is not None:
-            job.close()
-        elif process.poll() is None:
-            process.kill()
-        if not completed:
-            process.communicate(timeout=5)
+        with cleanup_phase():
+            if job is not None:
+                job.close()
+            elif process.poll() is None:
+                process.kill()
+            if not completed:
+                process.communicate(timeout=5)

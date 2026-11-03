@@ -49,6 +49,11 @@ Reads use a real SQLite transaction, not the imported JSON files.
 newest first. Accepted records and their complete state snapshots are never
 silently pruned. History is not a canonical effort completion ledger.
 
+The source also offers [passive rich history](agenda-history.md) through
+`reader-info` and `history-page`, using an explicit adopter-owned reader locator.
+Actual context-qualified store support is negotiated independently of this
+legacy command reference or an installed payload's version.
+
 These records establish what the agenda store accepted, not the sole truth of
 external progress. An unavailable, stale or rewound store does not itself block
 otherwise-authorized work: use the skill's

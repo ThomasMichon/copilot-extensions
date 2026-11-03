@@ -585,6 +585,10 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         health_route.HOSTING_CAPABILITY: health_route.HOSTING_CAPABILITY_VERSION,
         bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY:
             bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+        health_route.LIVE_KEYED_RECEIPT_CAPABILITY: 1,
+        health_route.LIVE_EXACT_NOTIFY_CAPABILITY: 1,
+        health_route.OBSERVATIONS: 1,
+        health_route.HISTORY: 1,
     }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]

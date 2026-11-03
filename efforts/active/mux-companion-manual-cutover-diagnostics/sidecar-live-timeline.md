@@ -248,8 +248,14 @@ The source implementation is described in the
 [owning provider contract](../../../plugins/agent-worktrees/docs/worktree-observations.md);
 publication and installed support retain their separate qualification.
 
+- [x] Deliver the first selected worktree receiver's source read/history/feed
+  contract with partial observed-change coverage. #10097 merged as
+  `d55ee9a7f0a480cbcadd838b0783b75df11372f3`; native mutation receipts,
+  rich agenda delivery and Manager adapters are not included in this receipt.
 - [ ] Expand providers before callers with passive capabilities, selected-scope
   current facts, gap-aware observation history and bounded backward pages.
+  The worktree receiver portion is delivered; remaining owner and consumer
+  expansion stays open.
 - [ ] Capture real claim/binding/disposition evidence at existing mutation seams;
   reconcile cross-process/legacy sources without fabricated events.
   Isolate optional post-save callback failures so a completed canonical save is

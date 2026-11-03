@@ -13,6 +13,12 @@ from zdd import diagnostics, routing
 from . import locks, status_monitor_cutover as cutover
 
 
+class AsyncRetirementUnsupported(ValueError):
+    def __init__(self, message: str, identity: tuple[int, str, str | None]):
+        super().__init__(message)
+        self.identity = identity
+
+
 def _runtime_slot(root: Path, prefix: str | Path) -> Path:
     path = Path(prefix).resolve(strict=True)
     if path.name == ".venv" and path.parent.parent == (root / "versions").resolve():
@@ -22,25 +28,34 @@ def _runtime_slot(root: Path, prefix: str | Path) -> Path:
 
 def candidate_serving(root: Path, slot: Path) -> bool:
     from .runtime_identity import slot_generation
+    from .runtime_monitor_retirements import _exit_state
 
-    record = locks.read_lock(root / "status-monitor.lock")
+    directory = root / "status-monitor-routing"
+    snapshot = routing.read_table(directory, strict=True)
+    raw = (snapshot or {}).get("active")
+    endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+    if endpoint is None or endpoint.process_start_time is None:
+        return False
+    if _exit_state({"pid": endpoint.pid, "start": endpoint.process_start_time}) is True:
+        return False
+    before = locks.process_start_time(endpoint.pid)
+    if before is None or before != endpoint.process_start_time:
+        return False
     generation = slot_generation(slot)
-    if (
-        not locks.lock_is_live(record)
-        or not record.get("prefix")
-        or _runtime_slot(root, record["prefix"]) != slot.resolve()
-        or (generation is not None and record.get("runtime_generation") != generation)
-    ):
-        return False
-    endpoint = cutover.live_endpoint()
-    if endpoint is None or endpoint.pid != record.get("pid"):
-        return False
-    health = cutover.ControlClient(endpoint.base_url).health()
+    health = cutover.ControlClient(
+        endpoint.base_url, token=cutover.load_or_create_control_token(root),
+    ).health()
+    prefix = health.get("runtime_prefix")
     return (
         health.get("status") == "ready"
         and health.get("published") is True
         and health.get("pid") == endpoint.pid
+        and health.get("runtime_slot") == slot.name
+        and isinstance(prefix, str) and Path(prefix).is_absolute()
+        and _runtime_slot(root, prefix) == slot.resolve()
         and (generation is None or health.get("runtime_generation") == generation)
+        and locks.process_start_time(endpoint.pid) == before
+        and routing.read_table(directory, strict=True) == snapshot
     )
 
 
@@ -97,25 +112,93 @@ def routed_identity(
         raise ValueError("Routed monitor identity changed during admission")
     slot = health.get("runtime_slot")
     prefix = health.get("runtime_prefix")
+    if isinstance(prefix, str) and Path(prefix).is_absolute():
+        root = directory.parent if runtime_home is None else runtime_home
+        path = _runtime_slot(root, prefix)
+        slot = path.name if path.parent == (root / "versions").resolve() else None
+    identity = pid, before, slot if isinstance(slot, str) else None
     if require_async_retirement:
+        if not isinstance(prefix, str) or not Path(prefix).is_absolute():
+            raise ValueError("Serving monitor runtime prefix is unavailable")
         from .runtime_monitor_retirements import CAPABILITY
         from .status_monitor_recovery_contract import CAPABILITY as RECOVERY_CAPABILITY, ReceiverIdentity
 
         capabilities = health.get("capabilities")
         if not isinstance(capabilities, list) or CAPABILITY not in capabilities:
-            raise ValueError("Serving monitor does not support safe asynchronous retirement")
+            raise AsyncRetirementUnsupported(
+                "Serving monitor does not support safe asynchronous retirement", identity,
+            )
         if RECOVERY_CAPABILITY not in capabilities:
-            raise ValueError("Serving monitor does not support guarded preparation recovery")
+            raise AsyncRetirementUnsupported(
+                "Serving monitor does not support guarded preparation recovery", identity,
+            )
         ReceiverIdentity.parse({
             "pid": pid, "processStartTime": before, "runtimeGeneration": health.get("runtime_generation"),
         })
-        if not isinstance(prefix, str) or not Path(prefix).is_absolute():
-            raise ValueError("Serving monitor runtime prefix is unavailable")
-    if isinstance(prefix, str) and Path(prefix).is_absolute():
-        root = directory.parent if runtime_home is None else runtime_home
-        path = _runtime_slot(root, prefix)
-        slot = path.name if path.parent == (root / "versions").resolve() else None
-    return pid, before, slot if isinstance(slot, str) else None
+    return identity
+
+
+def activation_liveness(
+    monitor_was_live: bool | None, retired: tuple[int, str] | None, *,
+    asynchronous: bool, guard, handles, predecessor: dict | None,
+) -> tuple[bool, bool]:
+    """Ignore retained exited discovery only after exact installer-owned retirement."""
+    from zdd import process_exit
+    from . import status_monitor_runtime as runtime, runtime_monitor_retirements as retirements
+
+    lock_live = cutover._monitor_lock_is_live()
+    monitor_was_live = lock_live if monitor_was_live is None else bool(monitor_was_live)
+    if retired is None:
+        if asynchronous and predecessor is None and retirements.retirement_only(
+            runtime._aw_runtime_home(), locks.read_lock(runtime._monitor_lock_path()),
+        ):
+            return False, False
+        return lock_live, monitor_was_live
+    if not asynchronous or guard is None or handles is None:
+        raise ValueError("Cold startup requires the owning installer and cutover guard")
+    record = locks.read_lock(runtime._monitor_lock_path()) or {}
+    if lock_live and (record.get("pid"), record.get("start_time")) != retired:
+        raise ValueError("A different monitor owns the lock after legacy retirement")
+    if process_exit.observe_original_exit(*retired) is not True:
+        raise ValueError("Legacy predecessor native exit is unconfirmed before startup")
+    return False, False
+
+
+def retire_legacy(root: Path, expected: tuple[int, str, str | None], *, guard) -> dict:
+    """Retire only the authenticated incumbent while its installer owns cutover."""
+    from agent_procutil.process_retirement import PinnedProcess, birth_identity
+    from zdd import process_exit
+
+    directory = root / "status-monitor-routing"
+    if (
+        not isinstance(guard, cutover.SingleInstance) or not guard.held
+        or guard.lock_path.resolve() != (directory / "cutover.lock").resolve()
+    ):
+        raise ValueError("Legacy retirement requires the held installation cutover guard")
+    pid, start, slot = expected
+    if pid == os.getpid() or slot is None:
+        raise ValueError("Legacy retirement requires an attributable predecessor runtime")
+    with routing.routing_lock(directory, deadline=time.monotonic() + 5.0):
+        snapshot = routing.read_table(directory, strict=True)
+        try:
+            observed = routed_identity(root, require_async_retirement=True)
+        except AsyncRetirementUnsupported as error:
+            if error.identity != expected or monitor_slot(root, expected[:2]) != slot:
+                raise ValueError("Legacy predecessor ownership changed before retirement") from error
+        else:
+            if observed is None and process_exit.observe_original_exit(pid, start):
+                return {"pid": pid, "exit_confirmed": True, "already_exited": True}
+            raise ValueError("Legacy predecessor no longer requires cold takeover")
+        with PinnedProcess(pid, birth_identity(pid)) as process:
+            if (
+                locks.process_start_time(pid) != start
+                or routing.read_table(directory, strict=True) != snapshot
+            ):
+                raise ValueError("Legacy predecessor identity or route changed before retirement")
+            process.terminate(timeout=5.0)
+            if not process.exited():
+                raise RuntimeError("Legacy predecessor native exit is unconfirmed")
+    return {"pid": pid, "exit_confirmed": True, "forced": True}
 
 
 def monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:

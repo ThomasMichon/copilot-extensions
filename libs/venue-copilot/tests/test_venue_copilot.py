@@ -6,7 +6,8 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import pytest
 
@@ -27,7 +28,7 @@ from venue_copilot import (
 
 
 @pytest.fixture(autouse=True)
-def _alias_capable_daemon(monkeypatch):
+def _alias_capable_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     """Hermetic: a launch (a rejoin always) may probe the host daemon's
     protocol; answer as an alias-capable one unless a test says otherwise."""
     monkeypatch.setattr("venue_copilot._daemon_health", lambda port: {"protocol_version": 21})
@@ -40,14 +41,16 @@ class _FakeCompletedProcess:
         self.stderr = stderr
 
 
-def _run_returning(payload: dict[str, Any], returncode: int = 0):
+def _run_returning(
+    payload: dict[str, Any], returncode: int = 0,
+) -> Callable[..., _FakeCompletedProcess]:
     def _run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         return _FakeCompletedProcess(json.dumps(payload), returncode)
     return _run
 
 
 class TestReserveCliMode:
-    def test_builds_expected_argv_and_parses_reservation(self, monkeypatch) -> None:
+    def test_builds_expected_argv_and_parses_reservation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen: list[list[str]] = []
 
@@ -62,7 +65,7 @@ class TestReserveCliMode:
             "--worktree-id", "wt-A", "--ttl-seconds", "60.0",
         ]]
 
-    def test_resolves_bridge_bin_via_path_when_available(self, monkeypatch) -> None:
+    def test_resolves_bridge_bin_via_path_when_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "venue_copilot.shutil.which",
             lambda name: r"C:\fake\agent-bridge.CMD" if name == "agent-bridge" else None,
@@ -80,7 +83,7 @@ class TestReserveCliMode:
         # CodeSpace, agent-bridge-cli-mode-sessions Phase 4 validation).
         assert seen[0][0] == r"C:\fake\agent-bridge.CMD"
 
-    def test_uses_custom_bridge_bin(self, monkeypatch) -> None:
+    def test_uses_custom_bridge_bin(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen: list[list[str]] = []
 
@@ -112,7 +115,7 @@ class TestReserveCliMode:
 
         def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
             seen["timeout"] = kwargs.get("timeout")
-            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(argv, cast(float, kwargs.get("timeout")))
 
         with pytest.raises(VenueCopilotError, match="did not answer"):
             reserve_cli_mode("wt-A", run=fake_run)
@@ -120,7 +123,7 @@ class TestReserveCliMode:
 
 
 class TestReleaseCliMode:
-    def test_returns_removed_count(self, monkeypatch) -> None:
+    def test_returns_removed_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen: list[list[str]] = []
 
@@ -308,7 +311,9 @@ class TestDetachedLaunchAdditions:
     """Venue CLI-mode detached launch: venue-carrying reservations, exact
     release, reservation status, and the `embody`-shaped remote command."""
 
-    def _recording(self, payload):
+    def _recording(
+        self, payload: dict[str, Any],
+    ) -> tuple[list[list[str]], Callable[..., _FakeCompletedProcess]]:
         seen: list[list[str]] = []
 
         def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
@@ -317,7 +322,7 @@ class TestDetachedLaunchAdditions:
 
         return seen, fake_run
 
-    def test_reserve_forwards_compact_venue_json(self, monkeypatch) -> None:
+    def test_reserve_forwards_compact_venue_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen, fake_run = self._recording({"reservation_id": "r1"})
         venue = {"kind": "codespace", "target": "cs-1", "mux_session_name": "wt-x"}
@@ -329,14 +334,14 @@ class TestDetachedLaunchAdditions:
             venue, separators=(",", ":"),
         )
 
-    def test_release_by_exact_reservation_id(self, monkeypatch) -> None:
+    def test_release_by_exact_reservation_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen, fake_run = self._recording({"removed": 1})
 
         assert release_cli_mode("wt-A", reservation_id="r1", run=fake_run) == 1
         assert seen[0][-2:] == ["--reservation-id", "r1"]
 
-    def test_get_reservation_reports_claimant(self, monkeypatch) -> None:
+    def test_get_reservation_reports_claimant(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import get_cli_mode_reservation
 
         monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
@@ -416,11 +421,14 @@ class TestDetachedSharedHelpers:
         assert last_json('noise {"a": 1}\n{"b": 2}') == {"b": 2}
         assert last_json("no json") == {}
 
-    def test_reserve_with_retry_waits_on_active_reservation(self, monkeypatch) -> None:
-        calls = []
-        sleeps = []
+    def test_reserve_with_retry_waits_on_active_reservation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[tuple[str, float, dict[str, Any]]] = []
+        sleeps: list[float] = []
 
-        def fake_reserve(scope, *, ttl_seconds, venue, bridge_bin="agent-bridge", run=None):
+        def fake_reserve(
+            scope: str, *, ttl_seconds: float, venue: dict[str, Any],
+            bridge_bin: str = "agent-bridge", run: Callable[..., object] | None = None,
+        ) -> dict[str, str]:
             calls.append((scope, ttl_seconds, venue))
             if len(calls) == 1:
                 raise VenueCopilotError("reservation_active")
@@ -428,13 +436,13 @@ class TestDetachedSharedHelpers:
 
         monkeypatch.setattr("venue_copilot.reserve_cli_mode", fake_reserve)
         monkeypatch.setattr("venue_copilot.time.sleep", lambda delay: sleeps.append(delay))
-        waits = []
+        waits: list[str] = []
         got = reserve_with_retry(
             "scope",
             {"kind": "ssh", "target": "host", "mux_session_name": "wt-x"},
             ttl=42,
             retry_window=60,
-            on_wait=lambda: waits.append("wait"),
+            on_wait=cast(Callable[[], None], lambda: cast(Callable[[str], object], waits.append)("wait")),
         )
         assert got == {"reservation_id": "r2"}
         assert len(calls) == 2 and calls[0][1] == 42
@@ -452,6 +460,7 @@ class TestDetachedSharedHelpers:
 
 
 class _Adapter:
+    refs_ok: bool
     def __init__(
         self,
         launch_payload: dict[str, Any] | None = None,
@@ -514,7 +523,7 @@ class TestDetachedRunner:
             "venue": {"kind": "ssh", "target": "venue", "mux_session_name": "wt-anchor-repo"},
         }
 
-    def test_launch_detached_happy_path(self, monkeypatch) -> None:
+    def test_launch_detached_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         adapter = _Adapter()
@@ -525,10 +534,10 @@ class TestDetachedRunner:
             lambda scope, venue, **kw: {"reservation_id": "r1"},
         )
         monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
-        released = []
+        released: list[tuple[str, str | None]] = []
         monkeypatch.setattr(
             "venue_copilot.detached.release_cli_mode",
-            lambda scope, reservation_id=None: released.append((scope, reservation_id)) or 1,
+            lambda scope, reservation_id=None: cast(Callable[[tuple[str, str | None]], object], released.append)((scope, reservation_id)) or 1,
         )
 
         rc, payload = detached.launch_detached(
@@ -559,11 +568,11 @@ class TestDetachedRunner:
         assert released == [("anchor-repo@venue", "r1")]
 
     def _launch_resume(
-        self, monkeypatch, protocol: int | None, copilot_args: list[str] | None = None,
-    ) -> tuple[int, dict[str, Any], list]:
+        self, monkeypatch: pytest.MonkeyPatch, protocol: int | None, copilot_args: list[str] | None = None,
+    ) -> tuple[int, dict[str, Any], list[tuple[str, str]]]:
         from venue_copilot import detached
 
-        def health(_port):
+        def health(_port: int) -> dict[str, int]:
             if protocol is None:
                 raise OSError("connection refused")
             return {"protocol_version": protocol}
@@ -579,7 +588,7 @@ class TestDetachedRunner:
         monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
         adapter = _Adapter()
         adapter.launch_payload = {**adapter.launch_payload, "created": False}
-        steps: list = []
+        steps: list[tuple[str, str]] = []
         rc, payload = detached.launch_detached(
             adapter, self._plan(), seed=None, driver=None,
             copilot_args=["--resume=abc"] if copilot_args is None else copilot_args,
@@ -590,7 +599,7 @@ class TestDetachedRunner:
 
     @pytest.mark.parametrize("protocol", [19, None])
     def test_a_resume_on_a_daemon_without_aliases_reports_a_provisional_handle(
-        self, monkeypatch, protocol
+        self, monkeypatch: pytest.MonkeyPatch, protocol: int | None,
     ) -> None:
         """The alias floor is checked before launch, not only when a note is sent:
         a resume with nothing to deliver must not report a normal handle."""
@@ -601,7 +610,7 @@ class TestDetachedRunner:
         assert steps[0][0] == "handle"  # reported before anything was reserved or launched
 
     def test_a_flagless_rejoin_on_a_daemon_without_aliases_reports_a_provisional_handle(
-        self, monkeypatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A rejoin passing no resume flag can still find a worker loading an
         earlier --resume: once the launch reports a rejoin, the protocol is
@@ -611,7 +620,7 @@ class TestDetachedRunner:
         assert payload["session_handle"] == "provisional"
         assert "live-session aliases" in payload["handle_warning"]
 
-    def test_a_resume_on_an_alias_capable_daemon_reports_a_normal_handle(self, monkeypatch) -> None:
+    def test_a_resume_on_an_alias_capable_daemon_reports_a_normal_handle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rc, payload, steps = self._launch_resume(monkeypatch, 21)
         assert rc == 0
         assert "session_handle" not in payload and "handle_warning" not in payload
@@ -620,13 +629,13 @@ class TestDetachedRunner:
     def test_a_fresh_launch_never_asks_the_daemon(self) -> None:
         from venue_copilot import unstable_handle_warning
 
-        def health(_port):
+        def health(_port: int) -> dict[str, int]:
             raise AssertionError("a launch that can't switch ids needs no protocol check")
 
         assert unstable_handle_warning(41234, ["--no-ask-user"], health=health) is None
 
     def test_an_implicit_resume_on_a_daemon_without_aliases_reports_a_provisional_handle(
-        self, monkeypatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """No resume flag from the host, but embody resumed the existing
         worktree's head itself (``resume_session``): the id can still change."""
@@ -644,7 +653,7 @@ class TestDetachedRunner:
         assert payload["session_handle"] == "provisional"
 
     def test_a_rejoin_with_a_host_seed_still_reports_the_pending_seed_outcome(
-        self, monkeypatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A rejoin ignores the host seed but still runs the worktree's own
         pending seed: that attempt's outcome is reported, not hidden."""
@@ -661,7 +670,7 @@ class TestDetachedRunner:
         assert rc == 0
         assert payload["seed_delivery"] == "deferred"
 
-    def test_handle_never_echoes_runner_configuration(self, monkeypatch) -> None:
+    def test_handle_never_echoes_runner_configuration(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
@@ -682,7 +691,7 @@ class TestDetachedRunner:
         assert payload["scope_id"] == "anchor-repo@venue"
         assert detached.public_plan(plan) == self._plan()
 
-    def test_reservation_outlives_the_launch_and_registration_budget(self, monkeypatch) -> None:
+    def test_reservation_outlives_the_launch_and_registration_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A concurrent rejoin can replace an expired reservation; the TTL covers
         the refs upload, the seeded launch and registration."""
         from venue_copilot import detached
@@ -691,7 +700,7 @@ class TestDetachedRunner:
         ttls: list[float] = []
         monkeypatch.setattr(
             "venue_copilot.detached.reserve_with_retry",
-            lambda scope, venue, **kw: ttls.append(kw["ttl_seconds"]) or {"reservation_id": "r1"},
+            lambda scope, venue, **kw: cast(Callable[[float], object], ttls.append)(kw["ttl_seconds"]) or {"reservation_id": "r1"},
         )
         rc, _ = detached.launch_detached(
             _Adapter(), self._plan(), seed="do it", driver=None, copilot_args=[],
@@ -702,7 +711,7 @@ class TestDetachedRunner:
         assert launch > detached._LIFECYCLE_LOCK_WAIT + detached._SEED_READY_HARD_CAP  # plus launch overhead
         assert ttls == [600.0 + launch + 600.0 + 120.0]
 
-    def _patch_bridge(self, monkeypatch) -> None:
+    def _patch_bridge(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
         monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
         monkeypatch.setattr(
@@ -715,7 +724,7 @@ class TestDetachedRunner:
     def _refs(self) -> tuple[str, bytes, list[tuple[str, int]]]:
         return "mkdir -p x && base64 -d | tar -xzf - -C x && cd x && pwd", b"UEFZTE9BRA==", [("trace.har", 2048)]
 
-    def test_ref_files_are_copied_before_launch_and_named_in_a_new_sessions_seed(self, monkeypatch) -> None:
+    def test_ref_files_are_copied_before_launch_and_named_in_a_new_sessions_seed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         self._patch_bridge(monkeypatch)
@@ -733,13 +742,13 @@ class TestDetachedRunner:
         assert payload["refs_delivered"] == "seed"
         assert payload["ref_files"] == ["- /home/u/.agent-bridge/refs/b1/trace.har (2.0 KB)"]
 
-    def test_ref_files_for_a_running_session_are_sent_as_a_message(self, monkeypatch) -> None:
+    def test_ref_files_for_a_running_session_are_sent_as_a_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached, refs
 
         self._patch_bridge(monkeypatch)
-        sent = []
+        sent: list[tuple[str, str, str | None]] = []
         monkeypatch.setattr(refs, "deliver_note",
-                            lambda sid, note, **kw: sent.append((sid, note, kw.get("operation"))) or True)
+                            lambda sid, note, **kw: cast(Callable[[tuple[str, str, str | None]], object], sent.append)((sid, note, kw.get("operation"))) or True)
         adapter = _Adapter({"ok": True, "created": False, "session": "wt-anchor-repo"})
         rc, payload = detached.launch_detached(
             adapter, self._plan(), seed=None, driver=None, copilot_args=[],
@@ -753,16 +762,16 @@ class TestDetachedRunner:
     @pytest.mark.parametrize("copilot_args", [["--resume=abc"], []])
     @pytest.mark.parametrize("daemon_has_aliases", [True, False])
     def test_a_resumed_rejoins_ref_note_needs_a_daemon_that_follows_renames(
-        self, monkeypatch, daemon_has_aliases, copilot_args,
+        self, monkeypatch: pytest.MonkeyPatch, daemon_has_aliases: bool, copilot_args: list[str],
     ) -> None:
         """Flagless too: a rejoin's own flags say nothing about how the running
         session was launched, so it may still be resuming either way."""
         from venue_copilot import detached, refs
 
         self._patch_bridge(monkeypatch)
-        sent = []
+        sent: list[dict[str, Any]] = []
         monkeypatch.setattr(
-            refs, "deliver_note", lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"}) or daemon_has_aliases,
+            refs, "deliver_note", lambda sid, note, **kw: cast(Callable[[dict[str, Any]], object], sent.append)({k: v for k, v in kw.items() if k != "operation"}) or daemon_has_aliases,
         )
         adapter = _Adapter({"ok": True, "created": False, "session": "wt-anchor-repo"})
         rc, payload = detached.launch_detached(
@@ -773,7 +782,7 @@ class TestDetachedRunner:
         assert sent == [{"min_daemon_protocol": detached.LIVE_SESSION_ALIAS_PROTOCOL}]
         assert payload["refs_delivered"] == ("message" if daemon_has_aliases else "failed")
 
-    def test_a_failed_ref_copy_fails_before_launch(self, monkeypatch) -> None:
+    def test_a_failed_ref_copy_fails_before_launch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         self._patch_bridge(monkeypatch)
@@ -787,11 +796,11 @@ class TestDetachedRunner:
         assert "reference files" in payload["error"]
         assert "launch" not in [kind for kind, _ in adapter.calls]
 
-    def test_unsubmitted_seed_on_registered_session_is_delivered_over_bridge(self, monkeypatch) -> None:
+    def test_unsubmitted_seed_on_registered_session_is_delivered_over_bridge(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached, refs
 
         adapter = _Adapter({"ok": True, "created": True, "seed_submitted": False})
-        sent = []
+        sent: list[tuple[str, str]] = []
         monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
         monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
         monkeypatch.setattr(
@@ -799,7 +808,7 @@ class TestDetachedRunner:
             lambda scope, venue, **kw: {"reservation_id": "r1"},
         )
         monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
-        monkeypatch.setattr(refs, "deliver_note", lambda sid, note, **kw: sent.append((sid, note)) or True)
+        monkeypatch.setattr(refs, "deliver_note", lambda sid, note, **kw: cast(Callable[[tuple[str, str]], object], sent.append)((sid, note)) or True)
         monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
 
         rc, payload = detached.launch_detached(
@@ -822,14 +831,14 @@ class TestDetachedRunner:
         assert not any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
 
     @pytest.mark.parametrize("reason", ["enter-failed", "seed-not-echoed"])
-    def test_a_typed_but_unsubmitted_seed_is_never_resent(self, monkeypatch, reason) -> None:
+    def test_a_typed_but_unsubmitted_seed_is_never_resent(self, monkeypatch: pytest.MonkeyPatch, reason: str) -> None:
         """The draft may still sit in Copilot's input: a bridge copy could run the
         task twice, so the launch keeps the session and reports the seed failed."""
         from venue_copilot import detached, refs
 
         adapter = _Adapter({"ok": True, "created": True, "seeded": True,
                             "seed_submitted": False, "seed_reason": reason})
-        sent = []
+        sent: list[tuple[Any, ...]] = []
         monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
         monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
         monkeypatch.setattr(
@@ -837,7 +846,7 @@ class TestDetachedRunner:
             lambda scope, venue, **kw: {"reservation_id": "r1"},
         )
         monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
-        monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: sent.append(a) or True)
+        monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: cast(Callable[[tuple[Any, ...]], object], sent.append)(a) or True)
         monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
 
         rc, payload = detached.launch_detached(
@@ -866,7 +875,7 @@ class TestDetachedRunner:
         for unsure in ("send-failed", "seed-not-echoed", "enter-failed"):
             assert seed_outcome({"seeded": False, "seed_reason": unsure}, created=True, seed="s") == ("failed", False)
 
-    def test_unsubmitted_seed_without_registration_stops_created_session(self, monkeypatch) -> None:
+    def test_unsubmitted_seed_without_registration_stops_created_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         adapter = _Adapter({"ok": True, "created": True, "seed_submitted": False})
@@ -895,7 +904,7 @@ class TestDetachedRunner:
         assert adapter.keeper_stopped is True
         assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
 
-    def test_launch_failure_does_not_release_preexisting_keeper_hold(self, monkeypatch) -> None:
+    def test_launch_failure_does_not_release_preexisting_keeper_hold(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         adapter = _Adapter(
@@ -928,7 +937,7 @@ class TestDetachedRunner:
         assert not any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
 
     def test_launch_failure_cleanup_preserves_original_payload_when_keeper_stop_fails(
-        self, monkeypatch, capsys,
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     ) -> None:
         from venue_copilot import detached
 
@@ -960,7 +969,7 @@ class TestDetachedRunner:
         assert "could not update the forward keeper" in capsys.readouterr().err
         assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
 
-    def test_detached_launch_uses_180_second_seed_ready_timeout_floor(self, monkeypatch) -> None:
+    def test_detached_launch_uses_180_second_seed_ready_timeout_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         self._patch_bridge(monkeypatch)
@@ -972,7 +981,7 @@ class TestDetachedRunner:
             launch_timeouts.append(timeout)
             return original_launch(command, timeout=timeout)
 
-        adapter.launch = launch
+        cast(Any, adapter).launch = launch
 
         rc, _payload = detached.launch_detached(
             adapter,
@@ -986,13 +995,13 @@ class TestDetachedRunner:
         )
 
         assert rc == 0
-        launch = next(command for kind, command in adapter.calls if kind == "launch")
-        assert "--seed-ready-timeout 180.0" in launch
+        launch_command = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "--seed-ready-timeout 180.0" in launch_command
         assert launch_timeouts == [1320.0]  # 300s lifecycle lock + 900s seed cap + 120s overhead
 
     @pytest.mark.parametrize("anchor, expected", [(False, 1320.0), (True, 330.0)])
     def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
-        self, monkeypatch, anchor, expected,
+        self, monkeypatch: pytest.MonkeyPatch, anchor: bool, expected: float,
     ) -> None:
         """A worktree launch can consume the worktree's own pending seed with no
         seed or refs passed here; its readiness wait can reach the hard cap, so
@@ -1008,7 +1017,7 @@ class TestDetachedRunner:
             launch_timeouts.append(timeout)
             return original_launch(command, timeout=timeout)
 
-        adapter.launch = launch
+        cast(Any, adapter).launch = launch
         rc, _payload = detached.launch_detached(
             adapter,
             {**self._plan(), "anchor": anchor},
@@ -1030,7 +1039,7 @@ class TestDetachedRunner:
         ({"seeded": True, "seed_submitted": True}, "typed", True),
     ])
     def test_a_pending_seed_outcome_is_reported_without_a_host_seed(
-        self, monkeypatch, embody_says, delivery, seeded,
+        self, monkeypatch: pytest.MonkeyPatch, embody_says: dict[str, Any], delivery: str, seeded: bool,
     ) -> None:
         """A launch with no seed of its own whose embody delivered (or kept, or
         maybe half-typed) the worktree's pending seed reports that outcome;
@@ -1051,7 +1060,7 @@ class TestDetachedRunner:
         if delivery == "deferred":  # still stored: a manual send would run it twice
             assert "agent-bridge send" not in payload["warning"]
 
-    def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch) -> None:
+    def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         self._patch_bridge(monkeypatch)
@@ -1072,19 +1081,19 @@ class TestDetachedRunner:
         launch = next(command for kind, command in adapter.calls if kind == "launch")
         assert "--seed-ready-timeout 600.0" in launch
 
-    def test_stop_detached_verifies_releases_and_deregisters(self, monkeypatch) -> None:
+    def test_stop_detached_verifies_releases_and_deregisters(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         adapter = _Adapter()
-        released = []
-        deregistered = []
+        released: list[tuple[str, str | None]] = []
+        deregistered: list[str] = []
         monkeypatch.setattr(
             "venue_copilot.detached.release_cli_mode",
-            lambda scope, reservation_id=None: released.append((scope, reservation_id)) or 1,
+            lambda scope, reservation_id=None: cast(Callable[[tuple[str, str | None]], object], released.append)((scope, reservation_id)) or 1,
         )
         monkeypatch.setattr(
             "venue_copilot.detached.deregister_live_session",
-            lambda sid: deregistered.append(sid) or True,
+            lambda sid: cast(Callable[[str], object], deregistered.append)(sid) or True,
         )
 
         rc, payload = detached.stop_detached(
@@ -1100,15 +1109,15 @@ class TestDetachedRunner:
         assert released == [("anchor-repo@venue", None)]
         assert deregistered == ["sid-42"]
 
-    def test_stop_detached_failure_releases_nothing(self, monkeypatch) -> None:
+    def test_stop_detached_failure_releases_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from venue_copilot import detached
 
         adapter = _Adapter()
-        adapter.run = lambda command, *, timeout: (3, "STILL_RUNNING\n", "")
-        released = []
+        cast(Any, adapter).run = lambda command, *, timeout: (3, "STILL_RUNNING\n", "")
+        released: list[tuple[Any, ...]] = []
         monkeypatch.setattr(
             "venue_copilot.detached.release_cli_mode",
-            lambda *a, **k: released.append(a) or 1,
+            lambda *a, **k: cast(Callable[[tuple[Any, ...]], object], released.append)(a) or 1,
         )
 
         rc, payload = detached.stop_detached(adapter, self._plan(), session_row={})
@@ -1132,13 +1141,13 @@ def _bash() -> str | None:
 
 
 @pytest.mark.skipif(_bash() is None, reason="needs bash")
-def test_registration_credentials_write_a_complete_forwarded_route(tmp_path):
+def test_registration_credentials_write_a_complete_forwarded_route(tmp_path: Path) -> None:
     env = {**os.environ, "HOME": str(tmp_path)}
     script = (
         'flock() { touch "$1"; shift; "$@"; }; '
         + registration_credentials_script("tok-1", 62254)
     )
-    subprocess.run([_bash(), "-c", script], env=env, check=True)
+    subprocess.run([cast(str, _bash()), "-c", script], env=env, check=True)
     route = json.loads((tmp_path / ".agent-bridge" / "active.json").read_text())
     # A "bind" lets the venue's agent-bridge CLI parse the route (without it,
     # it fell back to its default port and started a local daemon over it).
@@ -1169,7 +1178,7 @@ def _bash_supports_python_fcntl() -> bool:
 
 
 @pytest.mark.skipif(not _bash_supports_python_fcntl(), reason="needs bash + python fcntl")
-def test_registration_credentials_fallback_locks_with_python_fcntl(tmp_path):
+def test_registration_credentials_fallback_locks_with_python_fcntl(tmp_path: Path) -> None:
     env = {**os.environ, "HOME": str(tmp_path)}
     script = (
         "command() { "
@@ -1178,7 +1187,7 @@ def test_registration_credentials_fallback_locks_with_python_fcntl(tmp_path):
         "}; "
         + registration_credentials_script("tok-2", 62255)
     )
-    subprocess.run([_bash(), "-c", script], env=env, check=True)
+    subprocess.run([cast(str, _bash()), "-c", script], env=env, check=True)
     bridge = tmp_path / ".agent-bridge"
     assert json.loads((bridge / "active.json").read_text()) == {
         "active": {"bind": "127.0.0.1", "port": 62255, "forwarded": True}
@@ -1188,7 +1197,7 @@ def test_registration_credentials_fallback_locks_with_python_fcntl(tmp_path):
 
 
 @pytest.mark.skipif(_bash() is None, reason="needs bash")
-def test_registration_credentials_fails_without_locking_tool(tmp_path):
+def test_registration_credentials_fails_without_locking_tool(tmp_path: Path) -> None:
     env = {**os.environ, "HOME": str(tmp_path)}
     script = (
         "command() { "
@@ -1198,7 +1207,7 @@ def test_registration_credentials_fails_without_locking_tool(tmp_path):
         "}; "
         + registration_credentials_script("tok-3", 62256)
     )
-    result = subprocess.run([_bash(), "-c", script], env=env, capture_output=True, text=True)
+    result = subprocess.run([cast(str, _bash()), "-c", script], env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert "cannot lock active.json" in result.stderr
     assert not (tmp_path / ".agent-bridge" / "active.json").exists()

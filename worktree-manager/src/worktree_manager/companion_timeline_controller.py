@@ -3,24 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, Callable, Mapping
 from functools import partial
 from typing import Protocol
 
 from .companion_timeline_contract import (
-    HistoryPage, LiveDelta, Provider, SourcePosition, SourceToken,
-    TimelineContractError, TimelineSnapshot,
+    HistoryPage, LiveDelta, Provider, SourceIdentity, SourcePosition, SourceToken,
+    TimelineContractError, TimelineGap, TimelineSnapshot,
 )
 
-Observation = TimelineSnapshot | LiveDelta
+Observation = TimelineSnapshot | LiveDelta | TimelineGap
+logger = logging.getLogger(__name__)
 
 
 class TimelineSourceError(RuntimeError):
     """An admitted source failed without changing another source's authority."""
 
 
+class TimelineCleanupError(TimelineSourceError):
+    """An adapter could not retire an owned resource; replacement must stay fenced."""
+
+
 class TimelineSource(Protocol):
-    """Adapters stop reads cooperatively and await their owned bounded cleanup."""
+    """Adapters report read failures as source errors, retirement failures as cleanup errors."""
 
     def observe(
         self, token: SourceToken, *, stop: asyncio.Event,
@@ -28,7 +34,7 @@ class TimelineSource(Protocol):
 
     async def history(
         self, token: SourceToken, before: SourcePosition, *, stop: asyncio.Event,
-    ) -> HistoryPage: ...
+    ) -> HistoryPage | TimelineGap: ...
 
 
 class TimelineController:
@@ -46,6 +52,7 @@ class TimelineController:
         observation: Callable[[Observation], None],
         page: Callable[[HistoryPage], None],
         error: Callable[[SourceToken, str], None],
+        gap: Callable[[TimelineGap], None] | None = None,
     ) -> None:
         if any(not isinstance(provider, Provider) for provider in sources):
             raise TimelineContractError("timeline adapters require exact provider keys")
@@ -53,6 +60,7 @@ class TimelineController:
         self._observation = observation
         self._page = page
         self._error = error
+        self._gap = gap
         self._selected: dict[Provider, SourceToken] = {}
         self._readers: dict[Provider, asyncio.Task[None]] = {}
         self._pages: dict[Provider, asyncio.Task[None]] = {}
@@ -62,6 +70,7 @@ class TimelineController:
         self._closed = False
         self._selection_lock = asyncio.Lock()
         self._teardown: asyncio.Future[list[None | BaseException]] | None = None
+        self._terminal_failures: tuple[tuple[SourceIdentity | None, TimelineCleanupError], ...] = ()
 
     @property
     def reader_count(self) -> int:
@@ -76,6 +85,32 @@ class TimelineController:
             not self._closed and revision == self._revision
             and self._selected.get(token.identity.provider) == token
         )
+
+    def _record_terminal(self, token: SourceToken | None, failure: TimelineCleanupError) -> None:
+        if not any(known is failure for _identity, known in self._terminal_failures):
+            identity = token.identity if token is not None else None
+            self._terminal_failures += ((identity, failure),)
+        if token is not None:
+            selected = self._selected.get(token.identity.provider)
+            if selected is not None and selected.identity == token.identity:
+                for stops in (self._reader_stops, self._page_stops):
+                    stop = stops.get(token.identity.provider)
+                    if stop is not None:
+                        stop.set()
+
+    def _source_failure(self, token: SourceToken) -> TimelineCleanupError | None:
+        return next((
+            failure for identity, failure in self._terminal_failures
+            if identity is None or identity == token.identity
+        ), None)
+
+    def _harvest_terminal(self, token: SourceToken) -> None:
+        for tasks in (self._readers, self._pages):
+            task = tasks.get(token.identity.provider)
+            if task is not None and task.done() and not task.cancelled():
+                failure = task.exception()
+                if isinstance(failure, TimelineCleanupError):
+                    self._record_terminal(token, failure)
 
     async def select(self, tokens: tuple[SourceToken, ...]) -> None:
         async with self._selection_lock:
@@ -119,29 +154,45 @@ class TimelineController:
         if task.cancelled():
             return
         failure = task.exception()
+        if isinstance(failure, TimelineCleanupError):
+            self._record_terminal(token, failure)
         if failure is not None and self._current(token, revision):
             self._error(token, f"Timeline adapter failed: {failure}")
 
     async def _observe(
         self, source: TimelineSource, token: SourceToken, revision: int, stop: asyncio.Event,
     ) -> None:
-        stream = source.observe(token, stop=stop)
+        stream = None
         try:
+            stream = source.observe(token, stop=stop)
             async for value in stream:
-                if not self._current(token, revision):
+                if not self._current(token, revision) or self._source_failure(token) is not None:
                     return
-                if not isinstance(value, (TimelineSnapshot, LiveDelta)) or value.token != token:
+                if not isinstance(value, (TimelineSnapshot, LiveDelta, TimelineGap)) or value.token != token:
                     raise TimelineContractError("source returned a wrong-selection observation")
-                self._observation(value)
-            if self._current(token, revision):
+                if isinstance(value, TimelineGap):
+                    self._deliver_gap(value)
+                else:
+                    self._observation(value)
+            if self._current(token, revision) and self._source_failure(token) is None:
                 self._error(token, "Unavailable: timeline source ended; explicit reconciliation required.")
+        except TimelineCleanupError as exc:
+            self._record_terminal(token, exc)
+            raise
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline source error: {exc}")
-            else:
-                raise
         finally:
-            await stream.aclose()
+            if stream is not None:
+                try:
+                    await stream.aclose()
+                except TimelineCleanupError as exc:
+                    self._record_terminal(token, exc)
+                    raise
+                except (OSError, ValueError, RuntimeError) as exc:
+                    failure = TimelineCleanupError(f"timeline stream retirement failed: {exc}")
+                    self._record_terminal(token, failure)
+                    raise failure from exc
 
     def request_history(self, token: SourceToken, before: SourcePosition) -> bool:
         """Refuse repeated demand while its same-source page is still running."""
@@ -152,6 +203,10 @@ class TimelineController:
         if not self._current(token, self._revision):
             raise TimelineSourceError("history demand belongs to an inactive selection")
         provider = token.identity.provider
+        self._harvest_terminal(token)
+        terminal = self._source_failure(token)
+        if terminal is not None:
+            raise TimelineCleanupError("source read admission is fenced by terminal retirement failure") from terminal
         previous = self._pages.get(provider)
         if previous is not None and not previous.done():
             return False
@@ -172,25 +227,37 @@ class TimelineController:
         )
         return True
 
+    def _deliver_gap(self, value: TimelineGap) -> None:
+        if self._gap is None:
+            self._error(value.token, f"History gap: {value.reason}: {value.details}")
+        else:
+            self._gap(value)
+
     async def _history(
         self, source: TimelineSource, token: SourceToken,
         before: SourcePosition, revision: int, stop: asyncio.Event,
     ) -> None:
         try:
             value = await source.history(token, before, stop=stop)
-            if not self._current(token, revision):
+            if not self._current(token, revision) or self._source_failure(token) is not None:
                 return
-            if not isinstance(value, HistoryPage) or value.token != token or value.before != before:
+            if not isinstance(value, (HistoryPage, TimelineGap)) or value.token != token or value.before != before:
                 raise TimelineContractError("history result does not match the requested source boundary")
-            self._page(value)
+            if isinstance(value, TimelineGap):
+                self._deliver_gap(value)
+            else:
+                self._page(value)
+        except TimelineCleanupError as exc:
+            self._record_terminal(token, exc)
+            raise
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline history error: {exc}")
-            else:
-                raise
 
     async def _stop(self) -> None:
         if self._teardown is None:
+            for token in tuple(self._selected.values()):
+                self._harvest_terminal(token)
             self._revision += 1
             self._selected.clear()
             tasks = (*self._pages.values(), *self._readers.values())
@@ -205,7 +272,13 @@ class TimelineController:
                 break
             except asyncio.CancelledError as exc:
                 if teardown.cancelled():
-                    raise TimelineSourceError("timeline adapter teardown was interrupted") from exc
+                    failure = next((
+                        known for identity, known in self._terminal_failures if identity is None
+                    ), None)
+                    if failure is None:
+                        failure = TimelineCleanupError("timeline adapter teardown was interrupted")
+                        self._record_terminal(None, failure)
+                    raise failure from exc
                 cancelled = exc
         self._pages.clear()
         self._readers.clear()
@@ -213,8 +286,13 @@ class TimelineController:
         self._reader_stops.clear()
         self._teardown = None
         for outcome in outcomes:
-            if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
-                raise TimelineSourceError(f"timeline adapter cleanup failed: {outcome}") from outcome
+            if isinstance(outcome, TimelineCleanupError):
+                self._record_terminal(None, outcome)
+            elif isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
+                logger.error("Retired timeline adapter failed outside resource cleanup: %s", outcome)
+        if self._terminal_failures:
+            failure = self._terminal_failures[0][1]
+            raise TimelineCleanupError(f"timeline adapter cleanup failed: {failure}") from failure
         if cancelled is not None:
             raise cancelled
 
