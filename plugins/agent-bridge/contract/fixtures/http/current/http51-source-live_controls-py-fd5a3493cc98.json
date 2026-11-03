@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "c4a536c59da8d652af2730d7632a841b4cb45e7235235cb7c036d5585c9d2fbe"
+    "sha256": "dda4a89b3bc3e0fd84682f0ab0a773be344404b7358238c6a90f5823187f31a5"
   },
   "scope": "unchanged source and immutable prior operation; no new runtime observation",
   "captured_from": {
-    "commit": "f00983a9f29e0d71f9267b0f78b12d9a3842ae7a",
+    "commit": "5cead5efcf55e91d07d20aadce6eac29a6844056",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/live_controls.py",
