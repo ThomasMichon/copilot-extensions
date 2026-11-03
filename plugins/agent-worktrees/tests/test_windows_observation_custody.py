@@ -179,6 +179,20 @@ def test_snapshot_pending_never_activates_or_renders(owner, monkeypatch):
     assert owner.observation_counts() == (0, 1)
 
 
+@pytest.mark.parametrize("field", ["cwd", "workingDirectory"])
+def test_closed_snapshot_preserves_matching_cleanup_for_both_cwd_forms(owner, monkeypatch, field):
+    pending(owner)
+    owner.close_observation_admission()
+    monkeypatch.setattr(core, "_activate_project_for_path", lambda *args, **kwargs: pytest.fail(
+        "Closed snapshot must not discover project state",
+    ))
+    result = core._resident_hook_decision(
+        "snapshot", {field: "/repo/wt"}, segment_cache=owner, policy=object(),
+    )
+    assert result == {"segment": owner.pending_segment()}
+    assert owner.observation_counts() == (0, 1)
+
+
 def test_segment_callback_itself_retains_failed_cleanup(owner, monkeypatch):
     failure = pt.ObservationCleanupError("render")
     monkeypatch.setattr(core, "_find_record_for_path", lambda path: None)

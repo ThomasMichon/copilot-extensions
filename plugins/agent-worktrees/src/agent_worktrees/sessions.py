@@ -1388,14 +1388,10 @@ def worktree_id_from_mux_session(
     return index.get(session_name) or session_name[len("wt-"):]
 
 
-def has_mux_session(worktree_id: str) -> bool:
-    """Check if a multiplexer session exists for a worktree (without killing it).
-
-    Uses tmux on Linux/WSL and psmux on Windows.
-
-    Returns True if the mux session is alive, False otherwise.
-    """
+def has_mux_session(worktree_id: str, *, strict: bool = False) -> bool:
+    """Probe mux presence; strict callers retain unavailable evidence."""
     import subprocess
+    from agent_procutil import no_window_kwargs
 
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
@@ -1403,12 +1399,14 @@ def has_mux_session(worktree_id: str) -> bool:
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=5)
+        result = subprocess.run(cmd, capture_output=True, timeout=5, **no_window_kwargs())
+        if strict:
+            from .mux_list_result import confirmed_has_session
+            return confirmed_has_session(sess_name, result)
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
-        # OSError covers FileNotFoundError (mux not installed) as well as
-        # spawn failures such as WinError 4551 (Application Control policy
-        # blocked the executable). Degrade gracefully instead of crashing.
+        if strict:
+            raise
         return False
 
 
@@ -1475,9 +1473,7 @@ def _mux_session_activity() -> dict[str, int]:
 
 
 def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[str, MuxInfo]:
-    """Get mux status with one listing, falling back only for ordinary reads.
-
-    Authoritative callers require a successful listing to confirm absence.
+    """Get mux status, requiring confirmed absence for authoritative callers.
     """
     result: dict[str, MuxInfo] = {}
 
@@ -1490,11 +1486,9 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             else:
                 result[wt_id] = MuxInfo(exists=False, clients=0)
     else:
-        if strict:
-            raise RuntimeError("Mux listing is unavailable; absence is unconfirmed")
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
-            exists = has_mux_session(wt_id)
+            exists = has_mux_session(wt_id, strict=True) if strict else has_mux_session(wt_id)
             result[wt_id] = MuxInfo(exists=exists, clients=None)
 
     return result

@@ -162,6 +162,22 @@ def test_authoritative_mux_parser_rejects_partial_and_duplicate_evidence():
             mux.parse_session_counts(text, strict=True)
 
 
+def test_authoritative_presence_requires_success_or_confirmed_absence():
+    assert mux.confirmed_has_session("wt-one", CompletedProcess([], 0, b"", b"")) is True
+    for message in (
+        b"can't find session: wt-one", b"session not found: wt-one",
+        "no server running", "no server running on /synthetic/mux",
+    ):
+        assert mux.confirmed_has_session("wt-one", CompletedProcess([], 1, "", message)) is False
+    for result in (
+        CompletedProcess([], 1, "", "permission denied"),
+        CompletedProcess([], 1, "", "can't find session: wt-other"),
+        CompletedProcess([], 2, "", "no server running"),
+    ):
+        with pytest.raises(RuntimeError, match="absence is unconfirmed"):
+            mux.confirmed_has_session("wt-one", result)
+
+
 @pytest.fixture
 def anchor_evidence(tmp_path, monkeypatch):
     anchor = tmp_path / "anchor"

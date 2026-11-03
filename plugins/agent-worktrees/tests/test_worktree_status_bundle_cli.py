@@ -259,6 +259,30 @@ def test_native_refresh_keeps_failed_or_malformed_real_mux_verifier_unknown(
     assert worktree_status_compute.refresh_unconfirmed_liveness("proj", "wt1", bundle) is bundle
 
 
+def test_native_refresh_retains_confirmed_has_session_fallback(monkeypatch, tmp_path):
+    from agent_worktrees import reclaim
+
+    record = _record()
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(tracking, "load_record_by_id", lambda *args, **kwargs: record)
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kwargs: [])
+
+    def run(command, **kwargs):
+        if "list-sessions" in command:
+            return subprocess.CompletedProcess(command, 1, "", "unsupported listing")
+        return subprocess.CompletedProcess(command, 1, b"", b"can't find session: wt-wt1")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    bundle = {
+        "project": "proj", "worktree_id": "wt1",
+        "facts": {"liveness": {"value": None, "confirmed": False, "observed_at": 1.0}},
+    }
+    fact = worktree_status_compute.refresh_unconfirmed_liveness(
+        "proj", "wt1", bundle,
+    )["facts"]["liveness"]
+    assert fact["confirmed"] is True and fact["value"]["active"] is False
+
+
 def test_falls_back_to_direct_compute_when_daemon_unreachable(monkeypatch, tmp_path):
     _wire_record_resolution(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")

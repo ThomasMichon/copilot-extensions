@@ -28,6 +28,23 @@ def _attached_count(value: str) -> int:
         return 0
 
 
+def confirmed_has_session(
+    session_name: str, result: CompletedProcess[str] | CompletedProcess[bytes],
+) -> bool:
+    if result.returncode == 0:
+        return True
+    message = result.stderr or ""
+    if isinstance(message, bytes):
+        message = message.decode("utf-8", errors="replace")
+    message = message.strip()
+    if result.returncode == 1 and not (result.stdout or "").strip() and (
+        message in {f"can't find session: {session_name}", f"session not found: {session_name}"}
+        or re.fullmatch(r"no server running(?: on [^\r\n]+)?", message)
+    ):
+        return False
+    raise RuntimeError("Mux presence probe is unavailable; absence is unconfirmed")
+
+
 def parse_session_counts(stdout: str | None, *, strict: bool = False) -> dict[str, int]:
     result: dict[str, int] = {}
     for line in (stdout or "").strip().splitlines():
