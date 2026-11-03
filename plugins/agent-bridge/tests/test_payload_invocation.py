@@ -21,6 +21,31 @@ from agent_bridge.session_host import launcher
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
+_ABBREVIATED_OBSERVER_ARGS = [
+    pytest.param(
+        [option, "demo", "observe-session", "fixture"],
+        id=f"abbreviation-project-{len(option)}-separate",
+    )
+    for option in ("--project"[:length] for length in range(3, len("--project")))
+] + [
+    pytest.param(
+        [option + "=demo", "session-observation-history", "fixture"],
+        id=f"abbreviation-project-{len(option)}-attached",
+    )
+    for option in ("--project"[:length] for length in range(3, len("--project")))
+] + [
+    pytest.param(
+        [option, "observe-session", "fixture"],
+        id=f"abbreviation-json-{len(option)}",
+    )
+    for option in ("--json"[:length] for length in range(3, len("--json")))
+] + [
+    pytest.param(
+        ["--proj", "observe-session", "create", "fixture"],
+        id="abbreviation-project-value-is-not-verb",
+    ),
+]
+
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
@@ -35,9 +60,18 @@ PLUGIN = Path(__file__).resolve().parents[1]
     ["agent-bridge", "--project", "demo", "observe-session", "fixture"],
     ["--project", "observe-session", "create", "fixture"],
     ["--project=session-observation-history", "create", "fixture"],
-])
+] + _ABBREVIATED_OBSERVER_ARGS)
 def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, mode, argv):
     """Run the shipped dispatcher with inert context/publication/installer spies."""
+    from agent_bridge.__main__ import build_parser
+
+    parser_argv = argv[1:] if argv[0] == "agent-bridge" else list(argv)
+    if parser_argv[-2] != "create":
+        parser_argv += ["--worktree-id", "fixture-worktree", "--contract-version", "1", "--json"]
+    parsed = build_parser().parse_args(parser_argv)
+    assert parsed.command == argv[-2]
+    if argv[-2] == "create":
+        assert parsed.project in {"observe-session", "session-observation-history"}
     host = shutil.which(shell)
     if host is None:
         pytest.skip(f"{shell} is unavailable")
@@ -633,6 +667,7 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
         "installerLifecycle": True,
+        "inProcessCatalog": True,
         "windowsCatalogShim": "powershell",
         "powershellPipelineInput": True,
         "provisionMode": "direct",

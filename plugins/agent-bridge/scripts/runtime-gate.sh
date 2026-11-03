@@ -19,8 +19,9 @@ for ARGUMENT in "$@"; do
         continue
     fi
     case "$ARGUMENT" in
-        --project|-p) SKIP_PROJECT=1 ;;
-        --project=*|-p?*|--json) ;;
+        --p|--pr|--pro|--proj|--proje|--projec|--project|-p) SKIP_PROJECT=1 ;;
+        --p=*|--pr=*|--pro=*|--proj=*|--proje=*|--projec=*|--project=*|-p?*) ;;
+        --j|--js|--jso|--json) ;;
         observe-session|session-observation-history)
             PASSIVE_OBSERVATION=1
             break

@@ -239,8 +239,9 @@ The same capture owner additionally admits the additive
 `bridge-session-observation-history-v1` capabilities, each version 1.
 HTTP generation 51, the existing evidence family and all prior protocol floors
 remain unchanged. The original 24 required cases retain their counts; two
-installation-mode observation boundary cases and four transport/lifetime cases
-expand the required portfolio to 30. The original operation report gains
+installation-mode observation boundary cases, four transport/lifetime cases,
+eight finite/follow EOF controls and two native-shell payload-abbreviation cases
+expand the required portfolio to 40. The original operation report gains
 independently expected observation
 results without replacing its native-send, receipt or live-CLI observations.
 
@@ -265,6 +266,17 @@ owning client must supply its existing 15-second I/O silence timeout.
 A separate concurrent-EventLog case cancels one captured observer and verifies
 the second subscriber still receives actual appended evidence. These are source
 resource-boundary tests, not timed installed-network or native qualification.
+
+The EOF controls execute the owning CLI loop against actual stdlib
+`HTTPResponse` objects: empty/truncated point and history reads, and follow EOF
+after a valid snapshot, must fail visibly. Valid finite replies and explicit
+`going-away` remain successful. An independently expected abbreviated command
+also executes the production parser/client/ASGI path.
+The two payload cases select the source platform's native shell and exercise the
+attributed dispatcher plus actual read-only resolver in legacy and namespaced
+fixtures. Only context/publication/installer answers are inert spies; no runtime
+is provisioned and no installed service is accessed. Project values that resemble
+observer verbs remain negative controls.
 
 Preparation includes `__main__.py`, `app_routes.py`, the bounded EventLog read
 owner, compaction evidence and the four observation source modules as explicit

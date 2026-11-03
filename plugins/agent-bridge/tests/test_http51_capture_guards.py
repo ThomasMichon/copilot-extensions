@@ -78,7 +78,9 @@ def test_http51_observation_expansion_retains_the_original_probe_counts():
     assert evidence.PROBES["test_http51_observation_boundaries"] == 2
     assert evidence.PROBES["test_observation_http_resource_boundary"] == 3
     assert evidence.PROBES["test_observation_cancellation_preserves_other_subscription"] == 1
-    assert sum(evidence.PROBES.values()) == 30
+    assert evidence.PROBES["test_observer_cli_http_eof"] == 8
+    assert evidence.PROBES["test_http51_observer_payload_abbreviations"] == 2
+    assert sum(evidence.PROBES.values()) == 40
     assert evidence.GENERATION == 51
     assert evidence.FAMILY == "http51-standard-native-send-asgi-v1"
     assert evidence.CAPABILITY_VERSIONS["bridge-session-observations-v1"] == 1

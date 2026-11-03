@@ -30,7 +30,12 @@ fails without consulting publication or invoking an installer; an existing
 runtime receives the original arguments unchanged.
 Classification consumes leading `--json`, `--project VALUE`, `--project=VALUE`,
 `-p VALUE` and attached `-pVALUE` forms without treating a project value as a
-verb. A redundant leading `agent-bridge` is conservatively fenced against
+verb. It also retains the owning root parser's accepted long-option
+abbreviations: `--p` through `--project` (with separate or `=VALUE` values),
+and `--j` through `--json`. Regression cases first parse those arguments through
+the production parser, then invoke the attributed gate with inert missing-runtime
+spies. No parser-wide abbreviation policy is changed.
+A redundant leading `agent-bridge` is conservatively fenced against
 provisioning but is not stripped or made a new Python CLI alias. The observation
 verbs are root commands; there is no Worktrees-style namespace alias.
 Other commands retain their existing first-use policy.
@@ -96,6 +101,10 @@ The existing 15-second I/O silence timeout remains in force. Frame overflow,
 transport timeout or caller interruption closes only that captured HTTP
 response. Server-side cancellation releases that observer's waiter and
 idle-watch registration, not another observer or the session actor.
+EOF before a finite response, within a frame, or during follow without an explicit
+`going-away` is a structured `source-unavailable` failure, not empty success.
+Already-delivered follow observations remain usable; the final failure reports
+lost continuity without replaying or controlling the underlying session.
 
 - `snapshot` contains a bounded latest tail, atomic retained floor/head and
   source incarnation, and a replay position.

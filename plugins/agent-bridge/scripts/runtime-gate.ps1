@@ -9,6 +9,7 @@ $forwardArgs = @($args)
 $passiveObservation = $false
 $skipProject = $false
 $firstArgument = $true
+$projectOptions = @('--p', '--pr', '--pro', '--proj', '--proje', '--projec', '--project')
 foreach ($argument in $forwardArgs) {
     if ($firstArgument) {
         $firstArgument = $false
@@ -18,10 +19,13 @@ foreach ($argument in $forwardArgs) {
         $skipProject = $false
         continue
     }
-    if ($argument -cin @('--project', '-p')) {
+    $optionName = ([string]$argument -split '=', 2)[0]
+    if ($argument -ceq '-p' -or
+        ($argument -cin $projectOptions)) {
         $skipProject = $true
-    } elseif ($argument -clike '--project=*' -or
-              ($argument -clike '-p?*') -or $argument -ceq '--json') {
+    } elseif (($optionName -cin $projectOptions) -or
+              ($argument -clike '-p?*') -or
+              ($argument -cin @('--j', '--js', '--jso', '--json'))) {
         continue
     } elseif ($argument -cin @('observe-session', 'session-observation-history')) {
         $passiveObservation = $true

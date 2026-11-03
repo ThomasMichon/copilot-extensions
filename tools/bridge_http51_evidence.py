@@ -45,6 +45,14 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_http51_capture_guards.py",
     "plugins/agent-bridge/tests/test_session_observations.py",
     "plugins/agent-bridge/tests/test_session_observation_transport.py",
+    "plugins/agent-bridge/tests/test_payload_invocation.py",
+    "plugins/agent-bridge/bin/agent-bridge",
+    "plugins/agent-bridge/bin/agent-bridge.ps1",
+    "plugins/agent-bridge/scripts/runtime-gate.sh",
+    "plugins/agent-bridge/scripts/runtime-gate.ps1",
+    "plugins/agent-bridge/scripts/resolve-runtime.sh",
+    "plugins/agent-bridge/scripts/resolve-runtime.ps1",
+    "plugins/agent-bridge/scripts/installation-context/json-query.awk",
     "plugins/agent-bridge/tests/http51_receipt_probes.py",
     "plugins/agent-bridge/tests/http51_live_cli_probes.py",
     "plugins/agent-bridge/tests/test_native_bound_prompt.py",
@@ -76,6 +84,8 @@ PROBES = {
     "test_http51_observation_boundaries": 2,
     "test_observation_http_resource_boundary": 3,
     "test_observation_cancellation_preserves_other_subscription": 1,
+    "test_observer_cli_http_eof": 8,
+    "test_http51_observer_payload_abbreviations": 2,
 }
 POLICY = common.POLICY
 encode = common.encode

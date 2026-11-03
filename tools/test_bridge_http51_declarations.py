@@ -147,3 +147,5 @@ def test_semantic_portfolio_requires_receipt_sources_and_probe():
     assert evidence.PROBES["test_http51_observation_boundaries"] == 2
     assert evidence.PROBES["test_observation_http_resource_boundary"] == 3
     assert evidence.PROBES["test_observation_cancellation_preserves_other_subscription"] == 1
+    assert evidence.PROBES["test_observer_cli_http_eof"] == 8
+    assert evidence.PROBES["test_http51_observer_payload_abbreviations"] == 2

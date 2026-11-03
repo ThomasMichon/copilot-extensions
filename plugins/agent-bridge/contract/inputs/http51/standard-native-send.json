@@ -13,6 +13,15 @@
         "--project", "fixture", "observe-session", "observation-source",
         "--worktree-id", "fixture-observation-worktree", "--contract-version", "1", "--json"
       ],
+      "abbreviated_snapshot_command": [
+        "--proj=fixture", "--j", "observe-session", "observation-source",
+        "--worktree-id", "fixture-observation-worktree", "--contract-version", "1", "--json"
+      ],
+      "payload_commands": [
+        ["--proj=fixture", "observe-session", "observation-source"],
+        ["--j", "--pr", "fixture", "session-observation-history", "observation-source"],
+        ["--pro", "observe-session", "create", "fixture"]
+      ],
       "history_command": [
         "--project", "fixture", "session-observation-history", "observation-source",
         "--worktree-id", "fixture-observation-worktree", "--contract-version", "1",
@@ -71,6 +80,7 @@
         "used_tokens": 35, "active_capacity_tokens": null, "qualification": "unknown"
       },
       "history": {"exit": 0, "kind": "history-page", "entries": 1, "has_more": true},
+      "abbreviated_snapshot": {"exit": 0, "kind": "snapshot", "same_source": true},
       "unknown": {"exit": 3, "code": "source-unavailable"},
       "alias": {"exit": 3, "code": "source-unavailable"},
       "unadmitted": {"exit": 3, "code": "source-unavailable"},

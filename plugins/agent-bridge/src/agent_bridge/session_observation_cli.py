@@ -35,7 +35,9 @@ class ObservationStream(SseStream):
                 line = self._response.readline(MAX_FRAME - size + 1)
                 if not line:
                     if size:
-                        raise ObservationError("invalid-frame", "incomplete observation frame")
+                        raise ObservationError(
+                            "source-unavailable", "observer transport ended within a frame",
+                        )
                     self.close()
                     raise StopIteration
                 size += len(line)
@@ -124,6 +126,9 @@ def _cmd(args: argparse.Namespace) -> None:
                     raise SystemExit(3)
                 if history or not request.follow or body["kind"] == "going-away":
                     return
+            raise ObservationError(
+                "source-unavailable", "observer transport ended before completion",
+            )
     except (ObservationError, BridgeClientError, BridgeConnectionError, OSError) as exc:
         print(
             json.dumps(

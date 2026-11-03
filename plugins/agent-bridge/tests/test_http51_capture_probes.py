@@ -2,6 +2,8 @@
 
 import json
 import io
+import os
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
@@ -39,6 +41,10 @@ from test_session_observations import (
     test_observation_cancellation_preserves_other_subscription
     as test_observation_cancellation_preserves_other_subscription,
     test_observation_http_resource_boundary as test_observation_http_resource_boundary,
+)
+from test_session_observation_transport import (
+    endpoint as endpoint,
+    test_observer_cli_http_eof as test_observer_cli_http_eof,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -247,6 +253,11 @@ def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_fa
                     "used_tokens", "active_capacity_tokens", "qualification",
                 )},
             }
+            code, abbreviated = command(spec["abbreviated_snapshot_command"])
+            observed["abbreviated_snapshot"] = {
+                "exit": code, "kind": abbreviated["kind"],
+                "same_source": abbreviated["source"] == snapshot["source"],
+            }
             code, history = command(spec["history_command"])
             observed["history"] = {
                 "exit": code, "kind": history["kind"], "entries": len(history["entries"]),
@@ -288,7 +299,7 @@ def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_fa
             observed["unauthenticated"] = api.get(
                 path, params=query, headers={"Authorization": ""},
             ).status_code
-            assert factory.call_count == 6
+            assert factory.call_count == 7
             assert all(call.args == () and call.kwargs == {"ensure": False}
                        for call in factory.call_args_list)
             ensure.assert_not_called()
@@ -316,3 +327,19 @@ def test_http51_observation_boundaries(serving, native_send, monkeypatch, capsys
     assert observe_sessions(
         api, manager, db, vector, monkeypatch, capsys, client_factory=core._get_client,
     ) == vector["expected"]["observations"]
+
+
+@pytest.mark.parametrize("mode", ["legacy", "namespaced"])
+def test_http51_observer_payload_abbreviations(tmp_path, mode):
+    """Run the actual payload gate with inert resolution/publication/install spies."""
+    from test_payload_invocation import test_passive_observer_attributed_payload_never_provisions
+
+    shell = (
+        "powershell" if shutil.which("powershell") else "pwsh"
+    ) if os.name == "nt" else "bash"
+    assert shutil.which(shell), "the capture requires its native fixture shell"
+    vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
+    for index, argv in enumerate(vector["requests"]["observations"]["payload_commands"]):
+        test_passive_observer_attributed_payload_never_provisions(
+            tmp_path / str(index), shell, mode, argv,
+        )

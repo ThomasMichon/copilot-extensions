@@ -222,3 +222,86 @@ def test_owning_cli_reaches_the_real_frame_parser(endpoint, monkeypatch, capsys)
     session_observation_cli._cmd(args)
     body = decode(capsys.readouterr().out.encode())
     assert body["kind"] == "history-page" and body["entries"][0]["native_event_id"] == 1
+
+
+@pytest.mark.parametrize("scenario", [
+    "empty-point", "truncated-point", "empty-history", "truncated-history",
+    "follow-eof", "finite-point", "finite-history", "follow-going-away",
+])
+def test_observer_cli_http_eof(endpoint, monkeypatch, capsys, scenario):
+    """Only finite replies or explicit retirement may finish the semantic CLI."""
+    from http.client import HTTPResponse
+
+    from agent_bridge.client import BridgeClient
+    from agent_bridge.session_observation_contract import sse
+
+    history = scenario.endswith("history")
+    follow = scenario.startswith("follow")
+    snapshot = _body(_read(endpoint))
+    payload = _read(endpoint, history=history).content
+    if scenario.startswith("empty"):
+        payload = b""
+    elif scenario.startswith("truncated"):
+        payload = b"event: snapshot\ndata: {"
+    elif scenario == "follow-going-away":
+        payload += sse({
+            "schema": OBSERVATIONS, "version": 1, "kind": "going-away",
+            "selection": {
+                key: snapshot["source"][key]
+                for key in ("session_id", "project", "worktree_id", "head_session_id")
+            },
+            "reason": "hosting-generation-stopping",
+        })
+    raw = io.BytesIO(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+        + payload
+    )
+    response = HTTPResponse(SimpleNamespace(makefile=lambda *_args: raw))
+    response.begin()
+    client = BridgeClient("http://fixture.invalid", "synthetic-token", connect_grace=0)
+    monkeypatch.setattr(client, "health", lambda: {
+        "capabilities": {OBSERVATIONS: 1, HISTORY: 1},
+    })
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: response)
+    calls = []
+
+    def get_client(*, ensure):
+        calls.append(ensure)
+        return client
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
+    monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
+    argv = [
+        "--project", "demo",
+        "session-observation-history" if history else "observe-session", "session-1",
+        "--worktree-id", "worktree-1", "--contract-version", "1", "--json",
+    ]
+    if follow:
+        argv.append("--follow")
+    unrelated = io.BytesIO(b"other subscription")
+    previous_project = cli._PROJECT_OVERRIDE
+    try:
+        try:
+            cli.main(argv)
+            code = 0
+        except SystemExit as exc:
+            code = exc.code
+        lines = [decode(line.encode()) for line in capsys.readouterr().out.splitlines()]
+        legitimate = scenario.startswith("finite") or scenario == "follow-going-away"
+        assert code == (0 if legitimate else 3)
+        assert lines
+        if legitimate:
+            assert lines[-1]["kind"] == (
+                "going-away" if follow else "history-page" if history else "snapshot"
+            )
+        else:
+            assert lines[-1]["kind"] == "error"
+            assert lines[-1]["code"] == "source-unavailable"
+        if follow:
+            assert len(lines) == 2 and lines[0]["kind"] == "snapshot"
+        assert calls == [False]
+        assert response.isclosed() and raw.closed and not unrelated.closed
+    finally:
+        cli._set_project_override(previous_project)
+        response.close()
+        unrelated.close()
