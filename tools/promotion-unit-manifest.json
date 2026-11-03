@@ -3828,7 +3828,7 @@
     "sources": {
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "59c7d88bc331a4b78a467aed6ca953ebba09ce3095ac0a77941e26ffe0f9f6ec",
         "worktree-manager/scripts/runtime_install.py": "29810d269ff7b9b491a01a079925dae2f88d6da5631cb8189b36ea9b485ab2b3",
-        "worktree-manager/src/worktree_manager/update_driver_cli.py": "a0147c1ca2b0a2b08a131f7f385578d354253c0a92bf5e17c64b1dc1a6369f01",
+        "worktree-manager/src/worktree_manager/update_driver_cli.py": "d3cb5a4b37460dfb10f5f0808c43fcbba23640512ca089db13a14e8863cb2a5a",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
         "libs/update-driver/src/update_driver/core.py": "0aa11d8219055b8b46245f3e732e3bedc854a3bb329c3ece7d8a4f21ec273619",
         "worktree-manager/src/worktree_manager/__init__.py": "1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",
