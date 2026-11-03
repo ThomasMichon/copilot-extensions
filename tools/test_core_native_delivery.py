@@ -117,7 +117,7 @@ def test_core_projection_refuses_active_local_wheel_without_registry_substitutio
         + 'dependencies = [' + json.dumps(requirement) + ']\n'
         + '[tool.uv.sources]\ndbus-next = {path = ' + json.dumps(relative) + '}\n',
     )
-    monkeypatch.setattr(producer, "validate_source_binding", lambda *_args: None)
+    monkeypatch.setattr(producer, "validate_source_binding", lambda *_args, **_kwargs: None)
     target = deepcopy(_record()["target"])
     target["environment"].update(
         os_name="posix", sys_platform="linux", platform_system="Linux",

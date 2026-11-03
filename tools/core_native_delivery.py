@@ -74,7 +74,7 @@ def project_core_inputs(
     _check_deadline(deadline)
     _target(target, 10_000, deadline)
     manifest = _core_manifest(manifest_data)
-    validate_source_binding(manifest, source)
+    validate_source_binding(manifest, source, core_hash_workers=min(4, os.cpu_count() or 1))
     try:
         groups, _ranges = bundle_lock.collect_inputs(
             source, groups=("core",), target_environment=target["environment"],
