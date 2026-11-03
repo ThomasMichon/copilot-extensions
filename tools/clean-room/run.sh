@@ -479,16 +479,25 @@ do_prune() {
         echo "no clean-room containers found"
         return 0
     fi
-    local id name failures=0
+    local id full_id name failures=0
     for id in $ids; do
-        name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##')"
-        [ -n "$name" ] || name="$id"
+        full_id="$(docker inspect -f '{{.Id}}' "$id" 2>/dev/null)" || {
+            echo "error: could not resolve container identity $id" >&2
+            failures=$((failures + 1))
+            continue
+        }
+        [ -n "$full_id" ] || { failures=$((failures + 1)); continue; }
+        name="$(docker inspect -f '{{.Name}}' "$full_id" 2>/dev/null | sed 's#^/##')"
+        [ -n "$name" ] || name="$full_id"
         # Best-effort agent-bridge unregister before removal -- a stray
         # registration for a container that's about to disappear is exactly
         # the kind of debris this command exists to prevent.
-        BRIDGE_CONTAINER_ID="$id" AGENT_NAME="cleanroom-${name#cr-}" CONTAINER="$name" \
-            do_bridge_unregister >/dev/null 2>&1 || true
-        if docker rm -f "$id" >/dev/null 2>&1; then
+        if ! BRIDGE_CONTAINER_ID="$full_id" AGENT_NAME="cleanroom-${name#cr-}" CONTAINER="$name" \
+            do_bridge_unregister >/dev/null; then
+            echo "error: could not unregister $name ($full_id)" >&2
+            failures=$((failures + 1))
+        fi
+        if docker rm -f "$full_id" >/dev/null 2>&1; then
             echo "removed $name"
         else
             echo "error: could not remove $name ($id)" >&2

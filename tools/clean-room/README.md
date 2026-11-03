@@ -191,6 +191,15 @@ Bounded Bridge registration uses the same ID through the adapter's existing
 `--container` and `--name-filter` options; its address is `cleanroom:<physical-id>`,
 and unregister uses that same registration key. Replacing the original Docker
 name cannot redirect registration or provider resolution to another container.
+Later standalone `bridge-unregister`, `down` and `prune` invocations resolve the
+physical Docker ID and clean up records owned by that ID, including existing
+legacy name-keyed records. Prune resolves abbreviated Docker IDs before removal.
+Replacement mismatches, Docker errors, ambiguous IDs and unreadable records
+refuse cleanup rather than guessing ownership. If an ID-keyed original is
+already absent and only its old name is known, ownership cannot be recovered
+from the name: the registration is retained with an error. Use the existing
+adapter `unregister --container <known-full-id> --stale` operation for that
+known, absent original; it still verifies the recorded container is gone.
 
 Bounded options support `run`, `eval`, `shell` and `bridge-register` modes only.
 They reject `--then down` / `-Then down`, interactive auth-container creation,

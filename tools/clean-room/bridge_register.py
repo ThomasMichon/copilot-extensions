@@ -424,9 +424,52 @@ def cmd_register(args) -> int:
 def cmd_unregister(args) -> int:
     """Remove one container record and retire the manifest after the last one."""
     mp = _manifest_path()
-    with _registration_lock(args.container):
-        registration = _load_registration(args.container)
-        if registration is not None:
+    current_id, _, state = _container_state(args.container)
+    if state == "error":
+        print(f"could not verify container '{args.container}'", file=sys.stderr)
+        return 2
+    expected_id = args.container_id
+    if re.fullmatch(r"[a-f0-9]{1,63}", expected_id):
+        expected_id, _, expected_state = _container_state(expected_id)
+        if expected_state != "present" or not expected_id:
+            print("could not resolve abbreviated expected container ID", file=sys.stderr)
+            return 2
+    if expected_id and current_id and expected_id != current_id:
+        print("container reference belongs to a different container instance", file=sys.stderr)
+        return 2
+    expected_id = expected_id or current_id
+    direct = _load_registration(args.container)
+    if not expected_id:
+        if re.fullmatch(r"[a-f0-9]{64}", args.container):
+            expected_id = args.container
+        elif direct:
+            expected_id = direct["container_id"]
+        elif _registered_containers():
+            print("cannot identify absent container's registration; retain unknown ownership", file=sys.stderr)
+            return 2
+    keys = {args.container}
+    if expected_id:
+        keys.add(expected_id)
+    for key in _registered_containers():
+        registration = _load_registration(key)
+        if registration and registration["container_id"] == expected_id:
+            keys.add(key)
+    # Lock every selected alias before checking ownership or deleting any record.
+    # An ID-keyed bounded record and a legacy name-keyed record can coexist.
+    with contextlib.ExitStack() as locks:
+        for key in sorted(keys):
+            locks.enter_context(_registration_lock(key))
+        owned = []
+        for key in sorted(keys):
+            registration = _load_registration(key)
+            if registration is None:
+                if _registration_path(key).exists():
+                    print(f"registration for '{key}' is unreadable; retain unknown ownership", file=sys.stderr)
+                    return 2
+                continue
+            if registration["container_id"] != expected_id:
+                print(f"registration for '{key}' belongs to a different container instance", file=sys.stderr)
+                return 2
             if args.stale:
                 recorded_id, _, state = _container_state(
                     registration["container_id"]
@@ -445,17 +488,12 @@ def cmd_unregister(args) -> int:
                         file=sys.stderr,
                     )
                     return 2
-            elif args.container_id != registration["container_id"]:
-                print(
-                    f"registration for '{args.container}' belongs to a different "
-                    "container instance",
-                    file=sys.stderr,
-                )
-                return 2
-        try:
-            _registration_path(args.container).unlink()
-        except FileNotFoundError:
-            pass
+            owned.append(key)
+        if not owned and args.container != expected_id and _registered_containers():
+            print("no registration can be attributed to this container reference; retain unknown ownership", file=sys.stderr)
+            return 2
+        for key in owned:
+            _registration_path(key).unlink(missing_ok=True)
     others = _registered_containers()
     if others:
         print(json.dumps({

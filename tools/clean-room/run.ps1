@@ -703,19 +703,26 @@ function Invoke-Prune {
     $savedAgentName = $script:AgentName
     $failures = 0
     foreach ($id in $ids) {
-        $name = (& docker inspect -f '{{.Name}}' $id 2>$null | Out-String).Trim().TrimStart('/')
-        if (-not $name) { $name = $id }
+        $fullId = (& docker inspect -f '{{.Id}}' $id 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $fullId) {
+            Write-Host "error: could not resolve container identity $id" -ForegroundColor Red
+            $failures++
+            continue
+        }
+        $name = (& docker inspect -f '{{.Name}}' $fullId 2>$null | Out-String).Trim().TrimStart('/')
+        if (-not $name) { $name = $fullId }
         try {
             # Best-effort agent-bridge unregister before removal -- a stray
             # registration for a container that's about to disappear is
             # exactly the kind of debris this command exists to prevent.
             $script:Container = $name
             $script:AgentName = "cleanroom-$($name -replace '^cr-', '')"
-            Invoke-BridgeUnregister -ContainerId $id | Out-Null
+            Invoke-BridgeUnregister -ContainerId $fullId | Out-Null
         } catch {
-            # unregister failures are best-effort here; removal still proceeds.
+            Write-Host "error: could not unregister $name ($fullId): $_" -ForegroundColor Red
+            $failures++
         }
-        docker rm -f $id 2>$null | Out-Null
+        docker rm -f $fullId 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "removed $name" -ForegroundColor Green
         } else {
