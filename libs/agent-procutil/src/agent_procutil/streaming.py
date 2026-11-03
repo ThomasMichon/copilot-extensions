@@ -32,6 +32,7 @@ class SyncProcessOutput:
         on_output: Callable[[str, bytes], None] | None = None,
         output_fds: Mapping[str, int] | None = None, capture: bool = True,
         input_bytes: bytes | None = None,
+        cleanup_deadline: float | None = None,
     ) -> None:
         from ._output_relay import ByteRelay
 
@@ -51,9 +52,13 @@ class SyncProcessOutput:
             for name, descriptor in (output_fds or {}).items():
                 if name not in ("stdout", "stderr"):
                     raise ValueError("output relay requires stdout or stderr")
-                self._relays[name] = ByteRelay(descriptor)
+                self._relays[name] = ByteRelay(
+                    descriptor, **({"deadline": cleanup_deadline} if cleanup_deadline is not None else {}),
+                )
         except BaseException:
-            self._abort_relays()
+            self._abort_relays(**(
+                {"deadline": cleanup_deadline} if cleanup_deadline is not None else {}
+            ))
             raise
         self._capture = capture
         self._relay_failed = False

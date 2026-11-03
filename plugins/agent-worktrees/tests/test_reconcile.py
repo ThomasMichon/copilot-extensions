@@ -2808,6 +2808,28 @@ def test_payload_preflight_timeout_does_not_fence_later_acquisition(env, monkeyp
     assert not (home / "activation-preservation" / "transaction.json").exists()
 
 
+def test_payload_caller_support_refusal_is_a_status_not_an_uncaught_error(env, monkeypatch):
+    from agent_worktrees import update_acquisition
+    from agent_procutil import owned_process
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "install")
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+
+    def unsupported():
+        raise RuntimeError("fixture caller ownership unavailable")
+
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", unsupported)
+    monkeypatch.setattr(
+        update_acquisition, "_run_update",
+        lambda *args, **kwargs: pytest.fail("unsupported caller launched a target"),
+    )
+    status = update_acquisition.acquire("optional-plugin", MKT, "fixture")
+    assert status.startswith("payload launch failed")
+    assert "fixture caller ownership unavailable" in status
+    assert not (home / "activation-preservation" / "transaction.json").exists()
+    assert json.loads((home / "settings.json").read_text())["enabledPlugins"][identity] is False
+
+
 @pytest.mark.guard
 def test_launch_adapters_apply_planned_runtime_environment():
     # Environment application belongs to the checked Python executor, not a

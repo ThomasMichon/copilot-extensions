@@ -239,3 +239,46 @@ def test_progressing_sink_cannot_renew_aggregate_settlement(tmp_path):
         os.close(reader)
         os.close(writer)
     assert not consumer.is_alive()
+
+
+def test_partial_output_initialization_cleanup_uses_same_deadline(tmp_path, monkeypatch):
+    from agent_procutil import _output_relay, _caller_owned
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    created, allowances, witnessed = [], [], []
+
+    class PartialRelay:
+        def abort(self, timeout):
+            allowances.append(timeout)
+            time.sleep(timeout)
+
+    def relay(*args, **kwargs):
+        created.append(True)
+        if len(created) == 2:
+            raise OSError("fixture second relay unavailable")
+        return PartialRelay()
+
+    monkeypatch.setattr(_output_relay, "ByteRelay", relay)
+    marker = tmp_path / "late-write"
+    with (tmp_path / "output").open("wb") as stream:
+        started = time.monotonic()
+        with pytest.raises(owned.OwnedCleanupError) as raised:
+            owned.run_owned(
+                [sys.executable, "-c",
+                 "import time,sys;from pathlib import Path;time.sleep(2.5);Path(sys.argv[1]).touch()",
+                 str(marker)],
+                timeout=5, inactivity_timeout=1, capture=False,
+                output_fds={"stdout": stream.fileno(), "stderr": stream.fileno()},
+                budget=OwnedExecutionBudget.from_timeout(1, cleanup_reserve=.5),
+                on_settled=lambda: witnessed.append(True),
+            )
+        assert time.monotonic() - started < 1.8
+        assert len(allowances) == 1 and allowances[0] <= 1
+        assert not witnessed and not marker.exists()
+        process = raised.value.process
+        if process.returncode is None:
+            owned._retire_posix_group(process)
+            _caller_owned._confirm_group(process)
+            process.wait(timeout=2)
+        process.stdout.close()
+        process.stderr.close()

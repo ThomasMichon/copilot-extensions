@@ -522,6 +522,7 @@ def _run_owned(
 
             stream_capture = SyncProcessOutput(
                 process, output_fds=output_fds, capture=capture,
+                cleanup_deadline=deadline,
             )
             stream_capture.wait(
                 inactivity_timeout, deadline=deadline, wait_for_eof=False,

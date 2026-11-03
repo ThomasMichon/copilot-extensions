@@ -97,7 +97,10 @@ def _run_install(
     if not _WINDOWS:
         from agent_procutil.owned_process import require_caller_owned_support
 
-        require_caller_owned_support()
+        try:
+            require_caller_owned_support()
+        except (OSError, RuntimeError) as error:
+            raise installer_run.InstallerLaunchError(f"payload caller preflight failed: {error}") from error
     guard = (
         custody.preserve(identity) if custody is not None
         else activation_preservation.preserve_activation_durably(identity)
