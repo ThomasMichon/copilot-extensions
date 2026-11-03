@@ -4162,12 +4162,15 @@ validated again afterward. The index check is a snapshot, not a lock on
 subsequent feed changes. The mode
 reports `selection: guarded-native-feed`, does not expose feed credentials
 or loopback URLs in the delivery, and fails closed on unsupported native
-source or index settings. Its selection and acquisition share request,
-redirect and metadata budgets. Candidate inspection and final acquisition
-may download the same wheel twice.
+source or index settings. It retains and rechecks the inspected bytes actually
+served for each selected lock entry instead of downloading them again. The
+acquisition owner validates the captured transport and exact selected records,
+then reapplies file-admission rules against the selected wheel's actual upload
+time and rechecked seasoning cutoff. Selection and the final index recheck share
+request, redirect and metadata budgets.
 
-All three modes subsequently reacquire the selected external wheels through
-the same governed feed and origin guard. The source-derived roots and
+The selected-lock and offline-pool modes reacquire their selected external
+wheels through the same governed feed and origin guard. The source-derived roots and
 complete inspected closure still have to agree, and unused or first-party
 registry entries refuse. The existing feed
 owner requires an affirmatively trusted non-public HTTPS index and uses

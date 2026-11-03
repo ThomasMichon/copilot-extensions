@@ -376,21 +376,13 @@ class _Client:
         return b"".join(chunks), "sha256:" + digest.hexdigest(), size
 
 
-@contextmanager
-def acquire_wheel_inputs(
+def validate_acquisition_inputs(
     expected, *, feeds: tuple[WheelFeed, ...], download_origins: tuple[str, ...],
     cutoffs: dict[str, datetime], policy_id: str, limits: AcquisitionLimits,
     deadline: float, ssl_context: ssl.SSLContext, proxies: dict[str, str],
     procutil: ModuleType,
 ):
-    """Retain exact downloads and file-policy facts through inspected construction.
-
-    This mechanism cannot establish feed/profile trust. The existing installation
-    adapter supplies captured policy, configuration and independently selected
-    exact records before calling it.
-    """
-    import installer_dependency_policy as policy
-
+    """Validate captured transport and exact selected records without acquiring bytes."""
     limits.verify()
     _check_deadline(deadline)
     if (
@@ -448,6 +440,29 @@ def acquire_wheel_inputs(
         names.add(name)
         filenames.add(filename.casefold())
         selected.append(item)
+    return selected, origins
+
+
+@contextmanager
+def acquire_wheel_inputs(
+    expected, *, feeds: tuple[WheelFeed, ...], download_origins: tuple[str, ...],
+    cutoffs: dict[str, datetime], policy_id: str, limits: AcquisitionLimits,
+    deadline: float, ssl_context: ssl.SSLContext, proxies: dict[str, str],
+    procutil: ModuleType,
+):
+    """Retain exact downloads and file-policy facts through inspected construction.
+
+    This mechanism cannot establish feed/profile trust. The existing installation
+    adapter supplies captured policy, configuration and independently selected
+    exact records before calling it.
+    """
+    import installer_dependency_policy as policy
+
+    selected, origins = validate_acquisition_inputs(
+        expected, feeds=feeds, download_origins=download_origins, cutoffs=cutoffs,
+        policy_id=policy_id, limits=limits, deadline=deadline, ssl_context=ssl_context,
+        proxies=proxies, procutil=procutil,
+    )
     with policy._temporary_inputs(None) as temporary:
         root = policy._private_retained_root(Path(temporary)).resolve()
         result = _run_worker(
