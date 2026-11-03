@@ -220,6 +220,7 @@ test("owned host uses the caller's retained reader instead of rebuilding a root-
         async read() { throw new Error("unexpected fixture source read"); },
         async validate() { throw new Error("caller-owned source validation refusal"); },
         receipts: () => [],
+        rootFailures: () => [],
     };
     const { report, observed } = await fixture(t, { sourceReader });
     assert.equal(report.status, "unavailable");

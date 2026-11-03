@@ -81,8 +81,10 @@ export function createSelectionTool({ getSession, run, acquireSources = selectio
                 });
                 checkCancelled();
                 const acquisitionMs = Math.round(performance.now() - started);
+                const rootFailures = reader.rootFailures();
+                const sourceContext = rootFailures.length ? { ...context, unavailableSourceRoots: rootFailures } : context;
                 startedRunner = true;
-                const report = await run({ snapshot, request: { ...args, context },
+                const report = await run({ snapshot, request: { ...args, context: sourceContext },
                     trustedRoots: sourcePolicy.trustedRoots, authorizeSource: sourcePolicy.authorizeSource,
                     sourceReader: reader,
                     signal: invocation.signal });
@@ -118,6 +120,7 @@ export function createSelectionTool({ getSession, run, acquireSources = selectio
                         omitted: context.omitted, truncated: context.truncated, inputBytes: context.inputBytes },
                     configuration: { requested: report.requestedProfile, before: report.resolvedBefore, after: report.resolvedAfter },
                     sourceFailures: report.sourceFailures ?? [],
+                    unavailableSourceRoots: reader.rootFailures(),
                     usage: report.usage, latency: { acquisitionMs, ownedMs: report.elapsedMs,
                         totalMs: Math.round(performance.now() - started) },
                 }), resultType: "success" };

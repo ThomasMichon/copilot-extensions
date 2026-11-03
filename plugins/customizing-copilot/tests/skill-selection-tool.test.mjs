@@ -168,6 +168,31 @@ test("source access and bytes are revalidated after owned cleanup and final pare
     }
 });
 
+test("a missing unrelated exact-grant parent does not block a readable native source", async t => {
+    const root = await mkdtemp(join(tmpdir(), "selector-missing-root-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const f = fixture(), path = join(root, "SKILL.md"), missing = join(root, "deleted", "approved.md");
+    await writeFile(path, "Current readable source");
+    f.state.skills[0].path = path;
+    f.session.rpc.permissions = { paths: {
+        list: async () => ({ primary: root, directories: [root], sessionApprovedPaths: [missing] }),
+        isPathWithinAllowedDirectories: async ({ path: candidate }) => ({ allowed: candidate === path }),
+    } };
+    f.session.rpc.contentExclusion = {
+        checkPaths: async ({ paths }) => ({ available: true, checks: paths.map(path => ({ path, excluded: false })) }),
+    };
+    delete f.options.acquireSources;
+    f.options.run = async input => {
+        assert.deepEqual(input.request.context.unavailableSourceRoots, [{ rootIndex: 1, reason: "ENOENT" }]);
+        assert.equal((await input.sourceReader.read({ skill: "fixture" })).content, "Current readable source");
+        await assert.rejects(input.authorizeSource(join(root, "deleted", "unapproved.md")), /access denied/);
+        return f.report(input);
+    };
+    const output = await createSelectionTool(f.options).handler(f.args, f.invocation);
+    assert.equal(output.resultType, "success");
+    assert.deepEqual(resultOf(output).unavailableSourceRoots, [{ rootIndex: 1, reason: "ENOENT" }]);
+});
+
 test("native grants and exclusion checks are independent, current and fail closed", async () => {
     const root = resolve("granted"), path = resolve(root, "SKILL.md");
     const state = { allowed: true, approved: [path], available: true, excluded: false, checks: 0 };

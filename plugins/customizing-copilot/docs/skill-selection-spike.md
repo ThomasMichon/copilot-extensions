@@ -225,6 +225,12 @@ transitive guide traversal or skill execution occurs. Reads are byte/count
 bounded, reject non-UTF-8 sources, and return unavailable for pathless entries
 without excluding their advisory metadata.
 
+Missing roots or non-directory ancestors are recorded independently; an unrelated
+deleted approved directory does not suppress readable sources. Other root
+resolution errors still fail explicitly. Missing-root diagnostics reach the
+callable selector's context and result without exposing root paths. Remaining
+sources retain all lexical/canonical containment and live policy checks.
+
 Reference extraction handles inline links and single-line reference definitions,
 balanced or escaped destination parentheses, angle-bracket paths and optional
 titles. Code spans, fenced/indented examples and comments do not declare guides.

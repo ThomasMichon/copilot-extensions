@@ -637,3 +637,8 @@ owned-session alternative or name the SDK dependency before adopting it.
   than accepting pre-cleanup receipts. Regression controls revoke access or
   change bytes during cleanup and revoke access during final checks; the
   bounded packet passes with verified process cleanup.
+- A subsequent review identified an unrelated deleted exact-grant parent
+  blocking all source-root resolution. Missing/non-directory roots now retain
+  separate diagnostics while readable roots continue under unchanged live
+  authorization. A valid native source plus a stale approved directory is
+  covered by the bounded callable regression.

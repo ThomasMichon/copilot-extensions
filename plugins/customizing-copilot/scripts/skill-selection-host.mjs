@@ -332,6 +332,7 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
             || report.usage.calls.some(call => call.model !== profile.model || call.reasoningEffort !== profile.reasoningEffort));
         if (usageMismatch) report.error = "actual selector usage configuration unavailable or mismatched";
         report.receipts = reader.receipts();
+        report.rootFailures = reader.rootFailures();
         report.sourceDelivery = [...readOutputs.keys()].map(contentDigest => ({
             contentDigest, deliveredInline: delivered.has(contentDigest),
         }));

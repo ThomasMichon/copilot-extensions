@@ -234,9 +234,16 @@ export async function selectionReader(snapshot, trustedRoots, {
         || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 128000
         || !Number.isInteger(maxReads) || maxReads < 1 || maxReads > 64
         || authorizeSource !== undefined && typeof authorizeSource !== "function") throw new Error("invalid selection read bounds");
-    const roots = await Promise.all(trustedRoots.map(async root => ({
-        supplied: resolve(root), canonical: await realpath(root),
-    })));
+    const rootFailures = [];
+    const resolvedRoots = await Promise.all(trustedRoots.map(async (root, rootIndex) => {
+        try { return { supplied: resolve(root), canonical: await realpath(root) }; }
+        catch (error) {
+            if (!["ENOENT", "ENOTDIR"].includes(error?.code)) throw error;
+            rootFailures.push({ rootIndex, reason: error.code });
+            return null;
+        }
+    }));
+    const roots = resolvedRoots.filter(root => root !== null);
     const reads = new Map(), checks = new Map();
     let attempts = 0;
     async function admitted(path) {
@@ -289,6 +296,7 @@ export async function selectionReader(snapshot, trustedRoots, {
     }
     return {
         read, receipts: () => [...reads.values()],
+        rootFailures: () => structuredClone(rootFailures.sort((left, right) => left.rootIndex - right.rootIndex)),
         async validate(value) {
             const result = validateSelection(value, snapshot, [...reads.values()]);
             for (const [path, evidence] of checks) {
