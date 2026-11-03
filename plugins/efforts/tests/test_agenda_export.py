@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib
 import json
@@ -16,8 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from test_agenda_store import AGENDA, STORE, documents as documents, request
-from test_agenda_v2_core import lane as lane, outcome, revisit
+from test_agenda_store import AGENDA, STORE, documents as documents, proof, request
+from test_agenda_v2_core import current, lane as lane, outcome, revisit, update
 
 EXPORT = importlib.import_module("agenda_export")
 POSIX = pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory-fsync qualification")
@@ -83,6 +84,55 @@ def test_full_ledger_original_bytes_and_delivery_are_preserved(lane: Path) -> No
     (lane / "unrelated-private-data").write_bytes(b"not agenda state")
     assert EXPORT.export_store(lane, destination(lane, "second"), **selected)["revision"] == 105
     assert not (target / "unrelated-private-data").exists()
+
+
+@POSIX
+def test_deferred_acceptance_observation_survives_revisit_deadline(lane: Path) -> None:
+    revisit_at = datetime.now(timezone.utc) + timedelta(seconds=5)
+    frame, _, _ = current(lane)
+    result = update(lane, {
+        "operation": "defer", "frame_id": frame, "decision_ref": "fixture pending decision",
+        "decision_packet_ref": "fixture packet", "revisit_at": revisit_at.isoformat(),
+        "evidence": proof(),
+    })
+    deferred_id = result["transition"]["deferred_id"]
+    selected = selection(lane)
+    accepted = STORE.delivery_record(lane)[1]
+    assert accepted["snapshot"]["due_rechecks"] == []
+    assert accepted["snapshot"]["next_revisit_at"] == revisit_at.isoformat()
+    before_bytes, before_rows = source_bytes(lane), rows(lane)
+    target = destination(lane)
+
+    manifest = EXPORT.export_store(lane, target, **selected, expected_revision=2)
+    assert EXPORT.verify_export(target, **selected, expected_revision=2) == manifest
+    assert STORE.read(lane)["snapshot"]["due_rechecks"] == []
+    # Cross the real deadline without replacing the clock or projection. This
+    # integration fixture waits at most its five-second declared revisit delay.
+    remaining = (revisit_at - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < remaining <= 5
+    threading.Event().wait(remaining + 0.01)
+    live = STORE.read(lane)["snapshot"]
+    assert live["due_rechecks"] == [deferred_id] and live["next_revisit_at"] is None
+    assert live["next_action"] != accepted["snapshot"]["next_action"]
+    assert live["deferred"][0]["due"] and live["deferred"][0]["trigger"] == "time"
+    assert EXPORT.verify_export(target, **selected, expected_revision=2) == manifest
+    after_target = destination(lane, "after-revisit")
+    after_manifest = EXPORT.export_store(lane, after_target, **selected, expected_revision=2)
+    assert after_manifest["tables"] == manifest["tables"]
+    assert EXPORT.verify_export(after_target, **selected, expected_revision=2) == after_manifest
+    assert rows(after_target) == before_rows
+    assert source_bytes(lane) == before_bytes and rows(target) == before_rows
+    assert STORE.delivery_record(target)[1] == accepted
+
+    # Substituting today's otherwise-valid projection is not a valid immutable
+    # observation: strict verification still checks acceptance-time semantics.
+    changed_observation = {**accepted, "snapshot": live}
+    with closing(sqlite3.connect(target / STORE.DATABASE, isolation_level=None)) as db:
+        db.execute("UPDATE delivery SET observation=?", (STORE.encode(changed_observation),))
+    rewrite_member_manifest(target)
+    with pytest.raises(AGENDA.AgendaError, match="delivery observation"):
+        EXPORT.verify_export(target, **selected, expected_revision=2)
+    assert source_bytes(lane) == before_bytes
 
 
 @POSIX

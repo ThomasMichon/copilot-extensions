@@ -10,6 +10,7 @@ access fail closed; no administrative volume handle is opened.
 from __future__ import annotations
 
 from contextlib import closing, contextmanager
+from dataclasses import asdict
 import hashlib
 import os
 from pathlib import Path
@@ -19,12 +20,13 @@ import stat
 import time
 from typing import Any, Iterator
 
-from agenda import AgendaError, _object, decode
+from agenda import AgendaError, _object, _time, decode
 import agenda_history as history
 import agenda_history_contract as wire
 from agenda_operations import fields
 import agenda_store as store
 import agenda_store_v2 as owner
+from agenda_v2_projection import project
 from agenda_v2_schema import MODE, validate
 
 MANIFEST = "manifest.json"
@@ -284,10 +286,16 @@ def _ledger(
     revision, observation_text, status = db.execute(
         "SELECT revision,observation,status FROM delivery").fetchone()
     observation = decode(observation_text.encode())
+    # Delivery is an immutable acceptance-time observation. Live reads may
+    # project different due/recheck fields without any intervening commit.
+    accepted_snapshot = asdict(project(
+        state["documents"], state["records"],
+        now=_time(state["committed_at"], "accepted commit time"),
+    ))
     expected_observation = {
         "schema": "efforts.agenda-observation", "version": 2, "source": latest["source"],
         "revision": state["revision"], "committed_at": state["committed_at"],
-        "snapshot": state["snapshot"],
+        "snapshot": accepted_snapshot,
     }
     if len(store.encode(expected_observation).encode()) + 1 > 32768:
         expected_observation = {

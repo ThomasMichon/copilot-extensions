@@ -44,6 +44,11 @@ records, metadata and delivery state. The online backup preserves that cut
 under concurrent mutation. Neither page limits nor display omissions truncate
 the export.
 
+Persisted delivery is validated with the owner's projection at its accepted
+commit time, not the current presentation clock. Crossing a deferred
+`revisit_at` can change live due/next-action fields without a database write;
+it does not invalidate unchanged accepted evidence or a verified export.
+
 The completed export contains `agenda.sqlite3` and `manifest.json`.
 The manifest uses schema `efforts.agenda-export`, version 1, and records
 completeness, store version/mode, exact worktree/store/revision/commit time,

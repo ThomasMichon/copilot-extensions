@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify the real placement-owner to managed-agenda initialization boundary.",
+  "comment": "Return canonical state homes for admitted project-root aliases and qualify managed agenda initialization.",
   "changes": [
     {
       "plugin": "agent-worktrees",

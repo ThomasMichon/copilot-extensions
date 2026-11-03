@@ -28,6 +28,10 @@ Missing or old providers refuse without installation, host startup, filesystem
 search or a checkout-local fallback. No independently installed package is
 imported into the efforts process.
 
+The allocator returns a home beneath its canonical admitted project root.
+Supported root aliases therefore work without relaxing efforts' rejection of
+symlink/reparse child paths or changing the descriptor's registered identity.
+
 The request is an ordinary fresh context-qualified request-v2 `init`, with
 expected revision zero and the exact selected worktree. Invalid initialization
 data is rejected before allocation. The initial agenda accepts the same store

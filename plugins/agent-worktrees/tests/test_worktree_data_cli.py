@@ -114,8 +114,13 @@ sys.exit(main.main(["--project",sys.argv[2],*sys.argv[3:]]))
 """
 
 
+@pytest.mark.parametrize("aliased", [
+    False, pytest.param(True, marks=pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX project-root alias fixture; native reparse acceptance is separate",
+    )),
+])
 def test_efforts_payload_initializes_the_actual_allocated_store(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path, monkeypatch, capsys, aliased: bool,
 ) -> None:
     project, worktree = "sample-project", "machine-20300101-123456-abcd"
     nonce, store = "0123456789abcdef", "a" * 32
@@ -128,6 +133,10 @@ def test_efforts_payload_initializes_the_actual_allocated_store(
         "branch": "worktree/sample", "worktree_path": str(tmp_path / "absent-checkout"),
         "machine": "sample-machine", "platform": "linux",
     }), encoding="utf-8")
+    if aliased:
+        physical = tmp_path / "physical-project-data"
+        root.rename(physical)
+        root.symlink_to(physical, target_is_directory=True)
     skill = Path(__file__).resolve().parents[2] / "efforts" / "skills" / "driving-effort-agendas"
     monkeypatch.syspath_prepend(str(skill / "scripts"))
     managed = importlib.import_module("agenda_managed")
@@ -153,7 +162,7 @@ def test_efforts_payload_initializes_the_actual_allocated_store(
     assert managed.main(argv) == 0
     created = json.loads(capsys.readouterr().out)
     home = Path(created["placement"]["state_home"])
-    assert home.is_relative_to(root) and created["result"]["store_id"] == store
+    assert home.is_relative_to(root.resolve()) and created["result"]["store_id"] == store
     independent = run_headless(
         [sys.executable, "-B", str(skill / "scripts" / "agenda_cli.py"),
          "read", "--state-home", str(home), "--worktree", worktree],

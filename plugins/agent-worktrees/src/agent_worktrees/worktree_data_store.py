@@ -236,6 +236,16 @@ def _placement(
     descriptor: DataDescriptor,
     entry: PlacementRegistration,
 ) -> WorktreeDataPlacement:
+    # Resolve only the admitted owner root, never the strictly checked data children.
+    root = root.resolve(strict=True)
+    metadata = root.stat()
+    if (metadata.st_dev, metadata.st_ino) != (
+        descriptor.scope.project_root_device,
+        descriptor.scope.project_root_inode,
+    ):
+        raise WorktreeDataError(
+            "identity-conflict", "canonical project-data root does not match admitted owner"
+        )
     return WorktreeDataPlacement(
         descriptor.scope,
         descriptor.worktree_id,

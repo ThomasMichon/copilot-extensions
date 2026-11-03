@@ -74,6 +74,9 @@ descriptor alone cannot validate store contents or authenticate current work.
 
 Discovery reuses the admitted project-data root, including its supported root
 aliases. Child traversal and aliasing cannot redirect a registered placement.
+Returned homes use the canonical spelling of the admitted root without
+resolving unsafe child aliases. Descriptor bytes, identity and placement
+generation do not change merely because the root has an admitted alias.
 No new global registry, listener, fleet scan or consumer-local locator cache is
 introduced.
 
