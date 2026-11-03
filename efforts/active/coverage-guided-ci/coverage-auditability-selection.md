@@ -1,7 +1,8 @@
 # Coverage-auditability selection amendment
 
 Parent: [Coverage-Guided CI](README.md). Coordination: #4453; implementation
-re-scopes existing draft #6783 after this plan-only amendment merges.
+merged in #6783 after the plan-only amendment #10194. This bounded slice is
+complete; the parent campaign and deferred native research #10209 remain open.
 
 Everything below is agent-recommended decomposition of the operator's
 verbatim follow-up and selected scope in the parent Request.
@@ -42,8 +43,8 @@ retain their obligations; this bounded change does not complete the umbrella.
 - [x] Base the owned #6783 branch on reviewed current `dev`, preserving the
       exact prototype first. Replace that PR's scope and description through
       the managed rewrite flow, retaining its discussion and identity.
-- [ ] Implement and qualify the bounded selection contract below.
-- [ ] Merge/finalize #6783 and journal this slice's evidence and remaining
+- [x] Implement and qualify the bounded selection contract below.
+- [x] Merge/finalize #6783 and journal this slice's evidence and remaining
       umbrella obligations; no installed runtime update or rollout.
 
 ## Implementation plan
@@ -77,29 +78,29 @@ retain their obligations; this bounded change does not complete the umbrella.
 
 ## Validation Plan
 
-- [ ] Metadata controls reject conflicting/invalid declarations and keep
+- [x] Metadata controls reject conflicting/invalid declarations and keep
       missing declarations conservative; tier/effect/platform admission
       remains independent of auditability.
-- [ ] Hand-computed mixed inventories prove unaffected proven-auditable tests
+- [x] Hand-computed mixed inventories prove unaffected proven-auditable tests
       can be omitted while every eligible unauditable/unknown test runs,
       including tests with no baseline entry.
-- [ ] Missing/partial/legacy coverage, mismatched profiles, missing dependencies,
+- [x] Missing/partial/legacy coverage, mismatched profiles, missing dependencies,
       changed configuration/data/tests, deleted/added/renamed test inventory,
       and debt/remapping uncertainty preserve conservative run sets and
       observable reasons. Existing guards and fallback cases still pass.
-- [ ] Required-unit selection never imports excluded native, integration,
+- [x] Required-unit selection never imports excluded native, integration,
       platform-inapplicable or manual-only nodes from another profile.
       Mandatory retained tests cannot disappear because a budget is exhausted.
-- [ ] Exercise the actual inventory/metadata-to-selection-to-execution command
+- [x] Exercise the actual inventory/metadata-to-selection-to-execution command
       in an existing hosted lane, with exact expected node IDs and counts.
       Inject a regression caught by a retained test and prove the selected
       command fails, rather than trusting a pure selector result.
-- [ ] Run focused unit/lint/contract gates and current-head required hosted CI;
+- [x] Run focused unit/lint/contract gates and current-head required hosted CI;
       record the exact source and evidence. Avoid a heavy local test run on
       a contended host. This is not native timing or installed-rollout proof.
-- [ ] Record validation tiers and reasons for skipped tiers in the
+- [x] Record validation tiers and reasons for skipped tiers in the
       implementation PR. Fresh-environment checks cover metadata/baseline
       first-touch compatibility where changed; native venue qualification is
       not required for behavior this bounded change does not alter.
-- [ ] Clear current-head review and mergeability gates, verify real merge and
+- [x] Clear current-head review and mergeability gates, verify real merge and
       managed finalization, then settle only this slice in the parent Journal.
