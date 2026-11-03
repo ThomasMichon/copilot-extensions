@@ -554,14 +554,14 @@ existing maintenance and installation workspace owners, not another updater.
 - [x] Implement canonical automatic software-update routing after Manager startup and before
   worktree creation/resume through `<repo> update --auto`, preserving
   origin through queued execution and retaining the existing single executor.
-- [ ] Prove that disabling automatic updates blocks only automatic requests;
+- [x] Prove that disabling automatic updates blocks only automatic requests;
   explicit user/agent and selected-component updates retain their ordinary
   path and re-entrancy guards without requiring force.
-- [ ] Qualify UI cancellation/persistence, queued policy changes, both launcher
+- [x] Qualify UI cancellation/persistence, queued policy changes, both launcher
   adapters and supported mixed-version behavior; update owner docs and land
   the bounded source through normal review and required CI.
 
-Local source qualification and its explicit platform/publication limits are
+Source qualification merged in #10103; its explicit platform/publication limits are
 recorded in the [control refinement](automatic-update-control.md#implementation-and-qualification).
 The implementation rows above do not credit native rollout or the parent
 maintenance/adoption gate.
@@ -1351,6 +1351,15 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-11-03 - Automatic-update controls qualified and merged
+
+#10103 merged the bounded Phase 4a.1 implementation after exact-head native
+functional qualification, independent approval and required CI. The
+[qualification record](automatic-update-control.md#source-gate-closed-2026-11-03)
+keeps the failed 300-second attempt distinct from the separately authorized
+passing attempt. Phase 4a recurring maintenance, Manager-first setup and
+installed/native-lifecycle acceptance remain open under their existing owners.
 
 - [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
 
