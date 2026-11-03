@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve user-global activation during explicit repository payload reconciliation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

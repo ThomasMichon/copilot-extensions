@@ -22,6 +22,18 @@ def payload_subprocess_double(monkeypatch):
     from agent_worktrees import update_acquisition
 
     monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    from agent_procutil import owned_process
+    import subprocess
+
+    def run(argv, *, on_settled=None, **kwargs):
+        kwargs.pop("budget", None)
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, **kwargs)
+        finally:
+            if on_settled is not None:
+                on_settled()
+
+    monkeypatch.setattr(owned_process, "run_owned", run)
 
 
 @pytest.fixture(scope="session")
