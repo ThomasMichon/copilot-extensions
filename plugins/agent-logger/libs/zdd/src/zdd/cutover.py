@@ -1,7 +1,11 @@
-"""Active/passive cutover orchestration for zero-downtime redeploys.
+"""Active/passive cutover orchestration for graceful or best-effort redeploys.
 
-OS-agnostic, injected collaborators keep publication, readiness and retirement
-under application ownership rather than delegating them to a service manager.
+Adapters may opt into exact-owner retirement when predecessor drain or shutdown
+fails. That cleanup is separate from successor readiness: a healthy incoming
+generation stays authoritative, with unresolved retirement reported durably.
+
+OS-agnostic orchestration injects spawning, health, control and port collaborators
+for isolated tests; the application wires the real lifecycle implementations.
 
 Default sequence (each step before the commit point is reversible)::
 
@@ -15,14 +19,12 @@ Default sequence (each step before the commit point is reversible)::
     7. shut the old daemon down (clean exit; systemd won't resurrect)
     8. adopt the credential relay on the new daemon (best effort)
 
-A failure anywhere before the commit point rolls back: re-publish the old
-endpoint as active, undrain the old daemon, and terminate the freshly spawned
-passive. After the commit point, retirement is irreversible.
+Precommit failure normally restores and undrains the old route and terminates
+the passive. Postcommit retirement is irreversible.
 
-An adopter with resident-owned supersession can opt into ``self_retirement``.
-Publication is irreversible before its ``activate_successor`` callback can
-admit work. Serving readiness completes installation without contacting or
-waiting for the predecessor's independently owned retirement.
+With ``self_retirement``, publication commits before ``activate_successor``
+can admit work. Serving readiness completes installation independently of
+predecessor retirement; an explicit bounded fallback may then clean up old owners.
 """
 
 from __future__ import annotations
@@ -109,6 +111,9 @@ class CutoverOrchestrator:
         self_retirement: bool = False,
         activate_successor: Callable[[Endpoint], None] | None = None,
         serving_health_check: Callable[[str, int], bool] | None = None,
+        retire_failed_predecessor: Callable[[Endpoint], dict[str, Any]] | None = None,
+        drain_predecessor: bool = True,
+        refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
@@ -127,6 +132,7 @@ class CutoverOrchestrator:
         self.make_client = make_client
         self.pick_free_port = pick_free_port
         self.refuse_old = refuse_old
+        self.refuse_restoration = refuse_restoration if refuse_restoration is not None else refuse_old
         self.sleep = sleep
         self.clock = clock
         self.routing = routing_mod
@@ -136,6 +142,14 @@ class CutoverOrchestrator:
         self.self_retirement = self_retirement
         self.activate_successor = activate_successor
         self.serving_health_check = serving_health_check
+        self.retire_failed_predecessor = retire_failed_predecessor
+        if retire_failed_predecessor is not None and expected_old is None:
+            raise ValueError("best-effort retirement requires an exact observed predecessor")
+        if type(drain_predecessor) is not bool or (
+            not drain_predecessor and retire_failed_predecessor is None
+        ):
+            raise ValueError("skipping predecessor drain requires bounded native retirement")
+        self.drain_predecessor = drain_predecessor
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -190,24 +204,9 @@ class CutoverOrchestrator:
         self, port: int, timeout: float, poll: float,
         check: Callable[[str, int], bool] | None = None,
     ) -> bool:
-        check = check or self.health_check
-        deadline = self.clock() + timeout
-        while self.clock() < deadline:
-            try:
-                if check(self._client_host(), port):
-                    return True
-            except CutoverError:
-                raise
-            except Exception:
-                pass
-            self.sleep(poll)
-        # one last probe at the deadline
-        try:
-            return bool(check(self._client_host(), port))
-        except CutoverError:
-            raise
-        except Exception:
-            return False
+        from .cutover_drain import await_health
+
+        return await_health(self, port, timeout, poll, check)
 
     def _await_exit(self, handle: _Handle, timeout: float = 10.0, poll: float = 0.2) -> bool:
         from .cutover_rollback import _await_exit
@@ -428,7 +427,11 @@ class CutoverOrchestrator:
         elif self.refuse_old is not None:
             raw_active = self._raw_active()
             old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
-        old = conditional.old if conditional else self.routing.read_active_endpoint(self.config_dir)
+        old = (
+            conditional.old if conditional else old_for_cas
+            if self.retire_failed_predecessor is not None
+            else self.routing.read_active_endpoint(self.config_dir)
+        )
         result.old_endpoint = old
         if self.expected_old is not None and old != self.expected_old:
             result.error = "selected predecessor differs from the observed serving daemon"
@@ -449,11 +452,10 @@ class CutoverOrchestrator:
                 result.steps.append(f"refused: {result.error}")
                 return result
 
-        new_port = self.pick_free_port()
-        result.new_port = new_port
-        if conditional and new_port == conditional.old.port:
-            result.error = "candidate port must differ from predecessor"
-            result.steps.append(f"refused: {result.error}")
+        from .cutover_selection import candidate_port
+
+        new_port = candidate_port(self, old, conditional, result)
+        if new_port is None:
             return result
         # Record custody before drain; preserve started_at across later updates.
         old_dict = (
@@ -548,7 +550,10 @@ class CutoverOrchestrator:
                 detail={"pid": getattr(handle, "pid", None)},
             )
 
-            if self.drain_before_publish and old is not None and old.port != new_port:
+            if (
+                self.drain_before_publish and self.drain_predecessor
+                and old is not None and old.port != new_port
+            ):
                 phase = "draining"
                 write_breadcrumb(
                     state="draining", old=old_dict,
@@ -691,23 +696,16 @@ class CutoverOrchestrator:
             if self.self_retirement:
                 if not isinstance(new_for_cas, Endpoint) or new_for_cas.process_start_time != new_process_start_time:
                     raise CutoverError("published successor native identity unavailable")
-                successor = new_for_cas
-                activate_successor = self.activate_successor
-                assert activate_successor is not None
                 write_breadcrumb(
                     state="committed", old=old_dict, new_port=new_port,
                     new_pid=new_pid, started_at=started_at,
                 )
-                activate_successor(successor)
-                if not self._await_health(
-                    new_port, health_timeout, poll, self.serving_health_check or health_check,
-                ):
-                    raise CutoverError("published successor did not become ready")
-                if not breadcrumb.clear_breadcrumb(self.config_dir):
-                    raise CutoverError("committed recovery record retained; retry cleanup")
-                result.ok = True
-                result.steps.append("successor ready; predecessor retirement is asynchronous")
-                return result
+                from .cutover_drain import complete_self_retirement
+
+                return complete_self_retirement(
+                    self, new_for_cas, old, result, health_timeout=health_timeout,
+                    poll=poll, health_check=self.serving_health_check or health_check,
+                )
 
             if conditional and conditional.snapshot.activate_successor is not None:
                 conditional.activate_successor()
@@ -718,7 +716,7 @@ class CutoverOrchestrator:
                     old_client = make_client(old.base_url)
                 # About to open the old daemon's drain gate -- record it first
                 # so an abort during the (possibly long) drain is traceable.
-                if not self.drain_before_publish:
+                if not self.drain_before_publish and self.drain_predecessor:
                     phase = "draining"
                     write_breadcrumb(
                         state=phase, old=old_dict,
@@ -766,24 +764,22 @@ class CutoverOrchestrator:
                     conditional.retire_predecessor()
                     result.retirement_requested = True
                 else:
-                    retirement = old_client.shutdown()
-                    if self.drain_before_publish and (
-                        not isinstance(retirement, dict) or retirement.get("retired") is not True
-                    ):
-                        raise CutoverError("old daemon retirement was not confirmed by its owner")
-                    if self.drain_before_publish:
-                        result.retirement_confirmed = True
-                        result.steps.append("old daemon exit confirmed")
-                result.steps.append("old daemon shutdown requested")
+                    from .cutover_drain import shutdown_predecessor
+
+                    shutdown_predecessor(self, old, old_client, result)
+                result.steps.append("old daemon shutdown requested" if result.predecessor_cleanup is None
+                                    else "old daemon best-effort retirement attempted")
                 if conditional:
                     conditional.confirm_retired()
                     result.retirement_confirmed = True
                     result.steps.append("old daemon exit confirmed")
-                # The retired daemon is the OLD one, so log its port (matching
-                # `drain`); the new port is carried in detail for correlation.
+                detail = {"new_port": new_port}
+                if result.predecessor_cleanup is not None:
+                    detail.update(old_endpoint=old_dict, predecessor_cleanup=result.predecessor_cleanup)
                 self._emit(
-                    lifecycle.CUTOVER_RETIRE, lifecycle.OK, port=old.port,
-                    detail={"new_port": new_port},
+                    lifecycle.CUTOVER_RETIRE,
+                    lifecycle.FAIL if result.predecessor_cleanup and not result.retirement_confirmed else lifecycle.OK,
+                    port=old.port, detail=detail,
                 )
             else:
                 result.committed = True

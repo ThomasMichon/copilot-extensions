@@ -26,6 +26,7 @@ class CutoverResult:
     retirement_pending: bool = False
     conditional: bool = False
     publication_uncertain: bool = False
+    predecessor_cleanup: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -48,4 +49,6 @@ class CutoverResult:
             data["publication_uncertain"] = True
         if self.retirement_pending:
             data["retirement_pending"] = True
+        if self.predecessor_cleanup is not None:
+            data["predecessor_cleanup"] = self.predecessor_cleanup
         return data

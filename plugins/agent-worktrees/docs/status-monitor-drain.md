@@ -10,6 +10,16 @@ Ownership-transfer and serving-convergence follow-ups remain tracked by
 [#5453](https://github.com/ThomasMichon/copilot-extensions/issues/5453) and
 [#6389](https://github.com/ThomasMichon/copilot-extensions/issues/6389).
 
+The ordinary asynchronous installer retains native predecessor custody even
+when the old peer lacks its retirement/recovery capabilities or its control
+request times out. After the incoming monitor passes actual serving readiness,
+the existing cutover owner attempts bounded termination of that exact PID/birth
+and guarded release of its previous endpoint. A failed cleanup is reported
+without rolling back the healthy incoming monitor. Runtime-reference and
+dev-claim settlement remains with the existing retirement lifecycle, not a new
+reaper. Unknown native identity, changed routes and unsupported incoming
+capabilities still refuse their respective operation.
+
 ## What actually happens
 
 1. The installer builds, marks complete and selects the new immutable runtime.

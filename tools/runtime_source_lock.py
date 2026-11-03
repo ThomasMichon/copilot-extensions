@@ -6,7 +6,7 @@ admission. Its candidate is not a complete inspected-wheel RuntimeProfile.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
 
 from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
@@ -120,11 +121,14 @@ def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
 
 def _wheel_pins(
     content: bytes, target: dict, deadline: float, *, prefer_target_tags: bool = False,
+    local_wheels: Mapping[str, Path] | None = None,
 ) -> list[dict]:
-    """Keep exact-file defaults; opt in to unique recorded-target tag preference."""
+    """Keep remote defaults; local witnesses must match an already-held wheel set."""
     _check_deadline(deadline)
     if type(prefer_target_tags) is not bool:
         raise ProfileError("native source wheel matching needs an explicit boolean")
+    if local_wheels is not None and not isinstance(local_wheels, Mapping):
+        raise ProfileError("native local wheel witnesses require a held mapping")
     try:
         document = dependencies._toml_parser().loads(content.decode("utf-8"))
         if (
@@ -188,10 +192,20 @@ def _wheel_pins(
                 url = urlsplit(wheel["url"])
                 filename = unquote(url.path.rsplit("/", 1)[-1])
                 if (
-                    url.scheme not in ("http", "https") or not url.hostname
-                    or not filename.endswith(".whl") or "/" in filename or "\\" in filename
+                    not filename.endswith(".whl") or "/" in filename or "\\" in filename
                 ):
                     raise ProfileError("native source wheel witness has no exact wheel filename")
+                if local_wheels is None:
+                    if url.scheme not in ("http", "https") or not url.hostname:
+                        raise ProfileError("native source wheel witness has no exact wheel filename")
+                else:
+                    path = Path(url2pathname(url.path))
+                    if (
+                        url.scheme != "file" or url.netloc or url.query or url.fragment
+                        or not path.is_absolute() or filename not in local_wheels
+                        or not os.path.samefile(path, local_wheels[filename])
+                    ):
+                        raise ProfileError("native source wheel witness differs from the held pool")
                 wheel_name, wheel_version, _, tags = _wheel_filename(filename, 10_000, deadline)
                 if wheel_name != name or wheel_version != version:
                     raise ProfileError("native source wheel witness differs from the selected target")
@@ -212,7 +226,7 @@ def _wheel_pins(
             })
         _check_deadline(deadline)
         return sorted(result, key=lambda item: item["name"])
-    except (ValueError, TypeError, KeyError, InvalidMarker) as exc:
+    except (OSError, ValueError, TypeError, KeyError, InvalidMarker) as exc:
         if isinstance(exc, ProfileError):
             raise
         raise ProfileError("invalid native source wheel-lock output") from exc

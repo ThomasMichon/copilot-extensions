@@ -110,6 +110,35 @@ def test_native_file_matching_default_remains_strict(multiple):
         )
 
 
+def test_native_local_witness_requires_the_held_file(monkeypatch):
+    from runtime_source_lock import _wheel_pins
+
+    filename = "app-1.0-py3-none-any.whl"
+    held = Path(__file__).parent / "pool" / filename
+    other = Path(__file__).parent / "other" / filename
+    monkeypatch.setattr("runtime_source_lock.os.path.samefile", lambda left, right: left == right)
+    original = _native_file_lock([(filename, {"sha256": "1" * 64})])
+    target = {"environment": dict(_ENVIRONMENT), "tags": ["py3-none-any"]}
+
+    def content(url):
+        return original.replace(
+            ("https://example.invalid/" + filename).encode(), url.encode(),
+        )
+
+    with pytest.raises(source.ProfileError):
+        _wheel_pins(content(held.as_uri()), target, time.monotonic() + 5)
+    assert _wheel_pins(
+        content(held.as_uri()), target, time.monotonic() + 5,
+        local_wheels={filename: held},
+    )[0]["filename"] == filename
+    for url in (other.as_uri(), held.as_uri() + "?query=1", "https://example.invalid/" + filename):
+        with pytest.raises(source.ProfileError):
+            _wheel_pins(
+                content(url), target, time.monotonic() + 5,
+                local_wheels={filename: held},
+            )
+
+
 @pytest.mark.parametrize("marker,admitted", [
     ('"sys_platform == \'win32\'"', True),
     ('"sys_platform == \'linux\'"', False),
