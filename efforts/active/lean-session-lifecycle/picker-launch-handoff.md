@@ -597,3 +597,43 @@ reviewed admission revision is implemented and qualified.
   daemon, whose routed process identity and readiness were observed after
   its startup caller had exited. Remaining installer reconciliation and
   complete working-set verification are still separate obligations.
+
+### 2026-11-03 - Context correction merged; watchdog blocker isolated
+
+- #10100 merged at `06e17474ee8ca66d9bfb92b81fe385f43ec5e00d` after
+  exact-head required CI, resolution of all three review threads, the
+  documentation/contract assessment and the recorded clean-Comment
+  evaluation. The source worktree is pulled forward; release and adoption
+  of this additional correction are not inferred from that merge.
+- The Bridge survivor later requested watchdog replacement after health
+  timeouts. Its current-generation replacement failed daemon-instance PID
+  admission. #10121 owns the isolated service-watchdog defect: the already
+  attributed delayed helper uses Windows CRT `exec`, which starts a different
+  process while carrying the helper's instance context. This is separate
+  from the external contributor's installer-watchdog work in #6928.
+- The next bounded source stretch preserves the admitted helper PID on
+  Windows, retains existing POSIX behavior and qualifies actual native
+  admission. No admission check, Job policy, deadline or session database is
+  bypassed. A proposed terminal-metadata repair was not performed because
+  its required healthy-survivor identity could no longer be established.
+  Whole-update recovery and the parent completion gates remain open.
+
+### 2026-11-03 - Watchdog PID custody qualified at the source boundary
+
+- #10121's Windows replacement now enters the module in the admitted helper
+  process, preserving its PID, original start flags and delayed startup.
+  POSIX keeps its existing `exec` path. The exact canonical Windows helper
+  also joins strict daemon recognition so ensure/retirement does not mistake
+  the repaired replacement for an unrelated `-c` process; arbitrary snippets,
+  changed helper bodies and non-start commands remain refused.
+- The focused watchdog, process-identity and launch-adapter packet passes
+  95 cases with nine existing platform skips. Its native control uses the
+  actual attributed launcher and decorated service admission, with only the
+  serving body replaced by PID/argv evidence under a private renewed test
+  lifecycle. The initial fixture's command-registration cycle was corrected
+  without mocking admission or changing process custody.
+- Python lint, the complete module-size check and the 13-plugin installation
+  contract pass. Architecture and test documentation describe this bounded
+  evidence; no service port or existing session is used by the fixture.
+  Exact-head review/CI, release, authorized adoption and live watchdog recovery
+  remain open. Neither the mini-task nor its inherited parent is complete.

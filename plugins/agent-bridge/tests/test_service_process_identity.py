@@ -14,6 +14,29 @@ from agent_bridge import service_process_identity as identity
 from agent_bridge.service_process_identity import bridge_daemon_argv, split_windows_command
 
 
+@pytest.mark.parametrize("arguments, expected", [
+    (["1.0", "start"], True),
+    (["1.0", "--json", "start", "--passive"], True),
+    (["start"], False),
+    (["1.0"], False),
+    (["1.0", "status"], False),
+    (["1.0", "--unknown", "start"], False),
+])
+def test_windows_watchdog_entrypoint_is_recognized_exactly(monkeypatch, arguments, expected):
+    monkeypatch.setattr(identity, "sys", SimpleNamespace(platform="win32"))
+    code = identity.WINDOWS_WATCHDOG_START_CODE
+    assert bridge_daemon_argv(["python.exe", "-c", code, *arguments]) is expected
+    assert not bridge_daemon_argv(["python.exe", "-c", code + ";pass", *arguments])
+    assert not bridge_daemon_argv(["python.exe", "-c", "pass", code, *arguments])
+
+
+def test_windows_watchdog_entrypoint_is_not_posix_exec_identity(monkeypatch):
+    monkeypatch.setattr(identity, "sys", SimpleNamespace(platform="linux"))
+    assert not bridge_daemon_argv([
+        "python", "-c", identity.WINDOWS_WATCHDOG_START_CODE, "1.0", "start",
+    ])
+
+
 @pytest.mark.parametrize("arguments", [
     ["python", "-m", "agent_bridge", "start"],
     ["/runtime/bin/python3.10", "-u", "-m", "agent_bridge", "start", "--passive"],
