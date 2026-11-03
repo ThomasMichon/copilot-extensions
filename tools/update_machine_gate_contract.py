@@ -1,4 +1,4 @@
-"""Exercise update's machine gate and receipt judgment without an installed runtime."""
+"""Exercise update gates, receipt judgment and monitor outcomes without an installed runtime."""
 
 from __future__ import annotations
 
@@ -46,6 +46,71 @@ def _module(path: Path, name: str) -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def check_monitor_outcome(source: Path) -> list[str]:
+    """Exercise the legacy monitor adapter with a fake transition boundary."""
+    try:
+        _check_monitor_outcome(source)
+    except (RuntimeError, OSError, UnicodeError, SyntaxError, TypeError, AttributeError,
+            KeyError, NameError, ValueError) as error:
+        return [f"update monitor outcome contract: {error}"]
+    return []
+
+
+def _check_monitor_outcome(source: Path) -> None:
+    environ: dict[str, str] = {}
+    environment = SimpleNamespace(environ=environ, getenv=environ.get)
+    state: dict = {}
+    calls = []
+
+    def activate(*, monitor_was_live):
+        calls.append(monitor_was_live)
+        if state.get("error"):
+            raise RuntimeError("fixture transition failure")
+        return state["summary"]
+
+    adapter = _function(source / "status_monitor_cutover.py", "installer_after_update", {
+        "os": environment, "activate_after_update": activate, "print": lambda *_args, **_kwargs: None,
+    })
+    cases = (
+        ("disabled", {"enabled": False, "action": "noop", "reason": "disabled"}, True),
+        ("not-live", {"enabled": True, "action": "noop", "reason": "no-live-monitor"}, True),
+        ("unrouted", {"enabled": True, "action": "noop", "reason": "no-routed-monitor"}, False),
+        ("busy", {"enabled": True, "action": "noop", "reason": "cutover-busy:123"}, False),
+        ("refused", {"enabled": True, "action": "refused", "result": {"ok": False}}, False),
+        ("rolled-back", {"enabled": True, "action": "cutover",
+                         "result": {"ok": False, "rolled_back": True}}, False),
+        ("missing-result", {"enabled": True, "action": "cutover"}, False),
+        ("invalid-success", {"enabled": True, "action": "cutover", "result": {"ok": "true"}}, False),
+        ("cutover", {"enabled": True, "action": "cutover", "result": {"ok": True}}, True),
+        ("restart-failed", {"enabled": True, "action": "restart", "restart": {"spawned": False}}, False),
+        ("restart-missing", {"enabled": True, "action": "restart"}, False),
+        ("restart-current", {"enabled": True, "action": "restart",
+                             "restart": {"already_current": True}}, True),
+        ("restart-spawned", {"enabled": True, "action": "restart", "restart": {"spawned": True}}, True),
+        ("unknown", {"enabled": True, "action": "unknown"}, False),
+        ("unknown-success", {"enabled": True, "action": "unknown", "result": {"ok": True}}, False),
+    )
+    for live in ("0", "1"):
+        environment.environ["AGENT_WORKTREES_MONITOR_WAS_LIVE"] = live
+        for label, summary, succeeded in cases:
+            state.update(summary=summary, error=False)
+            calls.clear()
+            status = adapter()
+            _expect(type(status) is int and (status == 0) == succeeded,
+                    f"{label}: monitor transition outcome was misreported")
+            _expect(calls == [live == "1"], f"{label}: monitor liveness was not forwarded")
+
+    state["error"] = True
+    calls.clear()
+    try:
+        status = adapter()
+    except RuntimeError as error:
+        _expect(str(error) == "fixture transition failure", "unexpected monitor exception")
+    else:
+        _expect(type(status) is int and status != 0, "monitor exception became success")
+    _expect(calls == [True], "monitor exception did not reach the transition boundary")
 
 
 def check_receipt_judgment(source: Path) -> list[str]:
