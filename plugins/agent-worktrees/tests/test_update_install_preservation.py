@@ -170,6 +170,13 @@ def test_posix_native_acquisition_interruption_retains_original(tmp_path, monkey
     )
     try:
         _wait_file(tmp_path / "transaction-ready", worker)
+        from agent_worktrees import reconcile_deployment
+        from plugin_activation import activation_preservation_pending
+
+        assert activation_preservation_pending(home) is True
+        runtime = {"service": "agent-example", "phase": "runtime"}
+        diagnostic = reconcile_deployment.execution_diagnostic(runtime)
+        assert diagnostic is not None and diagnostic["reason"] == "payload-custody-pending"
         worker.kill()
         stdout, stderr = worker.communicate(timeout=5)
         assert not stdout and not stderr
