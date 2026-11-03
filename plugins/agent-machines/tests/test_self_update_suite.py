@@ -53,7 +53,7 @@ def test_self_update_suite_holds_canonical_lock_across_process_boundary(tmp_path
 
     result = self_update_suite.run_suite_updates(["example"], runner=runner, home=tmp_path)
     assert result.status == "ok"
-    assert calls == [["agent-worktrees", "-p", "example", "update", "--no-manager"]]
+    assert calls == [["agent-worktrees", "-p", "example", "update", "--auto", "--no-manager"]]
     with ownership.suite_update_transaction(tmp_path):
         pass  # The transaction is released before dependency restore.
 

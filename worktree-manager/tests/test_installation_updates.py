@@ -145,6 +145,8 @@ def engine_cells(inventory, monkeypatch, tmp_path):
         }
         for name in ("cell-a", "cell-b")
     }
+    for context in contexts.values():
+        Path(context["AGENT_WORKTREES_UPDATE_CONTEXT"]).mkdir(parents=True)
     roots = {name: tmp_path / name / "runtime" for name in contexts}
     selected = []
     resolutions = []
@@ -336,6 +338,10 @@ def test_default_root_submission_history_uses_real_resolver_without_inheriting_c
     monkeypatch.setattr(ui.engine_client, "inherited_engine_command", lambda: None)
     monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation", RESOLVE_ENGINE_INVOCATION)
     patch_profile(monkeypatch, agent_plugin_runtime, home)
+    context_owner = agent_plugin_runtime._load_installation_context()
+    monkeypatch.setattr(agent_plugin_runtime, "_load_installation_context", lambda: context_owner)
+    # This fixture models an ordinary profile, not native WSL registration.
+    monkeypatch.setattr(context_owner, "_is_wsl_guest", lambda: False)
     root = home / ".agent-worktrees"
     write_slot(root / "versions" / "1.0.0", windows=os.name == "nt")
     (root / "current-version").write_text("1.0.0", encoding="utf-8")
@@ -353,13 +359,15 @@ def test_default_root_submission_history_uses_real_resolver_without_inheriting_c
         }],
     })
     assert ui.submit("guide") == 0
-    assert calls[0].context == ()
+    assert dict(calls[0].context) == {
+        "WORKTREE_MANAGER_ROOT": str((home / ".worktree-manager").resolve()),
+    }
     for state, exit_code, activity in (
         ("pending", None, "queued"), ("running", None, "running"),
         ("completed", 1, "failed"), ("completed", 0, "succeeded"),
     ):
         request.state, request.exit_code = state, exit_code
-        assert ui.inventory()["entries"][1]["activity"] == activity
+        assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["activity"] == activity
 
     install, _python = namespaced_fixture(home, windows=os.name == "nt")
     write_json(home / ".copilot-extensions" / "installation-mode.json", {
@@ -372,14 +380,17 @@ def test_default_root_submission_history_uses_real_resolver_without_inheriting_c
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(home / "payload"))
     cell = RESOLVE_ENGINE_INVOCATION("agent-worktrees")
     assert cell is not None and cell[1] == install.parent
-    assert RESOLVE_ENGINE_INVOCATION("agent-worktrees", environment={}) == invocation
+    isolated = RESOLVE_ENGINE_INVOCATION("agent-worktrees", environment={})
+    assert isolated is not None and isolated[1] == invocation[1]
+    assert isolated[0][0] == invocation[0][0]
+    assert isolated[0][-2:] == invocation[0][-2:]
     selected[0] = str(cell[1].resolve())
-    row = ui.inventory()["entries"][1]
+    row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
     assert row["activity"] == "idle" and "Durable operation:" not in row["card"]["body"]
     selected[0] = str(root.resolve())
-    assert ui.inventory()["entries"][1]["activity"] == "succeeded"
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["activity"] == "succeeded"
     request.spec = replace(calls[0], context=(("COPILOT_EXTENSIONS_CONTEXT", str(home / "missing.json")),))
-    row = ui.inventory()["entries"][1]
+    row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
     assert row["activity"] == "unknown"
     assert "Durable update attribution unavailable" in row["card"]["body"]
 

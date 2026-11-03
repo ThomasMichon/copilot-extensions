@@ -169,7 +169,13 @@ def test_configure_cannot_change_owner_during_active_update(tmp_path: Path) -> N
     assert policy.load_policy(tmp_path).owner == "manager"
 
 
-def test_update_guard_strips_only_its_flags_and_serializes(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("automatic_flags", [
+    ["--automatic-trigger", "manager"],
+    ["--auto", "--automatic-trigger", "manager"],
+])
+def test_update_guard_strips_only_its_flags_and_serializes(
+    tmp_path: Path, monkeypatch, automatic_flags: list[str],
+) -> None:
     monkeypatch.setattr(cli, "default_root", lambda: tmp_path)
     monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
     policy.configure(tmp_path, owner="manager", provenance="user", project="example")
@@ -183,9 +189,9 @@ def test_update_guard_strips_only_its_flags_and_serializes(tmp_path: Path, monke
         return 4
 
     assert cli.guarded_update(
-        ["--automatic-trigger", "manager", "--project", "example", "--no-anchor-sync"], execute,
+        [*automatic_flags, "--project", "example", "--no-anchor-sync"], execute,
     ) == 4
-    assert calls == [(["--project", "example", "--no-anchor-sync"], "schedule", "manager")]
+    assert calls == [(["--auto", "--project", "example", "--no-anchor-sync"], "schedule", "manager")]
     policy.configure(tmp_path, owner="disabled", provenance="user")
     assert cli.guarded_update(["--automatic-trigger", "manager"], execute) == 3
     assert len(calls) == 1
@@ -338,7 +344,7 @@ def test_targeted_updates_share_automatic_admission_and_preserve_trigger(
     policy.configure(tmp_path, owner="manager", provenance="user", project="example")
     automatic = ["--automatic-trigger", "manager", "--target", "agent-bridge"]
     assert manager._cmd_update(automatic) == 0
-    assert calls[-1] == (["--target", "agent-bridge"], "schedule", "manager")
+    assert calls[-1] == (["--auto", "--target", "agent-bridge"], "schedule", "manager")
     policy.configure(tmp_path, owner="disabled", provenance="user")
     assert manager._cmd_update(automatic) == 3
     assert len(calls) == 2
@@ -386,7 +392,10 @@ def test_public_targeted_executor_applies_policy_and_consumes_manager_only_flags
     monkeypatch.setattr(engine_client, "run_engine_passthrough", lambda project, args:
         calls.append((project, args)) or 0)
     assert boundary.cmd_update_request(arguments) == (0 if enabled else 3)
-    assert calls == ([("example", ["update", "--no-manager", "--target", "agent-bridge"])] if enabled else [])
+    assert calls == (
+        [("example", ["update", "--no-manager", "--target", "agent-bridge", "--auto"])]
+        if enabled else []
+    )
 
 
 def test_health_proves_live_worker_and_rejects_wrong_cookie(tmp_path: Path) -> None:

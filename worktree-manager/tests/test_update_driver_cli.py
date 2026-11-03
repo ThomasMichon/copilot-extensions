@@ -901,6 +901,7 @@ def test_self_install_reports_project_authority_refusal(queued, monkeypatch, tmp
     ["--target", "agent-bridge"],
     ["--target", "agent-bridge", "--automatic-trigger", "manager"],
     ["--target", "agent-bridge", "--automatic-trigger", "external", "--controller", "example"],
+    ["--target", "agent-bridge", "--auto"],
 ])
 def test_public_component_update_queues_manager_admission_before_engine_dispatch(queued, monkeypatch, flags):
     from worktree_manager import engine_client
@@ -911,7 +912,10 @@ def test_public_component_update_queues_manager_admission_before_engine_dispatch
     )
     seen, _request = queued
     assert driver.cmd_update_request(flags) == 6
-    assert seen["spec"].backend == "manager" and seen["spec"].argv == tuple(flags)
+    automatic = "--auto" in flags or "--automatic-trigger" in flags
+    expected = [*flags, "--auto"] if automatic and "--auto" not in flags else flags
+    assert seen["spec"].backend == "manager" and seen["spec"].argv == tuple(expected)
+    assert seen["spec"].repair is not automatic
     if "--automatic-trigger" in flags:
         assert "--unattended" not in seen["spec"].argv
         assert "CE_UPDATE_UNATTENDED" not in dict(seen["spec"].context)
@@ -1030,6 +1034,9 @@ def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
     monkeypatch.setenv("HOME", str(caller))
     monkeypatch.setenv("USERPROFILE", str(caller))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(held))
+    monkeypatch.setenv("GH_TOKEN", "fixture-session-credential")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "fixture-worker-transport")
+    monkeypatch.setenv("SSH_ASKPASS", "fixture-worker-helper")
 
     class Custody:
         root = tmp_path
@@ -1046,10 +1053,16 @@ def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
     monkeypatch.setattr(update_driver, "status", lambda *args, **kwargs: request)
-    monkeypatch.setattr(
-        manager, "_cmd_update",
-        lambda args: 3 if maintenance_policy.update_refusal(args) else 0,
-    )
+    def execute(arguments):
+        unattended = backend == "manager" and "--auto" in arguments
+        assert ("GH_TOKEN" not in driver.os.environ) is unattended
+        assert ("GIT_SSH_COMMAND" not in driver.os.environ) is unattended
+        assert ("SSH_ASKPASS" not in driver.os.environ) is unattended
+        if unattended:
+            assert driver.os.environ["SSH_ASKPASS_REQUIRE"] == "never"
+        return 3 if maintenance_policy.update_refusal(arguments) else 0
+
+    monkeypatch.setattr(manager, "_cmd_update", execute)
     for selected, arguments, expected in (
         (str(allowed), ["--auto"], 0),
         (str(held), ["--auto"], 3),
@@ -1066,6 +1079,9 @@ def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
         assert driver.cmd_update_request(arguments) == expected
         assert driver.os.environ["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(held)
         assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == "worker-original"
+        assert driver.os.environ["GH_TOKEN"] == "fixture-session-credential"
+        assert driver.os.environ["GIT_SSH_COMMAND"] == "fixture-worker-transport"
+        assert driver.os.environ["SSH_ASKPASS"] == "fixture-worker-helper"
     assert "spec" not in seen
 
 
@@ -1487,7 +1503,7 @@ def test_actual_queued_automatic_update_sanitizes_a_foreground_drivers_environme
     assert foreground["session_credentials_present"] and foreground["git_override_present"]
     assert foreground["askpass_requirement"] == "force"
     assert foreground["unattended"] is None
-    assert automatic["arguments"] == ["--automatic-trigger", "manager"]
+    assert automatic["arguments"] == ["--automatic-trigger", "manager", "--auto"]
     assert not automatic["session_credentials_present"] and not automatic["git_override_present"]
     assert not automatic["askpass_present"] and automatic["askpass_requirement"] == "never"
     assert automatic["unattended"] == "1"

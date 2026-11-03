@@ -492,7 +492,7 @@ def cmd_update_request(rest: list[str]) -> int:
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
             cwd=source_anchor, source=_source_key(), context=tuple(context.items()),
-            repair=not options.auto,
+            repair="--auto" not in arguments,
             killswitch_path=hold_path,
             authority="standalone" if selected.configured and selected.mode == "standalone" else "",
         )
