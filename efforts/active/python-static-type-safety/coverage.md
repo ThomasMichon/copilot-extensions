@@ -1,0 +1,172 @@
+# Strict enforcement coverage
+
+Canonical objective and completion gate: [README](README.md).
+The [project manifest](../../../tools/typecheck-projects.json) owns scope,
+exclusions, source views and admission policy; this tracker records progress,
+not a second checker configuration.
+
+## Snapshot and counting rules
+
+Snapshot: **2026-11-02**, merged Dev policy
+`07050311d0220051dd518c61ded848ab4d226dde`, reconciled with
+`python tools/typecheck.py --inventory --json`.
+
+- **27 / 68 checker projects (39.7%)** have merged strict admission.
+- **206 / 7,628 physical Python files (2.7%)** belong to those strict scopes.
+- **41 projects remain pending; none are basic.**
+- All 7,628 tracked physical Python paths are classified. Classification,
+  annotations, passing consumer tests and a prepared implementation do not
+  count as strict enforcement.
+- Plugin Activation is prepared but not merged: its 21 files are not included
+  in the locked totals. Admission would bring this snapshot to 28 projects
+  and 227 physical files. Plugin Resolve's source artifact is also prepared,
+  but its admission and integration gates remain open.
+
+Project percentages are not code-volume or runtime-test percentages. Small
+shared-library projects and large plugins have very different sizes. Physical
+copies count under their own owners rather than disappearing through
+deduplication. Split source/remaining projects count only their separately
+owned files; the manifest remains authoritative for their exact boundaries.
+
+| Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
+|------|-----------------:|-----------------------:|----------------------:|------------------------------:|
+| Shared libraries | 37 | 26 | 712 | 202 |
+| Plugins | 20 | 0 | 5,358 | 0 |
+| Services and managers | 7 | 0 | 912 | 0 |
+| Tools and support | 4 | 1 | 646 | 4 |
+| **Total** | **68** | **27** | **7,628** | **206** |
+
+**Locked** means the complete declared project scope is admitted to strict
+MyPy on both declared analysis targets through a merged, reviewed change and
+required CI. It does not claim installed rollout, arbitrary runtime soundness
+or qualification of another project's copies/callers. Reviewed dynamic and
+third-party boundaries remain permitted by the effort's terminal policy.
+Admission decisions and validation details are retained in the
+[canonical journal](README.md#journal).
+
+## Shared libraries
+
+| Project | Python files | Merged gate | Admission record or remaining work |
+|---------|-------------:|-------------|------------------------------------|
+| `lib-agent-procutil` | 133 | Pending | Production, native API and fixture cohorts; preserve existing SDK owners |
+| `lib-bootstrap-killswitch` | 3 | **Locked** | #9964 |
+| `lib-config-migrate` | 6 | **Locked** | #9924; declared YAML/stub environment |
+| `lib-configuration-layers` | 6 | **Locked** | #10021; deployed-resolution follow-up #10132 |
+| `lib-core-delegation` | 5 | **Locked** | #10025 |
+| `lib-credential-relay` | 22 | Pending | Complete source, protocol and test qualification |
+| `lib-docker-resource-producer` | 11 | **Locked** | #10045; canonical Windows/Linux fixtures |
+| `lib-dropin-registry` | 6 | **Locked** | #9930; consumer copies remain independently owned |
+| `lib-endpoint-rendezvous` | 5 | **Locked** | #9933 |
+| `lib-fleet-contracts` | 6 | **Locked** | #10026 |
+| `lib-fleet-index-adapter` | 4 | **Locked** | #10036 |
+| `lib-fleet-vault-adapter` | 4 | **Locked** | #10036 |
+| `lib-installation-context` | 51 | **Locked** | #10018; faithful source view #9916 and consumer delivery #10048 |
+| `lib-installer-engine` | 28 | Pending | Fragment composition, helper/template and caller qualification |
+| `lib-installer-readiness` | 10 | **Locked** | #10044 |
+| `lib-lazy-cli-dispatch` | 3 | **Locked** | #9951 |
+| `lib-machine-transport` | 19 | **Locked** | #10107; five consumer contracts and native qualification |
+| `lib-payload-invocation` | 29 | Pending | Production and fixture cohorts; emitted templates/copies also need qualification |
+| `lib-peer-launch` | 3 | **Locked** | #9967 |
+| `lib-plugin-activation` | 21 | Pending | Prepared integration #10108; final candidate checks and merge remain |
+| `lib-plugin-resolve` | 23 | Pending | Source artifact #10141; lead review, native Linux, consumers and admission remain |
+| `lib-process-telemetry` | 17 | **Locked** | #10083; explicit optional-SDK checker environment |
+| `lib-remote-login-shell` | 1 | **Locked** | Foundation source admission; canonical journal |
+| `lib-remote-login-shell-remaining` | 1 | **Locked** | Leaf helper/test completion; canonical journal |
+| `lib-repository-policy` | 6 | **Locked** | #10029; executable guest reader included |
+| `lib-session-liveness-probe` | 1 | **Locked** | Foundation source admission; canonical journal |
+| `lib-session-liveness-probe-remaining` | 2 | **Locked** | Leaf helper/test completion; canonical journal |
+| `lib-single-instance-lease` | 14 | **Locked** | #10084; canonical/native and copy correspondence checks |
+| `lib-ssh-manager` | 52 | Pending | Transport/native boundaries and complete fixtures |
+| `lib-update-driver` | 99 | Pending | Driver, installer/bootstrap and test cohorts |
+| `lib-update-telemetry` | 8 | **Locked** | #10043; owning consumer tests remain separately pending |
+| `lib-venue-copilot` | 12 | Pending | Venue/runtime contracts and complete tests |
+| `lib-versioned-runtime` | 22 | Pending | Runtime, construction/retention and fixture cohorts |
+| `lib-work-coalescing-singleton` | 8 | **Locked** | #10039 |
+| `lib-worktree-identity` | 1 | **Locked** | Foundation source admission; canonical journal |
+| `lib-worktree-identity-remaining` | 1 | **Locked** | Leaf helper/test completion; canonical journal |
+| `lib-zdd` | 69 | Pending | Lifecycle, native/process boundaries and complete fixtures |
+
+## Plugins
+
+Each row includes all Python owned by that plugin's declared project: source,
+tests, installers/hooks and independently owned shipped copies where present.
+Passing a shared-library consumer regression does not lock the plugin.
+The remaining marketplace entries, `agent-remote-driver`, `visions` and
+`wsl-setup`, have no tracked physical `.py` files in this snapshot. They are
+explicitly outside the physical-file/project metrics, not omitted pending
+Python projects. Any embedded/generated Python still belongs to the
+cross-cutting qualification gate below.
+
+| Project | Python files | Merged gate | Remaining work |
+|---------|-------------:|-------------|----------------|
+| `agent-bridge` | 860 | Pending | Component-sized source, native boundary, fixture and copy cohorts |
+| `agent-codespaces` | 278 | Pending | Runtime, venue/install helpers, fixtures and copies |
+| `agent-conduct-guidance` | 36 | Pending | Scripts, tests and owned copies |
+| `agent-containers` | 187 | Pending | Runtime, providers/install helpers, fixtures and copies |
+| `agent-dispatch` | 807 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
+| `agent-index` | 397 | Pending | Client/server, scripts, fixtures and copies |
+| `agent-logger` | 239 | Pending | Runtime, native installer fixtures and copies |
+| `agent-machines` | 169 | Pending | Configuration/requirement engine, scripts, fixtures and copies |
+| `agent-mcp` | 217 | Pending | Adapter/auth/runtime contracts, scripts, fixtures and copies |
+| `agent-pull-requests` | 209 | Pending | Provider/runtime contracts, scripts, fixtures and copies |
+| `agent-ssh` | 157 | Pending | Transport/configuration, native helpers, fixtures and copies |
+| `agent-vault` | 161 | Pending | Secret/runtime boundaries, native fixtures and copies |
+| `agent-worktrees` | 1,399 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
+| `ai-attribution` | 5 | Pending | Complete helper/test admission |
+| `budget-guidance` | 86 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
+| `context-handoff` | 6 | Pending | Complete Python helper/test admission |
+| `copilot-extensions-harness` | 17 | Pending | Complete Python helper/test admission |
+| `customizing-copilot` | 95 | Pending | Authoring/review/projection scripts, fixtures and shipped copies |
+| `efforts` | 24 | Pending | Policy/capture/lifecycle helpers and tests |
+| `harness-knowledge` | 9 | Pending | Binding/overlay helpers and tests |
+
+## Services and managers
+
+| Project | Python files | Merged gate | Remaining work |
+|---------|-------------:|-------------|----------------|
+| `fleet-manager` | 213 | Pending | Model/control/runtime subsystems, native boundaries and tests |
+| `service-chat` | 29 | Pending | Service/storage/admission boundaries and tests |
+| `service-dispatch` | 6 | Pending | Complete service and test admission |
+| `service-index` | 27 | Pending | Service/backend/storage boundaries and tests |
+| `service-pr` | 9 | Pending | Provider/service boundaries and tests |
+| `service-ssh` | 26 | Pending | Transport/service/native boundaries and tests |
+| `worktree-manager` | 602 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
+
+## Tools and support
+
+| Project | Python files | Merged gate | Admission record or remaining work |
+|---------|-------------:|-------------|------------------------------------|
+| `checker` | 4 | **Locked** | #9831/#9853; typed front door, source views, cache paths and checker tests |
+| `devcontainer` | 3 | Pending | Build/verification helpers |
+| `effort-helpers` | 5 | Pending | Every tracked effort-hosted executable helper |
+| `repository-tools` | 634 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
+
+## Cross-cutting lockdown
+
+| Gate | State | Evidence or completion condition |
+|------|-------|----------------------------------|
+| Physical Python ownership/classification | Established | Current inventory accounts for every tracked physical `.py` path; unknown paths must still fail |
+| Required source type gate | Established for admitted scopes | #9853; actual type-regression rejection recorded in the canonical effort |
+| Required exact-candidate type gate | Established for admitted scopes | #9862 and the reviewed Main adoption; actual candidate regression rejection recorded |
+| All fragments/templates/generated copies qualified | Open | Complete source-map/materialization correspondence and negative drift controls |
+| Every plugin, service and tool strictly admitted | Open | All project rows locked; no pending/basic scope or omitted fixture family |
+| Final full-portfolio local/CI/release parity | Open | All declared targets, final negative controls and actual full-cohort source/candidate gates pass together |
+
+## Updating after each lockdown
+
+1. After a reviewed admission actually merges, refresh the inventory with the
+   existing `--inventory --json` command and inspect the merged project policy.
+   Record the merged source snapshot, issue/PR evidence and relevant
+   qualification in this tracker and the canonical journal.
+2. Reconcile every row against the manifest, including new/split/renamed
+   projects. Recompute area totals and physical-file totals from inventory
+   ownership; never infer coverage from annotations or a selected test run.
+3. Keep prepared work pending until its admission has merged and required CI
+   and validation are resolved. Canonical-library locks do not advance a
+   consumer/copy row without that row's own complete qualification.
+4. Keep the effort index as a pointer to this tracker, not a second stale
+   numeric scoreboard. Batch tracker/journal publication with the next
+   substantive slice, preserving the repository's PR/review gate.
+5. At the final gate, reconcile all rows and cross-cutting conditions again.
+   Close #9807 and archive the effort only after its Plan and Validation Plan
+   are completely resolved.

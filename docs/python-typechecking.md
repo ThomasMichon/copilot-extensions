@@ -9,7 +9,7 @@ Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resour
 Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
 Context, Installer Readiness, Lazy CLI Dispatch, Machine Transport,
-Peer Launch, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
+Peer Launch, Plugin Activation, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
 Instance Lease, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
 source/test projects.
@@ -42,6 +42,8 @@ python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-machine-transport --prepare
 python tools/typecheck.py lib-machine-transport
 python tools/typecheck.py lib-peer-launch
+python tools/typecheck.py lib-plugin-activation --prepare
+python tools/typecheck.py lib-plugin-activation
 python tools/typecheck.py lib-process-telemetry --prepare
 python tools/typecheck.py lib-process-telemetry
 python tools/typecheck.py lib-repository-policy
@@ -67,6 +69,15 @@ same bytes for both the environment key and installation. Nested requirement
 includes are refused until a complete graph snapshot is qualified. The dependency
 install subprocess has a five-minute bound. Cache-path validation stays independent of Python
 3.11-only installer imports, preserving the checker's Python 3.10 bootstrap.
+
+Plugin Activation checks all twenty-one canonical source/test files strictly
+on both targets using the existing YAML checker lock. Dynamic JSON and YAML
+documents retain explicit `Any` boundaries after the existing runtime checks;
+cache callbacks preserve their result types, and native Windows bindings retain
+their pointer-correct signatures and platform gates. Resolution, preservation,
+precedence and filesystem behavior are unchanged. The synchronized Customizing
+Copilot copy and all nine release consumers remain independently pending
+checker projects.
 
 Config Migrate selects `tools/typecheck-yaml-requirements.txt`, a separate flat
 hash lock containing the same checker/pytest pins plus seasoned PyYAML and its
