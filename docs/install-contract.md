@@ -3641,6 +3641,9 @@ cutover into a successful operation.
 execution seam, human-output adapter, owned runner and receipt judge with a fake child boundary.
 It checks matching, missing and stale receipts plus busy and deadline outcomes;
 it does not replace native process-tree or other installer validation.
+The same guard checks that the legacy monitor result adapter forwards prior
+liveness and reports a failed, busy or refused transition as incomplete.
+Its fake transition does not validate the native wrappers or a live cutover.
 
 Bridge, Dispatch, Vault, Pull Requests, SSH, Budget Guidance, Worktrees and
 Codespaces emit ordinary

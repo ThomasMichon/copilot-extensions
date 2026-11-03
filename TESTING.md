@@ -7251,6 +7251,9 @@ the unit-only release packet.
 The install-contract guard exercises actual Worktrees receipt-judgment source
 with a fake child boundary. Its focused source-mutation controls verify that
 missing/stale receipts and busy/deadline outcomes cannot become success.
+It also exercises the legacy monitor result adapter with a fake transition,
+including failed, refused and busy outcomes and the previous-live flag.
+The native installer wrappers and actual service cutover remain separate tests.
 
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)

@@ -16,6 +16,12 @@ from promotion_unit_tests.test_update_receipt_contract import (
     test_receipt_contract_rejects_runner_bypass as test_receipt_contract_rejects_runner_bypass,
     test_receipt_contract_rejects_source_regressions as test_receipt_contract_rejects_source_regressions,
 )
+from promotion_unit_tests.test_monitor_outcome_contract import (
+    test_actual_monitor_outcome_contract as test_actual_monitor_outcome_contract,
+    test_monitor_outcome_contract_accepts_an_annotated_local as test_monitor_outcome_contract_accepts_an_annotated_local,
+    test_monitor_outcome_contract_accepts_equivalent_environment_lookup as test_monitor_outcome_contract_accepts_equivalent_environment_lookup,
+    test_monitor_outcome_contract_rejects_source_regressions as test_monitor_outcome_contract_rejects_source_regressions,
+)
 
 pytest.register_assert_rewrite("runtime_profile_cases")
 from runtime_profile_cases import TestExactRuntimeProfile as TestExactRuntimeProfile
@@ -105,6 +111,20 @@ def test_install_guard_runs_receipt_contract(monkeypatch, capsys) -> None:
     assert called == [REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"]
     output = capsys.readouterr()
     assert "synthetic receipt violation" in output.out + output.err
+
+
+def test_install_guard_runs_monitor_outcome_contract(monkeypatch, capsys) -> None:
+    called = []
+
+    def fail(source):
+        called.append(source)
+        return ["synthetic monitor outcome violation"]
+
+    monkeypatch.setattr(checker, "check_monitor_outcome", fail)
+    assert checker.check() == 1
+    assert called == [REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"]
+    output = capsys.readouterr()
+    assert "synthetic monitor outcome violation" in output.out + output.err
 
 
 @pytest.mark.parametrize("name,before,after", [
