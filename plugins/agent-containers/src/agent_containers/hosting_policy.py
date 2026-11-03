@@ -106,7 +106,9 @@ def session_host_launch_inputs(
     context: TrustedContext, expected_instance: str | None,
 ) -> tuple[str, str, int, str]:
     """Admit the selected checkout and preference launcher before projection."""
-    require_container_checkout(context.instance_id, context.user, context.workspace)
+    require_container_checkout(
+        getattr(context, "target", context.instance_id), context.user, context.workspace,
+    )
     command = context.config.acp_command_for(context.fleet)
     launcher = "{{target_preference_launcher}}"
     count = command.count(launcher)
@@ -118,11 +120,12 @@ def session_host_launch_inputs(
 
 
 def _run(target: ExecutionCheckout, command: str) -> subprocess.CompletedProcess[str]:
+    from .runtime_drivers import run_routed
+
+    argv = ["docker", "exec", "-u", target.user, target.container_id, "bash", "-lc", command]
     try:
-        result = subprocess.run(
-            ["docker", "exec", "-u", target.user, target.container_id,
-             "bash", "-lc", command],
-            capture_output=True, text=True, timeout=90, check=False,
+        result = run_routed(argv, timeout=90) or subprocess.run(
+            argv, capture_output=True, text=True, timeout=90, check=False,
             creationflags=no_window_flags(),
         )
     except (OSError, subprocess.SubprocessError) as exc:

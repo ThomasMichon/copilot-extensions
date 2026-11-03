@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, NoReturn
 
 import pytest
 
@@ -14,7 +15,7 @@ IDENTITY = "agent-example@market"
 PEER = "agent-peer@market"
 
 
-def initialize(home: Path, value=False) -> None:
+def initialize(home: Path, value: bool = False) -> None:
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.json").write_text(json.dumps({
         "installedPlugins": [{"name": IDENTITY, "enabled": value, "version": "old"}],
@@ -40,7 +41,7 @@ def journal(home: Path) -> Path:
     return home / "activation-preservation" / "transaction.json"
 
 
-def assert_restored(home: Path, value=False) -> None:
+def assert_restored(home: Path, value: bool = False) -> None:
     assert state.inspect_plugin_state(IDENTITY, home)["userActivation"] == str(value).lower()
     config = json.loads((home / "config.json").read_text(encoding="utf-8"))
     assert config["installedPlugins"][0] == {
@@ -52,7 +53,9 @@ def assert_restored(home: Path, value=False) -> None:
 
 
 @pytest.mark.parametrize("value", [False, True])
-def test_original_is_persisted_before_command_and_verified_before_clear(tmp_path, value):
+def test_original_is_persisted_before_command_and_verified_before_clear(
+    tmp_path: Path, value: bool,
+) -> None:
     initialize(tmp_path, value)
     with preserve_activation_durably(IDENTITY, tmp_path) as transaction:
         record = json.loads(journal(tmp_path).read_text(encoding="utf-8"))
@@ -66,7 +69,7 @@ def test_original_is_persisted_before_command_and_verified_before_clear(tmp_path
     assert not journal(tmp_path).exists()
 
 
-def test_absent_original_state_is_not_promoted(tmp_path):
+def test_absent_original_state_is_not_promoted(tmp_path: Path) -> None:
     with preserve_activation_durably(IDENTITY, tmp_path) as transaction:
         install(tmp_path)
         transaction.confirm_quiescent()
@@ -76,10 +79,12 @@ def test_absent_original_state_is_not_promoted(tmp_path):
     assert state.inspect_plugin_state(IDENTITY, tmp_path)["inventoryEnabled"] is False
 
 
-def test_update_custody_never_captures_a_new_activation_snapshot(tmp_path, monkeypatch):
+def test_update_custody_never_captures_a_new_activation_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     initialize(tmp_path)
 
-    def unexpected_capture(*args):
+    def unexpected_capture(*args: object) -> NoReturn:
         pytest.fail("update-only custody must not capture a new install snapshot")
 
     monkeypatch.setattr(state, "capture", unexpected_capture)
@@ -88,7 +93,7 @@ def test_update_custody_never_captures_a_new_activation_snapshot(tmp_path, monke
     assert not journal(tmp_path).exists()
 
 
-def test_unproven_command_retains_original_and_blocks_any_identity(tmp_path):
+def test_unproven_command_retains_original_and_blocks_any_identity(tmp_path: Path) -> None:
     initialize(tmp_path)
     with pytest.raises(PluginStateError, match="settlement is unproven"):
         with preserve_activation_durably(IDENTITY, tmp_path):
@@ -102,7 +107,7 @@ def test_unproven_command_retains_original_and_blocks_any_identity(tmp_path):
     assert state.inspect_plugin_state(IDENTITY, tmp_path)["userActivation"] == "true"
 
 
-def test_unproven_body_failure_retains_evidence_without_masking_the_cause(tmp_path):
+def test_unproven_body_failure_retains_evidence_without_masking_the_cause(tmp_path: Path) -> None:
     initialize(tmp_path)
     error = OSError("original command or witness-publication failure")
     with pytest.raises(OSError) as raised:
@@ -118,18 +123,20 @@ def test_unproven_body_failure_retains_evidence_without_masking_the_cause(tmp_pa
 @pytest.mark.parametrize("phase", ["running", "quiescent"])
 @pytest.mark.parametrize("code,failures", [(32, 1), (33, 1), (32, 2), (5, 1)])
 def test_publication_contention_retries_the_same_original_without_command_replay(
-    tmp_path, monkeypatch, phase, code, failures,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, code: int, failures: int,
+) -> None:
     initialize(tmp_path)
     write = state.write_json_object_atomic
-    attempted, commands, waits = [], [], []
+    attempted: list[dict[str, Any]] = []
+    commands: list[str] = []
+    waits: list[float] = []
 
-    def publish(path, record, *args):
+    def publish(path: Path, record: dict[str, Any], *args: str) -> None:
         if path == journal(tmp_path) and record["phase"] == phase:
             attempted.append(json.loads(json.dumps(record)))
             if len(attempted) <= failures:
                 error = OSError("synthetic journal publication refusal")
-                error.winerror = code
+                setattr(error, "winerror", code)
                 raise error
         write(path, record, *args)
 
@@ -137,7 +144,7 @@ def test_publication_contention_retries_the_same_original_without_command_replay
     monkeypatch.setattr(preservation, "sleep", waits.append)
     recovered = code in (32, 33) and failures == 1
 
-    def run():
+    def run() -> None:
         with preserve_activation_durably(IDENTITY, tmp_path) as transaction:
             commands.append("one install")
             install(tmp_path)
@@ -160,8 +167,8 @@ def test_publication_contention_retries_the_same_original_without_command_replay
 
 @pytest.mark.parametrize("failure", ["restore", "verify", "clear"])
 def test_failed_witnessed_restoration_reuses_original_before_next_capture(
-    tmp_path, monkeypatch, failure,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     initialize(tmp_path)
     with monkeypatch.context() as patch:
         if failure == "restore":
@@ -171,10 +178,10 @@ def test_failed_witnessed_restoration_reuses_original_before_next_capture(
         else:
             original = Path.unlink
 
-            def unlink(path, *args, **kwargs):
+            def unlink(path: Path, missing_ok: bool = False) -> None:
                 if path == journal(tmp_path):
                     raise PermissionError("journal clear denied")
-                return original(path, *args, **kwargs)
+                return original(path, missing_ok=missing_ok)
 
             patch.setattr(Path, "unlink", unlink)
         with pytest.raises((OSError, PluginStateError)):
@@ -196,7 +203,9 @@ def test_failed_witnessed_restoration_reuses_original_before_next_capture(
     ("transaction", "unknown"), ("phase", "unknown"), ("witness", "pid-gone"),
     ("snapshot", {}), ("snapshot", {"identity": IDENTITY}),
 ])
-def test_invalid_or_foreign_transaction_never_mutates_state(tmp_path, field, value):
+def test_invalid_or_foreign_transaction_never_mutates_state(
+    tmp_path: Path, field: str, value: object,
+) -> None:
     initialize(tmp_path)
     with pytest.raises(PluginStateError):
         with preserve_activation_durably(IDENTITY, tmp_path):
@@ -213,7 +222,7 @@ def test_invalid_or_foreign_transaction_never_mutates_state(tmp_path, field, val
     assert before == {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
 
 
-def test_record_drift_and_missing_inventory_are_not_settled(tmp_path):
+def test_record_drift_and_missing_inventory_are_not_settled(tmp_path: Path) -> None:
     initialize(tmp_path)
     with pytest.raises(PluginStateError, match="transaction changed"):
         with preserve_activation_durably(IDENTITY, tmp_path) as transaction:
@@ -227,7 +236,7 @@ def test_record_drift_and_missing_inventory_are_not_settled(tmp_path):
     assert journal(tmp_path).exists()
 
 
-def test_inventory_presence_is_not_confused_with_an_absent_activation_flag(tmp_path):
+def test_inventory_presence_is_not_confused_with_an_absent_activation_flag(tmp_path: Path) -> None:
     initialize(tmp_path)
     (tmp_path / "config.json").write_text(json.dumps({
         "installedPlugins": [{"name": IDENTITY, "version": "old"}],
@@ -241,7 +250,7 @@ def test_inventory_presence_is_not_confused_with_an_absent_activation_flag(tmp_p
     assert record["snapshot"]["inventory_record_existed"] is True
 
 
-def test_linked_journal_does_not_authorize_recovery(tmp_path):
+def test_linked_journal_does_not_authorize_recovery(tmp_path: Path) -> None:
     initialize(tmp_path)
     area = tmp_path / "activation-preservation"
     area.mkdir()

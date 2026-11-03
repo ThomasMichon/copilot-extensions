@@ -31,7 +31,7 @@ def _plain(path: Path, *, directory: bool = False) -> bool:
     expected = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
     if (
         not expected or path.is_symlink()
-        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
     ):
         raise state.PluginStateError(f"activation custody artifact is not plain: {path}")
     return True

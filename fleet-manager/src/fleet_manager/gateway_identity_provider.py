@@ -53,6 +53,17 @@ def prepare_identity(value: object, provider: IdentityProvider | None,
                      clock: Callable[[], int], *, profile: str = PROFILE,
                      ) -> tuple[dict[str, object], IdentityVerifier, int]:
     """Normalize trust without admitting a plugin-created authenticated identity."""
+    normalized = prepare_trust(value, provider, profile=profile)
+    trust = normalized["trust"]
+    verifier = IdentityVerifier(**trust, clock=clock)
+    expires = trust["trust_valid_until"]
+    assert type(expires) is int
+    return normalized, verifier, expires
+
+
+def prepare_trust(value: object, provider: IdentityProvider | None, *,
+                  profile: str) -> dict[str, object]:
+    """Prepare public trust only; the explicitly selected common verifier validates it."""
     if not isinstance(value, dict):
         raise IdentityError("invalid-trust")
     if set(value) != {"provider", "profile", "configuration"}:
@@ -76,10 +87,7 @@ def prepare_identity(value: object, provider: IdentityProvider | None,
             or not isinstance(jwks["keys"], list) or not 1 <= len(jwks["keys"]) <= 16):
         raise IdentityError("invalid-trust")
     normalized = dict(trust, jwks={"keys": sorted(jwks["keys"], key=planning.canonical)})
-    verifier = IdentityVerifier(**normalized, clock=clock)
-    expires = trust["trust_valid_until"]
-    assert type(expires) is int
     return {
         "provider": provider.name, "profile": profile,
         "configuration": value["configuration"], "trust": normalized,
-    }, verifier, expires
+    }

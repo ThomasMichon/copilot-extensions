@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from plugin_resolve import Marketplace
@@ -44,7 +44,7 @@ def memo_get(cache: dict[K, V] | None, key: K, loader: Callable[[], V]) -> V:
     pure passthrough (always calls ``loader()``) -- the no-caching default
     every other/test caller gets."""
     if isinstance(cache, _ConcurrentCache):
-        return cache.get_or_load(key, loader)
+        return cast(_ConcurrentCache[K, V], cache).get_or_load(key, loader)
     if cache is not None and key in cache:
         return cache[key]
     value = loader()
@@ -58,7 +58,7 @@ class MarketplaceMemo:
     """Caches ``_local_root`` shares across one `resolve_active_plugins()`
     pass, keyed on canonical marketplace root."""
 
-    manifests: dict[Path, tuple[Path | None, dict | None, str | None, bool]] = field(
+    manifests: dict[Path, tuple[Path | None, dict[str, Any] | None, str | None, bool]] = field(
         default_factory=dict
     )
     marketplaces: dict[Path, Marketplace | None] = field(default_factory=dict)

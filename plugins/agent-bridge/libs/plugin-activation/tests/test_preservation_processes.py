@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -50,7 +51,7 @@ with preserve_activation_durably(identity, home) as transaction:
 
 
 @contextmanager
-def holder(home: Path, mode: str):
+def holder(home: Path, mode: str) -> Iterator[subprocess.Popen[str]]:
     ready = home / "ready"
     python, extra_env = direct_python(sys.executable)
     env = {**os.environ, **extra_env, "PYTHONPATH": os.pathsep.join(sys.path)}
@@ -74,7 +75,7 @@ def holder(home: Path, mode: str):
 
 
 @pytest.mark.parametrize("mode", ["running", "quiescent", "partial"])
-def test_forced_parent_death_keeps_original_and_requires_witness(tmp_path, mode):
+def test_forced_parent_death_keeps_original_and_requires_witness(tmp_path: Path, mode: str) -> None:
     initialize(tmp_path)
     with holder(tmp_path, mode) as child:
         with pytest.raises(PluginStateError, match="custody refused"):
@@ -95,7 +96,7 @@ def test_forced_parent_death_keeps_original_and_requires_witness(tmp_path, mode)
         assert not journal(tmp_path).exists()
 
 
-def test_fresh_interpreter_can_recover_without_replaying_the_command(tmp_path):
+def test_fresh_interpreter_can_recover_without_replaying_the_command(tmp_path: Path) -> None:
     initialize(tmp_path)
     with holder(tmp_path, "partial") as child:
         child.kill()

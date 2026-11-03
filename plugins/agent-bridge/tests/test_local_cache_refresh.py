@@ -90,9 +90,14 @@ _requires_descendant_safety_net = pytest.mark.skipif(
 
 
 class TestSessionHostConnectionLocalCacheOrdering:
+    @pytest.fixture(autouse=True)
+    def isolated_hosting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
+        monkeypatch.setattr("agent_bridge.hosting_policy.require_path_hosting", lambda *_a: None)
+
     @pytest.mark.asyncio
     async def test_awaits_refresh_after_resolution_before_spawn(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tmp_db
     ) -> None:
         from agent_bridge.session_host_connection import _SessionHostConnectionMixin
         from agent_bridge.transport import SpawnTarget
@@ -124,7 +129,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
         monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
         monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", refresh)
         task = asyncio.create_task(_SessionHostConnectionMixin._connect_via_session_host(
-            SimpleNamespace(_db=None),
+            SimpleNamespace(_db=tmp_db),
             SpawnTarget(type="local", project="example", cwd=None),
             tracker=SimpleNamespace(stage=lambda *args: contextlib.nullcontext()),
             session_id="test-session",
@@ -151,7 +156,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
     @pytest.mark.parametrize("cancelled", [False, True])
     async def test_refresh_error_logging_and_cancellation(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        caplog: pytest.LogCaptureFixture, cancelled: bool,
+        caplog: pytest.LogCaptureFixture, cancelled: bool, tmp_db,
     ) -> None:
         from agent_bridge.session_host_connection import _SessionHostConnectionMixin
         from agent_bridge.transport import SpawnTarget
@@ -165,7 +170,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
         spawn = AsyncMock(side_effect=RuntimeError("spawn reached"))
         with pytest.raises(asyncio.CancelledError if cancelled else RuntimeError):
             await _SessionHostConnectionMixin._connect_via_session_host(
-                SimpleNamespace(_db=None),
+                SimpleNamespace(_db=tmp_db),
                 SpawnTarget(type="local", cwd=str(tmp_path)),
                 tracker=SimpleNamespace(stage=lambda *args: contextlib.nullcontext()),
                 session_id="test-session",
@@ -473,14 +478,15 @@ class TestRefreshLocalCache:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         (repo / ".gitignore").write_text("*.local.instructions.md\n", encoding="utf-8")
-        destination = (
+        local_sibling = (
             repo
             / ".github"
             / "instructions"
+            / "agent-worktrees-generated"
+            / "test-marketplace"
             / "test-plugin"
-            / "fallback.instructions.md"
+            / "fallback.local.instructions.md"
         )
-        local_sibling = repo / ".github" / "instructions" / destination.parent.name / "fallback.local.instructions.md"
         assert not local_sibling.exists()
 
         monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))

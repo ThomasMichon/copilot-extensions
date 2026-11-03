@@ -162,11 +162,23 @@ def _case(tmp_path, plugin, *, incomplete_first=False):
     second_slot = state.root / "versions" / state.second.runtime_version
     state.template = tmp_path / "candidate-template" if incomplete_first else None
     first_environment = state.template if incomplete_first else first_slot
-    venv.EnvBuilder(with_pip=False, symlinks=False).create(first_environment)
+    if os.name == "nt":
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(first_environment)
+    else:
+        # Python 3.10 can report the outer venv launcher as its base executable.
+        created = _run(
+            [str(Path(sys.executable).resolve()), "-m", "venv", "--without-pip",
+             "--copies", str(first_environment)],
+            env=env, cwd=payload / "src",
+        )
+        assert created.returncode == 0, created.stdout + created.stderr
     shutil.copytree(first_environment, second_slot)
     state.packages = {}
     state.clis = {}
     state.probes = {}
+    retain_helpers = runpy.run_path(str(payload / "scripts" / "versioned_runtime.py"))[
+        "retain_runtime_helpers"
+    ]
     for identity, slot in ((state.first, first_environment), (state.second, second_slot)):
         site = slot / "Lib" / "site-packages" if os.name == "nt" else (
             slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
@@ -190,6 +202,7 @@ def _case(tmp_path, plugin, *, incomplete_first=False):
         assert healthy.returncode == 0, healthy.stdout + healthy.stderr
         if not (incomplete_first and identity == state.first):
             with source._runtime().construction_lease(state.root, identity.runtime_version):
+                retain_helpers(slot, complete=False)
                 source._runtime().mark_complete(state.root, identity.runtime_version, payload_hash=fingerprint)
         state.packages[identity.runtime_version] = module / "__init__.py"
         state.clis[identity.runtime_version] = module / ("cli.py" if plugin == "agent-vault" else "__main__.py")

@@ -18,6 +18,15 @@ class TrustedContext:
     user: str
     workspace: str
     instance_id: str
+    # Routing handle for exec/inspection: the container id for Docker; the
+    # fleet-qualified ``<name>.<id>`` for a driver member, whose raw id is
+    # unique only within its runtime. ``instance_id`` stays the raw id for
+    # incarnation comparisons.
+    handle: str = ""
+
+    @property
+    def target(self) -> str:
+        return self.handle or self.instance_id
 
     def __iter__(self) -> Iterator[Any]:
         return iter((self.config, self.fleet, self.user, self.workspace))
@@ -28,7 +37,15 @@ def resolve_context(
 ) -> TrustedContext:
     from .lifecycle import get_container, inspect_container
 
-    info = get_container(config, name)
+    scoped, info = False, None
+    if any(getattr(f, "driver", None) for f in config.fleets.values()):
+        from .runtime_drivers import scoped_member
+
+        # Only the member's own driver fleet: an unrelated hung driver must
+        # not consume agent-bridge's preparation deadline.
+        scoped, info = scoped_member(config, name)
+    if not scoped:
+        info = get_container(config, name)
     if info is None:
         raise RuntimeError(f"Container '{name}' is not a discovered fleet member")
     if info.state != "running":
@@ -38,7 +55,12 @@ def resolve_context(
     fleet = config.fleets.get(info.fleet or "")
     if fleet is None:
         raise RuntimeError(f"Container '{name}' has no matching fleet configuration")
-    inspection = inspect_container(expected_instance or name)
+    handle = ""
+    if getattr(info, "driver", None):
+        from .runtime_drivers import route_handle
+
+        handle = route_handle(info)
+    inspection = inspect_container(handle or expected_instance or name)
     if expected_instance and inspection.get("Id") != expected_instance:
         raise RuntimeError("selected container instance could not be confirmed")
     actual_profile = (
@@ -56,15 +78,16 @@ def resolve_context(
         config, fleet, fleet.exec_user or config.exec_user,
         fleet.workspace_folder or config.workspace_folder,
         str(inspection.get("Id") or ""),
+        handle,
     )
 
 
-def cleanup_user(instance_id: str, bound_user: str | None) -> str:
+def cleanup_user(instance_id: str, bound_user: str | None, handle: str | None = None) -> str:
     from .lifecycle import inspect_container
 
     if not bound_user:
         raise RuntimeError("immutable cleanup requires its bound execution user")
-    inspection = inspect_container(instance_id)
+    inspection = inspect_container(handle or instance_id)
     profile = ((inspection.get("Config") or {}).get("Labels") or {}).get(SECURITY_PROFILE_LABEL)
     if inspection.get("Id") != instance_id or profile != TRUSTED_PROFILE:
         raise RuntimeError("immutable cleanup target is not the prepared trusted instance")

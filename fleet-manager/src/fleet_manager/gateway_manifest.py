@@ -119,8 +119,8 @@ class ServiceSlot:
 
     name: str
     role: str
-    principal: str
-    key_source: str
+    principal: str | None
+    key_source: str | None
     routes: tuple[RouteSpec, ...]
     configuration_ref: str | None
 
@@ -139,7 +139,19 @@ def _route(value: object) -> RouteSpec:
                      _choices(fields["methods"], _METHODS, "invalid-methods"), capabilities)
 
 
-def _slot(value: object, roles: tuple[str, ...], sources: set[str]) -> ServiceSlot:
+def _slot(value: object, roles: tuple[str, ...], sources: set[str], *,
+          local_allowed: bool = False) -> ServiceSlot:
+    if local_allowed and isinstance(value, dict) and value.get("delivery") == "local":
+        fields = _fields(value, {"name", "role", "delivery", "routes"},
+                         frozenset({"configuration_ref"}))
+        role = _identifier(fields["role"])
+        _require(role in roles, "undeclared-role")
+        routes = tuple(sorted((_route(item) for item in _items(fields["routes"], 16)),
+                              key=lambda route: route.prefix))
+        _require(all(route.capabilities == ("http",) for route in routes),
+                 "unsupported-local-capability")
+        config = _reference(fields["configuration_ref"]) if "configuration_ref" in fields else None
+        return ServiceSlot(_identifier(fields["name"]), role, None, None, routes, config)
     fields = _fields(value, {"name", "role", "principal", "key_source", "routes"},
                      frozenset({"configuration_ref"}))
     role = _identifier(fields["role"])
@@ -163,6 +175,7 @@ class GatewayManifest:
     roles: tuple[str, ...]
     key_sources: tuple[KeySourceRef, ...]
     slots: tuple[ServiceSlot, ...]
+    version: int = 1
 
     @classmethod
     def load(cls, value: object) -> GatewayManifest:
@@ -174,20 +187,23 @@ class GatewayManifest:
         fields = _fields(value, {"schema", "version", "fleet", "gateway", "revision",
                                  "roles", "key_sources", "slots"})
         _require(fields["schema"] == SCHEMA and type(fields["version"]) is int
-                 and fields["version"] == 1, "unsupported-schema")
+                 and fields["version"] in (1, 2), "unsupported-schema")
+        version = fields["version"]
         revision = fields["revision"]
         if type(revision) is not int or not 1 <= revision <= MAX_REVISION:
             raise ManifestError("invalid-revision")
         roles = tuple(sorted(_identifier(item) for item in _items(fields["roles"], 64)))
         _require(len(set(roles)) == len(roles), "duplicate-role")
         sources = tuple(sorted(
-            (_key_source(item) for item in _items(fields["key_sources"], 128)),
+            (_key_source(item) for item in _items(
+                fields["key_sources"], 128, minimum=1 if version == 1 else 0)),
             key=lambda source: source.name,
         ))
         source_names = {source.name for source in sources}
         _require(len(source_names) == len(sources), "duplicate-key-source")
         slots = tuple(sorted(
-            (_slot(item, roles, source_names) for item in _items(fields["slots"], 64, minimum=0)),
+            (_slot(item, roles, source_names, local_allowed=version == 2)
+             for item in _items(fields["slots"], 64, minimum=0)),
             key=lambda slot: slot.name,
         ))
         _require(len({slot.name for slot in slots}) == len(slots), "duplicate-slot")
@@ -197,7 +213,7 @@ class GatewayManifest:
             _require(not any(_overlap(prefix, other) for other in prefixes[:index]),
                      "overlapping-prefix")
         return cls(_identifier(fields["fleet"]), _identifier(fields["gateway"]),
-                   revision, roles, sources, slots)
+                   revision, roles, sources, slots, version)
 
     @classmethod
     def parse(cls, raw: bytes) -> GatewayManifest:
@@ -213,16 +229,19 @@ class GatewayManifest:
         slots: list[dict[str, object]] = []
         for slot in self.slots:
             item: dict[str, object] = {
-                "name": slot.name, "role": slot.role, "principal": slot.principal,
-                "key_source": slot.key_source,
+                "name": slot.name, "role": slot.role,
                 "routes": [{"prefix": route.prefix, "methods": list(route.methods),
                             "capabilities": list(route.capabilities)} for route in slot.routes],
             }
+            if slot.key_source is None:
+                item["delivery"] = "local"
+            else:
+                item.update(principal=slot.principal, key_source=slot.key_source)
             if slot.configuration_ref is not None:
                 item["configuration_ref"] = slot.configuration_ref
             slots.append(item)
         return {
-            "schema": SCHEMA, "version": 1, "fleet": self.fleet, "gateway": self.gateway,
+            "schema": SCHEMA, "version": self.version, "fleet": self.fleet, "gateway": self.gateway,
             "revision": self.revision, "roles": list(self.roles),
             "key_sources": [{"name": source.name, "provider": source.provider,
                              "reference": source.reference} for source in self.key_sources],

@@ -31,6 +31,7 @@ on:
           - bridge-commands
           - bridge-contracts
           - bridge-binding
+          - vault-activation
           - dispatch-binding
           - dispatch-publication
           - dispatch-maintenance
@@ -128,6 +129,45 @@ jobs:
     timeout-minutes: 125
     env: *codespaces-installer-env
     steps: *codespaces-installer-steps
+  vault-activation-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
+    name: Vault configuration activation (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps: &vault-activation-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact source
+        run: python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Qualify inactive first touch and configured consumers
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --max-files-per-sub-suite 2
+          --test-file tests/test_configuration_layers.py
+          --test-file tests/test_installer_readiness.py
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_runtime_activation.py
+          --test-file tests/test_install_snapshot_ps1.py
+          --test-file tests/test_service_launch.py
+      - name: Qualify accepted activation context under a different queue worker
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use.py -k activation_selectors
+
+  vault-activation-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
+    name: Vault configuration activation (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps: *vault-activation-steps
   worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
     name: Worktrees Git probe packet (Linux)

@@ -84,10 +84,21 @@ def invoke():
         def spawn(argv, **options):
             assert not rows(), rows()
             assert not events, events
-            assert argv[4:] == ["--handoff-stdin", "--foreground"]
+            bootstrap = argv.index("-c")
+            assert argv[:bootstrap] == [
+                launch.windowless_python(sys.executable), "-X", argv[2],
+            ]
+            assert argv[2].startswith("pycache_prefix=")
+            cache = Path(argv[2].split("=", 1)[1])
+            assert cache.parent.name == "python"
+            assert cache.parent.parent.parent.samefile(state)
+            assert argv[bootstrap + 1] == launch._SERVICE_BOOTSTRAP
+            assert argv[bootstrap + 2] == str(Path(launch.__file__).resolve().parent.parent)
+            service_args = argv[bootstrap + 3:]
+            assert service_args == ["--handoff-stdin", "--foreground"]
             command = [
                 sys.executable, "-c", os.environ["VAULT_STARTUP_HARNESS"],
-                "resident", str(registry), str(state), *argv[4:],
+                "resident", str(registry), str(state), *service_args,
             ]
             process = real_spawn(command, **options)
             children.append(process)

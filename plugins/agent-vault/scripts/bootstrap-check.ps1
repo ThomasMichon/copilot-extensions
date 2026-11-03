@@ -39,6 +39,9 @@ try {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }
     $name = ([IO.File]::ReadAllText((Join-Path $PluginDir 'plugin.json')) | ConvertFrom-Json).name
     if ($name -cne 'agent-vault') { throw 'The owning payload is not Agent Vault.' }
+    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
+    $activation = Get-VaultRuntimeActivation
+    if ($activation.state -ceq 'configuration-empty') { Exit-SessionStart }
     $InstallDir = Join-Path $env:USERPROFILE '.agent-vault'
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     $installerAction = 'stamp'

@@ -169,6 +169,11 @@ def _agent_worktrees_wrapper(payload_root: str | None) -> str:
 
 
 def _run_docker(args: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
+    from .runtime_drivers import run_routed
+
+    routed = run_routed(args, timeout=timeout)
+    if routed is not None:
+        return routed
     return subprocess.run(
         args,
         capture_output=True,
@@ -509,12 +514,9 @@ def _docker_write(container: str, path: str, content: str, mode: str = "755") ->
     """Write ``content`` to ``path`` in the container (as root) and chmod it."""
     b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
     script = f"echo {b64} | base64 -d > {path} && chmod {mode} {path}"
-    res = subprocess.run(
+    res = _run_docker(
         ["docker", "exec", "-u", "0", container, "bash", "-lc", script],
-        capture_output=True,
-        text=True,
         timeout=30,
-        creationflags=no_window_flags(),
     )
     if res.returncode != 0:
         raise RuntimeError(

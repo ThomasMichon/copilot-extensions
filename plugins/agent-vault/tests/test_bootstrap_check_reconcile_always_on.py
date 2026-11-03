@@ -1,17 +1,4 @@
-"""Guard: bootstrap-check's background reconcile no longer gates on a
-per-plugin opt-in (agent-bridge-unified-zdd-cutover Phase 0). The opt-in
-existed because a raw reconcile could race a live daemon/session; now that
-every reconcile-capable plugin's update path is always-ZDD (safe to run
-unattended), the gate was removed rather than kept as a redundant consent
-checkbox. This test proves:
-
-* neither hook script still contains opt-in-gate text or a
-  ``background_reconcile_<plugin>`` key reference, and
-* a version drift reconciles unconditionally -- no
-  ``.copilot-extensions/config.yaml`` required, and a stale
-  ``background_reconcile_<plugin>`` key left over from before this change
-  (e.g. set to ``false``) does not resurrect the old skip behavior.
-"""
+"""Configured Vault reconcile ignores the retired background-reconcile key."""
 
 from __future__ import annotations
 
@@ -99,8 +86,18 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         "bootstrap-check.sh", "bootstrap-check.ps1",
         "runtime-environment.sh", "runtime-environment.ps1",
         "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+        "runtime-activation.sh", "runtime-activation.ps1", "runtime-activation.py",
     ):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
+    shutil.copytree(
+        _PLUGIN_ROOT / "scripts" / "configuration-layers",
+        scripts_dir / "configuration-layers",
+    )
+    source = plugin_dir / "src" / "agent_vault"
+    source.mkdir(parents=True)
+    for filename in ("__init__.py", "config.py", "configuration.py", "_peer_launch.py"):
+        shutil.copyfile(_PLUGIN_ROOT / "src" / "agent_vault" / filename, source / filename)
+    (root / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
     (scripts_dir / "install.sh").write_text(
         '#!/usr/bin/env bash\nprintf inline >"$(dirname "$0")/inline-entered"\nexit 99\n',
         encoding="utf-8",
@@ -158,12 +155,15 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
         "COPILOT_EXTENSIONS_CONTEXT", "AGENT_VAULT_NO_SELFPROVISION",
         "AGENT_VAULT_PINNED_CONTEXT", "UPDATE_DRIVER_WITNESS", "BOOTSTRAP_TEST_DRIVER_EXIT_CODE",
         "BOOTSTRAP_TEST_NO_ACK", "BOOTSTRAP_TEST_FOREIGN_ACK",
+        "AGENT_RT_ROOT", "AGENT_CONFIGURATION_CONTEXT", "AGENT_VAULT_CONFIG",
+        "AGENT_VAULT_HOME", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
     ):
         env.pop(key, None)
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
     env.update(overrides)
+    env.setdefault("AGENT_VAULT_CONFIG", str(Path(env["HOME"]) / "absent-global.json"))
     return env
 
 

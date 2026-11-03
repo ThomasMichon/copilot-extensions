@@ -69,6 +69,10 @@ async def test_process_auth_is_child_only_and_existing_cleanup_handle_is_used(mo
         "/launch/general.env",
     ]
     assert all("--expected-instance" in cmd for cmd in seen)
+    seen.clear()
+    prepared["execution_runtime"] = "driver:example-driver/example"
+    assert await transport.cleanup_container_session_host(target, prepared)
+    assert seen[0][seen[0].index("--expected-runtime") + 1] == "driver:example-driver/example"
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,10 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
+from pathlib import Path
+from types import EllipsisType
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -24,10 +28,15 @@ from plugin_activation import state
 IDENTITY = "optional-plugin@example-marketplace"
 
 
+class _StagedStateError(OSError):
+    winerror: int
+    staged_state_path: Path
+
+
 @pytest.mark.parametrize("name", [
     "state.json", f"state-{chr(0x1F680)}.json",
 ] + ([f"state-{chr(0xD800)}.json"] if os.name == "nt" else []))
-def test_atomic_state_replace_preserves_an_open_reader_snapshot(tmp_path, name):
+def test_atomic_state_replace_preserves_an_open_reader_snapshot(tmp_path: Path, name: str) -> None:
     path = tmp_path / name
     write_json_object_atomic(path, {"generation": "old"})
     with state._open_state_text(path) as stream:
@@ -38,28 +47,32 @@ def test_atomic_state_replace_preserves_an_open_reader_snapshot(tmp_path, name):
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows partial replacement errors")
 @pytest.mark.parametrize("code", [1175, 1176, 1177])
-def test_native_partial_replacement_error_retains_staged_state(tmp_path, monkeypatch, code):
+def test_native_partial_replacement_error_retains_staged_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int,
+) -> None:
     import ctypes
     from types import SimpleNamespace
 
     path = tmp_path / "state.json"
     write_json_object_atomic(path, {"generation": "old"})
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     calls = []
 
-    def legacy_replace(destination, source, backup, *args):
+    def legacy_replace(
+        destination: object, source: object, backup: object, *args: object,
+    ) -> bool:
         calls.append("legacy")
         assert backup is None
         if code == 1176:
             path.unlink()
         elif code == 1177:
             path.rename(tmp_path / "legacy-old.json")
-        ctypes.set_last_error(code)
+        getattr(ctypes, "set_last_error")(code)
         return False
 
-    def atomic_rename(*args):
+    def atomic_rename(*args: object) -> bool:
         calls.append("atomic")
-        ctypes.set_last_error(code)
+        getattr(ctypes, "set_last_error")(code)
         return False
 
     injected = SimpleNamespace(
@@ -67,8 +80,9 @@ def test_native_partial_replacement_error_retains_staged_state(tmp_path, monkeyp
         CreateFileW=kernel.CreateFileW, CloseHandle=kernel.CloseHandle,
     )
     monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: injected)
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(OSError) as caught:
         write_json_object_atomic(path, {"generation": "new"})
+    raised = cast(pytest.ExceptionInfo[_StagedStateError], caught)
     assert raised.value.winerror == code
     staged = list(tmp_path.glob("*.tmp"))
     assert len(staged) == 1
@@ -79,7 +93,9 @@ def test_native_partial_replacement_error_retains_staged_state(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("source_kind", ["canonical", "shipped"])
-def test_state_source_first_touch_needs_only_isolated_stdlib(tmp_path, source_kind):
+def test_state_source_first_touch_needs_only_isolated_stdlib(
+    tmp_path: Path, source_kind: str,
+) -> None:
     from pathlib import Path
 
     source = Path(state.__file__)
@@ -98,16 +114,19 @@ def test_state_source_first_touch_needs_only_isolated_stdlib(tmp_path, source_ki
     result = subprocess.run(
         [sys.executable, "-I", "-c", script, str(source), str(tmp_path / "state.json")],
         cwd=tmp_path, capture_output=True, text=True, timeout=20,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "standalone-ok"
 
 
-def _write_state(tmp_path, user_value=..., inventory_enabled=None):
+def _write_state(
+    tmp_path: Path, user_value: bool | EllipsisType = ...,
+    inventory_enabled: bool | None = None,
+) -> Path:
     home = tmp_path / ".copilot"
     home.mkdir()
-    settings = {"unrelated": {"keep": True}}
+    settings: dict[str, Any] = {"unrelated": {"keep": True}}
     if user_value is not ...:
         settings["enabledPlugins"] = {IDENTITY: user_value, "other@m": True}
     (home / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
@@ -129,7 +148,7 @@ def _write_state(tmp_path, user_value=..., inventory_enabled=None):
     return home
 
 
-def test_inspect_and_remove_preserve_inventory_and_unrelated_state(tmp_path):
+def test_inspect_and_remove_preserve_inventory_and_unrelated_state(tmp_path: Path) -> None:
     home = _write_state(tmp_path, True, inventory_enabled=True)
 
     state = inspect_plugin_state(IDENTITY, home)
@@ -155,7 +174,7 @@ def test_inspect_and_remove_preserve_inventory_and_unrelated_state(tmp_path):
     assert remove_user_activation(IDENTITY, home, apply=True)["changed"] is False
 
 
-def test_remove_does_not_rewrite_already_disabled_inventory(tmp_path):
+def test_remove_does_not_rewrite_already_disabled_inventory(tmp_path: Path) -> None:
     home = _write_state(tmp_path, True, inventory_enabled=False)
     _, config = read_json_object(home / "config.json", jsonc_header=True)
     raw_config = "// managed\n" + json.dumps(config, indent=4) + "\n"
@@ -168,7 +187,9 @@ def test_remove_does_not_rewrite_already_disabled_inventory(tmp_path):
 
 
 @pytest.mark.parametrize("before", [..., False, True])
-def test_snapshot_restore_preserves_user_activation_tristate(tmp_path, before):
+def test_snapshot_restore_preserves_user_activation_tristate(
+    tmp_path: Path, before: bool | EllipsisType,
+) -> None:
     inventory_enabled = None if before is ... else before
     home = _write_state(tmp_path, before, inventory_enabled=inventory_enabled)
     snapshot = capture(IDENTITY, home)
@@ -183,7 +204,7 @@ def test_snapshot_restore_preserves_user_activation_tristate(tmp_path, before):
     assert state["userActivation"] == expected
 
 
-def test_restore_skips_rewrite_when_nothing_changed(tmp_path):
+def test_restore_skips_rewrite_when_nothing_changed(tmp_path: Path) -> None:
     # restore() previously rewrote the shared, user-global settings.json/
     # config.json on every call regardless of whether anything actually
     # changed, generating a distinct file-change event per plugin per update
@@ -202,7 +223,7 @@ def test_restore_skips_rewrite_when_nothing_changed(tmp_path):
     assert config_path.stat().st_mtime_ns == config_before
 
 
-def test_restore_still_writes_when_activation_actually_changed(tmp_path):
+def test_restore_still_writes_when_activation_actually_changed(tmp_path: Path) -> None:
     home = _write_state(tmp_path, True, inventory_enabled=True)
     snapshot = capture(IDENTITY, home)
     _, settings = read_json_object(home / "settings.json")
@@ -216,12 +237,12 @@ def test_restore_still_writes_when_activation_actually_changed(tmp_path):
 
 
 def test_installing_missing_inventory_preserves_absent_user_activation(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = tmp_path / ".copilot"
 
-    def install(argv, **kwargs):
+    def install(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         write_json_object_atomic(
             home / "settings.json",
             {"enabledPlugins": {IDENTITY: True}},
@@ -251,10 +272,12 @@ def test_installing_missing_inventory_preserves_absent_user_activation(
     assert state["inventoryEnabled"] is False
 
 
-def test_install_restores_activation_after_failure(tmp_path, monkeypatch):
+def test_install_restores_activation_after_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = _write_state(tmp_path, False, inventory_enabled=False)
 
-    def fail(argv, **kwargs):
+    def fail(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         _, settings = read_json_object(home / "settings.json")
         settings["enabledPlugins"][IDENTITY] = True
         write_json_object_atomic(home / "settings.json", settings)
@@ -270,13 +293,16 @@ def test_install_restores_activation_after_failure(tmp_path, monkeypatch):
 @pytest.mark.parametrize("blocked_file", ["settings.json", "config.json"])
 @pytest.mark.parametrize("command_timeout", [False, True])
 def test_transient_restoration_reuses_original_snapshot_without_reinstall(
-    tmp_path, monkeypatch, before, blocked_file, command_timeout,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before: bool | EllipsisType,
+    blocked_file: str, command_timeout: bool,
+) -> None:
     home = _write_state(tmp_path, before, inventory_enabled=False)
-    commands, writes, waits = [], [], []
+    commands: list[list[str]] = []
+    writes: list[Path] = []
+    waits: list[float] = []
     monkeypatch.setattr(state, "sleep", waits.append)
 
-    def install(argv, **kwargs):
+    def install(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         commands.append(list(argv))
         settings = {"enabledPlugins": {IDENTITY: True, "added@m": True}}
         (home / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
@@ -289,12 +315,12 @@ def test_transient_restoration_reuses_original_snapshot_without_reinstall(
 
     replace = state._replace_state
 
-    def locked_once(source, destination):
+    def locked_once(source: str, destination: Path) -> None:
         if destination == home / blocked_file:
             writes.append(destination)
             if len(writes) == 1:
                 error = OSError("localized sharing violation")
-                error.winerror = 32
+                setattr(error, "winerror", 32)
                 raise error
         return replace(source, destination)
 
@@ -320,20 +346,21 @@ def test_transient_restoration_reuses_original_snapshot_without_reinstall(
 
 @pytest.mark.parametrize("code,attempts", [(32, 2), (33, 2), (5, 1), (13, 1)])
 def test_restoration_contention_is_bounded_and_permission_is_terminal(
-    tmp_path, monkeypatch, code, attempts,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, attempts: int,
+) -> None:
     home = _write_state(tmp_path, False, inventory_enabled=False)
     snapshot = capture(IDENTITY, home)
     (home / "settings.json").write_text(
         json.dumps({"enabledPlugins": {IDENTITY: True}}), encoding="utf-8",
     )
-    writes, waits = [], []
+    writes: list[Path] = []
+    waits: list[float] = []
     monkeypatch.setattr(state, "sleep", waits.append)
 
-    def locked(source, destination):
+    def locked(source: str, destination: Path) -> NoReturn:
         writes.append(destination)
         error = OSError("localized error")
-        error.winerror = code
+        setattr(error, "winerror", code)
         raise error
 
     monkeypatch.setattr(state, "_replace_state", locked)
@@ -344,18 +371,22 @@ def test_restoration_contention_is_bounded_and_permission_is_terminal(
     assert not list(home.glob("*.tmp"))
 
 
-def test_restoration_malformed_state_never_retries(tmp_path, monkeypatch):
+def test_restoration_malformed_state_never_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = _write_state(tmp_path, False, inventory_enabled=False)
     snapshot = capture(IDENTITY, home)
     (home / "settings.json").write_text('{"enabledPlugins":[]}', encoding="utf-8")
-    waits = []
+    waits: list[float] = []
     monkeypatch.setattr(state, "sleep", waits.append)
     with pytest.raises(PluginStateError, match="must be an object"):
         restore(snapshot, home)
     assert waits == []
 
 
-def test_restoration_retries_wrapped_read_contention(tmp_path, monkeypatch, caplog):
+def test_restoration_retries_wrapped_read_contention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
     home = _write_state(tmp_path, False, inventory_enabled=False)
     snapshot = capture(IDENTITY, home)
     settings = home / "settings.json"
@@ -364,14 +395,16 @@ def test_restoration_retries_wrapped_read_contention(tmp_path, monkeypatch, capl
     attempts = []
     monkeypatch.setattr(state, "sleep", lambda seconds: None)
 
-    def locked_once(path, **kwargs):
+    def locked_once(
+        path: Path, *, jsonc_header: bool = False,
+    ) -> tuple[str, dict[str, Any]]:
         if path == settings:
             attempts.append(path)
             if len(attempts) == 1:
                 error = OSError("localized lock violation")
-                error.winerror = 33
+                setattr(error, "winerror", 33)
                 raise PluginStateError(f"cannot read {path}") from error
-        return read(path, **kwargs)
+        return read(path, jsonc_header=jsonc_header)
 
     monkeypatch.setattr(state, "read_json_object", locked_once)
     restore(snapshot, home)
@@ -382,8 +415,8 @@ def test_restoration_retries_wrapped_read_contention(tmp_path, monkeypatch, capl
 
 @pytest.mark.parametrize("fresh", [False, True])
 def test_native_install_restores_after_a_transient_lock_without_replay(
-    tmp_path, monkeypatch, fresh,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh: bool,
+) -> None:
     if fresh:
         home = tmp_path / ".copilot"
         home.mkdir()
@@ -403,12 +436,12 @@ def test_native_install_restores_after_a_transient_lock_without_replay(
     replace, writes = state._replace_state, []
     monkeypatch.setattr(state, "sleep", lambda seconds: None)
 
-    def locked_once(source, destination):
+    def locked_once(source: str, destination: Path) -> None:
         if destination == blocked:
             writes.append(destination)
             if len(writes) == 1:
                 error = OSError("sharing violation")
-                error.winerror = 32
+                setattr(error, "winerror", 32)
                 raise error
         return replace(source, destination)
 
@@ -416,7 +449,7 @@ def test_native_install_restores_after_a_transient_lock_without_replay(
     result = run_install_preserving_activation(
         [sys.executable, "-c", program, str(home), str(attempts), IDENTITY],
         IDENTITY, home=home, capture_output=True, text=True, timeout=10,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert attempts.read_text() == "ran\n"
@@ -440,14 +473,16 @@ def test_native_install_restores_after_a_transient_lock_without_replay(
         ("config.json", '{"installedPlugins":{}}', "must be an array"),
     ],
 )
-def test_malformed_state_fails_closed(tmp_path, name, content, message):
+def test_malformed_state_fails_closed(
+    tmp_path: Path, name: str, content: str, message: str,
+) -> None:
     home = _write_state(tmp_path)
     (home / name).write_text(content, encoding="utf-8")
     with pytest.raises(PluginStateError, match=message):
         inspect_plugin_state(IDENTITY, home)
 
 
-def test_a_built_in_plugin_entry_is_left_alone(tmp_path):
+def test_a_built_in_plugin_entry_is_left_alone(tmp_path: Path) -> None:
     """Copilot CLI's first-party plugins write an unqualified key (no
     ``@marketplace``) into enabledPlugins. It is not this library's: reads and
     removals work around it and never drop or rewrite it."""
@@ -468,7 +503,7 @@ def test_a_built_in_plugin_entry_is_left_alone(tmp_path):
 
 
 @pytest.mark.parametrize("key", ["@m", "a@", "a@b@c"])
-def test_a_malformed_marketplace_key_still_fails_closed(tmp_path, key):
+def test_a_malformed_marketplace_key_still_fails_closed(tmp_path: Path, key: str) -> None:
     home = _write_state(tmp_path)
     (home / "settings.json").write_text(json.dumps({"enabledPlugins": {key: True}}),
                                         encoding="utf-8")
@@ -476,7 +511,7 @@ def test_a_malformed_marketplace_key_still_fails_closed(tmp_path, key):
         inspect_plugin_state(IDENTITY, home)
 
 
-def test_a_marketplace_key_still_needs_a_boolean(tmp_path):
+def test_a_marketplace_key_still_needs_a_boolean(tmp_path: Path) -> None:
     home = _write_state(tmp_path)
     (home / "settings.json").write_text(json.dumps({"enabledPlugins": {"a@m": "yes"}}),
                                         encoding="utf-8")

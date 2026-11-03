@@ -15,8 +15,9 @@ from .planning import PlanError, digest, identifier
 from .runtime_identity import VerifiedIdentity
 from .enrolled_identity import EnrolledIdentity, PROFILE as ENROLLED_PROFILE
 from .machine_identity import MachineIdentity, PROFILE as MACHINE_PROFILE
+from .bearer_identity import BearerIdentity, PROFILE as BEARER_PROFILE
 
-CallerIdentity = VerifiedIdentity | EnrolledIdentity | MachineIdentity
+CallerIdentity = VerifiedIdentity | EnrolledIdentity | MachineIdentity | BearerIdentity
 
 MAX_ENROLLMENTS = 64
 MAX_GRANTS = 256
@@ -184,7 +185,8 @@ class AuthoritySnapshot:
             _time(value)
         if not self.valid_from < self.valid_until:
             raise AdmissionError("invalid-record")
-        if self.identity_profile not in ("jwt-pop-v1", ENROLLED_PROFILE, MACHINE_PROFILE):
+        if self.identity_profile not in (
+                "jwt-pop-v1", ENROLLED_PROFILE, MACHINE_PROFILE, BEARER_PROFILE):
             raise AdmissionError("unsupported-profile")
         if self.identity_profile == MACHINE_PROFILE and self.issuer != MACHINE_PROFILE:
             raise AdmissionError("invalid-record")
@@ -354,13 +356,16 @@ class AdmissionAuthority:
                     and identity.kind == "caller")
         machine = (type(identity) is MachineIdentity and identity.profile == MACHINE_PROFILE
                    and identity.kind == "caller")
-        if not (ordinary or enrolled or machine):
+        bearer = type(identity) is BearerIdentity and identity.profile == BEARER_PROFILE
+        if not (ordinary or enrolled or machine or bearer):
             raise AdmissionError("invalid-identity")
         if machine:
             _name(identity.resource)
         for value, bound in ((identity.issuer, 2048), (identity.subject, 256),
-                             (identity.audience, 512), (identity.proof_key, 43)):
+                             (identity.audience, 512)):
             _text(value, bound)
+        if not bearer:
+            _text(identity.proof_key, 43)
         for value in (identity.issued_at, identity.expires_at, identity.verified_at):
             _time(value)
         if (identity.issued_at > identity.verified_at + 30

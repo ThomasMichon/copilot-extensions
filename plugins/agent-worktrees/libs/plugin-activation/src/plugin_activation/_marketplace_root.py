@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 from pathlib import Path
+from typing import Any
 
 from dropin_registry import ScanAuthority
 from plugin_resolve import (
@@ -26,7 +27,7 @@ from ._memo import MarketplaceMemo, memo_get
 
 def _marketplace_manifest(
     root: Path,
-) -> tuple[Path | None, dict | None, str | None, bool]:
+) -> tuple[Path | None, dict[str, Any] | None, str | None, bool]:
     for rel in MARKETPLACE_MANIFEST_RELS:
         path = root.joinpath(*rel)
         try:

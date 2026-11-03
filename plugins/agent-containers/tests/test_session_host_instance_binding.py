@@ -114,7 +114,10 @@ def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, cap
     result = json.loads(capsys.readouterr().out)
     assert effects == ["policy", "ssh", "cleanup", "environment", "write"]
     assert result["execution_instance"] == selected
-    assert result["state_command"][-2:] == ["--expected-instance", selected]
+    assert result["state_command"][-4:] == [
+        "--expected-instance", selected, "--expected-runtime", "docker",
+    ]
+    assert result["execution_runtime"] == "docker"
 
 
 def test_repository_denial_precedes_session_host_projection(monkeypatch):
@@ -175,7 +178,7 @@ def test_secret_cleanup_survives_name_replacement_and_uses_bound_user(monkeypatc
     path = "/home/your_user/.agent-containers/launch/" + "0" * 32 + ".env"
     args = SimpleNamespace(
         name="name-now-points-elsewhere", expected_instance=selected,
-        expected_user="runner", remote_env=path,
+        expected_user="runner", remote_env=path, expected_runtime="docker",
     )
     if removed:
         assert cli._cmd_session_host_cleanup(args) == 0

@@ -23,8 +23,8 @@ elsewhere would silently break that monkeypatch -- see
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
+import shutil as shutil
+import subprocess as subprocess
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -43,7 +43,7 @@ from plugin_resolve import SETTINGS_RELS, split_source
 from ._config_io import _SettingsLoad, _read_settings, _user_settings
 from ._findings import REGISTRY_NAME, _combine_authority, _finding
 from ._fs_candidates import _valid_source_part
-from ._installed_root import _Candidate, _installed_root
+from ._installed_root import _Candidate, _installed_root as _installed_root
 from ._marketplace_root import _local_root
 from ._memo import MarketplaceMemo
 from ._project_roots import _verified_project_roots
@@ -337,9 +337,9 @@ def resolve_active_plugins(
             continue
 
         local_root = next(iter(roots)) if roots else None
-        root = local_root or installed.root
+        selected_root_candidate = local_root or installed.root
         findings = _decision_findings(source, source_findings)
-        if root is None:
+        if selected_root_candidate is None:
             finding = _finding(
                 copilot_home,
                 "missing-target",
@@ -374,7 +374,7 @@ def resolve_active_plugins(
             source=source,
             name=name,
             marketplace=marketplace,
-            root=root,
+            root=selected_root_candidate,
             scopes=tuple(sorted(scopes[source])),
             roots=active_roots,
         )
