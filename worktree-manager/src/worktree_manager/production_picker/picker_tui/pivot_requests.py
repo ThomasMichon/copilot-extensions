@@ -185,6 +185,7 @@ class PivotRequestsMixin:
                 return
             if not force and machine in self._cache:
                 return
+            self._refresh_pending.discard(machine)
             self._inflight.add(machine)
             generation = (self._gen, self._scope_generations.get(machine, 0), object())
             self._active_requests[machine] = generation

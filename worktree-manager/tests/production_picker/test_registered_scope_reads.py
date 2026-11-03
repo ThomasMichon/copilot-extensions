@@ -313,13 +313,13 @@ def test_legacy_configuration_timeout_explains_the_read_not_its_launcher_argv(mo
     assert "Command [" not in message
 
 
-def wait(predicate, timeout=3):
+def wait(predicate, timeout=3, *, diagnostics=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return
         time.sleep(.01)
-    assert predicate(), "provider request did not settle"
+    assert predicate(), diagnostics() if diagnostics else "provider request did not settle"
 
 
 def test_startup_fanout_is_bounded_and_cached_failures_do_not_retry_per_frame():
@@ -703,9 +703,23 @@ def test_held_stream_first_commits_release_bounded_startup_slots(tmp_path):
     }, name="held", source_path="fixture")
     runtime = tasks.RegisteredPivotRuntime(reg)
     scopes = ["a", "b", "c", "d", "e", "f"]
+
+    def diagnostics():
+        with runtime._lock:
+            return {
+                "cached": {scope: runtime._cache.get(scope) for scope in scopes},
+                "starting": tuple(runtime._starting_scopes),
+                "queued": tuple(scope for scope, _generation in runtime._pending_requests),
+            }
+
     try:
         runtime.ensure_many(scopes)
-        wait(lambda: all(runtime.get(scope)[0] == "ready" for scope in scopes))
+        # Real child startup uses the provider's first-response budget, not a speed assertion.
+        wait(
+            lambda: all(runtime.get(scope)[0] == "ready" for scope in scopes)
+            and not runtime._starting_scopes,
+            timeout=tasks.STREAM_TIMEOUT, diagnostics=diagnostics,
+        )
         assert len(runtime._procs) == 6
         assert not runtime._starting_scopes
     finally:
@@ -772,6 +786,33 @@ def test_ensure_during_retirement_retains_only_an_uncached_read(cached, phase):
             assert starts[0][0][0] == "a"
     finally:
         runtime._scope_retirements.clear()
+        runtime.close()
+
+
+@pytest.mark.parametrize("subscribe", [False, True])
+def test_ensure_admission_consumes_the_deferred_finalizer_request(subscribe):
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=subscribe))
+    starts = []
+    runtime._start_pending_lists = lambda: starts.append(True)
+    runtime._scope_generations["a"] = 1
+    runtime._inflight.add("a")
+    runtime._active_requests["a"] = (runtime._gen, 0, object())
+    try:
+        runtime.ensure("a")
+        runtime._inflight.discard("a")
+        runtime._active_requests.pop("a")
+        runtime.ensure("a")
+        assert starts == [True]
+        runtime._pending_requests.clear()
+        runtime._cache["a"] = ("ready", [{"id": "current"}], "")
+        runtime._refresh_when_idle("a")
+        if subscribe:
+            assert not runtime.read_pending("a")
+        runtime._inflight.discard("a")
+        runtime._active_requests.pop("a")
+        runtime._refresh_when_idle("a")
+        assert starts == [True]
+    finally:
         runtime.close()
 
 

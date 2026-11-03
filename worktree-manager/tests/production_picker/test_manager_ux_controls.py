@@ -102,7 +102,8 @@ def test_configuration_highlight_activates_view_and_escape_returns_without_apply
             screen.htabs.insert(0, "Other")
             start = screen._left_pivots()[-1]
             screen.htab, screen.sel = start, ("V", 0)
-            screen._nav_view_row(1)
+            screen._sync_focus_to_sel()
+            await pilot.press("right")
             assert screen._in_configuration() and screen.sel == ("CFG", 0)
             footer = screen.footer(size[0]).plain
             assert "Enter: focus sections" in footer
