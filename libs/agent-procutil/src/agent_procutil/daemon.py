@@ -265,7 +265,7 @@ def spawn_daemon(
             ):
                 from .linux_daemon_scope import scope_command
 
-                launch_command = scope_command(command, receipt.instance_id, child_env)
+                launch_command = scope_command(command, receipt.instance_id, child_env, cwd=cwd_path)
             creation_attempted, creation_refused = True, False
             try:
                 return subprocess.Popen(launch_command, **popen_kwargs, **kwargs)  # noqa: S603

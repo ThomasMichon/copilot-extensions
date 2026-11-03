@@ -28,28 +28,45 @@ def caller_unit() -> str | None:
     return None
 
 
+def runner_version(runner: str, environment: Mapping[str, str], *, cwd: str) -> int:
+    try:
+        result = subprocess.run(
+            [runner, "--version"], cwd=cwd, env=dict(environment), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("resident systemd scope compatibility probe timed out") from error
+    match = re.match(rb"systemd (\d+)(?:\s|$)", result.stdout)
+    if result.returncode or match is None:
+        raise RuntimeError("cannot determine resident systemd scope compatibility")
+    return int(match[1])
+
+
+def resolve_runner(environment: Mapping[str, str], *, cwd: str) -> str:
+    search_path = os.pathsep.join(
+        entry if os.path.isabs(entry) else os.path.join(cwd, entry)
+        for entry in os.get_exec_path(environment)
+    )
+    runner = shutil.which("systemd-run", path=search_path)
+    if runner is None:
+        raise RuntimeError("resident systemd lifetime requires systemd-run")
+    return os.path.abspath(runner)
+
+
 def scope_command(
-    command: list[str], instance_id: str, environment: Mapping[str, str],
+    command: list[str], instance_id: str, environment: Mapping[str, str], *, cwd: str,
 ) -> list[str]:
     """systemd-run's scope mode execs the target in its own PID after admission."""
     if caller_unit() is None:
         return command
-    runner = shutil.which("systemd-run", path=environment.get("PATH", os.defpath))
-    if runner is None:
-        raise RuntimeError("resident systemd lifetime requires systemd-run")
-    result = subprocess.run(
-        [runner, "--version"], env=dict(environment), stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, check=False,
-    )
-    match = re.match(rb"systemd (\d+)(?:\s|$)", result.stdout)
-    if result.returncode or match is None:
-        raise RuntimeError("cannot determine resident systemd scope compatibility")
+    runner = resolve_runner(environment, cwd=cwd)
+    version = runner_version(runner, environment, cwd=cwd)
     prefix = [
         runner, "--user", "--scope", "--quiet", "--collect", "--no-ask-password",
         "--unit=agent-daemon-" + instance_id + ".scope",
         "--description=Attributed resident daemon",
     ]
     # Earlier versions never expanded scope argv; 254 introduced expansion.
-    if int(match[1]) >= 254:
+    if version >= 254:
         prefix.append("--expand-environment=no")
     return [*prefix, "--", *command]

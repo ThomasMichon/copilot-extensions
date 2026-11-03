@@ -13,6 +13,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import agent_procutil as pu
+from agent_procutil.linux_daemon_scope import resolve_runner, runner_version
 from agent_procutil._caller_owned import _pidfd_exited
 from agent_procutil._linux_pidfd import open_pidfd
 from agent_procutil.daemon_instances import (
@@ -70,16 +71,20 @@ def qualify(root: Path) -> dict:
     descriptors = []
     cleanup = []
     stopped = False
+    runner = resolve_runner(os.environ, cwd=str(root))
+    expansion = ["--expand-environment=no"] if runner_version(
+        runner, os.environ, cwd=str(root),
+    ) >= 254 else []
     with daemon_test_lifecycle(
         owner="systemd-lifetime-fixture", registry_root=root / "instances",
         lease=DaemonLeasePolicy(3, 30), cleanup_results=cleanup,
     ) as environment:
         try:
             subprocess.run([
-                "systemd-run", "--user", "--quiet", "--collect", "--unit=" + unit,
+                runner, "--user", "--quiet", "--collect", "--unit=" + unit,
                 "--property=Type=exec", "--property=RuntimeMaxSec=20",
                 "--property=TimeoutStopSec=3", "--property=MemoryMax=128M",
-                "--property=TasksMax=32", "--expand-environment=no",
+                "--property=TasksMax=32", *expansion,
                 *["--setenv=" + key + "=" + value for key, value in environment.items()],
                 "--", sys.executable, str(Path(__file__).resolve()), "parent", str(root),
             ], check=True, timeout=5)

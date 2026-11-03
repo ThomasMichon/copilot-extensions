@@ -1,6 +1,7 @@
 """A new session does not detach a resident from a systemd cleanup unit."""
 
 from pathlib import Path
+import os
 import subprocess
 from unittest.mock import Mock
 
@@ -26,19 +27,20 @@ def test_native_cleanup_boundary(monkeypatch, text, expected):
 
 
 @pytest.mark.parametrize("version,expand", [(253, False), (254, True), (255, True)])
-def test_scope_preserves_literal_command_and_child_environment(monkeypatch, version, expand):
+def test_scope_preserves_literal_command_and_child_environment(tmp_path, monkeypatch, version, expand):
     command = ["/runtime/python", "-c", "print('$VALUE')", "$VALUE", ""]
     environment = {"PATH": "/native", "VALUE": "do not substitute"}
     monkeypatch.setattr(scope, "caller_unit", lambda: "caller.service")
     monkeypatch.setattr(scope.shutil, "which", lambda *a, **k: "/native/systemd-run")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, f"systemd {version}\n".encode()))
     monkeypatch.setattr(scope.subprocess, "run", run)
-    result = scope.scope_command(command, "a" * 32, environment)
+    result = scope.scope_command(command, "a" * 32, environment, cwd=str(tmp_path))
     assert result[result.index("--") + 1:] == command
     assert ("--expand-environment=no" in result) is expand
     assert "--unit=agent-daemon-" + "a" * 32 + ".scope" in result
     assert "--no-ask-password" in result
     assert run.call_args.kwargs["env"] == environment
+    assert run.call_args.kwargs["cwd"] == str(tmp_path)
     assert run.call_args.kwargs["timeout"] == 3
 
 
@@ -46,10 +48,11 @@ def test_no_native_cleanup_boundary_keeps_plain_posix_launch(monkeypatch):
     monkeypatch.setattr(scope, "caller_unit", lambda: None)
     monkeypatch.setattr(scope.shutil, "which", Mock(side_effect=AssertionError("unexpected native lookup")))
     command = ["/runtime/python", "-m", "resident"]
-    assert scope.scope_command(command, "a" * 32, {}) is command
+    assert scope.scope_command(command, "a" * 32, {}, cwd="/runtime") is command
 
 
 @pytest.mark.parametrize("mode", ["contained-parent", "contained-child", "no-breakaway"])
+@pytest.mark.skipif(scope.sys.platform == "win32", reason="real POSIX process containment")
 def test_spawn_preserves_explicit_containment(tmp_path, monkeypatch, mode):
     monkeypatch.setattr(pu, "_is_windows", lambda: False)
     if mode == "contained-parent":
@@ -94,14 +97,41 @@ def test_unknown_native_runner_is_not_inherited_lifetime(monkeypatch, output, co
         return_value=subprocess.CompletedProcess([], code, output),
     ))
     with pytest.raises(RuntimeError, match="scope compatibility"):
-        scope.scope_command(["/runtime/python"], "a" * 32, {})
+        scope.scope_command(["/runtime/python"], "a" * 32, {}, cwd="/runtime")
 
 
 def test_missing_native_runner_refuses(monkeypatch):
     monkeypatch.setattr(scope, "caller_unit", lambda: "caller.service")
     monkeypatch.setattr(scope.shutil, "which", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="requires systemd-run"):
-        scope.scope_command(["/runtime/python"], "a" * 32, {})
+        scope.scope_command(["/runtime/python"], "a" * 32, {}, cwd="/runtime")
+
+
+def test_relative_runner_search_uses_daemon_cwd_for_probe_and_launch(tmp_path, monkeypatch):
+    caller, target = tmp_path / "caller", tmp_path / "resident"
+    caller.mkdir()
+    (target / "bin").mkdir(parents=True)
+    runner = target / "bin" / ("systemd-run.exe" if os.name == "nt" else "systemd-run")
+    runner.write_bytes(b"fixture")
+    runner.chmod(0o700)
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(scope, "caller_unit", lambda: "caller.service")
+    probe = Mock(return_value=subprocess.CompletedProcess([], 0, b"systemd 255\n"))
+    monkeypatch.setattr(scope.subprocess, "run", probe)
+    result = scope.scope_command(["/runtime/python"], "a" * 32, {"PATH": "bin"}, cwd=str(target))
+    assert result[0] == str(runner)
+    assert probe.call_args.args[0] == [str(runner), "--version"]
+    assert probe.call_args.kwargs["cwd"] == str(target)
+
+
+def test_native_probe_timeout_is_an_admission_refusal(tmp_path, monkeypatch):
+    monkeypatch.setattr(scope, "caller_unit", lambda: "caller.service")
+    monkeypatch.setattr(scope.shutil, "which", lambda *a, **k: "/native/systemd-run")
+    timeout = subprocess.TimeoutExpired("systemd-run", 3)
+    monkeypatch.setattr(scope.subprocess, "run", Mock(side_effect=timeout))
+    with pytest.raises(RuntimeError, match="probe timed out") as raised:
+        scope.scope_command(["/runtime/python"], "a" * 32, {}, cwd=str(tmp_path))
+    assert raised.value.__cause__ is timeout
 
 
 def test_other_platforms_do_not_read_linux_cgroups(monkeypatch):

@@ -24,3 +24,7 @@ test_unknown_native_runner_is_not_inherited_lifetime = (
 )
 test_missing_native_runner_refuses = original.test_missing_native_runner_refuses
 test_other_platforms_do_not_read_linux_cgroups = original.test_other_platforms_do_not_read_linux_cgroups
+test_relative_runner_search_uses_daemon_cwd_for_probe_and_launch = (
+    original.test_relative_runner_search_uses_daemon_cwd_for_probe_and_launch
+)
+test_native_probe_timeout_is_an_admission_refusal = original.test_native_probe_timeout_is_an_admission_refusal
