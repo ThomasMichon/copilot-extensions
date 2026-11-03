@@ -2346,6 +2346,7 @@ own files, plus explicit local integration commands:
 ```bash
 uv run python -m worktree_manager projects        # harness repos (binstubs + profiles)
 uv run python -m worktree_manager projects <name> # config dir, linked knowledge repo, profiles, enabled plugins
+uv run python -m worktree_manager projects --json # strict read-only version-1 project snapshot
 uv run python -m worktree_manager repos           # every known repo + indicators
 uv run python -m worktree_manager repos <name>    # worktree mode · agent mode · pr model · ownership · remote
 uv run python -m worktree_manager worktrees       # live worktree counts per project (via the engine)
@@ -2354,6 +2355,19 @@ uv run python -m worktree_manager plugins --status  # known plugins vs. what is 
 uv run python -m worktree_manager contracts --project <name> # contributed pivots/actions/cards/config
 uv run python -m worktree_manager refresh-profiles <name> # Windows: reconcile local profiles + shortcuts
 ```
+
+`projects --json` exposes registry-owned identity as
+`{"version":1,"projects":[...]}`. Each record contains only `name`, selected
+`anchor`, `config_dir` and Boolean `expose_agent`. It performs strict registry
+reads without provisioning, registration or repairs.
+An absent profile returns an empty list without creating it; malformed or
+unreadable inputs return nonzero with `state: "unavailable"`, never successful
+absence. Human-readable project listings retain their existing tolerant behavior.
+This optional read form is additive; callers of older Manager versions must
+refuse non-JSON/unsupported output before apply, not infer an empty catalogue.
+It deliberately omits PR model, plugin enablement, machine rosters and runtime
+configuration/readiness. Those unrelated inputs are not inspected or silently
+represented by defaults; this ownership view is not a full readiness proof.
 
 `refresh-profiles` is the narrow, JSON-producing local integration command.
 It collects saved project selections once, applies the existing fragment and
@@ -2367,7 +2381,7 @@ rosters, invalid registry entries and dangling configuration links before
 touching fragment/state/settings outputs. Actual publishing collection uses
 strict registry reads too; preliminary validation never authorizes a later
 tolerant reload. Genuinely absent optional files remain supported. Read-only
-state views and previews retain their tolerant behavior.
+human-readable state views and previews retain their tolerant behavior.
 Present registries require their explicit `projects`/`repos` mapping; an empty,
 null or missing-key document is not permission to retire profiles. Shortcut
 display names are validated before fragment publication, not after it. Engine

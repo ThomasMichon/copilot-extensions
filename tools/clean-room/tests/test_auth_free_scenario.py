@@ -25,17 +25,19 @@ def test_powershell_uses_manifest_auth_contract(tmp_path, auth):
     source = (RIG / "run.ps1").read_text(encoding="utf-8")
     start = source.index("function Start-Container {")
     function = source[start:source.index("\nfunction Ensure-Container", start)]
-    quote = lambda p: str(p).replace("'", "''")
+    def quote(path):
+        return str(path).replace("'", "''")
     script = tmp_path / "probe.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'\n"
         "function Resolve-CopilotToken { throw 'authentication-requested' }\n"
         "function Test-Image { return $true }\n"
-        "function docker { if ($args[0] -eq 'run') { $script:selectedImage=$args[-2] } }\n"
+        "function docker { $global:LASTEXITCODE=0; if ($args[0] -eq 'run') { $script:selectedImage=$args[-2] } }\n"
         f"$ScenarioDir='{quote(scenario)}'; $Results='{quote(tmp_path / 'out')}'\n"
         f"$LibDir='{quote(RIG / 'lib')}'\n"
         "$BaseTag='base-image'; $AuthTag='authed-image'; $Container='fixture'\n"
         "$PassEnv=@(); $HarnessMount=''; $ScenarioSharedLib=$null\n"
+        "$SleepDuration='infinity'\n"
         + function + "\nStart-Container\nWrite-Output \"selected=$script:selectedImage\"\n",
         encoding="utf-8",
     )
@@ -85,7 +87,7 @@ def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(t
     # block that closes with `fi`, not `}`. Print $img *inside* the function,
     # before the synthetic close: it is `local` to start_container, so a
     # top-level echo after the call returns would see it as unbound.
-    body = body[: body.index('docker rm -f "$CONTAINER"')] + '\n    echo "img=$img"\n}\n'
+    body = body[: body.index('    if [ "${BOUNDED:-0}" = 0 ]; then')] + '\n    echo "img=$img"\n}\n'
     probe = tmp_path / "probe.sh"
     probe.write_text(
         "#!/bin/sh\nset -eu\n"
@@ -116,7 +118,7 @@ def test_bash_malformed_manifest_fails_closed_to_auth(tmp_path):
     (scenario / "manifest.json").write_text("{not valid json", encoding="utf-8")
     source = (RIG / "run.sh").read_text(encoding="utf-8")
     body = source[source.index("start_container() {"):]
-    body = body[: body.index('docker rm -f "$CONTAINER"')] + '\n    echo "no_scenario_auth=$no_scenario_auth"\n}\n'
+    body = body[: body.index('    if [ "${BOUNDED:-0}" = 0 ]; then')] + '\n    echo "no_scenario_auth=$no_scenario_auth"\n}\n'
     probe = tmp_path / "probe.sh"
     probe.write_text(
         "#!/bin/sh\nset -eu\n"

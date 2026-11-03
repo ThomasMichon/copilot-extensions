@@ -59,8 +59,24 @@ HARNESS_MOUNT="${CR_HARNESS_MOUNT_HOST:-}"
 MODE=run
 RUNS_OVERRIDE=0
 SKIP_TIER_P=0
+CPUS=""
+MEMORY=""
+PIDS_LIMIT=""
+LIFETIME_SECONDS=""
+BOUNDED=0
+CREATED_CONTAINER_ID=""
 while [ $# -gt 0 ]; do
     case "$1" in
+        --cpus|--memory|--pids-limit|--lifetime-seconds)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "$1 requires a value" >&2; exit 2; }
+            BOUNDED=1
+            case "$1" in
+                --cpus) CPUS="$2" ;;
+                --memory) MEMORY="$2" ;;
+                --pids-limit) PIDS_LIMIT="$2" ;;
+                --lifetime-seconds) LIFETIME_SECONDS="$2" ;;
+            esac
+            shift 2 ;;
         --image) IMAGE="$2"; shift 2 ;;
         --name-suffix) NAME_SUFFIX="$2"; shift 2 ;;
         --until) UNTIL="$2"; shift 2 ;;
@@ -76,9 +92,44 @@ while [ $# -gt 0 ]; do
         --skip-tier-p-gate) SKIP_TIER_P=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|eval|shell|down|prune|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--block-public-feeds] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|prune|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--cpus N] [--memory SIZE] [--pids-limit N] [--lifetime-seconds N] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--block-public-feeds] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|prune|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
+
+LIMIT_ARGS=()
+SLEEP_DURATION=infinity
+if [ "$BOUNDED" = 1 ]; then
+    case "$MODE" in
+        run|eval|shell|bridge-register) ;;
+        *) echo "container limits require run, eval, shell or bridge-register mode" >&2; exit 2 ;;
+    esac
+    [ "$THEN" != down ] || { echo "bounded containers are retained; --then down is not supported" >&2; exit 2; }
+    if [ -n "$CPUS" ]; then
+        [[ "$CPUS" =~ ^[0-9]{1,7}([.][0-9]{1,9})?$ ]] &&
+            awk -v n="$CPUS" 'BEGIN { exit !(n > 0 && n <= 1000000) }' ||
+            { echo "--cpus must be a positive decimal <= 1000000 (up to 9 fractional digits)" >&2; exit 2; }
+        LIMIT_ARGS+=(--cpus "$CPUS")
+    fi
+    if [ -n "$MEMORY" ]; then
+        [[ "$MEMORY" =~ ^[1-9][0-9]{0,8}[bBkKmMgG]?$ ]] &&
+            awk -v n="$MEMORY" 'BEGIN {
+                unit = tolower(substr(n, length(n))); scale = 1
+                if (unit == "k") scale = 1024
+                if (unit == "m") scale = 1024*1024
+                if (unit == "g") scale = 1024*1024*1024
+                exit !(n * scale >= 6*1024*1024)
+            }' || { echo "--memory must be an integer size >= 6 MiB (up to 9 digits, optional b/k/m/g)" >&2; exit 2; }
+        LIMIT_ARGS+=(--memory "$MEMORY" --memory-swap "$MEMORY")
+    fi
+    for value in "$PIDS_LIMIT" "$LIFETIME_SECONDS"; do
+        [ -z "$value" ] || {
+            [[ "$value" =~ ^[1-9][0-9]{0,9}$ ]] && [ "$value" -le 2147483647 ] ||
+                { echo "--pids-limit and --lifetime-seconds must be positive integers <= 2147483647" >&2; exit 2; }
+        }
+    done
+    [ -z "$PIDS_LIMIT" ] || LIMIT_ARGS+=(--pids-limit "$PIDS_LIMIT")
+    [ -z "$LIFETIME_SECONDS" ] || SLEEP_DURATION="$LIFETIME_SECONDS"
+fi
 
 # Resolve the scenario dir: an explicit path, else scenarios/<name>/.
 if [ -d "$SCENARIO" ]; then
@@ -152,6 +203,7 @@ do_build() {
     fi
 }
 do_auth() {
+    [ "$BOUNDED" = 0 ] || { echo "bounded runs cannot create an interactive auth container; authenticate separately" >&2; return 1; }
     img_exists "$BASE_TAG" || do_build
     echo "== one-time device-code login ($AUTH_TAG) =="
     echo "Run '/login' if not prompted, authorize the device code, then '/exit'."
@@ -170,6 +222,20 @@ resolve_token() {
     if [ -n "$TOKEN_ACCOUNT" ]; then gh auth token --user "$TOKEN_ACCOUNT" 2>/dev/null | head -1; else gh auth token 2>/dev/null | head -1; fi
 }
 start_container() {
+    if [ "${BOUNDED:-0}" = 1 ]; then
+        if [ -n "$CREATED_CONTAINER_ID" ]; then
+            local current
+            current="$(docker inspect -f '{{.Id}} {{.State.Running}}' "$CONTAINER")" || return 1
+            [ "$current" = "$CREATED_CONTAINER_ID true" ] || {
+                echo "bounded container identity changed or lifetime ended; retained $CREATED_CONTAINER_ID" >&2
+                return 1
+            }
+            return 0
+        fi
+        local existing escaped_name="${CONTAINER//./\\.}"
+        existing="$(docker ps -aq --filter "name=^/${escaped_name}$")" || return 1
+        [ -z "$existing" ] || { echo "bounded container name already exists: $CONTAINER; refusing reuse or replacement" >&2; return 1; }
+    fi
     # Auth: prefer a host-grabbed Copilot token (COPILOT_GITHUB_TOKEN) -- no
     # interactive step, runs against the plain unauthed image. Fall back to the
     # committed device-code :authed image only when no token is available.
@@ -197,10 +263,12 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         export COPILOT_GITHUB_TOKEN="$token"   # value from env, not on the docker CLI args
         token_args=(-e COPILOT_GITHUB_TOKEN)
     else
-        img_exists "$AUTH_TAG" || { echo "no host token and no $AUTH_TAG -- device-code auth"; do_auth; }
+        img_exists "$AUTH_TAG" || { echo "no host token and no $AUTH_TAG -- device-code auth"; do_auth || return 1; }
         img="$AUTH_TAG"
     fi
-    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    if [ "${BOUNDED:-0}" = 0 ]; then
+        docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    fi
     mkdir -p "$RESULTS"
     if [ "$RESULTS_PREEXISTED" = 0 ]; then
         local docker_security
@@ -318,8 +386,10 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
     fi
     local uv_args=()
     [ -z "$UV_INDEX" ] || uv_args=(-e "UV_DEFAULT_INDEX=$UV_INDEX")
-    docker run -d --init --name "$CONTAINER" \
+    local created_id
+    created_id="$(docker run -d --init --name "$CONTAINER" \
         --label "$CLEAN_ROOM_LABEL" \
+        "${LIMIT_ARGS[@]}" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \
         -v "$RESULTS:/home/operator/out" \
@@ -338,23 +408,33 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         -e "CR_REPORT=/home/operator/out/cr-report.json" \
         "${token_args[@]}" \
         "${pass_args[@]}" \
-        --entrypoint sleep "$img" infinity >/dev/null
+        --entrypoint sleep "$img" "${SLEEP_DURATION:-infinity}")" || {
+            echo "container creation failed; any failed container is retained: $CONTAINER" >&2
+            return 1
+        }
+    if [ "${BOUNDED:-0}" = 1 ]; then
+        [[ "$created_id" =~ ^[a-f0-9]{64}$ ]] || { echo "docker run returned no valid container identity; refusing further effects" >&2; return 1; }
+        CREATED_CONTAINER_ID="$created_id"
+        echo "bounded container id=$CREATED_CONTAINER_ID lifetime=$SLEEP_DURATION seconds (not renewed)"
+    fi
     [ -n "$token" ] && unset COPILOT_GITHUB_TOKEN
-    if ! docker exec "$CONTAINER" /bin/sh -c \
+    if ! docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/sh -c \
         'dir=/home/operator/out; [ ! -d "$dir/eval" ] || dir="$dir/eval";
          probe="$dir/.container-access-probe.$$"; : > "$probe" && rm -f -- "$probe"'; then
         echo "prepared results directory is not writable by the container operator: $RESULTS" >&2
-        docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+        if [ "${BOUNDED:-0}" = 0 ]; then docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; fi
         exit 1
     fi
     echo "container $CONTAINER up (results -> $RESULTS)"
 }
-ensure_container() { is_running "$CONTAINER" || start_container; }
+ensure_container() {
+    if [ "$BOUNDED" = 1 ]; then start_container; else is_running "$CONTAINER" || start_container; fi
+}
 do_shell() {
-    ensure_container
+    ensure_container || return 1
     echo "== entering $CONTAINER (interactive login shell; 'exit' leaves, container stays up) =="
     echo "   run '$0 --image $IMAGE${NAME_SUFFIX:+ --name-suffix $NAME_SUFFIX} down' to remove it."
-    docker exec -it "$CONTAINER" /bin/bash -l
+    docker exec -it "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/bash -l
 }
 do_down() {
     local container_id="${BRIDGE_CONTAINER_ID:-}"
@@ -399,16 +479,25 @@ do_prune() {
         echo "no clean-room containers found"
         return 0
     fi
-    local id name failures=0
+    local id full_id name failures=0
     for id in $ids; do
-        name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##')"
-        [ -n "$name" ] || name="$id"
+        full_id="$(docker inspect -f '{{.Id}}' "$id" 2>/dev/null)" || {
+            echo "error: could not resolve container identity $id" >&2
+            failures=$((failures + 1))
+            continue
+        }
+        [ -n "$full_id" ] || { failures=$((failures + 1)); continue; }
+        name="$(docker inspect -f '{{.Name}}' "$full_id" 2>/dev/null | sed 's#^/##')"
+        [ -n "$name" ] || name="$full_id"
         # Best-effort agent-bridge unregister before removal -- a stray
         # registration for a container that's about to disappear is exactly
         # the kind of debris this command exists to prevent.
-        BRIDGE_CONTAINER_ID="$id" AGENT_NAME="cleanroom-${name#cr-}" CONTAINER="$name" \
-            do_bridge_unregister >/dev/null 2>&1 || true
-        if docker rm -f "$id" >/dev/null 2>&1; then
+        if ! BRIDGE_CONTAINER_ID="$full_id" AGENT_NAME="cleanroom-${name#cr-}" CONTAINER="$name" \
+            do_bridge_unregister >/dev/null; then
+            echo "error: could not unregister $name ($full_id)" >&2
+            failures=$((failures + 1))
+        fi
+        if docker rm -f "$full_id" >/dev/null 2>&1; then
             echo "removed $name"
         else
             echo "error: could not remove $name ($id)" >&2
@@ -424,11 +513,14 @@ do_prune() {
 # `cleanroom` manifest and IS the provider CLI the daemon shells out to.
 _py() { command -v python3 || command -v python; }
 do_bridge_register() {
-    ensure_container
+    ensure_container || return 1
     local bridge_args=(--acp-command "$ACP_COMMAND")
     local response
     [ -n "${ACP_CWD:-}" ] && bridge_args+=(--acp-cwd "$ACP_CWD")
-    if ! response="$("$(_py)" "$HERE/bridge_register.py" "${bridge_args[@]}" register --container "$CONTAINER" --name "$AGENT_NAME")"; then
+    if [ -n "$CREATED_CONTAINER_ID" ]; then
+        bridge_args+=(--name-filter "$CREATED_CONTAINER_ID")
+    fi
+    if ! response="$("$(_py)" "$HERE/bridge_register.py" "${bridge_args[@]}" register --container "${CREATED_CONTAINER_ID:-$CONTAINER}" --name "$AGENT_NAME")"; then
         return 1
     fi
     printf '%s\n' "$response"
@@ -437,14 +529,15 @@ import json, sys
 print(json.load(sys.stdin).get("container_id", ""))
 ')"
     [ -n "$BRIDGE_CONTAINER_ID" ] || return 1
+    if [ -n "$CREATED_CONTAINER_ID" ]; then DRIVE_AGENT="cleanroom:$CREATED_CONTAINER_ID"; fi
     echo "drive it:  agent-bridge create $DRIVE_AGENT \"<prompt>\""
 }
 do_bridge_unregister() {
-    local container_id="${BRIDGE_CONTAINER_ID:-}"
+    local container_id="${BRIDGE_CONTAINER_ID:-${CREATED_CONTAINER_ID:-}}"
     if [ -z "$container_id" ]; then
         container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER" 2>/dev/null || true)"
     fi
-    local unregister_args=(unregister --name "$AGENT_NAME" --container "$CONTAINER")
+    local unregister_args=(unregister --name "$AGENT_NAME" --container "${CREATED_CONTAINER_ID:-$CONTAINER}")
     if [ -n "$container_id" ]; then
         unregister_args+=(--container-id "$container_id")
     else
@@ -469,17 +562,17 @@ except Exception: d=[]
 [print(s.get("session_id","")) for s in d if s.get("agent_name")==a and s.get("session_id")]' "$agent")
 }
 do_run() {
-    start_container
+    start_container || return 1
     local until_env=()
     [ "$UNTIL" != all ] && until_env=(-e "CR_UNTIL=$UNTIL")
     echo "== running clean-room scenario '$SCENARIO_NAME' ($IMAGE, through stage ${UNTIL}) =="
-    docker exec "${until_env[@]}" "$CONTAINER" /bin/bash -lc \
+    docker exec "${until_env[@]}" "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/bash -lc \
         'bash /home/operator/scenario/scenario.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
     local rc=$?
     echo; echo "== report =="; cat "$RESULTS/cr-report.json" 2>/dev/null || true
     echo "results dir: $RESULTS"
     case "$THEN" in
-        shell) do_shell ;;
+        shell) do_shell || return 1 ;;
         down)  do_down ;;
     esac
     [ "$THEN" = shell ] || return $rc
@@ -664,7 +757,7 @@ PY
     write_scenario_invalid() {
         local jam="$1"
         [ -n "$INVALID_WRITER" ] || return 0
-        docker exec "$CONTAINER" python3 \
+        docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" python3 \
             "/home/operator/scenario/$INVALID_WRITER" \
             --manifest /home/operator/scenario/manifest.json \
             --output "/home/operator/out/$INVALID_OUTPUT" \
@@ -673,9 +766,9 @@ PY
     }
 
     # --- 1) start box + 2) establish starting state ---------------------------
-    start_container
+    start_container || return 1
     echo "== eval: establishing starting state ($SETUP_REL) =="
-    docker exec "$CONTAINER" /bin/bash -lc \
+    docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/bash -lc \
         "bash /home/operator/scenario/$SETUP_REL; rc=\$?; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit \$rc"
     local setup_rc=$?
     if [ -f "$RESULTS/cr-report.json" ]; then
@@ -691,7 +784,7 @@ PY
     # authoritative worktree path is generated at runtime can publish it through
     # acp_cwd_file. The resolved path drives both the shell and ACP session/new.
     if [ -n "$ACP_CWD_FILE" ]; then
-        ACP_CWD="$(docker exec "$CONTAINER" python3 -c '
+        ACP_CWD="$(docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" python3 -c '
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 lines = p.read_text(encoding="utf-8").splitlines()
@@ -723,7 +816,7 @@ for value in json.loads(sys.argv[1]):
     # --- Tier-P precondition: cheap in-box smoke of the plugin CLI ------------
     if [ "${SKIP_TIER_P:-0}" != 1 ] && [ -n "$TIERP" ]; then
         echo "== eval: Tier-P precondition ($TIERP) =="
-        if ! docker exec "$CONTAINER" /bin/bash -lc "$TIERP" >/dev/null 2>&1; then
+        if ! docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/bash -lc "$TIERP" >/dev/null 2>&1; then
             write_scenario_invalid scenario-fixture
             echo "eval: Tier-P precondition '$TIERP' failed -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass --skip-tier-p-gate to force." >&2
             exit 1
@@ -745,7 +838,7 @@ for value in json.loads(sys.argv[1]):
     if [ "$docs_dirs_json" = "[]" ]; then
         docs_dirs_json='["/home/operator/.copilot/installed-plugins"]'
     fi
-    docs_hash="$(docker exec "$CONTAINER" python3 -c '
+    docs_hash="$(docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" python3 -c '
 import hashlib
 import json
 import pathlib
@@ -923,7 +1016,7 @@ PY
     # --- 6) optional programmatic post-check (ground-truth evidence) ---------
     if [ -n "$POST_CHECK" ] && [ -f "$SCENARIO_DIR/$POST_CHECK" ]; then
         echo "== eval: programmatic post-check ($POST_CHECK) =="
-        docker exec "$CONTAINER" /bin/bash -lc \
+        docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/bash -lc \
             "bash /home/operator/scenario/$POST_CHECK; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null" >/dev/null 2>&1 || true
     fi
 
@@ -935,7 +1028,7 @@ PY
     fi
 
     # --- write the eval run-manifest (judge packet index) --------------------
-    copilot_ver="$(docker exec "$CONTAINER" /bin/bash -lc 'copilot --version 2>/dev/null' 2>/dev/null | head -1)"
+    copilot_ver="$(docker exec "${CREATED_CONTAINER_ID:-$CONTAINER}" /bin/bash -lc 'copilot --version 2>/dev/null' 2>/dev/null | head -1)"
     CR_SCENARIO_NAME="$SCENARIO_NAME" CR_FAMILY="$FAMILY" CR_IMAGE="$IMAGE" CR_RUN_COUNT="$RUN_COUNT" \
     CR_AGG="$AGG" CR_COPILOT_VER="$copilot_ver" CR_PROMPT_HASH="$PROMPT_HASH" CR_DOCS_HASH="$docs_hash" \
     CR_ACP_DIRS_JSON="$ACP_DIRS_JSON" CR_FINGERPRINT_DIRS_JSON="$docs_dirs_json" \

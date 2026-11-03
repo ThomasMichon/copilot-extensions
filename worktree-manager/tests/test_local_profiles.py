@@ -343,6 +343,9 @@ def test_invalid_selection_values_preserve_outputs(monkeypatch, tmp_path, select
 def test_collection_revalidates_selection_without_tolerant_coercion(monkeypatch, tmp_path):
     monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
     monkeypatch.setattr(profiles.harness_state, "home", lambda: tmp_path)
+    registry = tmp_path / ".agent-worktrees"
+    registry.mkdir()
+    (registry / "projects.yaml").write_text("projects:\n  demo: {}\n", encoding="utf-8")
     (tmp_path / ".demo").mkdir()
     config = tmp_path / ".demo" / "config.yaml"
     config.write_text("machine: host\n", encoding="utf-8")
@@ -354,6 +357,8 @@ def test_collection_revalidates_selection_without_tolerant_coercion(monkeypatch,
         return collect(**kwargs)
 
     monkeypatch.setattr(tf, "collect_local_projects", changed)
+    monkeypatch.setattr(tf, "deploy_fragment", lambda *a, **k: pytest.fail("Invalid selection published"))
+    monkeypatch.setattr(profiles, "refresh_shortcuts", lambda *a: pytest.fail("Invalid selection published"))
     with pytest.raises(ValueError, match="kind must be"):
         profiles.refresh("demo")
 
