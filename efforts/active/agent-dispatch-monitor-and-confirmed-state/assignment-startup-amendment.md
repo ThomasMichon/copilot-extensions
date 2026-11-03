@@ -218,6 +218,12 @@ process exists; a launched process or delivered prompt does not prove acceptance
 
 ## Implementation plan
 
+The [managed allocator source slice](journal/2026/11.02-managed-pool-allocation.md)
+connects the ordinary caller to its selected registration/machine/environment
+instance behind a separate default-off opt-in. It retains global transactional
+selection and refuses another instance's win before claim insertion. This is
+bounded source integration, not ordinary retry/decline or rollout qualification.
+
 The following sequencing and transaction means are **agent-recommended**;
 they implement the requested guarantees. The source receipts above identify
 the explicit implemented boundaries; remaining integration means are not
@@ -334,6 +340,8 @@ The [ordinary first-prompt source](journal/2026/11.02-ordinary-first-prompt.md)
 expands explicit initial admission to the actual ordinary Bridge driver.
 It preserves the allocator claim and keyed first-turn/native binding without
 claiming automatic allocator-instance or ordinary retry integration.
+Source merged in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123);
+the complete validation matrix remains open.
 
 - [ ] Fake-clock selection and admission before, exactly at and after retry
   eligibility; direct reservation/claim bypass attempts refuse early work.

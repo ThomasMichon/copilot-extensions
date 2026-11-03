@@ -112,7 +112,8 @@ class PoolPlacementClientMixin:
 
     def place_pool_task(
         self, task_id: str, *, reserved_by: str, catalog_revision: int,
-        driver: str = "cli",
+        driver: str = "cli", expected_instance: tuple[str, str, str] | None = None,
+        startup_timeout: float | None = None,
     ) -> dict:
         """Claim before startup; only a validated fresh result permits a spawn.
 
@@ -128,7 +129,23 @@ class PoolPlacementClientMixin:
             or driver not in {"cli", "ordinary-bridge"}
         ):
             raise DispatchError(400, "pool placement requires task, allocator, catalog revision and qualified driver")
-        _validate_contract(self.pool_placement_contract(), driver=driver)
+        contract = _validate_contract(self.pool_placement_contract(), driver=driver)
+        extra: dict[str, object] = {}
+        if expected_instance is not None or startup_timeout is not None:
+            versions = contract.get("instance_bound_placement_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise DispatchUpgradeRequired("running coordinator lacks instance-bound placement")
+            if expected_instance is not None:
+                from .pool_instances import pool_instance_identity
+                instance = dict(zip(("registration_id", "machine", "env"), expected_instance))
+                if len(expected_instance) != 3:
+                    raise DispatchError(400, "pool placement requires an exact launch instance")
+                pool_instance_identity(instance)
+                extra["expected_instance"] = instance
+            if startup_timeout is not None:
+                from .queue_pool_startup import validate_startup_timeout
+                validate_startup_timeout(startup_timeout)
+                extra["startup_timeout"] = startup_timeout
         try:
             result = self._unwrap(self._http.post(
                 "/pool-placements", headers=self._control_headers(),
@@ -136,14 +153,20 @@ class PoolPlacementClientMixin:
                     "version": POOL_PLACEMENT_VERSION, "task_id": task_id,
                     "reserved_by": reserved_by, "catalog_revision": catalog_revision,
                     "driver": driver,
+                    **extra,
                 },
             ))
         except ValueError as exc:
             raise DispatchError(502, "pool placement outcome is unknown: invalid response") from exc
-        return validate_placement_result(
+        placed = validate_placement_result(
             result, task_id=task_id, reserved_by=reserved_by,
             catalog_revision=catalog_revision, driver=driver,
         )
+        if expected_instance is not None and tuple(
+            placed["assignment"][name] for name in ("registration_id", "machine", "env")
+        ) != expected_instance:
+            raise DispatchError(502, "pool placement outcome is unknown: launch instance changed")
+        return placed
 
     def start_pool_task(
         self, task_id: str, worker_id: str, *, owner_session_id: str,

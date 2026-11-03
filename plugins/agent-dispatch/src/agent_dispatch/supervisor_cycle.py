@@ -31,6 +31,14 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
     from .ordinary_bridge import reserve_for_backend
     from .spawn_factories import SpawnPreparationRetained
     from . import supervisor as owner
+    from .supervisor_pool_allocator import begin_cycle
+
+    try:
+        configured_pool = begin_cycle(self)
+    except DispatchError as exc:
+        log.warning("managed pool instance admission refused: %s", exc)
+        trace.event("scheduling", "blocked", reason="pool_instance_custody_unavailable")
+        return []
 
     def call(name: str, **kwargs: object) -> None:
         with trace.stage(name):
@@ -70,11 +78,16 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             self.event_wake.acknowledge()
         call("_sync_event_subscriptions")
         return []
-    with trace.stage("failed_spawn_counts"):
-        failed_counts = self._failed_spawn_counts()
     with trace.stage("selection") as selected:
         eligible = list(self._eligible(now))
+        if configured_pool and not self.pool_allocation_enabled:
+            eligible = [task for task in eligible if task.get("source") == "ci-repair"]
+            trace.event("scheduling", "blocked", reason="pool_allocation_disabled")
         selected["eligible_count"] = len(eligible)
+    legacy_eligible = [task for task in eligible if not configured_pool or task.get("source") == "ci-repair"]
+    legacy_needed = not configured_pool or bool(legacy_eligible)
+    with trace.stage("failed_spawn_counts"):
+        failed_counts = self._failed_spawn_counts() if legacy_needed else {}
     if failed_counts is None:
         log.warning(
             "could not determine failed-spawn counts this cycle; "
@@ -86,10 +99,10 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         active = self.max_concurrent
     else:
         with trace.stage("retry_budget") as budget:
-            dead_lettered = self._log_dead_lettered(eligible, failed_counts)
+            dead_lettered = self._log_dead_lettered(legacy_eligible, failed_counts)
             budget["exhausted_count"] = len(dead_lettered)
         with trace.stage("active_reservations"):
-            active = len(self._active_reservations())
+            active = len(self._active_reservations()) if legacy_needed else 0
     spawned: list[str] = []
     for task in eligible:
         task_trace = SpawnDiagnostics(
@@ -103,7 +116,7 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         if task["id"] in dead_lettered:
             # The existing signature-based warning bounds per-task dead-letter output.
             continue
-        if active >= self.max_concurrent:
+        if (not configured_pool or task.get("source") == "ci-repair") and active >= self.max_concurrent:
             trace.event("scheduling", "blocked", reason="concurrency_limit",
                         active=active, max_concurrent=self.max_concurrent)
             break
@@ -134,9 +147,13 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
                     self.client, task, self.supervisor_id,
                     ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task),
                     restricted=getattr(self.spawn_fn, "restricted_bridge_for", lambda _: False)(task),
+                    instance=self.pool_instance, startup_timeout=self.reserving_timeout,
                 )
                 reserved["reserved"] = bool(resp.get("reserved"))
-        except DispatchError:
+        except DispatchError as exc:
+            task_trace.event("scheduling", "deferred", reason="reservation_refused")
+            log.warning("reservation refused for task %s: %s", task["id"],
+                        diagnostic_text(str(exc), task_trace.secrets))
             continue
         if resp.get("coordinator_launch") and (
             resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"
