@@ -4185,6 +4185,19 @@ attestation through the existing release owner. The old subject's attestation
 cannot approve changed index bytes. No dependency bytes enter this index
 hand-off, and the default profile-only output remains unchanged.
 
+`tools/core_release_inputs.py` provides a retained-input adapter for the
+first-party core in the existing source-keyed Release. Given independently
+selected Dev, Main and content-tree identities and the source owner's ancestry
+check, `retain_released_core` authenticates the source index and its unique core
+bundle through the existing promotion attestation owner. It validates the
+manifest/entry binding, exact archive member set and wheel digests, then yields
+private retained index, manifest and wheel paths for the native producer.
+Those inputs remain held and rechecked until the context exits; callers must
+stage any output until that exit succeeds. The native producer still validates
+the selected source and actual wheel metadata. This adapter does not select or
+authenticate the source checkout, approve a runtime profile, provision
+third-party materials, publish a delivery, or enable an updater.
+
 `tools/core_native_delivery.py` connects that candidate producer to the
 existing native resolver and delivery owners:
 

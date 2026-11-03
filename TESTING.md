@@ -3478,6 +3478,10 @@ and an explicitly restricted redirect that must not be contacted.
 delivery/index handoff, exact release-state binding, input mutation during
 final guarded verification and the actual CLI. It does not authenticate the
 input index or approve the changed subject.
+`tools/test_core_release_inputs.py` exercises the existing source-release
+discovery and core attestation hand-off into the producer, including missing,
+untrusted, oversized, changed and unsafe inputs. Its release service and
+attestations are controlled fixtures; they do not approve a profile.
 `tools/test_core_native_pool_index.py` injects an unlisted wheel during the
 real offline resolver call and verifies it cannot change the selection; it
 also checks deep Windows pool inputs and bounded, private failure diagnostics.
