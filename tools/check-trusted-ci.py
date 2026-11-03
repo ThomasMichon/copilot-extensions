@@ -20,6 +20,10 @@ TRUSTED_JOB_CONDITION = (
 )
 UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
 UNIT_JOB_CONDITION = "github.event_name != 'push'"
+UNIT_GATE_NAME = (
+    "${{ github.event_name == 'pull_request' && "
+    "'PR gate (required check)' || 'Non-PR CI summary' }}"
+)
 UNIT_COMMAND = (
     'python tools/ci_pr_unit_reuse.py --source-sha "$GITHUB_SHA" '
     '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
@@ -651,6 +655,8 @@ def _validate_ci(path: Path) -> list[str]:
             ):
                 errors.append("only freshly executed units may publish exact-input reuse evidence")
             gate = _mapping(ci_jobs.get("pr-gate")) or {}
+            if gate.get("name") != UNIT_GATE_NAME:
+                errors.append("only PR events may publish the required PR check context")
             gate_steps = gate.get("steps")
             gate_step = (
                 _mapping(gate_steps[0])

@@ -281,6 +281,24 @@ The [configuration workbench](configurator/README.md#installation-and-updates)
 makes automatic-update policy visible and adjustable, with a clear distinction
 between allowing an automatic request and enrolling a recurring controller.
 
+### ordinary-update-completion
+
+A directly requested update owns its recovery and completion: it performs a
+fresh installation, or joins an equivalent already-running fresh installation
+and waits for that installation's verified result. An accepted request,
+historical success or completed Manager-only bootstrap is not completion of a
+whole-toolset update. Joining preserves the fully resolved target, requested
+scope and options; a different target requires its own execution.
+
+Interrupted attempts retain their original outcome and effects evidence. The
+normal update entry uses the existing owner's supported reconciliation and
+repair authority rather than requiring a separate cleanup command or extra
+recovery flag. Authorization to repair is recorded distinctly from native
+cleanup proof; it does not fabricate settlement, replay uncertain work, retire
+another live owner, or weaken source, integrity, privilege or independent
+foundation ownership. An unavailable recovery boundary remains an explicit
+failure, never a successful no-op or a reason to run a competing installer.
+
 ### setup-invocation-authorizes-dependencies
 A user or authorized agent directly invoking the trusted harness setup flow
 authorizes installation of the dependencies required by its selected

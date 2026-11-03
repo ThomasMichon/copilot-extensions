@@ -1,6 +1,9 @@
 """Real process boundaries against fixture products, never a live installation."""
 
+import base64
+import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -72,13 +75,27 @@ def test_executor_shim_reuses_external_bytecode_without_mutating_source(
     from update_driver import core
 
     slot = area / "versions" / "incumbent"
-    driver = slot / "update_driver"
-    procutil = slot / "agent_procutil"
+    packages = slot / "Lib" / "site-packages"
+    driver = packages / "update_driver"
+    procutil = packages / "agent_procutil"
     driver.mkdir(parents=True)
     procutil.mkdir()
     for name in ("_runner.py", "participant.py"):
         shutil.copyfile(Path(core.__file__).with_name(name), driver / name)
     shutil.copyfile(agent_procutil.__file__, procutil / "__init__.py")
+    record = packages / "fixture.dist-info" / "RECORD"
+    record.parent.mkdir()
+    entries = []
+    for path in sorted(packages.rglob("*.py")):
+        content = path.read_bytes()
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+        entries.append(f"{path.relative_to(packages).as_posix()},sha256={digest},{len(content)}\n")
+    record.write_text("".join(entries), encoding="utf-8")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "2026-11-03T00:00:00Z", "pid": 1,
+        "payload_hash": hashlib.sha256(record.read_bytes()).hexdigest(),
+    }), encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(slot))
     monkeypatch.setattr(core, "__file__", str(driver / "core.py"))
     monkeypatch.setattr(agent_procutil, "__file__", str(procutil / "__init__.py"))
 
@@ -90,6 +107,7 @@ def test_executor_shim_reuses_external_bytecode_without_mutating_source(
 
     before = snapshot(slot)
     root = area / "state"
+    assert "installed-" in agent_procutil.python_cache_args(root)[1]
     previous_prefix = sys.pycache_prefix
     previous_environment = os.environ.get("PYTHONPYCACHEPREFIX")
     for source in ("cold", "warm"):

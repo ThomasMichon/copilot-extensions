@@ -193,9 +193,21 @@ function Find-SystemBootstrapPython {
         }
     }
     $directory = [IO.Path]::GetDirectoryName($python)
-    $remaining = @($env:PATH -split ';' | Where-Object { $_ -and $_ -ine $directory })
-    $env:PATH = (@($directory) + $remaining) -join ';'
+    $env:PATH = Add-BootstrapPythonPath $env:PATH $directory
     return $python
+}
+
+function Add-BootstrapPythonPath([string]$Path, [string]$Directory) {
+    if (-not [IO.Path]::IsPathRooted($Directory) -or $Directory -match '[;\x00-\x1f]') {
+        throw 'Bootstrap Python directory cannot be represented safely on PATH.'
+    }
+    $remaining = @()
+    if ($Path) {
+        $remaining = @($Path -split ';' | Where-Object {
+            -not [string]::Equals($_, $Directory, [StringComparison]::Ordinal)
+        })
+    }
+    return (@($Directory) + $remaining) -join ';'
 }
 
 function Find-BootstrapPython([string]$Uv) {
@@ -454,6 +466,7 @@ if ($InstallSource) {
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
 try {
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
+    $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))
     if ($commandArgs.Count) {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
     } else {
