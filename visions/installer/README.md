@@ -421,18 +421,26 @@ scope; it does not veto updating or demand an extra repair flag.
 
 Ordinary updates and repair/force-install publish and start the incoming
 generation independently of the old version's existence, health or cooperation.
-They do not require uninstalling, deleting, unregistering or stopping the old
+Construction does not require uninstalling, deleting or unregistering the old
 runtime first. Current binstubs and applicable task registrations select the new
-generation; brief overlap is expected. The outgoing owner recognizes that it
-is no longer current and retires itself after the incoming owner starts.
-Installer-driven teardown is not the replacement mechanism.
+generation. Prefer incoming startup followed by outgoing self-retirement where
+supported; brief overlap is expected. Graceful cutover is an optimization, not
+an update admission requirement. An incompatible, unavailable or non-settling
+predecessor follows bounded cold takeover through the existing lifecycle owner.
+That owner may force-terminate the exact identity-verified predecessor when
+necessary, including before incoming readiness when exclusive resources cannot
+safely overlap. Old-contract cooperation and an extra force/repair flag are not
+prerequisites.
 
 Replacement preserves configuration, durable application data, unrelated
 installations and protected session/connectivity dependencies. Readiness,
-current routing and confirmed self-retirement are distinct observed facts;
-uncertain convergence stays explicit without turning incumbent inspection into
-an admission gate. Explicit uninstall or independently scoped reclamation is a
-separate operation, not a prerequisite for updating.
+current routing and confirmed predecessor exit are distinct observed facts.
+Cold takeover requires actual owner/identity checks and native exit or equivalent
+write exclusion before exclusive work resumes; unknown ownership is not permission
+to kill. Unsafe activation remains an explicit partial outcome, not a veto on
+independent construction or a claim that the incoming service is healthy.
+Explicit uninstall or independently scoped historical reclamation is a separate
+operation, not a prerequisite for updating.
 
 ### installation-refusal-boundary
 Incumbent inspection may block applying an explicitly requested installation
@@ -469,6 +477,25 @@ Validation detects omitted artifacts, unsupported incremental reuse and unsafe
 reset boundaries. The inventory includes generated commands, runtime state and
 process or registration effects rather than only package files. Durable data
 and protected execution/connectivity remain outside disposable reset scope.
+
+### on-demand-historical-cleanup
+An explicit on-demand cleanup capability finds and reclaims obsolete installed
+footprints across the selected components: lingering outmoded daemons, unneeded
+scheduled tasks or service registrations, superseded binstubs and other
+disposable artifacts left by replaced versions. Maintained historical detectors
+remain available independently of a current installer's incremental recognizers,
+so retiring an optimization does not erase the ability to identify older
+leftovers. Detection uses attributable ownership and artifact evidence, not
+process names, age or a matching path alone.
+
+Inspection produces a reviewable scope and explains uncertain or preserved
+items. Explicit apply revalidates current selection, ownership, native process
+identity and artifact/registration contents immediately before acting. It never
+targets the current owner, unrelated installations, separately owned sessions,
+protected connectivity, edited foreign artifacts, configuration or durable data.
+Failed or unconfirmed cleanup stays explicit and retryable through its existing
+resource owner. This is not a new resident reaper or periodic sweep, and neither
+running it nor proving historical cleanup is required for an ordinary update.
 
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update
@@ -540,11 +567,12 @@ is preferred, not a veto on bounded cold replacement.
 Explicit force/repair installation gives any intact authorized installer a
 bounded way to request disruptive recovery or an explicit replacement target.
 It is not the switch that enables the normal fresh fallback. Agents request
-operator approval before a concrete disruptive host operation. Ordinary and
-repair replacement use the same start-first/self-retirement lifecycle:
-establish and start the selected generation, update its invocation and
-activation routes, and let the outgoing runtime observe supersession and exit.
-An old runtime cannot veto construction or startup of its replacement.
+operator approval before a concrete disruptive host operation. Once replacement
+is authorized, ordinary and repair installation use the same lifecycle:
+prefer start-first/self-retirement, falling back to bounded identity-checked
+cold takeover when the old owner cannot cooperate or settle. No extra repair
+mode is needed solely because graceful cutover is unsupported. An old runtime
+cannot veto construction or activation merely by lacking the new handoff contract.
 An active installation writer remains subject to the existing execution owner;
 competing repair callers do not become concurrent writers or repeatedly kill
 one another. Separately authorized stuck-writer recovery is not the routine
