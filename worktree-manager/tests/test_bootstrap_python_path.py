@@ -59,4 +59,6 @@ def test_update_python_path_prefers_the_physical_base_and_preserves_other_entrie
     details = json.loads(result.stdout)
     assert Path(details["python"]).samefile(sys._base_executable)
     assert Path(details["selected"]).samefile(sys._base_executable)
-    assert details["path"].split(";") == [preferred, unrelated, unrelated + "\\secondary"]
+    assert details["path"].split(";") == [
+        preferred, unrelated, preferred.upper() + "\\", unrelated + "\\secondary",
+    ]

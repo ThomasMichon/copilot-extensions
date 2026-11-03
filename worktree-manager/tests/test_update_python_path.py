@@ -40,7 +40,7 @@ def public_python(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "_base_executable", str(base))
     monkeypatch.setattr(path_update, "os", SimpleNamespace(environ={"PATH": original}))
     state.base, state.original, state.registry = base, original, registry
-    state.expected = f"{base.parent};{older};{unrelated}"
+    state.expected = f"{base.parent};{older};{base.parent}\\;{unrelated}"
     return state
 
 
@@ -52,7 +52,7 @@ def test_waited_update_publishes_physical_base_once_and_keeps_other_entries(publ
     assert len(state.writes) == state.notifications == 1
     assert "Restart existing terminals" in capsys.readouterr().err
     assert path_update.finish_update(["update"], 0) == 0
-    assert len(state.writes) == state.notifications == 1
+    assert len(state.writes) == 1 and state.notifications == 2
 
 
 def test_publication_preserves_distinct_windows_names_with_equal_unicode_casefold(public_python):
@@ -62,6 +62,32 @@ def test_publication_preserves_distinct_windows_names_with_equal_unicode_casefol
     state.value = (unrelated, 2)
     assert path_update._publish_user_path(directory) is True
     assert state.value == (directory + ";" + unrelated, 2)
+
+
+def test_publication_keeps_nonidentical_case_aliases_and_existing_empty_entries(public_python):
+    state = public_python
+    directory = str(state.base.parent)
+    original = directory.upper() + ";;" + directory + "\\"
+    state.value = (original, 2)
+    assert path_update._publish_user_path(directory) is True
+    assert state.value == (directory + ";" + original, 2)
+
+
+def test_retry_notifies_an_already_written_path_without_rewriting(public_python, monkeypatch):
+    state = public_python
+
+    def notify():
+        state.notifications += 1
+        if state.notifications == 1:
+            raise OSError("notification refused")
+
+    monkeypatch.setattr(path_update, "_notify_environment_change", notify)
+    assert path_update.finish_update(["update"], 0) == 1
+    assert state.value == (state.expected, 2)
+    assert path_update.os.environ["PATH"] == state.original
+    assert path_update.finish_update(["update"], 0) == 0
+    assert state.notifications == 2 and len(state.writes) == 1
+    assert path_update.os.environ["PATH"] == state.expected
 
 
 @pytest.mark.parametrize("kind", [1, 2], ids=["literal", "expandable"])

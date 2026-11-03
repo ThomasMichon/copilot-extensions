@@ -363,8 +363,10 @@ removes an older Python, or rewrites machine PATH. Existing parent terminals
 cannot inherit a child's environment changes and must be restarted; machine
 PATH precedence remains administrator-owned. Automatic, detached, targeted or
 inspection/recovery commands, failed updates and contained tests do not persist
-this preference. Duplicate matching is conservative: distinct Unicode directory
-names are preserved. A physical Python directory containing `%` is refused
+this preference. Only byte-identical duplicate entries are removed; other case,
+Unicode and separator aliases are preserved. Verified desired PATH is notified
+even when no write is needed, allowing a failed notification to be retried.
+A physical Python directory containing `%` is refused
 before writing an expandable user PATH, rather than publishing a different
 directory after Windows variable expansion; literal registry strings retain
 their original type.

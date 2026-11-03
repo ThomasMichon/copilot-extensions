@@ -6,20 +6,14 @@ import os
 from pathlib import Path
 import sys
 
-_ASCII_CASE = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
-
-
 def _prepend(path: str, directory: str) -> str:
     if not Path(directory).is_absolute() or any(
         character == ";" or ord(character) < 32 for character in directory
     ):
         raise ValueError("Python directory cannot be represented safely on PATH")
-    # Keep equivalent non-ASCII aliases rather than merge distinct Windows names.
-    key = directory.rstrip("\\").translate(_ASCII_CASE)
-    return ";".join([
-        directory,
-        *(entry for entry in path.split(";") if entry and entry.rstrip("\\").translate(_ASCII_CASE) != key),
-    ])
+    # Nonidentical aliases may name distinct Windows case-sensitive directories.
+    remaining = [entry for entry in path.split(";") if entry != directory] if path else []
+    return ";".join([directory, *remaining])
 
 
 def _notify_environment_change() -> None:
@@ -52,13 +46,14 @@ def _publish_user_path(directory: str) -> bool:
         if kind == winreg.REG_EXPAND_SZ and "%" in directory:
             raise ValueError("Physical Python directory contains '%' and cannot be published on expandable user PATH")
         preferred = _prepend(path, directory)
-        if preferred == path:
-            return False
-        winreg.SetValueEx(key, "Path", 0, kind, preferred)
+        changed = preferred != path
+        if changed:
+            winreg.SetValueEx(key, "Path", 0, kind, preferred)
         if winreg.QueryValueEx(key, "Path") != (preferred, kind):
             raise OSError("User Python PATH changed before verification; reconciliation is incomplete")
+    # An earlier write may have succeeded while its notification failed.
     _notify_environment_change()
-    return True
+    return changed
 
 
 def finish_update(command: list[str], exit_code: int) -> int:
