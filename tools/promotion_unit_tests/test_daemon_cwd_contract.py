@@ -5,6 +5,7 @@ import ast
 import importlib.util
 import os
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
@@ -40,7 +41,7 @@ def _mutate_keyword(source: Path, destination: Path, keyword: str, expression: s
 
 def _replaceable(path: Path, root: Path) -> bool:
     lexical = Path(os.path.abspath(path))
-    resolved = lexical.resolve()
+    resolved = path.resolve()
     for name in ("snapshots", "versions"):
         subtree = root / name
         if lexical.is_relative_to(subtree) or resolved.is_relative_to(subtree.resolve()):
@@ -93,7 +94,7 @@ def _exercise(source: Path, temporary: Path, *, installed: bool = False, existin
         "owner cwd is not a durable home or runtime root"
     )
     assert log.resolve().is_relative_to(root.resolve())
-    assert log_path == options["log_path"]
+    assert Path(log_path).resolve() == log.resolve()
 
 
 @pytest.mark.parametrize("installed", [False, True], ids=["source", "installed"])
@@ -125,6 +126,41 @@ def test_mutations_accept_equivalent_source_spelling(tmp_path: Path) -> None:
     mutant = _mutate_keyword(equivalent, tmp_path / "mutant.py", "cwd", "os.getcwd()")
     with pytest.raises(AssertionError, match="owner cwd is not a durable"):
         _exercise(mutant, tmp_path / "mutant")
+
+
+def test_equivalent_string_log_argument_is_accepted(tmp_path: Path) -> None:
+    _exercise(SOURCE, tmp_path / "baseline")
+    mutant = _mutate_keyword(SOURCE, tmp_path / "owner_startup.py", "log_path", "str(log_path)")
+    _exercise(mutant, tmp_path / "mutant")
+
+
+@pytest.mark.parametrize("field", ["cwd", "log"])
+def test_symlink_parent_cannot_escape_replaceable_tree(tmp_path: Path, field: str) -> None:
+    _exercise(SOURCE, tmp_path / "baseline")
+    keyword = "cwd" if field == "cwd" else "log_path"
+    expression = 'root / "link" / ".."' + (' / "owner.log"' if field == "log" else "")
+    mutant = _mutate_keyword(SOURCE, tmp_path / "owner_startup.py", keyword, expression)
+    run = tmp_path / "mutant"
+    root = run / "runtime"
+    target = root / "versions" / "v1" / "deep"
+    target.mkdir(parents=True)
+    link = root / "link"
+    context = nullcontext()
+    if os.name == "nt":
+        original_resolve = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == link / "..":
+                return target.parent
+            if path == link / ".." / "owner.log":
+                return target.parent / "owner.log"
+            return original_resolve(path, *args, **kwargs)
+
+        context = patch.object(Path, "resolve", autospec=True, side_effect=resolve)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    with context, pytest.raises(AssertionError, match="replaceable"):
+        _exercise(mutant, run)
 
 
 @pytest.mark.parametrize(("field", "subtree"), [
