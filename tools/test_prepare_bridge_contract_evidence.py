@@ -39,8 +39,8 @@ def _runner(monkeypatch, results, metadata=None):
 
     def run(root, *arguments, timeout=10):
         calls.append((arguments, timeout))
-        if arguments[0] == "show":
-            path = arguments[1].split(":", 1)[1]
+        if arguments[:2] == ("cat-file", "blob"):
+            path = arguments[2].split(":", 1)[1]
             return subprocess.CompletedProcess(
                 arguments, 0 if path in metadata else 1, metadata.get(path, ""), "",
             )
@@ -57,8 +57,39 @@ def test_available_capture_needs_no_fetch(tmp_path, monkeypatch):
     assert preparation.prepare(tmp_path, REMOTE) == COMMIT
     assert calls == [
         (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
-        (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
+        (("cat-file", "blob", f"{COMMIT}:{codec.REGISTRY}"), 10),
     ]
+
+
+@pytest.mark.parametrize("fault", [None, "commit", "blob"])
+def test_retained_merkle_metadata_needs_no_remote_checkpoint(tmp_path, monkeypatch, fault):
+    import shutil
+    import bridge_capture_metadata as retained
+    from test_bridge_capture_metadata import _capture
+
+    source = tmp_path / "source"
+    commit, _ = _capture(source, 2)
+    canonical = tmp_path / "canonical"
+    shutil.copytree(source / retained.PREFIX, canonical / retained.PREFIX)
+    _packet(canonical, commit)
+    directory = canonical / retained.PREFIX / commit
+    if fault == "commit":
+        proof_path = directory / "proof.json"
+        proof = json.loads(proof_path.read_bytes())
+        proof["objects"][commit]["base64"] = "YmFk"
+        proof_path.write_bytes(codec.encode(proof))
+    elif fault == "blob":
+        next(directory.glob("*.txt")).write_bytes(b"unbound metadata")
+    calls = _runner(monkeypatch, iter([1]))
+
+    if fault is None:
+        assert preparation.prepare(canonical, REMOTE) == commit
+    else:
+        with pytest.raises(ValueError, match="identity mismatch"):
+            preparation.prepare(canonical, REMOTE)
+
+    assert not (canonical / ".git").exists()
+    assert calls == [(("cat-file", "-e", f"{commit}^{{commit}}"), 10)]
 
 
 def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path, monkeypatch):
@@ -74,7 +105,7 @@ def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path
         (("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
           "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, COMMIT), 60),
         (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
-        (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
+        (("cat-file", "blob", f"{COMMIT}:{codec.REGISTRY}"), 10),
     ]
 
 
@@ -89,12 +120,12 @@ def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monk
     assert preparation.prepare(tmp_path, REMOTE) == COMMIT
     assert calls == [
         (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
-        (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
+        (("cat-file", "blob", f"{COMMIT}:{codec.REGISTRY}"), 10),
         (("cat-file", "-e", f"{second}^{{commit}}"), 10),
         (("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
           "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, second), 60),
         (("cat-file", "-e", f"{second}^{{commit}}"), 10),
-        (("show", f"{second}:{codec.REGISTRY}"), 10),
+        (("cat-file", "blob", f"{second}:{codec.REGISTRY}"), 10),
     ]
 
 
@@ -114,7 +145,7 @@ def test_new_operation_checkpoint_is_independently_prepared(tmp_path, monkeypatc
         ("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
          "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, commit), 60,
     ) in calls
-    assert (("show", f"{commit}:{codec.REGISTRY}"), 10) in calls
+    assert (("cat-file", "blob", f"{commit}:{codec.REGISTRY}"), 10) in calls
 
 
 @pytest.mark.parametrize("relative", preparation.PACKETS[1:])
@@ -157,7 +188,7 @@ def test_preparation_reads_complete_captured_provenance_chunks(tmp_path, monkeyp
     else:
         with pytest.raises(ValueError, match="metadata is unavailable|hash mismatch"):
             preparation.prepare(tmp_path, REMOTE)
-    assert calls[-1] == (("show", f"{COMMIT}:{relative}"), 10)
+    assert calls[-1] == (("cat-file", "blob", f"{COMMIT}:{relative}"), 10)
 
 
 @pytest.mark.parametrize("results,diagnostic", [
@@ -203,8 +234,14 @@ def test_untrusted_remote_forms_refuse_before_git(tmp_path, monkeypatch, remote)
     assert calls == []
 
 
-def test_native_git_captured_tree_survives_without_an_advertised_branch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("chunked", [False, True])
+def test_native_git_captured_tree_survives_without_an_advertised_branch(
+    tmp_path, monkeypatch, chunked,
+):
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    if chunked:
+        tmp_path = tmp_path / "canonical-source"
+        tmp_path.mkdir()
 
     def git(*arguments):
         return subprocess.run(
@@ -215,7 +252,22 @@ def test_native_git_captured_tree_survives_without_an_advertised_branch(tmp_path
     git("init")
     registry = tmp_path / codec.REGISTRY
     registry.parent.mkdir(parents=True)
-    registry.write_bytes(codec.encode(_registry()))
+    document = _registry()
+    if chunked:
+        chunk = codec.encode({
+            "schema": codec.CHUNK_SCHEMA, "schema_version": 1, "contract": "example",
+            "record_offset": 0, "provenance": document["contracts"][0]["provenance"],
+        })
+        sha256 = codec.digest(chunk)
+        relative = f"{codec.PROVENANCE}example/{sha256}.json"
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True)
+        path.write_bytes(chunk)
+        document["schema_version"] = 2
+        document["contracts"][0].update(provenance=[], provenance_chunks=[{
+            "contract": "example", "path": relative, "sha256": sha256, "record_count": 1,
+        }])
+    registry.write_bytes(codec.encode(document))
     git("add", ".")
     tree = git("write-tree")
     commit = subprocess.run(

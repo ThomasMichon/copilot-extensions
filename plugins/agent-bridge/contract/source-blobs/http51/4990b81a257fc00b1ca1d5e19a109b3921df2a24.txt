@@ -1,0 +1,4403 @@
+"""Tests for the Session Host layer (effort agent-bridge-version-mux, #1762).
+
+Covers the 1:1-ACP wire protocol, the host's reattach/seq/ack/buffer semantics
+(no gap, no re-stream), child liveness, WRITE relay, explicit terminate, and the
+Windows job-breakaway flag plumbing. The host is exercised in-process against a
+fake child (no real subprocess) so the tests are fast and deterministic on every
+platform.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from unittest.mock import MagicMock
+
+import pytest
+
+from agent_bridge import winjob
+from agent_bridge.session_host import launcher
+from agent_bridge.session_host import protocol as proto
+from agent_bridge.session_host.acp_adapter import open_acp_streams
+from agent_bridge.session_host.client import SessionHostClient
+from agent_bridge.session_host.host import SessionHost
+
+
+def _write_hosting_policy(checkout, *, allowed):
+    (checkout / ".git").mkdir(exist_ok=True)
+    policy = checkout / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(f"expose_agent: {str(allowed).lower()}\n", encoding="utf-8")
+
+
+@pytest.fixture
+def hosted_workspace(tmp_path, monkeypatch):
+    """Real local hosts execute only inside this explicitly eligible checkout."""
+    _write_hosting_policy(tmp_path, allowed=True)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR", raising=False)
+    return tmp_path
+
+
+@pytest.fixture
+def mocked_codespace_admission(tmp_path, monkeypatch):
+    """Only the synthetic cs-one guest replaces its remote policy transport."""
+    from repository_policy import require_agent_hosting
+
+    from agent_bridge.session_host.codespace_transport import parse_codespace_target
+
+    guest = tmp_path / "cs-one-policy-checkout"
+    guest.mkdir()
+    _write_hosting_policy(guest, allowed=True)
+    checks = []
+
+    async def query(target, *, operation):
+        metadata = target.codespace or parse_codespace_target(target.spawn_command)
+        assert metadata is not None and metadata["name"] == "cs-one"
+        checks.append((target, operation))
+        return {**require_agent_hosting(guest, operation=operation).to_dict(), "allowed": True}
+
+    monkeypatch.setattr("agent_bridge.provider_hosting.query_provider_policy", query)
+    return guest, checks
+
+
+@pytest.fixture(autouse=True)
+def _stub_tree_kill(monkeypatch):
+    """Stub the in-host reap's tree-kill so a ``_FakeChild`` pid never reaches a
+    real ``taskkill``/``os.kill``.
+
+    ``_terminate_child`` now tree-kills the copilot subtree via the
+    ``host._tree_kill`` seam (dotfiles #911). We replace only that seam with a
+    recorder -- NOT ``osutil.kill_pid`` itself -- so tests that reap real host
+    processes through the session manager keep the real reaper.
+    """
+    from agent_bridge.session_host import host as host_mod
+
+    calls: list[tuple[int, bool]] = []
+
+    def _record(pid, *, force=False):
+        calls.append((pid, force))
+
+    monkeypatch.setattr(host_mod, "_tree_kill", _record)
+    return calls
+
+
+# --------------------------------------------------------------------------
+# protocol
+# --------------------------------------------------------------------------
+def test_pack_unpack_u64():
+    assert proto.unpack_u64(proto.pack_u64(0)) == 0
+    assert proto.unpack_u64(proto.pack_u64(2**63)) == 2**63
+
+
+def test_pack_unpack_frame():
+    seq, data = proto.unpack_frame(proto.pack_frame(42, b'{"x":1}\n'))
+    assert seq == 42
+    assert data == b'{"x":1}\n'
+
+
+def test_pack_unpack_attach():
+    # No nonce (legacy): trailing bytes empty; last_acked round-trips.
+    assert proto.unpack_attach(proto.pack_attach(7)) == (7, b"")
+    # With nonce: cursor + token both survive.
+    last, nonce = proto.unpack_attach(proto.pack_attach(9, b"tok3n"))
+    assert last == 9 and nonce == b"tok3n"
+    # A legacy reader that only reads the first 8 bytes ignores the nonce.
+    assert proto.unpack_u64(proto.pack_attach(9, b"tok3n")[:8]) == 9
+
+
+def test_child_preexec_and_pdeathsig_platform():
+    import sys
+
+    from agent_bridge.session_host.osutil import child_preexec, set_pdeathsig
+
+    fn = child_preexec()
+    if sys.platform == "win32":
+        assert fn is None  # preexec_fn unsupported on Windows
+    else:
+        assert callable(fn)
+    # set_pdeathsig is a best-effort no-op (no raise, returns None) off-Linux.
+    if not sys.platform.startswith("linux"):
+        assert set_pdeathsig() is None
+
+
+def test_pack_unpack_liveness():
+    assert proto.unpack_liveness(proto.pack_liveness(True)) == (True, 0)
+    assert proto.unpack_liveness(proto.pack_liveness(False, 7)) == (False, 7)
+
+
+@pytest.mark.asyncio
+async def test_message_roundtrip():
+    r = asyncio.StreamReader()
+    r.feed_data(proto.encode(proto.MsgType.FRAME, proto.pack_frame(3, b"hi\n")))
+    r.feed_eof()
+    msg = await proto.read_message(r)
+    assert msg is not None
+    mtype, payload = msg
+    assert mtype == proto.MsgType.FRAME
+    assert proto.unpack_frame(payload) == (3, b"hi\n")
+    # EOF -> None
+    assert await proto.read_message(r) is None
+
+
+@pytest.mark.asyncio
+async def test_message_partial_eof_is_clean():
+    r = asyncio.StreamReader()
+    r.feed_data(b"\x00\x00")  # truncated header
+    r.feed_eof()
+    assert await proto.read_message(r) is None
+
+
+@pytest.mark.asyncio
+async def test_oversized_message_raises():
+    r = asyncio.StreamReader()
+    import struct
+    r.feed_data(struct.pack(">I", proto.MAX_MESSAGE_BYTES + 1))
+    r.feed_eof()
+    with pytest.raises(proto.ProtocolError):
+        await proto.read_message(r)
+
+
+@pytest.mark.asyncio
+async def test_unknown_type_skipped():
+    # Forward-compat (#51): a well-formed message whose type this build does not
+    # know is reported as (None, payload) -- consumed and skipped, NOT raised --
+    # so a version-skewed peer's additive control message can't drop the link.
+    r = asyncio.StreamReader()
+    r.feed_data(proto._U32.pack(1) + b"Z")
+    r.feed_eof()
+    mtype, payload = await proto.read_message(r)
+    assert mtype is None
+    assert payload == b""
+
+
+# --------------------------------------------------------------------------
+# fake child
+# --------------------------------------------------------------------------
+class _FakeStdin:
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+
+    def write(self, data: bytes) -> None:
+        self.buffer.extend(data)
+
+    async def drain(self) -> None:
+        return None
+
+
+class _FakeChild:
+    """Duck-typed ChildProcess: a feedable stdout + a captured stdin."""
+
+    def __init__(self, pid: int = 4242) -> None:
+        # Mirror production: the real child stdout reader is sized to the
+        # protocol max (launcher._ACP_STDIO_LIMIT_BYTES), not asyncio's 64 KiB
+        # default, so a large single ACP frame is readable off the child.
+        self.stdout = asyncio.StreamReader(limit=proto.MAX_MESSAGE_BYTES)
+        self.stdin = _FakeStdin()
+        self._pid = pid
+        self._returncode: int | None = None
+        self._exited = asyncio.Event()
+        self.killed = False
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._returncode
+
+    def feed_frame(self, obj: bytes) -> None:
+        self.stdout.feed_data(obj if obj.endswith(b"\n") else obj + b"\n")
+
+    def finish(self, code: int = 0) -> None:
+        self._returncode = code
+        self.stdout.feed_eof()
+        self._exited.set()
+
+    def kill(self) -> None:
+        self.killed = True
+        if self._returncode is None:
+            self.finish(-9)
+
+    async def wait(self) -> int:
+        await self._exited.wait()
+        return self._returncode or 0
+
+
+async def _serve(child: _FakeChild) -> tuple[SessionHost, int]:
+    host = SessionHost(child)
+    port = await host.serve(port=0)
+    return host, port
+
+
+def _host_instance_row(receipt):
+    from agent_procutil.daemon_instances import inspect_instances
+
+    return next(
+        row for row in inspect_instances(receipt.registry_root)
+        if row["instance_id"] == receipt.instance_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_retains_admission_until_cross_task_close_finishes(monkeypatch):
+    child = _FakeChild()
+    host = SessionHost(child)
+    reader_stopping = asyncio.Event()
+    finish_reader = asyncio.Event()
+    real_reader = host._reader_loop
+    observed = []
+
+    async def reader():
+        observed.append(_host_instance_row(host._instance_guard.receipt)["state"])
+        try:
+            await real_reader()
+        finally:
+            reader_stopping.set()
+            await finish_reader.wait()
+
+    monkeypatch.setattr(host, "_reader_loop", reader)
+    client = None
+    closing = None
+    try:
+        port = await asyncio.create_task(host.serve())
+        receipt = host._instance_guard.receipt
+        client = await SessionHostClient.connect(port=port)
+        assert (await client.attach(0)).child_pid == child.pid
+        assert observed == ["running"]
+        assert _host_instance_row(receipt)["state"] == "running"
+        closing = asyncio.create_task(host.close())
+        await asyncio.wait_for(reader_stopping.wait(), timeout=5)
+        assert _host_instance_row(receipt)["state"] == "running"
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert _host_instance_row(receipt)["state"] == "running"
+        finish_reader.set()
+        await asyncio.wait_for(asyncio.create_task(host.close()), timeout=5)
+        assert host._reader_task.done()
+        assert not host._connections
+        assert not host._server.is_serving()
+        assert _host_instance_row(receipt)["state"] == "finished"
+        await host.close()
+        assert _host_instance_row(receipt)["state"] == "finished"
+        with pytest.raises(OSError):
+            await asyncio.open_connection("127.0.0.1", port)
+    finally:
+        finish_reader.set()
+        await host.close()
+        if client is not None:
+            await client.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_borrows_launcher_admission_without_duplicate_record():
+    from agent_procutil.daemon_instances import admit_daemon_instance, inspect_instances
+
+    guard = admit_daemon_instance(
+        "agent-bridge-session-host", source=__file__, purpose="production",
+    )
+    receipt = guard.receipt
+    before = {row["instance_id"] for row in inspect_instances(receipt.registry_root)}
+    host = SessionHost(_FakeChild())
+    try:
+        await asyncio.create_task(host.serve())
+        assert host._instance_guard.receipt == receipt
+        assert {row["instance_id"] for row in inspect_instances(receipt.registry_root)} == before
+        await asyncio.create_task(host.close())
+        assert _host_instance_row(receipt)["state"] == "running"
+    finally:
+        await host.close()
+        guard.close()
+    assert _host_instance_row(receipt)["state"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_bind_failure_finishes_admission_without_reader(monkeypatch):
+    import socket
+
+    from agent_bridge.session_host import host as host_module
+
+    real_admit = host_module.admit_daemon_instance
+    receipts = []
+
+    def admit(*args, **kwargs):
+        guard = real_admit(*args, **kwargs)
+        receipts.append(guard.receipt)
+        return guard
+
+    monkeypatch.setattr(host_module, "admit_daemon_instance", admit)
+    host = SessionHost(_FakeChild())
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        with pytest.raises(OSError):
+            await host.serve(port=listener.getsockname()[1])
+    assert len(receipts) == 1
+    assert host._reader_task is None
+    assert _host_instance_row(receipts[0])["state"] == "finished"
+    await host.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_admission_refusal_precedes_listener_and_reader(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from agent_bridge.session_host import host as host_module
+
+    monkeypatch.setattr(
+        host_module, "admit_daemon_instance", Mock(side_effect=ValueError("admission refused")),
+    )
+    listener = AsyncMock()
+    monkeypatch.setattr(asyncio, "start_server", listener)
+    host = SessionHost(_FakeChild())
+    with pytest.raises(ValueError, match="admission refused"):
+        await host.serve()
+    listener.assert_not_awaited()
+    assert host._reader_task is None
+    await host.close()
+
+
+async def _read_n(gen, n: int, client: SessionHostClient) -> list[int]:
+    seqs: list[int] = []
+    for _ in range(n):
+        seq, _data = await asyncio.wait_for(gen.__anext__(), timeout=5)
+        seqs.append(seq)
+        await client.ack(seq)
+    return seqs
+
+
+# --------------------------------------------------------------------------
+# host reattach semantics
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_reattach_no_gap_no_restream():
+    child = _FakeChild(pid=1234)
+    host, port = await _serve(child)
+    try:
+        # front 1 attaches fresh, consumes 3 frames, acks them, detaches.
+        c1 = await SessionHostClient.connect(port=port)
+        hello = await c1.attach(0)
+        assert hello.child_pid == 1234
+        for i in range(1, 4):
+            child.feed_frame(f'{{"n":{i}}}'.encode())
+        acked = await _read_n(c1.frames(), 3, c1)
+        assert acked == [1, 2, 3]
+        await c1.close()
+        await asyncio.sleep(0.02)
+
+        # frames stream while NO front is attached -> buffered by the host.
+        for i in range(4, 7):
+            child.feed_frame(f'{{"n":{i}}}'.encode())
+        await asyncio.sleep(0.02)
+
+        # front 2 reattaches from last-acked seq 3.
+        c2 = await SessionHostClient.connect(port=port)
+        await c2.attach(3)
+        got = await _read_n(c2.frames(), 3, c2)
+        assert got == [4, 5, 6]              # contiguous
+        assert min(got) > 3                  # no re-stream of acked frames
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_ack_trims_buffer():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        for i in range(1, 5):
+            child.feed_frame(f'{{"n":{i}}}'.encode())
+        await _read_n(c1.frames(), 4, c1)
+        await asyncio.sleep(0.05)
+        # everything acked -> buffer trimmed to empty.
+        assert host.buffered_seqs == []
+        assert host.ack_cursor == 4
+        await c1.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_write_relays_to_child_stdin():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.write(b'{"initialize":1}\n')
+        await asyncio.sleep(0.05)
+        assert bytes(child.stdin.buffer) == b'{"initialize":1}\n'
+        await c1.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_liveness_on_child_exit():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        child.feed_frame(b'{"n":1}')
+        gen = c1.frames()
+        seq, _ = await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert seq == 1
+        await c1.ack(1)
+        child.finish(0)
+        # generator ends once the dead-liveness arrives.
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert c1.child_alive is False
+        await c1.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reattach_replays_buffer_before_dead_liveness():
+    """A dead child still yields its final unacknowledged frames on reattach."""
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        child.feed_frame(b'{"final":true}')
+        child.finish(4)
+        await asyncio.wait_for(host._child_done.wait(), timeout=5)
+
+        client = await SessionHostClient.connect(port=port)
+        await client.attach(0)
+        gen = client.frames()
+        seq, data = await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert seq == 1
+        assert data == b'{"final":true}\n'
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert client.child_alive is False
+        assert client.child_exit_code == 4
+        await client.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_exit_flushes_final_frame_before_dead_liveness():
+    """Child exit cannot overtake a final frame on an attached frontend."""
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        client = await SessionHostClient.connect(port=port)
+        await client.attach(0)
+        child.feed_frame(b'{"final":true}')
+        child.finish(5)
+
+        frames = []
+        async for seq, data in client.frames():
+            frames.append((seq, data))
+        assert frames == [(1, b'{"final":true}\n')]
+        assert client.child_exit_code == 5
+        await client.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_terminate_reaps_child():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.terminate()
+        await asyncio.sleep(0.05)
+        assert child.killed is True
+        await c1.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_terminate_tree_kills_child_subtree(_stub_tree_kill):
+    """The reap tree-kills the copilot subtree (via osutil.kill_pid) so
+    descendant MCP-bridge / sub-agent processes are not orphaned (#911), in
+    addition to driving the transport reap (child.killed)."""
+    child = _FakeChild(pid=4242)
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.terminate()
+        await asyncio.sleep(0.05)
+        assert (4242, True) in _stub_tree_kill  # tree-kill invoked with child pid
+        assert child.killed is True             # transport bookkeeping still fires
+        await c1.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_host_survives_front_reset():
+    """A front crashing (abrupt close) must not take the host down."""
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        child.feed_frame(b'{"n":1}')
+        await _read_n(c1.frames(), 1, c1)
+        # abrupt transport close (no graceful shutdown)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.05)
+        # host is still serving: a new front can attach and reach the child.
+        c2 = await SessionHostClient.connect(port=port)
+        hello = await c2.attach(1)
+        assert hello.child_pid == child.pid
+        await c2.close()
+    finally:
+        await host.close()
+
+
+# --------------------------------------------------------------------------
+# front-lost auto-reap (#51)
+# --------------------------------------------------------------------------
+async def _serve_reap(child: _FakeChild, secs: float) -> tuple[SessionHost, int]:
+    host = SessionHost(child, unexpected_reap_seconds=secs)
+    port = await host.serve(port=0)
+    return host, port
+
+
+@pytest.mark.asyncio
+async def test_graceful_detach_reaps_reapable_child():
+    """A graceful DETACH with reapable=True reaps the idle child promptly."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 60.0)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)          # idle, no background work
+        await c1.detach(True)               # graceful disconnect
+        await c1.close()
+        await asyncio.sleep(0.1)
+        assert child.killed is True         # reaped without waiting any grace
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_graceful_detach_keeps_busy_child():
+    """A graceful DETACH while NOT reapable (mid-turn) leaves the child alive."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)         # a turn is in flight
+        await c1.detach(False)
+        await c1.close()
+        await asyncio.sleep(0.3)            # well past the grace window
+        assert child.killed is False        # never reaped mid-turn
+        # a reattach still reaches the surviving child
+        c2 = await SessionHostClient.connect(port=port)
+        hello = await c2.attach(0)
+        assert hello.child_pid == child.pid
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recoverable", [False, True])
+async def test_frontend_stop_preserves_idle_host_only_for_recovery(
+    tmp_path, monkeypatch, recoverable,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import agent_bridge.session_manager as sm
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.transport import SpawnTarget
+
+    monkeypatch.setattr(sm, "_cleanup_worktree", AsyncMock())
+    child = _FakeChild()
+    host, port = await _serve_reap(child, .1)
+    db = Database(tmp_path / "bridge.db")
+    manager = sm.SessionManager(db)
+    db.create_session("s1", "s1", None, str(tmp_path), "local", "idle", 1)
+    control = await SessionHostClient.connect(port=port)
+    await control.attach(0)
+    await control.send_status(True)
+    session = sm.Session("s1", "s1", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.client = SimpleNamespace(
+        session_host_client=control, is_running=True, has_active_background_tasks=False,
+        shutdown=AsyncMock(side_effect=control.close),
+    )
+    manager._sessions["s1"] = session
+    try:
+        await manager.stop_session(
+            "s1", cancel_turn=not recoverable, allow_background_recovery=recoverable,
+        )
+        await asyncio.sleep(.2)
+        assert child.killed is not recoverable
+        if recoverable:
+            successor = await SessionHostClient.connect(port=port)
+            try:
+                assert (await successor.attach(0)).child_pid == child.pid
+            finally:
+                await successor.close()
+    finally:
+        await control.close()
+        await host.close()
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_drop_reaps_idle_child_after_grace():
+    """A bare EOF (no DETACH) with last-known reapable reaps after the grace."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.15)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        await asyncio.sleep(0.02)
+        c1._writer.transport.abort()        # unexpected: no graceful DETACH
+        await asyncio.sleep(0.05)
+        assert child.killed is False        # still within the grace window
+        await asyncio.sleep(0.25)
+        assert child.killed is True         # reaped once the grace elapsed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_drop_keeps_busy_child():
+    """A bare EOF while last-known NOT reapable never self-reaps."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.3)
+        assert child.killed is False
+    finally:
+        await host.close()
+
+
+# --------------------------------------------------------------------------
+# bounded active-child keep-alive (#145)
+# --------------------------------------------------------------------------
+async def _serve_active(
+    child: _FakeChild, active_secs: float, unexpected_secs: float = 60.0,
+) -> tuple[SessionHost, int]:
+    host = SessionHost(
+        child, unexpected_reap_seconds=unexpected_secs,
+        active_reap_seconds=active_secs,
+    )
+    port = await host.serve(port=0)
+    return host, port
+
+
+@pytest.mark.asyncio
+async def test_active_child_held_then_reaped_on_unexpected_drop():
+    """An unexpected drop mid-turn HOLDS the active child, then lets it go once
+    the active window elapses with no reattach (the 30-min bound; #145)."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)         # a turn is in flight (not reapable)
+        c1._writer.transport.abort()        # unexpected: no graceful DETACH
+        await asyncio.sleep(0.08)
+        assert child.killed is False        # still held within the active window
+        await asyncio.sleep(0.4)
+        assert child.killed is True         # let go once the hold window elapsed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_active_child_streaming_output_is_not_reaped_then_reaped_when_quiet():
+    """A severed active child that keeps STREAMING frames is never reaped
+    mid-task -- the progress-aware hold re-arms while output flows -- and is
+    reclaimed only once it goes quiet for a full window with no reattach."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)          # a turn is in flight (not reapable)
+        c1._writer.transport.abort()         # unexpected: arms the active hold
+        # Keep streaming child output across several hold windows.
+        for _ in range(10):
+            child.feed_frame(b'{"jsonrpc":"2.0","method":"x"}')
+            await asyncio.sleep(0.05)
+        assert child.killed is False         # never killed while producing work
+        assert host.max_seq >= 10            # frames were relayed/buffered
+        # Go quiet: no more frames for a full window -> reclaimed.
+        await asyncio.sleep(0.5)
+        assert child.killed is True
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_inflight_prompt_turn_held_through_silence_then_reaped_at_boundary():
+    """A severed child with a genuine ``session/prompt`` turn in flight is held
+    even while it falls SILENT (a slow test emitting no output) -- never reaped
+    mid-task -- and is reclaimed only once the turn's response closes the
+    boundary and the child goes idle."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        # Open a real prompt turn (client -> agent), then sever with no DETACH.
+        await c1.write(b'{"jsonrpc":"2.0","id":7,"method":"session/prompt"}\n')
+        await c1.send_status(False)             # a turn is in flight
+        await asyncio.sleep(0.05)
+        assert host._turn_in_flight is True
+        c1._writer.transport.abort()            # unexpected sever
+        # Silent for well over the active window -- a running-but-quiet turn is
+        # NEVER reaped mid-task (the protocol-aware hold protects it).
+        await asyncio.sleep(0.6)
+        assert child.killed is False
+        # The turn completes: the agent's prompt RESPONSE closes the boundary.
+        child.feed_frame(b'{"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}}')
+        await asyncio.sleep(0.05)
+        assert host._turn_in_flight is False
+        # Now idle + quiet -> reclaimed within a couple of windows.
+        await asyncio.sleep(0.7)
+        assert child.killed is True
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_observe_frame_is_tolerant_of_unclassifiable_bytes():
+    """The turn-state observer never raises and only moves on real prompt
+    request/response frames -- notifications, unknown methods, non-JSON, and
+    partial bytes leave the state unchanged (fail-safe)."""
+    child = _FakeChild()
+    host = SessionHost(child)
+    # Noise that must NOT start a turn.
+    for junk in (
+        b"not json at all",
+        b'{"jsonrpc":"2.0","method":"session/update","params":{}}',   # notification
+        b'{"jsonrpc":"2.0","id":1,"method":"fs/read_text_file"}',      # other request
+        b'{"jsonrpc":"2.0","id":2,"result":{}}',                       # stray response
+        b'[1,2,3]',                                                    # batch/array
+    ):
+        host._observe_frame(junk, to_child=True)
+        host._observe_frame(junk, to_child=False)
+    assert host._turn_in_flight is False
+    # A real prompt request opens a turn; its response closes it.
+    host._observe_frame(b'{"jsonrpc":"2.0","id":9,"method":"session/prompt"}', to_child=True)
+    assert host._turn_in_flight is True
+    boundary = host._observe_frame(
+        b'{"jsonrpc":"2.0","id":9,"result":{"stopReason":"end_turn"}}', to_child=False)
+    assert boundary is True
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_multiple_concurrent_prompts_need_all_responses():
+    """Two overlapping prompt turns stay in flight until BOTH are answered; only
+    the response that empties the set reports a boundary."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(b'{"jsonrpc":"2.0","id":1,"method":"session/prompt"}', to_child=True)
+    host._observe_frame(b'{"jsonrpc":"2.0","id":2,"method":"session/prompt"}', to_child=True)
+    assert host._turn_in_flight is True
+    assert host._observe_frame(b'{"jsonrpc":"2.0","id":1,"result":{}}', to_child=False) is False
+    assert host._turn_in_flight is True                     # id 2 still open
+    assert host._observe_frame(b'{"jsonrpc":"2.0","id":2,"result":{}}', to_child=False) is True
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_string_id_and_error_response_close_turn():
+    """A string JSON-RPC id is tracked, and an ERROR response (not ``result``)
+    still closes the turn."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(b'{"jsonrpc":"2.0","id":"abc","method":"session/prompt"}', to_child=True)
+    assert host._turn_in_flight is True
+    boundary = host._observe_frame(
+        b'{"jsonrpc":"2.0","id":"abc","error":{"code":-32000,"message":"x"}}', to_child=False)
+    assert boundary is True
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_multiple_messages_in_one_payload():
+    """A single relayed payload may carry several newline-delimited frames; each
+    is observed independently."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(
+        b'{"jsonrpc":"2.0","id":5,"method":"session/prompt"}\n'
+        b'{"jsonrpc":"2.0","method":"session/update","params":{}}\n',
+        to_child=True)
+    assert host._turn_in_flight is True
+    host._observe_frame(
+        b'{"jsonrpc":"2.0","method":"session/update","params":{}}\n'
+        b'{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}\n',
+        to_child=False)
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_server_request_is_not_a_response():
+    """A server->client REQUEST during a turn (``method`` + ``id``, e.g. a
+    permission ask) must not be mistaken for the prompt response -- even if its
+    id collides."""
+    host = SessionHost(_FakeChild())
+    host._observe_frame(b'{"jsonrpc":"2.0","id":7,"method":"session/prompt"}', to_child=True)
+    host._observe_frame(
+        b'{"jsonrpc":"2.0","id":7,"method":"session/request_permission"}', to_child=False)
+    assert host._turn_in_flight is True                     # not closed by a request
+    host._observe_frame(b'{"jsonrpc":"2.0","id":7,"result":{}}', to_child=False)
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turnstate_response_for_unknown_id_is_noop():
+    """A response to an id we never saw as a prompt neither crashes nor reports a
+    boundary."""
+    host = SessionHost(_FakeChild())
+    assert host._observe_frame(b'{"jsonrpc":"2.0","id":99,"result":{}}', to_child=False) is False
+    assert host._turn_in_flight is False
+
+
+@pytest.mark.asyncio
+async def test_turn_boundary_with_front_present_does_not_self_reap():
+    """Observing a turn boundary while a front is still attached never triggers a
+    front-less self-reap -- the attached front owns the child's lifetime."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.15)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.write(b'{"jsonrpc":"2.0","id":3,"method":"session/prompt"}\n')
+        await c1.send_status(False)
+        await asyncio.sleep(0.03)
+        child.feed_frame(b'{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}')
+        await asyncio.sleep(0.4)
+        assert child.killed is False        # front attached -> never self-reaped
+    finally:
+        await c1.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_inflight_child_exit_frontless_is_not_killed():
+    """A front-less child mid-turn that EXITS on its own is never 'reaped'
+    (killed) by the hold timer -- child liveness gates the reap."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.12)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.write(b'{"jsonrpc":"2.0","id":4,"method":"session/prompt"}\n')
+        await c1.send_status(False)
+        c1._writer.transport.abort()        # sever mid-turn
+        await asyncio.sleep(0.05)
+        child.finish(0)                     # child exits on its own
+        await asyncio.sleep(0.4)
+        assert child.killed is False        # it exited itself; never force-killed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reattach_cancels_active_hold_timer():
+    """A reattach during the active-hold window cancels the pending reap so the
+    in-flight turn survives and can be resumed."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.25)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)
+        c1._writer.transport.abort()        # arms the active-hold timer
+        await asyncio.sleep(0.05)
+        c2 = await SessionHostClient.connect(port=port)  # reconnect in time
+        hello = await c2.attach(0)
+        assert hello.child_pid == child.pid
+        await asyncio.sleep(0.4)            # past the original window
+        assert child.killed is False        # cancelled by the reattach
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_active_reap_disabled_keeps_child_indefinitely():
+    """With active_reap_seconds=0 (legacy), an unexpected drop mid-turn never
+    reaps the active child (it lives until its own stop)."""
+    child = _FakeChild()
+    host, port = await _serve_active(child, 0.0, unexpected_secs=0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.3)
+        assert child.killed is False
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reattach_cancels_unexpected_reap_timer():
+    """A reattach before the grace elapses cancels the pending self-reap."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        c1._writer.transport.abort()        # arms the unexpected timer
+        await asyncio.sleep(0.05)
+        c2 = await SessionHostClient.connect(port=port)  # reattach in time
+        await c2.attach(0)
+        await asyncio.sleep(0.3)            # past the original window
+        assert child.killed is False        # timer was cancelled by reattach
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_status_false_supersedes_earlier_reapable():
+    """A later STATUS(False) (a new turn) vetoes reaping on an unexpected drop."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        # Confirm the host has processed STATUS(True) (reader is caught up)...
+        for _ in range(200):
+            if host._last_reapable is True:
+                break
+            await asyncio.sleep(0.005)
+        assert host._last_reapable is True
+        await c1.send_status(False)         # a fresh turn started
+        # ...then confirm the flip back to False. Only once the host has
+        # OBSERVED STATUS(False) is the veto real. Without this, transport.abort()
+        # can RST away the not-yet-read STATUS(False) (Windows-prone), leaving
+        # _last_reapable stale at True so the grace timer reaps -- racing the very
+        # thing under test. (A one-shot poll on `is False` is not enough: it also
+        # matches the *initial* False before either STATUS is processed.)
+        for _ in range(200):
+            if host._last_reapable is False:
+                break
+            await asyncio.sleep(0.005)
+        assert host._last_reapable is False
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.3)
+        assert child.killed is False
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_reap_disabled_when_zero():
+    """unexpected_reap_seconds=0 disables the unexpected-grace timer entirely."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.0)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.2)
+        assert child.killed is False        # no timer armed
+        # ...but a graceful DETACH still reaps even with the timer disabled.
+        c2 = await SessionHostClient.connect(port=port)
+        await c2.attach(0)
+        await c2.send_status(True)
+        await c2.detach(True)
+        await c2.close()
+        await asyncio.sleep(0.1)
+        assert child.killed is True
+    finally:
+        await host.close()
+
+
+# --------------------------------------------------------------------------
+# crash-tail capture (#5384)
+# --------------------------------------------------------------------------
+def test_crash_tail_capture_decodes_output():
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    os.write(w, b"hello from the crashed process\n")
+    os.close(w)
+
+    tail = launcher._CrashTailCapture(stream)
+    # Give the background drain thread a moment to read EOF.
+    for _ in range(50):
+        if tail.tail_text():
+            break
+        time.sleep(0.02)
+    assert tail.tail_text() == "hello from the crashed process\n"
+
+
+def test_crash_tail_capture_closes_stream_on_eof():
+    """The drain thread must close its own stream once it reaches EOF, or
+    a successful launch (whose HostHandle keeps the Popen object, and so
+    this stream, alive for the host's full lifetime) leaks a frontend file
+    descriptor per launch."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    launcher._CrashTailCapture(stream)
+    os.close(w)
+
+    for _ in range(50):
+        if stream.closed:
+            break
+        time.sleep(0.02)
+    assert stream.closed
+
+
+def test_crash_tail_capture_is_bounded():
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream, cap_bytes=16)
+    os.write(w, b"0123456789" * 10)  # 100 bytes, well over the 16-byte cap
+    os.close(w)
+
+    for _ in range(50):
+        if len(tail.tail_text()) == 16:
+            break
+        time.sleep(0.02)
+    text = tail.tail_text()
+    assert len(text) == 16
+    # Only the *tail* (most recent bytes) is kept, not the head.
+    assert text == ("0123456789" * 10)[-16:]
+
+
+def test_crash_tail_capture_never_blocks_a_chatty_child():
+    """The drain thread must keep draining even past the OS pipe buffer size
+    (commonly 64KiB) so a host that writes a lot of startup noise never
+    deadlocks waiting on a full pipe that nobody is reading (#5384)."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream, cap_bytes=4096)
+
+    big_chunk = b"x" * 70_000  # larger than a typical 64KiB pipe buffer
+
+    def _writer():
+        with os.fdopen(w, "wb") as out:
+            out.write(big_chunk)
+
+    writer_thread = threading.Thread(target=_writer)
+    writer_thread.start()
+    writer_thread.join(timeout=5.0)
+    assert not writer_thread.is_alive(), "writer blocked -- drain thread stalled"
+
+    for _ in range(50):
+        if len(tail.tail_text()) == 4096:
+            break
+        time.sleep(0.02)
+    assert tail.tail_text() == "x" * 4096
+
+
+def test_crash_tail_capture_wait_until_drained_blocks_for_final_bytes():
+    """``wait_until_drained`` must block until the drain thread has actually
+    consumed a delayed final write + EOF, not return based on ``poll()``
+    alone -- otherwise a reader could observe the process as exited while
+    its last (often most diagnostic) bytes are still in flight."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream)
+
+    def _delayed_writer() -> None:
+        time.sleep(0.2)
+        with os.fdopen(w, "wb") as out:
+            out.write(b"final traceback line\n")
+
+    writer = threading.Thread(target=_delayed_writer)
+    writer.start()
+    # Immediately after spawning, the delayed writer hasn't written yet.
+    assert tail.tail_text() == ""
+    tail.wait_until_drained(timeout=5.0)
+    writer.join()
+    assert tail.tail_text() == "final traceback line\n"
+
+
+def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
+    """An early-exiting host surfaces its own stdout/stderr tail in the
+    raised RuntimeError instead of only a bare exit code (#5384)."""
+    crash_script = tmp_path / "crash.py"
+    crash_script.write_text(
+        "import sys\n"
+        "print('simulated session host startup crash')\n"
+        "print('diagnosable detail line', file=sys.stderr)\n"
+        "sys.exit(7)\n"
+    )
+
+    real_popen = subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        # Run the crash script instead of the real
+        # `-m agent_bridge.session_host` entry point, keeping every other
+        # kwarg (stdin/stdout/stderr redirection, env, cwd, creationflags)
+        # exactly as launch_session_host set them up.
+        return real_popen([sys.executable, str(crash_script)], **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        launcher.launch_session_host(
+            ["irrelevant-child-argv"],
+            state_dir=tmp_path,
+            ready_timeout=5.0,
+        )
+    message = str(exc_info.value)
+    assert "exited early (code=7)" in message
+    assert "simulated session host startup crash" in message
+    assert "diagnosable detail line" in message
+
+
+def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
+    """A host that neither becomes ready nor exits within ``ready_timeout``
+    must be killed rather than left running (leaking a hung process, its
+    capture thread, and its pipe file descriptor)."""
+    hang_script = tmp_path / "hang.py"
+    hang_script.write_text(
+        "import sys, time\n"
+        "print('still starting...')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+
+    real_popen = subprocess.Popen
+    spawned: dict[str, subprocess.Popen] = {}
+
+    def _fake_popen(argv, **kwargs):
+        proc = real_popen([sys.executable, str(hang_script)], **kwargs)
+        spawned["proc"] = proc
+        return proc
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(TimeoutError):
+        launcher.launch_session_host(
+            ["irrelevant-child-argv"],
+            state_dir=tmp_path,
+            ready_timeout=0.5,
+        )
+
+    proc = spawned["proc"]
+    for _ in range(100):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    assert proc.poll() is not None, "hung host process was not killed"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "exercises the real zdd.diagnostics.process_start_time identity "
+        "backend, which only exists on Linux (/proc) -- on macOS/other "
+        "POSIX _kill_host_process_tree's identity guard correctly refuses "
+        "to killpg with no baseline, which would fail this specific "
+        "end-to-end assertion (and leak the grandchild) despite being the "
+        "intended, safe behavior there; see TestKillHostProcessTreeIdentityGuard "
+        "below for the (mocked, platform-independent) guard-logic coverage"
+    ),
+)
+def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
+    """``_kill_host_process_tree`` must reach an already-spawned grandchild
+    too, not just the host pid -- ``PR_SET_PDEATHSIG`` (used elsewhere to tie
+    a copilot child to its host) is Linux-only, so macOS/other POSIX would
+    orphan that child if only the host pid were killed."""
+    marker = tmp_path / "grandchild-pid.txt"
+    script = tmp_path / "group_probe.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(30)'])\n"
+        f"with open({str(marker)!r}, 'w') as f:\n"
+        "    f.write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    # start_new_session=True mirrors host_spawn_kwargs()'s real POSIX
+    # behavior (proc.pid doubling as the process group id) -- set up
+    # directly here since contained_test_mode() suppresses it for the
+    # actual launch path under the test supervisor.
+    proc = subprocess.Popen(
+        [sys.executable, str(script)], start_new_session=True,
+    )
+    try:
+        from zdd.diagnostics import process_start_time
+
+        expected_identity = process_start_time(proc.pid)
+
+        for _ in range(100):
+            if marker.exists() and marker.read_text().strip():
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("grandchild never reported its pid")
+        child_pid = int(marker.read_text().strip())
+
+        monkeypatch.setattr(launcher, "contained_test_mode", lambda: False)
+        launcher._kill_host_process_tree(proc, expected_identity)
+        proc.wait(timeout=5)
+
+        for _ in range(100):
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("grandchild survived the process-group kill")
+    finally:
+        proc.kill()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX process-group semantics only",
+)
+class TestKillHostProcessTreeIdentityGuard:
+    """Direct, mocked tests of ``_kill_host_process_tree``'s POSIX identity-
+    verification gate -- this repository's PID-destruction rule requires a
+    dedicated mismatch/refusal unit test (mirrors
+    ``TestKillTreeIdentityGuard`` in ``test_local_cache_refresh.py``), not
+    just the real end-to-end descendant regression above (which only proves
+    the happy identity path)."""
+
+    def test_refuses_to_signal_without_an_established_baseline(
+        self, monkeypatch,
+    ) -> None:
+        """``expected_identity is None`` must fail closed -- the universal
+        case on any POSIX platform with no identity backend at all (macOS:
+        ``process_start_time`` always returns ``None`` there), not just a
+        transient miss. Never trust an unverified numeric pid."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time", lambda pid: None,
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, None)
+
+        assert killpg_calls == [], (
+            "os.killpg was called with no established identity baseline -- "
+            "the fail-closed guard did not hold"
+        )
+        proc.kill.assert_called_once()
+
+    def test_refuses_to_signal_on_a_confirmed_identity_mismatch(
+        self, monkeypatch,
+    ) -> None:
+        """A live, differing identity at the same numeric pid means the pid
+        has been recycled by an unrelated process -- refuse the signal
+        outright."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time",
+            lambda pid: "a-different-identity",
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, "the-original-identity")
+
+        assert killpg_calls == [], (
+            "os.killpg was called despite a confirmed identity mismatch"
+        )
+        proc.kill.assert_called_once()
+
+    def test_signals_when_identity_is_established_and_not_contradicted(
+        self, monkeypatch,
+    ) -> None:
+        """The common, expected-to-succeed case: a real baseline was
+        captured and the current occupant of that pid still matches it."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append((pgid, sig)),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time",
+            lambda pid: "the-original-identity",
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, "the-original-identity")
+
+        assert killpg_calls == [(4321, signal.SIGKILL)]
+        proc.kill.assert_not_called()
+
+
+def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
+    """Once the host calls ``_detach_stdio_from_frontend``, the frontend's
+    crash-tail pipe must see EOF (its write end closed) instead of staying
+    open for the host's full lifetime -- a host that outlives a later
+    frontend exit/restart must never depend on that pipe still being read.
+    The child stays alive well past the detach so EOF can
+    only have come from the dup2 itself, not from process exit (otherwise
+    the test would pass even if the detach did nothing)."""
+    script = tmp_path / "detach_probe.py"
+    script.write_text(
+        "import sys, time\n"
+        "from agent_bridge.session_host.launcher import ("
+        "_detach_stdio_from_frontend)\n"
+        "print('before-detach')\n"
+        "sys.stdout.flush()\n"
+        "_detach_stdio_from_frontend()\n"
+        "time.sleep(5.0)\n"  # stay alive well past the bounded read below
+        "print('after-detach-should-not-reach-the-frontend')\n"
+    )
+    # A Windows venv's python.exe is a redirector that spawns the real
+    # interpreter and itself holds the inherited pipe write handle until the
+    # child exits, so EOF could never come from the child's dup2. Probe the
+    # real interpreter directly, with this venv's import path.
+    interpreter = sys.executable
+    env = None
+    base = getattr(sys, "_base_executable", None)
+    if sys.platform == "win32" and base and base != sys.executable:
+        interpreter = base
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+    proc = subprocess.Popen(
+        [interpreter, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+    try:
+        result: dict[str, bytes] = {}
+
+        def _read() -> None:
+            result["data"] = proc.stdout.read()
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=5.0)
+        assert not reader.is_alive(), "pipe never reached EOF"
+        # The child's own 5s sleep hasn't elapsed yet -- it is still alive,
+        # so the EOF above came from the dup2 inside
+        # _detach_stdio_from_frontend, not from process exit.
+        assert proc.poll() is None
+        captured = result["data"]
+        assert b"before-detach" in captured
+        assert b"after-detach-should-not-reach-the-frontend" not in captured
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+# --------------------------------------------------------------------------
+# winjob breakaway flags
+# --------------------------------------------------------------------------
+def test_breakaway_flag_composition():
+    with_ba = winjob._kill_on_close_limit_flags(True)
+    without = winjob._kill_on_close_limit_flags(False)
+    kill = winjob._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    breakaway = winjob._JOB_OBJECT_LIMIT_BREAKAWAY_OK
+    # both keep kill-on-close
+    assert with_ba & kill and without & kill
+    # only the breakaway-ok variant sets the escape flag
+    assert with_ba & breakaway
+    assert not (without & breakaway)
+
+
+def test_create_breakaway_flag_value():
+    # documented Win32 constant
+    assert winjob.CREATE_BREAKAWAY_FROM_JOB == 0x01000000
+
+
+# --------------------------------------------------------------------------
+# host index (durable session -> host endpoint map)
+# --------------------------------------------------------------------------
+def test_host_index_register_get_remove(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    idx = HostIndex(tmp_path / "hosts.json")
+    rec = HostRecord(session_id="s1", port=9000, host_pid=111, child_pid=222)
+    idx.register(rec)
+    assert "s1" in idx
+    assert idx.get("s1").child_pid == 222
+    assert len(idx) == 1
+    assert idx.remove("s1") is True
+    assert idx.remove("s1") is False
+    assert len(idx) == 0
+
+
+def test_host_index_persists_across_reload(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    path = tmp_path / "hosts.json"
+    idx = HostIndex(path)
+    idx.register(HostRecord(session_id="s1", port=9000, host_pid=111, child_pid=222,
+                            host_version="0.4.0-dev78"))
+    idx.register(HostRecord(session_id="s2", port=9001, host_pid=333, child_pid=444))
+    # fresh instance reads the same file
+    idx2 = HostIndex(path)
+    assert len(idx2) == 2
+    assert idx2.get("s1").host_version == "0.4.0-dev78"
+    assert idx2.get("s2").port == 9001
+
+
+def test_host_index_prune_and_live(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    idx = HostIndex(tmp_path / "hosts.json")
+    idx.register(HostRecord(session_id="alive", port=1, host_pid=10, child_pid=20))
+    idx.register(HostRecord(session_id="dead", port=2, host_pid=99, child_pid=30))
+
+    def is_alive(pid: int) -> bool:
+        return pid == 10
+
+    live = idx.live_records(is_alive)
+    assert [r.session_id for r in live] == ["alive"]
+    pruned = idx.prune_dead(is_alive)
+    assert [r.session_id for r in pruned] == ["dead"]
+    assert "dead" not in idx and "alive" in idx
+
+
+def test_host_index_from_state_file(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    state = tmp_path / "host.json"
+    state.write_text('{"pid": 111, "child_pid": 222, "port": 9000}')
+    rec = HostRecord.from_state_file("s1", state, host_version="v1")
+    assert rec.session_id == "s1"
+    assert rec.host_pid == 111
+    assert rec.child_pid == 222
+    assert rec.port == 9000
+    assert rec.host_version == "v1"
+    assert rec.state_file == str(state)
+
+
+def test_host_index_from_remote_authority_state(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    state = tmp_path / "host.json"
+    state.write_text(json.dumps({
+        "version": 2,
+        "session_id": "s1",
+        "pid": 111,
+        "host_pid": 111,
+        "child_pid": 222,
+        "port": 9000,
+        "host_version": "v2",
+        "protocol_version": 3,
+        "nonce": "nonce",
+        "created_at": 123.0,
+        "child_executable": "bash",
+        "cwd": "/workspaces/repo",
+    }))
+    rec = HostRecord.from_state_file("s1", state)
+    assert rec.host_version == "v2"
+    assert rec.protocol_version == 3
+    assert rec.nonce == "nonce"
+    assert rec.created_at == 123.0
+    assert rec.extra["child_executable"] == "bash"
+    assert rec.extra["cwd"] == "/workspaces/repo"
+
+
+def test_remote_authority_state_is_atomic_and_private(tmp_path):
+    catalog = tmp_path / "hosts"
+    state = catalog / "host-s1.json"
+    launcher._write_host_state(state, {"session_id": "s1", "nonce": "secret"})
+
+    assert json.loads(state.read_text())["session_id"] == "s1"
+    if os.name != "nt":
+        assert state.stat().st_mode & 0o777 == 0o600
+        assert catalog.stat().st_mode & 0o777 == 0o700
+
+
+def test_host_index_rejects_state_session_mismatch(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    state = tmp_path / "host.json"
+    state.write_text(json.dumps({
+        "session_id": "other",
+        "pid": 111,
+        "child_pid": 222,
+        "port": 9000,
+    }))
+    with pytest.raises(ValueError, match="session mismatch"):
+        HostRecord.from_state_file("s1", state)
+
+
+@pytest.mark.asyncio
+async def test_manager_recovers_missing_index_from_remote_authority(
+    session_manager,
+    monkeypatch,
+):
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+        codespace={
+            "name": "cs-one",
+            "repo": "org/repo",
+            "workspace_folder": "/workspaces/repo",
+        },
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    recovered = HostRecord(
+        session_id="s1",
+        port=0,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    )
+
+    class FakeSpawner:
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            assert session_id == "s1"
+            return recovered
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: FakeSpawner(),
+    )
+
+    assert await session_manager._recover_remote_host_records() == 1
+    assert session_manager._host_index.get("s1") == recovered
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_does_not_wake_stopped_codespace(
+    session_manager,
+    monkeypatch,
+):
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+
+    class StoppedSpawner:
+        async def can_inspect_without_wake(self):
+            return False
+
+        async def recover_record(self, session_id):
+            pytest.fail("stopped CodeSpace must not be inspected over SSH")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: StoppedSpawner(),
+    )
+
+    assert await session_manager._recover_remote_host_records() == 0
+    assert session_manager._host_index.get("s1") is None
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_skips_failed_remote_session(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.status = SessionStatus.FAILED
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: pytest.fail(
+            "terminal failed sessions must not build a remote startup probe"
+        ),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    attach.assert_not_awaited()
+    assert session_manager._host_index.get("s1") is not None
+
+
+@pytest.mark.asyncio
+async def test_explicit_recovery_can_inspect_failed_remote_session(
+    session_manager,
+    monkeypatch,
+):
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.status = SessionStatus.FAILED
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    recovered = HostRecord(
+        session_id="s1",
+        port=0,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    )
+
+    class FakeSpawner:
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            assert session_id == "s1"
+            return recovered
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: FakeSpawner(),
+    )
+
+    assert await session_manager._recover_remote_host_records() == 1
+    assert session_manager._host_index.get("s1") == recovered
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_timeout_is_bounded_below_watchdog(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+
+    class SlowSpawner:
+        async def can_inspect_without_wake(self):
+            await asyncio.sleep(60)
+            return True
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: SlowSpawner(),
+    )
+
+    started = asyncio.get_running_loop().time()
+    assert await session_manager._recover_remote_host_records(
+        timeout_seconds=0.01,
+    ) == 0
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < 0.5
+    assert "s1" in session_manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_timeout_covers_attach_work(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+    import os
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(type="command")
+    session = Session("s1", "one", target, "local")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=os.getpid(),
+        child_pid=os.getpid(),
+        nonce="nonce",
+        boundary="local",
+        endpoint={"kind": "local"},
+    ))
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        AsyncMock(return_value=0),
+    )
+
+    async def slow_attach(*_args, **_kwargs):
+        await asyncio.sleep(60)
+        return True
+
+    monkeypatch.setattr(session_manager, "_reattach_one", slow_attach)
+
+    started = asyncio.get_running_loop().time()
+    assert await session_manager.reattach_session_hosts(
+        remote_recovery_timeout=0.02,
+    ) == 0
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < 0.5
+    assert "s1" in session_manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_clamps_negative_budget(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    recover = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        recover,
+    )
+
+    assert await session_manager.reattach_session_hosts(
+        remote_recovery_timeout=-1,
+    ) == 0
+    assert recover.await_args.kwargs["timeout_seconds"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_reattach_cancellation_closes_partial_transport(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    closed = {"sock": False, "streams": False, "client": False}
+
+    class FakeSock:
+        async def attach(self, *_args, **_kwargs):
+            return None
+
+        async def close(self):
+            closed["sock"] = True
+
+    class FakeStreams:
+        reader = object()
+        writer = object()
+        on_transport_lost = None
+
+        async def aclose(self):
+            closed["streams"] = True
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.session_host_client = None
+
+        def mark_transport_lost(self):
+            pass
+
+        def mark_host_child_exited(self, _exit_code):
+            pass
+
+        async def start_streams(self, *_args, **_kwargs):
+            await asyncio.sleep(60)
+
+        async def shutdown(self):
+            closed["client"] = True
+
+    sock = FakeSock()
+    streams = FakeStreams()
+    monkeypatch.setattr(
+        "agent_bridge.session_host.client.SessionHostClient.connect",
+        AsyncMock(return_value=sock),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.acp_adapter.open_acp_streams",
+        AsyncMock(return_value=streams),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.AcpClient",
+        FakeClient,
+    )
+    monkeypatch.setattr(session_manager, "_ensure_forward", AsyncMock())
+
+    session = Session("s1", "one", SpawnTarget(type="command"), "local")
+    session.acp_session_id = "acp-1"
+    task = asyncio.create_task(
+        session_manager._reattach_one(
+            SimpleNamespace(
+                session_id="s1",
+                port=1234,
+                host_pid=111,
+                child_pid=222,
+                nonce="nonce",
+            ),
+            session,
+            new_status=session.status,
+        )
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert closed == {"sock": True, "streams": True, "client": True}
+
+
+@pytest.mark.asyncio
+async def test_new_forward_cancellation_stops_untracked_process(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    cancelled = False
+
+    class SlowForward:
+        async def establish(self):
+            await asyncio.sleep(60)
+
+        async def cancel(self):
+            nonlocal cancelled
+            cancelled = True
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.forward_from_endpoint",
+        lambda _endpoint: SlowForward(),
+    )
+    rec = SimpleNamespace(
+        session_id="s1",
+        boundary="codespace",
+        endpoint={"kind": "codespace", "host": "example"},
+    )
+
+    task = asyncio.create_task(session_manager._ensure_forward(rec))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cancelled is True
+    assert "s1" not in session_manager._forwards
+
+
+@pytest.mark.asyncio
+async def test_end_failed_launch_pending_recovers_after_restart(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import (
+        RemoteHostRecoveryPendingError,
+        Session,
+    )
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "container-one",
+            "launch_pending_session_id": "s1",
+        },
+    )
+    session = Session("s1", "one", target, "container:one")
+    session.status = SessionStatus.FAILED
+    session_manager._sessions["s1"] = session
+
+    async def inconclusive_recovery(**_kwargs):
+        session_manager._remote_recovery_inconclusive.add("s1")
+        return 0
+
+    recover = AsyncMock(side_effect=inconclusive_recovery)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        recover,
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError):
+        await session_manager.end_session("s1", force=True)
+
+    recover.assert_awaited_once()
+    assert session_manager._sessions["s1"] is session
+    assert session.target.container["launch_pending_session_id"] == "s1"
+
+
+@pytest.mark.asyncio
+async def test_end_inconclusive_remote_session_requires_authority(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_manager import (
+        RemoteHostRecoveryPendingError,
+        Session,
+    )
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._remote_recovery_inconclusive.add("s1")
+
+    async def inconclusive_recovery(**_kwargs):
+        session_manager._remote_recovery_inconclusive.add("s1")
+        return 0
+
+    recover = AsyncMock(side_effect=inconclusive_recovery)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        recover,
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError):
+        await session_manager.end_session("s1", force=True)
+
+    recover.assert_awaited_once()
+    assert session_manager._sessions["s1"] is session
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_skips_existing_stopped_codespace_record(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    class StoppedSpawner:
+        async def can_inspect_without_wake(self):
+            return False
+
+        async def recover_record(self, session_id):
+            pytest.fail("stopped CodeSpace must not be inspected over SSH")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: StoppedSpawner(),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    attach.assert_not_awaited()
+    assert session_manager._host_index.get("s1") is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_skips_when_state_check_fails(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    class UnknownSpawner:
+        async def can_inspect_without_wake(self):
+            raise RuntimeError("control plane unavailable")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: UnknownSpawner(),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    attach.assert_not_awaited()
+    assert "s1" in session_manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_startup_attach_failure_retains_remote_authority(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(type="command", venue={"kind": "container"})
+    session = Session("s1", "one", target, "container:one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    record = HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    )
+    session_manager._host_index.register(record)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        AsyncMock(return_value=0),
+    )
+    attach = AsyncMock(return_value=False)
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    assert session_manager._host_index.get("s1") is not None
+    assert attach.await_args.kwargs["new_status"] is SessionStatus.IDLE
+    assert attach.await_args.kwargs["prune_on_fail"] is False
+
+
+@pytest.mark.asyncio
+async def test_confirmed_dead_remote_authority_is_pruned(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_host.spawner import RemoteHostDeadError
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    class DeadSpawner:
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            raise RemoteHostDeadError(session_id)
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: DeadSpawner(),
+    )
+    drop = AsyncMock()
+    monkeypatch.setattr(session_manager, "_drop_forward", drop)
+
+    assert await session_manager._recover_remote_host_records() == 0
+    assert session_manager._host_index.get("s1") is None
+    drop.assert_awaited_once_with("s1")
+
+
+@pytest.mark.asyncio
+async def test_resume_refuses_duplicate_after_inconclusive_remote_attach(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import (
+        RemoteHostRecoveryPendingError,
+        Session,
+    )
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session(
+        "s1",
+        "one",
+        SpawnTarget(type="command"),
+        "codespace:cs-one",
+    )
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+    monkeypatch.setattr(
+        session_manager,
+        "_reattach_one",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError, match="refusing"):
+        await session_manager._try_reattach_live_host(session)
+
+
+@pytest.mark.asyncio
+async def test_resume_revalidates_skipped_v2_remote_authority(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session(
+        "s1",
+        "one",
+        SpawnTarget(
+            type="command",
+            codespace={"name": "cs-one", "repo": "org/repo"},
+        ),
+        "codespace:cs-one",
+    )
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+    session_manager._remote_recovery_skipped.add("s1")
+
+    async def recover(*, allow_wake=False, session_ids=None):
+        assert allow_wake is True
+        assert session_ids == {"s1"}
+        session_manager._host_index.remove("s1")
+        session_manager._remote_recovery_skipped.discard("s1")
+        return 0
+
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        AsyncMock(side_effect=recover),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager._try_reattach_live_host(session) is False
+    attach.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_remote_record_keeps_fresh_spawn_fallback(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session(
+        "legacy",
+        "one",
+        SpawnTarget(type="command"),
+        "codespace:cs-one",
+    )
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["legacy"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="legacy",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+    ))
+    monkeypatch.setattr(
+        session_manager,
+        "_reattach_one",
+        AsyncMock(return_value=False),
+    )
+
+    assert await session_manager._try_reattach_live_host(session) is False
+
+
+def _persist_stopped_remote_session(manager, target):
+    manager.db.create_session(
+        session_id="s1", name="one", agent_name=None, target_dir=target.cwd,
+        target_type=target.type, status="stopped", now=time.time(),
+        target_json=target.to_json(), acp_session_id="acp-1",
+    )
+    manager.db.flush()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy_allowed", [True, False])
+async def test_codespace_resume_replacement_uses_new_session_host(
+    session_manager,
+    monkeypatch,
+    mocked_codespace_admission,
+    policy_allowed,
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+    from repository_policy import AgentHostingError
+
+    guest, checks = mocked_codespace_admission
+    _write_hosting_policy(guest, allowed=policy_allowed)
+
+    target = SpawnTarget(
+        type="command",
+        spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+        codespace={
+            "name": "cs-one",
+            "repo": "org/repo",
+            "acp_command": "cd /workspaces/repo && copilot --acp --stdio",
+            "workspace_folder": "/workspaces/repo",
+        },
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.STOPPED
+    session.event_log = MagicMock()
+    session_manager._sessions["s1"] = session
+    _persist_stopped_remote_session(session_manager, target)
+    monkeypatch.setattr(
+        session_manager,
+        "_try_reattach_live_host",
+        AsyncMock(return_value=False),
+    )
+    client = MagicMock()
+    client.pid = 1234
+    host_resume = AsyncMock(return_value=(client, "acp-1"))
+    monkeypatch.setattr(
+        session_manager,
+        "_resume_via_new_remote_host",
+        host_resume,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.spawn",
+        AsyncMock(side_effect=AssertionError("raw stdio must not spawn")),
+    )
+
+    if policy_allowed:
+        resumed = await session_manager.resume_session("s1")
+        assert resumed.status is SessionStatus.IDLE
+        assert resumed.client is client
+        host_resume.assert_awaited_once()
+    else:
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            await session_manager.resume_session("s1")
+        host_resume.assert_not_awaited()
+    assert checks and all(checked == target and operation == "resume" for checked, operation in checks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy_allowed", [True, False])
+async def test_legacy_codespace_resume_replacement_uses_session_host(
+    session_manager,
+    monkeypatch,
+    mocked_codespace_admission,
+    policy_allowed,
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+    from repository_policy import AgentHostingError
+
+    guest, checks = mocked_codespace_admission
+    _write_hosting_policy(guest, allowed=policy_allowed)
+
+    target = SpawnTarget(
+        type="command",
+        spawn_command=[
+            "agent-codespaces",
+            "ssh",
+            "cs-one",
+            "--stdio",
+            "--remote-cmd",
+            "cd /workspaces/repo && copilot --acp --stdio",
+        ],
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.STOPPED
+    session.event_log = MagicMock()
+    session_manager._sessions["s1"] = session
+    _persist_stopped_remote_session(session_manager, target)
+    monkeypatch.setattr(
+        session_manager,
+        "_try_reattach_live_host",
+        AsyncMock(return_value=False),
+    )
+    client = MagicMock()
+    client.pid = 1234
+    connect = AsyncMock(return_value=(client, "acp-1"))
+    monkeypatch.setattr(
+        session_manager,
+        "_connect_via_session_host",
+        connect,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.venue_plugins.prepare_venue_plugins",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env",
+        lambda *args, **kwargs: ("", None),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.spawn",
+        AsyncMock(side_effect=AssertionError("raw stdio must not spawn")),
+    )
+
+    if policy_allowed:
+        resumed = await session_manager.resume_session("s1")
+        assert resumed.status is SessionStatus.IDLE
+        connect.assert_awaited_once()
+    else:
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            await session_manager.resume_session("s1")
+        connect.assert_not_awaited()
+    assert checks and all(checked == target and operation == "resume" for checked, operation in checks)
+
+
+def test_host_index_corrupt_file_is_ignored(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex
+
+    path = tmp_path / "hosts.json"
+    path.write_text("{ not json")
+    idx = HostIndex(path)  # must not raise
+    assert len(idx) == 0
+
+
+# --------------------------------------------------------------------------
+# Phase 3: cursor-stable event identity across a front cycle / resync
+# --------------------------------------------------------------------------
+def _mk_session(db, sid="s1"):
+    import time as _t
+    db.create_session(session_id=sid, name="n", agent_name=None, caller_id=None,
+                      target_dir=".", target_type="local", status="idle",
+                      now=_t.time(), target_json="{}")
+
+
+def test_reattach_preserves_event_ids_and_cursor(tmp_path):
+    """A frontend restart (rehydrate) must NOT renumber events or orphan the
+    delivery cursor -- the identity is append-only and stable."""
+    import time as _t
+
+    from agent_bridge.db import Database
+    from agent_bridge.events import EventLog
+
+    db = Database(tmp_path / "e.db")
+    try:
+        _mk_session(db)
+        log1 = EventLog(db=db, session_id="s1")
+        for i in range(5):
+            log1.append("agent_message", {"text": f"m{i}"})
+        db.flush()
+        ids_before = [e.id for e in log1.get_events(0)]
+        assert ids_before == [1, 2, 3, 4, 5]
+        db.set_cursor("nf", "s1", 3, _t.time())  # consumer acked up to id 3
+
+        # simulate a frontend restart: EventLog is rebuilt from the DB
+        log2 = EventLog.from_db(db, "s1")
+        assert [e.id for e in log2.get_events(0)] == ids_before   # no renumbering
+        cur = db.get_cursor("nf", "s1")
+        assert cur == 3                                           # cursor intact
+        assert [e.id for e in log2.get_events(after=cur)] == [4, 5]  # no gap/dup
+        assert log2.append("x", {}).id == 6                       # append-only continues
+    finally:
+        db.close()
+
+
+def test_rebuild_resets_delivery_cursors(tmp_path):
+    """resync's rebuild renumbers from 1; the monotonic cursor must be reset so
+    a consumer re-reads the rebuilt log instead of stalling past its end."""
+    import time as _t
+
+    from agent_bridge.db import Database
+    from agent_bridge.events import EventLog
+
+    db = Database(tmp_path / "e.db")
+    try:
+        _mk_session(db)
+        log = EventLog(db=db, session_id="s1")
+        for i in range(5):
+            log.append("agent_message", {"text": f"m{i}"})
+        db.flush()
+        db.set_cursor("nf", "s1", 5, _t.time())   # consumer fully caught up
+        assert db.get_cursor("nf", "s1") == 5
+
+        # resync rebuilds to a shorter authoritative log (ids renumber 1..N)
+        n = log.rebuild([("agent_message", {"text": "only-one"})])
+        db.flush()
+        assert n == 1
+        # cursor reset -> consumer re-reads the rebuilt log rather than seeing
+        # nothing (its old ack id 5 is now past the 1-event log).
+        assert db.get_cursor("nf", "s1") == 0
+        assert [e.id for e in log.get_events(after=0)] == [1]
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# flag-gated start_session -> Session-Host mode, end to end (real subprocesses)
+# --------------------------------------------------------------------------
+_FAKE_AGENT_SRC = (
+    "import asyncio, acp\n"
+    "from acp.schema import InitializeResponse, NewSessionResponse, AgentCapabilities\n"
+    "class Agent:\n"
+    "    async def initialize(self, protocol_version, **kw):\n"
+    "        return InitializeResponse(protocol_version=protocol_version, agent_capabilities=AgentCapabilities())\n"
+    "    async def new_session(self, cwd, **kw):\n"
+    "        return NewSessionResponse(session_id='host-mode-sess')\n"
+    "    def __getattr__(self, name):\n"
+    "        if name.startswith('_') or name == 'on_connect':\n"
+    "            raise AttributeError(name)\n"
+    "        async def _noop(*a, **k):\n"
+    "            return None\n"
+    "        return _noop\n"
+    "asyncio.run(acp.run_agent(Agent()))\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch, hosted_workspace):
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    db = Database(tmp_path / "s.db")
+    mgr = SessionManager(
+        db,
+        session_host_state_dir=str(tmp_path / "hosts"),
+    )
+    host_pid = None
+    child_pid = None
+    try:
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+
+        # ACP session created THROUGH the Session Host, host index registered.
+        assert session.acp_session_id == "host-mode-sess"
+        assert session.pid  # child pid surfaced via host-mode AcpClient
+        assert mgr._host_index is not None and len(mgr._host_index) == 1
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert osutil_pid_alive(host_pid)
+
+        # host-mode teardown DETACHES -- the child survives (goal 1).
+        await session.client.shutdown()
+        await asyncio.sleep(0.2)
+        assert osutil_pid_alive(host_pid)  # host + child untouched by detach
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch, hosted_workspace):
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = None
+    child_pid = None
+    try:
+        # --- frontend generation 1: start a host-backed session ---
+        db1 = Database(dbpath)
+        mgr1 = SessionManager(db1, session_host_state_dir=statedir)
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
+        sid = session.session_id
+        rec = mgr1._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert osutil_pid_alive(host_pid)
+
+        # simulate a frontend restart: detach (host survives) + drop generation 1
+        await session.client.shutdown()
+        db1.close()
+        # A real restart's outgoing generation releases its session-host claims
+        # as part of its own /api/v1/shutdown exit contract (Phase 3) -- this
+        # test drives SessionManager directly rather than through that HTTP
+        # handler, so simulate the same release explicitly.
+        mgr1._host_index.release_all(mgr1._generation_id)
+        assert osutil_pid_alive(host_pid)  # host untouched by the front going away
+
+        # --- frontend generation 2: reattach to the surviving host ---
+        db2 = Database(dbpath)
+        mgr2 = SessionManager(db2, session_host_state_dir=statedir)
+        assert mgr2.get_session(sid) is not None  # rehydrated (STOPPED)
+
+        n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
+        assert n == 1
+        s2 = mgr2.get_session(sid)
+        assert s2.status == SessionStatus.IDLE
+        assert s2.client is not None
+        assert s2.acp_session_id == "host-mode-sess"      # session adopted, not re-created
+        assert s2.client.pid == child_pid                 # same surviving child
+        await s2.client.shutdown()
+        db2.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
+async def test_adapter_fires_transport_lost_on_socket_drop():
+    """A dropped host->front socket (child still alive) fires on_transport_lost.
+
+    This is the in-session ``disconnected`` signal the liveness-driven reattach
+    driver keys on (P1): the transport died underneath us, not the child.
+    """
+    child = _FakeChild()
+    host, port = await _serve(child)
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    fired = asyncio.Event()
+    streams = await open_acp_streams(client)
+    streams.on_transport_lost = fired.set
+    try:
+        # Deliver one frame so the relay is live, then drop the transport by
+        # closing the host's front-side connection -- child stays alive.
+        child.feed_frame(b'{"jsonrpc":"2.0"}')
+        await asyncio.sleep(0.05)
+        assert host._front is not None
+        host._front.writer.close()
+        await asyncio.wait_for(fired.wait(), timeout=5)
+        assert child.returncode is None  # child never exited -- transport-only loss
+    finally:
+        await streams.aclose()
+        await client.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_no_transport_lost_on_child_exit():
+    """A clean child exit (LIVENESS(dead)) must NOT fire on_transport_lost.
+
+    Reattaching a genuinely-ended child would be wrong; the driver keys on
+    transport loss, not child death.
+    """
+    child = _FakeChild()
+    host, port = await _serve(child)
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    transport_lost = asyncio.Event()
+    child_exited = asyncio.Event()
+    exit_codes = []
+    streams = await open_acp_streams(client)
+    streams.on_transport_lost = transport_lost.set
+    streams.on_child_exit = lambda code: (exit_codes.append(code), child_exited.set())
+    try:
+        child.feed_frame(b'{"jsonrpc":"2.0"}')
+        await asyncio.sleep(0.05)
+        child.finish(7)  # child exits -> host emits LIVENESS(dead)
+        await asyncio.wait_for(child_exited.wait(), timeout=5)
+        assert not transport_lost.is_set()
+        assert exit_codes == [7]
+        assert streams.child_exit_code == 7
+    finally:
+        await streams.aclose()
+        await client.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_settles_attached_client_after_child_exit(
+    session_manager, monkeypatch
+):
+    """A latched child exit is terminal, not a reattach-loop candidate."""
+    import os
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session("s1", "one", SpawnTarget(type="command"), "local")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.IDLE
+    client = MagicMock()
+    client.is_running = False
+    client.host_child_exit_code = 7
+    client.shutdown = AsyncMock()
+    session.client = client
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=os.getpid(),
+        child_pid=222,
+    ))
+    reap = MagicMock()
+    monkeypatch.setattr(session_manager, "_reap_host_record", reap)
+
+    assert await session_manager.recover_disconnected_hosts() == 0
+    reap.assert_called_once()
+    assert session.status == SessionStatus.STOPPED
+    assert session.client is None
+    client.shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkeypatch, hosted_workspace):
+    """In-session liveness-driven reattach: a RUNNING host-backed session whose
+    transport dropped (host + child alive) is redialed and resumed by cursor by
+    ``recover_disconnected_hosts`` -- no restart, same child, same ACP session.
+    """
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    db = Database(tmp_path / "s.db")
+    mgr = SessionManager(
+        db,
+        session_host_state_dir=str(tmp_path / "hosts"),
+    )
+    host_pid = None
+    child_pid = None
+    try:
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+        sid = session.session_id
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+
+        # Simulate a mid-turn transport drop: mark the session RUNNING and flip
+        # the host-mode client's transport dead (host + child untouched).
+        session.status = SessionStatus.RUNNING
+        session.client.mark_transport_lost()
+        assert session.liveness_state() == "disconnected"
+
+        n = await asyncio.wait_for(mgr.recover_disconnected_hosts(), timeout=30)
+        assert n == 1
+        s = mgr.get_session(sid)
+        assert s.client is not None and s.client.is_running   # transport restored
+        assert s.acp_session_id == "host-mode-sess"           # adopted, not re-created
+        assert s.client.pid == child_pid                      # same surviving child
+        assert s.status == SessionStatus.RUNNING              # turn status preserved
+        assert osutil_pid_alive(host_pid)                     # host never respawned
+
+        # Idempotent: a healthy session needs no further reattach.
+        assert await asyncio.wait_for(mgr.recover_disconnected_hosts(), timeout=30) == 0
+
+        await s.client.shutdown()
+        db.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state_selection", ["absolute", "parent"])
+async def test_launch_session_host_process_owns_child(
+    tmp_path, hosted_workspace, monkeypatch, state_selection,
+):
+    import signal
+    import sys
+
+    from agent_bridge.session_host.launcher import launch_session_host
+
+    state_dir = str(tmp_path)
+    if state_selection == "parent":
+        launch = tmp_path / "launch"
+        launch.mkdir()
+        monkeypatch.chdir(launch)
+        state_dir = "../state"
+    handle = await asyncio.to_thread(
+        launch_session_host, [sys.executable, "-c", _STREAMER],
+        state_dir=state_dir, cwd=str(hosted_workspace),
+    )
+    try:
+        assert handle.child_pid > 0 and handle.port > 0
+        assert osutil_pid_alive(handle.host_pid)
+
+        c = await SessionHostClient.connect(port=handle.port)
+        hello = await c.attach(0)
+        assert hello.child_pid == handle.child_pid
+        await c.write(b'{"prompt":"go"}\n')
+        seqs = []
+        async for seq, data in c.frames():
+            seqs.append(seq)
+            await c.ack(seq)
+            if b"turn_complete" in data:
+                break
+        assert len(seqs) >= 5
+        await c.close()
+    finally:
+        with contextlib.suppress(Exception):
+            handle.proc.terminate()
+        with contextlib.suppress(Exception):
+            handle.proc.wait(timeout=5)
+        if sys.platform != "win32":
+            import os as _os
+            with contextlib.suppress(Exception):
+                _os.kill(handle.child_pid, signal.SIGKILL)
+
+
+def test_launch_session_host_linked_state_root_refuses_before_spawn(tmp_path, monkeypatch):
+    import sys
+
+    from agent_bridge.session_host import launcher
+
+    state = tmp_path / "state"
+    state.mkdir()
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(state, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    spawned = []
+
+    def forbidden(*args, **kwargs):
+        spawned.append(args)
+        raise AssertionError("linked state root reached process creation")
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", forbidden)
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        launcher.launch_session_host(
+            [sys.executable, "-c", "pass"], state_dir=str(linked),
+        )
+    assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_host_rejects_wrong_nonce():
+    """A host launched with a nonce accepts the matching token and rejects
+    a wrong or absent one (connect-auth, P2a)."""
+    child = _FakeChild()
+    host = SessionHost(child, nonce="s3cret")
+    port = await host.serve(port=0)
+    try:
+        good = await SessionHostClient.connect(port=port)
+        hello = await good.attach(0, nonce=b"s3cret")
+        assert hello.child_pid == child.pid
+        await good.close()
+
+        bad = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"nope")
+        await bad.close()
+
+        missing = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await missing.attach(0)   # no nonce -> rejected
+        await missing.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_local_spawner_secures_with_nonce(tmp_path, hosted_workspace):
+    """LocalSpawner mints a connect nonce; only a client presenting it can drive
+    the spawned host (the P2a Spawner-seam + nonce, end to end)."""
+    import signal
+    import sys
+
+    from agent_bridge.session_host.spawner import LocalSpawner
+
+    spawned = await LocalSpawner().spawn(
+        [sys.executable, "-c", _STREAMER], cwd=str(hosted_workspace),
+    )
+    try:
+        assert spawned.boundary == "local"
+        assert spawned.nonce and spawned.local_port > 0
+        assert osutil_pid_alive(spawned.host_pid)
+
+        # Correct nonce connects and sees the surviving child.
+        good = await SessionHostClient.connect(port=spawned.local_port)
+        hello = await good.attach(0, nonce=spawned.nonce.encode())
+        assert hello.child_pid == spawned.child_pid
+        await good.close()
+
+        # Wrong nonce is refused.
+        bad = await SessionHostClient.connect(port=spawned.local_port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"wrong")
+        await bad.close()
+
+        # refresh_endpoint is a no-op for a local host (port never moves).
+        await spawned.refresh_endpoint()
+        assert spawned.local_port > 0
+    finally:
+        with contextlib.suppress(Exception):
+            spawned.proc.terminate()
+        with contextlib.suppress(Exception):
+            spawned.proc.wait(timeout=5)
+        if sys.platform != "win32":
+            import os as _os
+            with contextlib.suppress(Exception):
+                _os.kill(spawned.child_pid, signal.SIGKILL)
+
+
+async def _ready_host_state(state_file):
+    import json
+    last_error = None
+    for _ in range(200):
+        try:
+            data = json.loads(state_file.read_text())
+        except (FileNotFoundError, PermissionError, json.JSONDecodeError) as exc:
+            last_error = exc
+        else:
+            if data.get("port") and data.get("child_pid"):
+                return data
+        await asyncio.sleep(0.05)
+    pytest.fail(f"host never became ready: {last_error!r}")
+
+
+@pytest.mark.asyncio
+async def test_startup_poll_observes_readable_state_not_only_existence(monkeypatch):
+    import json
+    outcomes = iter([PermissionError("writer still owns the file"), FileNotFoundError(),
+                     json.JSONDecodeError("partial", "", 0), '{"port":123,"child_pid":456}'])
+
+    class State:
+        def read_text(self):
+            value = next(outcomes)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+    async def yield_once(_delay):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", yield_once)
+    assert await _ready_host_state(State()) == {"port": 123, "child_pid": 456}
+
+
+@pytest.mark.asyncio
+async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch, hosted_workspace):
+    """The far-side runner resolves an agent locally, hosts it in a Session Host,
+    and secures the endpoint with the nonce -- the program every boundary Spawner
+    launches (elevation / ssh / CodeSpace), validated in-process."""
+    import os
+    import signal
+    import sys
+
+    from agent_bridge.session_host import launcher
+    from agent_bridge.session_host.agent_runner import run_agent_session_host
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+
+    # Injected resolver: name -> a local target. resolve_local_launch is faked to
+    # yield the ACP fake-agent argv (so we exercise orchestration, not copilot).
+    class _Resolver:
+        async def resolve_async(self, name, sender_repo=None):
+            return SpawnTarget(type="local", cwd=str(tmp_path))
+
+    async def _fake_resolve(target, *, tracker=None, session_id="", prepare_plugins=True):
+        assert prepare_plugins is False
+        return [sys.executable, str(agent_script)], str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+    # Don't arm a kill-on-close job on the pytest process for an in-process host.
+    monkeypatch.setattr(launcher, "apply_host_survival", lambda: None)
+
+    state_file = tmp_path / "state.json"
+    task = asyncio.create_task(run_agent_session_host(
+        "fake-agent", port=0, state_file=str(state_file),
+        nonce="n0nce", resolver=_Resolver(),
+    ))
+    child_pid = None
+    try:
+        data = await _ready_host_state(state_file)
+        port, child_pid = data["port"], data["child_pid"]
+
+        # Wrong nonce refused.
+        bad = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"wrong")
+        await bad.close()
+
+        # Correct nonce drives the resolved+hosted child.
+        good = await SessionHostClient.connect(port=port)
+        hello = await good.attach(0, nonce=b"n0nce")
+        assert hello.child_pid == child_pid
+        await good.close()
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        if child_pid:
+            with contextlib.suppress(Exception):
+                if sys.platform == "win32":
+                    import subprocess
+                    subprocess.run(["taskkill", "/PID", str(child_pid), "/T", "/F"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    import os as _os
+                    _os.kill(child_pid, signal.SIGKILL)
+
+
+def test_session_host_bundle_preserves_procutil_and_portable_receiver_closures(tmp_path):
+    import ast
+    import zipfile
+    from pathlib import Path
+    from agent_procutil import no_window_kwargs
+    from agent_bridge.session_host import bundle
+
+    archive, _digest = bundle.build_session_host_bundle(tmp_path / "bundle")
+    with zipfile.ZipFile(archive) as contents:
+        names = set(contents.namelist())
+        assert "agent_procutil/_daemon_instance_records.py" in names
+        for module in bundle._PROCUTIL_MODULES:
+            assert "agent_procutil/" + module in names
+        assert contents.read("agent_bridge/hosting_policy.py") == (
+            Path(bundle.__file__).with_name("receiver_policy.py").read_bytes()
+        )
+        procutil_root = Path(bundle.agent_procutil.__file__).resolve().parent
+        for module in bundle._PROCUTIL_MODULES:
+            for node in ast.walk(ast.parse((procutil_root / module).read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and node.level == 1:
+                    dependencies = [node.module.split(".")[0]] if node.module else [
+                        alias.name for alias in node.names
+                    ]
+                    for dependency in dependencies:
+                        if (procutil_root / (dependency + ".py")).is_file():
+                            assert dependency + ".py" in bundle._PROCUTIL_MODULES
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-c",
+            "import sys;sys.path.insert(0,sys.argv[1]);"
+            "import agent_procutil.daemon_instances;"
+            "import agent_procutil._windows_caller_owned;"
+            "import agent_bridge.hosting_policy as policy;"
+            "import agent_bridge.session_host.launcher;"
+            "assert callable(policy.require_path_hosting);print('both-closures-ok')",
+            str(archive),
+        ],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "both-closures-ok"
+
+
+def test_session_host_bundle_optional_legacy_adapter_refuses_without_full_installation(tmp_path):
+    import zipfile
+    from agent_procutil import no_window_kwargs
+    from agent_bridge.session_host import bundle
+
+    archive, _digest = bundle.build_session_host_bundle(tmp_path / "bundle")
+    with zipfile.ZipFile(archive) as contents:
+        assert "agent_procutil/windows_task_broker.py" not in contents.namelist()
+    program = (
+        "import sys;sys.path.insert(0,sys.argv[1]);"
+        "from agent_procutil import DaemonSpawnError;"
+        "from agent_procutil.daemon import spawn_brokered_daemon;"
+        "\ntry:"
+        "\n spawn_brokered_daemon(['fixture'],cwd=sys.argv[2],env={},creationflags=0,"
+        "log_path=sys.argv[3],stderr_log_path=None)"
+        "\nexcept DaemonSpawnError as error:"
+        "\n assert error.process_created is False"
+        "\n assert 'windows-broker support' in str(error)"
+        "\n print('optional-adapter-refused')"
+        "\nelse: raise AssertionError('uninstalled legacy adapter activated')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", program, str(archive), str(tmp_path), str(tmp_path / "log")],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "optional-adapter-refused"
+
+
+def _bundle_policy_owner(tmp_path, monkeypatch, *, allowed=True):
+    """Supply only the guest policy-owner contract, not an admission bypass."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    workspace = tmp_path / "fixture-workspace"
+    workspace.mkdir()
+    owner_dir = tmp_path / "fixture-owner"
+    owner_dir.mkdir()
+    expected = [
+        "agent-policy", "check", "--path", str(workspace),
+        "--operation", "launch", "--json",
+    ]
+    answer = {
+        "version": 1, "allowed": allowed, "repository": "fixture/workspace",
+        "expose_agent": allowed, "sources": [str(owner_dir / "policy.json")],
+        "denied_by": [] if allowed else ["fixture-policy"],
+    }
+    script = owner_dir / "policy-owner.py"
+    script.write_text(
+        "import json,sys\n"
+        f"assert sys.argv[1:] == {expected!r}, sys.argv[1:]\n"
+        f"print({json.dumps(answer)!r})\n",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        (owner_dir / "agent-worktrees.cmd").write_text(
+            "@echo off\n" + subprocess.list2cmdline([sys.executable, str(script)]) + " %*\n",
+            encoding="utf-8",
+        )
+    else:
+        owner = owner_dir / "agent-worktrees"
+        owner.write_text("#!/usr/bin/env python3\n" + script.read_text(), encoding="utf-8")
+        owner.chmod(0o700)
+    monkeypatch.setenv("PATH", str(owner_dir) + os.pathsep + os.environ.get("PATH", ""))
+    return workspace
+
+
+def test_session_host_bundle_policy_refuses_denial(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    from agent_bridge.session_host.bundle import build_session_host_bundle
+
+    workspace = _bundle_policy_owner(tmp_path, monkeypatch, allowed=False)
+    path, _ = build_session_host_bundle(dest_dir=str(tmp_path / "bundles"))
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-c",
+            "import sys;sys.path.insert(0,sys.argv[1]);"
+            "from agent_bridge.hosting_policy import require_path_hosting;"
+            "require_path_hosting(sys.argv[2])",
+            str(path), str(workspace),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
+    assert "did not return an explicit version-1 allow" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_session_host_bundle_runs_and_secures(tmp_path, monkeypatch):
+    """The content-hashed zipapp bundle builds with a stable hash, runs as a host
+    owning a child, and is nonce-gated -- the version-alignment mechanism for the
+    CodeSpace/mesh far side (it runs the host's exact bytes)."""
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    from agent_bridge.session_host.bundle import (
+        build_session_host_bundle,
+        bundle_source_hash,
+    )
+
+    path, sha = build_session_host_bundle(dest_dir=str(tmp_path / "bundles"))
+    assert path.exists() and sha == bundle_source_hash()
+    # Stable + reused (the cache-by-hash property the CS relies on).
+    assert build_session_host_bundle(dest_dir=str(tmp_path / "bundles")) == (path, sha)
+
+    sf = tmp_path / "state.json"
+    workspace = _bundle_policy_owner(tmp_path, monkeypatch)
+    env = dict(os.environ, AGENT_BRIDGE_SESSION_HOST_NONCE="bundlenonce")
+    proc = subprocess.Popen(
+        [sys.executable, "-S", str(path), "--port", "0", "--state-file", str(sf),
+         "--cwd", str(workspace),
+         "--", sys.executable, "-c", _STREAMER], env=env)
+    child_pid = None
+    try:
+        data = await _ready_host_state(sf)
+        port, child_pid = data["port"], data["child_pid"]
+
+        bad = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"wrong")
+        await bad.close()
+
+        good = await SessionHostClient.connect(port=port)
+        hello = await good.attach(0, nonce=b"bundlenonce")
+        assert hello.child_pid == child_pid
+        await good.close()
+    finally:
+        with contextlib.suppress(Exception):
+            proc.terminate()
+            proc.wait(timeout=5)
+        if child_pid and sys.platform != "win32":
+            with contextlib.suppress(Exception):
+                os.kill(child_pid, signal.SIGKILL)
+
+
+def osutil_pid_alive(pid: int) -> bool:
+    import sys
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        h = k.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        code = wintypes.DWORD()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259
+    import os as _os
+    try:
+        _os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------
+# full-stack: a real AcpClient completes an ACP handshake THROUGH the host
+# --------------------------------------------------------------------------
+class _FakeAcpAgent:
+    """Minimal ACP agent: answers initialize + new_session; no-ops the rest."""
+
+    def __init__(self) -> None:
+        self.initialized = False
+        self.new_session_calls = 0
+
+    async def initialize(self, protocol_version, **kwargs):
+        from acp.schema import AgentCapabilities, InitializeResponse
+        self.initialized = True
+        return InitializeResponse(
+            protocol_version=protocol_version,
+            agent_capabilities=AgentCapabilities(),
+        )
+
+    async def new_session(self, cwd, **kwargs):
+        from acp.schema import NewSessionResponse
+        self.new_session_calls += 1
+        return NewSessionResponse(session_id="fake-sess-1")
+
+    def __getattr__(self, name):
+        # route_request binds getattr(agent, <method>) for every ACP method at
+        # build time; provide async no-ops for the ones this test never calls.
+        # Raise for dunders / on_connect so the library's optional-hook probe
+        # (getattr(agent, "on_connect", None)) resolves to None.
+        if name.startswith("_") or name == "on_connect":
+            raise AttributeError(name)
+
+        async def _noop(*a, **k):
+            return None
+
+        return _noop
+
+
+class _SockChild:
+    """A child whose stdio is one end of a socketpair (the agent is the other)."""
+
+    def __init__(self, reader, writer, pid) -> None:
+        self.stdout = reader
+        self.stdin = writer
+        self._pid = pid
+
+    @property
+    def pid(self):
+        return self._pid
+
+    @property
+    def returncode(self):
+        return None  # stays alive for the test
+
+    async def wait(self):
+        await asyncio.sleep(3600)
+        return 0
+
+
+@pytest.mark.asyncio
+async def test_full_stack_acp_handshake_through_host():
+    import socket as _socket
+
+    from acp.agent.connection import AgentSideConnection
+
+    from agent_bridge.acp_client import AcpClient
+    from agent_bridge.session_host.acp_adapter import open_acp_streams
+
+    # socketpair: one end is the child's stdio (host side), the other the agent.
+    host_sock, agent_sock = _socket.socketpair()
+    host_reader, host_writer = await asyncio.open_connection(sock=host_sock)
+    agent_reader, agent_writer = await asyncio.open_connection(sock=agent_sock)
+
+    fake_agent = _FakeAcpAgent()
+    # AgentSideConnection(input_stream=writer, output_stream=reader)
+    _agent_conn = AgentSideConnection(fake_agent, agent_writer, agent_reader)
+
+    child = _SockChild(host_reader, host_writer, pid=54321)
+    host = SessionHost(child)
+    port = await host.serve(port=0)
+
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    streams = await open_acp_streams(client, start_from=0)
+
+    acp = AcpClient()
+    try:
+        # initialize + new_session flow all the way through:
+        # AcpClient -> adapter -> host -> child.stdin -> agent, and back.
+        await asyncio.wait_for(
+            acp.start_streams(streams.reader, streams.writer,
+                              child_pid=child.pid, closer=streams.aclose),
+            timeout=10,
+        )
+        assert acp.is_running is True
+        assert acp.pid == 54321                       # informational child pid
+        assert fake_agent.initialized is True
+
+        sid = await asyncio.wait_for(acp.new_session(cwd="/tmp"), timeout=10)
+        assert sid == "fake-sess-1"
+        assert fake_agent.new_session_calls == 1
+
+        # host-mode shutdown DETACHES (no child kill) -- intentional-only reaping.
+        await acp.shutdown()
+        assert child.returncode is None               # child untouched
+    finally:
+        with contextlib.suppress(Exception):
+            await streams.aclose()
+        await client.close()
+        await host.close()
+        for w in (agent_writer, host_writer):
+            with contextlib.suppress(Exception):
+                w.close()
+
+
+# --------------------------------------------------------------------------
+# ACP stream adapter (Phase 2 bridge): host <-> asyncio streams, byte-exact
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_acp_adapter_relays_both_directions_byte_exact():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    c1 = await SessionHostClient.connect(port=port)
+    await c1.attach(0)
+    streams = await open_acp_streams(c1, start_from=0)
+    try:
+        # agent -> client: a child ACP line must arrive byte-for-byte on reader.
+        frame = b'{"jsonrpc":"2.0","method":"session/update","params":{"x":1}}\n'
+        child.feed_frame(frame.rstrip(b"\n"))
+        got = await asyncio.wait_for(streams.reader.readline(), timeout=5)
+        assert got == frame
+
+        # client -> agent: bytes written to writer must reach the child stdin.
+        outbound = b'{"jsonrpc":"2.0","id":1,"method":"session/prompt"}\n'
+        streams.writer.write(outbound)
+        await streams.writer.drain()
+        await asyncio.sleep(0.05)
+        assert bytes(child.stdin.buffer) == outbound
+    finally:
+        await streams.aclose()
+        await c1.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_acp_adapter_auto_acks_frames():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    c1 = await SessionHostClient.connect(port=port)
+    await c1.attach(0)
+    streams = await open_acp_streams(c1, start_from=0, auto_ack=True)
+    try:
+        for i in range(1, 4):
+            child.feed_frame(f'{{"n":{i}}}'.encode())
+        # drain three lines through the adapter
+        for _ in range(3):
+            await asyncio.wait_for(streams.reader.readline(), timeout=5)
+        await asyncio.sleep(0.05)
+        # auto-ack advanced the host's durable cursor and trimmed the buffer.
+        assert host.ack_cursor == 3
+        assert host.buffered_seqs == []
+    finally:
+        await streams.aclose()
+        await c1.close()
+        await host.close()
+
+
+# --------------------------------------------------------------------------
+# launcher: survival adapter selection + real end-to-end via run_host
+# --------------------------------------------------------------------------
+def test_host_spawn_kwargs_per_os(monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    kw = launcher.host_spawn_kwargs()
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        assert kw["creationflags"] & winjob.CREATE_BREAKAWAY_FROM_JOB
+        assert kw["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert not (kw["creationflags"] & subprocess.DETACHED_PROCESS)
+        assert "start_new_session" not in kw
+    else:
+        assert kw["start_new_session"] is True
+        assert "creationflags" not in kw
+
+
+def test_host_spawn_kwargs_stay_owned_when_contained(monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    kw = launcher.host_spawn_kwargs()
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        assert not (kw["creationflags"] & winjob.CREATE_BREAKAWAY_FROM_JOB)
+        assert kw["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert not (kw["creationflags"] & subprocess.DETACHED_PROCESS)
+        assert "start_new_session" not in kw
+    else:
+        assert kw == {}
+
+
+def test_apply_host_survival_skips_when_contained(monkeypatch):
+    import sys
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    called = False
+
+    if sys.platform == "win32":
+        def _record(*, allow_breakaway):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(winjob, "setup_kill_on_close_job", _record)
+    else:
+        def _record():
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(launcher.os, "setsid", _record)
+
+    launcher.apply_host_survival()
+    assert not called
+
+
+def test_containment_reaps_real_session_host_tree(tmp_path, capfd, hosted_workspace):
+    import sys
+    import time
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo))
+    from tools.plugin_test_containment import (
+        Limits,
+        isolated_environment,
+        run_contained,
+    )
+
+    pid_file = tmp_path / "session-host-tree.json"
+    state_dir = tmp_path / "host-state"
+    script = (
+        "import json,os,pathlib,sys,time;"
+        "from agent_bridge.session_host.launcher import launch_session_host;"
+        "h=launch_session_host("
+        "[sys.executable,'-c','import time;time.sleep(60)'],"
+        f"state_dir={str(state_dir)!r},cwd={str(hosted_workspace)!r},ready_timeout=10);"
+        f"pathlib.Path({str(pid_file)!r}).write_text("
+        "json.dumps({'host':h.host_pid,'child':h.child_pid}),encoding='ascii');"
+        "root=pathlib.Path("
+        "os.environ['COPILOT_EXTENSIONS_TEST_SANDBOX']);"
+        "(root/'trigger.bin').write_bytes(b'x'*(2*1024*1024));"
+        "time.sleep(60)"
+    )
+    env = isolated_environment(os.environ, tmp_path / "sandbox")
+    rc = run_contained(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        sandbox=tmp_path / "sandbox",
+        limits=Limits(
+            wall_seconds=20,
+            max_processes=16,
+            max_memory_mb=1024,
+            max_temp_mb=1,
+            poll_seconds=0.05,
+        ),
+    )
+
+    assert rc == 124
+    assert "temporary-storage limit exceeded" in capfd.readouterr().err
+    assert pid_file.is_file(), "session host did not report its process tree"
+    pids = json.loads(pid_file.read_text(encoding="ascii"))
+    deadline = time.monotonic() + 5
+    while any(osutil_pid_alive(pid) for pid in pids.values()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert all(not osutil_pid_alive(pid) for pid in pids.values())
+
+
+_STREAMER = (
+    "import sys,time,json\n"
+    "sys.stdout.write(json.dumps({'type':'ready'})+'\\n'); sys.stdout.flush()\n"
+    "line=sys.stdin.readline()\n"
+    "for i in range(1,6):\n"
+    "    sys.stdout.write(json.dumps({'type':'update','chunk':i})+'\\n'); sys.stdout.flush(); time.sleep(0.05)\n"
+    "sys.stdout.write(json.dumps({'type':'turn_complete'})+'\\n'); sys.stdout.flush()\n"
+    "time.sleep(1.0)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_run_host_end_to_end_reattach(tmp_path, hosted_workspace):
+    """run_host spawns a real child process; a front reattaches mid-stream."""
+    import sys
+
+    state = tmp_path / "host.json"
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        launcher.run_host(
+            [sys.executable, "-c", _STREAMER],
+            port=0, state_file=str(state), ready=ready, cwd=str(hosted_workspace),
+        )
+    )
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=10)
+        import json as _json
+        meta = _json.loads(state.read_text())
+        port = meta["port"]
+
+        # front 1: attach fresh, drive the stream, read 2 frames, ack, detach.
+        c1 = await SessionHostClient.connect(port=port)
+        hello = await c1.attach(0)
+        assert hello.child_pid == meta["child_pid"]
+        await c1.write(b'{"prompt":"go"}\n')
+        gen1 = c1.frames()
+        first_seqs = []
+        for _ in range(2):
+            seq, _d = await asyncio.wait_for(gen1.__anext__(), timeout=10)
+            first_seqs.append(seq)
+            await c1.ack(seq)
+        await c1.close()
+
+        # front 2: reattach from the last-acked seq; drain to completion.
+        c2 = await SessionHostClient.connect(port=port)
+        await c2.attach(first_seqs[-1])
+        saw_complete = False
+        seqs2 = []
+        async for seq, data in c2.frames():
+            seqs2.append(seq)
+            await c2.ack(seq)
+            if b"turn_complete" in data:
+                saw_complete = True
+                break
+        assert saw_complete
+        assert seqs2[0] == first_seqs[-1] + 1        # no gap
+        assert min(seqs2) > first_seqs[-1]           # no re-stream
+        await c2.close()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_run_host_persists_child_exit_state(tmp_path, hosted_workspace):
+    """The host authority record stops claiming a dead child is running."""
+    import sys
+
+    state = tmp_path / "host.json"
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        launcher.run_host(
+            [sys.executable, "-c", "raise SystemExit(7)"],
+            port=0, state_file=str(state), ready=ready, cwd=str(hosted_workspace),
+        )
+    )
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=10)
+        for _ in range(200):
+            meta = json.loads(state.read_text())
+            if meta.get("state") == "child_exited":
+                break
+            await asyncio.sleep(0.01)
+        assert meta["state"] == "child_exited"
+        assert meta["child_exit_code"] == 7
+        assert meta["child_exited_at"] >= meta["created_at"]
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+# --------------------------------------------------------------------------
+# Phase 4 -- host version-mux (protocol-version routing + stranded hosts)
+# --------------------------------------------------------------------------
+def test_version_mux_is_compatible():
+    from agent_bridge.session_host import version_mux as vm
+
+    assert vm.is_compatible(proto.PROTOCOL_VERSION) is True
+    assert vm.is_compatible(proto.PROTOCOL_VERSION + 1) is False
+    assert proto.PROTOCOL_VERSION in vm.SUPPORTED_PROTOCOL_VERSIONS
+
+
+def test_plan_host_dispositions():
+    from agent_bridge.session_host.version_mux import (
+        HostDisposition as D,
+        plan_host,
+    )
+
+    cur = proto.PROTOCOL_VERSION
+    future = cur + 1
+
+    # Compatible -> always reattach (drives a live child, drains a dead one).
+    assert plan_host(protocol_version=cur, child_alive=True).disposition is D.REATTACH
+    assert plan_host(protocol_version=cur, child_alive=False).disposition is D.REATTACH
+
+    # Incompatible + child still running, no bound -> strand (goal 1).
+    assert plan_host(protocol_version=future, child_alive=True).disposition is D.STRAND
+
+    # Incompatible + child already stopped -> reap (frees the pinned install).
+    assert (plan_host(protocol_version=future, child_alive=False).disposition
+            is D.REAP_STOPPED)
+
+    # Incompatible + child alive + past the sprawl bound -> force-reap.
+    assert (plan_host(protocol_version=future, child_alive=True,
+                      age_seconds=120.0, stale_reap_seconds=60.0).disposition
+            is D.FORCE_REAP)
+    # ...but under the bound it still strands.
+    assert (plan_host(protocol_version=future, child_alive=True,
+                      age_seconds=30.0, stale_reap_seconds=60.0).disposition
+            is D.STRAND)
+    # A zero/None bound never force-reaps.
+    assert (plan_host(protocol_version=future, child_alive=True,
+                      age_seconds=1e9, stale_reap_seconds=0).disposition
+            is D.STRAND)
+
+
+def test_host_record_protocol_version_persists(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    path = tmp_path / "hosts.json"
+    idx = HostIndex(path)
+    idx.register(HostRecord(session_id="s1", port=9000, host_pid=1, child_pid=2,
+                            protocol_version=7))
+    # Legacy record with no explicit protocol_version defaults to the baseline 1.
+    idx.register(HostRecord(session_id="s2", port=9001, host_pid=3, child_pid=4))
+    idx2 = HostIndex(path)
+    assert idx2.get("s1").protocol_version == 7
+    assert idx2.get("s2").protocol_version == 1
+
+
+def test_host_record_from_state_file_protocol_version(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    with_pv = tmp_path / "with.json"
+    with_pv.write_text('{"pid": 1, "child_pid": 2, "port": 9000, '
+                       '"protocol_version": 5}')
+    assert HostRecord.from_state_file("s", with_pv).protocol_version == 5
+
+    # A state file written before protocol_version existed -> baseline 1.
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text('{"pid": 1, "child_pid": 2, "port": 9000}')
+    assert HostRecord.from_state_file("s", legacy).protocol_version == 1
+
+
+@pytest.mark.asyncio
+async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypatch, hosted_workspace):
+    """An incompatible-protocol host is left running while its child lives
+    (goal 1), then reaped once the child stops -- the Phase-4 version-mux."""
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = None
+    child_pid = None
+    try:
+        # gen 1: start a host-backed session, then simulate a frontend restart.
+        db1 = Database(dbpath)
+        mgr1 = SessionManager(db1,
+                              session_host_state_dir=statedir)
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
+        sid = session.session_id
+        rec = mgr1._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert rec.protocol_version == proto.PROTOCOL_VERSION  # recorded on launch
+
+        # Rewrite the record as an incompatible future protocol generation.
+        rec.protocol_version = proto.PROTOCOL_VERSION + 1
+        mgr1._host_index.register(rec)
+        await session.client.shutdown()  # detach; host + child survive
+        db1.close()
+        assert osutil_pid_alive(host_pid)
+
+        # gen 2: reattach must STRAND the incompatible host, not drive it.
+        db2 = Database(dbpath)
+        mgr2 = SessionManager(db2,
+                              session_host_state_dir=statedir)
+        n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
+        assert n == 0                                   # not reattached
+        assert osutil_pid_alive(host_pid)               # left running (goal 1)
+        assert sid in mgr2._host_index                  # record kept
+        stranded = mgr2.stranded_host_records()
+        assert [r.session_id for r in stranded] == [sid]
+        assert mgr2.get_session(sid).status == SessionStatus.STOPPED
+        db2.close()
+
+        # The child reaches its own stop -> the stranded host is now reapable.
+        from agent_bridge.session_host.osutil import kill_pid, pid_alive
+        kill_pid(child_pid)
+        for _ in range(100):
+            if not pid_alive(child_pid):
+                break
+            await asyncio.sleep(0.05)
+        assert not pid_alive(child_pid)
+
+        db3 = Database(dbpath)
+        mgr3 = SessionManager(db3,
+                              session_host_state_dir=statedir)
+        n3 = await asyncio.wait_for(mgr3.reattach_session_hosts(), timeout=30)
+        assert n3 == 0
+        assert sid not in mgr3._host_index               # record dropped
+        for _ in range(100):
+            if not osutil_pid_alive(host_pid):
+                break
+            await asyncio.sleep(0.05)
+        assert not osutil_pid_alive(host_pid)            # host reaped
+        db3.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+
+
+def test_config_stale_reap_default_is_disabled():
+    from agent_bridge.models import ServiceConfig
+
+    cfg = ServiceConfig()
+    assert cfg.session_host_stale_reap_seconds == 0  # age bound off by default
+
+
+@pytest.mark.asyncio
+async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch, hosted_workspace):
+    """The periodic sweep leaves an incompatible host with a live child alone
+    under the bound (goal 1), then force-reaps it once it outlives the bound."""
+    import os
+    import sys
+    import time as _time
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = None
+    child_pid = None
+    try:
+        db = Database(dbpath)
+        mgr = SessionManager(db,
+                             session_host_state_dir=statedir,
+                             session_host_stale_reap_seconds=0)  # bound off
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        await session.client.shutdown()  # detach; host + child survive
+
+        # Make the host an incompatible generation with a live child.
+        rec.protocol_version = proto.PROTOCOL_VERSION + 1
+        mgr._host_index.register(rec)
+
+        # Bound disabled -> a live-child stranded host is left alone (goal 1).
+        assert mgr.sweep_stranded_hosts() == 0
+        assert osutil_pid_alive(host_pid)
+        assert rec.session_id in mgr._host_index
+
+        # Arm a small bound and backdate the host past it -> force-reaped.
+        mgr._session_host_stale_reap_seconds = 5.0
+        rec.created_at = _time.time() - 1000.0
+        mgr._host_index.register(rec)
+        assert mgr.sweep_stranded_hosts() == 1
+        assert rec.session_id not in mgr._host_index
+        from agent_bridge.session_host.osutil import pid_alive
+        for _ in range(100):
+            if not pid_alive(host_pid):
+                break
+            await asyncio.sleep(0.05)
+        assert not pid_alive(host_pid)  # host reaped by the sprawl bound
+        db.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+
+
+# --------------------------------------------------------------------------
+# Graceful cancel + resume-on-reattach (redeploy protocol)
+# --------------------------------------------------------------------------
+def test_host_record_resume_flag_persists(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    path = tmp_path / "hosts.json"
+    idx = HostIndex(path)
+    idx.register(HostRecord(session_id="s1", port=1, host_pid=1, child_pid=1))
+    assert idx.get("s1").resume_on_reattach is False
+    assert idx.set_resume_flag("s1", True) is True
+    assert idx.set_resume_flag("s1", True) is False        # idempotent no-op
+    assert idx.set_resume_flag("missing", True) is False
+    # persists across reload
+    assert HostIndex(path).get("s1").resume_on_reattach is True
+    assert idx.set_resume_flag("s1", False) is True
+    assert HostIndex(path).get("s1").resume_on_reattach is False
+
+
+@pytest.mark.asyncio
+async def test_graceful_cancel_for_redeploy(tmp_path):
+    """Opt-in legacy path (cancel_turns_on_redeploy=True): cancels only in-flight
+    (RUNNING) turns, spares the excluded caller, flags host-backed mid-turn
+    sessions for resume, and waits for settle. (The DEFAULT is detach-only --
+    see test_redeploy_detach_not_cancel.py, dotfiles#1661.)"""
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session, SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    db = Database(tmp_path / "s.db")
+    try:
+        mgr = SessionManager(db,
+                             session_host_state_dir=str(tmp_path / "hosts"),
+                             graceful_cancel_settle_seconds=5,
+                             cancel_turns_on_redeploy=True)
+        cancels: list[str] = []
+
+        class _FakeClient:
+            def __init__(self, sess):
+                self._sess = sess
+
+            async def cancel_prompt(self):
+                cancels.append(self._sess.session_id)
+                self._sess.status = SessionStatus.IDLE  # turn settles at once
+
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        for sid, status in [("run-a", SessionStatus.RUNNING),
+                            ("run-self", SessionStatus.RUNNING),
+                            ("idle-c", SessionStatus.IDLE)]:
+            s = Session(sid, sid, target)
+            s.status = status
+            s.client = _FakeClient(s)
+            mgr._sessions[sid] = s
+            mgr._host_index.register(
+                HostRecord(session_id=sid, port=1, host_pid=1, child_pid=1))
+
+        res = await mgr.graceful_cancel_for_redeploy(exclude_session_id="run-self")
+
+        assert res["enabled"] is True
+        assert res["settled"] is True
+        assert set(res["cancelled"]) == {"run-a"}     # only RUNNING, not excluded/idle
+        assert cancels == ["run-a"]
+        assert mgr._host_index.get("run-a").resume_on_reattach is True   # flagged
+        assert mgr._host_index.get("run-self").resume_on_reattach is False  # spared
+        assert mgr._host_index.get("idle-c").resume_on_reattach is False   # not mid-turn
+    finally:
+        db.close()
+
+
+def test_cli_drain_excludes_self_from_env(monkeypatch):
+    """The CLI drain passes AGENT_BRIDGE_SESSION_ID as exclude_session_id so an
+    agent updating its own bridge doesn't cancel the turn driving the update."""
+    from agent_bridge.client import BridgeClient
+
+    captured = {}
+
+    class _C(BridgeClient):
+        def __init__(self):
+            pass
+
+        def _request(self, method, path, *, body=None, request_timeout=None):
+            captured["body"] = body
+            return {}
+
+    monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "my-own-sess")
+    _C().drain(timeout=10)
+    assert captured["body"]["exclude_session_id"] == "my-own-sess"
+
+    captured.clear()
+    monkeypatch.delenv("AGENT_BRIDGE_SESSION_ID", raising=False)
+    _C().drain(timeout=10)
+    assert "exclude_session_id" not in captured["body"]
+
+
+# --------------------------------------------------------------------------
+# SSE stream closes promptly on shutdown / disconnect (#1789)
+# --------------------------------------------------------------------------
+class _QuietLog:
+    """Fake EventLog whose wait always times out empty (a quiet stream)."""
+
+    async def wait_for_events(self, after, timeout=2.0):
+        await asyncio.sleep(min(timeout, 0.02))
+        return []
+
+    def active_tool_call(self):
+        return None
+
+
+class _FakeSession:
+    def __init__(self):
+        self.event_log = _QuietLog()
+
+
+class _FakeServer:
+    should_exit = False
+
+
+async def _drain_stream(gen):
+    async for _chunk in gen:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_closes_on_shutdown():
+    """The SSE generator must return once uvicorn's should_exit flips, so it
+    never pins the daemon's graceful shutdown open (#1789)."""
+    from agent_bridge.routes.sessions import _sse_event_stream
+
+    server = _FakeServer()
+
+    async def _connected():
+        return False
+
+    gen = _sse_event_stream(_FakeSession(), 0, server=server,
+                            is_disconnected=_connected)
+
+    async def _flip():
+        await asyncio.sleep(0.1)
+        server.should_exit = True
+
+    asyncio.ensure_future(_flip())
+    # Must terminate (not hang) shortly after should_exit -- fail loud on hang.
+    await asyncio.wait_for(_drain_stream(gen), timeout=3.0)
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_closes_on_client_disconnect():
+    from agent_bridge.routes.sessions import _sse_event_stream
+
+    state = {"disconnected": False}
+
+    async def _is_disc():
+        return state["disconnected"]
+
+    gen = _sse_event_stream(_FakeSession(), 0, server=_FakeServer(),
+                            is_disconnected=_is_disc)
+
+    async def _flip():
+        await asyncio.sleep(0.1)
+        state["disconnected"] = True
+
+    asyncio.ensure_future(_flip())
+    await asyncio.wait_for(_drain_stream(gen), timeout=3.0)
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_yields_events_before_shutdown():
+    """A stream still delivers queued events, then closes on shutdown."""
+    from agent_bridge.routes.sessions import _sse_event_stream
+
+    class _OneShotLog:
+        def __init__(self):
+            self._sent = False
+
+        async def wait_for_events(self, after, timeout=2.0):
+            if not self._sent:
+                self._sent = True
+
+                class _E:
+                    id = 1
+                    event = "agent_message"
+                    data = {"text": "hi"}
+                    timestamp = 123.0
+                return [_E()]
+            await asyncio.sleep(min(timeout, 0.02))
+            return []
+
+        def active_tool_call(self):
+            return None
+
+    class _S:
+        def __init__(self):
+            self.event_log = _OneShotLog()
+
+    server = _FakeServer()
+
+    async def _connected():
+        return False
+
+    chunks = []
+
+    async def _collect():
+        async for c in _sse_event_stream(_S(), 0, server=server,
+                                         is_disconnected=_connected):
+            chunks.append(c)
+
+    async def _flip():
+        await asyncio.sleep(0.1)
+        server.should_exit = True
+
+    asyncio.ensure_future(_flip())
+    await asyncio.wait_for(_collect(), timeout=3.0)
+    assert any("agent_message" in c and "id: 1" in c for c in chunks)
+
+# --------------------------------------------------------------------------
+# Explicit end/destroy reaps the host-backed child (#1786)
+# --------------------------------------------------------------------------
+def _kill_pids(pids):
+    import os as _os
+    import signal
+    import subprocess
+    import sys
+    for pid in pids:
+        if not pid:
+            continue
+        with contextlib.suppress(Exception):
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                _os.kill(pid, signal.SIGKILL)
+
+
+async def _wait_dead(pid, timeout=5.0):
+    for _ in range(int(timeout / 0.05)):
+        if not osutil_pid_alive(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return not osutil_pid_alive(pid)
+
+
+@pytest.mark.asyncio
+async def test_end_session_reaps_host(tmp_path, monkeypatch, hosted_workspace):
+    """end_session (the CLI `end` / DELETE) must REAP the host-backed child and
+    drop the index record -- not detach-and-orphan like stop (#1786)."""
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    db = Database(tmp_path / "s.db")
+    host_pid = child_pid = None
+    try:
+        mgr = SessionManager(db,
+                             session_host_state_dir=str(tmp_path / "hosts"))
+        session = await asyncio.wait_for(
+            mgr.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
+            timeout=30)
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert osutil_pid_alive(host_pid)
+
+        await asyncio.wait_for(mgr.end_session(session.session_id), timeout=30)
+
+        # Index record dropped, host + child reaped.
+        assert mgr._host_index.get(session.session_id) is None
+        assert len(mgr._host_index) == 0
+        assert await _wait_dead(host_pid), "host survived end_session"
+        assert await _wait_dead(child_pid), "child survived end_session"
+        db.close()
+    finally:
+        _kill_pids((host_pid, child_pid))
+
+
+@pytest.mark.asyncio
+async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch, hosted_workspace):
+    """A live host whose session is gone (row deleted / pre-#1786 orphan) is
+    reaped on reattach instead of leaking forever."""
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = child_pid = None
+    try:
+        db1 = Database(dbpath)
+        mgr1 = SessionManager(db1,
+                              session_host_state_dir=statedir)
+        session = await asyncio.wait_for(
+            mgr1.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
+            timeout=30)
+        sid = session.session_id
+        rec = mgr1._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        # Simulate the pre-fix orphan: drop the session row + detach, but leave
+        # the host running and its index record in place.
+        await session.client.shutdown()
+        db1.delete_session(sid)
+        db1.close()
+        # Simulate generation 1's own /api/v1/shutdown exit-contract release
+        # (Phase 3) -- this test drives SessionManager directly, not through
+        # that HTTP handler.
+        mgr1._host_index.release_all(mgr1._generation_id)
+        assert osutil_pid_alive(host_pid)
+
+        # Fresh frontend: rehydrate won't see the deleted session, so reattach
+        # finds a live host with no adoptable session -> reap it.
+        db2 = Database(dbpath)
+        mgr2 = SessionManager(db2,
+                              session_host_state_dir=statedir)
+        assert sid in mgr2._host_index          # orphan record present pre-reattach
+        n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
+        assert n == 0                           # nothing adoptable
+        assert sid not in mgr2._host_index      # orphan record dropped
+        assert await _wait_dead(host_pid), "orphaned host not reaped"
+        db2.close()
+    finally:
+        _kill_pids((host_pid, child_pid))
+
+
+# --------------------------------------------------------------------------
+# child executable resolution (regression: bare argv[0] under a minimal
+# systemd --user PATH -- the Session Host must resolve against the CHILD's
+# PATH, not the host process's own PATH)
+# --------------------------------------------------------------------------
+def _make_exe(dir_path, name):
+    # _resolve_child_exe() resolves via shutil.which(), which on Windows needs a
+    # PATHEXT extension to recognize an executable (POSIX resolves the bare
+    # name). Lay the file down the way the real target OS exposes `copilot` so
+    # this test passes on both platforms.
+    if os.name == "nt":
+        exe = dir_path / f"{name}.cmd"
+        exe.write_text("@echo off\r\nexit /b 0\r\n")
+    else:
+        exe = dir_path / name
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+    return exe
+
+
+def test_resolve_child_exe_uses_given_path(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    exe = _make_exe(bindir, "copilot")
+    out = launcher._resolve_child_exe(["copilot", "--acp"], str(bindir))
+    # normcase: shutil.which returns the PATHEXT-cased extension on Windows
+    # (copilot.CMD), so compare case-insensitively; identity on POSIX.
+    assert [os.path.normcase(out[0]), out[1]] == [os.path.normcase(str(exe)), "--acp"]
+
+
+def test_resolve_child_exe_ignores_host_path(tmp_path, monkeypatch):
+    """The child PATH resolves even when the host's own PATH lacks the dir --
+    the exact copilot-not-found regression on the minimal --user service PATH.
+    """
+    bindir = tmp_path / "userbin"
+    bindir.mkdir()
+    exe = _make_exe(bindir, "copilot")
+    # Host process PATH deliberately excludes bindir.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    out = launcher._resolve_child_exe(["copilot", "--stdio"], str(bindir))
+    assert os.path.normcase(out[0]) == os.path.normcase(str(exe))
+    assert out[1] == "--stdio"
+
+
+def test_resolve_child_exe_unresolvable_is_unchanged(tmp_path):
+    out = launcher._resolve_child_exe(["definitely-not-a-real-exe-xyz"], str(tmp_path))
+    assert out == ["definitely-not-a-real-exe-xyz"]
+
+
+def test_resolve_child_exe_empty_argv():
+    assert launcher._resolve_child_exe([], "/usr/bin") == []
+
+
+# --------------------------------------------------------------------------
+# large-frame relay (regression: a single ACP frame larger than asyncio's
+# default 64 KiB StreamReader line limit must survive the host->ACP relay.
+# The ACP library reads its transport with readline(); before the fix the
+# socketpair reader in open_acp_streams used the 64 KiB default, so a large
+# frame raised LimitOverrunError -> the ACP receive loop died ("Connection
+# closed"), which reliably failed reviews of PRs with large diffs.)
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_large_acp_frame_survives_relay():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    streams = await open_acp_streams(client, start_from=0)
+    try:
+        # ~1 MiB single-line ACP frame: far exceeds asyncio's 64 KiB default,
+        # under proto.MAX_MESSAGE_BYTES. The ACP library reads End A via
+        # readline(), so the newline terminates exactly one large frame.
+        big = b'{"jsonrpc":"2.0","result":"' + (b"x" * (1024 * 1024)) + b'"}'
+        assert len(big) > 64 * 1024
+        child.feed_frame(big)
+        # streams.reader is End A -- what the ACP ClientSideConnection reads.
+        line = await asyncio.wait_for(streams.reader.readline(), timeout=5)
+        assert line.rstrip(b"\n") == big
+    finally:
+        await streams.aclose()
+        await client.close()
+        await host.close()

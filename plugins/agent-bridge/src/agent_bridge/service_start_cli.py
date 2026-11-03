@@ -98,6 +98,13 @@ def _bind_listen_socket(host: str, port: int) -> socket.socket:
     return sock
 
 
+def _cmd_source_start(_args: argparse.Namespace) -> None:
+    from .source_start import start_installed_slot
+
+    if not start_installed_slot():
+        raise SystemExit(1)
+
+
 @daemon_entrypoint("agent-bridge", source=__file__, purpose="production")
 def _cmd_start(
     args: argparse.Namespace, *,
@@ -241,6 +248,10 @@ def _run_start(
     app.state.single_instance = singleton
     app.state.background_readiness = True
     app.state.publish_on_ready = not passive
+    from . import __version__
+    from .source_build import is_source_build_version
+
+    app.state.independent_runtime_start = not passive and is_source_build_version(__version__)
     # Explicit passive marker (distinct from publish_on_ready, which a
     # create_app()-only caller -- every non-CLI test harness -- never sets
     # at all; defaulting *that* absence to "treat as passive" broke the
@@ -677,6 +688,8 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
     from .diagnostic_logs import register_log_commands
     register_log_commands(sub)
     core = _core()
+
+    sub.add_parser("__source-start", help=argparse.SUPPRESS).set_defaults(func=_cmd_source_start)
 
     start_p = sub.add_parser("start", help="Start the agent-bridge server")
     start_p.add_argument("--port", type=int, help="Port to listen on")

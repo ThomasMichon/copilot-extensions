@@ -4679,7 +4679,7 @@ configured-source authentication may still access its selected Git origin.
 Default marketplace/bootstrap integration, production dependency/native
 qualification and measured cold/warm speedup remain separate gates.
 
-### Local wheel applications for Manager and Worktrees
+### Local wheel applications
 
 The explicit `--install-source` adapters accept locally prepared Manager or
 Worktrees inputs without changing ordinary bootstrap selection. Native entry
@@ -4687,6 +4687,14 @@ points advertise support through their read-only `--describe-source-inputs`
 descriptor; callers must not send the option to an older executable that does
 not advertise it. PowerShell entry points use `-InstallSource`. Other services
 can continue using their existing source installers.
+
+Bridge and MCP also provide application-local install entries in explicitly
+prepared snapshots (`--project agent-bridge` / `--project agent-mcp`, followed
+by the matching profile `--component`). This does not add `--install-source`
+support to an older native installer or change ordinary suite selection.
+The installed callback executes from its physical flat or nested slot, checks
+its installation root and selected generation, and never invokes the outgoing
+installer to stop or remove the incumbent.
 
 `tools/local_install_source.py` freezes one full Git commit, materializes its
 declared resources and builds associated first-party wheels without consuming
@@ -4768,6 +4776,39 @@ builds a downstream project's initial snapshot, grants deployment authority or
 provides a new service supervisor. Its caller retains independent source
 approval and the application's installation ownership throughout consumption.
 It is a supported composition entry, not a complete packaged installer toolkit.
+
+### Bridge and MCP application startup
+
+Bridge starts its selected Source frontend on a fresh endpoint. It keeps the
+incumbent route and running identity unchanged until topology readiness and
+the new listener are ready; only then does it publish under the existing
+routing lock and attach surviving Session Hosts. A displaced or failed
+candidate cannot publish. The incoming frontend observes the predecessor's
+native exit rather than sending drain/shutdown requests; owned cold recovery
+and shared relay adoption remain fenced until that exit is confirmed. A
+superseded frontend uses its own existing host-preserving drain, waits for
+nonpreservable work and releases only its generation's Host claims during
+shutdown. The successor retries compatible Host attachment after native exit.
+This outgoing-provider behavior cannot be retrofitted into an older running
+binary by the incoming installer: uncertain legacy convergence remains
+retained, not a reason to steal claims or stop the incumbent first. Legacy
+and passive-cutover startup retain their existing entry paths. Frontend
+readiness does not imply that optional credential sources are configured.
+
+MCP setup prepares configured bridges before selection without overwriting a
+separate `AGENT_MCP_HOME`; `AGENT_MCP_INSTALL_DIR` owns the application slots.
+Ordinary application startup preserves its existing on-demand policy: no
+wanted, owned incumbent means no automatic resident server. A wanted
+replacement must actually serve its selected generation and retain the
+configured data-socket endpoint. An already healthy exact generation reuses its
+native owner and fixed data handle. A failed data-handle publication restores
+only the candidate-owned route before owned candidate cleanup when no data
+commit occurred; an observed committed owner is retained rather than rolled
+back. An existing fixed handle without attributable route ownership refuses
+before spawning. Candidate generation endpoints skip occupied socket and endpoint
+paths instead of unlinking an existing generation. Setup, selection and serving remain separate
+failure boundaries; a reused completion record does not substitute for
+serving readiness.
 
 ### Bounded wheel inspection
 

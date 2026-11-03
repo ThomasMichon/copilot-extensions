@@ -18,14 +18,20 @@ FIRST = f"{PACKAGE}+source.{'f' * 40}.{'a' * 16}"
 SECOND = f"{PACKAGE}+source.{'a' * 40}.{'b' * 16}"
 
 
-def test_source_slot_advertises_build_without_changing_distribution_version(tmp_path: Path) -> None:
-    prefix = tmp_path / "versions" / FIRST
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("suffix", ["", ".profile." + "c" * 16 + ".repair." + "d" * 32])
+def test_source_slot_advertises_build_without_changing_distribution_version(
+    tmp_path: Path, nested: bool, suffix: str,
+) -> None:
+    generation = FIRST + suffix
+    slot = tmp_path / "versions" / generation
+    prefix = slot / ".venv" if nested else slot
     module = prefix / "lib" / "agent_bridge" / "source_build.py"
     module.parent.mkdir(parents=True)
     module.write_text("# installed\n", encoding="utf-8")
     assert source_build.effective_runtime_version(
         "0.4.1.dev3", prefix=prefix, module_path=module,
-    ) == FIRST
+    ) == generation
 
 
 def test_source_tree_or_mismatched_package_cannot_claim_slot_build(tmp_path: Path) -> None:

@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify Bridge and MCP wheel applications; preserve late-identity Hosts and restart recovery during metadata refresh.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

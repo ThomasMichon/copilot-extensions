@@ -220,6 +220,154 @@ def test_shutdown_releases_every_claim_this_generation_holds(tmp_path) -> None:
     assert mgr._host_index.get("s2").owner_generation == ""
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("during_scan", [False, True])
+async def test_reattach_refreshes_late_predecessor_metadata_without_replacing_owned_sessions(
+    tmp_path, monkeypatch, existing, during_scan,
+) -> None:
+    db = Database(tmp_path / "sessions.db")
+    if existing:
+        db.create_session("late", "late", None, str(tmp_path), "local", "starting", 1)
+    (tmp_path / "hosts").mkdir()
+    mgr = SessionManager(
+        db, session_host_state_dir=str(tmp_path / "hosts"), read_only_rehydrate=True,
+    )
+    stale = mgr._sessions.get("late")
+    owned = Session("owned", "owned", SpawnTarget(type="local", cwd=str(tmp_path)))
+    owned.client = SimpleNamespace(is_running=True)
+    owned.status = SessionStatus.RUNNING
+    owned.acp_session_id = "owned-acp"
+    owned.subscriber_count = 1
+    mgr._sessions["owned"] = owned
+    db.create_session(
+        "owned", "stale owned", None, str(tmp_path), "local", "stopped", 1,
+        acp_session_id="old-owned-acp",
+    )
+    _register(mgr, "owned")
+    owned_state = dict(vars(owned))
+    reaped, attached = [], []
+
+    def predecessor_finishes_start():
+        if not existing:
+            db.create_session("late", "late", None, str(tmp_path), "local", "starting", 1)
+        db.update_session_acp_id("late", "late-acp")
+        db.update_session_status("late", "running", 2)
+        db.create_turn("late", 1, "unfinished", 2)
+        _register(mgr, "late")
+
+    async def remote_recovery(**_kwargs):
+        if during_scan:
+            predecessor_finishes_start()
+        return 0
+
+    async def attach(_rec, session, **_kwargs):
+        assert session.acp_session_id == "late-acp"
+        assert session.status is SessionStatus.RUNNING
+        attached.append(session)
+        session.client = SimpleNamespace(is_running=True)
+        return True
+
+    if not during_scan:
+        predecessor_finishes_start()
+    monkeypatch.setattr(mgr, "_recover_remote_host_records", remote_recovery)
+    monkeypatch.setattr(mgr, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(mgr, "_live_host_records", lambda: [
+        mgr._host_index.get("owned"), mgr._host_index.get("late"),
+    ])
+    monkeypatch.setattr(mgr, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(mgr, "_reap_host_record", lambda *args: reaped.append(args))
+    monkeypatch.setattr(mgr, "_reattach_one", attach)
+
+    assert await mgr.reattach_session_hosts(recover_cold=False) == 1
+    assert len(attached) == 1 and not reaped
+    if stale is not None:
+        assert attached[0] is stale
+    assert attached[0].restart_status == SessionStatus.RUNNING.value
+    assert mgr._sessions["owned"] is owned and vars(owned) == owned_state
+    assert db.get_session("late")["status"] == "running"
+    assert db.get_turns("late")[0]["completed_at"] is None
+    assert mgr._host_index.get("late").owner_generation == mgr._generation_id
+    db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy", ["lifecycle", "turn", "subscriber"])
+async def test_metadata_merge_preserves_a_session_in_use_without_a_client(
+    tmp_path, busy,
+) -> None:
+    mgr = _session_manager(tmp_path)
+    db = mgr._db
+    db.create_session(
+        "s1", "stored", None, str(tmp_path), "local", "running", 1,
+        acp_session_id="stored-acp",
+    )
+    session = Session("s1", "live", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.acp_session_id = "live-acp"
+    mgr._sessions["s1"] = session
+    lock = None
+    if busy == "subscriber":
+        session.subscriber_count = 1
+    else:
+        lock = session._lifecycle_lock if busy == "lifecycle" else session._turn_start_lock
+        await lock.acquire()
+    before = dict(vars(session))
+    try:
+        mgr._rehydrate(merge=True)
+        assert mgr._sessions["s1"] is session and vars(session) == before
+        assert db.get_session("s1")["status"] == "running"
+    finally:
+        if lock is not None:
+            lock.release()
+        db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy", ["subscriber", "lifecycle"])
+async def test_late_acp_identity_defers_reaping_until_metadata_can_refresh(
+    tmp_path, monkeypatch, busy,
+) -> None:
+    mgr = _session_manager(tmp_path)
+    db = mgr._db
+    db.create_session("late", "late", None, str(tmp_path), "local", "starting", 1)
+    mgr._rehydrate(read_only=True)
+    session = mgr._sessions["late"]
+    event_log = session.event_log
+    _register(mgr, "late")
+    db.update_session_acp_id("late", "late-acp")
+    db.update_session_status("late", "running", 2)
+    if busy == "subscriber":
+        session.subscriber_count = 1
+    else:
+        await session._lifecycle_lock.acquire()
+    before = dict(vars(session))
+    reaped = []
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(mgr, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(mgr, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(mgr, "_live_host_records", lambda: [mgr._host_index.get("late")])
+    monkeypatch.setattr(mgr, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(mgr, "_reap_host_record", lambda *args: reaped.append(args))
+    monkeypatch.setattr(mgr, "_reattach_one", attach)
+    try:
+        assert await mgr.reattach_session_hosts(recover_cold=False) == 0
+        assert not reaped
+        attach.assert_not_awaited()
+        assert vars(session) == before and session.event_log is event_log
+        assert db.get_session("late")["acp_session_id"] == "late-acp"
+        if busy == "subscriber":
+            session.subscriber_count = 0
+        else:
+            session._lifecycle_lock.release()
+        assert await mgr.reattach_session_hosts(recover_cold=False) == 1
+        assert not reaped and attach.await_args.args[1] is session
+        assert session.acp_session_id == "late-acp"
+    finally:
+        if session._lifecycle_lock.locked():
+            session._lifecycle_lock.release()
+        db.close()
+
+
 # -- claim_hosts=False: a passive instance never claims at startup (PR #4543
 # review) -------------------------------------------------------------------
 

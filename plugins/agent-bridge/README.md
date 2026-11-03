@@ -108,6 +108,25 @@ existing default, and never installs a broker as a spawn fallback. This source
 integration does not establish full cold-construction, desktop or rollout
 qualification.
 
+Source-qualified application startup resolves an unset installation-root override
+from its installed physical slot. Before selection/publication it hydrates
+session metadata without restart or open-turn mutations and registers HTTP
+credential sources without reclaiming a predecessor's TCP relay listener.
+Fresh startup may adopt that listener after publication; overlapping startup
+waits for confirmed predecessor exit, then retries surviving Host attachment
+and relay adoption. Each Host scan merges newly persisted predecessor metadata
+without replacing successor-owned clients, locks, turns or subscribed event
+streams. First startup creates the effective configuration directory before
+acquiring its startup lock, including separate configuration roots.
+Recoverable frontend detaches retain idle Hosts rather than authorizing
+self-reaping; explicit stops and idle reapers keep their existing cleanup.
+Heartbeat reconciliation, session GC and session reapers
+remain fenced until startup settles and cold recovery is safe, so an overlapping
+candidate cannot maintain the predecessor's live sessions. Cancellation retains native publication/wait workers
+through completion, including event-loop teardown. Existing legacy startup
+remains separate; this does not retrofit an older predecessor with the new
+retirement behavior or prove every retained Host/consumer can reconnect.
+
 Internal owner-driven deployment and service restart accept optional
 `conditional`/`routing_dir` keyword arguments using the shared
 [conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).

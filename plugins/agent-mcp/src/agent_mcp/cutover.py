@@ -25,14 +25,11 @@ Two separate planes, deliberately:
   ``zdd`` routing table (``libs/zdd``) so this orchestrator can find *any*
   running generation, including one it did not spawn.
 
-Scope note (v1): this drives the cutover state machine and the one-shot/
-attach-session drain semantics. It does **not** yet include the "generation
-self-retire" watchdog backstop `docs/patterns/graceful-daemon-cutover.md`
-describes as an optional hardening even for its reference implementation, nor
-automatic installer-triggered cutover on every version bump -- both are
-explicitly named follow-up phases (see the ``agent-mcp-graceful-cutover``
-effort). A daemon that predates this module has no control channel to dial;
-that one-time bootstrap transition is a plain stop/start, not a regression.
+Installed application callbacks start the selected physical generation
+independently of its predecessor. The outgoing source-aware daemon retires
+itself only after that exact replacement owns the ready data handle.
+The legacy cutover protocol below retains its explicit bootstrap boundary
+for daemons without a control channel.
 """
 
 from __future__ import annotations
@@ -43,6 +40,8 @@ import json
 import os
 import secrets
 import socket as _socket
+import stat
+import struct
 import subprocess
 import sys
 import time
@@ -115,6 +114,7 @@ class _CutoverContext:
     new_control_token: str
     old_control_token: str | None
     token_by_port: dict[int, str]
+    config_home: Path | None = None
 
 
 def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.Popen:
@@ -145,7 +145,7 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     # child runs from the data root, so a relative AGENT_MCP_HOME-derived
     # socket/log path (or AGENT_MCP_HOME itself) would otherwise be resolved a
     # second time there and name ``home/home/...``.
-    home = Path(ctx.data_root).resolve()
+    home = Path(ctx.config_home or ctx.data_root).resolve()
     socket_path = Path(os.path.abspath(ctx.new_socket_path))
     log_path = Path(os.path.abspath(ctx.new_log_path))
     python = sys.executable
@@ -306,7 +306,7 @@ class CutoverClient:
         return {}
 
 
-def _fixed_handle_has_live_listener(data_root: Path) -> bool:
+def _fixed_handle_has_live_listener(data_root: Path, *, fixed: Path | None = None) -> bool:
     """Probe the fixed data socket path itself for an actual live listener.
 
     A genuinely pre-cutover-feature daemon never calls ``routing.
@@ -324,13 +324,445 @@ def _fixed_handle_has_live_listener(data_root: Path) -> bool:
     """
     from . import sockio
 
-    path = sockio.default_socket_path()
+    path = fixed or sockio.default_socket_path()
     try:
         sock, _token = sockio._connect(path)
     except sockio.HostUnreachableError:
         return False
     sockio._close(sock)
     return True
+
+
+def source_fixed_socket() -> Path:
+    """Resolve the data handle independently of the installation selector."""
+    from . import ipc, sockio
+
+    return Path(sockio.absolute_handle(
+        os.environ.get("AGENT_MCP_SERVE_SOCKET") or ipc.default_socket_path(),
+    ))
+
+
+def source_handle_state(fixed: Path) -> tuple:
+    """Retain actual data-handle custody without a second identity protocol."""
+    from . import serve
+
+    for parent in (fixed.parent, *fixed.parent.parents):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ControlError("MCP data home must have ordinary directory ancestors")
+    for name in ("zdd-cutover.lock", "agent-mcp-serve.lock", "active.lock", "active.json"):
+        try:
+            info = (fixed.parent / name).lstat()
+        except FileNotFoundError:
+            continue
+        if (
+            not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, "st_file_attributes", 0) & 0x400
+        ):
+            raise ControlError("MCP control custody must use ordinary unshared files")
+    path = fixed if serve._HAS_AF_UNIX else serve._endpoint_path(fixed)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return ("absent",)
+    if serve._HAS_AF_UNIX:
+        if stat.S_ISLNK(info.st_mode):
+            target = path.resolve(strict=True)
+            if target.parent != fixed.parent or not stat.S_ISSOCK(target.stat().st_mode):
+                raise ControlError("MCP data handle has a foreign socket target")
+            content = os.readlink(path)
+        elif stat.S_ISSOCK(info.st_mode):
+            content = None
+        else:
+            raise ControlError("MCP data handle is not an owned socket")
+    else:
+        if (
+            not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, "st_file_attributes", 0) & 0x400 or info.st_size > 65536
+        ):
+            raise ControlError("MCP data endpoint must be a bounded ordinary file")
+        content = path.read_bytes()
+        if serve._read_endpoint(fixed) is None:
+            raise ControlError("MCP data endpoint is invalid")
+    after = path.lstat()
+    if (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size) != (
+        after.st_dev, after.st_ino, after.st_mtime_ns, after.st_size,
+    ):
+        raise ControlError("MCP data handle changed during admission")
+    return ("present", info.st_dev, info.st_ino, info.st_mtime_ns, content)
+
+
+def source_serving_intent() -> bool:
+    """Observe optional serving before selection changes; this is not permission."""
+    from zdd import routing
+
+    fixed = source_fixed_socket()
+    return bool(
+        routing.read_active_endpoint(fixed.parent)
+        or _fixed_handle_has_live_listener(fixed.parent, fixed=fixed)
+    )
+
+
+def source_data_owner(fixed: Path) -> int | None:
+    """Identify the native data listener without requiring the old control protocol."""
+    from . import serve
+
+    if serve._HAS_AF_UNIX:
+        if not hasattr(_socket, "SO_PEERCRED"):
+            raise ControlError("Native Unix data-listener identity is unavailable")
+        with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as peer:
+            peer.settimeout(0.25)
+            try:
+                peer.connect(str(fixed))
+            except (FileNotFoundError, ConnectionRefusedError):
+                return None
+            return struct.unpack("3i", peer.getsockopt(
+                _socket.SOL_SOCKET, _socket.SO_PEERCRED, 12,
+            ))[0]
+    endpoint = serve._read_endpoint(fixed)
+    if endpoint is None:
+        return None
+    if sys.platform != "win32":
+        raise ControlError("Native TCP data-listener identity is unavailable")
+    import ctypes
+    from ctypes import wintypes
+
+    query = ctypes.WinDLL("iphlpapi", use_last_error=True).GetExtendedTcpTable
+    query.argtypes = (
+        ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), wintypes.BOOL,
+        wintypes.ULONG, ctypes.c_int, wintypes.ULONG,
+    )
+    query.restype = wintypes.DWORD
+    size = wintypes.DWORD()
+    if query(None, ctypes.byref(size), False, _socket.AF_INET, 3, 0) not in (0, 122):
+        raise ControlError("Native TCP listener inspection failed")
+    for _ in range(3):
+        if not 4 <= size.value <= 4 << 20:
+            raise ControlError("Native TCP listener table exceeds its inspection bound")
+        buffer = ctypes.create_string_buffer(size.value)
+        result = query(buffer, ctypes.byref(size), False, _socket.AF_INET, 3, 0)
+        if result == 122:
+            continue
+        if result != 0:
+            raise ControlError("Native TCP listener inspection failed")
+        content = buffer.raw
+        count = struct.unpack_from("<I", content)[0]
+        if count > (len(content) - 4) // 24:
+            raise ControlError("Native TCP listener table is incomplete")
+        owners = set()
+        for index in range(count):
+            state, address, port, _remote, _remote_port, pid = struct.unpack_from(
+                "<6I", content, 4 + index * 24,
+            )
+            if (
+                state == 2 and _socket.ntohs(port & 0xffff) == endpoint["port"]
+                and _socket.inet_ntoa(struct.pack("<I", address)) in {"127.0.0.1", "0.0.0.0"}
+            ):
+                owners.add(pid)
+        if len(owners) > 1:
+            raise ControlError("Native TCP data-listener ownership is ambiguous")
+        return next(iter(owners), None)
+    raise ControlError("Native TCP listener table changed during inspection")
+
+
+def _require_selected(layout: tuple) -> None:
+    path = layout[2] / "current-version"
+    try:
+        info = path.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, "st_file_attributes", 0) & 0x400 or info.st_size > 4096
+        ):
+            raise ControlError("MCP selected generation must use a bounded ordinary file")
+        selected = path.read_text(encoding="utf-8-sig").strip()
+        after = path.lstat()
+        if (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size) != (
+            after.st_dev, after.st_ino, after.st_mtime_ns, after.st_size,
+        ):
+            raise ControlError("MCP selected generation changed during admission")
+    except ControlError:
+        raise
+    except (OSError, UnicodeError) as error:
+        raise ControlError("MCP selected generation is unavailable") from error
+    if selected != layout[0]:
+        raise ControlError("MCP callback slot is not the selected generation")
+
+
+def _installed_slot(*, require_selected: bool = True) -> tuple:
+    from importlib.metadata import PackageNotFoundError, version
+
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
+    from .source_build import effective_runtime_version, is_source_build_version
+
+    prefix = Path(sys.prefix)
+    layout = runtime_slot_paths(prefix)
+    if layout is None or not Path(__file__).resolve().is_relative_to(prefix.resolve()):
+        raise ControlError("MCP callback is not running from its installed slot environment")
+    declared_root = os.environ.get("AGENT_MCP_INSTALL_DIR")
+    if declared_root and Path(declared_root).resolve() != Path(layout[2]).resolve():
+        raise ControlError("MCP callback installation root differs from its physical slot")
+    for parent in (prefix, *prefix.parents):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ControlError("MCP callback slot must have ordinary directory ancestors")
+    try:
+        package = version("agent-mcp")
+    except PackageNotFoundError as error:
+        raise ControlError("MCP callback package metadata is unavailable") from error
+    physical = effective_runtime_version(package, prefix=prefix, module_path=Path(__file__))
+    if (
+        physical != layout[0]
+        and package.lower().replace("-", ".").replace("_", ".")
+        != layout[0].lower().replace("-", ".").replace("_", ".")
+    ):
+        raise ControlError("MCP callback package and physical generation differ")
+    if prefix.name != ".venv" and not is_source_build_version(layout[0]):
+        raise ControlError("Released MCP callbacks require the installed UV slot environment")
+    if require_selected:
+        _require_selected(layout)
+    return layout
+
+
+def _configured_readiness() -> dict:
+    from . import config
+    from .installer_readiness import evaluate
+
+    candidates = []
+    if config.BRIDGES_DIR.is_dir():
+        candidates.extend(
+            (config.normalize_bridge_name(path.name), path)
+            for path in sorted(config.BRIDGES_DIR.iterdir())
+            if path.suffix.lower() in {".yaml", ".yml", ".json"}
+        )
+    candidates.extend(config.discover_plugin_bridge_candidates())
+    return evaluate(candidates)
+
+
+def _intent_path(layout: tuple) -> Path:
+    return Path(layout[1]) / ".mcp-serving-intent.json"
+
+
+def _read_intent(path: Path, generation: str) -> dict:
+    info = path.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+        or getattr(info, "st_file_attributes", 0) & 0x400 or info.st_size > 4096
+    ):
+        raise ControlError("MCP serving intent is not a bounded ordinary slot file")
+    with path.open("rb") as stream:
+        content = stream.read(4097)
+    if len(content) > 4096:
+        raise ControlError("MCP serving intent exceeds its slot-file bound")
+    record = json.loads(content)
+    if (
+        not isinstance(record, dict) or set(record) != {"generation", "wanted"}
+        or record["generation"] != generation or type(record["wanted"]) is not bool
+    ):
+        raise ControlError("MCP serving intent differs from its installed slot")
+    return record
+
+
+def source_setup() -> dict:
+    """Prepare a physical candidate's serving intent before selector publication."""
+    layout = _installed_slot(require_selected=False)
+    readiness = _configured_readiness()
+    if readiness["state"] == "failed":
+        raise ControlError(readiness["detail"])
+    wanted = readiness["state"] == "ready" and source_serving_intent()
+    path = _intent_path(layout)
+    if path.exists() or path.is_symlink():
+        _read_intent(path, layout[0])
+    temporary = path.with_name(path.name + "." + secrets.token_hex(8) + ".tmp")
+    created = False
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            created = True
+            json.dump({"generation": layout[0], "wanted": wanted}, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if path.exists() or path.is_symlink():
+            _read_intent(path, layout[0])
+        os.replace(temporary, path)
+    finally:
+        if created:
+            temporary.unlink(missing_ok=True)
+    return {"ok": True, "state": readiness["state"], "wanted": wanted}
+
+
+def source_start() -> dict:
+    """Apply only the selected installed slot's preserved optional serving intent."""
+    layout = _installed_slot()
+    if os.environ.get("AGENT_MCP_NO_SERVE") or os.environ.get("AGENT_MCP_NO_CUTOVER"):
+        return {"ok": True, "skipped": "serving disabled"}
+    intent = _read_intent(_intent_path(layout), layout[0])
+    readiness = _configured_readiness()
+    if readiness["state"] == "failed":
+        raise ControlError(readiness["detail"])
+    if not intent["wanted"] or readiness["state"] != "ready":
+        return {"ok": True, "skipped": "serving not configured/wanted"}
+    _require_selected(layout)
+    return _run_slot_startup(
+        layout, layout[0],
+        health_timeout=float(os.environ.get("AGENT_MCP_CUTOVER_HEALTH_TIMEOUT", "15")),
+    )
+
+
+def run_source_startup(*, health_timeout: float = 60.0) -> dict:
+    """Start selected Source code without controlling its predecessor."""
+    from .source_build import is_source_build_version
+
+    layout = _installed_slot()
+    if not is_source_build_version(layout[0]):
+        raise ControlError("Source startup requires the exact selected physical generation")
+    return _run_slot_startup(layout, layout[0], health_timeout=health_timeout)
+
+
+def _run_slot_startup(layout: tuple, physical_version: str, *, health_timeout: float) -> dict:
+    from zdd import CutoverLock, routing
+    from zdd.diagnostics import process_start_time
+
+    from . import ipc, serve, source_serving
+
+    if not 0 < health_timeout <= 3600:
+        raise ControlError("Source startup requires a bounded positive health timeout")
+    _require_selected(layout)
+    fixed = source_fixed_socket()
+    home = fixed.parent
+    home.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + health_timeout
+    source_handle_state(fixed)
+    with CutoverLock(home):
+        handle = source_handle_state(fixed)
+        table = routing.read_table(home, strict=True) or {}
+        raw = table.get("active")
+        previous = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+
+        def refuse_existing_owner(current_raw):
+            current = (
+                routing.Endpoint.from_dict(current_raw) if isinstance(current_raw, dict)
+                else None
+            )
+            if handle[0] != "absent" and current is None:
+                return "MCP data handle has no attributable serving owner"
+            if current_raw is not None and (
+                current is None or not current.pid or not current.process_start_time
+                or current.client_host not in {"127.0.0.1", "::1"}
+                or (routing._pid_alive(current.pid)
+                    and process_start_time(current.pid) != current.process_start_time)
+            ):
+                return "MCP current native route ownership is unavailable or foreign"
+            owner = source_data_owner(fixed)
+            if owner is not None and (
+                current is None or owner != current.pid
+                or process_start_time(owner) != current.process_start_time
+            ):
+                return "MCP data listener has an unknown or foreign native owner"
+            return None
+
+        refusal = refuse_existing_owner(raw)
+        if refusal:
+            raise routing.ActivePublicationRefused(refusal)
+        reusable = source_serving.ready_owner(
+            fixed, previous, physical_version, deadline=deadline,
+        )
+        _require_selected(layout)
+        if reusable is not None:
+            return reusable
+        generation = max(
+            (endpoint.generation for role in ("active", "previous")
+             if (endpoint := routing.Endpoint.from_dict(table.get(role, {}))) is not None),
+            default=0,
+        ) + 1
+        while True:
+            if time.monotonic() >= deadline:
+                raise ControlError("Source startup exhausted its candidate endpoint deadline")
+            candidate_socket = home / f"serve-g{generation}.sock"
+            occupied = False
+            for path in (candidate_socket, serve._endpoint_path(candidate_socket)):
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    continue
+                occupied = True
+                break
+            if not occupied:
+                break
+            generation += 1
+        ctx = _CutoverContext(
+            home, candidate_socket, home / f"serve-g{generation}.log",
+            secrets.token_hex(16), None, {}, config_home=ipc.default_home_dir(),
+        )
+        port = pick_free_port()
+        process = spawn_passive_daemon(ctx, port)
+        publication_attempted = False
+        try:
+            birth = process_start_time(process.pid)
+            if not birth:
+                raise ControlError("Source MCP incoming native identity is unavailable")
+            while True:
+                try:
+                    reply = control_request(
+                        "127.0.0.1", port, ctx.new_control_token, {"op": "ping"}, timeout=0.25,
+                    )
+                except ControlError:
+                    reply = {}
+                if (
+                    reply.get("ok") is True and reply.get("pong") is True
+                    and reply.get("ready") is True
+                    and not reply.get("draining") and reply.get("pid") == process.pid
+                    and reply.get("version") == physical_version
+                    and reply.get("data_socket") == str(ctx.new_socket_path)
+                ):
+                    break
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    raise ControlError("Source MCP incoming server failed readiness")
+                time.sleep(0.05)
+            if process_start_time(process.pid) != birth:
+                raise ControlError("Source MCP incoming process identity changed")
+            incoming = routing.Endpoint(
+                bind="127.0.0.1", port=port, pid=process.pid, version=physical_version,
+                generation=generation, process_start_time=birth,
+            )
+
+            def refuse_current(current_raw):
+                _require_selected(layout)
+                if source_handle_state(fixed) != handle:
+                    return "MCP data handle changed before source publication"
+                if process.poll() is not None or process_start_time(process.pid) != birth:
+                    return "Source MCP incoming native identity changed"
+                return refuse_existing_owner(current_raw)
+
+            publication_attempted = True
+            routing.publish_active_with_previous_guarded(
+                home, bind="127.0.0.1", port=port, pid=process.pid, version=physical_version,
+                generation=generation, demote_existing=True, expected_active=previous,
+                refuse_current=refuse_current, process_start_time=birth, lock_deadline=deadline,
+            )
+            serve.flip_data_handle(ctx.new_socket_path, legacy_path=fixed, expected_state=handle)
+            return {
+                "ok": True, "pid": process.pid, "version": physical_version,
+                "data_socket": str(ctx.new_socket_path),
+            }
+        except BaseException as error:
+            if publication_attempted:
+                recovered = source_serving.recover_publication(
+                    layout, fixed, ctx.new_socket_path, handle, previous, incoming, process,
+                    deadline=deadline,
+                )
+                if recovered is not None:
+                    if isinstance(error, Exception):
+                        return recovered
+                    raise
+            try:
+                control_request(
+                    "127.0.0.1", port, ctx.new_control_token, {"op": "shutdown"}, timeout=0.5,
+                )
+                process.wait(timeout=2)
+            except (ControlError, subprocess.TimeoutExpired):
+                process.terminate()
+                process.wait(timeout=5)
+            raise
 
 
 def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,

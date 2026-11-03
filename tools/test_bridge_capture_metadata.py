@@ -1,0 +1,135 @@
+"""Capture metadata remains verifiable after a squash drops its original commit."""
+from __future__ import annotations
+
+import base64
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import agent_bridge_contract_registry as codec
+import bridge_capture_metadata as subject
+
+
+def _git(root: Path, *arguments: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(root), *arguments],
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    ).decode().strip()
+
+
+def _capture(root: Path, version: int = 1) -> tuple[str, codec.Snapshot]:
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.name", "Fixture")
+    _git(root, "config", "user.email", "fixture@example.test")
+    row = {
+        "id": "agent-bridge.http-wire", "provenance": [{"commit": "original"}],
+        "source_paths": [{"path": "session_prompts.py", "semantic": False}],
+    }
+    if version == 2:
+        content = codec.encode({
+            "schema": codec.CHUNK_SCHEMA, "schema_version": 1,
+            "contract": row["id"], "record_offset": 0, "provenance": row["provenance"],
+        })
+        digest = codec.digest(content)
+        relative = codec.PROVENANCE + row["id"] + "/" + digest + ".json"
+        path = root / relative
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+        row.update(provenance=[], provenance_chunks=[{
+            "contract": row["id"], "path": relative, "sha256": digest, "record_count": 1,
+        }])
+    path = root / codec.REGISTRY
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(codec.encode({
+        "schema_version": version, "contracts": [row], "deferred_contracts": [],
+    }))
+    expected = codec.load(root)
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "capture metadata")
+    commit = _git(root, "rev-parse", "HEAD")
+    subject.retain(root, commit)
+    return commit, expected
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_original_source_semantics_survive_without_capture_commit(tmp_path, version):
+    source = tmp_path / "source"
+    commit, expected = _capture(source, version)
+    fresh = tmp_path / "canonical"
+    shutil.copytree(source / subject.PREFIX, fresh / subject.PREFIX)
+    current = fresh / codec.REGISTRY
+    changed = json.loads(expected.inputs[codec.REGISTRY])
+    changed["contracts"][0]["source_paths"][0]["semantic"] = True
+    current.write_text(json.dumps(changed))
+
+    observed = subject.load(fresh, commit)
+
+    assert not (fresh / ".git").exists()
+    assert observed.materialized == expected.materialized
+    assert observed.inputs == expected.inputs
+
+
+@pytest.mark.parametrize("fault", [
+    "commit", "tree", "blob", "blob-crlf", "missing", "different-commit",
+])
+def test_corrupt_or_unbound_metadata_remains_a_failure(tmp_path, fault):
+    source = tmp_path / "source"
+    commit, _ = _capture(source, 2)
+    directory = source / subject.PREFIX / commit
+    proof_path = directory / "proof.json"
+    proof = json.loads(proof_path.read_bytes())
+    if fault in {"commit", "tree"}:
+        row = next(row for row in proof["objects"].values() if row["kind"] == fault)
+        row["base64"] = base64.b64encode(b"unbound metadata").decode()
+        proof_path.write_bytes(codec.encode(proof))
+    elif fault == "different-commit":
+        replacement = "1" * 40
+        directory.rename(directory.with_name(replacement))
+        commit = replacement
+    else:
+        blob = next(directory.glob("*.txt"))
+        if fault == "missing":
+            blob.unlink()
+        elif fault == "blob-crlf":
+            blob.write_bytes(blob.read_bytes().replace(b"\n", b"\r\n"))
+        else:
+            blob.write_bytes(b"corrupt metadata\n")
+
+    with pytest.raises((ValueError, OSError)):
+        subject.load(source, commit)
+
+
+def test_retention_never_overwrites_existing_metadata(tmp_path):
+    source = tmp_path / "source"
+    commit, _ = _capture(source)
+    blob = next((source / subject.PREFIX / commit).glob("*.txt"))
+    blob.write_bytes(b"retained conflicting evidence\n")
+
+    with pytest.raises(ValueError, match="must not be replaced"):
+        subject.retain(source, commit)
+
+    assert blob.read_bytes() == b"retained conflicting evidence\n"
+
+
+def test_retention_reuses_git_rendered_control_documents_without_rewriting(tmp_path):
+    source = tmp_path / "source"
+    commit, expected = _capture(source, 2)
+    paths = (
+        source / subject.PREFIX / ".gitattributes",
+        source / subject.PREFIX / commit / "proof.json",
+    )
+    rendered = {}
+    for path in paths:
+        rendered[path] = path.read_bytes().replace(b"\n", b"\r\n")
+        path.write_bytes(rendered[path])
+
+    observed = subject.retain(source, commit)
+
+    assert observed.inputs == expected.inputs
+    assert subject.load(source, commit).inputs == expected.inputs
+    assert all(path.read_bytes() == data for path, data in rendered.items())

@@ -39,6 +39,7 @@ import secrets
 import time
 from pathlib import Path
 
+from . import source_serving
 from .client import (
     OneShotSession,
     UpstreamError,
@@ -354,7 +355,7 @@ class Server:
         # future cutover attempt can authenticate to via the token sidecar
         # (see ``_start_control_listener``).
         self._control_token = control_token or secrets.token_hex(16)
-        self._version = version
+        self._runtime_root, self._version = source_serving.installed_generation(version)
 
     @property
     def attached(self) -> int:
@@ -634,6 +635,8 @@ class Server:
         runtime_root=lambda self: self.socket_path.parent,
     )
     async def serve_forever(self) -> None:
+        if not source_serving.generation_selected(self):
+            return
         # Take the single-instance lease before binding so a losing host never
         # touches the winner's socket handle. Standing down is a clean no-op exit.
         if not self._acquire_lease():
@@ -818,7 +821,11 @@ class Server:
         op = req.get("op")
         if op in ("ping", "health"):
             return {"ok": True, "pong": True, "draining": self._draining,
-                    "attached": self._attached, "sessions": self.pool.size}
+                    "attached": self._attached, "sessions": self.pool.size,
+                    "pid": os.getpid(), "version": self._version,
+                    "data_socket": str(self.socket_path),
+                    "ready": self._server is not None and self._server.is_serving()
+                    and not self._closing and not self._draining}
         if op == "drain":
             self._draining = True
             # Only attached (long-lived multiplexer) sessions are "in-flight,
@@ -886,6 +893,9 @@ class Server:
     def stop(self) -> None:
         self._stop.set()
 
+    def _ready_replacement(self) -> bool:
+        return source_serving.ready_replacement(self)
+
     async def _sweep_loop(self) -> None:
         # Check at least twice per idle window (capped at the 30s default) so a
         # small idle_timeout evicts promptly and a large one stays cheap.
@@ -895,6 +905,11 @@ class Server:
         try:
             while True:
                 await asyncio.sleep(interval)
+                if await source_serving.inspect_replacement(self):
+                    log.info("serve: ready replacement published; draining displaced owner")
+                    self._draining = True
+                    self._stop.set()
+                    return
                 await self.pool.sweep_idle()
                 self._maybe_idle_evict()
         except asyncio.CancelledError:
@@ -919,7 +934,8 @@ class Server:
 
 
 def flip_data_handle(new_data_socket_path: str | Path, *,
-                     legacy_path: str | Path | None = None) -> None:
+                     legacy_path: str | Path | None = None,
+                     expected_state: tuple | None = None) -> None:
     """Atomically repoint the **fixed, client-facing** data handle at a newly
     promoted generation's real socket -- the actual "cutover" clients feel.
 
@@ -948,12 +964,25 @@ def flip_data_handle(new_data_socket_path: str | Path, *,
     fixed = Path(legacy_path) if legacy_path is not None else default_socket_path()
     new_path = Path(new_data_socket_path)
     fixed.parent.mkdir(parents=True, exist_ok=True)
+
+    def check_destination():
+        if expected_state is not None:
+            from .cutover import ControlError, source_handle_state
+
+            actual = source_handle_state(fixed)
+            if actual != expected_state and actual[0] != "absent":
+                raise ControlError("MCP data handle changed before source publication")
+
     if _HAS_AF_UNIX:
         tmp_link = fixed.with_name(fixed.name + f".tmp-{os.getpid()}")
         with contextlib.suppress(OSError):
             tmp_link.unlink()
         os.symlink(new_path, tmp_link)
-        os.replace(tmp_link, fixed)
+        try:
+            check_destination()
+            os.replace(tmp_link, fixed)
+        finally:
+            tmp_link.unlink(missing_ok=True)
         return
     new_ep = _endpoint_path(new_path)
     fixed_ep = _endpoint_path(fixed)
@@ -962,4 +991,8 @@ def flip_data_handle(new_data_socket_path: str | Path, *,
     tmp_ep.write_text(data, encoding="utf-8")
     with contextlib.suppress(OSError):
         os.chmod(tmp_ep, 0o600)
-    os.replace(tmp_ep, fixed_ep)
+    try:
+        check_destination()
+        os.replace(tmp_ep, fixed_ep)
+    finally:
+        tmp_ep.unlink(missing_ok=True)

@@ -7,6 +7,7 @@ import sys
 
 _SOURCE_LOCAL = re.compile(
     r"(?:[a-z0-9]+\.)*source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+    r"(?:\.profile\.[0-9a-f]{16})?(?:\.repair\.[0-9a-f]{32})?"
 )
 
 
@@ -27,15 +28,19 @@ def is_source_build_version(value: str) -> bool:
 def effective_runtime_version(
     package_version: str, *, prefix: Path | None = None, module_path: Path | None = None,
 ) -> str:
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
     candidate = prefix or Path(sys.prefix)
-    if candidate.parent.name != "versions" or "source." not in candidate.name:
+    paths = runtime_slot_paths(candidate)
+    if paths is None:
         return package_version
-    if not is_source_build_version(candidate.name):
+    generation = paths[0]
+    if not is_source_build_version(generation):
         return package_version
     from packaging.version import InvalidVersion, Version
 
     try:
-        package, runtime = Version(package_version), Version(candidate.name)
+        package, runtime = Version(package_version), Version(generation)
     except InvalidVersion:
         return package_version
     expected_local = (package.local + "." if package.local else "") + "source."
@@ -44,4 +49,4 @@ def effective_runtime_version(
     installed = candidate.resolve()
     if not (module_path or Path(__file__)).resolve().is_relative_to(installed):
         return package_version
-    return candidate.name
+    return generation

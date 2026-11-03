@@ -629,7 +629,23 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if markers:
                 session.progress.update(markers)
 
-    def _rehydrate(self, *, read_only: bool = False) -> None:
+    @staticmethod
+    def _session_metadata_in_use(session: Session) -> bool:
+        return (
+            session.client is not None
+            or session._local_launch_owner is not None
+            or session._native_turn_transport is not None
+            or session._handoff_in_progress
+            or session.subscriber_count > 0
+            or session._lifecycle_lock.locked()
+            or session._turn_start_lock.locked()
+            or session._prompt_task is not None and not session._prompt_task.done()
+        )
+
+    def _rehydrate(
+        self, *, read_only: bool = False, merge: bool = False,
+        session_id: str | None = None,
+    ) -> None:
         """Reload session metadata from DB on startup.
 
         Running processes are gone after a restart, so any session that
@@ -640,16 +656,29 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         A passive successor uses read-only hydration: the predecessor and
         independent hosts may still own live turns. Preserve status/cursors,
         do not append restart events, delete sessions or run startup GC.
+
+        A merge is read-only and refreshes unowned metadata in place. Never
+        replace a live successor's client, event stream, locks or turn state.
         """
-        rows = self._db.list_sessions()
+        read_only = read_only or merge
+        if session_id is None:
+            rows = self._db.list_sessions()
+        else:
+            row = self._db.get_session(session_id)
+            rows = [row] if row is not None else []
         retained = self._db.gc_retained_relationship_session_ids()
         now = time.time()
         for row in rows:
             sid = row["id"]
             status = row["status"]
+            existing = self._sessions.get(sid) if merge else None
+            if existing is not None and self._session_metadata_in_use(existing):
+                continue
 
             if status == SessionStatus.ENDED.value and sid not in retained:
                 if read_only:
+                    if existing is not None:
+                        existing.status = SessionStatus.ENDED
                     continue
                 # Defense-in-depth: a single session's cleanup must never brick
                 # daemon startup -- log and skip on failure rather than aborting
@@ -672,22 +701,35 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                     cwd=row.get("target_dir", "."),
                 )
 
-            session = Session(
+            session = existing or Session(
                 session_id=sid,
                 name=row["name"],
                 target=target,
                 agent_name=row.get("agent_name"),
                 caller_id=row.get("caller_id"),
                 caller_session_id=row.get("caller_session_id"),
+                preserve_target=read_only,
             )
+            session.name = row["name"]
+            session.target = target
+            session.agent_name = row.get("agent_name")
+            session.caller_id = row.get("caller_id")
+            session.caller_session_id = row.get("caller_session_id")
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
-            session.restart_status = status
+            # Startup already normalized the persisted row to STOPPED.
+            if not merge or existing is None or status != SessionStatus.STOPPED.value:
+                session.restart_status = status
             session.background_recovery_enabled = (
                 row.get("runtime_custody_json") is None
                 and bool(row.get("background_recovery_enabled", 1))
             )
+            if merge:
+                session.model_override = None
+                session.effort_override = None
+                session.mcp_servers = []
+                session.progress = {}
 
             # Restore the session's declared per-session MCP toolset. Without
             # this, a daemon restart silently drops it forever (it otherwise

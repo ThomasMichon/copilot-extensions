@@ -29,7 +29,7 @@ class _SessionLifecycleMixin:
     """Session teardown, interruption, and end-of-life helpers."""
 
     async def _quiesce_session(
-        self, session: Session, *, cancel_turn: bool = True
+        self, session: Session, *, cancel_turn: bool = True, preserve_host: bool = False,
     ) -> None:
         """Best-effort teardown of a session's in-flight prompt + ACP client.
 
@@ -46,12 +46,9 @@ class _SessionLifecycleMixin:
         prompt task + ACP client are torn down. Explicit stop/end keep the
         default so an operator stop still cancels.
         """
-        # Signal a GRACEFUL detach to the session host BEFORE tearing down the
-        # transport, carrying the child's current reapable state, so an idle
-        # host self-reaps promptly instead of waiting out the unexpected-grace
-        # window (#51). Best-effort and pre-cancel: computed from the *current*
-        # status before the in-flight prompt below is cancelled.
-        await self._detach_host(session)
+        # A recoverable frontend detach must retain even an idle Host.
+        # Explicit stops still send the current reapable state before cancel.
+        await self._detach_host(session, preserve_host=preserve_host)
         task = session._prompt_task
         if task and not task.done():
             if session.client and cancel_turn:
@@ -259,7 +256,10 @@ class _SessionLifecycleMixin:
         # live client after stop already persisted dormancy (review of #3058).
         async with session._lifecycle_lock:
             require_automatic_reap()
-            await self._quiesce_session(session, cancel_turn=cancel_turn)
+            await self._quiesce_session(
+                session, cancel_turn=cancel_turn,
+                preserve_host=allow_background_recovery and not reap_host,
+            )
             # An explicit (dormant) stop has no turn left that needs the
             # credential relay; retire its supervisor so it cannot re-wake a
             # stopped CodeSpace. A resume re-supervises it from the endpoint.
