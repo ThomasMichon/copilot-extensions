@@ -12,9 +12,11 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from agent_worktrees import dispatch_worker_closeout as closeout
 from agent_worktrees import config as cfg, sessions, tracking
+from agent_procutil import no_window_kwargs
 
 NATIVE = "00000000-0000-4000-8000-000000000001"
 SOURCE = "native-source-v1:" + "a" * 64
@@ -248,6 +250,7 @@ def test_failed_cli_closeout_is_structured_without_claiming_release(monkeypatch,
         raise ValueError("Unmerged source remains")
 
     monkeypatch.setattr(closeout, "finalize_own", blocked)
+    monkeypatch.setattr(closeout, "metadata_project", lambda *a, **k: "project")
     assert closeout.main([
         "--task-id", "task", "--reservation-key", "reservation", "--native-id", NATIVE,
     ]) == 1
@@ -256,6 +259,92 @@ def test_failed_cli_closeout_is_structured_without_claiming_release(monkeypatch,
     assert result["ok"] is False and result["error"] == "Unmerged source remains"
     assert result["task_release"] is False and result["process_retirement"] is False
     assert "Source validation remains blocked." in captured.err
+
+
+@pytest.fixture
+def cwd_project(worker, monkeypatch):
+    home = worker.root / "home"
+    anchor = worker.root / "anchor"
+    metadata = anchor / ".git" / "worktrees" / "worker"
+    metadata.mkdir(parents=True)
+    (metadata / "commondir").write_text("../..\n", encoding="utf-8")
+    (worker.binding.path / ".git").write_text(f"gitdir: {metadata}\n", encoding="utf-8")
+    project = "closeout-project"
+    state = home / f".{project}"
+    records = state / "worktrees"
+    records.mkdir(parents=True)
+    (state / "config.yaml").write_text(yaml.safe_dump({
+        "platform": "linux", "machine": "host",
+        "repos": {project: {"anchor": str(anchor), "worktree_root": str(worker.root)}},
+    }), encoding="utf-8")
+    registry = home / ".agent-worktrees"
+    registry.mkdir()
+    (registry / "repos.yaml").write_text(yaml.safe_dump({
+        "repos": {project: {
+            "class": "worktree", cfg.detect_platform(): str(anchor),
+        }},
+    }), encoding="utf-8")
+    (records / "worker.yaml").write_text(yaml.safe_dump({
+        "worktree_id": "worker", "repo": project, "worktree_path": str(worker.binding.path),
+        "branch": "worktree/worker", "status": "active", "sessions": [],
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    return project
+
+
+def test_fresh_module_entrypoint_resolves_cwd_and_loads_real_configuration(cwd_project) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees.dispatch_worker_closeout",
+         "--task-id", "task", "--reservation-key", "reservation", "--native-id", NATIVE],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    reply = json.loads(result.stdout)
+    assert result.returncode == 1 and reply["ok"] is False
+    assert reply["error"] == "Own-worker closeout requires its recorded Dispatch allocation"
+    assert reply["task_release"] is False and reply["process_retirement"] is False
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_entrypoint_restores_previous_project_after_real_cwd_config_load(
+    cwd_project, monkeypatch, capfd, fails,
+) -> None:
+    previous = cfg.active_project()
+    cfg.set_active_project("another-project")
+
+    def operation(*args):
+        assert cfg.project_name() == cfg.load_config().repo_name == cwd_project
+        if fails:
+            raise ValueError("Closeout refused")
+        return {"status": "finalized", "task_release": False, "process_retirement": False}
+
+    monkeypatch.setattr(closeout, "finalize_own", operation)
+    try:
+        assert closeout.main([
+            "--task-id", "task", "--reservation-key", "reservation", "--native-id", NATIVE,
+        ]) == int(fails)
+        assert cfg.active_project() == "another-project"
+        assert json.loads(capfd.readouterr().out)["ok"] is not fails
+    finally:
+        cfg.set_active_project(previous)
+
+
+def test_entrypoint_never_inherits_a_neighbor_project_when_cwd_is_unmanaged(
+    tmp_path, monkeypatch, capfd,
+) -> None:
+    previous = cfg.active_project()
+    cfg.set_active_project("another-project")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(closeout, "finalize_own", lambda *a: pytest.fail("Used another project"))
+    try:
+        assert closeout.main([
+            "--task-id", "task", "--reservation-key", "reservation", "--native-id", NATIVE,
+        ]) == 1
+        assert "project resolved from its actual cwd" in json.loads(capfd.readouterr().out)["error"]
+        assert cfg.active_project() == "another-project"
+    finally:
+        cfg.set_active_project(previous)
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Native holds require Linux procfs")

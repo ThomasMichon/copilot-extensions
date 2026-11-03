@@ -17,6 +17,9 @@ requesting closeout; a package version or a payload declaration is insufficient.
 
 The effectful form requires `--task-id`, `--reservation-key` and `--native-id`.
 It derives the worktree exclusively from the caller's actual current directory.
+The module entrypoint resolves and binds that directory's existing project
+before configuration loading, restoring any prior in-process project afterward.
+Discovery does not resolve or bind a project.
 The existing project metadata reader and execution-space mutation authority
 must agree on that managed checkout. Its immutable `dispatch_attempt` must
 match the task/reservation and execution machine. The current native UUID must

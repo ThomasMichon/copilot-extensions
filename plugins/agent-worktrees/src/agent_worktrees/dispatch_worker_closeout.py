@@ -11,6 +11,7 @@ from . import config as cfg
 from . import finalized_checkout, finalize, native_lifecycle_source, native_source_context, output, sessions, tracking
 from .execution_spaces import require_record_mutation
 from .record_read import read_workspace_record
+from .record_config import metadata_project
 from .dispatch_worker_sessions import require_no_foreign_hold
 
 CONTRACT = "agent-worktrees.dispatch-worker-closeout"
@@ -180,8 +181,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if any(value is None for value in supplied):
         parser.error("--task-id, --reservation-key and --native-id are required")
+    previous_project = cfg.active_project()
     try:
         with output.stdout_to_stderr():
+            project = metadata_project(None, cwd=Path.cwd())
+            if project is None:
+                raise ValueError("Own-worker closeout requires a project resolved from its actual cwd")
+            cfg.set_active_project(project)
             result = finalize_own(*supplied)
     except Exception as exc:
         output._json_output({
@@ -190,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             "process_retirement": False,
         })
         return 1
+    finally:
+        cfg.set_active_project(previous_project)
     output._json_output({"ok": True, **result})
     return 0
 
