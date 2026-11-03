@@ -339,7 +339,7 @@ The dtssh launcher now also persists a local dispatch-companion config under
 `%LOCALAPPDATA%\agent-ssh-dtssh`, and the plugin's session-start hook publishes
 an attributed `agent-dispatch` companion declaration. On a configured Windows
 host, the already-durable interactive-session dispatch coordinator can
-re-launch the watchdog even when the historical Startup-folder shortcut did not
+re-launch the watchdog even when the logon launcher did not
 fire for that logon or the launcher died later in the session.
 Before launching that new daemon root, the companion removes only the inherited
 Win32 OpenSSH `C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE` execution-descriptor

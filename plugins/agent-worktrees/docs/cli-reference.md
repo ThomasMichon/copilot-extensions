@@ -1663,7 +1663,7 @@ has no supported uninstall action (`uninstall-unsupported`); `wsl-setup`'s
 `skills/setting-up-wsl/references/wsl-keepalive.ps1`, outside this
 convention (`manual-cleanup-required`). `agent-ssh` gets one cascaded step:
 its own uninstall does not remove the separate dtssh transport's
-Startup-folder host listener, so
+logon host launcher, so
 `transports/dtssh/scripts/install-host.{ps1,sh} uninstall` is appended
 automatically (or reported as `dtssh-host-script-missing`). `agent-worktrees`
 itself is excluded -- use its own top-level `uninstall` verb.

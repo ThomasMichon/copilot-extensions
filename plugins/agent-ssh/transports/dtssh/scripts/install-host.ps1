@@ -58,6 +58,7 @@ $LauncherSrc = Join-Path $PSScriptRoot 'dtssh-host-launcher.ps1'
 $LauncherDst = Join-Path $InstallDir 'dtssh-host-launcher.ps1'
 $CompanionConfigPath = Join-Path $InstallDir 'dispatch-companion.json'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'agent-ssh-dtssh-host.lnk'
+$LogonTaskName = 'agent-ssh-dtssh-host'
 $HostStateDir = Join-Path $env:LOCALAPPDATA 'dtssh\host'
 
 function Resolve-DurableHostIdentityRoot {
@@ -655,14 +656,60 @@ function Install-Shortcut {
     # conhost --headless gives the launcher a windowless console (matches the runtime
     # Start-HostLauncher path + the agent-bridge task pattern; windows-launch-hardening #786).
     $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+    $arguments = "--headless `"$pwsh`" " + ($launcherArgs -join ' ')
+    if (Register-LogonTask -Execute $conhost -Argument $arguments) {
+        # One logon trigger: a leftover shortcut would only start a second, later launch.
+        if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
+        return
+    }
     $ws = New-Object -ComObject WScript.Shell
     $shortcut = $ws.CreateShortcut($StartupLnk)
     $shortcut.TargetPath = $conhost
-    $shortcut.Arguments = "--headless `"$pwsh`" " + ($launcherArgs -join ' ')
+    $shortcut.Arguments = $arguments
     $shortcut.WorkingDirectory = $InstallDir
     $shortcut.WindowStyle = 7
     $shortcut.Description = 'agent-ssh-dtssh host launcher'
     $shortcut.Save()
+}
+
+function Register-LogonTask {
+    <#
+      Start the launcher at this user's logon from a per-user scheduled task.
+      Explorer runs Run-key and Startup-folder entries one after another, waiting
+      on each, so on a busy logon a Startup shortcut can fire many minutes after
+      sign-in -- the host stays unreachable all that time. A logon trigger fires
+      as the session starts. The task runs with the user's interactive token in
+      that session, as the shortcut did. A task whose trigger and principal name
+      this user needs no elevation (an any-user logon trigger does); where
+      policy still refuses it, this returns $false and the caller keeps the
+      Startup shortcut.
+    #>
+    param([Parameter(Mandatory)][string]$Execute, [Parameter(Mandatory)][string]$Argument)
+    try {
+        $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $task = @{
+            TaskName  = $LogonTaskName
+            Action    = New-ScheduledTaskAction -Execute $Execute -Argument $Argument -WorkingDirectory $InstallDir
+            Trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
+            Principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+            Settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+            Description = 'agent-ssh-dtssh host launcher'
+        }
+        Register-ScheduledTask @task -Force -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        Write-Warning "Could not register the logon task '$LogonTaskName' ($($_.Exception.Message.Trim())); using the Startup-folder shortcut, which can start late on a busy logon."
+        return $false
+    }
+}
+
+function Get-LogonTask {
+    Get-ScheduledTask -TaskName $LogonTaskName -ErrorAction SilentlyContinue
+}
+
+function Unregister-LogonTask {
+    if (Get-LogonTask) { Unregister-ScheduledTask -TaskName $LogonTaskName -Confirm:$false }
 }
 
 function Start-DetachedHostLauncher {
@@ -851,6 +898,7 @@ switch ($Action) {
         if ($DryRun) {
             Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
             Write-Host '[dry-run] would stop launcher + host launcher'
+            if (Get-LogonTask) { Write-Host "[dry-run] would remove logon task: $LogonTaskName" }
             if (Test-Path $StartupLnk) { Write-Host "[dry-run] would remove Startup shortcut: $StartupLnk" }
             if (Test-Path $CompanionConfigPath) { Write-Host "[dry-run] would remove dispatch companion config: $CompanionConfigPath" }
             Write-Host "[dry-run] existing dtssh tunnel/client state would be left intact"
@@ -858,6 +906,7 @@ switch ($Action) {
         } else {
             Stop-Launcher
             Stop-HostLauncher
+            Unregister-LogonTask
             if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
             Remove-DispatchCompanionConfig
             Write-Host "Removed launcher. Existing dtssh tunnel/client state is left intact."
@@ -929,10 +978,12 @@ switch ($Action) {
         } else {
             Write-Warning 'dispatch companion launch config missing'
         }
-        if (Test-Path $StartupLnk) {
-            Write-Host "startup shortcut: $StartupLnk"
+        if (Get-LogonTask) {
+            Write-Host "logon task: $LogonTaskName"
+        } elseif (Test-Path $StartupLnk) {
+            Write-Host "startup shortcut: $StartupLnk (can start late on a busy logon; rerun install to switch to a logon task)"
         } else {
-            Write-Warning 'startup shortcut missing (dispatch companion supervision can still restore launcher presence)'
+            Write-Warning 'logon launcher missing (dispatch companion supervision can still restore launcher presence)'
         }
         $backupDirectory = Get-HostIdentityDirectory
         if (Test-Path -LiteralPath $backupDirectory -PathType Container) {

@@ -1,0 +1,9 @@
+{
+  "comment": "Uninstall cascade wording: the dtssh transport's logon host launcher",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

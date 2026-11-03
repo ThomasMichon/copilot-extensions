@@ -40,8 +40,9 @@ pwsh -File .\transports\dtssh\scripts\install-host.ps1 install -Alias <host>
 
 The script installs or updates dtssh under `%LOCALAPPDATA%\dtssh\bin`, installs a
 no-admin Win32-OpenSSH `sshd` when needed, prompts `dtssh login` if the
-Dev Tunnel account is not signed in (unless `-SkipLogin`), installs the hidden
-Startup-folder launcher, and starts it unless `-NoStart`.
+Dev Tunnel account is not signed in (unless `-SkipLogin`), registers the per-user
+logon launcher (a scheduled task; a hidden Startup-folder shortcut only where
+policy refuses the task), and starts it unless `-NoStart`.
 
 The launcher runs a Python helper, so the host needs Python 3.10 or newer as
 `python` on PATH, in the PATH order a logon process sees (machine entries before
@@ -85,17 +86,21 @@ factor; the identity gate is the tunnel owner.
 
 ## 3. Persist across logon
 
-The session is user-side, so host it from a **logon Startup launcher** (not a
-SYSTEM/scheduled task — the sessions need your interactive token, and non-elevated
-task creation is often blocked on managed Dev Boxes). Point a hidden Startup-folder
-shortcut at a small launcher that runs `dtssh host --persist` at logon; it then
-fires whenever you RDP/console-log-on and persists after you disconnect.
+The session is user-side, so host it from a **per-user logon launcher**, not
+SYSTEM: the sessions need your interactive token. The installer registers a
+scheduled task whose logon trigger and principal are *your* account, so it runs
+with your interactive token in your session and needs no elevation (only an
+any-user logon trigger does). It fires as the session starts, whether you RDP
+or console-log-on, and the host persists after you disconnect. A Startup-folder
+shortcut is the fallback where policy refuses the task: Explorer starts Startup
+entries one at a time after the Run keys, so on a busy logon it can fire many
+minutes late.
 
 That is exactly what `transports/dtssh/scripts/install-host.ps1` installs. Its
 actions are `install`, `update`, `status`, `start`, `stop`, and `uninstall`; it
 drives the self-healing
-`transports/dtssh/scripts/dtssh-host-launcher.ps1` from a hidden Startup-folder
-shortcut.
+`transports/dtssh/scripts/dtssh-host-launcher.ps1` from that logon task.
+`update` moves an existing Startup-folder install onto the task.
 
 ### Updating dtssh
 
