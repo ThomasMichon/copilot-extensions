@@ -30,8 +30,10 @@ pytestmark = [
 def test_actual_native_grace_preserves_old_until_expiry_and_keeps_successor(tmp_path, mode):
     root = tmp_path / "runtime"
     with start_provider(root / "status-monitor-routing", mode) as incumbent:
-        directory, data, old, _token_path = incumbent
+        directory, data, old, token_path = incumbent
+        control.control_token_path(root).write_text(token_path.read_text(encoding="utf-8"), encoding="utf-8")
         token = control.load_or_create_control_token(root)
+        assert token == data["token"]
         health = {
             "status": "ready", "published": True, "pid": os.getpid(),
             "worktrees": {"status": "ready"}, "repositories": {"admitting": True},
@@ -54,6 +56,7 @@ def test_actual_native_grace_preserves_old_until_expiry_and_keeps_successor(tmp_
                 new_process_start_time=successor.process_start_time, self_retirement=True,
             )
             MonitorHandover(passive=True).announce(directory, os.getpid())
+            assert (directory / "health-requested").exists()
 
             def ready():
                 return recovery.successor_healthy(

@@ -52,9 +52,13 @@ live compatible and `legacy-protocol` cases on Linux and Windows. It runs on
 demand and is path-gated on its workflow, owning lifecycle source and native
 fixture changes on PR branches. Both jobs also run the focused
 retirement/preparation/legacy custody and grace/handover/completion controls.
+These include early predecessor exit and retryable fallback-route release;
+custody remains until guarded route cleanup settles.
 Windows additionally runs the six finite Job/native-identity grace and
 asynchronous-installer cases; Linux native expiry is exercised by the real
-installer case above, not inferred from skipped Windows controls. These packets
+installer case above, not inferred from skipped Windows controls. The finite
+native grace controls assert authenticated health-handler entry before crediting
+old-peer timeout. All packets
 retain their 180-second subsuite, 600-second aggregate and existing item bounds.
 The real-installer packet and twenty-minute job bounds are unchanged.
 This is a focused smoke lane, not an expansion of required unit-only CI.

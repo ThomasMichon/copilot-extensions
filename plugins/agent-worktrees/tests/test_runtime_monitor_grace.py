@@ -152,6 +152,66 @@ def test_reused_old_pid_settles_original_exit_without_a_signal(retirement):
     assert not grace._path(r.root, r.predecessor).exists()
 
 
+def test_predecessor_exit_before_expiry_releases_fallback_before_custody(retirement):
+    r = retirement
+    grace.arm(r.root, ready=lambda: True, clock=lambda: 1000.0)
+    r.exited.add(r.old.pid)
+    grace.reconcile(r.root, clock=lambda: 1001.0)
+    assert r.calls == []
+    assert routing.read_table(r.directory) == {"active": r.new.to_dict()}
+    assert not grace._path(r.root, r.predecessor).exists()
+    assert not retirements.reconcile(r.root)
+
+
+@pytest.mark.parametrize("forced", [False, True])
+def test_failed_fallback_release_preserves_deadline_and_custody_for_retry(retirement, monkeypatch, forced):
+    r = retirement
+    grace.arm(r.root, ready=lambda: True, clock=lambda: 1.0)
+    if not forced:
+        r.exited.add(r.old.pid)
+    release = routing.release_previous_guarded
+
+    def failed(*a, **kw):
+        raise OSError("fixture route release failed")
+
+    monkeypatch.setattr(routing, "release_previous_guarded", failed)
+    resident = retirements.ResidentRetirements(r.root)
+    resident.refresh()
+    assert resident.pending and "route release failed" in resident.error
+    assert grace._path(r.root, r.predecessor).exists() and retirements._records(r.root)
+    assert routing.read_table(r.directory)["previous"] == r.old.to_dict()
+    assert len(r.calls) == int(forced)
+    monkeypatch.setattr(routing, "release_previous_guarded", release)
+    resident.refresh()
+    assert not resident.pending and resident.error is None
+    assert not grace._path(r.root, r.predecessor).exists()
+    assert not retirements._records(r.root)
+    assert routing.read_table(r.directory) == {"active": r.new.to_dict()}
+    assert len(r.calls) == int(forced)
+
+
+@pytest.mark.parametrize("changed", ["active", "previous", "absent"])
+def test_exit_cleanup_respects_guarded_route_comparison(retirement, changed):
+    r = retirement
+    grace.arm(r.root, ready=lambda: True, clock=lambda: 1000.0)
+    r.exited.add(r.old.pid)
+    other = routing.Endpoint("127.0.0.1", 41003, 303, generation=3, process_start_time="3003")
+    table = {"active": r.new.to_dict(), "previous": r.old.to_dict()}
+    if changed == "absent":
+        del table["previous"]
+    else:
+        table[changed] = other.to_dict()
+    r.route_path.write_text(json.dumps(table))
+    if changed == "active":
+        with pytest.raises(RuntimeError, match="fallback release remains pending"):
+            grace.reconcile(r.root, clock=lambda: 1001.0)
+        assert grace._path(r.root, r.predecessor).exists() and retirements._records(r.root)
+    else:
+        grace.reconcile(r.root, clock=lambda: 1001.0)
+        assert not grace._path(r.root, r.predecessor).exists()
+    assert routing.read_table(r.directory) == table and r.calls == []
+
+
 def test_unknown_old_identity_preserves_deadline_and_custody(retirement):
     r = retirement
     grace.arm(r.root, ready=lambda: True, clock=lambda: 1000.0)

@@ -51,6 +51,7 @@ def serve(root: Path, mode: str):
         with state_lock:
             if action == "health":
                 health_calls += 1
+                (root / "health-requested").touch()
                 if mode == "health-timeout":
                     wait_for(root / "release")
                 return {

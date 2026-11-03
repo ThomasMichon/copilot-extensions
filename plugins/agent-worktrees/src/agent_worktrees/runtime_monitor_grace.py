@@ -105,6 +105,17 @@ def arm(root: Path, *, ready, clock=time.time) -> None:
             return
 
 
+def _release_previous(root: Path, grace: dict) -> None:
+    route_root = root / "status-monitor-routing"
+    old = routing.Endpoint.from_dict(grace["old"])
+    released = routing.release_previous_guarded(
+        route_root, expected_active=routing.Endpoint.from_dict(grace["successor"]),
+        expected_previous=old, lock_deadline=time.monotonic() + 5.0,
+    )
+    if not released and (routing.read_table(route_root, strict=True) or {}).get("previous") == old.to_dict():
+        raise RuntimeError("Monitor retirement fallback release remains pending")
+
+
 def _force(root: Path, path: Path, grace: dict, predecessor: dict) -> None:
     from . import status_monitor_cutover as cutover
     from . import status_monitor_recovery_contract as recovery
@@ -144,11 +155,7 @@ def _force(root: Path, path: Path, grace: dict, predecessor: dict) -> None:
                 outcome = diagnostics.terminate_pid_if_identity(
                     predecessor["pid"], predecessor["start"], exit_timeout=5.0,
                 )
-            old = routing.Endpoint.from_dict(grace["old"])
-            routing.release_previous_guarded(
-                route_root, expected_active=successor, expected_previous=old,
-                lock_deadline=time.monotonic() + 5.0,
-            )
+            _release_previous(root, grace)
             if outcome.get("exit_confirmed") is not True:
                 raise RuntimeError("Grace-expired monitor native retirement remains unconfirmed")
             path.unlink()
@@ -174,6 +181,11 @@ def reconcile(root: Path, *, clock=time.time) -> None:
         if exited is None:
             raise RuntimeError("Grace-expired monitor native identity is unavailable")
         if exited is True:
-            path.unlink()
+            inventory = root / "status-monitor-retirements"
+            with retirements.tracking._RecordLock(inventory / "inventory", require_sidecar=True):
+                if dict(retirements._records(root)).get(_record_path) != predecessor or _read(path) != grace:
+                    continue
+                _release_previous(root, grace)
+                path.unlink()
         elif clock() - grace["ready_at"] >= GRACE_SECONDS:
             _force(root, path, grace, predecessor)
