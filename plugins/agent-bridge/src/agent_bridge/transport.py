@@ -641,7 +641,7 @@ async def resolve_local_launch(
                 target.cwd = work_dir
     # Assemble once after plugin preparation; envelope arguments are not an argv suffix.
     args = _append_local_launch_arguments(
-        cmd, ["--acp", "--stdio", "--no-auto-update", *native_args],
+        cmd, ["--acp", "--stdio", *native_args],
         record_path=record_path,
     )
     log.info(
@@ -768,14 +768,14 @@ def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
             binstub_args = [
                 target.project, "--json", "--worktree-id", target.worktree_id,
                 "--no-mux", "--no-update", "--no-resume",
-                "--", "--acp", "--stdio", "--no-auto-update",
+                "--", "--acp", "--stdio",
             ]
             if target.native_resume_id:
                 binstub_args[2:2] = ["--native-resume-session", target.native_resume_id]
         else:
             binstub_args = [
                 target.project, "--json", "--new", "--no-mux", "--no-update",
-                "--", "--acp", "--stdio", "--no-auto-update",
+                "--", "--acp", "--stdio",
             ]
         if target.copilot_args:
             binstub_args.extend(target.copilot_args)
@@ -848,7 +848,7 @@ def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
         script = f"$ErrorActionPreference = 'Stop'; Set-Location -LiteralPath {quote(target.cwd)}; "
         for key, value in target.env.items():
             script += f"$env:{key} = {quote(value)}; "
-        argv = [copilot, "--acp", "--stdio", "--no-auto-update", *target.copilot_args]
+        argv = [copilot, "--acp", "--stdio", *target.copilot_args]
         script += "& " + " ".join(quote(arg) for arg in argv) + "; exit $LASTEXITCODE"
         encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
         exe = "pwsh" if shell == "pwsh" else "powershell"
@@ -857,7 +857,7 @@ def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     if target.env:
         for k, v in target.env.items():
             parts.append(f"export {k}={shlex.quote(v)}")
-    copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio --no-auto-update"
+    copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio"
     if target.copilot_args:
         copilot_cmd += " " + " ".join(shlex.quote(a) for a in target.copilot_args)
     parts.append(copilot_cmd)

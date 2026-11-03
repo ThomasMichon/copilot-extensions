@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed proposal and implementation PRs against `dev`
 - **Created:** 2026-11-02
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/machine-fleet/README.md` - Existing service authorities; `visions/native-convergence/README.md`
 - **Umbrella issue:** #10149
 
@@ -71,30 +71,30 @@ effort.
 
 ### Phase 1 - Review the control contract
 
-- [ ] Land this proposal through normal review before implementation.
-- [ ] Confirm additive CLI semantics and native delegation, with no new daemon,
+- [x] Land this proposal through normal review before implementation.
+- [x] Confirm additive CLI semantics and native delegation, with no new daemon,
   binary replacement, download implementation or committed adopter-policy edit.
 
 ### Phase 2 - Implement the bounded operator surface
 
-- [ ] Add Agent Machines commands for update-policy/override status, explicit
+- [x] Add Agent Machines commands for update-policy/override status, explicit
   live auto-update on/off, native update delegation, cached-version inventory
   and deliberate one-launch cached-version selection.
-- [ ] Use the native configuration command for writes; refuse unsupported older
+- [x] Use the native configuration command for writes; refuse unsupported older
   configuration commands with actionable update guidance rather than editing
   malformed or unknown settings documents.
-- [ ] Make clearing stale environment overrides explicit. Report inherited
+- [x] Make clearing stale environment overrides explicit. Report inherited
   overrides and partial outcomes honestly; a child cannot change existing parents.
-- [ ] Remove Bridge's unconditional ACP auto-update opt-out while preserving
+- [x] Remove Bridge's unconditional ACP auto-update opt-out while preserving
   explicit caller flags and isolated preparation/test behavior.
-- [ ] Document explicit propagation over existing selected SSH/local transports,
+- [x] Document explicit propagation over existing selected SSH/local transports,
   retaining per-target outcomes rather than introducing a second fleet registry.
-- [ ] Keep exact uncached-version acquisition with native `/downgrade`; cached
+- [x] Keep exact uncached-version acquisition with native `/downgrade`; cached
   launch must reject missing, malformed or unsafe selections before execution.
 
 ### Phase 3 - Qualify and publish
 
-- [ ] Add focused policy, command, cache-selection and ACP launch regressions.
+- [x] Add focused policy, command, cache-selection and ACP launch regressions.
 - [ ] Complete documentation and contract-impact review, changefiles and the
   normal implementation PR/release flow.
 - [ ] Record authorized installed acceptance, or transfer an explicitly held
@@ -103,19 +103,19 @@ effort.
 
 ## Validation Plan
 
-- [ ] Native configuration delegation preserves unrelated settings and refuses
+- [x] Native configuration delegation preserves unrelated settings and refuses
   unsupported or failed operations without a success-shaped fallback.
-- [ ] Read-only status distinguishes live preferences, inherited/persistent
+- [x] Read-only status distinguishes live preferences, inherited/persistent
   overrides, bundled-version queries and cached packages.
-- [ ] Preview performs no mutation; explicit application changes only the
+- [x] Preview performs no mutation; explicit application changes only the
   approved user preference/overrides and reports any incomplete effect.
-- [ ] Cached launch validates version syntax and ordinary cache paths, preserves
+- [x] Cached launch validates version syntax and ordinary cache paths, preserves
   explicit version intent, and never downloads or substitutes another version.
-- [ ] Native update uses the existing updater and effective channel unless the
+- [x] Native update uses the existing updater and effective channel unless the
   operator explicitly selects another supported channel.
-- [ ] Local and remote ACP assembly no longer injects the opt-out; explicit
+- [x] Local and remote ACP assembly no longer injects the opt-out; explicit
   caller opt-outs and isolated acquisition/test controls remain intact.
-- [ ] The additive command surface and generic propagation procedure document
+- [x] The additive command surface and generic propagation procedure document
   old-runtime refusal, provider-first rollout and current-parent limitations.
 - [ ] Required scoped tests and repository contracts pass; reviewed release
   and actual authorized acceptance are recorded separately.
@@ -134,3 +134,26 @@ global version pin. Deliberate cached-version launch is explicit per invocation.
 - Traced the distinct native download and cached-package activation controls.
 - Captured the requested live-control boundary and operator choices; no portable
   implementation is claimed before proposal review.
+
+### 2026-11-02 - Proposal accepted
+
+- Proposal PR #10152 merged after a fresh approving review and required checks.
+- Preserved concurrent effort-index updates while resolving the proposal rebase.
+- Pulled the managed source worktree forward before starting implementation.
+
+### 2026-11-03 - Implementation qualification
+
+- Implemented the additive native controls and focused operator skill. Real
+  isolated native on/off/on writes retained unrelated settings; native cache
+  inspection also recognizes a CLI architecture different from its Python host.
+- Qualified 31 control regressions and 179 ACP/native-shell regressions. The
+  independent workspace-owner process passed another 8 cases with 3 opt-in skips.
+  Earlier aggregate Windows disposal failures remain tracked in #10225; the
+  successful independent run also completed sandbox and process cleanup.
+- Removed unconditional ACP suppression without changing explicit caller flags
+  or isolated preparation. Windows explicit-backend setup now avoids unused
+  default discovery, matching the existing POSIX selection order. Its real-shell
+  fixture keeps legacy-shape rejection and envelope acceptance in separate
+  bounded cases rather than increasing deadlines.
+- Documentation, install-contract, lint and enforced static-type checks passed.
+  Review, promotion and authorized installed acceptance remain separate gates.

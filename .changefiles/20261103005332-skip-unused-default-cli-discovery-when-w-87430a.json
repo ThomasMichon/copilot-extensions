@@ -1,0 +1,9 @@
+{
+  "comment": "Skip unused default CLI discovery when Windows setup has an explicit backend.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

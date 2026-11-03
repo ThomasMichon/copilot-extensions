@@ -43,6 +43,12 @@ requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+Ordinary ACP launches honor Copilot's native live update preference; Bridge does
+not add `--no-auto-update` unconditionally. Explicit caller opt-outs remain
+effective, and isolated acquisition/tests keep their own controls. See
+[live CLI update controls](../agent-machines/docs/copilot-cli.md) for the
+operator workflow; Agent Machines is optional, not a Bridge launch prerequisite.
+
 New-session ACP/CLI preferences are readable and explicitly writable offline
 with `config session-mode`. Operator policy can be global, venue-scoped or
 repository-scoped; missing policy defaults to ACP without a mode-choice prompt.

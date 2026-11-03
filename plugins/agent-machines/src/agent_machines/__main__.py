@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import cli_fleet_update
 from . import cli_git_config
+from . import cli_copilot
 from . import discover as _discover
 from . import identity as _identity
 from . import killswitch_cli
@@ -867,6 +868,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="show each module's captured output (shown by default in a dry-run)",
     )
     cli_git_config.register(sub)
+    cli_copilot.register(sub)
     self_update = sub.add_parser(
         "self-update",
         help="Run or manage unattended self-update tiers.",

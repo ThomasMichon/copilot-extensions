@@ -423,7 +423,7 @@ function Invoke-CopilotBackend {
         --invoke --record $LaunchSeedRecord --seed-id $LaunchSeedId @attemptArgs -- $Executable @LeadingArgs @CopilotArgs
 }
 
-$copilotCmd = Resolve-CopilotApplication
+$copilotCmd = if ($CopilotPath) { $null } else { Resolve-CopilotApplication }
 # This session's own worktree directory -- captured before launch so the
 # fsmonitor teardown below (in `finally`) targets the exact directory this
 # script's `git`/Copilot invocations may have lazily started a daemon for,

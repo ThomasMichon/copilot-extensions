@@ -1,0 +1,13 @@
+{
+  "comment": "Expose native Copilot CLI live update controls and honor update policy in ordinary ACP launches",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

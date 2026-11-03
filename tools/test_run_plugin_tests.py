@@ -1404,6 +1404,7 @@ def test_bridge_native_and_performance_files_have_independent_groups(tmp_path, m
         "test_auth_runtime.py", "test_live_runtime.py", "test_predecessor_runtime.py",
         "test_relay_adoption.py", "test_runtime_controls.py", "test_runtime_serving.py",
         "test_runtime_transfer.py", "test_startup_imports.py", "test_startup_performance.py",
+        "test_transport_owner_boundary.py",
         "test_worktree_runtime.py",
     }
     assert runner._INDEPENDENT_SUBSUITE_FILES["agent-bridge"] == native
