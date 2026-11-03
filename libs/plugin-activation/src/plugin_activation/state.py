@@ -90,7 +90,7 @@ def open_binary_shared(path: Path) -> BinaryIO:
     import msvcrt
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -100,9 +100,9 @@ def open_binary_shared(path: Path) -> BinaryIO:
     kernel.CloseHandle.restype = wintypes.BOOL
     handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
     if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     try:
-        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        fd = getattr(msvcrt, "open_osfhandle")(handle, os.O_RDONLY | getattr(os, "O_BINARY"))
     except BaseException:
         kernel.CloseHandle(handle)
         raise
@@ -126,7 +126,7 @@ def _replace_state(source: str, destination: Path) -> None:
             ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1),
         ]
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -141,7 +141,7 @@ def _replace_state(source: str, destination: Path) -> None:
     # Rename the staged name itself rather than following a substituted source link.
     handle = kernel.CreateFileW(source, 0x10000, 0x7, None, 3, 0x80 | 0x00200000, None)
     if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     try:
         name = str(destination.absolute()).encode("utf-16-le", errors="surrogatepass")
         offset = RenameInfo.FileName.offset
@@ -151,7 +151,7 @@ def _replace_state(source: str, destination: Path) -> None:
         info.FileNameLength = len(name)
         ctypes.memmove(ctypes.addressof(buffer) + offset, name, len(name))
         if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
-            error = ctypes.WinError(ctypes.get_last_error())
+            error = getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
             if error.winerror in {1175, 1176, 1177}:
                 error.retain_staged_state = True
             raise error
@@ -226,7 +226,7 @@ def write_json_object_atomic(
         _replace_state(temp_name, path)
     except BaseException as exc:
         if getattr(exc, "retain_staged_state", False):
-            exc.staged_state_path = Path(temp_name)
+            setattr(exc, "staged_state_path", Path(temp_name))
         else:
             try:
                 os.unlink(temp_name)

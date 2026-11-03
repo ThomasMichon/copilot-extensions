@@ -134,6 +134,8 @@ No alternate fleet schema or implicit resource enrollment is introduced.
 | `code_model` | String; `clone`; native restricted validation applies |
 | `host_workspace_path`, `host_home_path`, `home_folder` | String/null; null; only trusted image-backed fleets; home pair required |
 | `systemd_capable` | Strict boolean false; only trusted image-backed fleets |
+| `driver` | Lowercase driver name (`[a-z0-9][a-z0-9._-]{0,63}`)/null; null = built-in Docker; `docker` refused; trusted, internally lifecycle-owned fleets only; see [runtime drivers](runtime-drivers.md) |
+| `driver_options` | JSON-serializable mapping; empty; requires `driver`; forwarded verbatim to every driver call, never secret; merges recursively across tiers like any mapping |
 
 Host source paths retain their declaring-source ownership; remote paths and
 commands are not host paths. `devcontainer_config` remains relative to
@@ -143,3 +145,8 @@ receipts, installed generations or evidence into portable preferences.
 Restricted network/resource/mount/environment validation, inference admission,
 installation-cell ownership and lifecycle custody veto composed values exactly
 as they veto one-file configuration.
+Driver validation also runs on the composed fleet: a `driver` fleet whose
+composed values still carry a Docker provisioning key (`repo`,
+`devcontainer_path`, `devcontainer_config`, `image`, network/resource keys,
+host mounts, `systemd_capable`, `native_inference`, `dispatch_only`) is refused,
+whichever tier contributed it.

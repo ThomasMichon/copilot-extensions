@@ -2,6 +2,15 @@
 
 [Configuration reference](docs/configuration.md)
 
+Enabling this plugin exposes its guidance and commands, not its runtime.
+Automatic bootstrap, install/update participation and ordinary command
+provisioning require `"enabled": true` in the owning configuration. Without
+opt-in, readiness is `configuration-empty` and no runtime, service or KeePassXC
+installation is needed. Invalid configuration is a failure, not inactivity.
+Repository and qualified bound-knowledge `.agent-vault.json` files use the
+existing configuration-layer owner; standalone users can opt in through native
+machine configuration without Worktrees. See the [activation contract](docs/configuration.md#runtime-activation).
+
 Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
 generated resolvers and service launchers. Configuration, authentication,
 `run/`, `logs/`, `core/`, `cache/` and unknown files are retained by default.
@@ -45,7 +54,11 @@ while that work is pending. Healthy, cell-scoped and killswitch-paused hooks
 remain no-ops; no-self-provision and pinned reads explicitly defer publication.
 Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
-no-op; the payload command still supports true Python-free genesis. Cold
+no-op. Activation reads use the payload's bundled configuration SDK and the
+selected completed runtime interpreter when available, retaining ambient
+Python discovery for cold payloads. The canonical installation-context
+bootstrap keeps its independent platform prerequisites (currently Python
+on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock
 legacy Bash/macOS. The independent session-guidance writer is unchanged.
 Explicit installer entry points remain separate, unadopted callers.
@@ -56,7 +69,13 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
 ## Setup in one pass
 
 1. **Enable the plugin payload** through Copilot's plugin mechanism (or work from a local checkout of this repo).
-2. **Install or stamp the runtime.** The session-start bootstrap queues a publication-only `stamp` when the runtime is missing; the stamped binstub queues full provisioning on first use. Neither action runs its installer in the hook/calling command. To use the separate explicit management entry point from a checkout:
+2. **Opt in, then install or stamp the runtime.** Add `{"enabled": true}` to
+   `.agent-vault.json` in the repository or its qualified bound knowledge
+   repository, or merge `"enabled": true` into the native machine configuration.
+   The configured session-start bootstrap queues a publication-only `stamp` when
+   the runtime is missing; the stamped binstub queues full provisioning on first
+   use. Neither action runs its installer in the hook/calling command. To use
+   the separate explicit management entry point from a checkout:
 
    ```powershell
    pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install
@@ -67,7 +86,7 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
    ```
 
    Use `stamp` instead of `install` when you only need the binstub now and want the first real `agent-vault ...` call to build the runtime.
-3. **Install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows).
+3. **For selected KeePass-backed use, install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows). This is not a prerequisite for loading the plugin or inactive readiness.
 4. **Point the CLI at a database** with `KPDB`, a named vault, or a repo-local `.agent-vault.json`.
 
 ## Source-qualified runtimes

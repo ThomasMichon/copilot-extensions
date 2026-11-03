@@ -445,7 +445,10 @@ def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, ru
     assert job["runs-on"] == runner
     assert job["timeout-minutes"] == 15
     assert "strategy" not in job
-    execution = job["steps"][-1]
+    execution = next(
+        step for step in job["steps"]
+        if step.get("name") == "Isolated role construction, origins and reuse"
+    )
     assert "--test-file tests/test_python_installer_engine.py" in execution["run"]
     for selector in ("local_role", "local_package", "role_health", "selected_extras"):
         assert selector in execution["run"]

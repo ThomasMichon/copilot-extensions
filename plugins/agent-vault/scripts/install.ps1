@@ -56,6 +56,19 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
+    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
+    $activationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).ProviderPath }
+    $activation = Get-VaultRuntimeActivation -Project $activationProject
+    if ($activation.state -ceq 'configuration-empty') {
+        Write-Output "[SKIP] $($activation.detail)"
+        exit 0
+    }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -771,7 +784,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
+    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
         $source = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"
@@ -904,7 +917,7 @@ function Install-Runtime {
     # `[tool.uv.sources]` fine when installing the main package directly,
     # but the non-uv (bare `pip install`) fallback below ignores that
     # table entirely.
-    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease')) {
+    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease')) {
         $libDir = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $libDir 'pyproject.toml'))) {
             $libDir = Join-Path $PluginDir "..\..\libs\$lib"
@@ -1184,8 +1197,23 @@ function Invoke-Start {
         Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
         exit 1
     }
-    & $LinkPython -m agent_vault start
-    exit $LASTEXITCODE
+    $project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).ProviderPath }
+    $previousDirectory = [IO.Directory]::GetCurrentDirectory()
+    $previousPreference = $ErrorActionPreference
+    Push-Location -LiteralPath $project
+    try {
+        [IO.Directory]::SetCurrentDirectory($project)
+        $ErrorActionPreference = 'Continue'
+        & $LinkPython -m agent_vault start
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+        Pop-Location
+        [IO.Directory]::SetCurrentDirectory($previousDirectory)
+    }
+    exit $code
 }
 
 function Invoke-Stop {

@@ -112,6 +112,25 @@ def test_layered_container_binding_and_security_refusals(layered_container_conte
         load_config(strict=True)
 
 
+def test_layered_container_driver_is_validated_after_composition(layered_container_context):
+    base, knowledge, machine, _ = layered_container_context
+    _write_container_layer(base, {"fleets": {"example": {
+        "driver": "example-driver", "driver_options": {"profile": "base", "nested": {"a": 1}},
+    }}})
+    _write_container_layer(knowledge, {"fleets": {"example": {
+        "driver_options": {"nested": {"b": 2}},
+    }}})
+    selected = load_config(strict=True).fleets["example"]
+    assert selected.driver == "example-driver"
+    assert selected.driver_options == {"profile": "base", "nested": {"a": 1, "b": 2}}
+    # A Docker provisioning key from any tier is refused on the composed fleet.
+    (machine / "containers.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2, "fleets": {"example": {"image": "example/image:1"}},
+    }), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="driver fleets cannot set image"):
+        load_config(strict=True)
+
+
 def test_layered_container_retains_native_nonstrict_and_nullable_contracts(
     layered_container_context,
 ):

@@ -237,6 +237,27 @@ function Invoke-Runtime {
 }
 
 $runtimePython = Resolve-RuntimePython
+if (-not (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {
+    try {
+        . (Join-Path $scriptDir 'runtime-activation.ps1')
+        $activation = Get-VaultRuntimeActivation -Project $project -RuntimeRoot $runtimeRoot -Context $context -Python $runtimePython
+    } catch {
+        [Console]::Error.WriteLine('[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.')
+        exit 3
+    }
+    if ($activation.state -ceq 'configuration-empty') {
+        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installer-readiness') {
+            $activation | ConvertTo-Json -Compress
+            exit 0
+        }
+        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('stop', 'lock')) {
+            $env:AGENT_VAULT_NO_SELFPROVISION = '1'
+        } else {
+            [Console]::Error.WriteLine($activation.detail)
+            exit 2
+        }
+    }
+}
 if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }

@@ -40,6 +40,16 @@ def add_copilot_login_subparser(sub) -> None:
 _CONFIG_PATH = "~/.copilot/config.json"
 
 
+def _run(argv: list[str], *, interactive: bool = False, **kwargs):
+    """Run a Docker-shaped exec, through the runtime driver for driver members."""
+    from .runtime_drivers import run_routed, stream_routed
+
+    if interactive:
+        return subprocess.run(stream_routed(argv), **kwargs)
+    routed = run_routed(argv, input_text=kwargs.get("input"), timeout=kwargs.get("timeout", 30))
+    return routed if routed is not None else subprocess.run(argv, **kwargs)
+
+
 def _read_container_config(container_id: str, user: str) -> str | None:
     """Return the container's current config.json text, or None if absent.
 
@@ -47,7 +57,7 @@ def _read_container_config(container_id: str, user: str) -> str | None:
     treated as "no prior document" (``|| true`` keeps a missing file from
     aborting the surrounding command's own error handling).
     """
-    proc = subprocess.run(
+    proc = _run(
         [
             "docker", "exec", "-u", user, container_id,
             "bash", "-lc", f"cat {_CONFIG_PATH} 2>/dev/null || true",
@@ -80,7 +90,7 @@ def _restore_container_config(
     """
     try:
         if pre_login_snapshot is not None:
-            proc = subprocess.run(
+            proc = _run(
                 [
                     "docker", "exec", "-i", "-u", user, container_id,
                     "bash", "-lc", f"cat > {_CONFIG_PATH}",
@@ -91,7 +101,7 @@ def _restore_container_config(
                 creationflags=no_window_flags(),
             )
         else:
-            proc = subprocess.run(
+            proc = _run(
                 [
                     "docker", "exec", "-u", user, container_id,
                     "bash", "-lc", f"rm -f {_CONFIG_PATH}",
@@ -172,11 +182,12 @@ def cmd_copilot_login(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     try:
-        login_proc = subprocess.run(
+        login_proc = _run(
             [
                 "docker", "exec", "-it", "-u", user, container_id,
                 "copilot", "login", "--device-code", "--host", "https://github.com",
             ],
+            interactive=True,
             creationflags=no_window_flags(),
         )
         if login_proc.returncode != 0:
@@ -185,7 +196,7 @@ def cmd_copilot_login(args: argparse.Namespace) -> int:
                 f"{login_proc.returncode} -- login did not complete"
             )
 
-        read_proc = subprocess.run(
+        read_proc = _run(
             [
                 "docker", "exec", "-u", user, container_id,
                 "bash", "-lc", f"cat {_CONFIG_PATH}",

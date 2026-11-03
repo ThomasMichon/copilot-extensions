@@ -72,6 +72,13 @@ untrusted input must use the validating loader.
 
 ## Explicit source and process-local publication
 
+Manifest **version 2**, selected only by service-policy version 5, additionally
+supports [explicit code-registered local slots](gateway-user-callers.md).
+These have `delivery: "local"` and omit `principal`/`key_source`; they require
+HTTP-only routes, not a fictitious connector identity. `key_sources` may be
+empty for a local-only manifest. Remote slot declarations are unchanged.
+Version 1 and older service-policy schemas still reject these new local forms.
+
 An embedding owner constructs:
 
 ```python

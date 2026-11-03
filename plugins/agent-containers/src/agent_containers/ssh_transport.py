@@ -1,6 +1,8 @@
 """OpenSSH transport for trusted fleet containers.
 
-Docker remains the lifecycle/bootstrap boundary. Agent traffic crosses a real
+Docker -- or a fleet's external runtime driver, whose streaming exec carries
+the ``ProxyCommand`` (see ``runtime_drivers``) -- remains the lifecycle/bootstrap
+boundary. Agent traffic crosses a real
 OpenSSH connection to the container's ``sshd`` in inetd mode. POSIX hosts use a
 direct ``ProxyCommand``; Windows uses a plugin-owned loopback byte broker so the
 Docker CLI can be launched explicitly without a visible console.
@@ -24,6 +26,7 @@ from pathlib import Path
 from agent_procutil import no_window_flags
 from ssh_manager import SSHConfig, build_remote_exec_args
 
+from . import runtime_drivers
 from .config import RUNTIME_DIR
 from .launch_input_cleanup import abandoned_cleanup_script
 from .launch_storage import (
@@ -100,6 +103,9 @@ def _run(
     input_text: str | None = None,
     timeout: float = 30.0,
 ) -> subprocess.CompletedProcess:
+    routed = runtime_drivers.run_routed(args, input_text=input_text, timeout=timeout)
+    if routed is not None:
+        return routed
     try:
         if input_text is None:
             return subprocess.run(
@@ -180,6 +186,9 @@ def _ensure_host_key() -> tuple[Path, str]:
 
 
 def _container_id(container: str) -> str:
+    route = runtime_drivers.owner_of(container)
+    if route is not None:
+        return route.driver.inspect(route.name, instance_id=route.instance_id)["Id"]
     inspected = _run(["docker", "inspect", "--format", "{{.Id}}", container])
     container_id = inspected.stdout.strip()
     if inspected.returncode != 0 or not re.fullmatch(
@@ -306,6 +315,16 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
         container_id = _container_id(container)
         alias = f"agent-container-{container}-{container_id[:12]}"
         proxy_port: int | None = None
+        proxy_argv = runtime_drivers.stream_routed([
+            "docker", "exec", "-i", "-u", "root", container,
+            "/usr/sbin/sshd", "-i", "-e", "-o", "GatewayPorts=no",
+        ])
+        driven = proxy_argv[0] != "docker"
+        if _is_windows() and driven:
+            raise RuntimeError(
+                "The SSH transport through a runtime driver is not supported "
+                "on Windows hosts"
+            )
         if _is_windows():
             from .docker_proxy import ensure_broker
 
@@ -334,6 +353,8 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
             f'    UserKnownHostsFile "{_config_path(known_hosts)}"',
         ])
         proxy_command = (
+            # ssh_config expands %-tokens in ProxyCommand; keep JSON literal.
+            shlex.join(proxy_argv).replace("%", "%%") if driven else
             f"docker exec -i -u root {container} "
             "/usr/sbin/sshd -i -e -o GatewayPorts=no"
         )

@@ -33,6 +33,7 @@ native_genesis = pytest.mark.skipif(
 @pytest.fixture
 def materialized_vault(owning_context):
     payload, installation, project = owning_context
+    (project / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
     repository = Path(__file__).resolve().parents[3]
     shutil.copytree(
         repository / "plugins" / "agent-vault", payload, dirs_exist_ok=True,

@@ -4,7 +4,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, NoReturn, Protocol, TextIO, cast
 
 import pytest
 import yaml
@@ -17,6 +19,20 @@ from plugin_activation import (
     resolver,
     state,
 )
+from plugin_activation._installed_root import _Candidate
+
+
+class _GitProbe(Protocol):
+    def __call__(self, root: Path, *args: str) -> str: ...
+
+
+def _counted_git(
+    original: _GitProbe, calls: list[tuple[Path | str, ...]],
+) -> _GitProbe:
+    def counted(root: Path, *args: str) -> str:
+        calls.append((root, *args))
+        return original(root, *args)
+    return counted
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -117,7 +133,9 @@ def _register_project(
     repos_path.write_text(yaml.safe_dump(repos), encoding="utf-8")
 
 
-def _installed(home: Path, marketplace: str, name: str, *, manifest_name=None) -> Path:
+def _installed(
+    home: Path, marketplace: str, name: str, *, manifest_name: str | None = None,
+) -> Path:
     root = home / ".copilot" / "installed-plugins" / marketplace / name
     _write_json(root / "plugin.json", {"name": manifest_name or name})
     return root.resolve()
@@ -134,7 +152,9 @@ def _prior(source: str = "demo@local") -> ActivePlugin:
     )
 
 
-def test_explicit_project_resolves_repository_only_activation_without_registry_scan(tmp_path, monkeypatch):
+def test_explicit_project_resolves_repository_only_activation_without_registry_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = tmp_path / "home"
     repo = tmp_path / "current"
     root = _installed(home, "market", "customizing-copilot")
@@ -148,7 +168,7 @@ def test_explicit_project_resolves_repository_only_activation_without_registry_s
     real_installed = resolver._installed_root
     visited = []
 
-    def installed(copilot_home, source):
+    def installed(copilot_home: Path, source: str) -> _Candidate:
         visited.append(source)
         return real_installed(copilot_home, source)
 
@@ -162,7 +182,7 @@ def test_explicit_project_resolves_repository_only_activation_without_registry_s
     assert visited == ["customizing-copilot@market"]
 
 
-def test_explicit_project_retains_directory_marketplace_identity_validation(tmp_path):
+def test_explicit_project_retains_directory_marketplace_identity_validation(tmp_path: Path) -> None:
     home = tmp_path / "home"
     repo = tmp_path / "current"
     root = _plugin(repo, "local", "customizing-copilot")
@@ -181,7 +201,9 @@ def test_explicit_project_retains_directory_marketplace_identity_validation(tmp_
 
 
 @pytest.mark.parametrize("source_kind", ["directory", "local"])
-def test_local_manifest_mapping_preserves_registered_source_identity(tmp_path, source_kind):
+def test_local_manifest_mapping_preserves_registered_source_identity(
+    tmp_path: Path, source_kind: str,
+) -> None:
     from plugin_resolve import marketplace_manifest_name, read_repo_settings
 
     home = tmp_path / "home"
@@ -213,7 +235,9 @@ def test_local_manifest_mapping_preserves_registered_source_identity(tmp_path, s
     {"manifestName": ""},
     {"manifestName": False},
 ])
-def test_local_manifest_mapping_refuses_unmapped_wrong_or_invalid_identity(tmp_path, mapping):
+def test_local_manifest_mapping_refuses_unmapped_wrong_or_invalid_identity(
+    tmp_path: Path, mapping: dict[str, object],
+) -> None:
     repo = tmp_path / "current"
     _plugin(repo, "canonical-catalog", "demo")
     path = _settings(repo, "local-alias", "demo")
@@ -232,7 +256,7 @@ def test_local_manifest_mapping_refuses_unmapped_wrong_or_invalid_identity(tmp_p
 @pytest.mark.parametrize("failure", [
     "foreign-plugin", "missing-plugin", "escaping-source", "linked-manifest",
 ])
-def test_mapped_local_catalog_retains_payload_owner_refusals(tmp_path, failure):
+def test_mapped_local_catalog_retains_payload_owner_refusals(tmp_path: Path, failure: str) -> None:
     repo = tmp_path / "current"
     plugin = _plugin(repo, "canonical-catalog", "demo")
     path = _settings(repo, "local-alias", "demo")
@@ -266,7 +290,7 @@ def test_mapped_local_catalog_retains_payload_owner_refusals(tmp_path, failure):
     assert any(f.reason in {"identity-mismatch", "missing-target"} for f in report.findings)
 
 
-def test_local_manifest_mapping_is_checked_per_source_with_a_shared_cache(tmp_path):
+def test_local_manifest_mapping_is_checked_per_source_with_a_shared_cache(tmp_path: Path) -> None:
     repo = tmp_path / "current"
     plugin = _plugin(repo, "canonical-catalog", "demo")
     _write_json(repo / ".github" / "copilot" / "settings.json", {
@@ -289,7 +313,7 @@ def test_local_manifest_mapping_is_checked_per_source_with_a_shared_cache(tmp_pa
     assert "demo@wrong-alias" not in report.active
 
 
-def test_remote_source_cannot_use_manifest_mapping_to_select_a_local_root(tmp_path):
+def test_remote_source_cannot_use_manifest_mapping_to_select_a_local_root(tmp_path: Path) -> None:
     repo = tmp_path / "current"
     _plugin(repo, "canonical-catalog", "demo")
     _write_json(repo / ".github" / "copilot" / "settings.json", {
@@ -310,8 +334,8 @@ def test_remote_source_cannot_use_manifest_mapping_to_select_a_local_root(tmp_pa
 
 @pytest.mark.parametrize("local_override", [False, True])
 def test_explicit_project_false_overrides_global_activation_without_changing_global_scan(
-    tmp_path, local_override,
-):
+    tmp_path: Path, local_override: bool,
+) -> None:
     home = tmp_path / "home"
     repo = tmp_path / "current"
     source = "customizing-copilot@market"
@@ -328,7 +352,7 @@ def test_explicit_project_false_overrides_global_activation_without_changing_glo
     assert scoped.reconcile({source: _prior(source)}) == {}
 
 
-def test_unreadable_project_precedence_does_not_authorize_global_fallback(tmp_path):
+def test_unreadable_project_precedence_does_not_authorize_global_fallback(tmp_path: Path) -> None:
     home = tmp_path / "home"
     repo = tmp_path / "current"
     source = "customizing-copilot@market"
@@ -344,7 +368,7 @@ def test_unreadable_project_precedence_does_not_authorize_global_fallback(tmp_pa
     assert report.reconcile(prior) == prior
 
 
-def test_remote_normalization_for_network_forms():
+def test_remote_normalization_for_network_forms() -> None:
     expected = "network:github.com/example/repo"
     assert normalize_remote("https://github.com/example/repo.git") == expected
     assert normalize_remote("git@github.com:example/repo.git") == expected
@@ -354,7 +378,7 @@ def test_remote_normalization_for_network_forms():
     assert normalize_remote("https://github.com/Example/repo.git") != expected
 
 
-def test_remote_normalization_for_local_paths():
+def test_remote_normalization_for_local_paths() -> None:
     windows = "file:c:\\src\\example\\repo"
     assert normalize_remote(r"C:\Src\Example\repo.GIT") == windows
     assert normalize_remote("file:///C:/Src/Example/repo.git") == windows
@@ -381,18 +405,20 @@ def test_remote_normalization_for_local_paths():
         None,
     ],
 )
-def test_remote_normalization_is_fail_safe(remote):
+def test_remote_normalization_is_fail_safe(remote: str | None) -> None:
+    # Include malformed runtime input outside the typed caller contract.
+    remote = cast(str, remote)
     assert normalize_remote(remote) is None
 
 
-def test_no_settings_or_project_registry_is_absent(tmp_path):
+def test_no_settings_or_project_registry_is_absent(tmp_path: Path) -> None:
     report = resolve_active_plugins(home=tmp_path)
     assert report.authority is ScanAuthority.ABSENT
     assert report.active == {}
     assert report.reconcile({"demo@local": _prior()}) == {}
 
 
-def test_global_local_plugin_is_active(tmp_path):
+def test_global_local_plugin_is_active(tmp_path: Path) -> None:
     plugin = _plugin(tmp_path / ".copilot", "local", "demo")
     _write_json(
         tmp_path / ".copilot" / "settings.json",
@@ -412,14 +438,16 @@ def test_global_local_plugin_is_active(tmp_path):
     )
 
 
-def test_global_only_resolution_does_not_visit_project_registry(tmp_path, monkeypatch):
+def test_global_only_resolution_does_not_visit_project_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": True}},
     )
     installed = _installed(tmp_path, "local", "demo")
 
-    def unrelated_projects(_home):
+    def unrelated_projects(_home: Path) -> NoReturn:
         raise AssertionError("global-only lookup must not verify unrelated projects")
 
     monkeypatch.setattr(resolver, "_verified_project_roots", unrelated_projects)
@@ -429,7 +457,7 @@ def test_global_only_resolution_does_not_visit_project_registry(tmp_path, monkey
     assert report.active["demo@local"].scopes == ("global",)
 
 
-def test_global_only_resolution_cannot_select_a_project_override(tmp_path):
+def test_global_only_resolution_cannot_select_a_project_override(tmp_path: Path) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": True}},
@@ -446,9 +474,9 @@ def test_global_only_resolution_cannot_select_a_project_override(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["active", "disabled", "absent", "indeterminate"])
-def test_filtered_reconciliation_preserves_excluded_plugins(tmp_path, mode):
+def test_filtered_reconciliation_preserves_excluded_plugins(tmp_path: Path, mode: str) -> None:
     if mode != "absent":
-        settings = (
+        settings: dict[str, object] = (
             {"enabledPlugins": {"demo@local": mode == "active"}}
             if mode != "indeterminate"
             else {"enabledPlugins": "invalid"}
@@ -476,7 +504,7 @@ def test_filtered_reconciliation_preserves_excluded_plugins(tmp_path, mode):
         assert reconciled == {"unrelated@local": previous["unrelated@local"]}
 
 
-def test_empty_plugin_filter_preserves_entire_previous_roster(tmp_path):
+def test_empty_plugin_filter_preserves_entire_previous_roster(tmp_path: Path) -> None:
     previous = {"demo@local": _prior()}
     report = resolve_active_plugins(
         home=tmp_path, include_projects=False, plugin_names=()
@@ -488,8 +516,8 @@ def test_empty_plugin_filter_preserves_entire_previous_roster(tmp_path):
 @pytest.mark.parametrize("override", [False, True])
 @pytest.mark.parametrize("malformed_source", ["unrelated@local", "demo@local"])
 def test_filtered_settings_authority_checks_only_selected_plugin_entries(
-    tmp_path, override, malformed_source
-):
+    tmp_path: Path, override: bool, malformed_source: str,
+) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": False}},
@@ -520,7 +548,7 @@ def test_filtered_settings_authority_checks_only_selected_plugin_entries(
     assert unfiltered.authority is ScanAuthority.INDETERMINATE
 
 
-def test_filtered_project_settings_preserve_scoped_authority(tmp_path):
+def test_filtered_project_settings_preserve_scoped_authority(tmp_path: Path) -> None:
     repo = tmp_path / "project"
     _register_project(tmp_path, "project", repo, "https://github.com/example/project.git")
     _write_json(
@@ -538,7 +566,7 @@ def test_filtered_project_settings_preserve_scoped_authority(tmp_path):
     assert not report.findings
 
 
-def test_local_override_disables_base_setting(tmp_path):
+def test_local_override_disables_base_setting(tmp_path: Path) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": True}},
@@ -555,7 +583,7 @@ def test_local_override_disables_base_setting(tmp_path):
 
 
 @pytest.mark.parametrize("value", ["false", 1, None])
-def test_non_boolean_override_is_indeterminate(tmp_path, value):
+def test_non_boolean_override_is_indeterminate(tmp_path: Path, value: object) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": True}},
@@ -571,7 +599,7 @@ def test_non_boolean_override_is_indeterminate(tmp_path, value):
     assert any(f.reason == "invalid-entry" for f in report.findings)
 
 
-def test_malformed_local_override_is_indeterminate(tmp_path):
+def test_malformed_local_override_is_indeterminate(tmp_path: Path) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": True}},
@@ -585,15 +613,17 @@ def test_malformed_local_override_is_indeterminate(tmp_path):
     assert any(f.entry == str(override) and f.status == "indeterminate" for f in report.findings)
 
 
-def test_unreadable_global_settings_is_indeterminate(tmp_path, monkeypatch):
+def test_unreadable_global_settings_is_indeterminate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = tmp_path / ".copilot" / "settings.json"
     _write_json(settings, {"enabledPlugins": {"demo@local": True}})
     original = state._open_state_text
 
-    def denied(path: Path, *args, **kwargs):
+    def denied(path: Path) -> TextIO:
         if path == settings:
             raise PermissionError("denied")
-        return original(path, *args, **kwargs)
+        return original(path)
 
     monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
@@ -601,7 +631,7 @@ def test_unreadable_global_settings_is_indeterminate(tmp_path, monkeypatch):
     assert report.reconcile({"demo@local": _prior()})
 
 
-def test_registered_project_plugin_is_active(tmp_path):
+def test_registered_project_plugin_is_active(tmp_path: Path) -> None:
     repo = tmp_path / "src" / "demo-repo"
     remote = "https://github.com/example/demo-repo.git"
     _register_project(tmp_path, "demo-repo", repo, remote)
@@ -613,7 +643,9 @@ def test_registered_project_plugin_is_active(tmp_path):
     assert report.active["demo@local"].scopes == ("project:demo-repo",)
 
 
-def test_shared_marketplace_is_read_once_per_resolve_call(tmp_path, monkeypatch):
+def test_shared_marketplace_is_read_once_per_resolve_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """picker-performance-and-responsiveness Phase 4: two enabled plugins
     naming the SAME marketplace must parse that marketplace's manifest JSON
     only once per `resolve_active_plugins()` call, not once per plugin --
@@ -649,10 +681,12 @@ def test_shared_marketplace_is_read_once_per_resolve_call(tmp_path, monkeypatch)
     read_calls: list[Path] = []
     original_read_text = Path.read_text
 
-    def counting_read_text(path: Path, *args, **kwargs):
+    def counting_read_text(
+        path: Path, encoding: str | None = None, errors: str | None = None,
+    ) -> str:
         if path.name == "marketplace.json":
             read_calls.append(path)
-        return original_read_text(path, *args, **kwargs)
+        return original_read_text(path, encoding=encoding, errors=errors)
 
     monkeypatch.setattr(Path, "read_text", counting_read_text)
 
@@ -672,7 +706,7 @@ def test_shared_marketplace_is_read_once_per_resolve_call(tmp_path, monkeypatch)
     )
 
 
-def test_wrong_registered_remote_cannot_authorize(tmp_path):
+def test_wrong_registered_remote_cannot_authorize(tmp_path: Path) -> None:
     repo = tmp_path / "src" / "demo-repo"
     _register_project(
         tmp_path,
@@ -689,7 +723,7 @@ def test_wrong_registered_remote_cannot_authorize(tmp_path):
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-def test_malformed_registered_remote_is_indeterminate(tmp_path):
+def test_malformed_registered_remote_is_indeterminate(tmp_path: Path) -> None:
     repo = tmp_path / "src" / "demo-repo"
     _register_project(
         tmp_path,
@@ -705,7 +739,7 @@ def test_malformed_registered_remote_is_indeterminate(tmp_path):
     assert any(f.reason == "registry-indeterminate" for f in report.findings)
 
 
-def test_query_qualified_registered_remote_is_indeterminate(tmp_path):
+def test_query_qualified_registered_remote_is_indeterminate(tmp_path: Path) -> None:
     repo = tmp_path / "src" / "demo-repo"
     _register_project(
         tmp_path,
@@ -720,7 +754,9 @@ def test_query_qualified_registered_remote_is_indeterminate(tmp_path):
     assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
 
 
-def test_project_git_timeout_is_indeterminate(tmp_path, monkeypatch):
+def test_project_git_timeout_is_indeterminate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = tmp_path / "src" / "demo-repo"
     _register_project(
         tmp_path,
@@ -729,7 +765,7 @@ def test_project_git_timeout_is_indeterminate(tmp_path, monkeypatch):
         "https://github.com/example/demo-repo.git",
     )
 
-    def timeout(*_args):
+    def timeout(*_args: object) -> NoReturn:
         raise subprocess.TimeoutExpired("git", 10)
 
     monkeypatch.setattr(resolver, "_git", timeout)
@@ -740,7 +776,7 @@ def test_project_git_timeout_is_indeterminate(tmp_path, monkeypatch):
     assert any(f.reason == "registry-indeterminate" for f in report.findings)
 
 
-def test_missing_repos_for_adopted_projects_is_indeterminate(tmp_path):
+def test_missing_repos_for_adopted_projects_is_indeterminate(tmp_path: Path) -> None:
     aw = tmp_path / ".agent-worktrees"
     aw.mkdir()
     (aw / "projects.yaml").write_text(
@@ -752,7 +788,7 @@ def test_missing_repos_for_adopted_projects_is_indeterminate(tmp_path):
     assert any(f.reason == "registry-indeterminate" for f in report.findings)
 
 
-def test_malformed_projects_registry_is_indeterminate(tmp_path):
+def test_malformed_projects_registry_is_indeterminate(tmp_path: Path) -> None:
     aw = tmp_path / ".agent-worktrees"
     aw.mkdir()
     (aw / "projects.yaml").write_text("projects: [", encoding="utf-8")
@@ -761,7 +797,7 @@ def test_malformed_projects_registry_is_indeterminate(tmp_path):
     assert report.reconcile({"demo@local": _prior()})
 
 
-def test_git_environment_is_sanitized(monkeypatch):
+def test_git_environment_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'remote.origin.url=bad'")
     monkeypatch.setenv("GIT_DIR", "bad")
     env = resolver._clean_git_env()
@@ -771,18 +807,20 @@ def test_git_environment_is_sanitized(monkeypatch):
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull
 
 
-def test_git_executable_is_resolved_once_per_process(monkeypatch, tmp_path):
+def test_git_executable_is_resolved_once_per_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """picker-performance-and-responsiveness Phase 4 (remaining item):
     ``_git`` must not rescan ``PATH`` on every call -- a cold Picker boot
     calls it ~17-18 times during project/root discovery alone."""
     resolver._GIT_WHICH_CACHE.clear()
     which_calls = []
 
-    def fake_which(name):
+    def fake_which(name: str) -> str:
         which_calls.append(name)
         return "/usr/bin/git"
 
-    def fake_run(*args, **kwargs):
+    def fake_run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, stdout="ok\n")
 
     monkeypatch.setattr(resolver.shutil, "which", fake_which)
@@ -793,7 +831,7 @@ def test_git_executable_is_resolved_once_per_process(monkeypatch, tmp_path):
     resolver._GIT_WHICH_CACHE.clear()
 
 
-def test_bare_anchor_probe_is_one_combined_git_call(tmp_path):
+def test_bare_anchor_probe_is_one_combined_git_call(tmp_path: Path) -> None:
     """``git_root``'s bare-anchor fallback must fold ``--is-bare-repository``
     and ``--absolute-git-dir`` into a single ``git rev-parse`` call rather
     than two separate subprocess spawns."""
@@ -819,7 +857,7 @@ def test_bare_anchor_probe_is_one_combined_git_call(tmp_path):
     ]
 
 
-def test_bare_anchor_probe_rejects_non_bare_repo_with_one_combined_call(tmp_path):
+def test_bare_anchor_probe_rejects_non_bare_repo_with_one_combined_call(tmp_path: Path) -> None:
     from plugin_activation.bare_anchor import git_root
 
     root = tmp_path / "not-a-bare-anchor"
@@ -837,7 +875,7 @@ def test_bare_anchor_probe_rejects_non_bare_repo_with_one_combined_call(tmp_path
     assert len(calls) == 2  # still just the fallback's one combined probe
 
 
-def test_project_local_root_wins_over_convergent_installed_payload(tmp_path):
+def test_project_local_root_wins_over_convergent_installed_payload(tmp_path: Path) -> None:
     repo = tmp_path / "src" / "demo-repo"
     remote = "https://github.com/example/demo-repo.git"
     _register_project(tmp_path, "demo-repo", repo, remote)
@@ -853,7 +891,7 @@ def test_project_local_root_wins_over_convergent_installed_payload(tmp_path):
     ]
 
 
-def test_mixed_global_installed_and_project_local_roots_are_explicit(tmp_path):
+def test_mixed_global_installed_and_project_local_roots_are_explicit(tmp_path: Path) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": True}},
@@ -876,7 +914,7 @@ def test_mixed_global_installed_and_project_local_roots_are_explicit(tmp_path):
     ]
 
 
-def test_installed_payload_cannot_mask_distinct_local_roots(tmp_path):
+def test_installed_payload_cannot_mask_distinct_local_roots(tmp_path: Path) -> None:
     for name in ("one", "two"):
         repo = tmp_path / "src" / name
         _register_project(
@@ -894,7 +932,7 @@ def test_installed_payload_cannot_mask_distinct_local_roots(tmp_path):
     assert any(f.reason == "root-ambiguous" for f in report.findings)
 
 
-def test_installed_payload_requires_exact_manifest_identity(tmp_path):
+def test_installed_payload_requires_exact_manifest_identity(tmp_path: Path) -> None:
     repo = tmp_path / "src" / "demo-repo"
     remote = "https://github.com/example/demo-repo.git"
     _register_project(tmp_path, "demo-repo", repo, remote)
@@ -908,9 +946,9 @@ def test_installed_payload_requires_exact_manifest_identity(tmp_path):
 
 
 def test_unreadable_installed_payload_is_advisory_when_all_scopes_are_local(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = tmp_path / "src" / "demo-repo"
     remote = "https://github.com/example/demo-repo.git"
     _register_project(tmp_path, "demo-repo", repo, remote)
@@ -920,10 +958,10 @@ def test_unreadable_installed_payload_is_advisory_when_all_scopes_are_local(
     manifest = installed / "plugin.json"
     original = state._open_state_text
 
-    def denied(path: Path, *args, **kwargs):
+    def denied(path: Path) -> TextIO:
         if path == manifest:
             raise PermissionError("denied")
-        return original(path, *args, **kwargs)
+        return original(path)
 
     monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
@@ -938,9 +976,9 @@ def test_unreadable_installed_payload_is_advisory_when_all_scopes_are_local(
 
 
 def test_unreadable_installed_payload_is_indeterminate_when_fallback_is_needed(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@catalog": True}},
@@ -949,10 +987,10 @@ def test_unreadable_installed_payload_is_indeterminate_when_fallback_is_needed(
     manifest = installed / "plugin.json"
     original = state._open_state_text
 
-    def denied(path: Path, *args, **kwargs):
+    def denied(path: Path) -> TextIO:
         if path == manifest:
             raise PermissionError("denied")
-        return original(path, *args, **kwargs)
+        return original(path)
 
     monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
@@ -962,9 +1000,9 @@ def test_unreadable_installed_payload_is_indeterminate_when_fallback_is_needed(
 
 
 def test_installed_payload_does_not_mask_unreadable_local_evidence(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     copilot = tmp_path / ".copilot"
     _plugin(copilot, "local", "demo")
     _write_json(
@@ -980,10 +1018,10 @@ def test_installed_payload_does_not_mask_unreadable_local_evidence(
     manifest = copilot / ".ai" / ".claude-plugin" / "marketplace.json"
     original = state._open_state_text
 
-    def denied(path: Path, *args, **kwargs):
+    def denied(path: Path) -> TextIO:
         if path == manifest:
             raise PermissionError("denied")
-        return original(path, *args, **kwargs)
+        return original(path)
 
     monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
@@ -1005,10 +1043,10 @@ def test_installed_payload_does_not_mask_unreadable_local_evidence(
 )
 @pytest.mark.parametrize("has_installed", [False, True])
 def test_malformed_marketplace_evidence_is_indeterminate(
-    tmp_path,
-    definition,
-    has_installed,
-):
+    tmp_path: Path,
+    definition: dict[str, object],
+    has_installed: bool,
+) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {
@@ -1026,7 +1064,7 @@ def test_malformed_marketplace_evidence_is_indeterminate(
     assert any(f.reason == "invalid-entry" for f in report.findings)
 
 
-def test_remote_marketplace_can_use_exact_installed_payload(tmp_path):
+def test_remote_marketplace_can_use_exact_installed_payload(tmp_path: Path) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@catalog": True}},
@@ -1040,7 +1078,7 @@ def test_remote_marketplace_can_use_exact_installed_payload(tmp_path):
     )
 
 
-def test_disabled_everywhere_does_not_resurrect_installed_payload(tmp_path):
+def test_disabled_everywhere_does_not_resurrect_installed_payload(tmp_path: Path) -> None:
     _write_json(
         tmp_path / ".copilot" / "settings.json",
         {"enabledPlugins": {"demo@local": False}},
@@ -1055,7 +1093,9 @@ def test_disabled_everywhere_does_not_resurrect_installed_payload(tmp_path):
     ("source", "plugin_root"),
     [("../outside/demo", None), ("demo", "../outside")],
 )
-def test_local_marketplace_paths_cannot_escape(tmp_path, source, plugin_root):
+def test_local_marketplace_paths_cannot_escape(
+    tmp_path: Path, source: str, plugin_root: str | None,
+) -> None:
     copilot = tmp_path / ".copilot"
     market = copilot / ".ai"
     outside = copilot / "outside" / "demo"
@@ -1084,7 +1124,7 @@ def test_local_marketplace_paths_cannot_escape(tmp_path, source, plugin_root):
     )
 
 
-def test_local_marketplace_symlink_escape_is_rejected(tmp_path):
+def test_local_marketplace_symlink_escape_is_rejected(tmp_path: Path) -> None:
     copilot = tmp_path / ".copilot"
     market = copilot / ".ai"
     outside = copilot / "outside"
@@ -1114,7 +1154,7 @@ def test_local_marketplace_symlink_escape_is_rejected(tmp_path):
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-def test_duplicate_local_plugin_entries_are_ambiguous(tmp_path):
+def test_duplicate_local_plugin_entries_are_ambiguous(tmp_path: Path) -> None:
     copilot = tmp_path / ".copilot"
     market = copilot / ".ai"
     _write_json(
@@ -1144,7 +1184,9 @@ def test_duplicate_local_plugin_entries_are_ambiguous(tmp_path):
 
 
 @pytest.mark.parametrize("bare", [False, True])
-def test_registered_identity_memo_survives_processes_and_invalidates_config(tmp_path, bare):
+def test_registered_identity_memo_survives_processes_and_invalidates_config(
+    tmp_path: Path, bare: bool,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git", bare=bare)
     root = _plugin(repo, "local", "demo")
@@ -1163,13 +1205,13 @@ print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sys.path))}
 
-    def scan():
+    def scan() -> dict[str, Any]:
         completed = subprocess.run(
             [sys.executable, "-c", program, str(tmp_path)],
             capture_output=True, text=True, check=True, env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        return json.loads(completed.stdout)
+        return cast(dict[str, Any], json.loads(completed.stdout))
 
     cold, warm = scan(), scan()
     assert root.is_dir()
@@ -1183,15 +1225,17 @@ print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
     assert changed["active"] == []
 
 
-def test_registered_identity_memo_keeps_registry_and_settings_live(tmp_path, monkeypatch):
+def test_registered_identity_memo_keeps_registry_and_settings_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
     settings = _settings(repo, "local", "demo")
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     _write_json(settings, {"enabledPlugins": {"demo@local": False}})
     assert resolve_active_plugins(home=tmp_path).active == {}
     assert calls == []
@@ -1205,7 +1249,9 @@ def test_registered_identity_memo_keeps_registry_and_settings_live(tmp_path, mon
 
 
 @pytest.mark.parametrize("indirection", ["include", "includeIf", "worktree"])
-def test_registered_identity_memo_reprobes_indirect_git_config(tmp_path, monkeypatch, indirection):
+def test_registered_identity_memo_reprobes_indirect_git_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indirection: str,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
@@ -1217,13 +1263,15 @@ def test_registered_identity_memo_reprobes_indirect_git_config(tmp_path, monkeyp
         _git(repo, "config", key, str(tmp_path / "optional.gitconfig"))
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     assert calls
 
 
-def test_registered_identity_memo_invalidates_new_worktree_config(tmp_path, monkeypatch):
+def test_registered_identity_memo_invalidates_new_worktree_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
@@ -1231,8 +1279,8 @@ def test_registered_identity_memo_invalidates_new_worktree_config(tmp_path, monk
     _git(repo, "config", "extensions.worktreeConfig", "true")
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     _git(repo, "config", "--worktree", "url.https://github.com/other/.insteadOf", "https://github.com/example/")
     report = resolve_active_plugins(home=tmp_path)
     assert calls
@@ -1240,7 +1288,9 @@ def test_registered_identity_memo_invalidates_new_worktree_config(tmp_path, monk
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-def test_registered_identity_memo_does_not_publish_changed_probe_inputs(tmp_path, monkeypatch):
+def test_registered_identity_memo_does_not_publish_changed_probe_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
@@ -1248,7 +1298,7 @@ def test_registered_identity_memo_does_not_publish_changed_probe_inputs(tmp_path
     original = resolver._git
     calls = []
 
-    def change_after_probe(root, *args):
+    def change_after_probe(root: Path, *args: str) -> str:
         calls.append(args)
         result = original(root, *args)
         if args == ("remote", "get-url", "origin"):
@@ -1264,15 +1314,17 @@ def test_registered_identity_memo_does_not_publish_changed_probe_inputs(tmp_path
 
 
 @pytest.mark.parametrize("entry", ["HEAD", "objects", "refs"])
-def test_registered_identity_memo_reprobes_lost_repository_structure(tmp_path, monkeypatch, entry):
+def test_registered_identity_memo_reprobes_lost_repository_structure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
     _settings(repo, "local", "demo")
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     path = repo / ".git" / entry
     path.rename(path.with_name(entry + ".removed"))
     assert resolve_active_plugins(home=tmp_path).active == {}
@@ -1280,7 +1332,9 @@ def test_registered_identity_memo_reprobes_lost_repository_structure(tmp_path, m
 
 
 @pytest.mark.parametrize("raw", ["not-json", '{"version":1,"verified":[]}', None])
-def test_registered_identity_memo_missing_or_invalid_is_not_replayed(tmp_path, monkeypatch, raw):
+def test_registered_identity_memo_missing_or_invalid_is_not_replayed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str | None,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
@@ -1293,13 +1347,15 @@ def test_registered_identity_memo_missing_or_invalid_is_not_replayed(tmp_path, m
         memo.write_text(raw, encoding="utf-8")
     _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     assert resolve_active_plugins(home=tmp_path).active == {}
     assert calls
 
 
-def test_registered_identity_memo_write_failure_keeps_fresh_probes(tmp_path, monkeypatch, caplog):
+def test_registered_identity_memo_write_failure_keeps_fresh_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
     from plugin_activation import _project_identity
 
     repo = tmp_path / "repo"
@@ -1307,13 +1363,13 @@ def test_registered_identity_memo_write_failure_keeps_fresh_probes(tmp_path, mon
     _plugin(repo, "local", "demo")
     _settings(repo, "local", "demo")
 
-    def denied(*_args, **_kwargs):
+    def denied(*_args: object, **_kwargs: object) -> NoReturn:
         raise PermissionError("test memo publication refusal")
 
     monkeypatch.setattr(_project_identity, "write_json_object_atomic", denied)
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     cold_count = len(calls)
     assert cold_count > 0
@@ -1322,7 +1378,9 @@ def test_registered_identity_memo_write_failure_keeps_fresh_probes(tmp_path, mon
     assert "could not be published" in caplog.text
 
 
-def test_registered_identity_memo_reprobes_linked_gitfile(tmp_path, monkeypatch):
+def test_registered_identity_memo_reprobes_linked_gitfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial")
@@ -1337,8 +1395,8 @@ def test_registered_identity_memo_reprobes_linked_gitfile(tmp_path, monkeypatch)
     _settings(linked, "local", "demo")
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     assert calls
     _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
@@ -1346,7 +1404,9 @@ def test_registered_identity_memo_reprobes_linked_gitfile(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("owner_result", [False, "unavailable"])
-def test_registered_identity_memo_reprobes_when_owner_eligibility_changes(tmp_path, monkeypatch, owner_result):
+def test_registered_identity_memo_reprobes_when_owner_eligibility_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner_result: bool | str,
+) -> None:
     from plugin_activation import _project_identity
 
     repo = tmp_path / "repo"
@@ -1355,21 +1415,23 @@ def test_registered_identity_memo_reprobes_when_owner_eligibility_changes(tmp_pa
     _settings(repo, "local", "demo")
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
 
-    def no_owner_evidence(*_args):
+    def no_owner_evidence(*_args: object) -> bool | str:
         if owner_result == "unavailable":
             raise PermissionError("test ownership query refusal")
         return owner_result
 
     monkeypatch.setattr(_project_identity, "_owned_directory", no_owner_evidence)
     original = resolver._git
-    calls = []
-    monkeypatch.setattr(resolver, "_git", lambda *args: (calls.append(args), original(*args))[1])
+    calls: list[tuple[Path | str, ...]] = []
+    monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     assert calls
 
 
 @pytest.mark.parametrize("memo", ["cold", "warm", "changed"])
-def test_project_identity_memo_unit_work_counts(tmp_path, monkeypatch, memo):
+def test_project_identity_memo_unit_work_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, memo: str,
+) -> None:
     from plugin_activation import _project_roots
 
     monkeypatch.setattr(_project_roots, "_platform_key", lambda: "synthetic")
@@ -1388,12 +1450,12 @@ def test_project_identity_memo_unit_work_counts(tmp_path, monkeypatch, memo):
     monkeypatch.setattr(_project_roots, "identity_inputs", lambda *_: "a" * 64)
     previous = {} if memo == "cold" else {str(root): ("a" if memo == "warm" else "b") * 64}
     monkeypatch.setattr(_project_roots, "read_identities", lambda _: previous)
-    written = []
+    written: list[dict[str, str]] = []
     monkeypatch.setattr(_project_roots, "write_identities", lambda path, value: written.append(value))
     monkeypatch.setattr(resolver, "_git_executable", lambda: "synthetic-git")
     calls = []
 
-    def git(_root, *args):
+    def git(_root: Path, *args: str) -> str:
         calls.append(args)
         return str(root) if args == ("rev-parse", "--show-toplevel") else "https://github.com/example/demo.git"
 
@@ -1409,7 +1471,9 @@ def test_project_identity_memo_unit_work_counts(tmp_path, monkeypatch, memo):
 
 
 @pytest.mark.parametrize("timeout", [False, True])
-def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout):
+def test_project_identity_memo_unit_failed_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timeout: bool,
+) -> None:
     from plugin_activation import _project_roots
 
     monkeypatch.setattr(_project_roots, "_platform_key", lambda: "synthetic")
@@ -1427,11 +1491,11 @@ def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout)
     ))
     monkeypatch.setattr(_project_roots, "identity_inputs", lambda *_: "a" * 64)
     monkeypatch.setattr(_project_roots, "read_identities", lambda _: {str(root): "b" * 64})
-    written = []
+    written: list[dict[str, str]] = []
     monkeypatch.setattr(_project_roots, "write_identities", lambda path, value: written.append(value))
     monkeypatch.setattr(resolver, "_git_executable", lambda: "synthetic-git")
 
-    def refused(*_args):
+    def refused(*_args: object) -> NoReturn:
         if timeout:
             raise subprocess.TimeoutExpired("synthetic-git", 10)
         raise subprocess.CalledProcessError(128, "synthetic-git")
@@ -1448,7 +1512,9 @@ def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout)
 
 
 @pytest.mark.parametrize("rewrite", ["replace", "in-place-restored-mtime"])
-def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypatch, rewrite):
+def test_registered_identity_memo_rejects_a_b_a_config_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rewrite: str,
+) -> None:
     repo = tmp_path / "repo"
     expected = "https://github.com/example/demo.git"
     wrong = "https://github.com/other/demo.git"
@@ -1460,7 +1526,7 @@ def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypat
     initial_time = config.stat().st_mtime_ns
     original = resolver._git
 
-    def transient_match(root, *args):
+    def transient_match(root: Path, *args: str) -> str:
         if args != ("remote", "get-url", "origin"):
             return original(root, *args)
         if rewrite == "replace":
@@ -1483,7 +1549,9 @@ def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypat
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-def _synthetic_identity_input_files(tmp_path, monkeypatch):
+def _synthetic_identity_input_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, Path]:
     from plugin_activation import _project_identity
 
     root = tmp_path / "synthetic-root"
@@ -1494,16 +1562,16 @@ def _synthetic_identity_input_files(tmp_path, monkeypatch):
     executable.write_bytes(b"not executed")
     lstat, read_bytes = Path.lstat, Path.read_bytes
 
-    def synthetic_stat(path, *args, **kwargs):
+    def synthetic_stat(path: Path) -> os.stat_result:
         if path in root.parents:
             return lstat(root.parent)
         if path in (root / "objects", root / "refs"):
             return lstat(root)
         if path in (root / "HEAD", root / "config"):
             return lstat(config)
-        return lstat(path, *args, **kwargs)
+        return lstat(path)
 
-    def synthetic_read(path):
+    def synthetic_read(path: Path) -> bytes:
         if path == root / "HEAD":
             return b"synthetic head input"
         if path == root / "config":
@@ -1518,7 +1586,9 @@ def _synthetic_identity_input_files(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("changed", ["file", "directory", "ancestor"])
-def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch, changed):
+def test_project_identity_memo_unit_a_b_a_write_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
     from plugin_activation import _project_identity
 
     root, config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
@@ -1537,7 +1607,9 @@ def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
-def test_project_identity_memo_unit_rejects_legacy_origin(tmp_path, monkeypatch, legacy_dir):
+def test_project_identity_memo_unit_rejects_legacy_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_dir: str,
+) -> None:
     from plugin_activation import _project_identity
 
     root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
@@ -1548,7 +1620,9 @@ def test_project_identity_memo_unit_rejects_legacy_origin(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize("mutation", ["worktree-config", "gitdir-swap", "root-swap", "ancestor-swap"])
-def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkeypatch, mutation):
+def test_registered_identity_memo_rejects_directory_a_b_a_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     container = tmp_path / "container" if mutation == "ancestor-swap" else tmp_path
     container.mkdir(exist_ok=True)
     repo = container / "repo"
@@ -1574,7 +1648,7 @@ def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkey
     container_mtime = container.stat().st_mtime_ns
     original = resolver._git
 
-    def transient_match(root, *args):
+    def transient_match(root: Path, *args: str) -> str:
         if args != ("remote", "get-url", "origin"):
             return original(root, *args)
         if mutation == "worktree-config":
@@ -1616,7 +1690,9 @@ def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkey
 
 
 @pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
-def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legacy_dir):
+def test_registered_identity_memo_reprobes_changed_legacy_origin(
+    tmp_path: Path, legacy_dir: str,
+) -> None:
     repo = tmp_path / "repo"
     expected = "https://github.com/example/demo.git"
     wrong = "https://github.com/other/demo.git"
@@ -1625,7 +1701,7 @@ def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legac
     legacy = repo / ".git" / legacy_dir / "origin"
     legacy.parent.mkdir(exist_ok=True)
 
-    def set_legacy(url):
+    def set_legacy(url: str) -> None:
         text = f"URL: {url}\nPull: refs/heads/main:refs/heads/main\n" if legacy_dir == "remotes" else f"{url}#main\n"
         legacy.write_text(text, encoding="utf-8")
 
@@ -1643,7 +1719,9 @@ def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legac
     assert resolve_active_plugins(home=tmp_path).active == {}
 
 
-def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
+def test_project_identity_memo_unit_native_write_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from plugin_activation import _project_identity
 
     root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
@@ -1657,7 +1735,7 @@ def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
     after = _project_identity.identity_inputs(root, "expected", str(executable))
     assert before is not None and after is not None and before != after
 
-    def unavailable(_):
+    def unavailable(_: Path) -> NoReturn:
         raise PermissionError("synthetic native change-stamp refusal")
 
     monkeypatch.setattr(_project_identity, "_windows_write_version", unavailable)
@@ -1665,23 +1743,25 @@ def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("failure", ["none", "open", "query", "close"])
-def test_project_identity_memo_unit_windows_handle_cleanup(monkeypatch, failure):
+def test_project_identity_memo_unit_windows_handle_cleanup(
+    monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     from plugin_activation import _project_identity
 
     closed = []
 
-    def open_file(_path):
+    def open_file(_path: Path) -> int:
         if failure == "open":
             raise OSError("synthetic open refusal")
         return 42
 
-    def read_version(handle):
+    def read_version(handle: int) -> tuple[int, ...]:
         assert handle == 42
         if failure == "query":
             raise OSError("synthetic native change-stamp refusal")
         return 5, 7, 123
 
-    def close(handle):
+    def close(handle: int) -> bool:
         closed.append(handle)
         return failure != "close"
 

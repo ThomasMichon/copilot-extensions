@@ -202,7 +202,8 @@
         "libs/plugin-activation"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "lib-plugin-resolve",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 from dropin_registry import Finding, ScanAuthority
@@ -22,7 +23,7 @@ class _SettingsLoad:
     marketplace_origins: dict[str, Path] = field(default_factory=dict)
 
 
-def _load_json_object(path: Path) -> tuple[ScanAuthority, dict, list[Finding]]:
+def _load_json_object(path: Path) -> tuple[ScanAuthority, dict[str, Any], list[Finding]]:
     if not path.exists():
         return ScanAuthority.ABSENT, {}, []
     try:
@@ -55,7 +56,7 @@ def _read_settings(
     plugin_names: tuple[str, ...] | None = None,
 ) -> _SettingsLoad:
     enabled: dict[str, bool] = {}
-    marketplaces: dict[str, dict] = {}
+    marketplaces: dict[str, dict[str, Any]] = {}
     enabled_origins: dict[str, Path] = {}
     marketplace_origins: dict[str, Path] = {}
     findings: list[Finding] = []
@@ -156,7 +157,7 @@ def _user_settings(
     )
 
 
-def _load_yaml_object(path: Path) -> tuple[ScanAuthority, dict, list[Finding]]:
+def _load_yaml_object(path: Path) -> tuple[ScanAuthority, dict[object, Any], list[Finding]]:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

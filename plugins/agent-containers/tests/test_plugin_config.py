@@ -603,7 +603,6 @@ def test_operator_only_values_are_not_attributed_to_the_plugin(tmp_path, layered
 DRIVER_FRAGMENT = """\
     fleets:
       example:
-        image: example:latest
         driver: example-driver
         driver_options:
           endpoint: shipped

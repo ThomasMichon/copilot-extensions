@@ -7,7 +7,8 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** Machine Transport (#10107), followed by Plugin Activation (#10108); both source-only artifacts are reviewed and natively qualified for integration. Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
+- **Current slice:** Plugin Activation (#10108); its source-only artifact and shipped-copy baseline are reviewed and natively qualified for integration. Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10107 and #10108 integration, their explicit YAML checker prerequisites, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. Their source-only worktrees retain completed implementations. Publication remains with the lead. Prior implementation workers are complete.
+- **Delegates:** The lead owns #10108 integration and its explicit YAML checker prerequisite, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. The completed Plugin Resolve source artifact for #10141 awaits lead review, native Linux and consumer qualification before admission. Publication remains with the lead.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -41,6 +42,9 @@ The initial investigation found no MyPy CI gate. `AGENTS.md` and
 `CONTRIBUTING.md` encourage type hints; Ruff `F,E9` is not a type checker.
 The [baseline](baseline.md) records a fixed source snapshot, syntactic annotation
 coverage, progressive checker diagnostics and important limitations.
+The [coverage tracker](coverage.md) records current merged enforcement by shared
+library, plugin, service/manager and tool/support project. Classified paths and
+prepared implementations are kept distinct from merged strict lockdown.
 
 The implementation and PR boundaries are in [rollout](rollout.md). Existing
 owners remain authoritative for dependency seasoning, test-environment
@@ -51,6 +55,12 @@ those systems or authorize installed-runtime rollout.
 ## Request
 
 > Make an effort to enforce 100% type-safety on all copilot-extensions python code, enforced by MyPy. You will need to plan our a way to get there, breaking the work into reasonably-sized PRs, to provide CI-time enforcement and activating projects part by part until we achieve compliance. You can use initial non-strict enforcement initially to get pieces in, and enforce strictness as codebases come closer to compliance and deltas are minimized. You'll want to provide simple local commands that agents run can to pre-validate, so they are not caught off guard by CI.
+
+Additional operator request:
+
+> How are we doing in overall coverage? We should ensure in our effort that we have a coverage tracker that represents plugins, services, and tools, and records as we get each section locked down.
+
+> Yeah let's track both metrics
 
 Confirmed operator responses:
 
@@ -78,6 +88,11 @@ Confirmed operator responses:
 ## Scope Approvals
 
 - The operator authorized planning, normal reviewed implementation PRs, phased non-strict admission, eventual strict compliance and simple local pre-validation.
+- The operator requested an effort-owned coverage tracker representing plugins,
+  services and tools, recording each section's lockdown. Shared libraries and
+  file-weighted accounting remain part of the original all-Python objective.
+- The operator explicitly confirmed tracking both merged strict-project
+  coverage and physical Python-file coverage.
 - The confirmed terminal policy is every first-party file checked strictly, with typed dynamic boundaries and narrow reviewed third-party exceptions. It is not a literal ban on all `Any` expressions.
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
 - Normal PR/CI/review gates remain. Main-controller adoption is limited to the
@@ -105,6 +120,9 @@ rewrite.
 ### Phase 1 - Checker foundation and first admission
 
 - [x] Deliver the typed local front door, reproducible checker preparation, project manifest and complete tracked-Python coverage ledger.
+- [ ] Maintain the [portfolio coverage tracker](coverage.md), reconciling every
+  library/plugin/service/tool project and recording merged lockdowns after
+  each admission rather than counting prepared work as complete.
 - [x] Activate the already-clean small libraries in strict mode and the checker infrastructure's own code/tests; verify actual negative MyPy controls.
 - [x] Add required source-PR static checks using the same front door and project policies; preserve existing unit selection.
 - [x] Land candidate-local static-checking source/controller contracts with frozen-input identity, failure propagation and helper decision qualification.
@@ -137,7 +155,7 @@ rewrite.
 - [x] Strictly admit all canonical Docker Resource Producer source/test modules (#10045).
 - [x] Strictly admit all canonical Single Instance Lease source/test modules (#10084).
 - [x] Strictly admit all canonical Process Telemetry source/test modules with its declared optional-SDK checker environment (#10083).
-- [ ] Strictly admit all canonical Machine Transport source/test modules with its declared YAML checker environment (#10107).
+- [x] Strictly admit all canonical Machine Transport source/test modules with its declared YAML checker environment (#10107).
 - [ ] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
@@ -166,6 +184,9 @@ rewrite.
 ## Validation Plan
 
 - [ ] Unit controls cover manifest validity, complete file classification, additions/renames, safe selection, monotonic activation and dependency impact.
+- [ ] Reconcile tracker rows and file totals with the authoritative manifest
+  and inventory; local proposals and canonical-library locks must not imply
+  complete consumer/copy enforcement.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
@@ -1901,3 +1922,81 @@ composition prerequisites, and review/validation rules.
   Corrected execution ran in that same container; only after diagnosis and
   successful verification were the exact container and volume removed.
   No dependency declaration, runtime code or assertion was changed for this check.
+
+### 2026-11-02 - Machine admission merged; Plugin Activation selected
+
+- #10128 merged as `5fd7172247e789cb14c18867310b3ac90d755560`
+  after exact-head approval, no open review findings and green required CI in
+  [run 41556572650](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41556572650).
+  Managed source synchronization passed. There are now 27 merged strict
+  projects and 41 pending; this Plan and Validation Plan remain active.
+- The final qualification retains the complete canonical Windows/Linux fixtures,
+  all five focused consumer contracts, the actual-container consumer case and
+  the unchanged-budget 3,779-node unit packet. Consumer fixture drift is repaired
+  without runtime behavior changes or weaker routing/ownership assertions.
+- The lead selected #10108. Its reviewed twenty-one-file artifact and Windows/
+  Linux fixtures are already qualified, and all fourteen shipped source files
+  exactly match the artifact's pre-change canonical baseline. Synchronizing that
+  copy, admitting the scope, propagating its nine consumers and qualifying the
+  changed source/test packet inputs remain before normal reviewed publication.
+
+### 2026-11-02 - Plugin Activation admission and consumer qualification
+
+- All twenty-one canonical source/test files pass strict checking on both
+  declared targets. The proposed cohort has 28 strict projects and 40 pending;
+  no independently pending consumer or packaged copy is declared strict.
+  All fourteen packaged source files correspond to the canonical source after
+  the scoped synchronization. The changefile names the library and all nine
+  release consumers, without hand-editing versions.
+- The complete library fixtures preserve the original 105 test names,
+  333 assertion ASTs and 43 parametrizations. Windows passes 207 tests without
+  skips; actual Linux/Python 3.10.21 passes 203 with three native-Windows skips.
+  The surrogate-filename vector is conditionally collected only on Windows.
+- Focused contained consumer checks pass Bridge's 154 tests, Codespaces's 89,
+  Containers's 42, Dispatch's 121, Machines's 116, Worktrees's 117,
+  Customizing Copilot's 58 and Manager's 110. Platform-specific skips remain
+  explicit. Logger's four activation-install closure controls pass; its
+  retained source-reselection controls receive separate native qualification.
+- Bridge's ordering fixtures use a real isolated database and isolate the
+  separate hosting-admission contract; its real renderer checks the managed
+  instruction-copy namespace. Dispatch's unavailable-layer fixture checks
+  the discovery mode that retains both healthy and diagnostically unavailable
+  paths. These repairs retain the real consumer behavior and assertions.
+- The native Logger/Vault fixtures now populate the immutable bootstrap through
+  the assembled payload's retained-helper owner before marking slots complete.
+  POSIX nested venv creation resolves the real interpreter, preventing Python
+  3.10's outer-venv launcher alias from losing its standard library. All thirteen
+  native cases pass on Linux in 215.62 seconds, without skips. The failed
+  container was retained for in-place diagnosis and corrected execution; its
+  exact container and volume were removed only after successful validation.
+  All thirteen Windows cases also pass across six bounded selectors, with
+  120-second native-case limits and the existing 300-second group limits.
+  The broader native installer file is not claimed as a passing suite:
+  its aggregate run exceeded the group limit, while the selected activation
+  closure and complete source-reselection contracts are independently green.
+- The incoming packet-runner change is preserved. Complete current qualification
+  passes all 3,783 source-bound unit nodes with nineteen existing deselections
+  in 287.062 seconds, including the single coverage collection. This admission
+  refreshes only nine changed library source/test input hashes; coverage targets
+  and the 300-second budget are unchanged. The consumer fixture files are not
+  packet inputs.
+- Ruff, install-contract, documentation, module-size, changefile and copy
+  correspondence checks pass. Review, required CI and merge remain before
+  completion of #10108. The independent canonical Plugin Resolve source/test
+  worker is reserved by #10141; its integration and complete qualification
+  remain separately owned. This effort and #9807 stay active.
+
+### 2026-11-02 - Portfolio coverage made explicit
+
+- The operator requested a tracker covering plugins, services and tools and
+  recording each section as it becomes locked down. The linked tracker has
+  one row per declared checker project, grouped into shared libraries,
+  plugins, services/managers and tools/support.
+- The merged snapshot has 27 of 68 strict projects, but only 206 of 7,628
+  physical Python files in those scopes. All paths are classified; the
+  39.7% project count is not a 39.7% code-volume claim. Plugins and services
+  remain independently pending despite their tested shared-library consumers.
+- Plugin Activation and Plugin Resolve are explicitly prepared work, not
+  merged locks. The tracker keeps qualification/issue records and a
+  post-merge update procedure. The effort index now links this canonical
+  scoreboard instead of carrying a stale second count.

@@ -124,6 +124,13 @@ class CallerPolicy:
 
 
 @dataclass(frozen=True)
+class UserCallerPolicy:
+    principal: str
+    slots: tuple[str, ...]
+    methods: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ServiceContext:
     """No mutable JSON or verifier aliases cross this immutable boundary."""
 
@@ -135,6 +142,9 @@ class ServiceContext:
     callers: tuple[CallerPolicy, ...]
     slot_fingerprints: tuple[tuple[str, str], ...]
     caller_fingerprints: tuple[tuple[str, str], ...]
+    user_callers: tuple[UserCallerPolicy, ...] = ()
+    user_trust_digest: str | None = None
+    user_trust_valid_until: int | None = None
 
     def slot(self, name: str) -> ServiceSlot:
         result = next((item for item in self.manifest.slots if item.name == name), None)
@@ -157,6 +167,12 @@ class ServiceContext:
     def caller_fingerprint(self, principal: str) -> str | None:
         return next((digest for caller, digest in self.caller_fingerprints
                      if caller == principal), None)
+
+    def user_caller(self, principal: str) -> UserCallerPolicy:
+        result = next((item for item in self.user_callers if item.principal == principal), None)
+        require(result is not None, "caller-denied")
+        assert result is not None
+        return result
 
 
 def _enrollment(value: object, keys: tuple[ResolvedKey, ...], manifest: GatewayManifest,
@@ -220,6 +236,7 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
         require(root["schema"] == SCHEMA and type(root["version"]) is int
                 and root["version"] in (1, 2, 3, 4), "unsupported-schema")
         manifest = GatewayManifest.load(root["manifest"])
+        require(manifest.version == 1, "unsupported-schema")
         if root["version"] == 4:
             normalized_identity = fields(
                 root["identity"], {"profile", "audience", "trust_valid_until"})
