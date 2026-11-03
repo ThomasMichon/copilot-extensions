@@ -61,8 +61,8 @@ Complete `fleet-manager.gateway-service-policy` **version 5** has exactly:
     },
     "principal_claim": "user_id",
     "required_claims": [
-      {"claim": "realm", "values": ["selected-realm"]},
-      {"claim": "roles", "values": ["gateway-user"]}
+      {"claim": "realm", "values": ["selected-realm"], "shape": "scalar"},
+      {"claim": "roles", "values": ["gateway-user"], "shape": "list"}
     ],
     "mappings": [{"subject": "issuer-owned-user-id", "principal": "operator-a"}],
     "callers": [{
@@ -92,7 +92,18 @@ their connector remains independent.
 
 All required-claim entries must pass. A signed scalar string must equal one
 listed value; a signed unique string list must contain at least one listed
-value. The policy has at most 16 distinct claim requirements, each with 1–64
+value. An optional `shape: "scalar"` or `shape: "list"` first requires that exact
+signed JSON claim type, without coercion or rewriting. Other shape values,
+including null and booleans, refuse. The SDK equivalent is
+`ClaimRequirement(claim, values, shape="scalar")` or `shape="list"`.
+Omitting the field (`shape=None` in the SDK) preserves the original either-shape
+matching and normalized policy/digests, with no added default field.
+Changing an explicit shape is a material user trust-policy change and
+invalidates retained user handles and bound operation permits.
+Publish explicit shapes only after selecting a shape-capable SDK owner;
+earlier version-5 parsers reject this unknown requirement field. Do not remove
+a required shape to work around that refusal.
+The policy has at most 16 distinct claim requirements, each with 1–64
 distinct values; consumed strings are nonempty visible ASCII, at most 256
 characters, and token lists have the same 64-item bound. Nested/boolean/null
 values refuse. Claim names use `[A-Za-z][A-Za-z0-9_.:-]{0,63}`.
