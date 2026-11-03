@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** Single Instance Lease (#10084). Process Telemetry (#10083) is implementing against its prepared optional-dependency checker environment. Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Process Telemetry (#10083), whose source-only artifact and optional-dependency checker environment are ready for integration. Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10084 integration, #10083's checker environment, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. A source-only worktree retains the completed Single Instance Lease implementation; the Process Telemetry worker has resumed after its declared optional-dependency prerequisite was prepared. Publication remains with the lead. Prior implementation workers are complete.
+- **Delegates:** The lead owns #10083 integration and checker environment, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. The Process Telemetry source-only worktree retains its completed implementation and explicit optional-SDK prerequisite. Publication remains with the lead. Prior implementation workers are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -69,6 +69,11 @@ Confirmed operator responses:
   after repeated reviewer-guidance tool failures. Required CI, resolved
   feedback and normal Maintainer/provider gates remain. This is not a
   standing exception for subsequent PRs.
+- `dependency_policy=approve_scoped_exception`: permit only the reviewed
+  `opentelemetry-semantic-conventions==0.66b1` declaration in the OTLP checker
+  lock while the same lock pins its requiring stable SDK to `1.45.1`.
+  Seven-day artifact age, non-yanked/known-timestamp checks and mandatory
+  installation hashes remain. This is not a general prerelease allowance.
 
 ## Scope Approvals
 
@@ -77,8 +82,9 @@ Confirmed operator responses:
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
 - Normal PR/CI/review gates remain. Main-controller adoption is limited to the
   explicitly approved two-step workflow change and job deadline above; no ruleset/CI bypass,
-  pause/resume, dependency-policy relaxation, service restart or installed
-  rollout is authorized.
+  pause/resume, service restart or installed rollout is authorized. The only
+  dependency-policy exception is the exact reviewed prerelease declaration
+  approved above; no age or integrity requirement is relaxed.
 - For #10045's platform verification, the operator explicitly authorized starting
   the existing local Docker Desktop installation and preparing isolated test
   tooling. This is bounded test capacity, not installed plugin rollout, product
@@ -129,7 +135,8 @@ rewrite.
 - [x] Strictly admit all eight canonical Update Telemetry source modules; owning consumer tests remain independently pending (#10043).
 - [x] Strictly admit all canonical Installer Readiness source/test modules (#10044).
 - [x] Strictly admit all canonical Docker Resource Producer source/test modules (#10045).
-- [ ] Strictly admit all canonical Single Instance Lease source/test modules (#10084).
+- [x] Strictly admit all canonical Single Instance Lease source/test modules (#10084).
+- [ ] Strictly admit all canonical Process Telemetry source/test modules with its declared optional-SDK checker environment (#10083).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1741,3 +1748,86 @@ composition prerequisites, and review/validation rules.
   live service takeover or installed runtime rollout changes. No external
   development venue or additional CI lane is required. Review, required CI
   and merge remain open gates for #10084.
+
+### 2026-11-02 - Lease admission merged; Process Telemetry selected
+
+- #10102 merged as `3350afd6c7ca5d75f87812c3eadfc349f2e617ed`
+  after exact-head approval, zero review findings and green required CI in
+  [run 41542391423](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41542391423).
+  Managed source synchronization passed. There are now 25 merged strict
+  projects and 43 pending; this Plan and Validation Plan remain active.
+- The lead selected #10083 and reviewed all sixteen edited source/test files.
+  Independent AST comparison preserves its 31 test names, 47 assertions and
+  thirteen parametrizations. The artifact passes its seventeen-file strict
+  scope on both targets in the declared OTLP checker environment.
+- Its actual Linux/Python 3.10.21 contained run passes all 73 tests with zero
+  skips in 0.20 seconds, explicitly selecting both ordinary and native files.
+  An initial launcher-only collection failure was analyzed in the retained
+  container: this library has no path-injecting conftest, so its import roots
+  and separately named native test file must be supplied explicitly. No source
+  change or fresh container was substituted for that diagnosis.
+- Optional-SDK native verification, consumer/copy/packet qualification,
+  admission and normal publication remain before completing #10083.
+
+### 2026-11-02 - Process Telemetry qualification and scoped declaration policy
+
+- The seventeen-file canonical source/test scope passes strict checking on both
+  targets in its declared optional-SDK environment. All 26 proposed strict
+  projects pass; 42 remain pending, with 7,576 physical files classified.
+  There are no physical copies or source-bound packet inputs/direct nodes to
+  refresh. Release consumers are Bridge, Dispatch and Worktree Manager; their
+  complete checker scopes remain independently pending.
+- The retained Linux/Python 3.10.21 container passed all 73 ordinary/native tests,
+  then both real-SDK and absent-SDK boundary checks. Actual SDK constructors,
+  exporters, protobuf round trips and three-signal acknowledgements execute;
+  only HTTP posting is synthetic, and no new thread is admitted. After the
+  original invocation failure was diagnosed and all corrected checks passed,
+  that exact container and volume were removed with verified receipts.
+- Focused contained Windows consumer runs pass Bridge's 97 tests, Dispatch's
+  29 tests and Manager's 70 tests. The initial Bridge and Manager skips reflect
+  their deliberately absent optional SDK, not platform qualification.
+  A seven-package SDK-only projection of the existing hash lock was installed
+  under test-environment admission through the canonical seasoned installer,
+  preserving each consumer's pytest 9.1.1. The formerly skipped SDK paths then
+  pass all 56 Bridge cases and all 71 Manager observation cases, with zero skips.
+- The declaration audit initially refused the SDK's required
+  `opentelemetry-semantic-conventions==0.66b1` pin solely because it is a
+  prerelease. Both public artifacts were uploaded on October 6 and are
+  non-yanked and seasoned; the stable SDK's version-specific metadata requires
+  that exact pin. The operator approved the bounded declaration exception
+  recorded above rather than weakening the seven-day or installation policies.
+- The audit now recognizes only that exact file/package/version and
+  unconditional same-file SDK pin. Other files, versions, ranges and parent
+  changes remain rejected. Unit controls cover revocation and young, yanked,
+  missing-timestamp and youngest-artifact refusals. The complete existing
+  dependency-audit suite passes 154 tests under containment; the live Python
+  audit passes all 460 declarations. Installer hash enforcement and resolver
+  seasoning are unchanged.
+- Documentation records the checker environment, concrete typed boundaries,
+  scope limits and exact declaration exception. Ruff, install-contract,
+  documentation consistency and diff checks pass. Review, required CI and merge
+  remain before completing #10083.
+- The next independent source-only slices are claimed by #10107 (Machine
+  Transport) and #10108 (Plugin Activation). Both retain their pending level and
+  use the existing seasoned YAML checker lock after their initial missing-stub
+  prerequisite was diagnosed. The lead retains shared metadata and publication.
+
+### 2026-11-02 - Process packet admission reconciled to incoming Dev
+
+- #10115 received exact-head approval with no findings. Its source-unit job
+  correctly refused the changed `tools/dependency_age.py` bytes: incoming Dev
+  had added that tool to the admitted packet after the initial impact snapshot.
+  The completed job log names the stale source input directly; this is neither
+  a flaky test nor permission to bypass the gate.
+- Only that one source digest is refreshed. The current 3,773 nodes, 513 source
+  inputs, 211 coverage targets, nineteen existing deselections and 300-second
+  budget remain unchanged. Complete local qualification passes all 3,773 tests
+  in 282.171 seconds, including the single coverage collection.
+- The PR's impact statement is corrected to describe the new tracked policy
+  input. The updated head requires fresh review and required CI; earlier approval
+  and the initial snapshot's lack of a policy input do not qualify it.
+- The next Machine Transport artifact is independently verified to preserve
+  all 214 test names, 324 assertions and 134 parametrizations. All 763 tests pass
+  with zero skips on actual Linux/Python 3.10.21 in 2.41 seconds, matching its
+  contained Windows result. Plugin Activation independently preserves its 105
+  test names, 333 assertions and 43 parametrizations; integration remains pending.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+from typing import Any, cast
 
 from .buffer import BufferedSink
 from .diagnostic_logs import DiagnosticLog, _utc
@@ -47,17 +48,18 @@ def _validate_percent(template: str) -> None:
         index += 1
 
 
-def _safe_argument(value):
+def _safe_argument(value: object) -> tuple[str | int | float | bool | None, bool]:
     """Retain a failure's context without calling user repr/str or path hooks."""
     kind = type(value)
     if value is None or kind is bool:
-        return value, False
+        return cast("None | bool", value), False
     if kind is str:
-        return value[:512], len(value) > 512
-    if kind is int and -(2**63) <= value < 2**63:
-        return value, False
-    if kind is float and math.isfinite(value):
-        return value, False
+        text = cast(str, value)
+        return text[:512], len(text) > 512
+    if kind is int and -(2**63) <= cast(int, value) < 2**63:
+        return cast(int, value), False
+    if kind is float and math.isfinite(cast(float, value)):
+        return cast(float, value), False
     return "<" + kind.__name__[:128] + ">", True
 
 
@@ -75,7 +77,7 @@ class BufferedDiagnosticLog(logging.Handler):
         self.baseFilename = store.baseFilename
         self.initialized = False
 
-        def initialize():
+        def initialize() -> None:
             try:
                 self.store.maintain(force=True)
             finally:
@@ -106,9 +108,9 @@ class BufferedDiagnosticLog(logging.Handler):
             elif type(args) is dict and len(args) <= 32 and all(
                 type(key) is str and len(key) <= 512 for key in args
             ):
-                prepared = {key: _safe_argument(value) for key, value in args.items()}
-                event["_args"] = {key: value for key, (value, _changed) in prepared.items()}
-                adapted = adapted or any(changed for _value, changed in prepared.values())
+                prepared_mapping = {key: _safe_argument(value) for key, value in args.items()}
+                event["_args"] = {key: value for key, (value, _changed) in prepared_mapping.items()}
+                adapted = adapted or any(changed for _value, changed in prepared_mapping.values())
             else:
                 event["_args"] = []
                 adapted = True
@@ -120,7 +122,7 @@ class BufferedDiagnosticLog(logging.Handler):
                     event[key] = None if changed else value
             if record.exc_info:
                 kind, _error, trace = record.exc_info
-                event["exception_type"] = kind.__name__
+                event["exception_type"] = cast(type[BaseException], kind).__name__
                 frames = []
                 for _ in range(8):
                     if trace is None:
@@ -137,7 +139,7 @@ class BufferedDiagnosticLog(logging.Handler):
             # Let the existing copier count invalid input without formatting it.
             self.writer({"invalid": object()})
 
-    def _consume(self, event: dict) -> None:
+    def _consume(self, event: dict[str, Any]) -> None:
         control = event.get("_control")
         if control:
             self._maintenance(force=control == "startup")
@@ -173,7 +175,7 @@ class BufferedDiagnosticLog(logging.Handler):
         """Request maintenance on this same writer, never on the serving thread."""
         self.writer({"_control": "maintenance"})
 
-    def stats(self) -> dict:
+    def stats(self) -> dict[str, int | str | None]:
         return {**self.writer.stats(), "storage_error": self.store.last_error}
 
     def close(self) -> None:

@@ -6,32 +6,46 @@ import math
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from itertools import count
+from typing import Any, TypedDict, cast
 
 from .emission import TelemetrySink
 
 
+class BufferBounds(TypedDict, total=False):
+    capacity: int
+    max_bytes: int
+    batch_size: int
+    batch_sink: bool
+    stamp_missing_ts: bool
+    on_start: Callable[[], None] | None
+    on_iteration: Callable[[], None] | None
+
+
 class _Counter:
-    def __init__(self):
+    def __init__(self) -> None:
         self._events = count()
         self._reads = count()
         self._reader_lock = threading.Lock()
 
-    def __next__(self):
+    def __next__(self) -> int:
         return next(self._events)
 
-    def read(self):
+    def read(self) -> int:
         # Reading advances the iterator too; subtract those advances rather than
         # depending on the deprecated itertools pickle/copy representation.
         with self._reader_lock:
             return next(self._events) - next(self._reads)
 
 
-def snapshot(event: dict, *, max_bytes: int = 4096, stamp_missing_ts: bool = False) -> dict:
+def snapshot(
+    event: dict[str, Any], *, max_bytes: int = 4096, stamp_missing_ts: bool = False,
+) -> dict[str, Any]:
     """Copy a bounded primitive event without JSON, arbitrary repr or user hooks."""
     remaining = max_bytes
 
-    def copy(value, depth=0):
+    def copy(value: object, depth: int = 0) -> object:
         nonlocal remaining
         remaining -= 32
         if remaining < 0 or depth > 3:
@@ -50,21 +64,21 @@ def snapshot(event: dict, *, max_bytes: int = 4096, stamp_missing_ts: bool = Fal
         if type(value) is list and len(value) <= 32:
             return [copy(item, depth + 1) for item in value]
         if type(value) is dict and len(value) <= 64:
-            result = {}
+            result: dict[str, object] = {}
             for key, item in value.items():
                 if type(key) is not str:
                     raise ValueError("non-string key")
-                result[copy(key, depth + 1)] = copy(item, depth + 1)
+                result[cast(str, copy(key, depth + 1))] = copy(item, depth + 1)
             return result
         raise ValueError("unsupported event value")
 
     if type(event) is not dict:
         raise ValueError("event must be a dict")
-    result = copy(event)
+    result = cast(dict[str, Any], copy(event))
     if stamp_missing_ts is True and "ts" not in result:
         if len(result) >= 64:
             raise ValueError("event limit")
-        result[copy("ts")] = copy(int(time.time() * 1000))
+        result[cast(str, copy("ts"))] = copy(int(time.time() * 1000))
     return result
 
 
@@ -77,11 +91,12 @@ class BufferedSink:
     """
 
     def __init__(
-        self, sink: TelemetrySink, *, capacity: int = 128, max_bytes: int = 4096,
+        self, sink: TelemetrySink | Callable[[list[dict[str, Any]]], None], *,
+        capacity: int = 128, max_bytes: int = 4096,
         batch_size: int = 32, batch_sink: bool = False,
         stamp_missing_ts: bool = False,
-        on_start=None,
-        on_iteration=None,
+        on_start: Callable[[], None] | None = None,
+        on_iteration: Callable[[], None] | None = None,
     ) -> None:
         if not callable(sink):
             raise ValueError("sink must be callable")
@@ -105,7 +120,7 @@ class BufferedSink:
         self._batch_size = batch_size
         self._batch_sink = batch_sink
         self._stamp_missing_ts = stamp_missing_ts
-        self._queue: deque[dict] = deque()
+        self._queue: deque[dict[str, Any]] = deque()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -131,7 +146,7 @@ class BufferedSink:
             self._started = True
         return self
 
-    def __call__(self, event: dict) -> None:
+    def __call__(self, event: dict[str, Any]) -> None:
         if not self._started or self._closed:
             next(self._counts["inactive"])
             return
@@ -193,7 +208,7 @@ class BufferedSink:
                 ]
             if self._batch_sink and batch and not self._closed:
                 try:
-                    self._sink(batch)
+                    cast(Callable[[list[dict[str, Any]]], None], self._sink)(batch)
                 except Exception:
                     for _ in batch:
                         next(self._counts["sink_failed"])
@@ -206,7 +221,7 @@ class BufferedSink:
                     next(self._counts["abandoned"])
                     continue
                 try:
-                    self._sink(event)
+                    cast(TelemetrySink, self._sink)(event)
                 except Exception:
                     next(self._counts["sink_failed"])
                 else:

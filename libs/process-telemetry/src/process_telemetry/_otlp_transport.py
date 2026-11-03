@@ -8,7 +8,11 @@ import re
 import socket
 import time
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING, cast
+from urllib.parse import SplitResult, urlsplit
+
+if TYPE_CHECKING:
+    from _typeshed import ReadableBuffer, WriteableBuffer
 
 
 @dataclass(frozen=True)
@@ -19,7 +23,7 @@ class Reply:
     attempted: bool = False
 
 
-def remaining(deadline):
+def remaining(deadline: float) -> float:
     value = deadline - time.monotonic()
     if value <= 0:
         raise TimeoutError("signal deadline exhausted")
@@ -27,14 +31,14 @@ def remaining(deadline):
 
 
 class _Reader(io.RawIOBase):
-    def __init__(self, sock, deadline):
+    def __init__(self, sock: socket.socket, deadline: float) -> None:
         super().__init__()
         self.sock, self.deadline, self.received = sock, deadline, 0
 
-    def readable(self):
+    def readable(self) -> bool:
         return True
 
-    def readinto(self, buffer):
+    def readinto(self, buffer: WriteableBuffer) -> int:
         self.sock.settimeout(remaining(self.deadline))
         size = self.sock.recv_into(buffer)
         self.received += size
@@ -42,7 +46,7 @@ class _Reader(io.RawIOBase):
             raise ValueError("signal response exceeds wire limit")
         return size
 
-    def close(self):
+    def close(self) -> None:
         try:
             self.sock.close()
         finally:
@@ -50,34 +54,35 @@ class _Reader(io.RawIOBase):
 
 
 class _Socket:
-    def __init__(self, sock, deadline):
+    def __init__(self, sock: socket.socket, deadline: float) -> None:
         self.sock, self.deadline = sock, deadline
 
-    def makefile(self, mode):
+    def makefile(self, mode: str) -> io.BufferedReader:
         # Like socket.makefile, the response must outlive HTTPConnection.close
         # when HTTP/1.0 marks the connection non-reusable after its headers.
         return io.BufferedReader(_Reader(self.sock.dup(), self.deadline))
 
-    def sendall(self, data):
+    def sendall(self, data: ReadableBuffer) -> None:
         self.sock.settimeout(remaining(self.deadline))
         self.sock.sendall(data)
 
-    def close(self):
+    def close(self) -> None:
         self.sock.close()
 
 
 class _Connection(http.client.HTTPConnection):
-    def __init__(self, destination, deadline):
-        super().__init__(destination.hostname, destination.port)
+    def __init__(self, destination: SplitResult, deadline: float) -> None:
+        super().__init__(cast(str, destination.hostname), destination.port)
         self.deadline = deadline
 
-    def connect(self):
+    def connect(self) -> None:
         # Admission already proved a numeric loopback address; never resolve DNS.
         sock = socket.socket(socket.AF_INET6 if ":" in self.host else socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.settimeout(remaining(self.deadline))
             sock.connect((self.host, self.port))
-            self.sock = _Socket(sock, self.deadline)
+            # HTTPConnection consumes this adapter's makefile/sendall/close seam.
+            self.sock = cast(socket.socket, _Socket(sock, self.deadline))
         except BaseException:
             sock.close()
             raise
