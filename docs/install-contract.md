@@ -4198,6 +4198,26 @@ the selected source and actual wheel metadata. This adapter does not select or
 authenticate the source checkout, approve a runtime profile, provision
 third-party materials, publish a delivery, or enable an updater.
 
+`tools/core_release_delivery.py` combines that adapter with the native
+producer in one local candidate operation:
+
+```text
+python tools/core_release_delivery.py --repository <owner/repo> --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --guarded-feed --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
+```
+
+The caller independently selects the committed source and Main head and
+provides materials and the native selection inputs. The command checks
+ancestry, reads the selected commit's release state, and derives its content
+tree through the promotion owner before authenticating the matching source
+Release. It stages the delivery until retained release-input and material
+custody checks have completed, then publishes locally without replacing an
+existing destination. Its JSON result includes an **unattested** candidate
+index and delivery digest; neither the changed index nor its delivery is
+approved by the original Release attestation. This command does not obtain
+materials, authorize a profile, sign, upload, install or activate anything.
+It also accepts the existing `--native-lock` and `--offline-wheel-pool`
+selection modes instead of `--guarded-feed`.
+
 `tools/core_native_delivery.py` connects that candidate producer to the
 existing native resolver and delivery owners:
 

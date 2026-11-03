@@ -3482,6 +3482,13 @@ input index or approve the changed subject.
 discovery and core attestation hand-off into the producer, including missing,
 untrusted, oversized, changed and unsafe inputs. Its release service and
 attestations are controlled fixtures; they do not approve a profile.
+`tools/test_core_release_delivery.py` connects those retained inputs to the
+real native producer using a committed Git fixture. It checks source identity,
+foreign Git selectors, bounded failures, material and release-input custody,
+staged-output integrity, no-clobber publication and CLI argument handling.
+The admitted actor-free `tools/promotion_unit_tests/test_core_release_delivery.py`
+separately covers committed release-state selection and publication ordering
+with substituted Git, intake and producer effects.
 `tools/test_core_native_pool_index.py` injects an unlisted wheel during the
 real offline resolver call and verifies it cannot change the selection; it
 also checks deep Windows pool inputs and bounded, private failure diagnostics.
