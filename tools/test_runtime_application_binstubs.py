@@ -94,6 +94,27 @@ def test_install_transaction_before_start_failure_restores_prior_state(
     assert not (fixture.slot / "install-success.json").exists()
 
 
+def test_install_transaction_verifies_inputs_outside_selector_update(
+    install_transaction, monkeypatch,
+):
+    fixture = install_transaction
+    verified = []
+
+    def unchanged():
+        with engine.runtime._publication_lease(fixture.root, timeout=0):
+            verified.append(True)
+
+    @contextmanager
+    def qualified(*_, **_kwargs):
+        yield engine.runtime, unchanged
+
+    monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert verified
+    assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
+
+
 @pytest.mark.parametrize("serving_committed", [False, True])
 def test_install_transaction_unknown_start_retains_selection_not_last_good(
     install_transaction, monkeypatch, serving_committed,
@@ -307,6 +328,31 @@ def application(tmp_path, monkeypatch, request):
     if getattr(request, "param", None) == "long-asset":
         member = "/".join(["fixture_assets", *["nested-resources" * 2] * 5, "operational.txt"])
         files[member] = b"retained operational asset\n"
+    if getattr(request, "param", None) == "selector-lock":
+        files["fixture_app.py"] = files["fixture_app.py"].replace(
+            b"def cli():\n",
+            (
+                "def cli():\n"
+                "    if '--setup' in sys.argv or '--start' in sys.argv:\n"
+                "        import importlib.util\n"
+                "        root = Path(os.environ['FIXTURE_APP_HOME'])\n"
+                "        path = Path(sys.prefix).parent / 'runtime' / 'versioned_runtime_leases.py'\n"
+                "        spec = importlib.util.spec_from_file_location('fixture_selector', path)\n"
+                "        leases = importlib.util.module_from_spec(spec)\n"
+                "        sys.modules[spec.name] = leases\n"
+                "        spec.loader.exec_module(leases)\n"
+                "        with leases._publication_lease(root, timeout=0):\n"
+                "            with (root / 'callback-selection-checks').open('a') as log:\n"
+                "                log.write(('setup' if '--setup' in sys.argv else 'start') + '\\n')\n"
+                "        if '--start' in sys.argv:\n"
+                "            path = path.with_name('versioned_runtime.py')\n"
+                "            spec = importlib.util.spec_from_file_location('fixture_runtime', path)\n"
+                "            runtime = importlib.util.module_from_spec(spec)\n"
+                "            sys.modules[spec.name] = runtime\n"
+                "            spec.loader.exec_module(runtime)\n"
+                "            runtime.activate(root, Path(sys.prefix).parent.name, link_free=True)\n"
+            ).encode(),
+        )
     if long_repair:
         files["fixture_app.py"] += (
             b"\nif sys.argv[0] == '-c':\n"
@@ -477,6 +523,19 @@ def test_regular_install_runs_setup_publishes_then_starts(application, extension
     assert json.loads(followup.stdout)["args"] == ["--fail", "", "\u03b1", "100% ready!"]
     alias = invoke(globals_root / ("fixture-alias" + extension), ["--fail"], caller, environment)
     assert alias.returncode == 17, alias.stderr
+
+
+@pytest.mark.parametrize("application", ["selector-lock"], indirect=True)
+def test_regular_install_callbacks_can_update_selection_without_parent_lock(application):
+    root, slot, caller, environment = application
+    environment["UV_PYTHON"] = sys.executable
+    result = invoke(slot / ("install.ps1" if os.name == "nt" else "install.sh"),
+                    [], caller, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "callback-selection-checks").read_text().splitlines() == ["setup", "start"]
+    assert (root / "current-version").read_text().strip() == slot.name
+    assert (root / "last-known-good").read_text().strip() == slot.name
+    assert (slot / "install-success.json").is_file()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows legacy path-length behavior")

@@ -125,6 +125,13 @@ last-good and success records are written, not during post-success context exit.
 Direct qualification consumers, including Manager's separate self-install owner,
 retain their existing exit-time check; only this generic transaction owns its
 final verification explicitly.
+Application setup, startup/readiness and construction-input verification run
+outside selector-update locking. Only launcher/selector writes, the final
+success commit and guarded pre-start recovery use brief atomic updates.
+Callbacks may therefore use the existing selector owner without waiting for
+their installer to release a lock. A callback that confirms the same selected
+generation is not a competing winner; the final check accepts the canonical
+LF/CRLF marker forms, while preserving a genuinely different selection.
 Setup and publication failures before startup retain guarded rollback. Once a
 nonempty startup action is invoked, a failure, timeout or lost reply has an
 **unknown** outcome: it may already have admitted work. The installer raises
