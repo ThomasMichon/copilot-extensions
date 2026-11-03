@@ -81,6 +81,11 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
 
 ## What works today
 
+- **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
+  and cached versions, previews/applies live on/off and native update operations,
+  and deliberately launches a cached version without another installer or
+  persistent pin. See [the operator contract](docs/copilot-cli.md) for commands
+  and task-time guidance.
 - **Runtime is standalone.** With absent or false installation-mode policy, the
   CLI installs under `~/.agent-machines` exactly as before and can run without
   `agent-worktrees`; without the sibling registries, discovery simply returns no

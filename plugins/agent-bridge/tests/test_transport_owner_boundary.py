@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -21,6 +21,12 @@ from agent_bridge._peer_launch import ContextRefused
 
 pytestmark = pytest.mark.contract("agent_bridge.transport.workspace_owner")
 PLUGIN = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def admitted_workspace(monkeypatch):
+    """Workspace-owner contracts start after independent hosting admission."""
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
 
 
 @pytest.fixture
@@ -98,7 +104,7 @@ async def test_real_managed_launch_uses_owner_not_bridge_interpreter(installed_o
              "VIRTUAL_ENV": "/caller/venv", "AGENT_HOME": "/caller/registry"},
     )
     args, cwd, environment = await transport.resolve_local_launch(target)
-    assert args == ["fixture-copilot", "--acp", "--stdio", "--no-auto-update"]
+    assert args == ["fixture-copilot", "--acp", "--stdio"]
     assert cwd == str(workspace)
     assert target.cwd == str(workspace)
     assert target.worktree_id == "workspace-a"

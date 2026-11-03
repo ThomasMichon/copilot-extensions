@@ -101,7 +101,7 @@ async def test_resolved_setup_keeps_final_native_arguments_in_envelope(
     assert args[1:index] == command[1:index]
     assert json.loads(args[index]) == {
         "args": [
-            *native, "--acp", "--stdio", "--no-auto-update",
+            *native, "--acp", "--stdio",
             "--allow-all", "--plugin-dir", "prepared path" if prepare else "old",
             "--name", "two words",
         ],
@@ -192,7 +192,7 @@ async def test_complete_worktrees_plan_preserves_final_native_boundary(
     monkeypatch.setattr(venue_plugins, "prepare_local_plugins", barrier)
     args, cwd, env = await transport.resolve_local_launch(target)
     additions = [
-        "--acp", "--stdio", "--no-auto-update", "--allow-all",
+        "--acp", "--stdio", "--allow-all",
         "--plugin-dir", "prepared path" if prepare_plugins else "old", "--name", "two words",
     ]
     assert len(args) == len(command)
@@ -276,13 +276,14 @@ def test_missing_custom_setup_is_not_inspected_or_rewritten(tmp_path):
 @pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell setup consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
 @pytest.mark.parametrize("wrapped", [False, True], ids=["direct", "wrapped"])
+@pytest.mark.parametrize("legacy_shape", [False, True], ids=["envelope", "legacy-append"])
 @pytest.mark.parametrize("prefix, tail", [
     (["--resume=original-head"], []),
     (["--resume=original-head"], ["--", "literal-tail"]),
     (["--resume=original-head", "--name", "--"], ["--", "literal-tail"]),
 ], ids=["resume", "literal-tail", "terminator-as-name"])
 def test_real_setup_consumer_rejects_old_shape_and_preserves_fixed_arguments(
-    tmp_path, monkeypatch, shell, wrapped, prefix, tail,
+    tmp_path, monkeypatch, shell, wrapped, legacy_shape, prefix, tail,
 ):
     executable = shutil.which(shell)
     if executable is None:
@@ -313,17 +314,19 @@ def test_real_setup_consumer_rejects_old_shape_and_preserves_fixed_arguments(
             *command,
         ]
     additions = ["--acp", "--stdio", "--no-auto-update", "--name", "literal ' $value", "--plugin-dir", ""]
-    old = subprocess.run(
-        command + additions, cwd=tmp_path, env=environment,
-        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
-    )
-    assert old.returncode != 0
-    assert "Native argument envelope cannot be combined" in old.stderr
-    assert not old.stdout
+    if legacy_shape:
+        old = subprocess.run(
+            command + additions, cwd=tmp_path, env=environment,
+            capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+        )
+        assert old.returncode != 0
+        assert "Native argument envelope cannot be combined" in old.stderr
+        assert not old.stdout
+        return
 
     target = transport.SpawnTarget(
         project="example", worktree_id="retained-workspace", native_resume_id="original-head",
-        copilot_args=additions[3:],
+        copilot_args=additions[2:],
     )
     monkeypatch.setattr(transport, "_resolve_worktree", AsyncMock(return_value={"launch": {
         "cmd": command, "work_dir": str(tmp_path), "worktree_id": "retained-workspace", "env": environment,
