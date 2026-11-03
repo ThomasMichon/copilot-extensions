@@ -114,7 +114,7 @@ def test_local_only_needs_no_service_identity_key_source_or_enrollment(rsa_keys)
 
 
 @pytest.mark.parametrize("change", [
-    "mapping", "claim", "trust", "caller", "route", "operation", "profile", "expiry",
+    "mapping", "claim", "shape", "trust", "caller", "route", "operation", "profile", "expiry",
 ])
 def test_retained_operation_permit_obeys_current_independent_policy(rsa_keys, change):
     h, _ = configured(rsa_keys[0])
@@ -136,6 +136,8 @@ def test_retained_operation_permit_obeys_current_independent_policy(rsa_keys, ch
             selected["mappings"] = []
         elif change == "claim":
             selected["required_claims"][0]["values"] = ["other-realm"]
+        elif change == "shape":
+            selected["required_claims"][0]["shape"] = "scalar"
         elif change == "trust":
             selected["identity"]["configuration"] = {"snapshot": "changed"}
             trust = IdentityTrust(
@@ -252,10 +254,39 @@ def test_explicit_closed_schema_and_mapping_grant_separation(rsa_keys, change):
     assert h.owner.status().revision is None
 
 
-def test_real_protected_tls_local_route_current_admission_and_mixed_auth(rsa_keys, tmp_path):
+def test_claim_shape_policy_validation_preserves_legacy_normalization(rsa_keys, monkeypatch):
+    h, _ = configured(rsa_keys[0])
+    original_digest = planning.digest
+    observed = []
+
+    def digest(value):
+        if isinstance(value, dict) and "required_claims" in value:
+            observed.append(value["required_claims"])
+        return original_digest(value)
+
+    monkeypatch.setattr(planning, "digest", digest)
+    original = h.owner.reload().snapshot
+    assert observed == [h.document["user_callers"]["required_claims"]]
+    requirement = h.document["user_callers"]["required_claims"][0]
+    for shape in (None, True, 1, [], {}, "", "either"):
+        requirement["shape"] = shape
+        h.document["manifest"]["revision"] += 1
+        with pytest.raises(ServicePolicyError, match="^invalid-claim-shape$"):
+            h.owner.reload()
+        assert h.owner.status().revision == original.revision
+    requirement.pop("shape")
+    current = h.owner.reload().snapshot
+    assert current.context.user_trust_digest == original.context.user_trust_digest
+
+
+@pytest.mark.parametrize("shapes", [False, True])
+def test_real_protected_tls_local_route_current_admission_and_mixed_auth(rsa_keys, tmp_path, shapes):
     async def scenario():
         rig = Rig(tmp_path)
         rig.h.document = user_document(rig.h)
+        if shapes:
+            requirements = rig.h.document["user_callers"]["required_claims"]
+            requirements[0]["shape"], requirements[1]["shape"] = "scalar", "list"
         selected, _ = provider(rsa_keys[0], rig.h)
         owner, current = admission(rig.h)
         received, effects = [], []
@@ -282,6 +313,14 @@ def test_real_protected_tls_local_route_current_admission_and_mixed_auth(rsa_key
             access = token(rsa_keys[0], now=rig.h.clock.value)
             headers = {"Authorization": scheme + access}
             assert headers["Authorization"].endswith(access)
+            if shapes:
+                for claims in ({"realm": ["realm-a"]}, {"roles": "gateway-user"}):
+                    denied = token(rsa_keys[0], now=rig.h.clock.value, claims=claims)
+                    async with rig.session.post(
+                        rig.origin + "/api/run",
+                        headers={"Authorization": scheme + denied}) as response:
+                        assert response.status == 401
+                assert not received and not effects
             for spelling in (scheme, scheme.lower(), scheme.upper()):
                 selected_headers = {"Authorization": spelling + access}
                 async with rig.session.post(
@@ -305,10 +344,21 @@ def test_real_protected_tls_local_route_current_admission_and_mixed_auth(rsa_key
             async with rig.session.post(
                 rig.origin + "/api/run", headers={"Cookie": "synthetic"}) as response:
                 assert response.status == 401
+            if shapes:
+                requirements[0]["shape"] = "list"
+                await rig.update()
+                async with rig.session.post(rig.origin + "/api/run", headers=headers) as response:
+                    assert response.status == 401
+                access = token(
+                    rsa_keys[0], now=rig.h.clock.value, claims={"realm": ["realm-a"]})
+                headers = {"Authorization": scheme + access}
+                async with rig.session.post(rig.origin + "/api/run", headers=headers) as response:
+                    assert response.status == 200
             current[0] = replace(current[0], revision=2, enrollments=())
             async with rig.session.post(rig.origin + "/api/run", headers=headers) as response:
                 assert response.status == 403
-            assert len(effects) == 3 and len(received) == 4 and not owner._issued
+            successes = 3 + int(shapes)
+            assert len(effects) == successes and len(received) == successes + 1 and not owner._issued
             assert not rig.state.channels and not rig.state.tickets
             assert not rig.state.authority._callers
         finally:
