@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import aiohttp
 
 from .komodo_evidence import native_fingerprint
+from .komodo_roles import KomodoRoleProvider
 from .node_journal import NodeJournal
 from .operations import OperationIntent, TargetReceipt
 from .planning import PlanError, canonical, decode, digest, identifier, integer
@@ -92,9 +93,11 @@ class KomodoWorkloadSelection:
         if (type(self.instance) is not ProviderInstance or type(self.binding) is not RoleBinding
                 or self.instance.implementation != "komodo"
                 or self.binding.provider != self.instance.name
-                or self.binding.implementation not in ("container.service", "fleet-manager.gateway")
+                or self.binding.implementation not in KomodoRoleProvider.contract.role_implementations
                 or self.binding.depends_on):
             raise PlanError("Komodo workload requires one exact independently admitted role")
+        if set(self.binding.requires) - set(KomodoRoleProvider.contract.capabilities):
+            raise PlanError("Komodo workload has unsupported provider requirements")
         for value in (self.fleet, self.installation, self.policy_revision,
                       self.controller, self.custody_ref):
             identifier(value, "Komodo workload owner reference")

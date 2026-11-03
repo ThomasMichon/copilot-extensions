@@ -33,7 +33,9 @@ owners must independently authenticate their inputs:
 - Exact `ProviderInstance` and one `RoleBinding`, fleet, installation,
   generation, configuration/artifact references, current policy and expiry.
   Role dependencies must already have been satisfied outside this one-role API;
-  declarations with unresolved dependency references refuse.
+  declarations with unresolved dependency references refuse. Required capabilities
+  must be supported by the selected built-in provider contract; bypassing the
+  pure planner does not permit unsupported requirements to reach execution.
 - Selected controller identity and TLS endpoint, or an independently
   authenticated loopback publication. Remote plaintext, redirects, ambient
   proxy configuration and cookie authentication are disabled.

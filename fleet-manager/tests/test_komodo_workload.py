@@ -414,6 +414,24 @@ def test_projection_stays_inert_and_execution_is_explicit(tmp_path, harness):
             provider.execution_binding(object(), None, role="client", installation="client-a")
 
 
+@pytest.mark.parametrize("supported", [True, False])
+def test_execution_enforces_the_selected_provider_capability_requirements(tmp_path, harness, supported):
+    backend = Backend()
+    with protocol(backend) as endpoint:
+        rig = WorkloadRig(tmp_path, harness, backend, endpoint)
+        binding = replace(
+            rig.selected.binding,
+            requires=("container-role", "named-resource") if supported else ("bootstrap-execution",))
+        if supported:
+            rig.selected = replace(rig.selected, binding=binding)
+            rig.admit_selection()
+            assert rig.run().to_dict()["status"] == "succeeded"
+        else:
+            with pytest.raises(PlanError, match="unsupported provider requirements"):
+                replace(rig.selected, binding=binding)
+            assert not backend.calls and not backend.writes
+
+
 def test_local_oci_image_id_needs_no_registry_selection(tmp_path, harness):
     backend = Backend()
     with protocol(backend) as endpoint:
