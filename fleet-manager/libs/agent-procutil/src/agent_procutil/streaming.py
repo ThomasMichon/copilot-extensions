@@ -190,8 +190,15 @@ class SyncProcessOutput:
         startup_timeout: float | None = None,
         exit_observer: Callable[[], bool] | None = None,
         cleanup_deadline: float | None = None,
+        activity_observer: Callable[[], bool] | None = None,
     ) -> None:
-        """Renew from bytes; optional startup grace ends at the first output."""
+        """Renew from bytes or attested activity, never beyond the absolute cap.
+
+        An optional caller-owned observer returns strictly bool: True only for
+        new completed work. Its errors propagate for caller-owned retirement.
+        Startup grace ends at the first byte or positive activity observation.
+        """
+        last_activity = None
         try:
             if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
                 raise ValueError("process inactivity timeout must be finite and positive")
@@ -208,6 +215,8 @@ class SyncProcessOutput:
             while True:
                 if self._input_errors:
                     raise self._input_errors.pop(0)
+                if activity_observer is not None and deadline is not None and time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(self.process.args, timeout, *self.output())
                 for _ in range(64):
                     try:
                         event = self._pending or self._events.get_nowait()
@@ -222,6 +231,12 @@ class SyncProcessOutput:
                         relay.check()
                 if on_wait is not None:
                     on_wait()
+                if activity_observer is not None:
+                    advanced = activity_observer()
+                    if type(advanced) is not bool:
+                        raise TypeError("process activity observer must return bool")
+                    if advanced:
+                        last_activity = time.monotonic()
                 exited = (
                     exit_observer() if exit_observer is not None
                     else self.process.poll() is not None
@@ -241,12 +256,18 @@ class SyncProcessOutput:
                     has_output = self._has_output
                 if inactivity_start is not None:
                     last_progress = max(last_progress, inactivity_start)
+                if last_activity is not None:
+                    last_progress = max(last_progress, last_activity)
                 if not self._relay_failed:
                     last_progress = max(
                         last_progress,
                         *(relay.last_progress for relay in self._relays.values()),
                     ) if self._relays else last_progress
-                quiet = startup_timeout if not has_output and startup_timeout is not None else timeout
+                quiet = (
+                    startup_timeout
+                    if not has_output and last_activity is None and startup_timeout is not None
+                    else timeout
+                )
                 expires = None if quiet is None else last_progress + quiet
                 if deadline is not None:
                     expires = deadline if expires is None else min(expires, deadline)

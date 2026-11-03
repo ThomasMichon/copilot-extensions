@@ -179,19 +179,19 @@ reviewed admission revision is implemented and qualified.
 
 ### Slice 4 - Qualify the acquisition prerequisite
 
-- [ ] Review the operator-selected consumer proposal below before implementation.
-- [ ] Add opt-in held-Job write activity to the existing finite stream owner,
+- [x] Review the operator-selected consumer proposal below before implementation.
+- [x] Add opt-in held-Job write activity to the existing finite stream owner,
   retaining original output behavior, explicit failures and the absolute budget.
-- [ ] Use it only for Windows installed-payload updates under strict Job custody;
+- [x] Use it only for Windows installed-payload updates under strict Job custody;
   preserve installation activation recovery, retry admission and POSIX behavior.
-- [ ] Qualify useful silent writes, a later stall, read-only work, the absolute
+- [x] Qualify useful silent writes, a later stall, read-only work, the absolute
   ceiling, output parity and exact owned-descendant cleanup with isolated tests.
 - [ ] Land through normal review/release, then qualify a supported bootstrap
   and normal updater before claiming installed adoption or returning to live
   launch/singleton measurements.
 
-The following is the **agent-recommended implementation proposal**, subject to
-the source review gate. Sample strictly increasing completed write-byte
+The following is the **reviewed implementation proposal** from #10178.
+Sample strictly increasing completed write-byte
 accounting from the already-held native containment Job, not a PID lookup,
 filesystem scan or private Copilot staging convention. The optional activity
 callback extends the existing finite observer; it does not create another
@@ -778,3 +778,19 @@ qualification therefore remains an explicit gate, not an assumed workaround.
   admission, to the existing installed-acceptance owner. This source driver
   will not run a concurrent update. That attempt's outcome is unobserved and
   remains separate from the proposed correction.
+
+### 2026-11-03 - Consumer prerequisite plan reviewed
+
+- #10178 merged at `99d8fef514e5cd7c0523e7c4aa05d31b8c58c6bd` after
+  exact-head Copilot approval, no open review threads and green required CI
+  `41585832546`. Pulled forward and re-read the parent and mini-effort gates.
+- Only the proposal-review item is complete. The next source slice implements
+  the optional held-Job activity observer and unchanged absolute acquisition
+  budget, then qualifies its native failure/cleanup controls. No observer code,
+  installed adoption, bootstrap workaround or live qualification is claimed.
+
+### 2026-11-03 - Native acquisition activity
+
+- Implemented the reviewed held-Job write observer without changing quiet/absolute budgets, output defaults or custody; source review and release remain pending.
+- Isolated Windows writer/stall/read-only/absolute/error controls and native output/receipt parity pass; actor-free counter/clock and activation/auth/retry controls remain separate evidence.
+- The registered-origin bootstrap consumer retains its separate absolute 180-second ceiling, not an inactivity clock. It remains in the bootstrap integration inventory; no installed adoption is claimed.

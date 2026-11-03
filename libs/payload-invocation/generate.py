@@ -264,6 +264,11 @@ def load_manifest(path: Path) -> dict[str, object]:
     installer_lifecycle = data.get("installerLifecycle", False)
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
+    runtime_admission = data.get("runtimeAdmissionToolkit", False)
+    if not isinstance(runtime_admission, bool):
+        raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
+    if runtime_admission and installation_context != "required":
+        raise ValueError(f"{path}: runtimeAdmissionToolkit requires installation context")
     if installer_lifecycle and (
         (manifest_version != LEGACY_VERSION and installation_context != "required")
         or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
@@ -304,6 +309,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["catalogBinding"] = catalog_binding
     data["inProcessCatalog"] = in_process_catalog
     data["installerLifecycle"] = installer_lifecycle
+    data["runtimeAdmissionToolkit"] = runtime_admission
     data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
     data["commands"] = commands
@@ -747,7 +753,7 @@ def render(
     return rendered
 
 
-def expected_files(manifest: Path) -> dict[Path, str]:
+def expected_files(manifest: Path) -> dict[Path, str | bytes]:
     data = load_manifest(manifest)
     installer = str(data["installer"])
     protected_paths: set[Path] = set()
@@ -760,7 +766,7 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
         protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    generated: dict[Path, str] = {}
+    generated: dict[Path, str | bytes] = {}
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:
@@ -852,6 +858,20 @@ def expected_files(manifest: Path) -> dict[Path, str]:
                 if asset in generated or asset in protected_paths:
                     raise ValueError(f"{manifest}: generated path collision: {asset}")
                 generated[asset] = source.read_text(encoding="utf-8")
+    if data["runtimeAdmissionToolkit"]:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_payload_runtime_admission", TEMPLATES.parent / "runtime_admission.py",
+        )
+        assert spec and spec.loader
+        toolkit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(toolkit)
+        for relative, content in toolkit.expected_files(REPO).items():
+            path = manifest.parent / "scripts" / "_runtime_admission" / relative
+            if path in generated or path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            generated[path] = content
     return generated
 
 
@@ -865,12 +885,18 @@ def display_path(path: Path) -> str:
 def process_manifest(manifest: Path, *, check: bool) -> list[str]:
     errors: list[str] = []
     for path, expected in expected_files(manifest).items():
-        executable = path.suffix == "" or path.name == "emit-command-catalog.sh"
+        executable = (
+            path.suffix == "" or path.name == "emit-command-catalog.sh"
+            or "_runtime_admission" in path.parts and path.suffix == ".sh"
+        )
         if check:
             try:
-                actual = path.read_text(encoding="utf-8")
+                actual = (
+                    path.read_bytes() if isinstance(expected, bytes)
+                    else path.read_text(encoding="utf-8")
+                )
             except OSError:
-                actual = ""
+                actual = b"" if isinstance(expected, bytes) else ""
             if actual != expected:
                 errors.append(f"{display_path(path)}: generated content is stale")
             if (
@@ -882,7 +908,10 @@ def process_manifest(manifest: Path, *, check: bool) -> list[str]:
                 errors.append(f"{display_path(path)}: POSIX shim is not executable")
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(expected, encoding="utf-8", newline="\n")
+        if isinstance(expected, bytes):
+            path.write_bytes(expected)
+        else:
+            path.write_text(expected, encoding="utf-8", newline="\n")
         if executable:
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         print(f"generated {display_path(path)}")

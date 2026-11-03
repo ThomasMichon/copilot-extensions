@@ -131,6 +131,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
                 "$context = $null\n"
                 "$forwardArgs = @('argument with spaces')\n"
                 "$runtimeRoot = '" + str(root).replace("'", "''") + "'\n"
+                "$payloadRoot = '" + str(manifest.parent).replace("'", "''") + "'\n"
                 + source[start:end]
                 + "\nInvoke-AgentWorktreesRuntime '" + str(python).replace("'", "''") + "'\n",
                 encoding="utf-8",
