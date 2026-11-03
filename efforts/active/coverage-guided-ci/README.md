@@ -155,7 +155,7 @@ order.
 - [x] Re-scope #6783 to metadata, conservative eligible-inventory selection
       and focused qualification; preserve its native prototype separately,
       without shipping it or crediting its unearned acceptance.
-- [ ] Qualify the actual metadata-to-selected-run consumer contract, merge
+- [x] Qualify the actual metadata-to-selected-run consumer contract, merge
       the re-scoped change, and journal the bounded result. Existing
       unrelated Plan and Validation Plan items remain owned and open.
 
@@ -711,7 +711,7 @@ regardless of this effort's local fixes.
 
 ## Validation Plan
 
-- [ ] Coverage-auditability amendment: resolve every acceptance item in the
+- [x] Coverage-auditability amendment: resolve every acceptance item in the
       [focused validation plan](coverage-auditability-selection.md#validation-plan),
       including unknown-test retention, profile isolation and actual selected
       execution/failure. A tag or a nonempty coverage map alone is not proof.
@@ -777,6 +777,42 @@ regardless of this effort's local fixes.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-11-03 - Complete the bounded auditability selection amendment
+
+- #6783 merged to `dev` as `9cc6f56e6a0170d615ee7bb8e7fa7a4cc908da07`
+  after fresh current-head Copilot approval, green required CI and resolved
+  review threads. Its source worktree was finalized through the managed
+  lifecycle; the parent claim settled at rest. Only this amendment's Plan and
+  Validation Plan items are complete.
+- Hosted qualification run
+  [41631632327](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41631632327)
+  exercised source `769481d621ff0975ce6c792cd177e78f3949691b`: Linux
+  **124 passed in 22.99 seconds**; Windows **124 passed in 75.28 seconds**.
+  The packet covers metadata and profile refusal, current-inventory retention,
+  actual ordinary collection through contained selected execution, exact
+  retained/excluded counts, first-touch synthetic fixtures, and a retained-test
+  regression that makes the real command fail. Current-head required CI run
+  [41651429811](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41651429811)
+  passed separately.
+- Review found two genuine correctness gaps: stale timestamp/size-valid Python
+  bytecode and a controller-only TOML import leaking into older test
+  interpreters. Collection and coverage-selected execution now use fresh
+  private cache prefixes with writes disabled; the `python-inprocess/v2`
+  profile refuses older evidence. Regression cases retain the seeded stale
+  cache throughout real execution and exercise missing `tomllib` and
+  `hashlib.file_digest` compatibility. Legacy exact selection stays unchanged.
+- Validation tiers were recorded in #6783: focused unit/regression and actual
+  consumer-contract integration passed in hosted Linux/Windows workers;
+  first-touch compatibility uses fresh synthetic source/venv fixtures. Local
+  lint, install-contract, whitespace and workflow-policy checks passed, with
+  no heavy local suite. Native fleet/CodeSpace qualification, immutable
+  baseline publication and installed rollout were outside this bounded change.
+- #4453 retains the wider campaign and its independent Windows, publication
+  and shadow-consumer obligations. #10209 retains the exact unqualified native
+  prototype and all original enrollment, native and performance gates,
+  including the #6617 prerequisite. No service update, rollout or native
+  acceptance is implied by this selection amendment.
 
 ### 2026-11-03 - Review the auditability amendment before re-scoping
 
