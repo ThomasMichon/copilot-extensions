@@ -57,6 +57,26 @@ def invoke(*args):
     return rc, json.loads(captured.getvalue())
 
 
+def test_closeout_discovery_and_incomplete_requests_use_actual_record_parser(record_fixture, monkeypatch):
+    from agent_worktrees import dispatch_closeout_observation
+
+    monkeypatch.setattr(dispatch_closeout_observation, "observe",
+                        lambda *a: pytest.fail("Incomplete request inspected a checkout"))
+    before = record_fixture[1].read_bytes()
+    prefix = ["--project", "example-project", "record"]
+    with output.capture_json_output() as captured:
+        assert main.main([*prefix, "--describe-closeout-contract", "--json"]) == 0
+    assert json.loads(captured.getvalue())["operations"] == ["observe-finalized"]
+    for args in (
+        ["--describe-closeout-contract", "--closeout-task", "task"],
+        ["--worktree-id", "example-worktree", "--closeout-task", "task"],
+    ):
+        with output.capture_json_output() as captured:
+            assert main.main([*prefix, *args, "--json"]) == 1
+        assert json.loads(captured.getvalue())["ok"] is False
+    assert record_fixture[1].read_bytes() == before
+
+
 @pytest.mark.parametrize("case", [
     "tracked", "untracked", "colliding-id", "foreign-project", "anchor",
     "nested-untracked", "record-race", "symlink-root", "ambiguous-root",

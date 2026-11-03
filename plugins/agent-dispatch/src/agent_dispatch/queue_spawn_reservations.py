@@ -240,6 +240,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 if any(row["state"] in SpawnState.ACTIVE for row in rows):
                     current = next(row for row in rows if row["state"] in SpawnState.ACTIVE)
                     if assigned_pool is None or assigned_pool.reservation_key != current["key"]:
+                        if conn.execute(
+                            "SELECT 1 FROM pool_worker_decline_closeouts WHERE reservation_key=?",
+                            (current["key"],),
+                        ).fetchone():
+                            raise TaskError("declined reservation is still accountable; native retirement pending")
                         raise TaskError("legacy reservation cannot be adopted as a pool claim")
                     require_selected_instance(expected_instance, assigned_pool)
                     if allocation_revision is not None and allocation_revision != current["allocation_revision"]:
@@ -512,6 +517,20 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     allocation_reservation_key = prior["allocation_reservation_key"] or prior["key"]
                 else:
                     carried_execution_machine = None
+            declined = carried_worktree is not None and conn.execute(
+                "SELECT 1 FROM pool_worker_decline_closeouts c"
+                " JOIN spawn_reservations s ON s.key=c.reservation_key"
+                " WHERE s.task_id=? AND s.worktree=? LIMIT 1", (task_id, carried_worktree),
+            ).fetchone()
+            if declined:
+                if task.target_worktree is not None or f"worktree:{carried_worktree}" in task.requires:
+                    raise TaskError("declined finalized workspace remains an unsatisfiable explicit target")
+                carried_worktree = carried_session = None
+                carried_path = carried_host = carried_execution_machine = None
+                worktree_ownership = None
+                conversation_retired = False
+                agent_info = None
+                allocation_reservation_key = key
             if pool_catalog_revision is not None:
                 resolved_task = replace(
                     task, target_worktree=carried_worktree,

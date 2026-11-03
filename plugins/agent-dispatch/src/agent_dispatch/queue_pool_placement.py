@@ -55,6 +55,7 @@ def pool_placement_contract() -> dict[str, object]:
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
         "worker_decline_preparation_versions": [1],
+        "worker_decline_local_closeout_versions": [1],
         "worker_decline_closeout_complete": False,
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
@@ -166,11 +167,19 @@ def migrate_pool_placement(conn: sqlite3.Connection) -> None:
     migrate_pool_startup(conn)
     from .queue_pool_decline import migrate_pool_decline
     migrate_pool_decline(conn)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(task_pool_assignments)")}
+    if "assignment_released" not in columns:
+        conn.execute(
+            "ALTER TABLE task_pool_assignments ADD COLUMN assignment_released INTEGER NOT NULL DEFAULT 0"
+        )
 
 
-def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | None:
+def pool_assignment(
+    conn: sqlite3.Connection, task_id: str, *, include_released: bool = False,
+) -> PoolAssignment | None:
     row = conn.execute(
-        "SELECT * FROM task_pool_assignments WHERE task_id = ?", (task_id,),
+        "SELECT * FROM task_pool_assignments WHERE task_id = ?"
+        + ("" if include_released else " AND assignment_released=0"), (task_id,),
     ).fetchone()
     return PoolAssignment(**{name: row[name] for name in PoolAssignment.__dataclass_fields__}) if row is not None else None
 
@@ -335,7 +344,9 @@ def record_pool_claim(
         " (task_id, registration_id, machine, env, reservation_key, task_generation, catalog_revision)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(task_id) DO UPDATE SET reservation_key = excluded.reservation_key,"
-        " task_generation = excluded.task_generation, catalog_revision = excluded.catalog_revision",
+        " task_generation = excluded.task_generation, catalog_revision = excluded.catalog_revision,"
+        " registration_id=excluded.registration_id, machine=excluded.machine, env=excluded.env,"
+        " assignment_released=0",
         (task.id, *pool.identity, key, task.generation + 1, catalog_revision),
     )
     from .queue_pool_startup import begin_pool_episode

@@ -18,12 +18,33 @@ def add_parsers(sub) -> None:
     selection.add_argument(
         "--cwd", help="Absolute trusted initialization directory (no adoption or resident lookup)",
     )
+    selection.add_argument("--describe-closeout-contract", action="store_true")
+    sp.add_argument("--closeout-task")
+    sp.add_argument("--closeout-reservation")
+    sp.add_argument("--closeout-native")
     sp.add_argument("--json", action="store_true", help="Emit JSON (the default)")
 
 
 def cmd_record(args: argparse.Namespace) -> int:
     """Return exact ground-owned metadata without discovery or mutation."""
     try:
+        closeout = (
+            getattr(args, "closeout_task", None), getattr(args, "closeout_reservation", None),
+            getattr(args, "closeout_native", None),
+        )
+        described = getattr(args, "describe_closeout_contract", False)
+        if described or any(value is not None for value in closeout):
+            from . import dispatch_closeout_observation
+            if described:
+                if any(value is not None for value in closeout):
+                    raise ValueError("Closeout discovery cannot include an observation request")
+                output._json_output(dispatch_closeout_observation.describe_contract())
+                return 0
+            if not getattr(args, "worktree_id", None) or any(value is None for value in closeout):
+                raise ValueError("Closeout observation requires worktree, task, reservation and native IDs")
+            observation = dispatch_closeout_observation.observe(args.worktree_id, *closeout)
+            output._json_output({"ok": True, **observation})
+            return 0
         if getattr(args, "cwd", None) is not None:
             context = read_workspace_record(args.cwd)
             output._json_output({"ok": True, "context": context})
@@ -34,6 +55,9 @@ def cmd_record(args: argparse.Namespace) -> int:
             "ok": False, "worktree": None,
             "error": {"code": exc.code, "message": str(exc)},
         })
+        return 1
+    except (OSError, RuntimeError, ValueError) as exc:
+        output._json_output({"ok": False, "error": str(exc)})
         return 1
     output._json_output({"ok": True, "worktree": worktree})
     return 0

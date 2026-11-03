@@ -68,16 +68,41 @@ It explicitly reports `task_release: false` and `process_retirement: false`.
 Failure is a nonzero exit with structured JSON and diagnostic stderr; an
 unconfirmed outcome retains responsibility, not permission to replay.
 
+## Read-only owner observation
+
+The selected Worktrees runtime also supports
+`record --describe-closeout-contract`, returning the same contract identity
+and version with operation `observe-finalized`. This additive read surface
+does not imply that an older runtime's ordinary `record` response contains
+closeout authority. Discovery never inspects or finalizes a checkout.
+
+Observation uses the explicit project and exact `--worktree-id` together with
+`--closeout-task`, `--closeout-reservation` and `--closeout-native`. Partial or
+mixed discovery/observation requests refuse. The record owner rechecks its
+local execution authority under its existing record lock, actual managed
+checkout, immutable allocation, native head/source, outbound custody and
+foreign-session preservation gates. It then verifies the actual clean
+checkout against the existing finalized snapshot. The observer need not be
+the worker process and never invokes the finalizer. Missing, dirty, changed,
+protected or uninspectable state is not a successful observation.
+
+The reply identifies the project/path, worktree creation nonce, complete
+Dispatch allocation, native head revision and observed finalized checkout.
+It remains a point-in-time read, not a checkout lock held across a remote
+queue transaction, task-release operation or proof that the runner exited.
+Task release belongs to the coordinator's separately fenced transaction;
+physical retirement remains with its existing owner.
+
 ## Remaining integration and validation
 
 This provider expansion does not apply exclusions, requeue a task, retire a
-native runner, supply a coordinator-authorized closeout receipt or change
+native runner or change
 ordinary worker CLI/prompts. A caller's copied JSON is not authoritative
-Dispatch release evidence. Coordinator-owned closeout observation and atomic
-routing/requeue remain separate work under the
+Dispatch release evidence. The
+[local coordinator boundary](../../agent-dispatch/docs/pool-worker-decline.md#coordinator-owned-local-closeout)
+observes this selected runtime before atomic routing/requeue; remote-host and
+ordinary-worker integration remain separate work under the
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).
-The [Dispatch decline provider](../../agent-dispatch/docs/pool-worker-decline.md)
-continues retaining the assignment and reservation until that integration lands.
 
 Focused controls live in `tests/test_dispatch_worker_closeout.py` and
 `tests/test_dispatch_worker_closeout_integration.py`. The latter traverses the

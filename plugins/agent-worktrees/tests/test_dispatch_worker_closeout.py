@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from agent_worktrees import dispatch_worker_closeout as closeout
+from agent_worktrees import dispatch_closeout_observation as observation
 from agent_worktrees import config as cfg, sessions, tracking
 from agent_procutil import no_window_kwargs
 
@@ -195,6 +196,74 @@ def test_finalizer_is_additive_and_never_asks_to_abandon_or_release(worker, monk
     assert result["creation_nonce"] == "created-worker" and result["native_id"] == NATIVE
 
 
+def _wire_observation(worker, monkeypatch):
+    _wire(worker, monkeypatch)
+    worker.record.status = "finalized"
+    worker.record.finalized_checkout = {"head": "a" * 40, "branch": worker.record.branch}
+    monkeypatch.setattr(observation, "require_record_mutation", lambda *a: None)
+    monkeypatch.setattr(observation, "read_exact_record", lambda *a: {
+        "path": worker.record.worktree_path, "creation_nonce": worker.record.creation_nonce,
+    })
+    monkeypatch.setattr(observation, "read_workspace_record", lambda *a: {"worktree": {
+        "id": worker.record.worktree_id, "creation_nonce": worker.record.creation_nonce,
+    }})
+    monkeypatch.setattr(closeout.finalize, "validate_and_finalize",
+                        lambda *a, **k: pytest.fail("A read finalized the worker"))
+
+
+def test_observation_is_separate_from_worker_process_ownership_and_never_finalizes(worker, monkeypatch):
+    _wire_observation(worker, monkeypatch)
+    monkeypatch.chdir(worker.root)
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID")
+    result = observation.observe("worker", "task", "reservation", NATIVE)
+    assert result["operation"] == "observe-finalized" and result["status"] == "finalized"
+    assert result["allocation"] == worker.record.dispatch_attempt.to_dict()
+    assert result["checkout"] == worker.record.finalized_checkout
+    assert result["task_release"] is False and result["process_retirement"] is False
+
+
+@pytest.mark.parametrize("kind", [
+    "active", "checkout", "allocation", "head", "paired", "effort", "follow-up",
+    "claim", "foreign", "unknown", "source", "workspace", "windows",
+])
+def test_observation_refuses_protected_or_replaced_finalized_custody(worker, monkeypatch, kind):
+    _wire_observation(worker, monkeypatch)
+    record = worker.record
+    if kind == "active":
+        record.status = "active"
+    elif kind == "checkout":
+        record.finalized_checkout = None
+    elif kind == "allocation":
+        record.dispatch_attempt = replace(record.dispatch_attempt, reservation_key="foreign")
+    elif kind == "head":
+        record.head_session = "foreign"
+    elif kind == "paired":
+        record.pair_id = "pair"
+        record.pair_role = "harness"
+        record.pair_ref = "host/notes/paired"
+        record.pair_kind = "worktree"
+    elif kind == "effort":
+        record.active_effort = "active"
+    elif kind == "follow-up":
+        tracking.add_follow_up(record, "Pending follow-up", save=False)
+    elif kind == "claim":
+        record.resources.append(tracking.ResourceClaim(kind="pr", ref="https://forge.example/pr/1"))
+    elif kind == "foreign":
+        monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *a: sessions.SessionContext(
+            active_sessions={sessions._normalize_path(record.worktree_path): ["foreign"]},
+        ))
+    elif kind == "unknown":
+        record.execution_leg_opaque = True
+    elif kind == "source":
+        record.sessions[0].activations = []
+    elif kind == "workspace":
+        monkeypatch.setattr(observation, "read_workspace_record", lambda *a: {"worktree": None})
+    else:
+        worker.config = replace(worker.config, platform="win32")
+    with pytest.raises(ValueError):
+        observation.observe("worker", "task", "reservation", NATIVE)
+
+
 @pytest.mark.parametrize("fault", ["normal-gate", "missing-stamp", "unresolved", "foreign", "no-worktree"])
 def test_failed_or_unconfirmed_closeout_does_not_emit_success(worker, monkeypatch, fault) -> None:
     calls = _wire(worker, monkeypatch)
@@ -304,6 +373,17 @@ def test_fresh_module_entrypoint_resolves_cwd_and_loads_real_configuration(cwd_p
     assert result.returncode == 1 and reply["ok"] is False
     assert reply["error"] == "Own-worker closeout requires its recorded Dispatch allocation"
     assert reply["task_release"] is False and reply["process_retirement"] is False
+
+
+def test_fresh_selected_cli_describes_observation_without_relying_on_worker_cwd(cwd_project, worker):
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "--project", cwd_project,
+         "record", "--describe-closeout-contract", "--json"],
+        cwd=worker.root, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    descriptor = json.loads(result.stdout)
+    assert result.returncode == 0 and descriptor["operations"] == ["observe-finalized"]
+    assert descriptor["task_release"] is False and descriptor["process_retirement"] is False
 
 
 @pytest.mark.parametrize("fails", [False, True])
