@@ -375,9 +375,12 @@ def _write_native_lock(path, state, files):
     return path
 
 
+@pytest.mark.parametrize("deep", [False, True])
 def test_core_delivery_uses_selected_native_lock_against_local_tls(
-    tmp_path, monkeypatch, tls_source, local_tls_feed,  # noqa: F811
+    tmp_path, monkeypatch, tls_source, local_tls_feed, deep,  # noqa: F811
 ):
+    if deep and os.name != "nt":
+        pytest.skip("Windows extended-length paths")
     uv = shutil.which("uv")
     git = shutil.which("git")
     if uv is None or git is None:
@@ -395,7 +398,10 @@ def test_core_delivery_uses_selected_native_lock_against_local_tls(
         tmp_path / "operator" / "pylock.toml", foreign, [("fixture", FILENAME, digest)],
     )
     deadline = time.monotonic() + 120
-    destination = tmp_path / "native-delivery.zip"
+    output_dir = tmp_path / ("deep-" + "x" * 115) if deep else tmp_path
+    if deep:
+        output_dir.mkdir()
+    destination = output_dir / "native-delivery.zip"
     result = producer.prepare_core_delivery(
         tmp_path, commit, commit, manifest_path, wheels,
         materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
@@ -416,7 +422,7 @@ def test_core_delivery_uses_selected_native_lock_against_local_tls(
     monkeypatch.setenv("LOCALAPPDATA", str(home / "local"))
     materials = tmp_path / "materials.json"
     materials.write_text("{}", encoding="utf-8")
-    output = tmp_path / "command-delivery.zip"
+    output = output_dir / "command-delivery.zip"
     command = [
         sys.executable, "-I", str(Path(producer.__file__)),
         "--source-checkout", str(tmp_path), "--source-commit", commit, "--main-head", commit,

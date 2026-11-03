@@ -169,7 +169,9 @@ def _build_from_snapshot(
     }
     limits = native.wheel_limits()
     with native.dependencies._temporary_inputs(destination.parent) as temporary:
-        work = native.dependencies._private_retained_root(Path(temporary)).resolve()
+        work = Path(source_owner.native_retained_path(
+            native.dependencies._private_retained_root(Path(temporary)).resolve(),
+        ))
         requirement_file = work / "registry.in"
         requirement_file.write_text("\n".join(requirements) + "\n", encoding="utf-8")
         lock_file = work / "pylock.toml"
@@ -295,8 +297,10 @@ def prepare_core_delivery(
         "tags": [str(tag) for tag in sys_tags()],
     }
     with native.dependencies._temporary_inputs(destination.parent) as temporary:
-        work = native.dependencies._private_retained_root(Path(temporary)).resolve()
-        snapshot = work / "source-snapshot"
+        work = Path(source_owner.native_retained_path(
+            native.dependencies._private_retained_root(Path(temporary)).resolve(),
+        ))
+        snapshot = Path(source_owner.native_retained_path(work / "source-snapshot"))
         record = source_owner.compose(
             repository, commit, main_head, snapshot, finalized_main=True, deadline=deadline,
         )
