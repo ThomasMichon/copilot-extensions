@@ -92,8 +92,9 @@ def test_real_resolver_failure_is_not_optional_absence(
 
 
 @pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("system_root_key", ["SystemRoot", "SYSTEMROOT", "sYsTeMrOoT"])
 def test_native_command_has_explicit_read_only_routing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows: bool, system_root_key: str,
 ) -> None:
     root, resolver = deploy(tmp_path)
     monkeypatch.setattr(runtime, "os", SimpleNamespace(name="nt" if windows else "posix"))
@@ -106,7 +107,7 @@ def test_native_command_has_explicit_read_only_routing(
 
     monkeypatch.setattr(subprocess, "run", run)
     assert runtime.deployed_runtime_python(
-        root, resolver=resolver, environment={"SystemRoot": str(tmp_path), "AGENT_RT_ROOT": "foreign"},
+        root, resolver=resolver, environment={system_root_key: str(tmp_path), "AGENT_RT_ROOT": "foreign"},
     ) is None
     argv, options = calls[0]
     assert options["timeout"] == 15
@@ -115,6 +116,7 @@ def test_native_command_has_explicit_read_only_routing(
     assert environment["AGENT_RT_ROOT"] == str(root)
     assert environment["AGENT_RT_RESOLVE_TRACE_MODE"] == "read-only"
     if windows:
+        assert argv[0] == str(tmp_path / "System32/WindowsPowerShell/v1.0/powershell.exe")
         assert options["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW")
         assert "-NonInteractive" in argv
         assert "-TraceMode read-only" in argv[-1]

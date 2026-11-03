@@ -41,7 +41,9 @@ def deployed_runtime_python(
         "AGENT_CONFIGURATION_RESOLVER": str(resolver),
     })
     if os.name == "nt":
-        system_root = Path(environment.get("SystemRoot", ""))
+        system_root = Path(next(
+            (value for key, value in environment.items() if key.upper() == "SYSTEMROOT"), "",
+        ))
         if not system_root.is_absolute():
             raise ConfigurationError("configuration resolver requires an absolute SystemRoot")
         command = [
