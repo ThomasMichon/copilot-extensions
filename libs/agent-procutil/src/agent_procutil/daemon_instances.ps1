@@ -83,13 +83,16 @@ function Start-DaemonInstanceWorker {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'The PowerShell daemon instance adapter requires native Windows.'
     }
-    # The Microsoft Store App Execution Alias stub is not an interpreter: it only
-    # prints an install hint, which would surface as an opaque helper-pipe failure.
-    $python = Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } | Select-Object -First 1
-    if (-not $python) {
-        throw 'Python 3.10+ must be available as python on PATH (the Microsoft Store alias stub does not count). Run the harness Python prerequisite setup, or install the standalone prerequisite.'
-    }
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $pythons = @(
+        $ExecutionContext.InvokeCommand.GetCommands(
+            'python', [Management.Automation.CommandTypes]::Application, $false
+        ) |
+            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' -and $seen.Add($_.Source) } |
+            ForEach-Object { $_.Source }
+    )
+    $prerequisiteError = 'Python 3.10+ must be available as python on PATH (unsupported interpreters and the Microsoft Store alias stub do not count). Run the harness Python prerequisite setup, or install the standalone prerequisite.'
+    if (-not $pythons.Count) { throw $prerequisiteError }
     if (-not [IO.File]::Exists($script:DaemonInstanceRuntime)) {
         throw 'The owning payload daemon instance source archive is unavailable.'
     }
@@ -106,15 +109,16 @@ function Start-DaemonInstanceWorker {
     $bootstrap = @'
 import base64,json,sys
 if sys.version_info < (3,10):
+    print('daemon-python-unsupported',flush=True)
     sys.stderr.write('daemon-instance: Python 3.10+ is required on PATH; run the harness prerequisite setup or install the standalone prerequisite.\n')
     sys.exit(1)
+print('daemon-python-compatible',flush=True)
 packet=json.loads(base64.b64decode(sys.stdin.buffer.raw.readline()).decode('utf-8'))
 sys.path.insert(0,packet['archive'])
 from agent_procutil._daemon_instance_shell import main
 sys.exit(main(packet))
 '@
     $start = New-Object Diagnostics.ProcessStartInfo
-    $start.FileName = $python.Path
     $start.Arguments = '-I -S -B -X utf8 -c "' + $bootstrap + '"'
     $start.WorkingDirectory = [Environment]::CurrentDirectory
     $start.UseShellExecute = $false
@@ -125,13 +129,41 @@ sys.exit(main(packet))
     $start.StandardOutputEncoding = $encoding
     $start.StandardErrorEncoding = $encoding
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $State.process = [Diagnostics.Process]::Start($start)
-    $State.input = $State.process.StandardInput
-    $State.input.NewLine = "`n"
-    $State.input.AutoFlush = $true
-    $State.output = $State.process.StandardOutput
-    $State.error = $State.process.StandardError
-    $State.diagnostics = $State.error.ReadToEndAsync()
+    $compatible = $false
+    for ($index = 0; $index -lt $pythons.Count; $index++) {
+        $start.FileName = $pythons[$index]
+        try { $State.process = [Diagnostics.Process]::Start($start) }
+        catch [ComponentModel.Win32Exception] { continue }
+        $State.input = $State.process.StandardInput
+        $State.input.NewLine = "`n"
+        $State.input.AutoFlush = $true
+        $State.output = $State.process.StandardOutput
+        $State.error = $State.process.StandardError
+        $State.diagnostics = $State.error.ReadToEndAsync()
+        $qualification = $State.output.ReadLineAsync()
+        Wait-DaemonInstanceTask $qualification $clock 30
+        if ($qualification.Result -ceq 'daemon-python-unsupported') {
+            $remaining = [Math]::Max(0, [Math]::Min(3000, 30000 - $clock.ElapsedMilliseconds))
+            if (-not $State.process.WaitForExit([int]$remaining)) {
+                throw 'Unsupported Python process exit is unconfirmed; selection was not retried.'
+            }
+            Wait-DaemonInstanceTask $State.diagnostics $clock 30
+            if ($State.process.ExitCode -ne 1) {
+                throw 'Unsupported Python returned an unexpected outcome; selection was not retried.'
+            }
+            if ($index -lt $pythons.Count - 1) {
+                foreach ($name in @('input', 'output', 'error', 'process')) { $State[$name].Dispose() }
+                foreach ($name in @('input', 'output', 'error', 'process', 'diagnostics')) { $State[$name] = $null }
+            }
+            continue
+        }
+        if ($qualification.Result -cne 'daemon-python-compatible') {
+            throw 'Daemon instance Python startup ended before compatibility was confirmed; selection was not retried.'
+        }
+        $compatible = $true
+        break
+    }
+    if (-not $compatible) { throw $prerequisiteError }
     $ready = $State.output.ReadLineAsync()
     Wait-DaemonInstanceTask ($State.input.WriteLineAsync($encoded)) $clock 30
     $State.offerPermitted = $true

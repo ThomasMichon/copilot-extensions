@@ -346,11 +346,22 @@ it stops before package discovery/acquisition instead of triggering an install.
 The selected interpreter hosts canonical Manager runtime installation; this mode
 does not migrate existing runtimes or change their lifecycle owner. UV/Git
 provisioning, repository arguments and Manager source/update configuration retain
-their existing owners. Without the option, the existing UV-based bootstrap is
-unchanged. Repeated mode flags and repair combinations refuse before acquisition.
+their existing owners. Without the option, Python acquisition remains UV-based.
+Repeated mode flags and repair combinations refuse before acquisition.
 The Bash counterpart explicitly refuses this Windows-specific mode before
 effects; it does not silently substitute a distribution package route.
 This optional mode alone is not a full adopter readiness or attended-auth claim.
+
+Every Windows bootstrap puts its selected Python directory first on the
+bootstrap process PATH before invoking Manager and nested installers. After a
+successful manual update, it also qualifies the physical Python 3.11+ base
+interpreter, places that directory first on the user PATH and reads the setting
+back. It never publishes a private runtime's venv as the public prerequisite,
+removes an older Python, or rewrites machine PATH. Existing parent terminals
+cannot inherit a child's environment changes and must be restarted; machine
+PATH precedence remains administrator-owned. Automatic, detached, targeted or
+inspection/recovery commands, failed updates and contained tests do not persist
+this preference.
 
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine
