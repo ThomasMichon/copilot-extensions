@@ -1,5 +1,6 @@
 /** Read-only native host preflight. Importing does not join a session or dispatch inference. */
 import { createHash } from "node:crypto";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { selectionSnapshot, selectionReadTool, selectionAgent } from "./skill-selection-contract.mjs";
 import { catalogSummary, collectHistory } from "./skill-selection-spike.mjs";
 
@@ -9,6 +10,54 @@ const parentConfig = model => Object.fromEntries([
     "modelId", "providerId", "planBaseModelId", "planBaseProviderId", "reasoningEffort",
     "contextTier", "autoTier", "pendingAutoTier", "activatingAutoTier",
 ].map(key => [key, model[key] ?? null]));
+
+/**
+ * Use requesting-session grants and exclusions, not descriptor paths, as authority.
+ * The native exclusion endpoint may refuse sources outside its workspace.
+ */
+export async function selectionSourcePolicy(session, signal) {
+    const checkCancelled = () => {
+        if (signal?.aborted) throw new Error("selection source acquisition cancelled");
+    };
+    checkCancelled();
+    const paths = await session.rpc.permissions.paths.list();
+    checkCancelled();
+    if (!isAbsolute(paths.primary ?? "") || !Array.isArray(paths.directories)
+        || paths.directories.some(path => typeof path !== "string" || !isAbsolute(path))
+        || paths.sessionApprovedPaths !== undefined && (!Array.isArray(paths.sessionApprovedPaths)
+            || paths.sessionApprovedPaths.some(path => typeof path !== "string" || !isAbsolute(path)))) {
+        throw new Error("requesting-session source grants unavailable");
+    }
+    const exact = new Set((paths.sessionApprovedPaths ?? []).map(path => resolve(path)));
+    return {
+        trustedRoots: [...new Set([paths.primary, ...paths.directories, ...[...exact].map(dirname)])],
+        async authorizeSource(path) {
+            checkCancelled();
+            const grant = await session.rpc.permissions.paths.isPathWithinAllowedDirectories({ path });
+            checkCancelled();
+            if (typeof grant.allowed !== "boolean") throw new Error("requesting-session source grants unavailable");
+            if (!grant.allowed) {
+                const current = await session.rpc.permissions.paths.list();
+                checkCancelled();
+                if (current.sessionApprovedPaths !== undefined && (!Array.isArray(current.sessionApprovedPaths)
+                    || current.sessionApprovedPaths.some(value => typeof value !== "string" || !isAbsolute(value)))) {
+                    throw new Error("requesting-session exact source grants unavailable");
+                }
+                if (!(current.sessionApprovedPaths ?? []).some(value => resolve(value) === resolve(path))) {
+                    throw new Error("requesting-session source access denied");
+                }
+            }
+            const result = await session.rpc.contentExclusion.checkPaths({ paths: [path] });
+            checkCancelled();
+            if (result.available !== true || !Array.isArray(result.checks) || result.checks.length !== 1
+                || result.checks[0].path !== path || typeof result.checks[0].excluded !== "boolean") {
+                throw new Error("requesting-session source exclusion policy unavailable");
+            }
+            if (result.checks[0].excluded) throw new Error("requesting-session source excluded");
+            return true;
+        },
+    };
+}
 
 /** Inspect owned fixture input, never a foreground request or a saved capture. */
 export function canonicalRequestEvidence(body, profile) {

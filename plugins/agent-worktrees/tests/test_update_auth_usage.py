@@ -139,6 +139,8 @@ def test_activation_state_errors_preserve_actual_usage_evidence(
 
     def runner(argv, **kwargs):
         assert kwargs["env"]["CE_UPDATE_AUTH_ROUTES"]
+        if kwargs.get("on_settled") is not None:
+            kwargs["on_settled"]()
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(state, "capture", capture)

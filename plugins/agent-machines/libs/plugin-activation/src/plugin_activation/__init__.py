@@ -5,6 +5,7 @@ from .preservation import (
     ActivationCustody,
     ActivationPreservation,
     activation_custody,
+    activation_preservation_pending,
     preserve_activation_durably,
 )
 from .resolver import (
@@ -43,6 +44,7 @@ __all__ = [
     "PluginStateError",
     "activation_value",
     "activation_custody",
+    "activation_preservation_pending",
     "capture",
     "inspect_plugin_state",
     "installed_plugin_identities",

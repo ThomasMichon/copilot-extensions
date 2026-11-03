@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+Worktrees' focused `tests/test_status_monitor.py` pending-request and bounded-retry
+packet checks that idle, unarmed, confirmed and empty-token queues do not read
+handoff history or claims. Armed requests retain the existing pre-spawn retry
+cap, ambiguous-spawn refusal and durable-trace suppression. These are isolated
+source controls, not installed-monitor or live-cutover evidence.
+
 Bridge's `test_wmi_broker_spawn.py`, `test_watchdog.py` and
 `test_service_process_identity.py` packet covers delayed replacement, argument
 filtering and strict daemon recognition. Its Windows native control invokes the
@@ -4001,6 +4007,15 @@ or desktop qualification. The release-helper verifier pins the retained
 guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
+
+The `plugin-activation` target runs the shared activation transaction suite.
+Its `tests/test_preservation_processes.py` packet interrupts real transaction
+holders before/after witness publication and during restoration. Worktrees'
+`tests/test_update_install_preservation.py` separately covers native acquisition
+integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/test_owned_streaming.py
+--allow-explicit-tiers` covers POSIX FD progress, absolute deadlines, cancellation
+and unverified cleanup. These explicit native packets do not expand required
+unit-only CI, and skips are not native platform qualification.
 
 Agent MCP's focused home-binding lane is:
 

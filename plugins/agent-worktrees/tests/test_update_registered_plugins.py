@@ -16,7 +16,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import activation_preservation, reconcile
+from agent_worktrees import activation_preservation, reconcile, update_acquisition
 
 
 pytestmark = pytest.mark.usefixtures("payload_subprocess_double")
@@ -41,11 +41,6 @@ def _no_user_global(monkeypatch: pytest.MonkeyPatch) -> None:
     ``~/.copilot/settings.json``). The dedicated user-global tests override it."""
     monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
     monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: [])
-    monkeypatch.setattr(
-        activation_preservation,
-        "run_install_preserving_activation",
-        lambda argv, identity, **kwargs: subprocess.run(argv, **kwargs),
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -499,7 +494,7 @@ def test_missing_payload_install_uses_activation_preserving_wrapper(monkeypatch)
         return _ok()
 
     monkeypatch.setattr(
-        activation_preservation, "run_install_preserving_activation", preserving
+        update_acquisition, "_run_install", preserving
     )
 
     assert (
@@ -543,7 +538,7 @@ def test_update_failure_on_existing_payload_retries_with_install(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(
-        activation_preservation, "run_install_preserving_activation", preserving
+        update_acquisition, "_run_install", preserving
     )
 
     result = m._update_one_plugin_payload("agent-machines", "copilot-extensions")
@@ -566,8 +561,8 @@ def test_unknown_update_failure_is_reported_without_install_retry(monkeypatch):
     )
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: _fail(code=3))
     monkeypatch.setattr(
-        activation_preservation,
-        "run_install_preserving_activation",
+        update_acquisition,
+        "_run_install",
         lambda argv, identity, **kw: _fail(code=4),
     )
 
@@ -583,8 +578,8 @@ def test_malformed_activation_state_is_reported_without_raising(monkeypatch):
         raise activation_preservation.PluginStateError("malformed settings")
 
     monkeypatch.setattr(
-        activation_preservation,
-        "run_install_preserving_activation",
+        update_acquisition,
+        "_run_install",
         fail_preservation,
     )
     assert m._update_one_plugin_payload(

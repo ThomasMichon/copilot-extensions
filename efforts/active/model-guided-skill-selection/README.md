@@ -98,7 +98,7 @@ cached or unavailable quota evidence.
 - [ ] Specify one exposed tool, one canonical specialist and concise preference
   guidance in the existing customization payload; no additional service,
   catalog authority or general discovery crawler.
-- [ ] Define current-catalog binding, bounded context collection, declared-guide
+- [x] Define current-catalog binding, bounded context collection, declared-guide
   resolution, result validation, source freshness and explicit unavailable,
   ambiguity, no-match and insufficient-context outcomes.
 - [ ] Preserve mandatory known-skill procedures and caller restrictions.
@@ -107,7 +107,7 @@ cached or unavailable quota evidence.
 
 ### Phase 2 - Native transport, context and lifecycle spike
 
-- [ ] Observe the actual requesting host's catalog, available agent identifiers,
+- [x] Observe the actual requesting host's catalog, available agent identifiers,
   model capabilities and accounting surfaces without model inference or global
   changes; distinguish declarations from working host support.
 - [ ] Use an owned isolated SDK runtime and synthetic fixtures to witness task
@@ -128,10 +128,10 @@ cached or unavailable quota evidence.
 - [ ] Freeze the task/context boundary and catalog for representative execution,
   planning and review cases, plus ambiguity, no-match and misleading metadata.
   Keep public fixtures generic and real adopter data out of this repository.
-- [ ] Bind a supported candidate and independent evaluator; compare the same
+- [x] Bind a supported candidate and independent evaluator; compare the same
   cases/configuration across the three context strategies where representable.
   Classify unsupported configurations separately rather than manufacturing a pass.
-- [ ] Measure applicable-guidance recall, precision, omissions, abstention,
+- [x] Measure applicable-guidance recall, precision, omissions, abstention,
   declared-guide provenance and actual resolved model/effort/tier.
 - [ ] Include context acquisition, summarization where used, SDK startup,
   retries, inference and settlement in latency and usage. Label cost quantities
@@ -165,7 +165,7 @@ cached or unavailable quota evidence.
 
 - [ ] Native catalog scope and complete descriptor coverage are demonstrated,
   including entries omitted from inline rendering and explicit unavailable data.
-- [ ] Each supported strategy has witnessed effective child input and actual
+- [x] Each supported strategy has witnessed effective child input and actual
   configuration, not merely a supplied-prompt or requested-model assertion.
 - [ ] The specialist has the intended read-only tool boundary and does not
   execute, approve, recursively select itself or bypass invocation restrictions.
@@ -583,3 +583,62 @@ owned-session alternative or name the SDK dependency before adopting it.
 - The focused bounded Windows packet passes with verified process cleanup.
   Source publication/release, broader qualification, main preference and the
   parent completion gate remain open.
+
+### 2026-11-02 - Owned hosts merged; integrating the callable surface is next
+
+- PR #10125 merged after current-head Copilot approval, successful required
+  checks, no open review findings and complete thread resolution. The parent
+  issue remains open. Reconciled the existing source worktree onto `dev`
+  without finalizing it or allocating a continuation worktree.
+- Review corrections bind source-delivery evidence atomically, reserve request
+  allowances before asynchronous inspection, reject cancellation and pending
+  requests through owned cleanup, and validate final accounting after shutdown.
+  Focused controls cover missing request evidence and late usage, not merely
+  requested configuration. The lifecycle census classifies the owned SDK fork.
+- Reread this Plan and Validation Plan. Closed only the defined prototype
+  contracts, observed requesting-host declarations, bound independent
+  comparison, measured guidance outcomes and witnessed owned-strategy input.
+  Missing local context, limited sampling, complete-system cost and production
+  registration remain separate, unresolved gates.
+- Next is the callable extension integration: resolve supported host-owned
+  profile, source-access and automatic context bindings, then expose one
+  canonical specialist/tool and concise selection preference. Preserve source
+  policy, existing mandatory procedures and the ordinary joined extension's
+  unavailable foreground-fork boundary; do not promote a trial profile by
+  implication. This effort remains Active.
+
+### 2026-11-02 - Callable integration preserves explicit host policy
+
+- Added an opt-in import-inert tool factory over the existing canonical leaf
+  and owned runner. The model supplies only intent/purpose; native catalog and
+  bounded primary context are acquired automatically. No extension is
+  automatically registered and no production profile or strategy is selected.
+- Bound source acquisition to public requesting-session path and exclusion
+  policy. Lexical/canonical reads and freshness checks retain live restrictions,
+  including exact-grant revocation. Unsupported external source policy remains
+  unavailable instead of using descriptor presence as access authority.
+- Rechecked parent model/agent and catalog at the return boundary; validated
+  actual owned profile, canonical tool/input evidence, body/guide receipts and
+  settlement. Cancellation rejects late output, concurrent calls do not
+  dispatch, and an unconfirmed runner settlement holds further inference.
+- The focused bounded Windows packet passed, including denial before source
+  reads, revoked access, missing policy, stale catalog/parent state, invalid
+  evidence, no-match separation and cancellation/settlement controls. This is
+  model-free source integration evidence, not native adoption or quality.
+- Public SDK inspection found no joined-session getter for the effective
+  subagent preference. The host must bind an eligible explicit owned profile;
+  neither the foreground model nor the trial candidate is silently promoted.
+  Complete-system comparison, broader representative cases, plugin-source
+  policy coverage, automatic registration and preference activation remain
+  open. The effort stays Active.
+- Source review found a return-time freshness gap across owned cleanup.
+  The factory now retains the actual reader used by the owned runner and
+  revalidates access/content after cleanup and final parent checks, rather
+  than accepting pre-cleanup receipts. Regression controls revoke access or
+  change bytes during cleanup and revoke access during final checks; the
+  bounded packet passes with verified process cleanup.
+- A subsequent review identified an unrelated deleted exact-grant parent
+  blocking all source-root resolution. Missing/non-directory roots now retain
+  separate diagnostics while readable roots continue under unchanged live
+  authorization. A valid native source plus a stale approved directory is
+  covered by the bounded callable regression.

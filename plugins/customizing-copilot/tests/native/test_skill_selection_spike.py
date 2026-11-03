@@ -21,7 +21,8 @@ def test_model_free_context_helpers():
          str(test_directory / "skill-selection-spike.test.mjs"),
          str(test_directory / "skill-selection-contract.test.mjs"),
          str(test_directory / "skill-selection-native.test.mjs"),
-         str(test_directory / "skill-selection-host.test.mjs")],
+         str(test_directory / "skill-selection-host.test.mjs"),
+         str(test_directory / "skill-selection-tool.test.mjs")],
         capture_output=True,
         text=True,
         # Preserve child timeout diagnostics before pytest ends the wrapper.

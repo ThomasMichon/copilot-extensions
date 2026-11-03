@@ -225,6 +225,12 @@ transitive guide traversal or skill execution occurs. Reads are byte/count
 bounded, reject non-UTF-8 sources, and return unavailable for pathless entries
 without excluding their advisory metadata.
 
+Missing roots or non-directory ancestors are recorded independently; an unrelated
+deleted approved directory does not suppress readable sources. Other root
+resolution errors still fail explicitly. Missing-root diagnostics reach the
+callable selector's context and result without exposing root paths. Remaining
+sources retain all lexical/canonical containment and live policy checks.
+
 Reference extraction handles inline links and single-line reference definitions,
 balanced or escaped destination parentheses, angle-bracket paths and optional
 titles. Code spans, fenced/indented examples and comments do not declare guides.
@@ -252,12 +258,72 @@ fail explicitly. The integrating host must separately recheck its current
 native catalog and actual owned-task configuration/settlement. File digests
 prove observed byte consistency, not authority or model quality.
 
+## Opt-in callable integration
+
+`scripts/skill-selection-tool.mjs` exports `createSelectionTool()`. It is an
+import-inert SDK tool factory, **not an automatically registered extension**.
+The host must supply `getSession` and an explicitly configured owned `run`
+implementation. No model, profile, runtime path, source root or strategy is a
+model-facing argument. The factory does not select a production profile from a
+trial result, read private SDK fields or change subagent preferences.
+
+The host can register the returned tool in its existing `joinSession({ tools })`
+call and bind `run` to `runOwnedSelection()` with its qualified owned runtime,
+fresh state directory and explicit model/effort/tier. The runner receives the
+native snapshot, bounded primary-text context, requesting-session source
+policy, caller-owned source reader and invocation cancellation signal from
+the factory. It must return only after owned settlement. A thrown runner or unconfirmed cleanup holds
+subsequent calls for host recovery; cancellation rejects late output, rather
+than treating a request acknowledgement as proof of exit.
+
+The tool accepts only current `intent` and `purpose` (`execution`, `planning`
+or `review`). It automatically acquires the complete native catalog and a
+bounded primary user/assistant sample through public session RPCs. The sample
+excludes tool payloads and reasoning, retains omission metadata, and is not
+claimed as a complete frozen foreground history. Child callers are explicitly
+unqualified; no recursive selector task is dispatched.
+
+The default `selectionSourcePolicy()` derives an upper source boundary from
+the requesting session's existing recursive and exact path grants, **not**
+descriptor paths. Every lexical and canonical acquisition, including result
+freshness validation, also checks live path access and native content
+exclusions. Exact grants are refreshed before use; they do not grant directory
+descendants. Denied, malformed or unavailable policy refuses the read. The
+current native exclusion endpoint only supports local workspace paths: plugin
+sources outside that scope can remain unavailable even when enumerated.
+Do not bypass that result with a different reader or guessed installed root.
+A host with an existing broader canonical-source policy may explicitly supply
+`acquireSources`; the callback must retain equivalent caller restrictions.
+The root-only reader mode remains for explicitly owned isolated fixtures,
+not a production authorization substitute.
+
+Before returning, the factory rechecks the native catalog, parent model and
+selected agent, plus the owned report's actual profile, canonical input/tool
+evidence and runtime settlement. It retains the same reader through cleanup
+and revalidates source access and bytes after those final parent checks;
+pre-cleanup receipts alone cannot establish return-time freshness.
+Path-backed recommendations require body-read
+receipts; guides require successful declared-reference receipts. Failed
+acquisition cannot become no-match. Results expose compact recommendations,
+context limitations, configuration and accounting without source bodies.
+Recommendations remain advisory; normal mandatory skill invocation and
+independent review procedures still apply.
+
+Automatic plugin registration, a production input strategy/profile, native
+source-policy coverage and main-agent preference activation remain separate
+qualification/adoption gates. Enabling this payload does not activate this
+factory.
+
 ## Owned selector and independent evaluator
 
 `scripts/skill-selection-host.mjs` exports `runOwnedSelection()`. The caller
 supplies the SDK, a fresh absolute root, an absolute owned runtime executable,
 an explicit model/effort/context-tier profile, the requesting native snapshot,
-trusted source roots and current intent/purpose/attributed context. These are
+trusted source roots and current intent/purpose/attributed context. An optional
+host `authorizeSource` callback checks each lexical/canonical source before
+acquisition and again during freshness validation. The callable factory
+supplies its own `sourceReader` so the same acquisition evidence remains
+available for post-cleanup return validation. These are
 host policy inputs, not model-selected paths or privileges. There is no
 registered production tool or default candidate model.
 

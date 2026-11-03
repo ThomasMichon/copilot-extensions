@@ -73,6 +73,23 @@ front-door route as the already repo-aware handler. Without an explicit repo,
 ordinary project resolution remains required; the change does not start
 reconciliation or installation merely by resolving the route.
 
+Explicit `--with-payload-refresh` reconciliation preserves the prior
+user-global activation choice (absent, disabled or enabled) around native
+payload install and update commands. Refreshed inventory, cached payloads and
+unrelated settings remain intact. It shares the updater's preservation owner,
+including Windows witnessed Job settlement and POSIX unreaped-group
+confirmation, followed by root/output settlement. POSIX descendants must remain
+in the inherited group; deliberate group/session escape is not covered.
+Unverified cleanup retains the original transaction and fences both the second
+pass and later participating install/update acquisitions. Only a persisted
+positive witness permits interrupted restoration; root exit, drained pipes or
+parent death alone do not. Refreshed inventory and unrelated settings survive
+recovery. Ordinary reconciliation remains runtime-only and pull-free.
+
+Dependent runtime steps also reject retained payload custody, including a later
+runtime-only pass. This fence check is read-only and adds no ordinary-launch
+lock or payload pull; existing acquisition custody owns restoration and recovery.
+
 For explicit source acquisition and repository-owned check/apply/final-check,
 use [`repos setup`](docs/repository-setup.md). It is plan-only by default,
 requires consent before repository code runs, and preserves editing/agent

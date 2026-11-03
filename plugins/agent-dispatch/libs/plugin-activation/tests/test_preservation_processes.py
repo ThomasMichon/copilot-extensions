@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from agent_procutil import direct_python, no_window_kwargs
 
-from plugin_activation import PluginStateError, preserve_activation_durably
+from plugin_activation import PluginStateError, preserve_activation_durably, state
 from test_preservation import IDENTITY, PEER, assert_restored, initialize, journal
 
 _CHILD = r'''
@@ -24,9 +24,7 @@ home, ready = Path(sys.argv[1]), Path(sys.argv[3])
 mode = sys.argv[2]
 identity, peer = "agent-example@market", "agent-peer@market"
 def pause():
-    pending = ready.with_suffix(".pending")
-    pending.write_text(str(os.getpid()), encoding="ascii")
-    pending.replace(ready)
+    state.write_json_object_atomic(ready, {"pid": os.getpid()})
     time.sleep(20)
 original_write = state.write_json_object_atomic
 def write(path, value, *args):
@@ -44,19 +42,19 @@ with preserve_activation_durably(identity, home) as transaction:
     }), encoding="utf-8")
     if mode == "running":
         pause()
-    transaction.confirm_quiescent()
+    getattr(transaction, sys.argv[4])()
     if mode == "quiescent":
         pause()
 '''
 
 
 @contextmanager
-def holder(home: Path, mode: str) -> Iterator[subprocess.Popen[str]]:
+def holder(home: Path, mode: str, witness: str = "confirm_quiescent") -> Iterator[subprocess.Popen[str]]:
     ready = home / "ready"
     python, extra_env = direct_python(sys.executable)
     env = {**os.environ, **extra_env, "PYTHONPATH": os.pathsep.join(sys.path)}
     child = subprocess.Popen(
-        [python, "-c", _CHILD, str(home), mode, str(ready)],
+        [python, "-c", _CHILD, str(home), mode, str(ready), witness],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         **no_window_kwargs(),
     )
@@ -65,7 +63,7 @@ def holder(home: Path, mode: str) -> Iterator[subprocess.Popen[str]]:
         while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
         assert ready.exists(), "preservation process did not reach the interruption boundary"
-        assert child.pid == int(ready.read_text(encoding="ascii"))
+        assert child.pid == state.read_json_object(ready)[1]["pid"]
         yield child
     finally:
         if child.poll() is None:
@@ -75,9 +73,12 @@ def holder(home: Path, mode: str) -> Iterator[subprocess.Popen[str]]:
 
 
 @pytest.mark.parametrize("mode", ["running", "quiescent", "partial"])
-def test_forced_parent_death_keeps_original_and_requires_witness(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("witness", ["confirm_quiescent", "confirm_posix_quiescent"])
+def test_forced_parent_death_keeps_original_and_requires_witness(
+    tmp_path: Path, mode: str, witness: str,
+) -> None:
     initialize(tmp_path)
-    with holder(tmp_path, mode) as child:
+    with holder(tmp_path, mode, witness) as child:
         with pytest.raises(PluginStateError, match="custody refused"):
             with preserve_activation_durably(PEER, tmp_path):
                 pytest.fail("a second process entered the held home")
