@@ -71,6 +71,34 @@ def bind_allocation(client, reservation: dict, project: str | None) -> None:
     reservation["allocation_project"] = project
 
 
+def prepare_workspace(owner, task: dict, reservation: dict) -> dict:
+    """Prepare and record workspace provenance before acquisition, including CLI pool claims."""
+    from . import embody
+    from .session_acquisition import spawn_snapshot
+
+    driver = (
+        reservation["driver"] if reservation.get("reservation_pool_bound") is True
+        else owner._spawn_attribute(task, "allocation_driver", "agent-dispatch")
+    )
+    project = reservation.get("allocation_project") or owner._spawn_attribute(
+        task, "allocation_project", embody.project_for_task(task) or "",
+    )
+    prepared = embody.prepare_reusable_worktree(
+        task, reservation, project=project or None,
+        interface=owner._spawn_attribute(task, "allocation_interface", "cli"),
+        driver=driver, supervisor=owner.supervisor_id,
+        agent=owner._spawn_attribute(task, "allocation_agent", "") or None,
+        no_pair=owner._spawn_no_pair(task), allocation_client=owner.client,
+    )
+    record_prepared(
+        owner.client, reservation, prepared, driver=driver, creating_host=owner.machine,
+    )
+    return spawn_snapshot(
+        task, reservation, str(prepared["worktree"]), prepared,
+        str(prepared.get("ownership") or "unknown"), bool(prepared.get("replaced")),
+    )
+
+
 def record_prepared(
     client, reservation: dict, prepared: dict, *, driver: str,
     creating_host: str | None = None,
@@ -179,8 +207,10 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
         return handle
     if not isinstance(data, dict):
         return handle
-    launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
-    worktree_obj = data.get("worktree") if isinstance(data.get("worktree"), dict) else {}
+    launch = data.get("launch")
+    launch = launch if isinstance(launch, dict) else {}
+    worktree_obj = data.get("worktree")
+    worktree_obj = worktree_obj if isinstance(worktree_obj, dict) else {}
     handle["worktree"] = (
         data.get("worktree_id")
         or worktree_obj.get("id")

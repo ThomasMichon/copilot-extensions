@@ -570,19 +570,28 @@ def make_embody_spawn(
         from . import bridge, session_acquisition
         worker_id = f"embody-{task.get('spawn_reservation_key')}"
         try:
+            prompt = embody.autopilot_worker_prompt(
+                task["id"], worker_id=worker_id, route=route,
+                repo=None if all_repos else task.get("repo"), all_repos=all_repos,
+            )
+            if "_spawn_client" in task:
+                from .ordinary_invocation import startup_seed
+                prompt = startup_seed(
+                    task, task["_spawn_client"], route=route, all_repos=all_repos, driver="cli",
+                )
             result = session_acquisition.acquire(
                 task, mode="cli",
-                prompt=embody.autopilot_worker_prompt(
-                    task["id"], worker_id=worker_id, route=route,
-                    repo=None if all_repos else task.get("repo"), all_repos=all_repos,
-                ),
+                prompt=prompt,
                 driver=driver,
                 project=task.get("spawn_allocation_project") or embody.project_for_task(task),
                 charter=charter,
                 verify_timeout=verify_timeout,
             )
         except bridge.BridgeCarriedSessionBusy as exc:
-            return False, {"error": str(exc), "deferred": True}
+            return False, {
+                "error": str(exc),
+                "retained" if task.get("spawn_pool_bound") is True else "deferred": True,
+            }
         except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc), "preserve_workspace": True}
         if result.returncode != 0:
@@ -605,6 +614,7 @@ def make_embody_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = driver
     spawn.allocation_interface = "cli"
+    spawn.pool_placement_driver = "cli"
     spawn.allocation_no_pair = no_pair
     return spawn
 
@@ -772,6 +782,7 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
         task, "allocation_interface", "cli"
     )
     spawn.allocation_project_for = lambda task: selected_attribute(task, "allocation_project", "")
+    spawn.pool_placement_driver_for = lambda task: selected_attribute(task, "pool_placement_driver", "")
     spawn.allocation_no_pair_for = lambda task: selected_bool_attribute(
         task, "allocation_no_pair", False
     )

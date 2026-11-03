@@ -24,14 +24,14 @@ if TYPE_CHECKING:
 def reserve_for_backend(
     client: DispatchClient, task: dict, supervisor_id: str, *, ordinary: bool,
     restricted: bool = False, instance: tuple[str, str, str] | None = None,
-    startup_timeout: float = 600,
+    startup_timeout: float = 600, pool_driver: str | None = None,
 ) -> dict:
     """Record the selected ordinary backend before its nontransactional create."""
     if instance is not None and task.get("source") != "ci-repair":
         from .supervisor_pool_allocator import reserve
         placed = reserve(
             client, task, supervisor_id, instance=instance, ordinary=ordinary,
-            restricted=restricted, startup_timeout=startup_timeout,
+            restricted=restricted, startup_timeout=startup_timeout, driver=pool_driver,
         )
         if placed is not None:
             return placed
