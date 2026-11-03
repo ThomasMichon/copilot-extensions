@@ -60,7 +60,7 @@ setup and release owners retain their unrelated work.
   or letting the automation setting block their normal path.
 - [x] Make ordinary disabled state actionable in Configuration rather than a
   dead-end toast; preserve visible configuration and execution errors.
-- [ ] Add focused tests and owner documentation, publish the source with
+- [x] Add focused tests and owner documentation, publish the source with
   required changefiles, and drive independent review/CI through merge.
 
 **Agent-recommended realization:** show the independently existing launch-time
@@ -270,3 +270,47 @@ Raw queued admission uses the same canonical directory, including absent-parent
 writer controls retain the original shadow file, unrelated settings/comments,
 manual-update exemption and independent hold behavior. The earlier packet's
 native execution, if any, remains evidence for its own pinned source only.
+
+## Source gate closed, 2026-11-03
+
+#10103 merged as `fbf7fa8a872032dec3664efb14a455bb66b77797` after independent
+approval of exact head `d00914470b6b0547c4c688bbea141d78baed24c8` and all
+required checks passed. The final actor-free packet passed 3,839 cases with
+530 bound sources and 221 production coverage targets; focused request,
+configuration, queue, reporting and admitted strict-typing checks remain
+separate supporting evidence.
+
+The exact implementation also passed native Windows functional qualification:
+184 passes and 41 declared platform skips across 225 scope-qualified cases.
+Both PowerShell 7 and Windows PowerShell 5.1 passed all 67 Manager control,
+configuration and public-submission cases plus 14 controller-process cases each.
+The controller cases exercise actual native lock contention/recovery, conditional
+audit-byte comparison and normalized reader/writer selection. The launch matrix
+ran once and passed all 22 PowerShell cases across 11 modes. The skips comprise
+18 POSIX Bash/Python interoperability cases, 12 POSIX symlink fixtures and 11
+POSIX launchers, not native passes.
+
+Complete pinned archive/inventory verification and safe extraction covered
+13,352 source entries before execution. Post-run comparisons completed for
+all 13,352 source files, 685 application entries and five provided inputs.
+All five child runs, the group and the native supervisor exited zero; cleanup
+was verified. The five retained raw JUnit reports, unique case identities,
+digests, completed preservation counts and supervisor receipt were independently
+checked. The supervised run took 286.563 seconds within its separately authorized
+480-second aggregate budget, retaining the 600-second supervisor, 30-second
+per-test limit and existing resource/containment limits.
+
+The earlier 300-second attempt remains a failed aggregate: it completed the
+same passing/skipped cases but timed out during final source-preservation
+readback. Complete post-run source preservation was unknown, and application
+and input comparisons were incomplete. The later attempt preserves that
+failure rather than relabeling it; its wrapper records completed/expected
+counts and marks preservation successful only after every comparison and
+deadline check completes.
+
+This closes only the bounded source control slice. Release, authorized
+activation, recurring maintenance enrollment, Manager-first setup, desktop
+behavior and long-lived native construction/handoff remain separate open
+gates. Continue the [parent maintenance plan](maintenance.md) and its existing
+setup owners; neither this merge nor these private-fixture tests enable an
+installed control or worker.
