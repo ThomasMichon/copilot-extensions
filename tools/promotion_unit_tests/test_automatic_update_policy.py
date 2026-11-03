@@ -228,7 +228,16 @@ def test_bootstrap_freezes_addressed_root_and_keeps_legacy_reader_veto(
         RequestSpec=lambda backend, argv, **kwargs: SimpleNamespace(backend=backend, argv=argv, **kwargs),
         automatic_update_refusal=policy.owner.automatic_update_refusal,
     )
-    namespace = {"_execution_driver": lambda payload: driver, "_bootstrap_hold_path": lambda: ""}
+    scripts = policy.home / "current-controller" / "scripts"
+
+    def execution_driver(payload):
+        assert payload == scripts.parent
+        return driver
+
+    namespace = {
+        "_execution_driver": execution_driver, "_bootstrap_hold_path": lambda: "",
+        "SCRIPTS": scripts,
+    }
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
     args = SimpleNamespace(root=root, payload=root, command=["update", "--auto"])
     assert "maintenance.automatic is false" in namespace["_automatic_bootstrap_refusal"](args)

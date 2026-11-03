@@ -3918,8 +3918,8 @@
         "tools/promotion_unit_tests/test_write_activity.py::test_output_bytes_and_default_quiet_behavior_are_unchanged[True]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_automatic_update_policy.py": "89bc6b816b365470efaa77c0d15c2c6a546b6c62ed489468a8e8e7b529d14e72",
-        "worktree-manager/scripts/runtime_install.py": "68e889585e93227feea18e7fa9b7e8c5926ecb05adbcaec26de1bd9c69ee14c4",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py": "10269ea5299c84dc925c7dc19371b3cb473f1cd00fc8342a461f03453d1a9016",
+        "worktree-manager/scripts/runtime_install.py": "53feaed51918fcdbe582f70c69cef773bb0980479e128db4a2a90f5ee352d45b",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "53844758f6538d0aba80d480226f131b5bc922f9d957d7b094be36d1bd6ffafa",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
         "libs/update-driver/src/update_driver/core.py": "a7060446d207ffcfe432ee89fe4d82a5648234b81c74ba3e4b7d5f0aeaa6db7f",
@@ -4068,7 +4068,7 @@
         "libs/installer-engine/installer_dependency_config.py": "8fbc9cf6ac0da5bed36678a3523385e95855fa7744afc2ebd003bd5fadbe19c7",
         "libs/installer-engine/installer_dependency_arguments.py": "d6b464c3d46f828089992b9da2fed7e30551861863de94c5a9869827f1791bb2",
         "libs/installer-engine/installer_dependency_policy.py": "740a29ec0062facf179d0d44d61f64bdf2d010643691b665b7626e29abcefb28",
-        "libs/installer-engine/installer_engine.py": "8c38de4ba0ecc20db11ad3b264c8e50976844d1b0394d138e0913292188ceac4",
+        "libs/installer-engine/installer_engine.py": "75d37ce6c82ee4e8eff01e2a9d0a194fef860304a263f05d87bf606458a58ccf",
         "libs/installer-engine/installer_engine_process.py": "88e40cd277d18daba227d95f3f81d576442f7c2cc4260d7f1e2c91f04ebf6c2c",
         "libs/installer-engine/installer_feed_policy.py": "529d45bd6d72cf36ac9b2c75dc56c98d63ad2b0364a26073ed8e355fd02b3c7d",
         "libs/installer-engine/installer_native_feed.py": "98fb838c43c688ed77796c2ca359c6a464b32d8ba569667ee0b6987bdce7e93c",
