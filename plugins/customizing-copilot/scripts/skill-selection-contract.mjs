@@ -227,13 +227,23 @@ async function readBounded(path, limit) {
 }
 
 /** Roots are supplied by the host's existing source/access policy, never by the model. */
-export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000, maxReads = 12 } = {}) {
+export async function selectionReader(snapshot, trustedRoots, {
+    maxBytes = 32000, maxReads = 12, authorizeSource,
+} = {}) {
     if (!Array.isArray(trustedRoots) || trustedRoots.some(root => typeof root !== "string" || !isAbsolute(root))
         || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 128000
-        || !Number.isInteger(maxReads) || maxReads < 1 || maxReads > 64) throw new Error("invalid selection read bounds");
-    const roots = await Promise.all(trustedRoots.map(async root => ({
-        supplied: resolve(root), canonical: await realpath(root),
-    })));
+        || !Number.isInteger(maxReads) || maxReads < 1 || maxReads > 64
+        || authorizeSource !== undefined && typeof authorizeSource !== "function") throw new Error("invalid selection read bounds");
+    const rootFailures = [];
+    const resolvedRoots = await Promise.all(trustedRoots.map(async (root, rootIndex) => {
+        try { return { supplied: resolve(root), canonical: await realpath(root) }; }
+        catch (error) {
+            if (!["ENOENT", "ENOTDIR"].includes(error?.code)) throw error;
+            rootFailures.push({ rootIndex, reason: error.code });
+            return null;
+        }
+    }));
+    const roots = resolvedRoots.filter(root => root !== null);
     const reads = new Map(), checks = new Map();
     let attempts = 0;
     async function admitted(path) {
@@ -241,8 +251,10 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
             || contained(resolve(path), root.canonical))) {
             throw new Error("selection source outside admitted roots");
         }
+        if (authorizeSource && await authorizeSource(path) !== true) throw new Error("selection source access not admitted");
         const canonical = await realpath(path);
         if (!roots.some(root => contained(canonical, root.canonical))) throw new Error("selection source escapes admitted roots");
+        if (authorizeSource && await authorizeSource(canonical) !== true) throw new Error("canonical selection source access not admitted");
         return canonical;
     }
     function record(path, canonical, digest) {
@@ -284,6 +296,7 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
     }
     return {
         read, receipts: () => [...reads.values()],
+        rootFailures: () => structuredClone(rootFailures.sort((left, right) => left.rootIndex - right.rootIndex)),
         async validate(value) {
             const result = validateSelection(value, snapshot, [...reads.values()]);
             for (const [path, evidence] of checks) {
