@@ -124,7 +124,16 @@ boundary. `native_owned.ps1` delegates finite process execution to the same
 original-shell-owned Python transport.
 Python is an existing harness prerequisite owned by machine provisioning;
 a cold plugin runtime does not authorize another Python download or a
-helper-owned interpreter installation.
+helper-owned interpreter installation. The PowerShell adapter checks PATH's
+`python` applications headlessly and selects the first compatible Python 3.10+.
+An unsupported earlier interpreter or WindowsApps alias does not hide a later
+compatible interpreter. A confirmed version refusal exits before receiving any
+custody packet or importing the helper archive; only that pre-offer outcome
+permits trying another candidate. Ambiguous startup is not replayed. The
+supported path reuses its one helper process rather than starting an extra
+compatibility probe, and retains the existing startup deadline. Selection
+changes no PATH or installation state; absent compatible candidates retain the
+prerequisite error.
 
 The private `_daemon_instance_records` transactions retain the shared registry,
 locks, lease checks and filesystem checks while naming an adapter's original
@@ -319,7 +328,7 @@ requests even when target retirement itself was confirmed.
 Import is inert and refuses an already-loaded compiled owned-process adapter
 before replacing its function. Upgrade or rollback uses a fresh PowerShell
 process with a coherent source archive, not live guard migration. Python is
-selected normally from PATH without attestation or acquisition.
+selected from compatible PATH candidates without attestation or acquisition.
 
 The native fixtures exercise actual Windows PowerShell and Core, canonical
 Python/native lock contention, caller-Job closure, contained controls,
@@ -337,6 +346,10 @@ two-cycle caller-loss, helper-loss and runspace-cancellation matrix through
 normal and test-venv PATH Python. These compiler-free source changes still
 require fresh source-bound native and desktop qualification; older compiled
 runner or source-archive results are not their acceptance.
+
+Select compatible PATH qualification with
+`python tools/run-plugin-tests.py agent-procutil --test-file tests/test_daemon_python_selection.py --allow-explicit-tiers`;
+it does not enter the ordinary unit-only portfolio.
 
 ```python
 import subprocess

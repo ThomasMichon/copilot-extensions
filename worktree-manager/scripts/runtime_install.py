@@ -759,10 +759,12 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
     if os.name != "nt":
         return _dispatch_manager(invocation)
     from worktree_manager.update_driver_cli import handoff_environment
+    from worktree_manager.update_python_path import finish_update
 
     handoff = handoff_environment(command)
     with runtime.retention_lease(args.root, slot.name):
-        return _dispatch_manager(invocation, handoff=handoff) if handoff else _dispatch_manager(invocation)
+        result = _dispatch_manager(invocation, handoff=handoff) if handoff else _dispatch_manager(invocation)
+    return finish_update(command, result)
 
 
 def main(argv: list[str] | None = None) -> int:
