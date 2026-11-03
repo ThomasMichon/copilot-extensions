@@ -200,6 +200,7 @@ def _execute_phase(args: argparse.Namespace) -> int:
             if remaining.get("action") == "self-update":
                 _log("launch: still stale after update; continuing with existing runtime")
     else:
+        _prior, stage_path, stage_lock = update_stage.application_status(Path(args.status))
         status, digest = _staged_snapshot(Path(args.status))
         if digest != args.snapshot:
             raise ValueError("Staged source changed after submission; acquire a new result")
@@ -227,11 +228,16 @@ def _execute_phase(args: argparse.Namespace) -> int:
             project = update_cli.cfg.active_project()
             if project:
                 argv += ["-ProjectName" if installer.suffix == ".ps1" else "--project-name", project]
+            applied_fingerprint = update_stage.fingerprint(payload)
             executed.append(_apply({
                 "service": "agent-worktrees", "phase": "runtime",
                 "payload_root": str(payload), "runtime_root": str(root),
                 "environment": environment,
                 "unset_environment": list(reconcile._RUNTIME_ENV_UNSET), "argv": argv,
             }, staged=True))
+            if executed[-1]["ok"] and stage_lock is not None:
+                update_stage.acknowledge_applied(
+                    status, payload, root, applied_fingerprint, status=stage_path, lock=stage_lock,
+                )
     print(json.dumps({"action": "launch-update", "phase": args.phase, "executed": executed}))
     return 1 if any(not item["ok"] for item in executed) else 0

@@ -182,7 +182,8 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         if not path.is_file():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
 

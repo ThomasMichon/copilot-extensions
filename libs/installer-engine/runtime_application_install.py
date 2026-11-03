@@ -15,6 +15,17 @@ import tempfile
 import time
 
 
+class ApplicationStartupUncertain(RuntimeError):
+    """Startup was invoked; only its application owner can reconcile its effects."""
+
+    def __init__(self, slot: Path):
+        self.slot = slot
+        super().__init__(
+            "application startup outcome is unknown; selection and launchers retained "
+            "for application-owned reconciliation"
+        )
+
+
 def _load(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -87,7 +98,7 @@ def _application(slot: Path) -> dict:
 
 
 @contextmanager
-def _qualified(slot: Path, record: dict):
+def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
     runtime_path = slot / "runtime"
     runtime = _load(runtime_path / "versioned_runtime.py", "versioned_runtime")
     sys.path.insert(0, str(runtime_path))
@@ -160,8 +171,19 @@ def _qualified(slot: Path, record: dict):
         engine.verify_application_wheels(wheels, slot)
 
     def run(argv):
+        command = list(argv)
+        executable, cwd = command[0], slot
+        if os.name == "nt":
+            # CreateProcess rejects long cwd values, including extended paths.
+            # Enter the physical slot inside the same isolated probe interpreter.
+            code = command.index("-c") + 1
+            command[code] = (
+                f"import os; os.chdir({engine._native_retained_path(slot)!r})\n"
+                + command[code]
+            )
+            executable, cwd = engine._native_retained_path(executable), slot.anchor
         result = subprocess.run(
-            argv, executable=argv[0], cwd=slot, capture_output=True, text=True,
+            command, executable=executable, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=max(0.1, min(180, deadline - time.monotonic())),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -253,7 +275,8 @@ def _qualified(slot: Path, record: dict):
                 root, slot.name, payload_hash=inputs["payload_hash"], timeout=180,
             ))
         yield runtime, unchanged
-        unchanged()
+        if verify_on_exit:
+            unchanged()
 
 
 def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
@@ -320,7 +343,9 @@ def install(
         raise ValueError("application installation has no configurable setup or startup action")
     setup = [*record["setup"], *arguments] if record["setup"] else []
     start = [*record["start"], *arguments] if record["start"] else []
-    with _qualified(slot, record) as (runtime, unchanged), runtime._publication_lease(root):
+    with _qualified(
+        slot, record, verify_on_exit=False,
+    ) as (runtime, unchanged), runtime._publication_lease(root):
         _run(record, setup, root, slot)
         unchanged()
         if not runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"]):
@@ -329,6 +354,7 @@ def install(
         selector_content = (slot.name + "\n").encode("utf-8")
         written = {}
         publishing = False
+        startup_attempted = False
         try:
             for path, content in replacements.items():
                 if _read(path) != previous[path]:
@@ -338,14 +364,32 @@ def install(
                     written[path] = content
             publishing = True
             runtime._runtime_component("versioned_runtime_publication").publish_selectors(
-                root, slot.name, None,
-                lambda home, version: _write(home / "last-known-good", selector_content),
+                root, slot.name, None, lambda home, version: None,
             )
+            startup_attempted = bool(start)
             _run(record, start, root, slot)
+            unchanged()
+            if (
+                _read(selectors[0]) != selector_content
+                or _read(selectors[1]) != selector_before[selectors[1]]
+            ):
+                raise RuntimeError("application selector changed before startup completion")
+            _write(root / "last-known-good", selector_content)
             _write(slot / "install-success.json", json.dumps({
                 "state": "installed", "version": slot.name,
             }, sort_keys=True).encode("utf-8") + b"\n")
-        except BaseException:
+        except BaseException as error:
+            if startup_attempted:
+                uncertain = ApplicationStartupUncertain(slot)
+                if isinstance(error, Exception):
+                    raise uncertain from error
+                print(str(uncertain), file=sys.stderr)
+                raise
+            if publishing and any(
+                _read(path) not in (selector_before[path], selector_content)
+                for path in selectors
+            ):
+                raise RuntimeError("application selector changed during recovery") from error
             for path, content in written.items():
                 if _read(path) != content:
                     raise RuntimeError(f"application publication changed during recovery: {path}")

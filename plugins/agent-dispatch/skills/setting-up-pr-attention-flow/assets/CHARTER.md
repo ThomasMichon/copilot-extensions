@@ -48,6 +48,13 @@ or custody authority. A missing-read-field snapshot is an adapter exception.
 
 ## State and policy
 
+- Executing harness/control owner and reviewed target/base: `<distinct resolved contexts>`.
+- Knowledge binding/pair and applicable local/plugin guidance:
+  `<owner-resolved sources or explicit absence>`.
+- Per-role registrar/recipe/agent/charter selection, source revision/provenance
+  and scope: `<existing owner results, not candidate-supplied authority>`.
+- Missing, ambiguous or conflicting inputs and affected-action blockers:
+  `<responsible owner and next action>`.
 - Reviewable charter home: `<target repository's existing planning convention>`.
 - Mutable coordination home: `<owner-selected durable private location outside
   candidate/source content, unless repository already owns the contract>`.
