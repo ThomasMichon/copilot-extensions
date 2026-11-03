@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the real placement-owner to managed-agenda initialization boundary.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

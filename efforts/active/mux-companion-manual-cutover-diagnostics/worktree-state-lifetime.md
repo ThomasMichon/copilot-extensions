@@ -4,9 +4,11 @@ Canonical parent: [complete effort](README.md).
 Sidecar dependency: [S2 and its validation](sidecar-live-timeline.md).
 Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktree-data/README.md).
 
-**Status: design reviewed in #10199; storage and archival implementation remain
-open.** That source merge delivers no managed placement, data move, export,
-collection, cleanup or rollout.
+**Status: design reviewed in #10199; D1 placement/discovery source merged in
+#10224.** Native durability, efforts integration and D2-D5 remain open.
+Neither source merge performs a live data move, export, collection, cleanup
+or rollout. The [D1 readback](journal/2026/11.03-sidecar-durable-placement.md)
+records the exact source acceptance.
 
 ## Request - verbatim
 
@@ -33,6 +35,12 @@ The rich reader can inspect an explicitly selected home and expected store.
 It cannot derive a path from the store ID. Store format 2 and reader contract 1
 are separate versions. The current Manager and resident cannot discover a rich
 home through that interface.
+
+#10224 adds the worktree owner's bounded descriptor and exact-store passive
+discovery outside the checkout. The owning
+[worktree-data contract](../../../plugins/agent-worktrees/docs/worktree-data.md)
+records allocation and filesystem refusal semantics. Efforts initialization,
+Manager consumption and archival are still separate, unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -141,11 +149,13 @@ not consequences of a reviewed design.
 
 - [x] D0. Review this amendment and standing intent through the normal PR flow
   before any allocator, discovery, export or cleanup integration executes.
-  #10199 merged as `a9645aa98b9a4217274cc61aa36a073806413a34`; D1-D5 and
-  the complete Validation Plan remain unchecked.
-- [ ] D1. Extend the existing worktree owner with admitted data allocation,
+  #10199 merged as `a9645aa98b9a4217274cc61aa36a073806413a34`; at that merge
+  D1-D5 and the complete Validation Plan remained unchecked.
+- [x] D1. Extend the existing worktree owner with admitted data allocation,
   bounded persistent descriptors and passive exact-identity discovery. Cover
   fresh managed homes and read-only unsupported/unknown behavior; no live move.
+  #10224 merged as `3da6f1c3e534fd2df0b65775ee17c6d252ec9c42`; this is
+  source delivery with the native durability acceptance below still open.
 - [ ] D2. Have efforts consume managed placement for explicitly selected new
   stores and provide consistent complete export. Preserve standalone/legacy
   operation; do not automatically migrate an active lane.
@@ -160,13 +170,21 @@ not consequences of a reviewed design.
 
 ## Validation Plan
 
-- [ ] The actual allocation owner and independently invoked readers resolve the
+- [x] The actual allocation owner and independently invoked readers resolve the
   same store without a checkout, session, consumer-local map or manual path flag.
-- [ ] Exact project/worktree incarnation, lane, store and placement fences reject
+  Qualified in isolated real CLI processes in #10224, not installed adoption.
+- [x] Exact project/worktree incarnation, lane, store and placement fences reject
   traversal, aliasing, stale/mismatched bindings and wrong installation cells.
   Unknown/old providers do not bootstrap or fabricate an empty complete store.
+  #10224 qualifies the source owner and passive Bash/PowerShell-on-Linux paths.
 - [ ] Atomic allocation/registration and interrupted relocation leave at most
   one admitted writer location; conflicting or partial registration is visible.
+  #10224 qualifies new-home publication/faults and concurrent worktree allocation;
+  no active-store relocation or native Windows durability is qualified.
+- [ ] Execute the owning allocation/retry durability control on native Windows
+  and record actual filesystem barriers separately from Linux API-double
+  coverage. Hardware power-loss behavior and unsupported filesystems are not
+  inferred from source tests.
 - [ ] A real producer-to-CLI-to-Manager join follows committed agenda revisions,
   pages backward while browsing and cancels all owned reads; unrelated views and
   the existing coarse subscription remain usable.

@@ -26,6 +26,11 @@ bounded Bridge membership and the reviewed data-lifetime design.
 The [source readback](journal/2026/11.03-sidecar-native-membership.md) retains
 the separate consumer, archival, measurement, native and original parent gates.
 
+#10224 merged as `3da6f1c3e534fd2df0b65775ee17c6d252ec9c42`, delivering
+worktree-owned durable placement and passive exact-store discovery.
+The [D1 source readback](journal/2026/11.03-sidecar-durable-placement.md) retains
+native durability, efforts initialization/export, consumer and archival gates.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -296,6 +301,8 @@ publication and installed support retain their separate qualification.
   lifetime and archival acceptance in the
   [linked worktree-state design](worktree-state-lifetime.md). Existing source
   approvals do not authorize actual data relocation, collection or deletion.
+  #10224 delivers D1's allocator/discovery source; D2-D5 and native durability
+  remain open rather than completing this combined acceptance.
 - [x] Attach the selected worktree provider to the actual Manager Timeline
   through the owning process boundary, with independent page/live cursors and
   request/source/head fences. #10131 includes the resident-to-CLI-to-Textual

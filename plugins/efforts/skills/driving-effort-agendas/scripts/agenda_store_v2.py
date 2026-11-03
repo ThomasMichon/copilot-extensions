@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 from uuid import uuid4
@@ -50,6 +51,7 @@ def state(db: sqlite3.Connection, home: Path) -> dict[str, Any]:
 def mutate(
     home: Path, request: dict[str, Any], *, session: str | None = None,
     actor: str | None = None, publisher_configured: bool = False,
+    initial_store_id: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     import agenda_store as common
 
@@ -73,6 +75,14 @@ def mutate(
     change = _object(request["change"], "semantic change")
     _text(change.get("operation"), "semantic operation")
     initializing = change["operation"] == "init"
+    if initial_store_id is not None:
+        if not initializing or not isinstance(initial_store_id, str) or re.fullmatch(
+            r"[0-9a-f]{32}", initial_store_id,
+        ) is None:
+            raise AgendaError("managed store identity requires init and 32 lowercase hexadecimal characters")
+        canonical = common.encode({
+            "request": request, "identity": asserted, "initial_store_id": initial_store_id,
+        })
     if initializing:
         fields(change, {"operation", "worktree", "board", "baseline_context", "resource_caps"})
         if expected != 0:
@@ -101,7 +111,7 @@ def mutate(
             baseline = context_body(change["baseline_context"], subjects)
             queue = init_queue(change["board"], change["worktree"], change["resource_caps"],
                                baseline, now, asserted)
-            store_id, revision, previous_records = uuid4().hex, 1, set()
+            store_id, revision, previous_records = initial_store_id or uuid4().hex, 1, set()
             frame_id = queue.cursor["frames"][0]
             item_ids = list(queue.cursor["frame_state"][frame_id]["pending"])
             transition = {"decision": "initialized", "frame_id": frame_id, "item_ids": item_ids,

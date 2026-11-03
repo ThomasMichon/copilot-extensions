@@ -14,6 +14,12 @@ has Python available. No sibling plugin, installation, Manager, daemon or
 agent-worktrees discovery is needed. An agenda is explicitly adopted; never
 initialize or import another active agent's home automatically.
 
+For explicitly selected new owner-managed homes, the optional
+[placement helper](managed-placement.md) composes allocation and fresh
+context-qualified initialization without changing this standalone interface.
+Use the separate [complete export/readback](agenda-export.md) for a declared
+store snapshot; bounded history pages and rendered summaries are not exports.
+
 ## Execution policy compatibility
 
 The command/request examples and operation table below document legacy request

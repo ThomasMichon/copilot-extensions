@@ -210,7 +210,7 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
                 finally:
                     os.close(fd)
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            if create:
+            if create and version == 0:
                 if store_version == 2:
                     from agenda_store_v2 import schema
                     schema(db)
@@ -277,14 +277,18 @@ def history(home: Path, limit: int = 100, before_revision: int | None = None) ->
 
 def mutate(home: Path, request: dict[str, Any], *, session: str | None = None,
            actor: str | None = None, publisher_configured: bool = False,
-           import_home: Path | None = None) -> tuple[dict[str, Any], bool]:
+           import_home: Path | None = None,
+           initial_store_id: str | None = None) -> tuple[dict[str, Any], bool]:
     home = safe_path(home, directory=True)
     if isinstance(request, dict) and type(request.get("version")) is int and request["version"] == 2:
         if import_home is not None:
             raise AgendaError("new execution mode does not import or migrate active legacy lanes")
         from agenda_store_v2 import mutate as mutate_v2
         return mutate_v2(home, request, session=session, actor=actor,
-                         publisher_configured=publisher_configured)
+                         publisher_configured=publisher_configured,
+                         initial_store_id=initial_store_id)
+    if initial_store_id is not None:
+        raise AgendaError("managed placement identity requires a fresh context-qualified store")
     if import_home is not None:
         import_home = safe_path(import_home, directory=True)
     fields(request, {"schema", "version", "expected_revision", "operation_id", "change"})
