@@ -158,3 +158,11 @@ remain authoritative for their machine-local custody.
 - Exact-source native qualification and required CI also passed on `dde5b4a9c3`.
   The remaining review correction applies the same two-file sub-suite shape to
   the on-demand workflow, preserving the existing runner budgets.
+- Required CI on the next revision exposed a newly introduced canonical SDK
+  module missing from Vault's bundled copy. Reconciliation and SDK regeneration
+  restore that module; all 13 install-contract adopters pass.
+- Queued execution now retains the accepted credential-free configuration
+  projection as well as native selectors, clearing each when absent rather
+  than inheriting another worker's environment. Both real queued controls pass
+  with present and absent projections. Fresh native qualification, required CI
+  and review remain required on the published revision.

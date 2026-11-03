@@ -205,17 +205,25 @@ def test_actual_owned_native_provision_keeps_exit_status_and_does_not_leak_ticke
 @pytest.mark.parametrize("present", [False, True])
 def test_vault_activation_selectors_survive_a_different_worker(owning_payload, area, monkeypatch, present):
     payload, installation, project = owning_payload
-    keys = ("AGENT_VAULT_CONFIG", "APPDATA", "XDG_CONFIG_HOME")
+    keys = ("AGENT_VAULT_CONFIG", "APPDATA", "XDG_CONFIG_HOME", "AGENT_CONFIGURATION_CONTEXT")
     for name in ("install.ps1", "install.sh"):
         path = payload / "scripts" / name
         record = (
             "[IO.File]::WriteAllLines((Join-Path $InstallDir 'activation-context'), "
-            "[string[]]@($env:AGENT_VAULT_CONFIG,$env:APPDATA,$env:XDG_CONFIG_HOME))\n"
+            "[string[]]@($env:AGENT_VAULT_CONFIG,$env:APPDATA,$env:XDG_CONFIG_HOME,$env:AGENT_CONFIGURATION_CONTEXT))\n"
             if name.endswith(".ps1") else
-            'printf "%s\\n" "${AGENT_VAULT_CONFIG:-}" "${APPDATA:-}" "${XDG_CONFIG_HOME:-}" >"$3/activation-context"\n'
+            'printf "%s\\n" "${AGENT_VAULT_CONFIG:-}" "${APPDATA:-}" "${XDG_CONFIG_HOME:-}" "${AGENT_CONFIGURATION_CONTEXT:-}" >"$3/activation-context"\n'
         )
         path.write_text(path.read_text().replace("exit 7", record + "exit 7"), encoding="utf-8")
     selected = {key: str(area / ("accepted-" + key.lower())) for key in keys}
+    selected["AGENT_CONFIGURATION_CONTEXT"] = json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "accepted-project", "execution_machine": "fixture",
+            "installation_cell": str(area / "cell"), "binding": "bound",
+            "base_root": str(project), "knowledge_root": str(area / "knowledge"),
+        },
+    })
     for key in keys:
         if present:
             monkeypatch.setenv(key, selected[key])
