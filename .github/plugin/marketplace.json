@@ -128,7 +128,7 @@
     {
       "name": "harness-knowledge",
       "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: after cloning the harness, ask for (or create) the knowledge repo, register both, and write the machine-local knowledge_repo pointer so agent-worktrees can resolve state and paired worktrees natively. Ships the binding-knowledge setup skill.",
-      "version": "0.1.3-dev1",
+      "version": "0.1.4-dev1",
       "source": "plugins/harness-knowledge"
     },
     {
