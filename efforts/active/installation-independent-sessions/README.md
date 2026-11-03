@@ -292,6 +292,20 @@ retains the operator's wording.
 - [ ] Reconcile restart and missed-boundary evidence through the existing
   lifecycle owner, preserving unknown effects rather than blind replay.
 - [ ] Land directly related tests, docs and required changefiles.
+  - [x] Land incoming-start-first monitor replacement, exact native rollback
+    validation, bounded old-port exclusion and truthful cleanup scope (#10148).
+    The six-stage handoff/grace target is reviewed documentation, not full
+    implementation or installed-host acceptance.
+- [ ] Realize and qualify successor-originated handoff announcement, independent
+  predecessor staleness detection, verified new-install completion before old
+  drain, and successor-resident bounded grace expiry with exact native forced
+  retirement through the existing retirement owner. Preserve interrupted work,
+  unavailable-platform cleanup and pending process/runtime custody honestly;
+  documentation of this target is not its implementation or live qualification.
+  - [x] Land the bounded Worktrees announcement/grace implementation and its
+    Linux/Windows installed-monitor and mixed-version controls (#10266).
+    This qualifies that source component, not the broader authoritative
+    replacement target or selected-host acceptance.
 
 ### Phase 4 - Native and clean-room acceptance
 
@@ -344,6 +358,11 @@ retains the operator's wording.
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #10148 release through normal promotion #10219:
+    Main `50e353788ca085fd6ba3b97371c9be9ce1bd2301`, admitted Dev
+    `8edcdf8b0dc9e30ea1f1488e8a0f77104564a9d6`, Worktrees 1.24.433-dev1
+    and Bridge 0.9.281-dev1. Twelve documentation/monitor/ZDD blobs match
+    reviewed source; deployment and the full grace target remain separate.
   - [x] Verify the containing #9418 release through normal promotion #9422:
     Main `595c18f6eea91e8227fad1fc5b963fdb0df01bc6`, admitted Dev
     `326a72d1332afe351e7f5e8ac0841ecba56a8230`, Worktrees 1.24.333-dev1
@@ -886,6 +905,125 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-11-03 - Successor announcement and resident grace source merged
+
+- #10266 merged to Dev as `95f3bc52d172c4938dec738c67b3d8fe1401791f`
+  from exact head `e8894e4f1ddb61b46f5032ca6fd0722eba0e8339`.
+  Copilot review `5760645921` approved that head with no open issues;
+  all six review threads are resolved. Required CI `41734176038` and
+  isolated native run `41734165433` passed. Managed completion used only the
+  repository-authorized additional-CODEOWNER exception, not a findings or
+  CI waiver.
+- The new resident attempts its optional, capability-selected notice before
+  promotion. Old admission does not close merely on receipt; independent
+  ready-successor observation remains its drain trigger. After serving
+  readiness, a separate durable five-minute deadline lets the existing
+  selected resident attempt exact native expiry without blocking installation
+  on predecessor exit. Legacy custody schemas and synchronous paths remain
+  unchanged; unconfirmed cleanup retains process/runtime protection.
+- Incoming asynchronous-retirement support alone does not promise a grace
+  loop. Preparation health must advertise the separate grace capability
+  before failed old cleanup is deferred. A newer controller restoring a
+  retained pre-grace runtime keeps bounded native cleanup, with the published
+  successor passed through the late-bound adapter.
+- Review and native qualification corrected retry-state loss on early exit,
+  a fixture token mismatch, direct canonical settlement before route cleanup,
+  the two-pass exit race, missing incoming grace selection and the fallback
+  adapter's wrong endpoint. The actual mixed-version packet reproduced the
+  adapter failure before its correction; those failed heads remain failed
+  evidence rather than being replaced by later green results.
+- A subsequent review identified the earlier committed-custody/pre-arm exit
+  race. Canonical settlement now compare-releases the exact exited fallback
+  even before the first grace record exists. Failed writes, changing routes
+  and missing active selection retain retry custody; another predecessor's
+  reservation is untouched. Six new direct/resident controls cover these
+  cases without fabricating a marker or sending a signal.
+- Validation tiers: the unchanged, path-gated hosted jobs ran real installer
+  transitions from disposable installed monitors on Linux and Windows,
+  focused custody/grace controls on both, and eight finite Windows native
+  mixed-version/grace cases. The native release controls exercise the common
+  transition seam, not a full retained-mode release end to end. These are
+  fresh-root component and real-subprocess checks, not whole-suite removal,
+  actual Copilot/TTY survival or selected-host rollout.
+- Existing local preparation timeouts, persistent-environment guard failures
+  and the later inadmissible local test-framework attempt remain uncredited.
+  No production deadline, source ceiling, actor restriction or historical
+  acceptance was weakened. All 553 source bindings, the unchanged monitor
+  outcome contract, the exact 1,000-line cutover ceiling and touched-source
+  lint passed before publication. Documentation reconciliation preserved the
+  newer replacement target separately from current resident-owned adoption.
+- Re-read every Plan and Validation item after the actual merge. Closed only
+  the source-component subitem above. Merged-Dev CI `41735507569` passed;
+  the native finalizer verified all source content upstream and settled the
+  source child's parent claim. Normal containing release,
+  the existing serial deployment owner's live gates, exact
+  conversation restoration, both installation cycles, standby/resume/end and
+  final publication remain open. No installed update, repair release,
+  interrupted-request replay or protected-process mutation occurred.
+
+### 2026-11-02 - Windows caller-cleanup prerequisite qualified
+
+- A finite native Windows control exercised the existing shared
+  kill-on-close Job helper with an ordinary child and an explicitly escaped
+  daemon. After successful caller exit and Job closure, the ordinary child
+  was reaped; the daemon survived and created another finite child after
+  cleanup. All identity-pinned fixture children exited. No production Job
+  policy or contained-test suppression was changed.
+- One separately authorized normal controller update then exited zero.
+  Independent observation after both installer and supervisor cleanup
+  confirmed the same selected controller, attributable route and live owned
+  children, with protected sessions and configuration unchanged. This
+  resolves that caller-lifetime prerequisite, not external service health.
+- External coordinator readiness remains a distinct blocker. Neither a
+  ready controller nor a tunnel process is proof of a usable remote endpoint
+  or successful producer. Private operational evidence stays in the operator's
+  knowledge worktree, not this public effort.
+- The selected-host native installation fence remains unresolved. Current
+  read-only inspection found one interrupted, unreleased request and no active
+  queued requests. Its immutable request metadata is not a session claim.
+  Any explicit repair release must use the existing native owner/exclusion
+  contract and preserve the failed outcome; it cannot fabricate settlement
+  or replay the interrupted command.
+- Fresh preservation also found changed bytes in protected automatic-hold
+  records. Their active values alone do not authorize adopting a new baseline.
+  Selected-host effects remain paused for reconciliation with the existing
+  owner; neither old nor current records were overwritten.
+- The existing owner subsequently accepted the later active-hold records as
+  the operation's strict baseline without changing their bytes. Fresh
+  preservation passed, but the selected installed driver still inhibits an
+  ordinary manual update under that automatic hold. Its real read-only
+  admission predicate reproduced the block with no repair/context override,
+  queue admission or install. Neither explicit repair release nor the new
+  suite attempt was spent. Qualify the governed released-code bootstrap path
+  before resuming; do not toggle the hold or confuse source availability with
+  installed behavior.
+- A later explicit operator countermand cancels update-related policy holds
+  for fleet recovery through the existing serial owner. Retain the prior
+  bytes as audit history, not a veto or instructions to restore them. This
+  cancellation does not clear installation execution custody or authorize
+  replay, unrelated switch changes or parallel installation. The existing
+  owner must report actual target clearance before coordinating resumption.
+- The operator separately requested the manual-update defect be repaired,
+  not hidden by policy clearing. The released guard already distinguishes
+  manual from `--auto`; an exact-function, isolated active-hold regression
+  reproduced the stale installed failure and passed all eight corrected
+  cases. Preserve automatic inhibition, including `--auto --force`.
+  Installation of that correction and actual selected-runtime verification
+  remain required; source proof alone does not close the repair.
+- The later authorized normal update reached a new candidate but rolled back
+  because the predecessor lacked the guarded recovery contract. The selected
+  old driver still reproduced manual inhibition. The operator clarified that
+  incompatible, timed-out or failed predecessor recovery is best-effort
+  cleanup: attempt attributable termination and owned port-reservation release,
+  then keep the new generation authoritative. Only incoming startup failure
+  warrants rollback. This source repair is coordinated with the existing
+  incoming-start-first contribution; no second live attempt or installed patch
+  is inferred from that direction.
+- The parent remains Active. Exact old conversation restoration, both
+  same-process live cycles, full reconstruction, standby/resume/end,
+  launch-consumer parity and final publication/completion are not closed by
+  these prerequisite results.
+
 ### 2026-10-28 - Blanket renderer admission removed
 
 [Merged source and final native evidence](<journal/2026/10.28 copied-posix-consumer.md#renderer-admission-removal-merged>).
@@ -904,6 +1042,45 @@ the real same-process installation cycles remain open.
 [Forwarding evidence and the remaining renderer gate](<journal/2026/10.28 copied-posix-consumer.md#literal-manager-forwarding>).
 The literal-value repair is landed; opaque-renderer admission and complete
 Manager launch qualification remain open.
+
+### 2026-10-28 - Cache correction released; installed acceptance in progress
+
+- Normal promotion `40769166050` passed. Release #9451 landed as
+  `6da0fa5ffeb0d754fe79ebbe6f4a402a80e2fa87`, admitting Dev `cb53be8e22be`.
+  The admitted source contains #9441, and its canonical builder and Main's
+  builder both match the reviewed SHA-256
+  `6561d901ef08db670ebb1d3df7ef140eb5dcad0f644b9ebd5aec2bc8081853ac`.
+  Stamped targets are Worktrees 1.24.335-dev1 and Manager 0.6.192-dev1.
+- The authorized selected-host ordinary project-scoped update is running
+  after independent preservation/custody preflight. Existing task disablement
+  remains unchanged; no deadline, integrity or consumer guard was bypassed.
+  Bootstrap's non-project source-mapping fallback is separate from the
+  corrected per-request builder identity.
+- The actual installed sixteen-wheel cold batch passed (16 built, zero
+  reused; 168.030 seconds), followed by own-interpreter verification and
+  publication. Installed source-wheel receipts and sampled filesystem
+  hardlinks corroborate that #9340's cache/hardlink flow was exercised.
+  This closes R9's confirmed defect and installed-batch gate, not a live
+  warm-cache-hit claim or all possible deadline contributors.
+- The containing unified update returned exit 1 in Vault reconciliation after the
+  engine stage passed. The native event retained only `installer exited 1`;
+  the existing disabled task plus unconditional service-start/readiness path
+  is a source-grounded explanation, not a recovered exception. Preserve
+  R2/R3, independent disablement and all existing protection obligations.
+  Postflight verified unchanged protected process identities, task intent and
+  maintenance custody. Fresh launch, same-process supported removal,
+  maintenance standby and final lifecycle acceptance remain open.
+- A fresh installed native-startup witness subsequently displayed its exact
+  initial prompt, answered the expected challenge and returned idle. The
+  execution ancestry has no removable-runtime Python waiter or runtime-root
+  startup argument. This is native launch/interactivity evidence, not removal
+  survival or complete consumer parity.
+- Read-only uninstall admission first found a live status-monitor retention
+  lease. Its authenticated existing shutdown boundary settled normally without
+  disturbing the witness. The repeated check then refused an older protected
+  rooted mux consumer. No lock, consumer guard or preservation directive was
+  bypassed. Legacy closure needs reconciliation with the latest operator
+  preservation direction before the live removal cycle can proceed.
 
 ### 2026-10-28 - Source-wheel deadline diagnosis
 
@@ -928,6 +1105,20 @@ Manager launch qualification remain open.
   separation. The shared batch deadline and all content checks are unchanged.
   R9 records the remaining native installed-batch acceptance; these component
   results do not close the parent effort or establish the sole timeout cause.
+- #9441 merged as `611e819e298041a4f2b660d4c25900a4bc0149d5` after a
+  clean current-head owner Comment review, no open threads, green required CI,
+  and exact-head real-Setuptools acceptance on Linux and Windows
+  (`40766541130`, head `6cee7367aa9a5b3ee1a59daab75df3d92bd799b7`).
+  The review's pending-native-qualification caveat was resolved by that run.
+  The configured additional-CODEOWNER exception did not waive findings or CI.
+- Required unit CI initially rejected the stale admission digest. Refreshed
+  only the reviewed canonical source digest and verified the complete declared
+  closure; exact unit nodes, coverage targets, effect restrictions and budgets
+  are unchanged. Effectful native controls remain in their separate lane.
+- Re-read all Plan and Validation Plan items after merge. R9 remains open for
+  the containing release and actual installed batch; no generic reconstruction,
+  standby or same-process uninstall acceptance is inferred. Native source sync
+  retained the published recovery ref and advanced onto the merged range.
 
 ### 2026-10-28 - Copied POSIX consumer review corrections
 
@@ -2725,3 +2916,1097 @@ Manager launch qualification remain open.
 ### 2026-10-28 - Additive retained #566 contract proposal
 
 Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
+
+### 2026-10-29 - Engine-repair driver handoff merged; live gate remains open
+
+- #9562 merged as `1f4336122082aaeb32c2a35236952a9c92b8bcba`, closing
+  #9561's missing scoped-custody export at Manager's engine-repair child
+  boundary. Exact-head Copilot approval, required green checks and ordinary
+  managed Maintainer completion preceded merge; the bounded source worktree
+  was finalized.
+- Both repair publication-mode controls failed on unchanged source. The fixed
+  canonical contained packet passed 36 tests, including a real child joining
+  and consuming the authenticated witness through the shipped Worktrees
+  installer participant. Its isolated probe shim does not prove a full
+  canonical native installation. Lint and the 13-plugin install contract pass.
+- Re-read the parent Plan and Validation Plan. No whole-roundtrip item closes
+  from this internal handoff fix. Same-process program-absence evidence is
+  distinct from supported-uninstaller conformance, complete reconstruction,
+  exact legacy conversation restoration, subsequent cycle, standby and final
+  lifecycle delivery.
+- Next stretch: verify normal containing promotion, then retry the already
+  authorized selected-host canonical update under the unchanged preservation
+  and maintenance conditions. Do not patch installed code, fabricate a driver
+  witness, remove admission guards or reinterpret a nonzero request as success.
+- Normal promotion #9563 subsequently admitted the reviewed Dev snapshot;
+  Main `7e42bbd77a1e100e2c577bb6d804a3b70b9d1d82` contains the exact repair
+  source blob and Manager 0.6.208-dev1. The authorized guarded live retry has
+  completed fresh Manager bootstrap and entered engine repair. It is not yet a
+  successful complete reconstruction or parent acceptance result.
+
+### 2026-10-29 - Custody handoff passed live; remaining installer broker cleanup
+
+- The guarded canonical request bootstrapped Manager 208 and completed fresh
+  Core 350 engine repair with
+  exit zero. The scoped-custody handoff fix is verified at the real consumer.
+  The ordinary suite phase then failed in Bridge installation after publishing
+  its completion marker but before selecting the runtime. The inner exception
+  was not retained; obsolete broker adoption is a confirmed source gap, not an
+  established attribution of that exact failure.
+- The outer request is interrupted and still fenced. Do not retry unchanged,
+  release native locks, fabricate settlement, or activate services/tasks to
+  bypass the owner. Protected process births, disabled maintenance triggers
+  and hold/notice hashes passed the last postflight unchanged.
+- Claimed #9567 and implemented its bounded source change in the managed
+  `curious-knob` worktree: seven PowerShell installer families no longer adopt
+  brokers during construction or retained-slot activation; Pull Requests'
+  cell installer no longer adopts one either. Bridge still retains reusable
+  completed slots before callbacks. Explicit owned legacy removal remains;
+  Dispatch's missing uninstall guard is restored before effectful teardown.
+- Seven patch changefiles, regenerated native human-output declarations and
+  MCP's append-only footprint revision 6 accompany the change. The 13-plugin
+  install contract, all seven native parser checks, Python lint and 50
+  footprint controls pass. Focused packets passed for MCP (3), Vault (1),
+  Pull Requests (8), Codespaces (4), Index (19) and Dispatch (10).
+- Qualification is unfinished: broad Bridge packets exceeded their aggregate
+  bound; a copied native driver case exceeded its 30-second subprocess limit;
+  fresh-cell construction reached the test watchdog before its own production
+  subprocess deadline. Smaller native packets and integration retries are
+  running with retained logs. No timeout or skipped lane counts as acceptance.
+  No PR is open for this leg yet, and no host rollout has occurred.
+- Parent Plan/Validation remain open. After source qualification, review and
+  release, use the execution owner's supported repair recovery for the
+  interrupted request before another guarded canonical reconstruction.
+- Subsequent focused Bridge qualification passed 8 controls, including the
+  exact copied Codespaces-update driver case that previously timed out.
+  Codespaces' broader native offline closure-build test now reports a concrete
+  dependency-seasoning configuration-probe failure (15 passed, 15 skipped,
+  one failed). That gate requires diagnosis; seasoning remains enforced.
+  Pull Requests' fresh construction and Dispatch preparation/retention
+  qualification are still running.
+- Dispatch preparation/retention subsequently passed 50 controls with 11
+  explicit skips. The cell packet reached a different failure-path unit test,
+  which timed out copying its full materialized release fixture before its
+  mocked subprocess could refuse construction. That unit fixture is now
+  minimal; actual fresh package construction and replay remain separate.
+- The Codespaces failure is now attributed exactly: native UV 0.13.6 rejects
+  duplicate `--no-editable` flags from its caller and the shared policy.
+  Existing contributor-owned #9489/#9501 already owns both call sites;
+  reported the cold/warm offline consumer evidence on that PR instead of
+  creating a competing fix. Temporary fixture-only diagnostics were removed.
+  This dependency must qualify before the native reconstruction lane is green.
+- All 26 cell controls are now covered by passing runs, including actual
+  fresh package construction and completed replay. The corrected failure-path
+  fixture retains the canonical runtime helpers and reaches its intended
+  refusal without copying a full release payload.
+- The cleanup is committed locally. The complete Bridge packet exceeded its
+  1,200-second aggregate bound; the exact-source admitted-unit packet exceeded
+  its 360-second outer bound after 13% without an assertion failure. Neither
+  counts as a pass. Required CI retains its normal unit budget; a smaller
+  verbose Bridge admission packet and draft publication are in progress.
+  The existing contributor UV fix still has blocking review findings, so it
+  is not merge eligible. Source publication does not clear host recovery,
+  release or parent acceptance.
+- Draft #9571 now carries the bounded installer cleanup on current Dev.
+  Required CI passed on its published head: 2,634 admitted units completed
+  in 59.559 seconds, with source guards, lint and the PR gate green. The
+  changed Bridge admission/callback fixture separately passed 18 native
+  controls. The published installer/admission bytes are unchanged by the
+  managed base reconciliation.
+- The draft remains held for contributor-owned #9501 and revalidation of
+  Codespaces' real offline cold/warm consumer. Requested source review while
+  retaining the draft hold; API acceptance is not a review verdict.
+  Nothing in this milestone releases the interrupted execution fence or
+  qualifies installed reconstruction, old-session restoration, the second
+  survival cycle, standby or final lifecycle acceptance.
+- Copilot's actual draft review found two concrete blockers: Dispatch's
+  restored broker-removal guard ran before live consumer shutdown, and a
+  separate cell lifecycle fixture still patched the removed adoption helper.
+  Corrected both rather than dismissing the review. Dispatch now performs
+  identity-checked process shutdown before broker-removal admission, retaining
+  refusal before task/runtime deletion; its 11-test native packet passes,
+  including running-coordinator ordering and removal refusal.
+- Migrated the cell lifecycle fixture to the real retention lease and
+  completed-cell validator, with explicit acquire/release events, no normal
+  legacy removal and refusal before selection. All 17 lifecycle controls
+  pass, including native retained-completion discovery. Python lint passes;
+  the 13-plugin install contract is running before publication. Publishing the
+  follow-up requires fresh CI and an actual passing subsequent review;
+  the earlier green head does not qualify changed source.
+- The follow-up's 13-plugin contract passed and both fixes were published.
+  The subsequent actual Copilot review reports zero open code issues, while
+  retaining the real offline consumer's dependency/revalidation hold. A fresh
+  manual CI run passed units and full source guards on that follow-up; its
+  PR-only gate was skipped, so it is not substituted for the required PR gate.
+- Independent #9572 advanced Dev with a source-wheel identity fix and an MCP
+  footprint revision 6. Reconciled the resulting append-only history conflict
+  by preserving that complete history and appending this cleanup as revision
+  7. Canonical producer/delta and append-only source checks pass; historical
+  bytes remain unchanged. The managed owned-PR rewrite is being published.
+  This still requires current-head CI/review and the contributor-owned UV
+  correction before live reconstruction can resume.
+- The reconciled draft is published and mergeable. Actual PR CI passed on
+  `7109268ba978b738660bbcb4b2cc00ae818acb03`: 2,634 admitted units in
+  72.171 seconds, source guards and the required PR gate green. Copilot's
+  subsequent current-head review reports zero open code findings and
+  explicitly retains the native offline cold/warm acceptance hold.
+- #9501 remains open on its unchanged head with two Medium consumer-test
+  review findings. Sent its author an actionable status update confirming
+  Maintainer acceptance and the actual Copilot review are now present, and
+  requesting corrections on that original PR plus the existing native
+  consumer rerun. No competing implementation or branch patch was made.
+  #9571 stays draft and unmerged. All local test/review/CI waits have ended;
+  no automatic poller or rollout was started. The parent effort remains
+  Active with its live reconstruction and lifecycle gates unchanged.
+- Continuing instead of waiting indefinitely: a maintainer contribution will
+  complete the reviewed consumer-test corrections on the original #9501,
+  preserving its implementation and author attribution. The original author
+  was notified of the bounded scope and the requirement to retain intervening
+  branch updates. A separate managed workspace is being allocated; no
+  replacement PR or installed rollout is part of this contribution.
+- The original UV correction now passes the actual Windows Codespaces offline
+  cold/warm consumer with the corrected test expectations. Logger's batch
+  packet passes 10 controls, including both native cold/warm layouts;
+  Dispatch's isolated consumer packet passes four controls at its unchanged
+  subprocess limits. These are source-consumer results, not installed-host
+  reconstruction.
+- Broader validation found an independent Codespaces stamp bottleneck:
+  provider copying spent about 13 seconds on the payload and reached only
+  seven of fourteen libraries within its 45-second bound. The bounded
+  follow-up reuses the existing native directory-copy helper and avoids
+  deleting/recopying libraries already supplied by a complete fresh payload
+  copy. Full source and reparse semantics remain; native stamp/consumer
+  limits and required CI budgets are unchanged. Compound test observation
+  windows separately include real fixture setup and cleanup. Qualification
+  of that follow-up is still running; temporary diagnostic code was removed.
+- The bounded stamp follow-up qualified: both checkout/release status and
+  first-use controls pass, as does refusal before copying/publication when
+  temporary-stage cleanup fails. Native subprocess limits remain unchanged.
+  Final lint, unit-source binding, generated installer declarations,
+  append-only footprint and 13-plugin contract checks pass.
+- The maintainer completion was published to the original #9501 through an
+  exact operator-confirmed recovery publication, preserving its original
+  author and contribution. Only unrecoverable historical publication proof
+  was overridden; authentication, exact head lease, CI, review and merge
+  gates remain. No replacement PR was opened. Current Dev advanced again
+  after reconciliation, so its fresh base conflict still needs resolution
+  before current-head CI and merge. The parent effort remains Active.
+- Reconciled that conflict by retaining all eight published MCP footprint
+  revisions and appending the UV producer change as revision nine. The fresh
+  review found two additional stale test fixtures and three missing generated
+  runtime policy copies; those corrections are being qualified before another
+  publication. The complete runtime synchronizer also restored generated
+  lifecycle assets omitted by the earlier native Job change.
+- Logger's release fixture needed the current transitive ZDD input. Its
+  existing native stamp test additionally exposed a roughly 76-second stamp
+  path against its 60-second subprocess limit. Reusing the existing native
+  directory copier and avoiding duplicate materialized-library copies brings
+  that test back under the unchanged limit; the snapshot includes ZDD.
+  Complete offline provisioning and snapshot-only first-use validation is
+  still running. No installed rollout or parent fence release occurred.
+- That full Logger packet completed with 22 passes, three platform skips and
+  one first-use fixture failure: its UV emulator did not support the current
+  foundation constructor's source-wheel cache/build calls. The fixture is being
+  updated to use declared real build tools and native offline wheel builds,
+  while leaving construction, source binding, native custody and health checks
+  real. Its original first-use subprocess and test limits remain unchanged.
+- The phase split from #9592 is now incorporated. One bounded attempt completed
+  acquisition in 48.281 seconds and offline assembly in 141.844 seconds before
+  the real verifier correctly rejected missing archive-origin metadata in the
+  package emulator. That fixture metadata now comes from the actual wheel URL
+  and verified digest, with a passing readback/editable-refusal control.
+- Fresh cold first use still does not qualify locally: the foundation producer
+  reported its unchanged 300-second whole-child deadline, and the first-use
+  caller reached its unchanged 420-second limit. Evidence is posted on the
+  existing #9290 performance thread rather than a competing implementation.
+  File-backed output now preserves that failure report; only the outer test
+  observation is 720 seconds to include real release/backend staging before
+  the individually bounded calls. This is not a pass under the old 520-second
+  observation or a production deadline change.
+- Generation, all 13 install contracts, source admission, touched-source lint,
+  the 45-file module guard and 50 footprint controls pass. The local candidate
+  is committed; the original #9501 remains on its previously published head and
+  is now draft while current-head hosted Logger bootstrap qualification is
+  prepared. Exact managed publication still awaits a new operator sign-off.
+  No merge, rollout or selected-host replay occurred.
+- The exact approved update was published to the original draft #9501.
+  Hosted run 41012159564 on that head failed before reaching the Logger
+  binstub controls: both prerequisite suites passed 112 controls, then the
+  shared cold fixture lost its required harness boundary.
+- The reconciled follow-up preserves runner containment, keeps Python absent
+  from product PATH, and gives only Linux's test lifecycle supervisor its
+  interpreter. The Linux consumer additionally requires its constructed SDK
+  to be private rather than borrowed from that supervisor. The environment
+  control and both native strict-Job/contained-custody controls pass; production
+  admission, no-fallback behavior and deadlines are unchanged.
+- The candidate now includes the shared-SDK base and preserves all twelve
+  published MCP footprint revisions before appending revision thirteen.
+  Redundant release entries absorbed by that base were removed. All local
+  structural gates pass. Current-head hosted qualification, CI and review
+  remain open; the parent effort is still Active.
+- The operator-approved `ce3f213e8e` update reached the original draft #9501.
+  Its required CI and fresh Copilot approval passed, and all five corrected
+  review threads were resolved. Hosted run 41021759877 still failed its real
+  consumer: Windows requires the documented caller-owned Python prerequisite,
+  while Linux rejected the runner interpreter's custody.
+- Follow-up `5bcfa9f151` supplies that Windows prerequisite only for the actual
+  Logger consumer and gives Linux test supervision a private copied interpreter.
+  The Python-free default, product-managed SDK requirement, native custody and
+  production deadlines remain intact. Both Windows environment controls and
+  touched-source lint pass. The local real-consumer attempt reached the runner's
+  900-second aggregate limit without a pytest result; it is not qualification.
+  Exact-head hosted run 41025139995 is pending on both operating systems.
+  No merge, rollout or selected-host replay occurred; the parent remains Active.
+- Hosted run 41025139995 passed all 138 update-driver tests on Linux, including
+  the real concurrent cold installation and installed consumers. The later
+  snapshot fixture still failed interpreter custody; Windows hit the canonical
+  2 GiB temporary-storage cap before completing its heavy consumer.
+  Follow-up `03fa9475e5` repairs the older Linux test fixture and splits that
+  Windows consumer into its own contained packet. Collection proves all
+  113 original recipe cases are retained as 112 plus one, with unchanged caps.
+  The Linux-only fixture regression is skipped locally on Windows, not passed.
+  Exact-head hosted run 41027764927 is pending; both full OS jobs and current
+  CI/review must qualify before the original draft #9501 can merge.
+- Hosted run 41027764927 passed the complete Linux job: 138 update-driver
+  controls and 64 Logger controls, with two platform skips. Windows still hit
+  its unchanged storage cap because the filtered invocation combined both
+  selected files despite the file-group setting. Follow-up `5749115ef3`
+  therefore gives refusals, bootstrap hooks and the heavy consumer three
+  separate invocations. Collection proves 112 plus 25 plus one retains all
+  138 cases; YAML and selector checks pass. Exact-head run 41029720499 is
+  pending. The original PR remains draft; no parent completion or rollout
+  is claimed.
+- Run 41029720499 passed the complete Linux job again. Windows passed its
+  112-case recipe packet, then failed the cold-hook fixture's Python-absence
+  probe before invoking the hook. That positive consumer also requires the
+  documented Windows caller-owned Python prerequisite. Follow-up `290b9265e6`
+  supplies it and keeps the negative absence probe only on the genuinely
+  Python-free fixture. Both environment controls pass in 9.14 seconds, with
+  lint and diff checks green. Exact-head run 41032050807 is pending on both
+  systems; no deadline, production admission or parent safety fence changed.
+- Run 41032050807 passed Linux's complete job and Windows's recipe packet.
+  Windows's cold-hook packet reached its unchanged 900-second aggregate limit
+  without reporting the native assertion. The shared observer reports only
+  after its owner-settlement wait, which can hide the original failure until
+  containment cleanup. Diagnostic-only follow-up `ed715ad5f3` emits a bounded
+  report before that wait and streams it in the Windows packet. A controlled
+  ordering regression passes; custody and wait limits are unchanged. Exact-head
+  run 41035665583 is pending. No native success or parent completion is inferred
+  from this diagnostic improvement.
+- Run 41035665583 again passed Linux and exhausted Windows's cold-hook budget,
+  with no pre-settlement exception report. The masking hypothesis therefore is
+  not established. A bounded local control then reproduced a concrete fixture
+  stall: after materialization, its redundant `copytree` exceeded 120 seconds.
+  Follow-up `fb8b11e584` uses the existing same-volume rename helper instead.
+  That control and diagnostic ordering now pass in 78.15 seconds under the
+  unchanged ceiling; exact-head run 41040401511 is pending.
+- Review also identified a separate scope defect in the new cold-environment
+  unit control: macOS lacks the fixture's Linux utilities. A pending four-line
+  platform guard retains Windows/Linux execution and skips macOS. Its actual
+  decorator truth table and lint pass; this is not native macOS qualification.
+  No production limit, custody behavior or selected-host state changed.
+- Run 41040401511 passed Linux and failed Windows's cold-hook packet at the
+  unchanged aggregate limit after fixture-ready markers. Its watcher lost API
+  connectivity; a later provider query established the actual terminal result.
+  Two local 120-second diagnostic observations were too short to finish the
+  existing foundation wait. A 240-second diagnostic then reached both cold
+  callers and exposed a real second-hook failure: 15.64 seconds against 15.
+  Retained native diagnostics reached custody-offer stages; no underlying
+  shared-runtime cause is inferred from that alone.
+- Follow-up `d6296060d3` publishes the macOS guard and bounded phase/path
+  diagnostics without production changes or deadline increases. The guard's
+  truth table and lint pass. Exact-head run 41065183300 and fresh review are
+  pending. The local deadline failure is not qualification, and the original
+  PR remains draft while the actual Windows gate is investigated.
+- Run 41065183300 passed Linux. Its Windows trace shows both cold hooks
+  acknowledged in roughly two seconds, first-caller closure, and then no
+  ordinary results before the aggregate limit. That separates this hosted
+  stall from the local 15.64-second deadline failure.
+  Follow-up `7f5bfabdef` adds fail-fast observation of terminal foundation
+  failures, exited owners without receipts and interrupted ordinary requests,
+  plus structured state-transition diagnostics. Seven focused controls pass
+  in 1.90 seconds; pending/running remain waits and completed outcomes remain
+  real receipt checks. Exact-head run 41069385480 and fresh review are pending.
+  Production deadlines and custody are unchanged; no success or parent
+  completion is inferred from improved observation.
+- Run 41069385480 passed Linux. Windows passed its recipes and 31 bootstrap
+  controls, then failed promptly because the first native owner exited without
+  an ordinary receipt after caller-Job closure; foundation remained running.
+  The source confirms a test contract mismatch: contained native creation
+  deliberately omits breakaway and inherits the strict caller Job, while this
+  fixture closes that Job and expects survival. Production strict-Job escape
+  refusal remains correct and independently controlled.
+- A decision is required before changing this acceptance contract. The bounded
+  fixture can honestly prove original caller-process exit while retaining its
+  test-owned Job until cleanup, with explicit Job-closure negative controls.
+  That would not satisfy or waive this parent's real production Job-survival
+  gate. Until the operator chooses that scope or retains the existing blocker,
+  the original #9501 remains draft and unmerged. No containment suppression,
+  alternative broker, production change or rollout is authorized by this finding.
+- The operator explicitly selected the corrected bounded-fixture semantics.
+  Follow-up `badd968cd4` retains the contained Windows caller Job through native
+  owner settlement, proves original caller-process exit, and closes the Job in
+  final cleanup even after settlement timeout. Other helper modes are unchanged.
+  Five fixture controls pass in 2.47 seconds; the two real native strict-Job
+  refusal/contained-custody controls pass in 24.18 seconds. Two conservative
+  unknown-launch cleanup records remain held, not force-cleared.
+  Exact-head run 41098299424 and fresh review are pending. This does not resolve
+  or transfer away the parent's actual production Job-survival gate.
+- Run 41098299424 passed both complete native lanes on `badd968cd4`.
+  Raw Windows logs confirm all packets ran: 205 passes and six platform skips;
+  Linux records 209 passes and two skips. Two hosted framework cleanup-held
+  FileNotFoundError warnings remain explicit, not force-cleared. This remains
+  bounded consumer evidence, not production Job-escape acceptance.
+- Review found a real receipt/exit snapshot race. The correction re-reads a
+  receipt after observing owner exit and has a real-file regression; eight
+  outcome controls pass in 1.13 seconds. Commit `9e790479f3` preserves that fix
+  locally before reconciliation; it is not on the published candidate yet.
+- The protected-workflow guard correctly refuses workflow edits in a
+  contributor-authored PR, regardless of who supplied the commits. Separate
+  owner-authored supporting PR #9681 moves only the packet workflow, its scope
+  regression and documentation through the required owner route. It preserves
+  the original #9501 and Xi's authorship; it is not a competing installer fix.
+  Four workflow controls pass and both job definitions match the actually
+  qualified candidate. Current CI/review for #9681 are pending; after merge,
+  reconcile #9501 to remove its protected-path diff and qualify its final head.
+  Both PRs remain unmerged; the parent effort stays Active.
+- Supporting #9681 merged as `a3806987cfe422772bd1cdb4987ed41986b56638`
+  after exact-head Copilot approval, green required checks and no open findings.
+  The managed maintainer flow used its configured additional-review exemption,
+  not a CI or author-policy bypass. The canonical Plan was reread: this closes
+  only the protected-workflow publication prerequisite, not Phase 4 or parent
+  acceptance. Next reconcile the original #9501, publish its receipt-race fix,
+  remove the now-upstream protected-path diff, and qualify its final head.
+- The original candidate is reconciled as `af9d1acf24`: both generators, all
+  13 installation contracts, current unit-source bindings and the 45-file
+  module guard pass. Published MCP revisions 1-13 retain exact bytes and
+  valid current producers; the native tests and receipt-race fix retain exact
+  pre-rebase bytes. Xi's original author/date/message and stable patch are
+  unchanged. The contributor PR's protected-path delta is zero.
+  Thirteen final receipt/custody controls pass in 5.35 seconds. Normal managed
+  publication refused the required foreign-branch rewrite; the fresh exact
+  recovery preview still needs operator sign-off. The remote remains the
+  qualified `badd968cd4` head. No merge or final-head qualification is claimed.
+- The operator approved that exact reconciliation preview, and managed
+  publication placed `af9d1acf24` on the same original draft #9501. The
+  receipt-race thread is now resolved against published code; fresh review and
+  exact-head native run 41114067715 are pending. Prior approvals are consumed,
+  not blanket rewrite authority. Current native, CI and maintainer acceptance
+  still gate readiness and merge; the parent remains Active.
+- Exact-head run 41114067715 passed both complete lanes on `af9d1acf24`:
+  Windows 206 passes/six platform skips; Linux 210/two. Raw logs confirm the
+  heavy consumer and retained-bootstrap steps. Sixteen hosted Windows
+  FileNotFoundError cleanup-held warnings remain explicit, not force-cleared.
+  Copilot approved the exact head with no open findings.
+- Required final-head CI is absent, not waived. Provider state now reports
+  `mergeable=false`, `mergeable_state=dirty` after `dev` advanced to
+  `92473fa43ebcbdf27303c15932735734b4fb9d21`; pull-request CI cannot start on
+  that conflicted merge ref. Next reconcile the actual base conflict while
+  preserving Xi's patch, all published footprint history and the bounded
+  fixture contract, then satisfy the remaining current-head gates. The PR
+  remains draft/unmerged; no parent production Job-survival or rollout
+  completion is inferred from these native passes.
+- The current-base reconciliation is published as `9b52edfc5f` on the same
+  original #9501 after a fresh, exact operator-approved rewrite preview.
+  The only rebase conflict was MCP's generated footprint history. Its 15
+  merged revisions remain unchanged; the former PR-only provisional revision
+  is replaced by appended revision 16. The earlier "published 1-13" note
+  described the candidate, not 13 merged baseline revisions.
+- Native constructor controls exposed the manifest's existing 64 KiB reader
+  limit: the new baseline already exceeded it. Compact formatting now fits
+  without changing any history record or increasing the runtime bound. The
+  source guard enforces that same bound with a real oversized-file regression.
+  All 91 footprint/install-guard tests, both generators, all 13 install
+  contracts and touched Python lint pass.
+- The provider now reports the PR mergeable and required CI is running.
+  Exact-head native run 41127692020 and fresh review remain pending. The
+  newly merged daemon SDK is not qualified by the prior head's results.
+  The PR stays draft/unmerged; parent production Job-survival, selected-host
+  recovery and complete round-trip acceptance remain open.
+- Run 41127692020 passed the full Linux lane and Windows cold-hook packet,
+  but failed the Windows concurrent-cold consumer's fatal-registration
+  negative: the real failure is logged, yet the waiting caller observes
+  exit zero. Windows retained-bootstrap steps consequently did not run.
+  The operator's conditional acceptance of `9b52edfc5f` requires both lanes
+  to pass and therefore does not authorize merge on this result.
+- The existing independent native-daemon error control reproduces the same
+  false success without Logger or installation: `test_native_daemon_cleanup.py
+  -k test_native_worker_failure_preserves_original_error_in_redirected_log`
+  observes zero instead of one after a worker throws. The contained native
+  runner reports one failure/six deselections in 13.45 seconds.
+  A local full consumer attempt separately exceeded its unchanged aggregate
+  bound; it is not a pass and yielded no substitute failure diagnosis.
+- Evidence was delivered to the existing original-shell custody driver on
+  #9687, comment 6534036414. Reciprocal shell/helper Job teardown is a
+  hypothesis, not a proven root cause or permission to remove containment.
+  No competing SDK patch, production change, review waiver or rollout was
+  made. The temporary local diagnostic edit was removed; published source
+  stays clean at `9b52edfc5f`. The original #9501 remains draft/unmerged,
+  blocked on this now-reproduced native exit-status contract.
+- The operator authorized a narrow SDK repair, coordinated with the existing
+  #9687 driver rather than a silent overlapping rewrite. The experiment is
+  confined to `native_daemon.ps1`'s terminal host exit and native controls;
+  no shared instance protocol/archive, Job, lease or containment changed.
+  Using `[Environment]::Exit` at that boundary makes the original throwing
+  control pass once (18.43 seconds).
+- Expanded controls preserve positive, negative and successful native statuses.
+  An attempted Core matrix correctly met the adapter's documented Desktop-only
+  refusal; that unsupported matrix was removed without expanding the adapter.
+  The supported full packet then had nine passes and one unchanged
+  15-second worker-completion timeout, not a status mismatch. Timeout
+  diagnostics were corrected to share the still-open log for reading; the
+  four-status diagnostic packet is pending. This is not a qualified fix,
+  merge, release or production-lifetime acceptance.
+- The `[Environment]::Exit` experiment is rejected: later controls reached
+  application code but could hang in host shutdown. The current candidate
+  instead uses the adapter's existing native termination primitive on its own
+  current-process pseudo-handle, after the target returns or unwinds. It adds
+  no PID-selected termination, activation mechanism or containment exception.
+- Expanded status controls cover two cycles each of throwing, signed,
+  positive and successful exits, and require the target's `finally` marker
+  before accepting its process status. These eight controls and two
+  fresh-profile controls passed together once. Full qualification remains
+  red: the latest complete packet has 25 passes and two timeouts, both now
+  localized to instance entry before target execution. Fifteen-second worker,
+  30-second outer and 60-second test deadlines remain unchanged.
+- Broader controls also exposed malformed Job-scope values reaching the
+  instance helper before the native adapter's existing validator. The
+  candidate reuses that validator before reservation, retaining native
+  refusal and all existing limits. Fresh-profile readiness is now published
+  atomically; cleanup observes the retained process after its owned Job
+  terminates rather than racing that termination with another kill.
+- A byte-identical temporary candidate in the original #9501 source was
+  exercised against the real concurrent-cold Logger consumer. The runner
+  exhausted its 900-second aggregate budget, including preparation and
+  cleanup, before producing a test result; this is not acceptance. The
+  temporary patch was removed and that source is verified clean again.
+  Focused lint and all 13 install contracts pass, but there is no repair PR
+  or merge. Diagnose the pre-entry helper stall without extending deadlines
+  before claiming qualification. Original #9501 and every parent gate stay open.
+- The temporary timing proxies are removed. A diagnostic pair measured
+  helper startup at 5.822/1.649 seconds and response delivery at
+  0.746/0.060 seconds; neither reproduced the earlier timeout. A coupled
+  fault-injection control still patched the removed `exit 1` statement.
+  It now delays the new terminal call by the same original ten seconds,
+  preserving its actual-live-handle assertion.
+- The final whole native packet passes all 27 controls in 236.93 seconds
+  (289.08 including preparation/cleanup), with every original per-worker,
+  outer-process and test deadline unchanged. Eight conservative unknown-launch
+  cleanup records remain held. Earlier pre-entry negatives are retained,
+  not relabeled as passing. Fresh external qualification and real Logger
+  acceptance remain outstanding; the existing native hosted selector also
+  enables unrelated broker consumers, so it must not be used blindly.
+- The operator approved a separate opt-in native-only qualification route.
+  The route's existing selector/default invariants and exact bounded command
+  pass 146 controls. Draft #9722 was published, then pulled through its
+  changefile-presence correction: the repository's existing detector names
+  all 16 vendored consumers, each now covered by this PR's own pending
+  changefile. No versions or publication gates were bypassed.
+- Exact final head `5701986ebd29d8fe71ecda63d49889c825ca18f3` passes all
+  27 fresh Windows native controls in run 41152335352 (45.12 seconds;
+  52.75 including preparation/cleanup). Only the new native-only job ran.
+  Required CI run 41152244726 passes on that same head. The PR is now ready
+  for current-head Copilot review, not merged or released.
+- Narrow SDK source-contract qualification does not substitute for the real
+  Logger acceptance owned by #9501. After the SDK repair merges, pull that
+  original contribution forward with its preserved author/history and
+  complete its own current-head native, CI, review and acceptance gates.
+  The parent remains Active; no selected-host recovery or round-trip gate
+  is resolved by opening or qualifying this supporting PR.
+- Copilot's current-head review of #9722 found one valid Medium issue:
+  .NET Framework's environment Hashtable lookup is case-sensitive, unlike
+  Windows variable names and the existing creation validator. Six malformed
+  lowercase-key controls reproduce the defect. A strengthened reservation
+  boundary control proves all six actually reach the forbidden reservation
+  call before the fix.
+- The preflight now compares each environment key with `OrdinalIgnoreCase`.
+  Both canonical and lowercase spellings are covered without changing scope
+  syntax, containment or deadlines. The complete 34-case native packet is
+  running; the correction is not yet published or qualified. The old
+  27-case/CI success and the commented review are not acceptance of a new head.
+  The Medium thread must be resolved and fresh native, CI and review gates
+  satisfied before SDK merge.
+- The corrected whole native packet passes 34 controls locally in
+  259.03 seconds, with unchanged deadlines. Published head
+  `1c9b20a7a326b768c4a56191a353515601906d6f` passes hosted run
+  41155476541: 34 controls in 41.95 seconds, 46.11 including preparation
+  and cleanup, with only the native-only job executing.
+- Required CI 41155378033 passes and Copilot review 5720366705 approves
+  that exact head with no open findings; the original Medium thread is
+  resolved. The final PR-body evidence update retriggered required CI as
+  run 41156127092 on the same unchanged source head. Await that live gate
+  before managed merge rather than substituting its earlier green result.
+  No SDK merge, release, rollout or parent completion is claimed yet.
+- Required metadata-triggered CI 41156127092 passed. The role-scoped managed
+  merge verified #9722 merged as `a7a6ff78f58fde1110500d55673cb015fb924461`,
+  retaining the approved final head's source, current CI and resolved review.
+  The normal Maintainer review-rule exception was used; no CI or blocking
+  feedback was bypassed. This is merged to Dev, not released or deployed.
+- Ordinary post-squash sync safely aborted on a history conflict. All ten
+  qualified PR files were then verified byte-identical to the confirmed merge
+  tree, with the reviewed head retained in both managed recovery and a local
+  backup. Only already-merged history was advanced, without a hard reset or
+  guessing at conflict content. The supported finalizer retired the SDK child
+  worktree and settled its parent's claim.
+- This closes the narrow SDK exit-status prerequisite, not any aggregate
+  Plan/Validation item. The canonical effort was re-read after merge and
+  remains Active. Next return to original #9501, preserve its contribution
+  and history, pull forward the SDK repair, and qualify its own final-head
+  native consumer, CI, review and Maintainer-acceptance gates before merge.
+  #9571, normal release, supported selected-host recovery and the complete
+  same-window round trip remain open.
+- Original #9501 is rebased locally onto pinned Dev
+  `0aee087c3f6e7507884b623f1d586162f79e3b25` at
+  `3044aeaf0236f37704c3202bbbe8e67414d33d4c`, not yet published. Xi's
+  original author, author date, message and stable patch ID are preserved;
+  the workflow delta against that base is zero. The only conflict was the
+  generated MCP footprint: all 16 merged records remain unchanged, with
+  current producer-only revision 17 appended in 43,193 actual UTF-8 bytes
+  under the unchanged 65,536-byte reader bound. Recovery refs remain.
+- Local guards passed 317 controls but timed out on the requirements
+  mutation's installed-Python metadata probe at its existing 10-second
+  bound. A fresh three-control run instead timed out during that case's
+  install at its existing 30-second bound; the other two cases passed.
+  The retained metadata probe then returned the expected values in 2.89
+  seconds. A bounded trace passed every install stage and metadata assertion,
+  followed by all three uninstrumented mutation controls passing in 35.91
+  seconds without source or deadline changes. The intermittent timeout's
+  cause is not established; retain both failures, not a claim that the first
+  suite was wholly green. Install-contract and changefile-presence guards
+  passed. Fresh exact-head hosted Windows/Linux consumer qualification,
+  required CI, review and Maintainer acceptance remain mandatory.
+- Normal publication refused the existing custom `fix/` head's historical
+  proof before pushing. The supported recovery preview bound the exact
+  old/new heads above; the operator explicitly approved that fingerprint.
+  Managed publication succeeded with both source and published recovery refs
+  retained. Provider readback confirms #9501 at `3044aeaf`, still draft/open.
+  Required CI 41174789941 passes. Full Windows/Linux Logger bootstrap run
+  41174931728 is pinned to that exact head and running both consumer jobs.
+  A fresh Copilot review was requested with a cursor newer than the old-head
+  approval; its bounded waiter and the consumer waiter retain those gates.
+  No merge, release, rollout or aggregate completion is claimed.
+- Full Logger bootstrap run 41174931728 passed on exact head `3044aeaf`:
+  Windows 206 controls with six platform skips, Ubuntu 210 with two.
+  Windows heavy, cold, concurrent-cold and retained steps all passed.
+  Copilot review 5721592040 approved that exact head with no open issues;
+  all six review threads are resolved and required CI is green.
+- The operator authorized completing all necessary work involving original
+  #9501, including its adjustments and Maintainer completion, without
+  per-adjustment prompts. This preserves native validation, required CI,
+  review and ordinary merge gates; it does not waive a permission or effect
+  boundary. During the operator pause, Dev moved and both original #9501
+  and #9571 became conflicting again, without a published-head change.
+- The qualified #9501 head was backed up before supported sync safely
+  aborted. Its 17 commits were then reconciled onto pinned Dev
+  `455d67f5ecbdcbf6517285c8a01e6931d77cd83c`. Xi's author, date and message
+  remain exact; the immutable-retention change follows the upstream function
+  relocation into `installer_source_build.retained_input_graph`, preserving
+  the new real-progress callbacks. Original patch history remains in backup.
+  The canonical engine itself has no delta against the new base.
+- All 36 now-merged footprint records remain unchanged, with producer-only
+  revision 37 appended at 94,752 bytes. Dev's already-reviewed separate
+  1 MiB manifest reader is preserved; runtime markers remain capped at
+  64 KiB. The source guard regression and documentation follow that existing
+  distinction. Both generators are synchronized; no workflow delta exists.
+  Local `60e76c6404` is clean but unpublished. Targeted retention,
+  source-build, footprint and publication guards are running before a
+  fresh exact-head hosted/CI/review qualification.
+- The continuing original branch was advanced to published `76cfa20a`,
+  reconciled onto pinned Dev `9a6adc0`. The upstream-reviewed current v3
+  footprint declaration replaces the source-history ledger while retaining
+  explicit v2 readers and pairing. Its semantic revision 36, contract and
+  change assessment remain unchanged; canonical source refresh yields a
+  4,248-byte document. All earlier published histories remain in recovery
+  refs. Current-schema guards passed 87 tests, install-contract and
+  changefile checks; retained source/build/process bytes were unchanged.
+- Full native run 41262194959 against previous `60e76c64` failed both
+  consumer jobs. Ubuntu's concurrent-cold test exceeded the unchanged
+  65,536-byte stderr limit because verified-file progress emitted a full
+  line for every unit. Windows snapshot-only first use failed its seasoning
+  probe: the function-relocation reconciliation mistakenly retained
+  `--no-editable` alongside the original `non_editable=True` enforcement.
+  The offline probe correctly rejects that obsolete flag. Neither failure
+  is passing aggregate qualification or permission to clear a fence.
+- The coupled fixes preserve renewal and a flushed real-completion byte
+  for every verified unit while coalescing detailed diagnostics and
+  reporting the exact final count. A 20,000-unit regression reproduced
+  1,169,009 bytes before the fix; controls now require output for every
+  unit within the unchanged 64 KiB native bound, renewal past the initial
+  allowance and refusal on silent or mutated work. Seven targeted controls
+  and Python lint passed. The obsolete CLI flag was removed, retaining
+  immutable projection enforcement; the test was not weakened.
+- The isolated local Windows snapshot-only/editable-refusal packet reached
+  its unchanged 420-second limit, 597.08 seconds including preparation and
+  cleanup. It did not complete snapshot-only qualification and is not a
+  pass. The fixes and generated consumers are staged, not yet committed or
+  published. Fresh hosted exact-head Windows/Linux completion, required
+  CI and review remain gates before the authorized managed merge. Root
+  coordination retains the same edit custody; no selected-host effect or
+  parent completion occurred.
+- The coupled native fixes were published on original #9501, followed by
+  a CI storage partition correction at `b888bc8427a1b04a35ec98585e04a14a5d7166fd`.
+  Full native run 41269455589 passed that exact combined candidate:
+  Windows 206 passed with six platform skips, Ubuntu 210 with two.
+  The ordinary, cold-hook, concurrent-cold and retained packets all passed;
+  the earlier local timeout and failed hosted runs remain failed evidence.
+  Copilot review 5726257840 approved that exact head with no active issues.
+  A complete current thread read found no unresolved threads.
+- Required workflow protection independently refused the protected-file
+  delta because original #9501 is contributor-authored. Owner-authored
+  CI-only companion #9828 carries just the Linux packet split and its
+  scope assertions; every functional correction stays on original #9501.
+  The complete scope suite passed 92 tests after its expected-target map
+  was aligned with both runtime-source controls already on current Dev.
+  The companion's workflow-protection and source-attribution checks pass;
+  ordinary required CI, review and merge remain pending.
+  After the companion merges, original #9501 must pull forward, remove
+  its protected-workflow delta and qualify its new exact head before
+  Maintainer acceptance and managed merge. No release, installed rollout
+  or installation-survival completion is claimed.
+- Owner-authored CI companion #9828 passed required CI and exact-head
+  Copilot review 5726417636 with no findings or threads, then merged and
+  finalized through the managed Maintainer path. Its child claim is settled.
+  Original #9501 pulled forward cleanly onto Dev `a3c3d1bf977256b20454f2e61c5d576a3a8a2b51`;
+  local head `eeab3d09af8da6c6694084ff074837f386c39dc0` has zero
+  protected-path delta. Xi's original author, message and commit remain
+  preserved, and pre-sync source/recovery refs retain the old head.
+  This new head is not yet published or natively qualified. Current local
+  source, footprint and CI-scope guards are running before publication;
+  fresh hosted native, CI, review and Maintainer acceptance remain open.
+- Original #9501's rebased `eeab3d09` head passed 484 local controls with
+  one skip and all 13 install-contract checks. It was published through
+  a freshly inspected, operator-authorized exact-head recovery lease.
+  Native run 41277209717 passed all four Logger packets on both platforms
+  (Windows 15m34s, Ubuntu 11m34s), and Copilot review 5726632865 approved
+  that exact head. New Dev drift created a separate content conflict;
+  those passing results do not qualify a later head or waive mergeability.
+- The released minimum #9820 / #9836 permits broker-retirement #9571's
+  original held consumer proof independently of the broader contributor PR.
+  On published `e6134d0c`, both actual offline cold/mutated-warm Codespaces
+  cases pass, as do 19 native Bridge admission/reuse/callback controls,
+  11 Dispatch retirement-order controls and 17 real cell lifecycle controls.
+  Existing deadlines and ownership/refusal guards remain unchanged.
+  All seven PowerShell entrypoints parse, touched Python lint passes and
+  all 13 install contracts pass. Current CI 41279773967 passes required
+  units, guards and the actual PR gate; source attribution/protection pass.
+  The current PR description replaces the obsolete dependency hold and
+  footprint-revision claim while retaining historical failed evidence.
+  #9571 is now ready for fresh review, not merged or installed.
+- Original #9501 retains Xi's authorship after reconciliation onto pinned
+  Dev `1039991a258276da1ffd15ab91f1f2b27c93e5fc`. Local `0fefc510` has
+  no canonical dependency-config, policy, source-constructor or promotion
+  manifest delta against that base. Current v3 footprint semantics remain
+  revision 36; earlier source/history refs are retained. Newer upstream
+  offline backend and interpreter-custody controls are preserved alongside
+  the original archive-origin and strict option-refusal regression.
+  Current qualification exposed an omitted new workflow input in the
+  scope test and lost fixture refusal during reconciliation. Both are
+  corrected in the tests only; no constructor or deadline changed.
+  Exact current contract/fixture retests are running before publication
+  and fresh hosted review/acceptance. The parent remains Active without
+  selected-host effects.
+- #9571's fresh review 5726812195 approved exact `e6134d0c` with no active
+  issues; full thread pagination found zero unresolved threads. Current
+  required checks were green, readiness was confirmed, and managed merge
+  verified `94a648c821dfe5746ac423716e370d79a35fcf82` on Dev.
+  The source worktree finalized and settled its parent claim. Parent #8669
+  remains Open, and R10 retains release/reconstruction/recovery obligations.
+  Dev CI 41281619346 passes; promotion 41281822343 is running. No installed
+  rollout, interrupted-request replay or parent completion is claimed.
+- Original #9501's current footprint/CI-scope suite passes all 179 controls.
+  The archive-origin/option-refusal regression passes after its test-only
+  repair. Local snapshot-only qualification reached the 420-second packet
+  limit without its own result and remains unqualified. Its existing
+  fixture permits 520 seconds for nested 60-second stamp and 420-second
+  provision calls. An isolated rerun gives only the local outer packet
+  600 seconds so it cannot preempt that already-declared fixture contract;
+  production, fixture and checked-in native CI bounds are unchanged.
+  Await the actual result, then publish and qualify the new original head.
+- Promotion 41281822343 succeeded and generated #9849 merged at
+  `a246b0587192bb4f754f4e6906fcf630ac42f343`, releasing exactly the
+  broker-retirement Dev merge `94a648c821dfe5746ac423716e370d79a35fcf82`.
+  Its immutable source tag resolves to that same Dev commit. Actual release
+  content preserves all eight reviewed consumers: six installer dot-source
+  lines undergo only declared canonical-to-vendored engine-path conversion;
+  MCP's initializer and the cell constructor are byte-exact. All seven engine
+  copies match the reviewed canonical engine. #9567 is closed within its
+  bounded source/consumer scope; R10 retains installed reconstruction and
+  interrupted-owner recovery. No installed-host success is inferred.
+- The isolated original-PR snapshot case then reached its own existing
+  520-second timer while waiting for provisioning, not the 600-second
+  local outer guard. It remains a failure/unqualified result. Completed-stage
+  timings now distinguish materialization, offline-tool preparation, native
+  stamp and original-source removal without periodic output or heartbeat.
+  The original branch is pulling forward the newly released broker-retirement
+  installer changes before further first-use qualification. No fixture,
+  production or checked-in CI bound has changed.
+- Original #9501 now includes the released broker-retirement source on pinned
+  Dev `3629a1b1`; Xi's authorship and all recovery refs remain intact.
+  The measured snapshot setup reached 102.03 seconds before provisioning,
+  so the old 520-second fixture timer preempted the existing 420-second child
+  outcome. Only the outer fixture guard changed to 600 seconds, with an AST
+  regression requiring the exact unchanged 60/420-second child bounds and
+  setup headroom. Owned stamp/provision file capture retains failure output;
+  completed-stage diagnostics never act as periodic keepalives.
+- Required CI on `41c73c0e` refused a stale retention-unit source hash before
+  tests ran. Its original `[single]` and `[conditional]` admissions had been
+  lost during reconciliation. Both exact original nodes and their current
+  source hash were restored; every other current-base admission field and
+  node remains unchanged. All source hashes verify, all five retention units
+  pass, all 93 CI-scope tests pass, and current required CI passes on `e1c4827e`.
+- Hosted native runs 41289795728 and 41291226117 passed the ordinary,
+  cold-hook and concurrent packets but failed retained snapshot qualification.
+  Their literal finding is the successful-build branch's early return before
+  recording the command, so the original build assertion cannot pass even
+  after successful first use. Current `815d790a` records only checked successful
+  build completion and keeps the assertion. The native focused control passes
+  actual wheel/source-byte preservation, one completed build record, no
+  record on failed build, archive origin and option refusal (35.10 seconds,
+  132.16 including preparation/cleanup). Medium thread 4434948504 was replied
+  to and resolved. Current native run 41293957513 and fresh contributor
+  review/CI remain pending; the original PR remains draft and unmerged.
+- The separate local snapshot failure remains recorded: its version command
+  reached the unchanged 420-second limit with the request pending after
+  worker launch. The foundation producer independently completed with exit
+  zero and four real source wheels; that prerequisite, or a launch ACK, is
+  not full first-use success or a whole-update performance claim.
+  Documentation and the current PR description now distinguish private
+  non-editability enforcement from generic caller-owned UV flag handling.
+  No installed update, interrupted-request recovery or parent completion
+  occurred during these source qualification steps.
+- Current native run 41293957513 passed all four Logger packets on exact
+  `815d790a`: Ubuntu 11m39s, Windows 16m47s, including retained snapshot
+  first use. Required CI 41293675277 passes guards, admitted units and
+  the actual PR gate; protection/source attribution are green.
+  Fresh Comment review 5727447758 reports no posted open issues but explicitly
+  requests assessment of an omitted Linux PowerShell cleanup-refusal fixture
+  finding. Its inline-comments API is empty and full thread pagination has
+  no unresolved threads, so absence of a thread is not treated as acceptance.
+  The matching changed Codespaces control,
+  `test_codespaces_stamp_cleanup_failure_precedes_copy_and_publication`,
+  uses Windows drive paths before its intended synthetic cleanup refusal.
+  Validate and correct that cross-platform control, then reconcile new Dev
+  drift and obtain current contributor acceptance. Original #9501 is still
+  draft/conflicting; this native pass is not a merge or parent completion.
+- The omitted cleanup-refusal finding is now corrected: the actual
+  Codespaces stamp fixture uses native temporary paths, including a quoted
+  directory name, instead of a Windows drive on Linux. The real function
+  and all staging/copy/publication negative guards remain. Its contained
+  Windows control passed; the same generated harness passed native Linux
+  PowerShell in a digest-pinned, network-disconnected, read-only-source
+  container. Temporary validation scripts were removed.
+  Original #9501 is published at `8b2fb8b4`, rebased onto `755ca6c8`.
+  All 22 commit author/date/message records survive; only two CI-contract
+  conflict resolutions differ, retaining current base assertions and source
+  admissions. Every admitted source hash verifies. The 96 passing contracts
+  initially accompanied four new base collection timeouts; those exact four
+  subsequently pass under their unchanged deadline. Lint passes and there
+  is no workflow/action/CODEOWNERS delta.
+  Current-head native qualification, required CI, review and separate
+  Contributor acceptance remain outstanding. The original PR is still draft;
+  publication is not merge, installed rollout or parent completion.
+- Exact-head native run 41300535827 failed both platforms in the raw-checkout
+  Logger stamp control: the base's newly declared `configuration-layers`
+  dependency was absent from the retained snapshot after checkout removal.
+  Current `10d45207` includes that library in both existing shell snapshot
+  mappings and governed install batches. The real source-absent control now
+  passes on Windows, as do both actual UV cold/warm source-layout controls.
+  The batch fixture explicitly edits its original `agent-config-migrate`
+  target rather than relying on dictionary order; warm assertions remain.
+  Eight fail-stop/reuse controls also pass. Windows skips eight POSIX
+  controls, so that local result is not Linux qualification.
+  Both shell parsers, the 13-plugin install contract and generated engine
+  bindings pass. TESTING now accurately describes the synthetic backend and
+  enforced 600-second fixture limit; both Low documentation threads have
+  published replies and are resolved.
+  Hosted bootstrap 41304042257 and UV compatibility 41304060919, fresh review,
+  required CI and Contributor acceptance now qualify exact `10d45207`.
+  The original PR remains draft, unmerged and uninstalled. No interrupted
+  request recovery, protected-host effect or parent completion is inferred.
+- Current `17e44756` preserves all 24 author/date/message records on the
+  actual `f6858bdf` base. The Logger release fixture now stages and requires
+  the exact ninth dependency; Dispatch's raw-checkout snapshot retains it
+  inside its attributable graph. Required source hashes, generated bindings,
+  the 13-plugin install contract, lint and whitespace checks pass.
+  Bootstrap 41370669290 passes raw-checkout retention, actual cold hooks and
+  concurrent first use on Windows and Ubuntu, then fails only the newly
+  inherited uninstall controls. UV compatibility 41370737090 passes the
+  Codespaces/MCP/Dispatch contracts and reaches the Logger packet, whose
+  failures match those uninstall controls.
+  The remaining corrections are test-only: Windows and POSIX shims must be
+  removed only by their own OS; opposite-OS shims remain byte-identical.
+  The synthetic publication-refusal test must also supply its explicit OS
+  profile rather than assuming Linux trusts HOME as passwd identity.
+  The operator explicitly reconfirmed this OS boundary. No production
+  cleanup is broadened. Local native validation and fresh-head hosted
+  qualification/review/Contributor acceptance remain required before merge.
+- The OS-scoped uninstall correction passes all five local native controls
+  under existing allowances, including both PowerShell and Git Bash
+  observation paths (303.39 seconds; 624.77 with preparation/cleanup).
+  Incremental head `dbcfe70f` preserves the original publication history and
+  changes only the test file. Fresh bootstrap 41373719267, UV compatibility
+  41373775005, required CI, full review and separate Contributor acceptance
+  now qualify that head. Opposite-OS shims, foreign commands, configuration,
+  manifests, session data and cache remain preserved. The original PR stays
+  draft and uninstalled; parent live-host recovery is still outstanding.
+- Exact `dbcfe70f` now passes bootstrap 41373719267 on Ubuntu (10m40s)
+  and Windows (19m16s), all four packets including retained-snapshot first
+  use. UV compatibility 41373775005 passes Linux (3m34s) and Windows
+  (5m7s), all five policy/consumer packets including actual cold/warm UV
+  batches and OS-owned uninstall controls. Both runs' head identities and
+  terminal success are independently verified. Required CI 41373992913
+  passes guards, admitted units and the actual PR gate; lockdown and
+  source attribution pass. The original PR description now retains the
+  historical failures separately from this passing current-source evidence.
+  Fresh full review reassessment and separate Contributor acceptance remain;
+  no draft release, merge, installed rollout or parent completion is claimed.
+- Copilot review 5731410816 genuinely approved exact `dbcfe70f` with no
+  active issues after native qualification. Complete thread pagination
+  reports no unresolved threads. Before completion, new Dev drift made the
+  branch conflicting; it was backed up and reconciled, not merged past the
+  conflict or counted as landed.
+  Current `193e4343` preserves all 25 prior author/date/message records on
+  base `9aaa5bc3`. The base independently carries several dependency/OS-test
+  fixes and a reviewed 90-second Windows stamp-fixture allowance (POSIX 60).
+  Retaining that allowance and this contribution's 120-second preparation
+  margin yields outer 630 seconds on Windows and 600 on POSIX, with the
+  first-use child still 420 seconds. The focused AST unit verifies both
+  exact sums; documentation is updated. Production deadlines do not change.
+  The stronger upstream opposite-OS no-removal-report assertion is kept.
+  Source hashes, history, synchronization, lint and whitespace checks pass.
+  Fresh bootstrap 41377493106 and UV compatibility 41377548312 are running;
+  review will be requested with their completed evidence. Current CI and
+  separate Contributor acceptance remain required. Original #9501 remains
+  draft and uninstalled; parent live-host recovery remains open.
+- Exact `193e4343` now passes bootstrap 41377493106 on Windows (12m10s)
+  and Ubuntu (7m28s), all four packets including retained-snapshot first
+  use. UV compatibility 41377548312 passes Windows (4m23s) and Linux
+  (3m43s), all five policy/consumer packets. Both runs independently
+  report the exact current head and terminal success. Required CI
+  41377383877 and 41377718035 passes guards, admitted units and the actual
+  PR gate; lockdown, identifier guard and source attribution pass.
+  The original PR description now records this evidence while preserving
+  historical failures and contributor attribution. Fresh review is requested
+  from cursor `r5731410816..h193e434316b8c7b62b99afa2bc5b84ddaad7314c.kpending`;
+  current full review, complete thread assessment, separate Contributor
+  acceptance and final head/mergeability checks remain before completion.
+  The original PR remains draft and uninstalled. No cross-OS cleanup,
+  installed rollout, interrupted-owner recovery or parent completion is claimed.
+- Original contributor PR #9501 is now merged at
+  `cf6c0ab189c9c537bd1df2c09249401187ff53d9` (2026-11-02T03:03:14Z).
+  Copilot review 5731622347 approved exact `193e4343` with no active issues;
+  complete pagination covers all 23 resolved threads and no truncated comments.
+  Separate authorized Maintainer acceptance 5731646263 covers the same head.
+  Final required source-attribution, workflow-lockdown and PR-gate checks
+  passed; managed completion reports no review-gate bypass. The source
+  worktree is finalized and its parent claim is at rest; the directory is
+  retained by the owner's active-directory safety rule, not deleted manually.
+  Re-reading the parent Plan/Validation leaves release verification,
+  interrupted-owner recovery, canonical reconstruction, exact legacy
+  conversation restoration, both live cycles, standby/end handling and
+  final publication open. This source slice does not close those items.
+- Normal Dev CI 41380941257 passed exact `cf6c0ab1`. Promotion
+  41381305753 completed successfully, and its generated PR #9937 merged
+  on Main at `98db6b0998ac03de52d8da06c3d687d2b449eda7`.
+  The candidate's own description explicitly admits `cf6c0ab1` and its
+  immutable source release, rather than relying on Dev-to-Main ancestry.
+  `python-artifacts-cf6c0ab189c9c537bd1df2c09249401187ff53d9` is published,
+  non-draft, with 24 uploaded artifacts including the complete source and
+  external generation manifest. This closes this source slice's normal
+  release check, not selected-host rollout or interrupted-owner recovery.
+- The bounded monitor companion on #6389 is coordinated with still-open #9935,
+  not a replacement for that contribution. Two new regressions reproduced
+  incompatible/timed-out predecessor negotiation refusing before incoming
+  startup. The focused 25-case packet then passed after the source repair.
+  The qualified monitor adapter now observes the old route independently of
+  its recovery contract and uses an opt-in shared ZDD best-effort retirement
+  hook for failed drain/shutdown. Native cleanup is birth/route-bound;
+  superseded endpoint release compares both exact current rows. A healthy
+  incoming owner remains authoritative, and installation settlement reports
+  unresolved old cleanup rather than indefinitely waiting or restoring the
+  old selection. Incoming startup failure still exercises rollback; other
+  adapters retain their existing defaults.
+  Installer/service vision and graceful-cutover pattern intent are reconciled.
+  Install contract and touched-source F/E9 lint pass, and source modules stay
+  within the 1,000-line cap. Native qualification is not yet green: the
+  first packet hit setup errors and its suite limit, a narrowed run exposed
+  a transient Windows ready-file read race, and subsequent native cutover
+  exposed an exited process retaining its creation token through an open
+  handle. The fixture now retries its bounded readiness read, and cleanup
+  recognizes actual native exit independently of retained creation metadata.
+  New controls preserve reused/unknown process identities and require actual
+  old-port rebinding while the successor serves. The current native packet
+  is running; source PR, real review, required CI and normal release remain
+  owed. No installed-host mutation or acceptance is claimed.
+- The retained pre-async repair now passes the complete focused 64-case packet,
+  including all eight selected real Windows controls (244.57 seconds inside
+  containment). Incompatible and timed-out predecessors, lost drain receipts,
+  actual old-port rebinding, failed/unready incoming promotion and confirmed
+  graceful exit all pass. Setup remains bounded at 30 seconds per disposable
+  provider and 90 seconds per native case; production deadlines are unchanged.
+  Before publication, overlap inspection found #9935 newly merged. The repair
+  was preserved locally, backed up and rebased onto current Dev without
+  restoring the removed monolithic result or settlement implementations.
+  Its async path still requires outgoing async/recovery capability before
+  installation admission, so this is not a duplicate-completion judgment:
+  the remaining fallback must qualify at that newer seam. A new five-case
+  native-custody regression is running there before the next production edit.
+  The earlier 64-pass evidence applies to the retained pre-async repair, not
+  the rebased ordinary installer. Source publication, review/release and every
+  original parent host/conversation acceptance gate remain open.
+- The merged async admission regression is now red as intended: all five
+  missing/malformed-capability or timeout variants fail while the same native
+  owner remains pinned. Four fail at the outgoing async-capability requirement;
+  the fifth propagates its control timeout. Generic coordination on #6389
+  records the preserved repair, merged #9935 and this remaining actual-consumer
+  gap. Continue with native-custody fallback and bounded retirement inside the
+  merged lifecycle, retaining its reservation/settlement owner and real safety
+  refusals. No new installer attempt or source PR has been made.
+- The merged ordinary async seam now retains native predecessor custody
+  through missing old capability metadata and control timeouts. Its existing
+  cutover owner attempts bounded cleanup only after the exact incoming owner
+  actually serves; canonical reference and deferred-claim settlement stay with
+  the merged retirement lifecycle. The focused 30-case packet passed, including
+  four real Windows async combinations proving old native exit and port reuse
+  for successful targets, and preserved old process/route for failed targets.
+  The wider packet passed 154 cases but hit one disposable-provider import
+  timeout before cutover. The four new cases received a bounded test-only
+  import allowance; production deadlines remain unchanged. The full closure is
+  rerunning after componentization to satisfy existing source-module caps.
+  The install contract passes all 13 plugins; no cap was widened. Source
+  publication, review/release, authorized rollout and the original parent
+  conversation/host acceptance gates remain open.
+- Final module-cap, Python lint, whitespace and 13-plugin install-contract
+  gates pass after that componentization. A second 154-pass packet encountered
+  the same pre-cutover import timeout in a different legacy fixture case.
+  The shared disposable provider now consistently uses finite 60-second
+  readiness, 150-second items and 180-second maximum lifetime under strict
+  Job cleanup. Production deadlines are unchanged. The identical 155-case
+  scope is rerunning before source publication; the parent remains Active.
+- The final monitor packet is green: **155 passed / 102 deselected**,
+  including all 12 selected native Windows controls. Static gates pass without
+  widening any source-module ceiling. The backed-up publication rebase
+  reconciled newer intent-document wording only; exact comparison preserves
+  all tested monitor/ZDD implementation and native-fixture bytes. Eight pure
+  route-withdrawal controls also pass after the extraction. Managed source
+  publication, real review, required CI and release remain owed. This closes
+  no original installed-host or conversation-survival acceptance item; the
+  parent remains Active.
+- The monitor companion is open as #10148. Both first-round ordering findings
+  were fixed: refused drain cannot trigger prepublication retirement, and an
+  unnegotiated legacy peer remains undrained if incoming promotion fails.
+  The final packet passed 161 cases including 14 native Windows controls;
+  Bridge default/conditional controls passed 16 cases. Required CI passed on
+  the updated head. The independent deeper-history #9629 gap remains tracked
+  and its packets/provenance were not rewritten, matching the earlier #9617
+  handling rather than claiming equivalent historical validation.
+  Fresh review confirms those two findings resolved and retains rollback
+  identity, closed-listener port selection and documented Darwin fallback
+  gaps. Continue the same source PR through fixes, review, CI and release.
+  No installed-host or original conversation-survival acceptance is closed.
+- The companion's R2 changes bind a separate native restoration check inside
+  routing publication and exclude the exact predecessor port even after its
+  listener closes, with bounded selection. macOS forced termination is
+  explicitly exempted: no unsafe PID-only signal, truthful unconfirmed exit,
+  matching fallback release and existing process/runtime custody retained.
+  Final focused checks pass 68 cases including the two real Windows races,
+  six existing native rollback/uncertainty controls, 264 shared ZDD tests
+  (three platform skips), 44 Bridge checks (29 platform skips), and all
+  lint/module-cap/whitespace/install-contract gates. No source ceiling,
+  history artifact or publication gate is weakened. R2 publication,
+  fresh review, required CI and release remain owed on the same #10148.
+  The parent remains Active; no original installed-host acceptance is closed.
+- #10148 merged to Dev as `dab3b2bc29ebb0586392c9e2f4ea81b995a00102`
+  on 2026-11-03, from reviewed head
+  `4283e55e35db23aa9af857529b08c3c40881d09c`. The final review is Approved
+  with no open findings, required CI is green, and both automatic and explicit
+  final-head Windows/Linux native lanes passed. The final local helper/native
+  packet passed 82 cases; the earlier local initial-construction timeout is
+  reported separately under #9290/#9758, not treated as passing evidence.
+  Metadata-only base reconciliation preserved all reviewed implementation and
+  requested lifecycle documentation, plus all current Dev historical provenance.
+  No publication gate or source ceiling was weakened.
+- The reviewed vision/architecture now states the explicit sequence: start
+  new; new attempts handoff to old; old observes handoff and independent
+  staleness; new declares verified completion; old attempts drain; the new
+  owner's existing retirement authority waits bounded grace and attempts
+  exact forced cleanup. The remaining successor announcement and resident
+  grace-expiry realization stays unchecked above. Normal release verification,
+  source-child settlement, Root's authorized deployment, original two-cycle
+  interactive acceptance and P/K publication remain open; the parent is Active.
+- The merged monitor source child finalized through the native owner, which
+  verified all content on Dev and settled its parent claim at rest. The
+  containing Dev CI `41602276714` passed. Normal promotion `41603500972`
+  remains in candidate qualification; its workflow control head is not the
+  admitted Dev identity and does not prove this component released. Preserve
+  source/qualification/promotion identities when checking Main. The original
+  parent and the remaining six-stage grace implementation stay open.
+- Normal promotion #10219 is merged and run `41603500972` succeeded through
+  exact source-unit reuse, artifact attestation, pre-merge publication/readback
+  and non-administrator exact-candidate merge. Its admitted Dev snapshot contains
+  the #10148 merge; twelve released document and monitor/ZDD blobs match the
+  reviewed source exactly. This closes containing-release verification, not
+  installed rollout, full successor grace realization or original live acceptance.
+- The one source-only release notification to the existing qualified Root
+  returned a remote-operation timeout. Admission/consumption remain unknown;
+  preserve the exact notification identity and payload privately, do not replay
+  under a fresh identity or restart transport. Root's original deployment custody
+  and pending effects are unchanged. P/K publication and all remaining parent
+  completion gates stay open.
+- The remaining six-stage realization is in a new isolated source child, under
+  the existing #6389 reservation. It adds a successor-originated optional notice,
+  selected through running-peer capability discovery within one five-second
+  budget, and a separate durable five-minute grace marker subordinate to the
+  original retirement grant. The selected resident's existing loop attempts
+  exact native expiry; the installer no longer performs incompatible-predecessor
+  cleanup itself. Legacy retirement-record bytes and synchronous paths remain
+  unchanged. This is uncommitted implementation, not a release or deployment.
+- The first corrected source-only packet passed 41 controls; finite native
+  controls observed old-process preservation before expiry, exact exit and old-port
+  rebinding afterward, while successor TCP health remained ready. These are
+  contained components, not whole installed-monitor or original live acceptance.
+  A later final-source packet passed all 62 test items but returned a failed
+  host-state guard because Machine:Path changed during the run. Attribution is
+  unknown; no environment rollback occurred and it is not a clean packet pass.
+  Ordinary package preparation also exceeded its unchanged 600-second aggregate
+  before pytest. Bulk custody/native packets reached their 180-second bounds;
+  their incomplete results are not relabeled green. Install-contract validation
+  passes all 13 plugins. Remaining clean qualification, source commit, review,
+  CI, release and every original parent/live gate stay open.
+- The realization is saved locally as `71e29f7db6`, without a PR, release or
+  rollout. A fresh current-source packet passed all 62 controls in 30.01 seconds
+  with clean containment. The ordinary packaged native packet passed both
+  assertions in 33.47 seconds, but again failed the persistent-environment guard;
+  that recurring Machine:Path discrepancy remains unattributed and blocking,
+  with no rollback or qualification waiver. A separate custody packet exhausted
+  its unchanged 600-second aggregate after preparation left only 92 seconds;
+  it produced no test result. The real-installer legacy fixture is being aligned
+  with pending grace, private deadline expiry and actual successor-owned cleanup.
+  Final source inputs are frozen for canonical cache preparation before the
+  remaining bounded packets. No parent Plan or Validation item is closed.
+- Canonical prepare-only also exceeded the unchanged 600-second ceiling before
+  completion. No further unchanged local preparation retry is justified without
+  diagnosis. The existing path-gated `Legacy monitor native acceptance` workflow
+  can exercise the real compatible/legacy installer cases on isolated Windows
+  and Linux runners at their already-declared budgets. Using a draft
+  implementation PR for that qualification requires resolving the current
+  publication hold; it does not waive clean validation, review, required CI or
+  any original live-acceptance gate.
+- The operator authorized draft CI qualification. Initial isolated Linux and
+  Windows runs exposed a fixture-reader mistake: the pytest owner attempted
+  installed-resident helper discovery. Reading canonical references through
+  the fixture's explicit runtime owner corrected that boundary without changing
+  production lookup or weakening the assertions. Required unit admission also
+  needed the one actually changed cutover-source digest; all 3,940 nodes, 233
+  coverage targets, actor restrictions and the 300-second packet budget remain
+  unchanged. No unrelated source digest or historical acceptance was rebaselined.
+- Head `db781e4db71a8afdba031cc393b6978ff4ea04ed` now passes required CI
+  `41696048389` and isolated native qualification `41695804612`. The same two
+  path-gated twenty-minute jobs retain their existing installer budget and add
+  focused 180/600-second packets: Windows passes two real-installer cases,
+  178 custody/grace controls and six finite native cases; Linux passes two
+  real-installer cases and 177 custody/grace controls with one Windows-specific
+  skip. Linux expiry is proved by its real resident, not skipped Windows Job
+  controls. The local environment/timeout failures remain uncredited. The source
+  has moved from draft qualification to review; merge, containing release,
+  authorized deployment and every original parent/live gate remain open.

@@ -97,7 +97,7 @@ retain their implementation authority; filing or linking is not claiming work.
   delete caches manually or re-seal an installed generation to manufacture
   removal acceptance. The witness remains running; no removal is claimed.
 
-- [ ] **R9 - Per-request custody invalidates source-wheel reuse.** #8669.
+- [x] **R9 - Per-request custody invalidates source-wheel reuse.** #8669.
   An ordinary Windows candidate exhausted the shared source-wheel deadline
   during build-tool-tree verification; the previously selected generation
   remained intact. The 333/334 installer code is identical, and the same
@@ -111,6 +111,53 @@ retain their implementation authority; filing or linking is not claiming work.
   is the sole contributor to the observed deadline. Finish integrity regressions,
   review/release and the actual installed batch before closing the live gate;
   do not relax integrity checks or deadlines to manufacture acceptance.
+  The source correction merged in #9441 after required CI and real-backend
+  Linux/Windows acceptance. Normal promotion #9451 contains its exact builder
+  bytes. The authorized installed Worktrees 1.24.335-dev1 candidate passed the
+  actual sixteen-wheel cold batch (16 built, zero reused; 168.030 seconds),
+  own-interpreter verification and publication. Its receipt independently
+  records sixteen source wheels; sampled installed modules each have two
+  filesystem hardlinks. This closes the confirmed cache-identity defect and
+  installed-batch gate, not a live warm-cache-hit claim or every possible
+  deadline contributor. The containing unified update separately failed in
+  Vault reconciliation; R2/R3 and the parent live gates remain open.
+
+- [ ] **R10 - Retire legacy broker adoption from normal installers.** #9567,
+  following #9542.
+  The released native-spawn architecture no longer requires Task-broker
+  adoption, but Bridge still invokes that adapter after slot completion and
+  before selection. A subsequent unified reconstruction produced a completed
+  Bridge candidate, then exited nonzero before publishing its selector or
+  deployment manifest. The inner exception was not retained, so the exact
+  failure is not retroactively diagnosed from that ordering alone. Runtime
+  reconciliation then refused participant custody and the request remained
+  interrupted, not settled or successful. Remove obsolete normal-adoption
+  effects through reviewed source while retaining legacy recovery/removal,
+  native custody, completion/publication and independent task-disable intent.
+  Keep #8370/#8826's diagnostic owner and #9357's separate lifecycle boundary;
+  no direct installer, fabricated witness or manual candidate activation.
+  Source repair #9571 merged at `94a648c821dfe5746ac423716e370d79a35fcf82`
+  after all 49 selected current-head native/offline/lifecycle controls,
+  required CI and fresh Copilot approval passed. The source worktree is
+  finalized and its parent claim settled. Promotion #9849 released exact
+  Dev `94a648c8` on Main `a246b0587192bb4f754f4e6906fcf630ac42f343`;
+  immutable source assets exist at the same Dev identity. All eight reviewed
+  consumer files are preserved apart from declared engine-path materialization,
+  and all seven released engine copies match canonical. #9567 is closed as
+  the completed bounded source follow-through. Installed canonical
+  reconstruction and interrupted-owner recovery remain open;
+  this finding is not closed by the source merge alone.
+  The separately authorized original contributor follow-through #9501 also
+  merged at `cf6c0ab189c9c537bd1df2c09249401187ff53d9` after exact-head
+  Windows/Linux native qualification, current required CI, full Copilot
+  approval, complete thread resolution and separate Maintainer acceptance.
+  Its source worktree is finalized; original attribution and history remain.
+  This completes that source lane, not selected-host reconstruction or
+  interrupted-request recovery. Each OS continues to own only its own cleanup.
+  Normal promotion 41381305753 and generated PR #9937 now release exact
+  Dev `cf6c0ab1` on Main `98db6b0998ac03de52d8da06c3d687d2b449eda7`,
+  with published complete-source assets at that Dev identity. Installed
+  acceptance and existing-owner recovery are still separate open gates.
 
 ## Evidence limits and remaining live gate
 
