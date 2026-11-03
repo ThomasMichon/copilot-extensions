@@ -1777,6 +1777,16 @@ refuses a missing sibling. The real application handoff and changed-wheel,
 installed-content and origin controls in `tools/test_local_install_source.py`
 exercise that companion loading through staged nested environments.
 
+The same file's `application_adapter` packet qualifies the explicit prepared
+downstream composition API. Four refusal controls stop changed selection,
+missing application, mismatched construction and Manager-native ownership
+before construction. Its contained synthetic application executes real UV
+construction, setup/start, unchanged repeat, failed-start selector rollback and
+the published stable command. The source receipt and application are fixtures,
+not authenticated release/deployment evidence. Native Windows qualification
+does not qualify Linux, resident-service readiness or an adopter's host rollout;
+these cases do not expand required unit-only CI.
+
 ```bash
 gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \
   -f immutable_runtime=true -f immutable_runtime_ref=<full-40-hex-candidate-commit>

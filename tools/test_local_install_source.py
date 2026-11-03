@@ -799,9 +799,25 @@ def native_source(tmp_path, request):
     options = getattr(request, "param", False)
     sibling = isinstance(options, dict) and options.get("sibling", False)
     dependency = isinstance(options, dict) and options.get("dependency", False)
+    entry = isinstance(options, dict) and options.get("entry", False)
+    content = (
+        "import json, os, sys\nfrom pathlib import Path\nVALUE = 1\n"
+        "def main():\n"
+        "    if '--setup' in sys.argv or '--start' in sys.argv:\n"
+        "        root = Path(os.environ['DEMO_APP_HOME'])\n"
+        "        if '--start' in sys.argv:\n"
+        "            assert (root / 'current-version').is_file()\n"
+        "            if '--fail-start' in sys.argv:\n"
+        "                return 17\n"
+        "        (root / ('setup.json' if '--setup' in sys.argv else 'started.json'))"
+        ".write_text(json.dumps(sys.argv[1:]))\n"
+        "    else:\n"
+        "        print('prepared application ready')\n"
+        "    return 0\n"
+    ) if entry else "VALUE = 1\n"
     package = payload / "src" / "demo_app"
     package.mkdir(parents=True)
-    (package / "__init__.py").write_text("VALUE = 1\n")
+    (package / "__init__.py").write_text(content)
     (payload / "pyproject.toml").write_text(
         '[project]\nname="demo-app"\nversion="1.0.0"\n' +
         ('dependencies=["counter>=1"]\n' if dependency else "") +
@@ -839,6 +855,7 @@ def native_source(tmp_path, request):
     archive = tmp_path / "demo_app-1.0.0-py3-none-any.whl"
     archive.write_bytes(wheel_bytes(
         name="demo_app", prefix="demo_app-1.0.0.dist-info/",
+        extra={"demo_app/__init__.py": content.encode()},
         metadata=(
             "Metadata-Version: 2.4\nName: demo-app\nVersion: 1.0.0\n" +
             ("Requires-Dist: counter>=1\n" if dependency else "") + "\n"
@@ -1102,6 +1119,101 @@ def test_native_candidate_rejects_changed_selection_before_constructing(native_s
             expected_version=selected.identity.runtime_version, expected_hash="0" * 64,
         )
     assert not (tmp_path / "runtime").exists()
+
+
+@pytest.mark.parametrize("changed", ["selection", "application", "declaration", "manager"])
+@pytest.mark.parametrize("native_source", [True], indirect=True)
+def test_application_adapter_refuses_incomplete_or_changed_inputs_before_construction(
+    native_source, tmp_path, monkeypatch, changed,
+):
+    source, snapshot = native_source
+    with source.project_inputs(snapshot, "demo-app") as (selected, inputs):
+        selection = source.native_selection(selected, inputs)
+    if changed == "selection":
+        selection["payload_hash"] = "0" * 64
+    elif changed == "application":
+        path = snapshot / source.MANIFEST
+        record = json.loads(path.read_text())
+        del record["projects"]["demo-app"]["application"]
+        path.write_text(json.dumps(record))
+    else:
+        path = snapshot / selected.project["application"] / "application.json"
+        record = json.loads(path.read_text())
+        if changed == "declaration":
+            record["construction"]["source_hash"] = "0" * 64
+        else:
+            record["name"] = "worktree-manager"
+        path.write_text(json.dumps(record))
+    monkeypatch.setattr(source.engine, "numbered_candidate", lambda *a, **kw: pytest.fail(
+        "unsupported application inputs reached construction",
+    ))
+    with pytest.raises(ValueError, match="changed|prepared application|declaration|native lifecycle"):
+        source.install_application(
+            snapshot, "demo-app", selected.payload, tmp_path / "runtime",
+            uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+            health_module="demo_app", expected_version=selection["runtime_version"],
+            expected_hash=selection["payload_hash"],
+        )
+    assert not (tmp_path / "runtime").exists()
+
+
+@pytest.mark.parametrize("native_source", [{"entry": True}], indirect=True)
+def test_application_adapter_runs_real_install_repeat_and_failed_start_rollback(
+    native_source, tmp_path, monkeypatch,
+):
+    source, snapshot = native_source
+    with source.project_inputs(snapshot, "demo-app") as (selected, inputs):
+        selection = source.native_selection(selected, inputs)
+    application = snapshot / selected.project["application"]
+    path = application / "application.json"
+    record = json.loads(path.read_text())
+    record.update(setup=["--setup"], start=["--start"])
+    path.write_text(json.dumps(record))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("UV_PYTHON", sys.executable)
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    if os.name == "nt":
+        monkeypatch.setenv("HOMEDRIVE", home.drive)
+        monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive):])
+    root = tmp_path / "runtime"
+    options = dict(
+        uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+        health_module="demo_app", expected_version=selection["runtime_version"],
+        expected_hash=selection["payload_hash"],
+    )
+    result = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
+    slot = root / "versions" / selection["runtime_version"]
+    assert result == {"state": "installed", "slot": str(slot)}
+    before = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
+    assert json.loads((root / "setup.json").read_text()) == ["--setup"]
+    assert json.loads((root / "started.json").read_text()) == ["--start"]
+    marker = source.engine.runtime.marker_path(root, slot.name).read_bytes()
+    assert source.install_application(snapshot, "demo-app", selected.payload, root, **options) == result
+    assert source.engine.runtime.marker_path(root, slot.name).read_bytes() == marker
+    with pytest.raises(subprocess.CalledProcessError):
+        source.install_application(
+            snapshot, "demo-app", selected.payload, root,
+            arguments=("--fail-start",), repair=True, **options,
+        )
+    assert {name: (root / name).read_bytes() for name in before} == before
+    failed = [path for path in (root / "versions").iterdir() if path != slot]
+    assert len(failed) == 1 and not (failed[0] / "install-success.json").exists()
+    launcher = home / ".local" / "bin" / ("demo-app.ps1" if os.name == "nt" else "demo-app")
+    command = (
+        [shutil.which("powershell.exe"), "-NoProfile", "-NonInteractive", "-File", str(launcher)]
+        if os.name == "nt" else [str(launcher)]
+    )
+    probe = subprocess.run(
+        command, cwd=tmp_path, env=dict(os.environ), capture_output=True, text=True,
+        timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    assert probe.stdout.strip() == "prepared application ready"
 
 
 @pytest.mark.parametrize("repair", [False, True])
