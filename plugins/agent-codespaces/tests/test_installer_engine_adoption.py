@@ -642,6 +642,10 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     )
     for name in retained_scripts:
         shutil.copyfile(PLUGIN / "scripts" / name, payload / "scripts" / name)
+    for name in ("installer-engine.sh", "installer-engine.ps1"):
+        source = PLUGIN / "scripts" / name
+        if source.is_file():
+            shutil.copyfile(source, payload / "scripts" / name)
     # Both input layouts feed the same fixture-owned canonical metadata graph.
     for pyproject in repository.rglob("pyproject.toml"):
         project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
