@@ -892,7 +892,7 @@ class TestSpawnLocal:
             # Second call: copilot exec
             exec_call = mock_asyncio.create_subprocess_exec.call_args_list[1]
             exec_args = exec_call[0]
-            expected_native = ["--acp", "--stdio", "--no-auto-update", "--allow-all"]
+            expected_native = ["--acp", "--stdio", "--allow-all"]
             if enveloped:
                 assert len(exec_args) == len(command)
                 assert Path(exec_args[0]).stem.casefold() == "pwsh"
@@ -968,7 +968,7 @@ class TestSpawnLocal:
             assert "--no-resume" in resolve_args
             exec_call = mock_asyncio.create_subprocess_exec.call_args_list[1]
             exec_args = exec_call[0]
-            expected_native = [*native, "--acp", "--stdio", "--no-auto-update"]
+            expected_native = [*native, "--acp", "--stdio"]
             if enveloped:
                 assert len(exec_args) == len(command)
                 assert Path(exec_args[0]).stem.casefold() == "powershell"
@@ -1401,14 +1401,18 @@ class TestLocalResolveBridgeFallback:
         return p
 
     @pytest.mark.asyncio
-    async def test_explicit_cwd_bypasses_project_worktree_resolution(self):
+    @pytest.mark.parametrize("explicit_opt_out", [False, True])
+    async def test_explicit_cwd_bypasses_project_worktree_resolution(self, tmp_path, explicit_opt_out):
+        executable = tmp_path / "copilot.exe"
+        executable.touch()
         target = SpawnTarget(
             type="local",
             cwd="/tmp/wt-review",
             project="test-chamber",
             worktree_id="wt-review",
             explicit_cwd=True,
-            copilot_path="/usr/bin/copilot",
+            copilot_path=str(executable),
+            copilot_args=["--no-auto-update"] if explicit_opt_out else [],
         )
 
         with patch(
@@ -1421,7 +1425,10 @@ class TestLocalResolveBridgeFallback:
         ):
             args, cwd, _env = await resolve_local_launch(target)
 
-        assert args == ["/usr/bin/copilot", "--acp", "--stdio", "--no-auto-update"]
+        assert args == [
+            str(executable), "--acp", "--stdio",
+            *(["--no-auto-update"] if explicit_opt_out else []),
+        ]
         assert cwd == "/tmp/wt-review"
 
     @pytest.mark.asyncio
