@@ -152,7 +152,14 @@ def test_unconfirmed_mux_failure_cannot_be_a_healthy_empty_listing(
 )
 def test_mux_parsers_keep_their_distinct_listing_formats(text, counts, monitor):
     assert mux.parse_session_counts(text) == counts
+    assert mux.parse_session_counts(text, strict=True) == counts
     assert mux.parse_monitor_sessions(text) == monitor
+
+
+def test_authoritative_mux_parser_rejects_partial_and_duplicate_evidence():
+    for text in ("unparsed", "work:-1", "work:bad", "work:0\nwork:1"):
+        with pytest.raises(ValueError, match="absence is unconfirmed"):
+            mux.parse_session_counts(text, strict=True)
 
 
 @pytest.fixture

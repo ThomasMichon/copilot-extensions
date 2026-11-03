@@ -74,6 +74,79 @@ def test_force_bypasses_a_fresh_cache_entry(tmp_path):
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("newer_finishes_first", [False, True])
+@pytest.mark.parametrize("older_is_sweep", [False, True])
+def test_older_refresh_cannot_publish_over_a_newer_generation(
+    tmp_path, newer_finishes_first, older_is_sweep,
+):
+    clock = [10.0]
+    cache = WorktreeStatusCache(tmp_path / "cache.sqlite3", now=lambda: clock[0])
+    cache.get_or_refresh("proj", "wt1", force=False, compute=lambda: {"value": "seed"})
+    clock[0] = 200.0
+    old_entered, new_entered = threading.Event(), threading.Event()
+    old_release, new_release = threading.Event(), threading.Event()
+    errors = []
+
+    def old_compute():
+        old_entered.set()
+        assert old_release.wait(10)
+        return {"value": "old"}
+
+    def new_compute():
+        new_entered.set()
+        assert new_release.wait(10)
+        return {"value": "new"}
+
+    def run_old():
+        try:
+            if older_is_sweep:
+                cache.sweep_due(refresh=lambda *args: old_compute())
+            else:
+                cache.get_or_refresh("proj", "wt1", force=False, compute=old_compute)
+        except Exception as error:
+            errors.append(error)
+
+    def run_new():
+        try:
+            cache.get_or_refresh("proj", "wt1", force=True, compute=new_compute)
+        except Exception as error:
+            errors.append(error)
+
+    older, newer = threading.Thread(target=run_old), threading.Thread(target=run_new)
+    older.start()
+    try:
+        assert old_entered.wait(5)
+        newer.start()
+        assert new_entered.wait(5)
+        first, first_release = (newer, new_release) if newer_finishes_first else (older, old_release)
+        second, second_release = (older, old_release) if newer_finishes_first else (newer, new_release)
+        first_release.set()
+        first.join(10)
+        assert not first.is_alive()
+        second_release.set()
+        second.join(10)
+        assert not second.is_alive()
+        assert not errors
+        assert cache.get_or_refresh(
+            "proj", "wt1", force=False, compute=lambda: pytest.fail("New generation was not cached"),
+        ) == {"value": "new"}
+        assert cache._refreshing == {}
+    finally:
+        old_release.set()
+        new_release.set()
+        older.join(10)
+        if newer.ident is not None:
+            newer.join(10)
+        cache.close()
+    restored = WorktreeStatusCache(tmp_path / "cache.sqlite3", now=lambda: clock[0])
+    try:
+        assert restored.get_or_refresh(
+            "proj", "wt1", force=False, compute=lambda: pytest.fail("New generation was not persisted"),
+        ) == {"value": "new"}
+    finally:
+        restored.close()
+
+
 def test_a_cached_bundle_disagreeing_with_its_own_key_forces_a_recompute(tmp_path):
     """Copilot review finding: a fresh-cache hit previously returned
     whatever was stored under the requested key without checking that the

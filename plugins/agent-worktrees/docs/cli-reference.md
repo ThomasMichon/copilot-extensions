@@ -18,6 +18,9 @@ including callers that use the legacy shared request key. Authoritative native
 liveness requires a successful, well-formed mux listing; unavailable or malformed
 listing evidence cannot confirm inactivity. Ordinary display helpers retain
 their existing best-effort fallback.
+Overlapping request and background refreshes use per-worktree publication
+generations: an older computation may finish its own response, but cannot
+replace a newer generation's cached or durable facts or renew their age.
 
 ## Repository PR census
 
