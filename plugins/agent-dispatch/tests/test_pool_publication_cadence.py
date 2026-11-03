@@ -130,6 +130,34 @@ def test_legacy_direct_row_without_complete_filters_withholds_entire_publication
     assert "effective-worker-definition-invalid" in owners.daemon.pool_source_snapshot().reasons
 
 
+def test_actual_scope_cadence_qualifies_the_installed_legacy_env_composition(
+    owners: Any, monkeypatch: Any,
+) -> None:
+    from agent_dispatch import registrar_discovery
+
+    monkeypatch.setattr(registrar_discovery, "install_dir", lambda: owners.base)
+    (owners.base / "supervisor.env").write_text(
+        "AGENT_DISPATCH_SUPERVISE_LABELS=review\n"
+        "AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=2\n", encoding="utf-8",
+    )
+    owners.daemon.declared_source = lambda: read_supervisor_declarations(owners.sources, legacy=True)
+    _tick(owners)
+    for _ in range(3):
+        owners.daemon.reconcile_once()
+    snapshot = owners.queue.pool_catalog_snapshot()
+    assert snapshot.configured_ready and len(snapshot.definitions) == 1
+    definition = snapshot.definitions[0]
+    assert definition.registration_id == "declared:legacy-env:supervisor:supervisor"
+    assert definition.max_concurrent == 2
+    assert definition.filters.permit["task-type"] == frozenset({"review", "supervisor"})
+    (owners.base / "supervisor.env").write_text(
+        "unsupported statement\nAGENT_DISPATCH_SUPERVISE_LABELS=review\n", encoding="utf-8",
+    )
+    owners.daemon.reconcile_once()
+    assert not owners.daemon.pool_source_snapshot().complete
+    assert not owners.queue.pool_catalog_snapshot().configured_ready
+
+
 @pytest.mark.parametrize("lost", [False, True])
 def test_actual_scope_cadence_continues_same_queue_after_endpoint_reconnect(
     owners: Any, lost: bool,

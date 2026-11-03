@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify complete legacy-env pool observations without changing legacy launch discovery",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
