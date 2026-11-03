@@ -130,57 +130,17 @@ def test_core_projection_refuses_active_local_wheel_without_registry_substitutio
         )
 
 
-def test_compile_failure_reports_bounded_sanitized_diagnostic(monkeypatch, tmp_path):
-    import core_native_delivery as producer
-
-    secret = "private-example-value"
-    stderr = (
-        "No solution: fixture>=2 conflicts with fixture<2\n"
-        + "https://private.example.invalid/simple?token=" + secret + "\n"
-        + "credential=" + secret + "\n" + "more details " * 200
-    ).encode()
-    monkeypatch.setattr(
-        producer.subprocess, "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=b"", stderr=stderr),
-    )
-    transaction = SimpleNamespace(argv=("fixture-uv",), cwd=tmp_path, environment={"FEED_TOKEN": secret})
-    with pytest.raises(ProfileError) as failure:
-        producer._run_compile(transaction, deadline=time.monotonic() + 60)
-    message = str(failure.value)
-    assert "fixture>=2" in message
-    assert secret not in message and "private.example.invalid" not in message
-    assert len(message) < 600
-
-
-def test_compile_timeout_does_not_expose_command_or_output(monkeypatch, tmp_path):
-    import core_native_delivery as producer
-
-    def timeout(*_args, **_kwargs):
-        raise subprocess.TimeoutExpired(
-            cmd=["https://private.example.invalid/input"], timeout=1,
-            output=b"private diagnostic",
-        )
-
-    monkeypatch.setattr(producer.subprocess, "run", timeout)
-    transaction = SimpleNamespace(argv=("fixture-uv",), cwd=tmp_path, environment={})
-    with pytest.raises(ProfileError, match="native core dependency resolution timed out") as failure:
-        producer._run_compile(transaction, deadline=time.monotonic() + 60)
-    assert "private" not in str(failure.value)
-    assert failure.value.__suppress_context__
-
-
 @pytest.fixture
 def delivery(tmp_path, monkeypatch):
     import core_native_delivery as producer
 
     wheels, manifest, _ = _build(tmp_path, monkeypatch)
     calls = []
+    lock = tmp_path / "selected-pylock.toml"
+    lock.write_text('lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.10"\n')
 
     @contextmanager
     def retain_compile(uv, arguments, **options):
-        output = arguments[arguments.index("--output-file") + 1]
-        with open(output, "w", encoding="utf-8") as stream:
-            stream.write('lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.10"\n')
         options["_projection"].extend(["original", "retained"])
         yield SimpleNamespace(argv=(uv,), cwd=options["cwd"], environment={})
 
@@ -196,7 +156,6 @@ def delivery(tmp_path, monkeypatch):
 
     monkeypatch.setattr(producer.native.dependencies, "retain_uv_compile", retain_compile)
     monkeypatch.setattr(producer.native, "_profile_feed", feed)
-    monkeypatch.setattr(producer, "_run_compile", lambda *_args, **_kwargs: calls.append("compile"))
     monkeypatch.setattr(
         producer, "acquire_wheel_inputs",
         lambda *_args, **_kwargs: pytest.fail("no external wheels should be acquired"),
@@ -208,7 +167,7 @@ def delivery(tmp_path, monkeypatch):
         "manifest_data": json.dumps(manifest).encode(), "wheel_dir": wheels,
         "target": _record()["target"], "uv": "fixture-uv", "download_origins": (),
         "materials": {}, "material_paths": {}, "destination": tmp_path / "delivery.zip",
-        "deadline": time.monotonic() + 120, "max_bytes": 4 << 20,
+        "deadline": time.monotonic() + 120, "max_bytes": 4 << 20, "native_lock": lock,
     }
     return producer, arguments, calls
 
@@ -217,8 +176,7 @@ def test_core_delivery_composes_existing_profile_and_transport_owners(delivery):
     producer, arguments, calls = delivery
     result = producer._build_from_snapshot(**arguments)
     assert result["approval"] == "unattested"
-    assert result["lock_source"] == "offline-cache"
-    assert calls == ["feed", "compile", "feed"]
+    assert calls == ["feed", "feed"]
     with zipfile.ZipFile(arguments["destination"]) as archive:
         profile = json.loads(archive.read("profile.json"))
         assert profile["component"] == "composition-core"
@@ -226,7 +184,7 @@ def test_core_delivery_composes_existing_profile_and_transport_owners(delivery):
     assert result["profile_sha256"].startswith("sha256:")
 
 
-def test_core_delivery_excludes_first_party_names_before_resolution(delivery, monkeypatch):
+def test_core_delivery_binds_first_party_exclusions_to_feed(delivery, monkeypatch):
     producer, arguments, _calls = delivery
     expected = tuple(sorted(row["name"].replace("_", "-") for row in
                             json.loads(arguments["manifest_data"])["wheels"]))
@@ -253,22 +211,17 @@ def test_core_delivery_excludes_first_party_names_before_resolution(delivery, mo
 
 def test_core_delivery_uses_selected_native_lock_without_compiling(delivery, monkeypatch):
     producer, arguments, _calls = delivery
-    lock = arguments["source"] / "selected-pylock.toml"
-    lock.write_text('lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.10"\n')
-    arguments["native_lock"] = lock
     monkeypatch.setattr(
-        producer, "_run_compile", lambda *_args, **_kwargs: pytest.fail("selected lock was re-resolved"),
+        subprocess, "run", lambda *_args, **_kwargs: pytest.fail("selected lock was re-resolved"),
     )
     result = producer._build_from_snapshot(**arguments)
-    assert result["approval"] == "unattested" and result["lock_source"] == "selected"
+    assert result["approval"] == "unattested"
     assert arguments["destination"].exists()
 
 
 def test_core_delivery_rechecks_selected_lock_before_publication(delivery, monkeypatch):
     producer, arguments, _calls = delivery
-    lock = arguments["source"] / "selected-pylock.toml"
-    lock.write_text('lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.10"\n')
-    arguments["native_lock"] = lock
+    lock = arguments["native_lock"]
     original = producer.build_profile_delivery
 
     def mutate_after_delivery(*args, **kwargs):
@@ -284,9 +237,8 @@ def test_core_delivery_rechecks_selected_lock_before_publication(delivery, monke
 
 def test_core_delivery_rejects_malformed_selected_lock_before_feed(delivery):
     producer, arguments, calls = delivery
-    lock = arguments["source"] / "selected-pylock.toml"
+    lock = arguments["native_lock"]
     lock.write_text("not a native lock")
-    arguments["native_lock"] = lock
     with pytest.raises(ProfileError):
         producer._build_from_snapshot(**arguments)
     assert not calls and not arguments["destination"].exists()
@@ -343,13 +295,6 @@ def test_core_delivery_acquires_external_wheel_over_local_tls(tmp_path, monkeypa
     @contextmanager
     def compile_lock(uv, arguments, **options):
         assert "fixture>=1" in Path(arguments[0]).read_text()
-        lock = Path(arguments[arguments.index("--output-file") + 1])
-        lock.write_text(
-            'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.10"\n'
-            '[[packages]]\nname = "fixture"\nversion = "1.0"\n'
-            f'wheels = [{{url = "{state["origin"]}/files/{FILENAME}", '
-            f'hashes = {{sha256 = "{digest}"}}}}]\n',
-        )
         options["_projection"].extend(["original", "retained"])
         yield SimpleNamespace(argv=(uv,), cwd=options["cwd"], environment={})
 
@@ -365,7 +310,6 @@ def test_core_delivery_acquires_external_wheel_over_local_tls(tmp_path, monkeypa
 
     monkeypatch.setattr(producer.native.dependencies, "retain_uv_compile", compile_lock)
     monkeypatch.setattr(producer.native, "_profile_feed", feed)
-    monkeypatch.setattr(producer, "_run_compile", lambda *_args, **_kwargs: None)
     loaded_packages = []
     engine = producer.native.source_inputs.engine
     original_procutil = engine._procutil
@@ -376,11 +320,12 @@ def test_core_delivery_acquires_external_wheel_over_local_tls(tmp_path, monkeypa
 
     monkeypatch.setattr(engine, "_procutil", trusted_procutil)
     destination = tmp_path / "delivery.zip"
+    lock = _write_native_lock(tmp_path / "selected-pylock.toml", state, [("fixture", FILENAME, digest)])
     result = producer._build_from_snapshot(
         tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
         json.dumps(manifest).encode(), wheels, _record()["target"], uv="fixture-uv",
         download_origins=(), materials={}, material_paths={}, destination=destination,
-        deadline=time.monotonic() + 120, max_bytes=4 << 20,
+        deadline=time.monotonic() + 120, max_bytes=4 << 20, native_lock=lock,
     )
     assert result["approval"] == "unattested"
     assert loaded_packages == [producer.ROOT / "libs" / "agent-procutil"]
@@ -430,7 +375,9 @@ def _write_native_lock(path, state, files):
     return path
 
 
-def test_core_delivery_uses_selected_native_lock_against_local_tls(tmp_path, monkeypatch, tls_source):
+def test_core_delivery_uses_selected_native_lock_against_local_tls(
+    tmp_path, monkeypatch, tls_source, local_tls_feed,  # noqa: F811
+):
     uv = shutil.which("uv")
     git = shutil.which("git")
     if uv is None or git is None:
@@ -442,12 +389,10 @@ def test_core_delivery_uses_selected_native_lock_against_local_tls(tmp_path, mon
     commit = _fixture_git(tmp_path, git, "rev-parse", "HEAD")
     manifest_path = tmp_path / "selected-core.json"
     manifest_path.write_bytes(json.dumps(manifest).encode())
+    foreign = local_tls_feed(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     _configure_native_tls(tmp_path, monkeypatch, state)
     lock = _write_native_lock(
-        tmp_path / "operator" / "pylock.toml", state, [("fixture", FILENAME, digest)],
-    )
-    monkeypatch.setattr(
-        producer, "_run_compile", lambda *_args, **_kwargs: pytest.fail("selected lock was re-resolved"),
+        tmp_path / "operator" / "pylock.toml", foreign, [("fixture", FILENAME, digest)],
     )
     deadline = time.monotonic() + 120
     destination = tmp_path / "native-delivery.zip"
@@ -462,8 +407,7 @@ def test_core_delivery_uses_selected_native_lock_against_local_tls(tmp_path, mon
         profile = json.loads(delivery.read("profile.json"))
     external = next(row for row in profile["wheels"] if row["name"] == "fixture")
     assert external["sha256"] == "sha256:" + digest
-    assert any(path == "/simple/fixture/" for path, _ in state["requests"])
-    assert any(path == "/files/" + FILENAME for path, _ in state["requests"])
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
 
     home = tmp_path / "isolated-home"
     home.mkdir()
@@ -487,12 +431,13 @@ def test_core_delivery_uses_selected_native_lock_against_local_tls(tmp_path, mon
     )
     assert command_result.returncode == 0, command_result.stderr
     command_record = json.loads(command_result.stdout)
-    assert command_record["approval"] == "unattested" and command_record["lock_source"] == "selected"
+    assert command_record["approval"] == "unattested"
     with zipfile.ZipFile(output) as delivery:
         command_profile = json.loads(delivery.read("profile.json"))
     assert next(row for row in command_profile["wheels"] if row["name"] == "fixture")[
         "sha256"
     ] == "sha256:" + digest
+    assert not foreign["requests"]
 
 
 def test_core_delivery_rejects_first_party_in_selected_lock_before_feed(tmp_path, monkeypatch, tls_source):
@@ -525,38 +470,6 @@ def test_core_delivery_rejects_first_party_in_selected_lock_before_feed(tmp_path
     assert not state["requests"]
 
 
-def test_core_resolution_does_not_contact_unapproved_redirect(
-    tmp_path, monkeypatch, tls_source, local_tls_feed,  # noqa: F811
-):
-    from packaging.tags import sys_tags
-
-    uv = shutil.which("uv")
-    if uv is None:
-        pytest.skip("native uv is required")
-    producer, wheels, manifest, state, wheel, _digest = tls_source
-    foreign = local_tls_feed(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
-    foreign["routes"]["/foreign.whl"] = (200, {}, wheel)
-    _configure_native_tls(tmp_path, monkeypatch, state)
-    state["routes"]["/files/" + FILENAME] = (
-        302, {"Location": foreign["origin"] + "/foreign.whl"}, b"",
-    )
-    deadline = time.monotonic() + 120
-    target = {
-        "device": "cpu",
-        "environment": producer.native._query_marker_environment(Path(sys.executable), deadline=deadline),
-        "tags": [str(tag) for tag in sys_tags()],
-    }
-    with pytest.raises(ValueError):
-        producer._build_from_snapshot(
-            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
-            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
-            materials={}, material_paths={}, destination=tmp_path / "rejected.zip",
-            deadline=deadline, max_bytes=4 << 20,
-        )
-    assert not state["requests"]
-    assert not foreign["requests"]
-
-
 def test_core_selected_lock_rejects_unapproved_download_redirect(
     tmp_path, monkeypatch, tls_source, local_tls_feed,  # noqa: F811
 ):
@@ -573,7 +486,7 @@ def test_core_selected_lock_rejects_unapproved_download_redirect(
     )
     _configure_native_tls(tmp_path, monkeypatch, state)
     lock = _write_native_lock(
-        tmp_path / "operator" / "pylock.toml", state, [("fixture", FILENAME, digest)],
+        tmp_path / "operator" / "pylock.toml", foreign, [("fixture", FILENAME, digest)],
     )
     deadline = time.monotonic() + 120
     target = {
@@ -633,7 +546,7 @@ def test_core_selected_lock_refuses_unreachable_wheel(tmp_path, monkeypatch, tls
     assert not destination.exists()
 
 
-def test_core_delivery_refuses_untrusted_feed_before_compiling(delivery, monkeypatch):
+def test_core_delivery_refuses_untrusted_feed_before_acquisition(delivery, monkeypatch):
     producer, arguments, calls = delivery
     monkeypatch.setattr(
         producer.native, "_profile_feed",
@@ -647,16 +560,20 @@ def test_core_delivery_refuses_untrusted_feed_before_compiling(delivery, monkeyp
 def test_core_delivery_rechecks_source_before_publishing(delivery, monkeypatch):
     producer, arguments, _calls = delivery
     source = arguments["source"] / "plugins" / "agent-sample" / "src" / "agent_sample" / "__init__.py"
-    monkeypatch.setattr(
-        producer, "_run_compile",
-        lambda *_args, **_kwargs: source.write_text("VALUE = 2\n", encoding="utf-8"),
-    )
+    original = producer.native._profile_feed
+
+    def mutate_source(*args, **kwargs):
+        result = original(*args, **kwargs)
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(producer.native, "_profile_feed", mutate_source)
     with pytest.raises(PromotionArtifactError, match="payload hash differs"):
         producer._build_from_snapshot(**arguments)
     assert not arguments["destination"].exists()
 
 
-def test_core_delivery_waits_for_retained_compiler_cleanup(delivery, monkeypatch):
+def test_core_delivery_waits_for_retained_feed_config_cleanup(delivery, monkeypatch):
     producer, arguments, _calls = delivery
     original = producer.native.dependencies.retain_uv_compile
 
@@ -664,10 +581,10 @@ def test_core_delivery_waits_for_retained_compiler_cleanup(delivery, monkeypatch
     def fail_on_exit(*args, **kwargs):
         with original(*args, **kwargs) as transaction:
             yield transaction
-        raise RuntimeError("retained compiler cleanup failed")
+        raise RuntimeError("retained feed config cleanup failed")
 
     monkeypatch.setattr(producer.native.dependencies, "retain_uv_compile", fail_on_exit)
-    with pytest.raises(RuntimeError, match="retained compiler cleanup failed"):
+    with pytest.raises(RuntimeError, match="retained feed config cleanup failed"):
         producer._build_from_snapshot(**arguments)
     assert not arguments["destination"].exists()
 
@@ -702,7 +619,7 @@ def _selected_material(arguments, name="notice.txt"):
     return path
 
 
-def test_core_delivery_rejects_bad_material_before_compiling(delivery):
+def test_core_delivery_rejects_bad_material_before_feed(delivery):
     producer, arguments, calls = delivery
     _selected_material(arguments, "../notice")
     with pytest.raises(ValueError):

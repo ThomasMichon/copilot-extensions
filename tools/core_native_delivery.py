@@ -3,11 +3,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib
 import json
 import os
-import re
-import subprocess
 import sys
 import time
 from contextlib import nullcontext
@@ -107,30 +104,6 @@ def _producer_procutil():
     )
 
 
-def _run_compile(transaction, *, deadline: float) -> None:
-    _check_deadline(deadline)
-    try:
-        result = subprocess.run(
-            [*transaction.argv, "--offline"], cwd=transaction.cwd, env=transaction.environment,
-            capture_output=True, timeout=max(0.1, deadline - time.monotonic()), check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-    except subprocess.TimeoutExpired:
-        raise ProfileError("native core dependency resolution timed out") from None
-    if result.returncode:
-        procutil = _producer_procutil()
-        diagnostics = importlib.import_module(procutil.__name__ + ".diagnostics")
-        detail = diagnostics.safe_diagnostic_text(
-            result.stderr.decode("utf-8", errors="replace"), 400, transaction.environment,
-        )
-        detail = re.sub(r"(?i)\b(?:https?|file)://\S+", "[URL]", detail)
-        raise ProfileError(
-            f"native core dependency resolution failed (exit {result.returncode}): "
-            + (detail or "no diagnostic returned"),
-        )
-    _check_deadline(deadline)
-
-
 def _inspect_first_party(snapshot, manifest: dict, source: Path, *, limits, deadline: float) -> None:
     for row in manifest["wheels"]:
         _check_deadline(deadline)
@@ -150,9 +123,9 @@ def _build_from_snapshot(
     source: Path, source_record: dict, manifest_data: bytes, wheel_dir: Path,
     target: dict, *, uv: str, download_origins: tuple[str, ...], materials: dict,
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
-    native_lock: Path | None = None,
+    native_lock: Path,
 ) -> dict:
-    """Keep actual compiler, wheel and material custody until candidate publication."""
+    """Keep selected lock, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
     if (
@@ -183,21 +156,17 @@ def _build_from_snapshot(
         raise ProfileError("core first-party wheel filenames collide")
     first_names = {canonicalize_name(row["name"]) for row in manifest["wheels"]}
     first_exclusions = tuple(sorted(first_names))
-    selected_lock = _read_lock(Path(native_lock), deadline) if native_lock is not None else None
-    selected_files = (
-        _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
-        if selected_lock is not None else None
-    )
-    if selected_files is not None and first_names & {item["name"] for item in selected_files}:
+    selected_lock = _read_lock(Path(native_lock), deadline)
+    selected_files = _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
+    if first_names & {item["name"] for item in selected_files}:
         raise ProfileError("native core lock overlaps its first-party wheel set")
     held_paths = {"material:" + name: path for name, path in material_paths.items()}
     held_files = {"material:" + name: item for name, item in material_files.items()}
-    if selected_lock is not None:
-        held_paths["selected-lock"] = Path(native_lock)
-        held_files["selected-lock"] = {
-            "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
-            "size": len(selected_lock),
-        }
+    held_paths["selected-lock"] = Path(native_lock)
+    held_files["selected-lock"] = {
+        "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
+        "size": len(selected_lock),
+    }
     limits = native.wheel_limits()
     with native.dependencies._temporary_inputs(destination.parent) as temporary:
         work = native.dependencies._private_retained_root(Path(temporary)).resolve()
@@ -221,29 +190,13 @@ def _build_from_snapshot(
                 ], cwd=work, env=dict(os.environ), deadline=deadline, native_target=True,
                 excluded_local_packages=first_exclusions, _projection=projections,
             ) as transaction:
-                initial_policy, initial_feed = native._profile_feed(
-                    selected, transaction, projections, uv=uv,
-                    download_origins=download_origins, wheels=selected_files or [], deadline=deadline,
-                    excluded_local_packages=first_exclusions,
-                )
-                if selected_lock is None:
-                    _run_compile(transaction, deadline=deadline)
-                    lock_bytes = _read_lock(lock_file, deadline)
-                    files = _wheel_pins(lock_bytes, target, deadline, prefer_target_tags=True)
-                else:
-                    lock_bytes = selected_lock
-                    files = selected_files
-                if first_names & {item["name"] for item in files}:
-                    raise ProfileError("native core lock overlaps its first-party wheel set")
                 policy, feed = native._profile_feed(
                     selected, transaction, projections, uv=uv,
-                    download_origins=download_origins, wheels=files, deadline=deadline,
+                    download_origins=download_origins, wheels=selected_files, deadline=deadline,
                     excluded_local_packages=first_exclusions,
                 )
-                if policy != initial_policy or feed.policy_id != initial_feed.policy_id:
-                    raise ProfileError("native core feed identity changed during resolution")
                 acquisition = acquire_wheel_inputs(
-                    files, feeds=feed.feeds, download_origins=feed.download_origins,
+                    selected_files, feeds=feed.feeds, download_origins=feed.download_origins,
                     cutoffs=feed.cutoffs, policy_id=feed.policy_id,
                     limits=AcquisitionLimits(
                         max_packages=256, max_requests=2048, max_redirects=128,
@@ -253,7 +206,7 @@ def _build_from_snapshot(
                     ),
                     deadline=deadline, ssl_context=feed.context, proxies=feed.proxies,
                     procutil=_producer_procutil(),
-                ) if files else nullcontext(None)
+                ) if selected_files else nullcontext(None)
                 with acquisition as acquired:
                     paths = dict(first.paths)
                     expected = dict(first_digests)
@@ -261,7 +214,7 @@ def _build_from_snapshot(
                         if paths.keys() & acquired.snapshot.paths.keys():
                             raise ProfileError("core and native wheel filenames collide")
                         paths.update(acquired.snapshot.paths)
-                        expected.update({item["filename"]: item["sha256"] for item in files})
+                        expected.update({item["filename"]: item["sha256"] for item in selected_files})
                     with retain_wheel_inputs(
                         paths, expected, max_wheels=256,
                         max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_bytes,
@@ -299,8 +252,13 @@ def _build_from_snapshot(
                         retained.verify()
                     if acquired is not None:
                         acquired.snapshot.verify()
-                if selected_lock is None and _read_lock(lock_file, deadline) != lock_bytes:
-                    raise ProfileError("native core lock changed during construction")
+                final_policy, final_feed = native._profile_feed(
+                    selected, transaction, projections, uv=uv,
+                    download_origins=download_origins, wheels=selected_files, deadline=deadline,
+                    excluded_local_packages=first_exclusions,
+                )
+                if policy != final_policy or feed.policy_id != final_feed.policy_id:
+                    raise ProfileError("native core feed identity changed during construction")
                 if project_core_inputs(source, manifest_data, target, deadline=deadline) != (
                     roots, requirements,
                 ):
@@ -314,17 +272,14 @@ def _build_from_snapshot(
             _unchanged(candidate, before, retained, opened=opened)
             _check_deadline(deadline)
             os.link(candidate, destination)
-    return result | {
-        "source_commit": identity.source_commit, "approval": "unattested",
-        "lock_source": "selected" if selected_lock is not None else "offline-cache",
-    }
+    return result | {"source_commit": identity.source_commit, "approval": "unattested"}
 
 
 def prepare_core_delivery(
     repository: Path, commit: str, main_head: str, manifest: Path, wheel_dir: Path,
     materials: dict, material_paths: dict, destination: Path, *, uv: str,
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
-    native_lock: Path | None = None,
+    native_lock: Path,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
@@ -363,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--material-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", required=True)
-    parser.add_argument("--native-lock", type=Path)
+    parser.add_argument("--native-lock", type=Path, required=True)
     parser.add_argument("--download-origin", action="append", default=[])
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
