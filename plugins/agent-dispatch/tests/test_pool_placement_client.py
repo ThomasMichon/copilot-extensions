@@ -40,7 +40,7 @@ def connected(
         response = api.request(
             request.method, str(request.url), headers=dict(request.headers), content=request.content,
         )
-        result = httpx.Response(response.status_code, content=response.content)
+        result = httpx.Response(response.status_code, content=response.content, headers=dict(response.headers))
         return rewrite(request, result) if rewrite else result
 
     return DispatchClient(

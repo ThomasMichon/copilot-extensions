@@ -412,6 +412,7 @@ class QueueClaimQueriesMixin:
         conclusion_state: str | None = None,
         native_release_pending: bool | None = None,
         pool_accountable: bool = False,
+        pool_instance: tuple[str, str, str] | None = None,
         resume_requested: bool | None = None,
         task_status: str | Sequence[str] | None = None,
         latest_only: bool = False,
@@ -479,6 +480,17 @@ class QueueClaimQueriesMixin:
             clauses.append(
                 "EXISTS (SELECT 1 FROM pool_reservation_bindings p WHERE p.reservation_key = r.key)"
             )
+        if pool_instance is not None:
+            from .pool_instances import pool_instance_identity
+            if len(pool_instance) != 3:
+                raise TaskError("reservation query requires an exact pool instance")
+            pool_instance_identity(dict(zip(("registration_id", "machine", "env"), pool_instance)))
+            clauses.append(
+                "(NOT EXISTS (SELECT 1 FROM pool_reservation_bindings p WHERE p.reservation_key = r.key) "
+                "OR EXISTS (SELECT 1 FROM pool_reservation_bindings p WHERE p.reservation_key = r.key "
+                "AND p.registration_id = ? AND p.machine = ? AND p.env = ?))"
+            )
+            params.extend(pool_instance)
         if resume_requested is not None:
             clauses.append("t.resume_requested = ?")
             params.append(1 if resume_requested else 0)

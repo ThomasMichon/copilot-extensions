@@ -204,6 +204,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         conclusion_fn: ConclusionFn | None = None,
         attempt_conclusion_fn: AttemptConclusionFn | None = None,
         machine: str | None = None,
+        pool_instance: tuple[str, str, str] | None = None,
+        pool_allocation_enabled: bool = False,
         capacity_gate: Callable[[dict], bool] | None = None,
         worktree_directory_present_fn: WorktreeDirectoryPresentFn | None = None,
         evaluator: Any | None = None,
@@ -215,15 +217,15 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     ):
         self.client = client
         self.spawn_fn = spawn_fn
+        self.pool_instance = pool_instance
+        self.pool_allocation_enabled = pool_allocation_enabled
+        self._configured_pool_mode = False
         self.repo = repo
         self.labels = set(labels) if labels else None
         self.max_concurrent = max(1, int(max_concurrent))
-        #: Bound on failed spawn attempts per task before it is dead-lettered
-        #: (held, no longer auto-retried). 0 disables the bound (retry forever).
+        #: Legacy failed-spawn bound; zero disables dead-lettering.
         self.max_attempts = max(0, int(max_attempts))
-        #: Per-label override of ``max_attempts`` (0 = retry-forever for that
-        #: label). A task's effective bound is the max override across its labels,
-        #: falling back to the global ``max_attempts`` when none apply.
+        #: Maximum applicable per-label override; otherwise the global bound.
         self.label_max_attempts = {
             str(k): max(0, int(v)) for k, v in (label_max_attempts or {}).items()
         }
@@ -244,6 +246,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         self.supervisor_id = supervisor_id or (
             "supervisor-" + hashlib.sha256(lane_identity.encode()).hexdigest()[:16]
         )
+        from .supervisor_pool_allocator import validate_instance
+        validate_instance(pool_instance, machine, self.supervisor_id)
         self.heartbeat = heartbeat
         #: Publish exact execution state into coordinator-owned task rows. This
         #: keeps read surfaces pure API queries instead of shelling to bridge.
@@ -413,20 +417,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     def _eligible(self, now: float) -> list[dict]:
         """Queued, due tasks in the lane matching the label opt-in (oldest first).
 
-        Fetches server-side PER OWN LABEL (when scoped to one or more labels)
-        rather than one broad, unfiltered, newest-first page: ``client.list``
-        truncates at ``limit`` (200) tasks-wide, newest first, across the
-        WHOLE coordinator -- every label/pool sharing it, not just this one.
-        With enough other pools' tasks queued at once (474 system-wide,
-        confirmed live), an older task in THIS lane falls off that shared
-        page and this supervisor never even sees it to attempt a claim --
-        regardless of how much free capacity its own lane has. A durably
-        assigned PR-review task sat `queued` with zero wakes for hours this
-        way while its own 4-slot lane had
-        room. Querying per-label pushes the ``LIMIT`` down to the
-        coordinator's own `label=` filter (an indexed json_each EXISTS
-        clause), so the page this supervisor actually sees is scoped to its
-        own pool before truncation, not after.
+        Server-side per-label filtering applies before the 200-row limit.
+        A shared newest-first page could otherwise hide older matching tasks
+        behind other lanes' work. Deduplicate the per-label results locally.
         """
         if self.labels:
             seen: dict[str, dict] = {}
@@ -459,6 +452,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             return False
         if self.labels is not None and not (self.labels & set(task.get("labels") or [])):
             return False
+        if self._configured_pool_mode and task.get("status") != Status.QUEUED:
+            from .supervisor_pool_allocator import matches_task
+            return matches_task(self, task)
         return True
 
     def _active_reservations(self) -> list[dict]:
@@ -518,6 +514,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         "unknown" is not the same as "genuinely none" and handles it itself.
         """
         try:
+            if self._configured_pool_mode:
+                kwargs["pool_instance"] = self.pool_instance
             return self.client.list_reservations(**kwargs)
         except (DispatchError, httpx.TransportError) as exc:
             log.warning("failed to list reservations (%s): %s", kwargs, exc)
@@ -594,7 +592,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         ordinary = getattr(self.spawn_fn, "ordinary_bridge_for", None)
         restricted = getattr(self.spawn_fn, "restricted_bridge_for", None)
         if (callable(ordinary) and ordinary(task)) or (callable(restricted) and restricted(task)):
-            return {**task, "spawn_reservation_key": reservation["key"], "_spawn_client": self.client}
+            from .supervisor_pool_allocator import prepare_task
+            return prepare_task(self.client, task, reservation, instance=self.pool_instance if callable(ordinary) and ordinary(task) else None,
+                                supervisor_id=self.supervisor_id)
         if not self._spawn_requires_reusable_worktree(task):
             return task
         from . import embody

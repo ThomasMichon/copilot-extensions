@@ -46,7 +46,7 @@ def rig(tmp_path, monkeypatch):
                 request.method, request.url.raw_path.decode(),
                 headers=dict(request.headers), content=request.content,
             )
-            return httpx.Response(response.status_code, content=response.content)
+            return httpx.Response(response.status_code, content=response.content, headers=dict(response.headers))
 
         def client_factory():
             return DispatchClient(
@@ -215,7 +215,10 @@ def test_restart_defers_a_previously_reserved_unclaimable_task(rig):
     assert rig.supervisor.poll_once() == [rig.task.id]
 
 
-def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig, monkeypatch):
+@pytest.mark.parametrize("managed", [False, True])
+def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig, monkeypatch, managed):
+    if managed:
+        rig.supervisor.pool_instance = ("restricted-supervisor", "fixture-host", "default")
     claim = rig.client.claim
 
     def interrupted(*args, **kwargs):

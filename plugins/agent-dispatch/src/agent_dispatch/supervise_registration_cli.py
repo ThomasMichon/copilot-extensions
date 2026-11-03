@@ -44,6 +44,8 @@ def register_supervise_commands(sub) -> None:
     p.add_argument("--no-reactive", action="store_true")
     p.add_argument("--reactive-interval", type=float, default=2.0)
     p.add_argument("--supervisor-id", help=argparse.SUPPRESS)
+    p.add_argument("--registration-machine", help=argparse.SUPPRESS)
+    p.add_argument("--registration-env", help=argparse.SUPPRESS)
     p.add_argument("--once", action="store_true")
     p.add_argument("--pool")
     p.add_argument("--origin")
