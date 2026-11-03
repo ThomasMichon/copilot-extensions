@@ -53,9 +53,16 @@ def parse_user_context(
             selected["identity"], user_identity_provider, profile=PROFILE)
         required = []
         for value in items(selected["required_claims"], MAX_CLAIMS):
-            entry = fields(value, {"claim", "values"})
+            names = {"claim", "values"}
+            if isinstance(value, dict) and "shape" in value:
+                names.add("shape")
+            entry = fields(value, names)
+            if "shape" in entry:
+                require(type(entry["shape"]) is str and entry["shape"] in ("scalar", "list"),
+                        "invalid-claim-shape")
             required.append(ClaimRequirement(
-                entry["claim"], tuple(items(entry["values"], MAX_VALUES, minimum=1))))
+                entry["claim"], tuple(items(entry["values"], MAX_VALUES, minimum=1)),
+                entry.get("shape")))
         mappings = []
         for value in items(selected["mappings"], MAX_MAPPINGS):
             entry = fields(value, {"subject", "principal"})
@@ -84,7 +91,9 @@ def parse_user_context(
         user_trust = {
             "identity": identity, "principal_claim": selected["principal_claim"],
             "required_claims": sorted(
-                [{"claim": item.claim, "values": sorted(item.values)} for item in required],
+                [{"claim": item.claim, "values": sorted(item.values),
+                  **({"shape": item.shape} if item.shape is not None else {})}
+                 for item in required],
                 key=planning.canonical),
             "mappings": sorted(
                 [{"subject": item.subject, "principal": item.principal} for item in mappings],

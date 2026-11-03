@@ -122,6 +122,26 @@ def test_wrong_signature_missing_claims_and_optional_public_header_metadata(rsa_
     assert verify(verifier, token(rsa_keys[0], claims={"roles": "gateway-user"})).subject == "user-a"
 
 
+def test_real_signed_claim_shapes_are_policy_selected_without_coercion(rsa_keys):
+    verifier = user_verifier(rsa_keys[0], required_claims=(
+        ClaimRequirement("realm", ("realm-a",), shape="scalar"),
+        ClaimRequirement("roles", ("gateway-user",), shape="list"),
+    ))
+    assert verify(verifier, token(rsa_keys[0])).subject == "user-a"
+    for claims in ({"realm": ["realm-a"]}, {"roles": "gateway-user"}):
+        access = token(rsa_keys[0], claims=claims)
+        with pytest.raises(IdentityError, match="^required-claim-denied$") as caught:
+            verify(verifier, access)
+        assert access not in str(caught.value)
+    legacy = user_verifier(rsa_keys[0])
+    assert verify(legacy, token(
+        rsa_keys[0], claims={"realm": ["realm-a"], "roles": "gateway-user"})).subject == "user-a"
+    for shape in ("either", "", True, 1, [], {}):
+        with pytest.raises(IdentityError, match="^invalid-trust$"):
+            user_verifier(rsa_keys[0], required_claims=(
+                ClaimRequirement("realm", ("realm-a",), shape=shape),))
+
+
 def test_immutable_public_keys_and_policy_current_trust_and_request_kind(rsa_keys):
     jwks = public_jwks(rsa_keys[0])
     clock = Clock()
