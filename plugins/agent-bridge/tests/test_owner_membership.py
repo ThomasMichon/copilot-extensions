@@ -21,6 +21,7 @@ from agent_bridge.client import BridgeClient
 from agent_bridge.models import ServiceConfig
 from agent_bridge.owner_membership_cli import MembershipStream
 from agent_bridge.owner_membership_contract import OwnerRead, validate
+from agent_bridge.protocol import HTTP_PROTOCOL_VERSION, OWNER_MEMBERSHIP_PROTOCOL_VERSION
 from agent_bridge.relationship_authority import NAMESPACE, _subject, confirm, native_identity
 from agent_bridge.routes.owner_membership import stream
 from agent_bridge.session_observation_contract import ObservationError, decode, encode, position
@@ -680,7 +681,11 @@ def test_actual_http_and_root_cli_remain_passive_and_strict(owner, monkeypatch, 
         assert response.status_code == 200
         body = decode(response.content.split(b"data: ", 1)[1].strip())
         validate(body, OwnerRead(OWNER))
-        assert api.get("/health").json()["capabilities"][membership.CAPABILITY] == 1
+        health = api.get("/health").json()
+        assert health["protocol_version"] == HTTP_PROTOCOL_VERSION
+        assert health["protocol_version"] >= OWNER_MEMBERSHIP_PROTOCOL_VERSION
+        assert type(health["capabilities"][membership.CAPABILITY]) is int
+        assert health["capabilities"][membership.CAPABILITY] == 1
         for extra in ({"contract_version": "true"}, {"after": "foreign"}, {"action": "write"}):
             result = api.get("/api/v1/owner-observations", params={**query, **extra})
             assert result.status_code == 422 or b'"kind":"error"' in result.content
@@ -693,10 +698,9 @@ def test_actual_http_and_root_cli_remain_passive_and_strict(owner, monkeypatch, 
         monkeypatch.setattr(
             client,
             "health",
-            lambda: {
-                "capabilities": {membership.CAPABILITY: 1},
-            },
+            lambda: health,
         )
+        assert client.daemon_supports(OWNER_MEMBERSHIP_PROTOCOL_VERSION)
         monkeypatch.setattr(
             "urllib.request.urlopen", lambda *_args, **_kwargs: io.BytesIO(response.content)
         )
@@ -728,13 +732,27 @@ def test_actual_http_and_root_cli_remain_passive_and_strict(owner, monkeypatch, 
         assert api.get("/api/v1/owner-observations", params=query).status_code == 401
 
 
-def test_unsupported_owner_receiver_does_not_open_an_event_stream(monkeypatch):
+@pytest.mark.parametrize("generation,version", [
+    (51, None), (52, None), (52, True), (52, "1"), (52, 0), (52, 2),
+])
+def test_unsupported_owner_receiver_does_not_open_an_event_stream(
+    generation, version, monkeypatch,
+):
     from agent_bridge.owner_membership_cli import read
 
-    client = SimpleNamespace(
-        health=lambda: {"capabilities": {}},
-        _stream_sse=lambda *_args, **_kwargs: pytest.fail("opened unsupported stream"),
+    client = BridgeClient("http://fixture.invalid", "synthetic-token", connect_grace=0)
+    monkeypatch.setattr(
+        client, "health",
+        lambda: {
+            "protocol_version": generation, "min_protocol_version": 1,
+            "capabilities": {} if version is None else {membership.CAPABILITY: version},
+        },
     )
+    monkeypatch.setattr(
+        client, "_stream_sse",
+        lambda *_args, **_kwargs: pytest.fail("opened unsupported stream"),
+    )
+    assert client.daemon_supports(OWNER_MEMBERSHIP_PROTOCOL_VERSION) is (generation >= 52)
     with pytest.raises(ObservationError, match="does not support"):
         read(client, OwnerRead(OWNER))
 

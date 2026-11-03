@@ -94,7 +94,10 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == 49
     assert bridge_protocol.RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == 50
     assert bridge_protocol.NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION == 51
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 51
+    assert (
+        bridge_protocol.HTTP_PROTOCOL_VERSION
+        >= bridge_protocol.NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION
+    )
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 

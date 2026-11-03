@@ -1,0 +1,486 @@
+{
+  "schema": "http52-owner-membership-cases-v1",
+  "generation": 52,
+  "requests": {
+    "owner_membership": {
+      "owner_ref": "fixture-host/demo/fixture-owner",
+      "session_id": "fixture-membership-child",
+      "command": [
+        "--proj=demo",
+        "observe-owner",
+        "--owner-ref",
+        "fixture-host/demo/fixture-owner",
+        "--contract-version",
+        "1",
+        "--json"
+      ]
+    },
+    "observations": {
+      "session_id": "observation-source",
+      "alias": "observation-native-alias",
+      "unadmitted": "observation-unadmitted",
+      "unknown": "observation-unknown",
+      "project": "fixture",
+      "worktree_id": "fixture-observation-worktree",
+      "snapshot_command": [
+        "--project",
+        "fixture",
+        "observe-session",
+        "observation-source",
+        "--worktree-id",
+        "fixture-observation-worktree",
+        "--contract-version",
+        "1",
+        "--json"
+      ],
+      "abbreviated_snapshot_command": [
+        "--proj=fixture",
+        "--j",
+        "observe-session",
+        "observation-source",
+        "--worktree-id",
+        "fixture-observation-worktree",
+        "--contract-version",
+        "1",
+        "--json"
+      ],
+      "payload_commands": [
+        [
+          "--proj=fixture",
+          "observe-session",
+          "observation-source"
+        ],
+        [
+          "--j",
+          "--pr",
+          "fixture",
+          "session-observation-history",
+          "observation-source"
+        ],
+        [
+          "--pro",
+          "observe-session",
+          "create",
+          "fixture"
+        ]
+      ],
+      "history_command": [
+        "--project",
+        "fixture",
+        "session-observation-history",
+        "observation-source",
+        "--worktree-id",
+        "fixture-observation-worktree",
+        "--contract-version",
+        "1",
+        "--json",
+        "--limit",
+        "1"
+      ]
+    },
+    "live_cli_request": {
+      "version": 1,
+      "expected_session_id": "fixture-live-original",
+      "idempotency_key": "fixture-live-prompt",
+      "sender": "fixture-controller",
+      "body": "Fixture original native input."
+    },
+    "live_cli_commands": {
+      "prompt": [
+        "--json",
+        "send",
+        "fixture-live-original",
+        "--live-exact",
+        "--expected-session-id",
+        "fixture-live-original",
+        "--idempotency-key",
+        "fixture-live-prompt",
+        "--sender",
+        "fixture-controller",
+        "--prompt-file",
+        "-",
+        "--no-wait"
+      ],
+      "receipt": [
+        "--json",
+        "send",
+        "fixture-live-original",
+        "--live-receipt-only",
+        "--expected-session-id",
+        "fixture-live-original",
+        "--idempotency-key",
+        "fixture-live-prompt",
+        "--sender",
+        "fixture-controller",
+        "--prompt-file",
+        "-",
+        "--no-wait"
+      ],
+      "notify": [
+        "--json",
+        "send",
+        "fixture-live-original",
+        "--live-exact-notify",
+        "--kind",
+        "notify",
+        "--expected-session-id",
+        "fixture-live-original",
+        "--idempotency-key",
+        "fixture-live-notify",
+        "--sender",
+        "fixture-controller",
+        "--prompt-file",
+        "-",
+        "--no-wait"
+      ]
+    },
+    "prompt": "Continue the original assignment.\nKeep \"prior context\".",
+    "receipt_route": "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt",
+    "receipt_command": [
+      "--json",
+      "send",
+      "bridge-a",
+      "--expected-native-session-id",
+      "native-a",
+      "--idempotency-key",
+      "same-operation",
+      "--caller",
+      "fixture-controller",
+      "--prompt-file",
+      "-",
+      "--receipt-only",
+      "--no-wait"
+    ],
+    "keyed_receipt_command": [
+      "--json",
+      "send",
+      "bridge-a",
+      "--expected-native-session-id",
+      "native-a",
+      "--native-invocation-file",
+      "-",
+      "--receipt-only",
+      "--no-wait"
+    ],
+    "keyed_receipt_request": {
+      "version": 1,
+      "invocation_key": "fixture-keyed-operation",
+      "expected_native_session_id": "native-a",
+      "prompt": "Fixture keyed prompt.",
+      "binding": {
+        "task_id": "fixture-task",
+        "admission_generation": 0,
+        "original_reservation_key": "fixture-reservation",
+        "creation_key": "fixture-creation",
+        "allocation_revision": 1,
+        "expected_turn_index": 0,
+        "origin_kind": "created",
+        "worktree_id": "fixture-worktree",
+        "project": "fixture",
+        "path": ".",
+        "creation_nonce": "fixture-nonce"
+      }
+    }
+  },
+  "expected": {
+    "owner_membership": {
+      "capability": 1,
+      "snapshot": {
+        "kind": "snapshot",
+        "completeness": "partial",
+        "registry": "owned",
+        "link_qualification": "reported",
+        "head_session_id": null,
+        "current_answerability": "unknown"
+      },
+      "delta": {
+        "kind": "delta",
+        "state": "idle",
+        "evidence_kind": "observed-change"
+      },
+      "cli": {
+        "exit": 0,
+        "kind": "snapshot",
+        "ensure": false
+      },
+      "unknown": {
+        "kind": "error",
+        "code": "source-unavailable"
+      },
+      "old_capability": {
+        "exit": 3,
+        "code": "unsupported",
+        "source_reads": 0
+      },
+      "retired": {
+        "kind": "session-retired",
+        "grants_claim_release": false
+      },
+      "gone": {
+        "kind": "record-disappeared",
+        "grants_claim_release": false
+      },
+      "token_exclusion": true,
+      "no_ensure": true,
+      "no_actor_start": true,
+      "no_idle_pinning": true,
+      "unauthenticated": 401
+    },
+    "observations": {
+      "capabilities": {
+        "bridge-session-observations-v1": 1,
+        "bridge-session-observation-history-v1": 1
+      },
+      "snapshot": {
+        "exit": 0,
+        "kind": "snapshot",
+        "registry": "owned",
+        "entry_kinds": [
+          "permission-request",
+          "permission-cleared",
+          "compaction"
+        ],
+        "head_session_id": null,
+        "current_requests": "unknown",
+        "used_tokens": 35,
+        "active_capacity_tokens": null,
+        "qualification": "unknown"
+      },
+      "history": {
+        "exit": 0,
+        "kind": "history-page",
+        "entries": 1,
+        "has_more": true
+      },
+      "abbreviated_snapshot": {
+        "exit": 0,
+        "kind": "snapshot",
+        "same_source": true
+      },
+      "unknown": {
+        "exit": 3,
+        "code": "source-unavailable"
+      },
+      "alias": {
+        "exit": 3,
+        "code": "source-unavailable"
+      },
+      "unadmitted": {
+        "exit": 3,
+        "code": "source-unavailable"
+      },
+      "old_capability": {
+        "exit": 3,
+        "code": "unsupported",
+        "source_reads": 0
+      },
+      "wrong_project": "selection-mismatch",
+      "wrong_worktree": "selection-mismatch",
+      "unproven_head": "head-unavailable",
+      "history_follow": 422,
+      "unauthenticated": 401,
+      "no_ensure": true,
+      "no_actor_start": true,
+      "read_only": true
+    },
+    "live_cli": {
+      "capabilities": {
+        "live_keyed_receipt": 1,
+        "live_exact_notify": 1
+      },
+      "prompt": {
+        "exit": 0,
+        "stage": "admitted"
+      },
+      "receipt": {
+        "exit": 0,
+        "same_original": true,
+        "readonly": true
+      },
+      "notify": {
+        "exit": 0,
+        "kind": "notify",
+        "delivery": "steer"
+      },
+      "poll_binding": {
+        "old_reader_hidden": true,
+        "original_native": true
+      },
+      "cold_rollback": {
+        "refused": true,
+        "unchanged": true,
+        "no_fabricated_custody": true
+      },
+      "replay_rejections": {
+        "passed": 18,
+        "failed": 0
+      },
+      "old_prompt": {
+        "exit": 69,
+        "outcome": "refused_unavailable",
+        "posts": []
+      },
+      "old_notify": {
+        "exit": 69,
+        "outcome": "refused_unavailable",
+        "posts": []
+      },
+      "rollover": {
+        "original_rows": true,
+        "successor_pending": [],
+        "successor_ack": 0,
+        "original_receipt": true,
+        "post_probe_notify": 409
+      },
+      "no_hosted_queue": true,
+      "no_ensure": true
+    },
+    "advertised": {
+      "protocol_version": 52,
+      "min_protocol_version": 1
+    },
+    "receipt": {
+      "version": 1,
+      "session_id": "bridge-a",
+      "native_session_id": "native-a",
+      "invocation_key": "same-operation",
+      "turn_index": 0,
+      "queued": false,
+      "admission": "accepted"
+    },
+    "same_retry": true,
+    "changed_input": 409,
+    "wrong_native": 409,
+    "busy": 409,
+    "old_receiver": {
+      "exit": 69,
+      "outcome": "refused_unavailable",
+      "posts": 0
+    },
+    "post_commit_failure": {
+      "exit": 70,
+      "outcome": "unknown",
+      "reason": "native_send_acceptance_unknown",
+      "idempotency_key": "lost-reply",
+      "recovered_turn": 1,
+      "turns": 2
+    },
+    "malformed_receipt": {
+      "exit": 70,
+      "outcome": "unknown",
+      "recovered_turn": 0,
+      "turns": 2
+    },
+    "caller_provenance": {
+      "content": "Continue the original assignment.\nKeep \"prior context\".",
+      "source": "agent-bridge",
+      "caller_id": "fixture-controller"
+    },
+    "no_inbox": true,
+    "unauthenticated": 401,
+    "receipt_only": {
+      "capability": 1,
+      "found": {
+        "status": 200,
+        "body": {
+          "version": 1,
+          "session_id": "bridge-a",
+          "native_session_id": "native-a",
+          "invocation_key": "same-operation",
+          "turn_index": 0,
+          "queued": false,
+          "admission": "accepted"
+        }
+      },
+      "cli_found": {
+        "exit": 0,
+        "body": {
+          "version": 1,
+          "session_id": "bridge-a",
+          "native_session_id": "native-a",
+          "invocation_key": "same-operation",
+          "turn_index": 0,
+          "queued": false,
+          "admission": "accepted",
+          "outcome": "accepted"
+        },
+        "posts": [
+          "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+        ],
+        "ensure": false,
+        "ensure_calls": 0,
+        "daemon_start_calls": 0
+      },
+      "missing": {
+        "status": 404,
+        "body": {
+          "detail": {
+            "code": "native_receipt_missing"
+          }
+        }
+      },
+      "cli_missing": {
+        "exit": 69,
+        "outcome": "refused_unavailable",
+        "reason": "native_receipt_missing",
+        "retryable": false,
+        "posts": [
+          "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+        ],
+        "ensure": false,
+        "ensure_calls": 0,
+        "daemon_start_calls": 0
+      },
+      "old_capability": {
+        "exit": 69,
+        "outcome": "refused_unavailable",
+        "reason": "unsupported_protocol",
+        "retryable": false,
+        "posts": [],
+        "ensure": false,
+        "ensure_calls": 0,
+        "daemon_start_calls": 0
+      },
+      "missing_provider": {
+        "exit": 70,
+        "outcome": "unknown",
+        "reason": "native_receipt_unproven",
+        "retryable": false,
+        "posts": [],
+        "ensure": false,
+        "ensure_calls": 0,
+        "daemon_start_calls": 0
+      },
+      "keyed_missing_provider": {
+        "exit": 1,
+        "json_output": false,
+        "unavailable_error": true,
+        "posts": [],
+        "ensure": false,
+        "ensure_calls": 0,
+        "daemon_start_calls": 0
+      },
+      "stopped_preserved": true,
+      "busy": {
+        "status": 200,
+        "same_receipt": true,
+        "preserved": true
+      },
+      "wrong_identity": {
+        "prompt": 409,
+        "caller_id": 409,
+        "expected_native_session_id": 409
+      },
+      "corrupt": {
+        "status": 409,
+        "body": {
+          "detail": {
+            "code": "native_admission_history_unproven"
+          }
+        }
+      },
+      "no_effects": true,
+      "unauthenticated": 401
+    }
+  }
+}

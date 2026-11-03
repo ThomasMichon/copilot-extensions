@@ -8,6 +8,7 @@ import pytest
 import agent_bridge_contract_registry as codec
 import bridge_http51_declarations as declarations
 import bridge_http51_evidence as evidence
+import bridge_http52_evidence as membership_evidence
 
 COMMIT = "a" * 40
 
@@ -51,18 +52,19 @@ def source(tmp_path, monkeypatch):
     return tmp_path, codec.load(tmp_path), committed
 
 
-def test_plan_changes_only_exact_source_declarations_and_doc_reference(source):
+@pytest.mark.parametrize("policy", [evidence, membership_evidence])
+def test_plan_changes_only_exact_source_declarations_and_doc_reference(source, policy):
     root, snapshot, _ = source
     original = copy.deepcopy(snapshot.materialized)
-    outputs = declarations.declaration_plan(root, COMMIT, snapshot)
+    outputs = declarations.declaration_plan(root, COMMIT, snapshot, evidence=policy)
     assert set(outputs) == {codec.REGISTRY}
     updated = codec.decode(outputs[codec.REGISTRY])
     before, after = original["contracts"][0], updated["contracts"][0]
     assert before["provenance"] == after["provenance"]
     assert before["fixtures"] == after["fixtures"]
     assert all(after["capability_versions"][key] == value
-               for key, value in evidence.CAPABILITY_VERSIONS.items())
-    assert {row["path"] for row in after["source_paths"]} == set(evidence.AFFECTED)
+               for key, value in policy.CAPABILITY_VERSIONS.items())
+    assert {row["path"] for row in after["source_paths"]} == set(policy.AFFECTED)
     for row in after["source_paths"]:
         assert row["semantic"] is True and row["non_semantic_reason"] is None
         assert row["sha256"] == codec.digest((root / row["path"]).read_bytes())

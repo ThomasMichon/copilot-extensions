@@ -4,6 +4,12 @@ The running Bridge advertises `bridge-owner-membership-v1: 1` only alongside
 the owning `observe-owner` parser and authenticated `/api/v1/owner-observations`
 GET handler. Existing session observation/history, raw SSE and delivery cursors
 retain their contracts.
+HTTP generation 52 introduces this endpoint
+(`OWNER_MEMBERSHIP_PROTOCOL_VERSION`); the minimum supported HTTP generation
+remains 1. Its named capability and request/frame contract remain version 1.
+Clients negotiate that exact named capability against the running daemon;
+older daemons without it refuse before opening the feed. Previously introduced
+session observation/history capabilities retain their independent identities.
 
 ```text
 agent-bridge observe-owner --owner-ref HOST/PROJECT/WORKTREE \

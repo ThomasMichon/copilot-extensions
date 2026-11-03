@@ -4,6 +4,28 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+## Current HTTP-52 owner-membership evidence
+
+Owner membership introduces HTTP generation 52 and
+`OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52`. Its named
+`bridge-owner-membership-v1` contract remains version 1. Both declarations are
+retained: generation-aware clients can recognize the endpoint's introduction,
+while passive callers still require its exact named capability. Minimum HTTP
+support and every earlier feature's introduction floor remain unchanged.
+
+The current capture owner is `tools/capture_bridge_http52.py`, using the same
+43 actual parser, authenticated ASGI, canonical producer, transport and payload
+cases with a new independent HTTP-52 vector. Retained test-function names do not
+select capture identity: the owning generation, source-bound request, protocol
+assertion, vector and evidence family all require 52.
+
+Commit source and the generation declaration, run the new owner's `--prepare`,
+commit and publish that checkpoint, then run `--write`, no-write verification
+and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared
+declarations are not execution evidence. All HTTP-51 and earlier packets and
+provenance remain historical, unmodified inputs; never run the HTTP-51 writer
+against HTTP-52 source or relabel its observations as a new generation.
+
 ## Lossless provenance layout
 
 The shared reader in `tools/agent_bridge_contract_registry.py` accepts the

@@ -117,9 +117,14 @@ def entries(receipt: SaveReceipt, verb: str) -> list[dict]:
                 and (a is None or a.get("state") == "released")
                 else "claim-released"
                 if a is not None
-                and b is not None
-                and a.get("state") in {"active", "at-rest"}
-                and b.get("state") == "released"
+                and (
+                    (verb == "claim_release" and b is None)
+                    or (
+                        b is not None
+                        and a.get("state") in {"active", "at-rest"}
+                        and b.get("state") == "released"
+                    )
+                )
                 else "claim-settled"
                 if a is not None
                 and b is not None

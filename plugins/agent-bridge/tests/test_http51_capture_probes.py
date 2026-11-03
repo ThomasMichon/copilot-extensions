@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-import bridge_http51_evidence as evidence
+import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli

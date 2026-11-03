@@ -88,6 +88,33 @@ def test_real_canonical_claims_materialize_native_entries(native, verb, kind):
     )
 
 
+@pytest.mark.parametrize("state", ["active", "at-rest", "released"])
+def test_real_canonical_claim_release_remove_retains_typed_local_evidence(native, state):
+    owner, path, _home = native
+    assert compute(owner, path)["ok"]
+    if state != "active":
+        assert compute(owner, path, "claim_settle", disposition=state)["ok"]
+    publish(owner, path)
+
+    result = compute(owner, path, "claim_release", remove=True)
+    assert result == {"ok": True, "action": "removed"}
+    receipt = owner.native_observations._queue[0].receipt
+    assert tracking.load_record(path).resources == []
+    current = publish(owner, path)
+    entry = native_entries(owner)[-1]
+    assert entry["kind"] == "claim-released"
+    assert entry["evidence_kind"] == "persisted-mutation"
+    assert entry["payload"]["before"]["ref"] == "ordinary-child"
+    assert entry["payload"]["before"]["state"] == state
+    assert entry["payload"]["after"] is None
+    assert entry["record_fence"]["saved_sha256"] == receipt.saved_sha256
+    assert entry["actor"]["qualification"] == "unknown"
+    assert current["facts"]["row"]["claims_assets"]["held_count"] == 0
+    assert current["completeness"] == "partial"
+    for other_verb in ("claim_add", "claim_settle"):
+        assert semantic.entries(receipt, other_verb)[0]["kind"] == "source-event"
+
+
 def test_late_history_and_retry_do_not_regress_current_facts(native):
     owner, path, _home = native
     assert compute(owner, path)["ok"]

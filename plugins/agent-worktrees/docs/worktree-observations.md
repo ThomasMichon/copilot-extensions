@@ -82,7 +82,12 @@ the existing publication/wake path performs materialization. There is no public
 receipt-publication RPC, new listener, spool or per-panel producer.
 
 Supported transactions are ordinary claim add/settle/release, disposition and
-the shared effort bind/release transactions. Effort writes retain their global
+the shared effort bind/release transactions. An admitted `claim_release` with
+`--remove` emits `claim-released` with the saved local claim as `before` and
+`after: null`, including removal of an already-released ledger entry. This
+describes local ledger removal, not destruction of or custody over the referenced
+resource. Missing claims outside an admitted release do not imply a native release.
+Effort writes retain their global
 binding exclusion, conflict checks, completion/transfer rechecks and direct
 fallback; they do not start a resident merely to obtain observation coverage.
 One compute can save zero, one or several times to its exact admitted record.
