@@ -1786,8 +1786,8 @@
       "sha256": "9a4bd618b2f2c32dba26a70d07ad9b29ab33a8b40c889db32d9c766cefc9565b"
     },
     "plugins/agent-bridge/docs/owner-membership.md": {
-      "blob": "263c05b8a2bd9e4cf0038e3fc4e0bade20d8f54c",
-      "sha256": "22271373e618adc19933fa100f0e4f6acdaf5fe4a0b19c3a8019dd073af5d3b2"
+      "blob": "2082f95cf5362704dc50e38c7cbed880389f386f",
+      "sha256": "bcfd8ddde41606ab43030beb00792dba66a9d4fd2d360de7561ff54a57aad7d9"
     },
     "plugins/agent-bridge/docs/session-observations.md": {
       "blob": "5bafbe0ed5536a61b3df7eccaf933461bb6c4676",
@@ -2398,8 +2398,8 @@
       "sha256": "3bb1939cde1103b5fc053d71a7331179f0f62d9e133be3db4ab27eb5ca6414f3"
     },
     "plugins/agent-bridge/src/agent_bridge/db_live_session_aliases.py": {
-      "blob": "f3cf27181438d2003e751b18a47585d0bdc701ae",
-      "sha256": "e4c38df37ad45b094d5a59878de9358a2381f51c7ea9c208fa0fedad3602504e"
+      "blob": "274f02c63a84761272ecdeda708643688f42ed0e",
+      "sha256": "6801d9d8e17207d01ae2d126f3f8866a306e121b21b5fc876764b628b58d6be2"
     },
     "plugins/agent-bridge/src/agent_bridge/db_live_sessions.py": {
       "blob": "7867deb8d001d5be155472a2051b1ca069fc6604",
@@ -2630,8 +2630,8 @@
       "sha256": "ca4f234460c79857429438f92ebf9944be75b87fc39f088f6a45c1d6465df2bc"
     },
     "plugins/agent-bridge/src/agent_bridge/owner_membership.py": {
-      "blob": "3746f43e33edaae0bb69dbc513312ae1e3ebd4ac",
-      "sha256": "69406a60e93a56e361b770b66598ec2e293f54d26dbf93db7e8fad38198cb243"
+      "blob": "7534b5ccf73e5750d0d817fe224bdbebdc27366e",
+      "sha256": "5f54208e086ad830c080471214614d522d78c3680add5287cbf31378fc8ae398"
     },
     "plugins/agent-bridge/src/agent_bridge/owner_membership_cli.py": {
       "blob": "af7f0219b5ee8089a3bca16dfea40d16cc4eede0",
@@ -2926,8 +2926,8 @@
       "sha256": "f33d32da7b32dafb9e1338995daa4d6b3154e495dd093e516d936cb77aeaf7fd"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/owner_membership.py": {
-      "blob": "0712cbec8d42d747000b4429b5693b2b381156fa",
-      "sha256": "4d0f0ca42343f44cb2741a6a657a87556276105c90793ba9d904c5c1c2ce5858"
+      "blob": "4c69fa2613eed7db49c9e02d224ee89c1994e9fd",
+      "sha256": "de24526408ea9fd053dce98ef3aa9484e3c9fed1889c854e6e20150810ff5145"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/prompts.py": {
       "blob": "a91c6758127d184a6bb93d10deb528282d4e1651",
@@ -3530,12 +3530,12 @@
       "sha256": "d2f4766d3486cdb141ebd7679604f3c81ad989145e894f1a48c6bec78d8745f9"
     },
     "plugins/agent-bridge/tests/test_owner_membership.py": {
-      "blob": "1bb147b88deb73e8957c51f5cdc6421434efea29",
-      "sha256": "8f0edbbc73d2c64e34ad6f5df34ca7278327b86b6b8473f49e7aab3b34863e44"
+      "blob": "112b307a36676c1f5ef2aa1f5d46768d849e831c",
+      "sha256": "2c6f7ad1ce76f0ae9ec8be52d27f7722b31eb268f518cb075552d57c405d398e"
     },
     "plugins/agent-bridge/tests/test_owner_membership_budget.py": {
-      "blob": "c04925b5194ca01e676dd72cd8357bc9fd26e6c4",
-      "sha256": "1ccf66da29f8a729ccef530352b8bf5ae2b0dbc5831d780fd7ffb5d06916c413"
+      "blob": "b74ce5bbb615ee128401c3d623811aa56c714620",
+      "sha256": "73054d20416fd9958353a91dae2eb3e0dc9c090e33221d5a4e75d4e0180eab79"
     },
     "plugins/agent-bridge/tests/test_payload_invocation.py": {
       "blob": "29aee1e79f0717ff7324e00c0861d0fc985df94f",
@@ -5246,7 +5246,7 @@
       "sha256": "f3e71d888e81948fed0a4e9336ed707c00d33e14234769bc2bc45afc9c6aad6e"
     }
   },
-  "execution_closure_sha256": "b3702fedc3634eb4ebd3aa12ee67eac158b484177e5248c5356fe39822c8ee78",
+  "execution_closure_sha256": "8cb446ee24da5babb1ee3323fd3476fab1957c0ecbddf3179edf2a6d30585e9c",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -5289,7 +5289,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification",
   "captured_from": {
-    "commit": "136dd5765604585b2ee0a9c5787f323a8d2e4820",
+    "commit": "a314233f5229c31bca47d252458994f2f148f8a0",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
