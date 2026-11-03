@@ -93,6 +93,14 @@ suppression intact and use an isolated production-lifetime regression.
 See [`windows-background-process-launch`](windows-background-process-launch.md)
 for the ownership/visibility distinction and supported primitives.
 
+On Linux, a new POSIX session does not leave a systemd cgroup. Resident helpers
+launched from another service must not share that service's stop boundary.
+The shared `agent-procutil` daemon primitive uses a transient user scope for
+that independent lifetime; native service entrypoints retain their own units.
+Preserve caller containment for finite children and contained tests. Qualify
+existing resident migration separately: changing a launch primitive does not
+move already-running processes.
+
 ### Gotchas this pattern encodes
 
 - **Attribution follows the instance, not just the installed version.** Every

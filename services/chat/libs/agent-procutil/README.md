@@ -4,6 +4,25 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+On Linux, `spawn_daemon` also separates a durable resident from its launching
+systemd unit's cleanup cgroup. It uses an independently named transient user
+scope, without a new restart policy or persistent service definition.
+Scope admission precedes execution and retains the launched PID, cwd, environment,
+literal argv and log descriptors. Missing or unsupported native admission does
+not fall back to the caller's lifetime; callers still own readiness checks.
+`breakaway=False` and contained test mode retain caller ownership.
+Non-systemd POSIX launches retain their existing session-based behavior.
+Host-visible cgroup ancestors of the current PID namespace's PID 1 are not
+caller-local units; units nested below that boundary still require admission.
+This changes future launches, not existing residents' native ownership.
+
+The explicit Linux user-systemd fixture is
+`tests/systemd_daemon_fixture.py qualify <fresh-private-directory>`.
+It uses finite caller units and a renewable test-instance lease to prove
+resident survival after caller retirement, bounded-control termination and exact
+fixture cleanup. It refuses contained mode; ordinary isolated unit tests never
+escape their runner to exercise this native lane.
+
 `agent_procutil.streaming.SyncProcessOutput` drains synchronous stdout/stderr
 in byte chunks, including output without newlines. Its optional inactivity
 window renews only on newly read bytes, acknowledged native relay writes or

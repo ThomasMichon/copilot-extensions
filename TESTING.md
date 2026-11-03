@@ -4687,6 +4687,13 @@ shared-library fingerprint cases retain the full transitive fixture. This
 keeps unrelated MSYS hashing subprocesses from consuming the admission cases'
 unchanged 30-second item budget. Install and update partitions retain every
 case without extending the 300-second suite budget.
+Two separate-process rerun cases prepare a completed slot once and invoke the
+extracted update function twice, checking receipt bytes and mtime, slot and
+receipt identities, and slot contents. They carry a 120-second item bound for
+the three native invocations. Installer locks, drain, build, manifest and
+serving remain faked, so these cases are not whole-update or native-lock proof.
+They run in the periodic Linux plugin suite, not the actor-free PR unit packet;
+the periodic Windows job remains unenrolled.
 The current-daemon native fixture starts independent cold daemon and CLI
 processes concurrently. A stdin barrier holds the actual CLI entrypoint until
 the daemon is verified ready; neither process is pooled or replaced by a mock.
