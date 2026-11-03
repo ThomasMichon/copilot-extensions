@@ -77,6 +77,21 @@ rows lacking complete pool filters remain unsupported for complete publication.
 Configured membership changes, retained obsolete scopes and direct-row migration
 still need their owning integration; metadata maintenance does not erase them.
 
+The installed `supervise serve --legacy-env` composition observes both current
+registrar sources and the legacy env profiles. A fresh strict legacy read can
+qualify the complete set; it no longer withholds every publication merely
+because the compatibility reader is enabled. Missing primary/profile paths are
+confirmed absence. Unreadable, invalid-encoding, unsupported-line or wrong-type
+inputs withhold metadata qualification instead of certifying a partial empty
+set. Strict keys must use the simple env assignment syntax; shell `export`
+statements are not silently treated as inert keys. Profile enumeration retains
+platform-native extension matching, including `.ENV` on Windows. Both readers
+skip opening non-regular profile entries, so a failed strict read cannot block
+its compatibility fallback on a FIFO or device. Legacy launch discovery
+otherwise keeps its best-effort behavior. First-class
+declarations still supersede same-name legacy profiles, and label-less profiles
+remain inert. No source file, supervisor argv or activation setting is migrated.
+
 The [original transport custody](pool-publication.md#implemented-explicit-sender-and-unknown-outcome-recovery)
 remains in force. The sender can continue a quiescent original request or settled
 publisher across endpoints only after confirming the same existing durable queue

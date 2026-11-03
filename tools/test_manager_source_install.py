@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-import runtime_source_build as builds
+import runtime_source_manager as builds
 from worktree_manager import self_install
 
 

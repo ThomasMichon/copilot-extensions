@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -22,7 +23,8 @@ import time
 from agent_procutil import no_window_kwargs
 
 from .runtime_source_config import RuntimeSource
-from .source_config import absolute_local_source
+from .self_install_runtime import running_payload_dir, runtime_scripts
+from .source_config import absolute_local_source, default_root
 
 _GIT_ROUTING_ENV = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
@@ -141,7 +143,10 @@ def acquire(
     selection: RuntimeSource, *, root: Path | None = None, deadline: float | None = None,
     environment: dict[str, str] | None = None,
 ) -> Iterator[ResolvedSource]:
-    from .self_install import _runtime_installer, default_root
+    # The payload owns the lease library; acquisition needs no installer or CLI.
+    scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
+    sys.path.insert(0, str(scripts))
+    from versioned_runtime import construction_lease, _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF
 
     _remaining(deadline)
     git_command = _git if deadline is None and environment is None else partial(
@@ -157,7 +162,7 @@ def acquire(
     checkout = source_root / digest / "checkout"
     owner = {"schema": "worktree-manager.runtime-source", "repo": repo}
     source_root.mkdir(parents=True, exist_ok=True)
-    with _runtime_installer().runtime.construction_lease(source_root, digest, timeout=_remaining(deadline, 60)):
+    with construction_lease(source_root, digest, timeout=_remaining(deadline, 60)):
         _ordinary(checkout)
         if not checkout.exists():
             checkout.parent.mkdir(parents=True, exist_ok=True)
@@ -172,10 +177,24 @@ def acquire(
                 marker = staging / ".git" / "runtime-source-owner.json"
                 _ordinary(marker)
                 marker.write_text(json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8")
-                _validate(staging, owner, deadline=deadline, environment=environment)
-                if checkout.exists() or checkout.is_symlink():
-                    raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
-                staging.rename(checkout)
+                initial_head = _validate(staging, owner, deadline=deadline, environment=environment)
+                for attempt in range(_AV_RETRY_ATTEMPTS):
+                    _remaining(deadline)
+                    _ordinary(checkout)
+                    if checkout.exists() or checkout.is_symlink():
+                        raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
+                    try:
+                        staging.rename(checkout)
+                        break
+                    except OSError as error:
+                        if (
+                            getattr(error, "winerror", None) not in (5, 32, 33)
+                            or attempt == _AV_RETRY_ATTEMPTS - 1
+                        ):
+                            raise
+                        time.sleep(min(_AV_RETRY_BACKOFF * (attempt + 1), _remaining(deadline)))
+                        if _validate(staging, owner, deadline=deadline, environment=environment) != initial_head:
+                            raise SourceAcquisitionError("Runtime source checkout moved during initialization")
         head = _validate(checkout, owner, deadline=deadline, environment=environment)
         branch = selection.branch
         remote_ref = f"refs/remotes/origin/{branch}"

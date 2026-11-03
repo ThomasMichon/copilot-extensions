@@ -1958,6 +1958,11 @@ First-use cloning pins the `origin` remote name and publishes a validated,
 owned checkout atomically. Failed initialization cleans only its private
 staging directory, leaving a later acquisition able to retry; an unowned
 incumbent is still refused rather than repaired automatically.
+Checkout publication retries only explicit Windows access/sharing/lock errors,
+using the existing versioned-runtime attempt/backoff bounds and the original
+deadline. Before retrying, it revalidates the staged owner, origin, clean
+checkout and exact head. An appearing destination, linked path or changed
+checkout is refused; retry never overwrites or adopts another checkout.
 
 Ordinary `update` qualifies the **exact executing engine** through its existing
 installation inventory before source acquisition or Manager self-update. A

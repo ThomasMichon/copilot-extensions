@@ -293,6 +293,9 @@ live claim token. No new blanket ACK or executor appointment is created.
       Explicit-definition adoption for remaining legacy direct rows,
       ordinary allocator/initial prompts and mixed-driver adoption
       remain required; the default-off source seam is not that completion gate.
+      The installed master's `--legacy-env` composition also needs the
+      [complete legacy observation correction](journal/2026/11.03-legacy-pool-observation.md);
+      a valid declaration-only snapshot does not qualify that actual caller.
 - [x] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
       under its actual `ordinary-bridge` driver, allocator claim and execution
       host in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123).
@@ -311,6 +314,12 @@ live claim token. No new blanket ACK or executor appointment is created.
       Preserve unknown effects and separate Bridge/native identity. This does
       not qualify worker decline/closeout, complete CLI/mixed-driver adoption
       or installed/native effects.
+- [x] Land [managed CLI allocator and first-prompt integration](journal/2026/11.03-managed-cli-startup.md)
+      in [#10214](https://github.com/ThomasMichon/copilot-extensions/pull/10214).
+      Current-head approval and green CI preceded the actual merge. Failed
+      startup custody and coordinator-clock deadline controls are source-tested;
+      complete-definition adoption, mixed-native qualification and the remaining
+      worker lifecycle gates stay open.
 - [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
       without erasing publication history, task assignments or accountable
       capacity. Source regressions cover current readiness and remove/re-add;

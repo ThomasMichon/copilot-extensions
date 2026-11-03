@@ -36,21 +36,26 @@ def read_supervisor_declarations(
     sources: RegistrarSources, *, legacy: bool = False,
 ) -> DeclarationRead:
     """Use the existing registrar owner; do not qualify its retained fallback."""
-    if legacy:
-        # The legacy env reader has no complete-versus-unreadable observation.
-        return DeclarationRead(
-            tuple(sources.discover_with_legacy()), False, "legacy-source-unconfirmed",
-        )
     report = sources.refresh()
     complete = (
         report.trusted_authority is not ScanAuthority.INDETERMINATE
         and report.combined.plugins.snapshot.authority is not ScanAuthority.INDETERMINATE
         and not report.combined.plugins.findings
     )
-    return DeclarationRead(
-        report.combined.declarations, complete,
-        "" if complete else "registrar-source-unavailable",
-    )
+    declarations = report.combined.declarations
+    reason = "" if complete else "registrar-source-unavailable"
+    if legacy:
+        from .registrar import RegistrarError
+        from .registrar_discovery import read_legacy_env_profiles
+
+        try:
+            profiles = read_legacy_env_profiles(strict=True)
+        except (OSError, UnicodeError, RegistrarError):
+            profiles = read_legacy_env_profiles()
+            complete, reason = False, "legacy-source-unavailable"
+        names = {declaration.name for declaration in declarations}
+        declarations = (*declarations, *(profile for profile in profiles if profile.name not in names))
+    return DeclarationRead(declarations, complete, reason)
 
 
 @dataclass(frozen=True)

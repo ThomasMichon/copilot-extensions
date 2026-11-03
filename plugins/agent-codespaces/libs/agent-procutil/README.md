@@ -6,10 +6,19 @@ containment consistent instead of reimplementing them in each consumer.
 
 `agent_procutil.streaming.SyncProcessOutput` drains synchronous stdout/stderr
 in byte chunks, including output without newlines. Its optional inactivity
-window renews only on newly read bytes or acknowledged native relay writes;
+window renews only on newly read bytes, acknowledged native relay writes or
+an explicitly supplied `activity_observer` reporting new completed work;
 an explicitly supplied absolute cap
 remains absolute. Optional `startup_timeout` applies only before the first
-captured byte; it never lengthens subsequent quiet windows.
+captured byte or positive activity observation; it never lengthens subsequent
+quiet windows. The optional observer must return a strict Boolean and its
+failures propagate through the same caller-owned retirement boundary.
+`agent_procutil.job_activity.JobWriteActivity` samples completed write bytes
+from an already-held Windows Job, including exited members. Only strict growth
+renews inactivity; reads, CPU time and unchanged counts do not. Missing or closed
+custody, native query errors, malformed accounting and decreasing counters fail
+explicitly. It creates no process, thread, Job or filesystem watcher. Activity is
+not content validation, publication evidence or a service-health result.
 The caller still owns launch, cancellation and tree retirement,
 and must retire writers before `finish()` after an error. Relay-only callers
 can disable retained capture. `output_fds` uses finite, strictly contained

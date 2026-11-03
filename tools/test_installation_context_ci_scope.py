@@ -784,6 +784,178 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
 
 
+def test_constructor_groups_and_mutations_move_to_existing_lanes_without_dropping_cache_scope():
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    marker = "backend_mutation_cannot_publish_cache_or_completion_and_retry_is_clean"
+    refusal_terms = [
+        marker, "shared_executables_keep_the_original_transaction_before_cache_effects",
+        "changed_retained_archive_refuses_before_complete_stamp",
+        "installed_missing_content_refuses_before_preparation_and_complete_stamp",
+        "request_custody_is_not_a_build_input_but_build_environment_still_is",
+        "control_and_target_share_only_verified_installation_wheels",
+        "canonical_setuptools_setup_boilerplate_keeps_the_graph_cacheable",
+    ]
+    refusal_expression = " or ".join(refusal_terms)
+    groups = (
+        "distinct_build_requirements_get_separate_tooling_and_cached_wheels or "
+        "all_requirement_groups_are_acquired_before_the_feed_becomes_unavailable or "
+        "offline_builds_keep_native_cache_selection_and_caller_relative_interpreter"
+    )
+    expected_files = {"tools/test_installer_source_build.py", "tools/test_runtime_source_wheel_cache.py"}
+    for key in ("source-build-linux", "source-build-windows"):
+        job = workflow["jobs"][key]
+        assert job["timeout-minutes"] == 6
+        matrix = job["strategy"]["matrix"]
+        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal"]
+        normal = next(item for item in matrix["include"] if item["suite"] == "normal")
+        assert normal["normal_expression"] == f"not ({refusal_expression} or {groups})"
+        profiles = next(item for item in matrix["include"] if item["suite"] == "profiles")
+        refusals = next(item for item in matrix["include"] if item["suite"] == "refusals")
+        assert profiles["constructor_expression"] == groups
+        assert refusals["constructor_expression"] == refusal_expression
+        execution = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructors,"))
+        assert set(shlex.split(execution["run"])[4:6]) == expected_files
+        assert '${{ matrix.normal_expression || \'\' }}' in execution["run"]
+        refusal = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructor profiles"))
+        assert refusal["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
+        assert shlex.split(refusal["run"]) == [
+            "python", "-m", "pytest", "-q", "tools/test_installer_source_build.py",
+            "-k", "${{ matrix.constructor_expression }}",
+        ]
+        backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
+        assert backend["if"] == "${{ matrix.suite != 'manager' }}"
+        assert job["steps"].index(backend) < job["steps"].index(refusal)
+    for key in ("source-cache-linux", "source-cache-windows"):
+        matrix = workflow["jobs"][key]["strategy"]["matrix"]
+        assert matrix == {"suite": ["normal"]}
+    for name in expected_files:
+        functions = {
+            node.name for node in ast.walk(ast.parse((HERE.parent / name).read_text()))
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+        }
+        moved = {
+            name for name in functions
+            if any(term in name for term in [*refusal_terms, *groups.split(" or ")])
+        }
+        if name.endswith("test_runtime_source_wheel_cache.py"):
+            assert not moved
+        else:
+            assert moved == {f"test_{term}" for term in [*refusal_terms, *groups.split(" or ")]}
+
+
+@pytest.mark.parametrize("job_key", ["source-build-linux", "source-build-windows"])
+@pytest.mark.parametrize("failure_at", [None, 0, 1])
+def test_manager_native_step_retains_owned_cleanup_and_child_failure(
+    tmp_path, monkeypatch, job_key, failure_at,
+) -> None:
+    import plugin_test_containment as containment
+
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"][job_key]
+    step = next(
+        step for step in job["steps"]
+        if step.get("name") == "Persisted Manager admission and fresh-process offline reuse"
+    )
+    assert step["shell"] == "python"
+    calls = []
+
+    def run(command, *, cwd, env, sandbox, limits):
+        assert cwd == tmp_path and sandbox.is_dir()
+        assert Path(env["HOME"]).resolve().is_relative_to(sandbox.resolve())
+        source_paths = [str(tmp_path / "tools")]
+        if calls:
+            source_paths.extend([
+                str(tmp_path / "worktree-manager" / "src"),
+                str(tmp_path / "libs" / "agent-procutil" / "src"),
+                str(tmp_path / "libs" / "worktree-identity" / "src"),
+                str(tmp_path / "libs" / "update-driver" / "src"),
+                str(tmp_path / "libs" / "single-instance-lease" / "src"),
+            ])
+        assert env["PYTHONPATH"] == os.pathsep.join(source_paths)
+        calls.append((command, sandbox, limits))
+        return 23 if failure_at == len(calls) - 1 else 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.setattr(containment, "run_contained", run)
+    with pytest.raises(SystemExit) as result:
+        exec(compile(step["run"], "<manager-native-workflow>", "exec"), {})
+    assert result.value.code == (0 if failure_at is None else 23)
+    assert len(calls) == (1 if failure_at == 0 else 2)
+    assert not any(sandbox.exists() for _command, sandbox, _limits in calls)
+    assert calls[0][0][:4] == [sys.executable, "-m", "pytest", "-q"]
+    assert calls[0][0][4:-2] == [
+        "tools/test_manager_source_install.py",
+        "tools/test_manager_source_native.py",
+        "tools/test_runtime_source_reuse.py",
+        "worktree-manager/tests/test_manager_update_check.py",
+        "libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version",
+    ]
+    assert [limits.wall_seconds for _command, _sandbox, limits in calls] == [300, 120][:len(calls)]
+    if len(calls) == 2:
+        assert calls[1][0][4:-2] == ["worktree-manager/tests/test_runtime_source.py"]
+    assert job["timeout-minutes"] == 6
+
+
+def test_manager_native_step_loads_first_party_helpers_without_site_packages(monkeypatch) -> None:
+    import plugin_test_containment as containment
+
+    repo = HERE.parent
+    workflow = yaml.safe_load(
+        (repo / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    step = next(
+        step for step in workflow["jobs"]["source-build-linux"]["steps"]
+        if step.get("name") == "Persisted Manager admission and fresh-process offline reuse"
+    )
+    original_run = containment.run_contained
+    calls = []
+    script = """
+import pathlib, sys
+import agent_procutil
+import worktree_identity
+import update_driver
+import single_instance_lease
+from worktree_manager import runtime_source
+repo = pathlib.Path(sys.argv[1])
+assert pathlib.Path(agent_procutil.__file__).resolve() == (
+    repo / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
+).resolve()
+assert pathlib.Path(runtime_source.__file__).resolve() == (
+    repo / "worktree-manager" / "src" / "worktree_manager" / "runtime_source.py"
+).resolve()
+assert pathlib.Path(worktree_identity.__file__).resolve() == (
+    repo / "libs" / "worktree-identity" / "src" / "worktree_identity" / "__init__.py"
+).resolve()
+assert pathlib.Path(update_driver.__file__).resolve() == (
+    repo / "libs" / "update-driver" / "src" / "update_driver" / "__init__.py"
+).resolve()
+assert pathlib.Path(single_instance_lease.__file__).resolve() == (
+    repo / "libs" / "single-instance-lease" / "src" / "single_instance_lease" / "__init__.py"
+).resolve()
+print("manager-source-helpers-without-site-packages-ok")
+"""
+
+    def run(command, **kwargs):
+        calls.append(command)
+        probe = script if len(calls) == 2 else "print('original-admission-path-retained')"
+        return original_run(
+            [sys.executable, "-S", "-c", probe, str(repo)], **kwargs,
+        )
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.setattr(containment, "run_contained", run)
+    with pytest.raises(SystemExit) as result:
+        exec(compile(step["run"], "<manager-native-workflow>", "exec"), {})
+    assert result.value.code == 0
+    assert len(calls) == 2
+
+
 def test_real_broker_consumers_retain_native_removal_failures_without_expanding_other_lanes() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

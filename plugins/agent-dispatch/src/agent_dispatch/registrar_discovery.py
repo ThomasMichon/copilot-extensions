@@ -26,6 +26,7 @@ import json
 from contextlib import contextmanager
 import logging
 import os
+import re
 import stat
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -721,18 +722,28 @@ def install_dir() -> Path:
     return dispatch_install_dir()
 
 
-def _parse_env_file(path: Path) -> dict[str, str]:
+def _parse_env_file(path: Path, *, strict: bool = False) -> dict[str, str]:
     """Parse a simple ``KEY=VALUE`` env file (``#`` comments + blanks skipped)."""
     out: dict[str, str] = {}
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        if not stat.S_ISREG(path.stat().st_mode):
+            if strict:
+                raise RegistrarError("legacy profile requires a regular file")
+            return out
+        text = path.read_text(encoding="utf-8", errors="strict" if strict else "replace")
     except OSError:
+        if strict:
+            raise
         return out
     for line in text.splitlines():
         s = line.strip()
+        if strict and s and not s.startswith("#") and "=" not in s:
+            raise RegistrarError("legacy profile contains an unsupported env line")
         if not s or s.startswith("#") or "=" not in s:
             continue
         key, value = s.split("=", 1)
+        if strict and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key.strip()) is None:
+            raise RegistrarError("legacy profile contains an unsupported assignment key")
         out[key.strip()] = value.strip()
     return out
 
@@ -741,6 +752,7 @@ def read_legacy_env_profiles(
     *,
     env_file: str | Path | None = None,
     profile_dir: str | Path | None = None,
+    strict: bool = False,
 ) -> list[ProfileDeclaration]:
     """Read legacy ``AGENT_DISPATCH_SUPERVISE_*`` env profiles as declarations.
 
@@ -756,25 +768,36 @@ def read_legacy_env_profiles(
     empty default ``supervisor.env`` contributes nothing. A duplicate name (two env
     files sharing a stem) keeps the first read; the primary ``supervisor.env`` is read
     before the profile directory.
+    Strict observation refuses unreadable, malformed or wrong-type inputs rather
+    than qualifying the legacy reader's best-effort empty result.
     """
     from .registrar import declaration_from_env
 
     base = install_dir()
     primary = Path(env_file) if env_file is not None else base / "supervisor.env"
     profiles = Path(profile_dir) if profile_dir is not None else base / "supervisors"
+    if strict:
+        for path, expected in ((primary, stat.S_ISREG), (profiles, stat.S_ISDIR)):
+            try:
+                mode = path.stat().st_mode
+            except FileNotFoundError:
+                continue
+            if not expected(mode):
+                raise RegistrarError("legacy profile source has an unsupported file type")
 
     sources: list[tuple[str, Path]] = []
     if primary.is_file():
         sources.append((primary.stem, primary))
     if profiles.is_dir():
-        sources.extend((f.stem, f) for f in sorted(profiles.glob("*.env")))
+        paths = (f for f in profiles.iterdir() if f.match("*.env")) if strict else profiles.glob("*.env")
+        sources.extend((f.stem, f) for f in sorted(paths))
 
     out: list[ProfileDeclaration] = []
     seen: set[str] = set()
     for name, path in sources:
         if name in seen:
             continue
-        env = _parse_env_file(path)
+        env = _parse_env_file(path, strict=strict)
         if not env.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip():
             continue  # label-less -> inert; skip (matches the installer's gate)
         seen.add(name)

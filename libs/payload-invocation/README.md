@@ -80,6 +80,45 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie
 
 ### Source-qualified command binding
 
+`runtimeAdmissionToolkit: true` packages the canonical admission/build helpers
+under `scripts/_runtime_admission/` for a required-context payload. It defaults
+to false and changes neither command/catalog bytes nor installer behavior.
+The generator preserves the helpers' own internal resource layout, including
+dynamic constructor/process modules and trusted native-build templates; no
+source checkout or sibling installed plugin supplies missing files.
+Copied installation-context adapters retain their sibling JSON-query script
+and first-party caller-lifetime archive. Generation and stale-content checks
+preserve the archive's binary bytes rather than decoding or rewriting it.
+
+An installation owner invokes `_runtime_admission.activate()` in its separately
+admitted Python 3.11+ tooling environment with its exact, governed Packaging
+selection (`packaging>=23`). The toolkit contains first-party source only.
+Its inventory describes delivery, not source approval, an authenticated
+installation, a selected dependency profile or permission to install.
+Existing source authentication, native compilation/acquisition, wheel inspection,
+builder and immutable constructor remain the owners of those decisions.
+The repository's Manager installation adapter is `tools/runtime_source_manager.py`;
+it is not part of this reusable toolkit. Subject attestation remains the same
+pinned hosted-workflow verifier, factored out of the publishing adapter.
+The shared index schema and byte limit belong to that reusable attestation
+module. Release-profile readers import them without reaching the repository's
+publication adapter; the publisher retains the same exported index contract.
+
+The payload-only native witness authenticates a synthetic Git source, admits
+its synthetic feed closure, builds first-party wheels, constructs and health
+checks an offline runtime, then reuses that same completed generation. It
+denies Manager/CLI/publishing imports and checks loaded first-party locations.
+The separate admitted-seed witness imports every toolkit entry and runs actual
+semantic profile validation with only its governed Packaging wheel installed,
+including refusal of an incomplete dependency closure.
+Copied POSIX and PowerShell adapter tests execute source-identity selection
+without importing a checkout or creating installation state.
+This qualifies toolkit delivery, not normal-consumer enablement, production
+feed access, credential-key ACLs, ordinary first-tooling integration or measured
+speedups.
+The credential-free witness uses the existing deterministic opaque-identity
+test seam; separate native controls own keyed feed/account identity.
+
 `installerLifecycle: true` packages the existing command-binding/lifecycle
 helpers for a required-context or legacy version-1 installer's admission without
 changing command catalogs or enabling their additive binding field. A legacy

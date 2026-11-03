@@ -18,8 +18,8 @@ negotiates receiver-side no-resume enforcement under the turn lock, and keeps
 ordinary receipt observation compatible with the previous strict receiver.
 Unknown outcomes permit receipt observation, not replay or replacement.
 The [managed CLI integration journal](journal/2026/11.03-managed-cli-startup.md)
-records the next source slice: explicit CLI placement, post-claim generation
-refresh and a first prompt that accepts its existing assignment. Contained
+records the source slice merged in #10214: explicit CLI placement, post-claim
+generation refresh and a first prompt that accepts its existing assignment. Contained
 tests are not native qualification. A live ordinary baseline reached worker
 acceptance, but used legacy claim-after-prompt ordering, so allocator-before-
 spawn and whole-cohort adoption remain unproven.
