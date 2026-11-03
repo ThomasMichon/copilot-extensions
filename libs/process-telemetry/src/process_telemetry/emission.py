@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+    from .buffer import BufferBounds, BufferedSink
 
 TelemetrySink = Callable[[dict[str, Any]], None]
 
@@ -14,8 +18,8 @@ class SinkSlot:
 
     def __init__(self) -> None:
         self.sink: TelemetrySink | None = None
-        self._owned_buffer = None
-        self._last_buffer = None
+        self._owned_buffer: BufferedSink | None = None
+        self._last_buffer: BufferedSink | None = None
         self._configuration_lock = threading.RLock()
 
     def set(self, sink: TelemetrySink | None) -> None:
@@ -27,7 +31,10 @@ class SinkSlot:
             if previous is not None:
                 previous.close()
 
-    def set_buffered(self, sink: TelemetrySink, **bounds):
+    def set_buffered(
+        self, sink: TelemetrySink | Callable[[list[dict[str, Any]]], None],
+        **bounds: Unpack[BufferBounds],
+    ) -> BufferedSink:
         """Opt into one owner-managed buffer; return it for counters/bounded join."""
         from .buffer import BufferedSink
 

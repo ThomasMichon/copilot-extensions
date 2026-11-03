@@ -23,7 +23,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent_procutil import no_window_kwargs
 from agent_worktrees import installer_run, reconcile, update_events
+from runtime_install_fixture import run_native_installer
 
 pytestmark = pytest.mark.real_installer_processes
 
@@ -83,7 +85,8 @@ def _spawn_ready(spawn, command, *args, ready: Path, **kwargs):
 def _alive(pid: int) -> bool:
     if os.name == "nt":
         out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                             capture_output=True, text=True, check=False).stdout
+                             capture_output=True, text=True, check=False,
+                             **no_window_kwargs()).stdout
         return str(pid) in out
     try:
         os.kill(pid, 0)
@@ -510,6 +513,37 @@ def test_output_relays_do_not_inherit_unrelated_pipe_handles(tmp_path):
             observer.join(timeout=10)
         os.close(reader)
     assert not observer.is_alive()
+
+
+def test_native_installer_fixture_preserves_streams_and_exit_status():
+    result = run_native_installer(
+        [sys.executable, "-c",
+         "import os;os.write(1,b'\\xffoutput');os.write(2,b'\\xfediagnostic');raise SystemExit(7)"],
+        env=dict(os.environ), timeout=10,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (
+        7, "\\xffoutput", "\\xfediagnostic",
+    )
+
+
+def test_native_installer_fixture_timeout_settles_nested_children(tmp_path):
+    ready = tmp_path / "child.pid"
+    program = textwrap.dedent("""
+        import pathlib, subprocess, sys, time
+        from agent_procutil import no_window_kwargs
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time;time.sleep(60)"],
+            **no_window_kwargs(),
+        )
+        pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+        time.sleep(60)
+    """)
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_native_installer(
+            [sys.executable, "-c", program, str(ready)], env=dict(os.environ), timeout=3,
+        )
+    pid = int(ready.read_text())
+    assert _wait_dead(pid), "native fixture returned before its nested child settled"
 
 
 def test_unicode_relay_error_receipt_preserves_native_error():

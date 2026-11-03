@@ -3,6 +3,9 @@
 # Looked up from $AGENT_CONTAINERS_CONFIG, ./containers.yaml,
 # ~/.agent-containers/containers.yaml, then (only when agent-worktrees is present
 # and bound to external state) a knowledge-overlay containers.yaml.
+# Fleets shipped by active plugins (`containersConfig` in their plugin.json)
+# merge beneath this file; override only the keys you need under the same
+# fleet name. `agent-containers config-sources` shows where each key came from.
 
 schema_version: 2
 

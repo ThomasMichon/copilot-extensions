@@ -1,0 +1,9 @@
+{
+  "comment": "Observe retained Komodo named volumes through their original daemon and storage owner without copying private keys or weakening local file custody.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

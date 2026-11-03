@@ -162,9 +162,11 @@ def test_running_health_advertises_only_the_registered_metadata_contract(queue) 
     contract = client.get("/health", headers=_headers("data")).json()["pool_catalog_transport"]
     assert contract == {
         "protocol": POOL_CATALOG_PROTOCOL, "supported_versions": [1], "definition_versions": [1],
+        "registration_definition_versions": [1],
         "control_authority_configured": True, "metadata_only": True,
         "lock_holder_verification": False, "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
+        "queue_identity_fencing_versions": [1],
         "configured_cohort_projection_versions": [1],
         "configured_cohort_projection_owner": "explicit-caller",
         "atomic_placement": False,

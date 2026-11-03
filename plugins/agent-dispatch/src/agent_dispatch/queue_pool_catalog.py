@@ -40,6 +40,15 @@ def advance_pool_registry_revision(conn: sqlite3.Connection) -> None:
     )
 
 
+def require_pool_queue_identity(conn: sqlite3.Connection, expected: str | None) -> str:
+    identity = conn.execute(
+        "SELECT identity FROM workspace_queue_identity WHERE singleton = 1"
+    ).fetchone()["identity"]
+    if expected is not None and _identity(expected, "queue identity") != identity:
+        raise TaskError("pool publication queue identity changed; refusing another queue")
+    return identity
+
+
 @dataclass(frozen=True)
 class PoolPublicationScope:
     machine: str
@@ -59,8 +68,20 @@ class PoolPublicationScope:
     definitions_cohort_revision: int | None
 
 
+def _required_scopes(
+    scopes: tuple[PoolPublicationScope, ...], cohort: PoolConfiguredCohort,
+) -> tuple[PoolPublicationScope, ...]:
+    observation = cohort.observation
+    if not cohort.revision or observation is None or not observation.complete:
+        return scopes
+    expected = {(member.execution_machine, member.env) for member in observation.members}
+    return tuple(scope for scope in scopes if (scope.machine, scope.env) in expected)
+
+
 @dataclass(frozen=True)
 class PoolCatalogSnapshot:
+    """All retained scopes, current required definitions and whole-catalog blockers."""
+
     version: int
     revision: int
     registration_revision: int
@@ -68,11 +89,12 @@ class PoolCatalogSnapshot:
     definitions: tuple[PoolInstanceDefinition, ...]
     blockers: tuple[str, ...]
     configured_cohort: PoolConfiguredCohort
+    queue_identity: str
 
     @property
     def ready(self) -> bool:
         """Retained metadata readiness, not current-file or execution support."""
-        return bool(self.scopes) and not self.blockers
+        return bool(_required_scopes(self.scopes, self.configured_cohort)) and not self.blockers
 
     @property
     def configured_ready(self) -> bool:
@@ -156,6 +178,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         self, machine: str, env: str, publisher_id: str, *,
         expected_generation: int, now: float | None = None,
         expected_cohort_revision: int | None = None,
+        expected_queue_identity: str | None = None,
     ) -> PoolPublicationScope:
         """CAS a new lock-holder incarnation; never auto-take over from age.
 
@@ -173,6 +196,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
             raise TaskError("pool publication requires a finite observation time")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            require_pool_queue_identity(conn, expected_queue_identity)
             row = conn.execute(
                 "SELECT * FROM pool_publication_scopes WHERE machine = ? AND env = ?",
                 (machine, env),
@@ -222,6 +246,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         input_revision: str, definitions: tuple[PoolInstanceDefinition, ...],
         reason: str | None = None, now: float | None = None,
         expected_cohort_revision: int | None = None,
+        expected_queue_identity: str | None = None,
     ) -> PoolPublicationScope:
         """Atomically replace the entire scope, or record unavailable inputs.
 
@@ -260,6 +285,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
             raise TaskError("pool publication requires a finite observation time")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            require_pool_queue_identity(conn, expected_queue_identity)
             row = conn.execute(
                 "SELECT * FROM pool_publication_scopes WHERE machine = ? AND env = ?",
                 (machine, env),
@@ -305,7 +331,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
 
     @classmethod
     def _pool_catalog_from_conn(cls, conn: sqlite3.Connection, *, now: float) -> PoolCatalogSnapshot:
-        """All expected scopes under the caller's transaction, never a subset."""
+        """Retain every scope; derive eligibility from the whole configured owner."""
         clock = conn.execute("SELECT * FROM pool_catalog_clock WHERE singleton = 1").fetchone()
         scopes = tuple(
             cls._pool_scope_from_row(row)
@@ -324,13 +350,10 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
                     f"{machine}/{env}: configured scope has not enrolled"
                     for machine, env in sorted(expected - enrolled)
                 )
-                blockers.extend(
-                    f"{machine}/{env}: enrolled scope is not configured"
-                    for machine, env in sorted(enrolled - expected)
-                )
         elif not scopes:
             blockers.append("no enrolled pool publication scopes")
-        for scope in scopes:
+        required = _required_scopes(scopes, cohort)
+        for scope in required:
             problem = (
                 scope.state if scope.state != "complete"
                 else "publication attribution mismatch"
@@ -349,8 +372,8 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
                 blockers.append(f"{scope.machine}/{scope.env}: {problem}")
         return PoolCatalogSnapshot(
             POOL_CATALOG_VERSION, clock["revision"], clock["registration_revision"],
-            scopes, ordered_pool_instances(value for scope in scopes for value in scope.definitions),
-            tuple(blockers), cohort,
+            scopes, ordered_pool_instances(value for scope in required for value in scope.definitions),
+            tuple(blockers), cohort, require_pool_queue_identity(conn, None),
         )
 
     def pool_catalog_snapshot(self, *, now: float | None = None) -> PoolCatalogSnapshot:

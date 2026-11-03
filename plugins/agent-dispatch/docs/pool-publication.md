@@ -17,6 +17,8 @@ the ordinary supervisor.
 The running coordinator's existing `/health` response adds
 `pool_catalog_transport`, with protocol `pool_catalog_transport/v1`, supported
 metadata/definition versions and whether control authority is configured.
+`queue_identity_fencing_versions: [1]` advertises the existing queue identity's
+transactional begin/publish fence, independently of package versions.
 The additive `configured_cohort_fencing_versions: [1]` advertises parsing and
 storage fences only, not an active configuration publisher or runtime admission.
 The separate `configured_cohort_projection_versions: [1]` advertises the
@@ -45,7 +47,7 @@ completeness or a supervisor process identity.
 
 | Route | Metadata operation |
 |-------|--------------------|
-| `GET /pool-catalog` | One unfiltered transaction over every retained scope, the catalog/registration revisions, original definitions, blockers and `metadata_ready` |
+| `GET /pool-catalog` | One unfiltered transaction over every retained scope with its original definitions, current required definitions, catalog/registration revisions, blockers and `metadata_ready` |
 | `POST /pool-catalog/scopes/begin` | Compare `expected_generation` for the explicit machine/environment/publisher incarnation |
 | `POST /pool-catalog/scopes/publish` | Compare generation, publication and registration revisions and replace the whole scope, or record unavailable inputs |
 
@@ -63,6 +65,13 @@ preserves legacy metadata writes only while no configured observation has been
 projected. After projection, fresh writes require its current coordinator
 revision and a complete observation containing that actual execution scope.
 An unfenced legacy writer receives `409` before mutation, not guessed coverage.
+The authenticated whole-catalog read also includes `queue_identity`, taken from
+the queue's existing durable workspace identity in the same SQLite snapshot.
+Both write bodies accept `expected_queue_identity`; the transaction compares it
+before either mutation or idempotent result recovery. Absence preserves legacy
+metadata semantics. An identity-pinned client requires the advertised fence
+before POST and never drops that field on provider rollback. No legacy wire
+form is retired by this expansion.
 
 Malformed request bodies yield `422`; invalid normalized definitions yield
 `400`; stale generation/revision/input fences or incompatible scope publication
@@ -82,6 +91,34 @@ legacy registration or to reject an otherwise-supported legacy operation.
 Publisher enrollment, consumer migration and the retirement/rollback window
 remain gated by the integration obligations below.
 
+### Configured withdrawal without execution retirement
+
+A complete projected cohort is the authority for which execution
+machine/environment scopes are required **now**. The snapshot still returns
+every retained scope, including each obsolete scope's original definitions,
+publisher generation, revision and expiry. Its top-level `definitions` and
+readiness blockers cover only scopes selected by that complete cohort. Missing
+current members still block the whole catalog; removed pending, unavailable or
+expired scopes do not block unrelated current members or supply new candidates.
+An explicit empty cohort is `configured_metadata_ready` with no candidates,
+but is not `metadata_ready`. Unconfirmed/unavailable observations still block;
+unprojected legacy catalogs still require every enrolled scope.
+
+Exclusion changes no stored scope, generation, publication history, task
+assignment, reservation, native binding or effect. Retained work can finish its
+original claim/start path; a later retry cannot silently move to another pool.
+Accountable capacity and exclusive keys remain held under their existing
+retirement rules, including after removal and re-addition. Re-adding a scope
+requires publication against the new cohort revision before new placement.
+Old accepted-request replay can recover its original result without renewing
+freshness or restoring eligibility; unfenced, removed-scope and stale writes
+remain refused. A predecessor generation cannot overwrite a successor.
+
+No new wire form or caller prerequisite is introduced. Older providers may
+conservatively block on obsolete enrollment; callers must preserve that refusal,
+not replay a legacy reservation. This source behavior does not enable ordinary
+allocation, prove a runtime stopped, or authorize cleanup.
+
 ## Implemented local collection boundary
 
 `SupervisorSources`, composed through the existing `BoundedReconciliation`
@@ -96,7 +133,12 @@ set but are not pool definitions.
 Each attempt requires observations from all three sources and an identified
 machine/environment. Effective worker rows need complete, scope-consistent
 normalized definitions. A missing or invalid definition cannot simply disappear
-from the pool list. Failed or cached reads, a future consumed from an earlier
+from the pool list. Explicit direct rows retain their complete definition in
+the existing spec JSON through the
+[negotiated registration boundary](pool-instances.md#direct-registrations).
+Equivalent-source deduplication compares explicit pool policy as well as launch
+behavior, so a different priority or full predicate is not erased by matching
+legacy flags. Failed or cached reads, a future consumed from an earlier
 attempt, unconfirmed declaration writes/withdrawals and duplicate source IDs
 make the entire collection unavailable. Inspecting the retained snapshot does
 not perform I/O or renew freshness; unsuccessful attempts do not expose a partial
@@ -324,12 +366,26 @@ waiter cannot acknowledge an old result against a newer pending request.
 Preparation binds the original client object and, for the concrete HTTP client,
 its bound base URL. Reconnection may replace the ordinary coordinator client,
 but retains an unresolved request's original transport instead of closing it
-under its future. Recovery uses only that transport; an identical catalog at a
-different target cannot settle the request. A fresh POST refuses if the daemon
-has switched clients. Changed targets also refuse later preparation from an
-already-settled publisher position; reconnect alone does not establish queue
-continuity or authorize re-enrollment. No new store or endpoint-identity protocol
-is introduced. The retained client closes after acknowledgment, confirmed
+under its future. Once the original flight and its source children are finished,
+a replacement client can continue the immutable request only after a fresh
+authenticated read confirms the same retained `queue_identity`. Matching
+positions or definitions at another queue cannot settle it, even at the same
+URL. Candidate transports remain owned while their reads run, including through
+another reconnect; failed qualification keeps the original binding and request.
+The next quiescent attempt closes superseded idle candidates before retaining
+another, so repeated wrong-target reads do not accumulate transports. Failed
+closure stays visible and retained.
+The sender's existing future and deadline own this read, without a new timer,
+executor, identity registry or prerequisite RPC.
+
+After same-queue qualification the sender can recover the original accepted
+result or retry under every original source/revision fence. Fresh POST still
+requires the currently selected client, actual singleton and the provider's
+transactional identity fence. Settled preparation likewise permits an endpoint
+change only with the same known queue identity and unchanged retained scope.
+Legacy reads without an identity keep their prior target pin and cannot cross
+endpoints; a known identity cannot silently disappear on rollback.
+The original accepted-request transports close after acknowledgment, confirmed
 pre-effect discard, or final worker retirement, never under an active flight.
 Source reads and declaration-publication futures launched by a send retain
 their binding too. A timed-out parent future does not retire those children;
@@ -340,6 +396,9 @@ confirmed and acknowledged the original result, unfinished children or a
 logged transport-close failure defer cleanup without withholding that result.
 The binding remains retained; later preparation and final retirement still
 require actual child completion and successful transport cleanup.
+`tests/test_pool_queue_continuity.py` exercises real client/HTTP/SQLite
+continuation, lookalike foreign catalogs, route replacement between read and
+POST, replay fences, reconnect during candidate reads and supported rollback.
 
 `discard_unaccepted_pool_metadata_request(original)` is the shared preparation
 operation used by explicit and opt-in cadence callers. It requires the exact pending request,
@@ -384,6 +443,9 @@ withdrawals, a changed publisher or closed admission refuse the write.
 The original and current final local-read revisions are retained separately from
 the collection revision and must both match it. A repeated final-read failure
 cannot qualify merely because its reason and earlier collection stayed equal.
+The initial catalog observation must also be fresh before declaration collection:
+a completed read retained from an earlier timeout is not current queue identity,
+even when its data matches the original queue after a reconnect.
 The original capture deadline is checked again immediately before POST admission,
 after parsing and final comparisons, not just before source collection.
 That final closed-state/deadline decision shares the short shutdown admission

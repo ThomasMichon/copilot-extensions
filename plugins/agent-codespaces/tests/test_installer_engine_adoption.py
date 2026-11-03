@@ -637,7 +637,8 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         shutil.copyfile(PLUGIN / name, payload / name)
     retained_scripts = (
         "install.sh", "install.ps1", "installer-human-output.ps1", "install.human-output.json",
-        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_arguments.py", "installer_retained_content.py",
     )
     for name in retained_scripts:
         shutil.copyfile(PLUGIN / "scripts" / name, payload / "scripts" / name)
@@ -658,7 +659,8 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
                     "install.sh", "install.ps1",
                     "installer-human-output.ps1", "install.human-output.json",
                     "installer-engine.sh", "installer-engine.ps1",
-                    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+                    "installer_dependency_policy.py", "installer_dependency_config.py",
+                    "installer_dependency_arguments.py", "installer_retained_content.py",
                 ):
                     continue
                 if member.is_dir():
@@ -701,7 +703,8 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     engine.mkdir(parents=True, exist_ok=True)
     for name in (
         "installer-engine.sh", "installer-engine.ps1",
-        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_arguments.py", "installer_retained_content.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
     roster = repository / ".github" / "plugin" / "marketplace.json"
@@ -754,11 +757,12 @@ def _validate_admission_record(record, expected):
     assert record["retained_resource_roots"] == [], "unexpected resource roots"
     assert record["env"] is None and record["cwd"] is None and record["now"] is None
     assert record["run_options"] == {"stdout": "stdout", "stderr": "stderr"}
+    assert record["non_editable"] is True, "editable installation was admitted"
     matches = [
         package for package, arguments in expected["arguments"].items()
         if record["arguments"] == arguments
     ]
-    assert len(matches) == 1, "unknown or incorrect installed source arguments"
+    assert len(matches) == 1, f"unknown or incorrect installed source arguments: {record['arguments']!r}"
     for package, source in expected["sources"].items():
         project = tomllib.loads((Path(source) / "pyproject.toml").read_text(encoding="utf-8"))["project"]
         assert project == expected["projects"][package], "changed originating project identity"
@@ -780,7 +784,8 @@ def _small_attributed_sources(tmp_path, *, editable, canonical=None):
     engine.mkdir(parents=True)
     for name in (
         "installer-engine.sh", "installer-engine.ps1",
-        "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_arguments.py", "installer_retained_content.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
     library_root = repository / "libs" if canonical else payload / "libs"
@@ -849,7 +854,7 @@ def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library
                 "--python", str(python),
                 *(argument for package, source in zip(PACKAGES, sources)
                   for argument in ("--reinstall-package", package, str(source))),
-                "--quiet",
+                "--quiet", "--link-mode", "copy",
             ]
         },
         "sources": dict(zip(PACKAGES, map(str, sources))),
@@ -880,7 +885,6 @@ def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library
 expected = json.loads(os.environ["TEST_ADMISSION_EXPECTED"])
 for name, digest in expected["context_inputs"].items():
     assert hashlib.sha256(Path(name).read_bytes()).hexdigest() == digest, "admission context changed"
-cache = Path(os.environ["TEST_ADMISSION_LOG"]).with_suffix(".context.json")
 def forward(record):
     _validate_admission_record(record, expected)
     with Path(os.environ["TEST_ADMISSION_LOG"]).open("a") as stream:
@@ -889,14 +893,6 @@ def forward(record):
         [record["uv"], "pip", "install", *record["arguments"]],
         stdout=sys.stdout, stderr=sys.stderr,
     )
-# Owner-derived kwargs do not depend on the target argv. Capture them from
-# the real CLI once, then reuse only while every owner/graph input is identical.
-if cache.exists():
-    assert sys.argv[1] == "--uv" and sys.argv[3] == "--"
-    record = json.loads(cache.read_text())
-    record["uv"] = sys.argv[2]
-    record["arguments"] = sys.argv[4:]
-    raise SystemExit(forward(record).returncode)
 policy = runpy.run_path(expected["policy"], run_name="orchestration_policy")
 main = policy["main"]
 namespace = main.__globals__
@@ -912,9 +908,9 @@ def admission_spy(uv, arguments, **kwargs):
         "retained_resource_roots": [str(path) for path in values["retained_resource_roots"]],
         "env": values["env"], "cwd": values["cwd"], "now": values["now"],
         "run_options": {"stdout": "stdout", "stderr": "stderr"},
+        "non_editable": values["non_editable"],
     }
     _validate_admission_record(record, expected)
-    cache.write_text(json.dumps(record), encoding="utf-8")
     return forward(record)
 namespace["run_uv_install"] = admission_spy
 raise SystemExit(main())
@@ -934,52 +930,6 @@ raise SystemExit(main())
             + _prelude(ext, engine) + _function(ext, "Install-PackageInto")
             + "$script:SourceRuntimeIdentity = $null\n"
         )
-        script += r"""
-# Orchestration-only transport spy. First call captures real CLI kwargs;
-# immutable-context replays avoid a second Python process per simulated call.
-Set-Item Function:Invoke-OrchestrationOriginalCapture (Get-Item Function:Invoke-NativeCapture).ScriptBlock
-function Invoke-NativeCapture {
-    param([scriptblock]$Command)
-    $shape = ($Command.ToString() -replace '\s+', ' ').Trim()
-    if ($shape -ne '& $policyPython -I $script:InstallerDependencyPolicy --uv $UvCommand -- @Arguments') {
-        throw 'Unexpected admission transport'
-    }
-    $cache = [IO.Path]::ChangeExtension($env:TEST_ADMISSION_LOG, '.context.json')
-    if (-not [IO.File]::Exists($cache)) {
-        return Invoke-OrchestrationOriginalCapture -Command $Command
-    }
-    $expected = $env:TEST_ADMISSION_EXPECTED | ConvertFrom-Json
-    foreach ($entry in $expected.context_inputs.PSObject.Properties) {
-        $bytes = [IO.File]::ReadAllBytes($entry.Name)
-        $sha = [Security.Cryptography.SHA256]::Create()
-        try { $digest = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
-        finally { $sha.Dispose() }
-        if ($digest -ne $entry.Value) { throw 'Admission context changed' }
-    }
-    $record = [IO.File]::ReadAllText($cache) | ConvertFrom-Json
-    $actualArguments = @($Arguments)
-    $matches = @($expected.arguments.PSObject.Properties | Where-Object {
-        [string]::Join([char]0, @($_.Value)) -eq [string]::Join([char]0, $actualArguments)
-    })
-    if ($matches.Count -ne 1) { throw 'Unknown or incorrect installed source arguments' }
-    if ($record.uv -ne $UvCommand -or $UvCommand -ne $expected.uv) { throw 'Incorrect UV executable' }
-    if ([string]::Join([char]0, @($record.trusted_source_roots)) -ne
-        [string]::Join([char]0, @($expected.trusted_source_roots))) { throw 'Incorrect trusted roots' }
-    if (@($record.retained_resource_roots).Count -ne 0) { throw 'Unexpected resource roots' }
-    if ($null -ne $record.env -or $null -ne $record.cwd -or $null -ne $record.now) {
-        throw 'Unexpected admission context'
-    }
-    if ($record.run_options.stdout -ne 'stdout' -or $record.run_options.stderr -ne 'stderr') {
-        throw 'Incorrect admission streams'
-    }
-    $record.arguments = $actualArguments
-    [IO.File]::AppendAllText(
-        $env:TEST_ADMISSION_LOG, (($record | ConvertTo-Json -Depth 20 -Compress) + "`n"),
-        [Text.UTF8Encoding]::new($false)
-    )
-    return Invoke-OrchestrationOriginalCapture -Command { & $UvCommand pip install @actualArguments }
-}
-"""
         script += (
             f"\n$script:InstallerDependencyPolicy='{spy}'\n"
             f"\n$UvCommand='{uv}'\nfunction Remove-ConsoleTrampolines {{ param($VenvDir) }}\n"
@@ -1191,7 +1141,7 @@ def test_codespaces_real_admission_replays_captured_source(
         assert "retrying in 6s" in result.stderr
 
 
-@pytest.mark.parametrize("fault", ["bypassed", "source", "roots", "resources"])
+@pytest.mark.parametrize("fault", ["bypassed", "source", "roots", "resources", "editable"])
 def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(fault, orchestration_runs):
     ext = "ps1" if PWSH else "sh"
     result, calls, records, expected, _, _ = orchestration_runs(ext, True, "sre")
@@ -1203,6 +1153,8 @@ def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(fault, orc
         damaged[0]["arguments"][-2] = str(PLUGIN / "unrecognized-source")
     elif fault == "roots":
         damaged[0]["trusted_source_roots"] = []
+    elif fault == "editable":
+        damaged[0]["non_editable"] = False
     else:
         damaged[0]["retained_resource_roots"] = [str(PLUGIN / "unrecognized-resource")]
     with pytest.raises(AssertionError):
@@ -1562,6 +1514,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     _fake_uv(fake_bin)
     if os.name != "nt":
         (fake_bin / "python3").symlink_to(sys._base_executable)
+        (fake_bin / "python").symlink_to(sys._base_executable)
     isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
     env["TEST_UV_MODE"] = "fatal"
     guard_installer_payload(payload)
@@ -1585,7 +1538,9 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
     snapshot = Path((root / "payload-dir").read_text().strip())
-    provenance = json.loads((snapshot / "snapshot-provenance.json").read_text(encoding="utf-8"))
+    receipt = snapshot / "snapshot-provenance.json"
+    assert receipt.is_file(), stamp.stdout + stamp.stderr
+    provenance = json.loads(receipt.read_text(encoding="utf-8"))
     assert provenance["schema"] == "copilot-extensions.legacy-snapshot-source"
     assert provenance["resolution"]["pluginId"] == PLUGIN.name
     assert snapshot_tree_manifest(snapshot / "snapshot-copy-probe") == probe_before

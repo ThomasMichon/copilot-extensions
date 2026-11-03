@@ -119,6 +119,11 @@ empty default user. Explicit user strings are preserved. A malformed configurati
 object, non-string user (including null) or malformed sequence still refuses.
 Image identity, official digest and selected-platform checks remain unchanged.
 
+Compose 2 distribution revision suffixes may contain `~`, such as
+`2.40.3+ds1-0ubuntu1~24.04.1`; these remain Compose 2, not a different
+toolchain major. The native version read preserves its ordinary environment
+scrubbing and selects no replacement binary or plugin.
+
 Compose 5 retains the Compose Specification and the fixed `up --no-build
 --pull never --wait --wait-timeout` interface used here. Stable 5.x is accepted
 alongside the existing 2.x contract; other majors and 5.x prereleases refuse.
@@ -214,7 +219,7 @@ inside directory mounts; the SDK cannot infer those dependencies from a director
 It authenticates those observations through its existing host/storage/release/
 credential authorities before constructing the record. The record itself
 authenticates nothing and transfers no incumbent writer custody.
-Both mandatory private keys are reread through the existing owner-private
+By default, both mandatory private keys are reread through the existing owner-private
 file reader, including current OS ownership/privacy and opened-file consistency.
 Unchanged bytes/inodes do not permit a newly shared permission or ACL grant.
 The SDK refuses that drift without repairing permissions or copying keys.
@@ -249,6 +254,38 @@ so a freshly resolved identical materialization retains its original deployment
 digest. Every record field and native mount remains bound; duplicates refuse.
 Both Core and Periphery must use the same original `/config/keys` mount.
 Volume mountpoints are read locations, never replacements for native volume mounts.
+An optional code-registered `storage: KomodoIncumbentStorage` supports original
+named volumes that the host caller cannot traverse. This is a separate
+original-daemon/storage-owner observation, not an alternative local private-file
+reader. Its daemon must match the selected native toolchain. All volumes must
+have disjoint canonical mountpoints, the keys directory must be one exact
+volume root, and the producer must explicitly select every observed file's
+original UID/GID. Local bind sources, local login/configured-username inputs
+and the physical Docker socket retain their existing filesystem checks.
+Overlapping bind sources are still checked locally on every observation and
+their retained files are locally reread, even when a volume observation also
+covers those paths. The two views must agree on physical identity. Directory
+link counts remain validated observation metadata but do not enter persistent
+material identity: ordinary subdirectory growth must not invalidate adoption.
+Regular-file link counts remain strict.
+
+The callback receives a bounded canonical request containing the complete
+original mounts and volume records, exact file-owner map and private-file set.
+It must authenticate these against the current original daemon, containers and
+storage mappings, reject overlays/indirection and read through stable opened
+descriptors. It returns only exact metadata, bounded file lengths, SHA-256
+digests and the two public-key files, with the request digest and a finite
+`valid_until` no more than five minutes ahead. It must not return private
+content. The SDK rejects missing/extra paths, file aliases, changed owners,
+nonregular or multiply linked files, shared private files, writable public
+files, empty private keys, oversized files and public bytes inconsistent with
+their file digest/length. Each observation is reacquired; file metadata and
+digests enter the selected material evidence. Public keys still pass the
+ordinary SPKI validator. Native full-volume inspection, exact mount comparison,
+adoption, credentials, current admission and process-custody gates remain
+independent. Constructing this callback record is not producer authentication,
+writer transfer, service installation or live adoption.
+
 The producer may optionally supply immutable canonical `topology` bytes with
 exactly `networks`, `modes` and `attachments`. `networks` maps at most eight
 original names to complete native bridge inspection records; `modes` and

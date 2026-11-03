@@ -1,0 +1,9 @@
+{
+  "comment": "Accept distribution revision tildes in Compose 2 version output without changing supported majors or stable Compose 5 checks.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

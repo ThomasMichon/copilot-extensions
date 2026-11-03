@@ -241,10 +241,20 @@ attached by this foundation. Current-source integration begins at S2.
 
 ### S2 - Worktree and agenda owner observations
 
+The first attachment consumes actual elected-owner roster observations and
+exposes qualified read/history/feed transport. Its generic observed-change
+history has partial coverage; it does not deliver native mutation capture.
+The source implementation is described in the
+[owning provider contract](../../../plugins/agent-worktrees/docs/worktree-observations.md);
+publication and installed support retain their separate qualification.
+
 - [ ] Expand providers before callers with passive capabilities, selected-scope
   current facts, gap-aware observation history and bounded backward pages.
 - [ ] Capture real claim/binding/disposition evidence at existing mutation seams;
   reconcile cross-process/legacy sources without fabricated events.
+  Isolate optional post-save callback failures so a completed canonical save is
+  not reported as failed and remaining notifications still run. Capture under
+  record/pair locks is bounded only; publication/RPC happens after release.
 - [ ] Supply live reported subagent/tool activity and owner-qualified accumulated
   statistics with explicit coverage; preserve unknown current concurrency when
   the native/ACP source does not establish it.

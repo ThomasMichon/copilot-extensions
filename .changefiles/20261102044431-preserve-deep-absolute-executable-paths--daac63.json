@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve deep absolute executable paths in caller-owned Windows process creation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

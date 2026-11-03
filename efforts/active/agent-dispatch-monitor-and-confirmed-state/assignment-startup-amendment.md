@@ -36,7 +36,20 @@ active/drain owner, without enabling automatic publication or worker migration.
 The [opt-in cadence source](journal/2026/11.02-publication-cadence.md)
 connects those existing owners behind default-off activation. It does not
 migrate ordinary allocation, initial prompts, direct legacy definitions,
-cross-endpoint continuity or native adoption; review and merge remain open.
+cross-endpoint continuity or native adoption. Its source merged in
+[#10090](https://github.com/ThomasMichon/copilot-extensions/pull/10090);
+those remaining integration and qualification gates stay open.
+The [queue-bound continuation source](journal/2026/11.02-queue-bound-publication.md)
+connects actual sender reconnect to the existing durable queue identity and
+provider write fences; it does not activate ordinary allocation or clear the
+remaining direct-row, withdrawal, prompt and mixed-driver gates.
+That source merged in [#10099](https://github.com/ThomasMichon/copilot-extensions/pull/10099);
+the current Plan and Validation Plan remain active.
+The [direct-definition source](journal/2026/11.02-direct-pool-definitions.md)
+connects explicit complete direct-worker policy to the existing registration
+and effective-source owners without deriving missing legacy semantics.
+Its source merged in [#10111](https://github.com/ThomasMichon/copilot-extensions/pull/10111);
+remaining legacy-row adoption, ordinary migration and native gates are distinct.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).

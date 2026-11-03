@@ -9,7 +9,8 @@ Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resour
 Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
 Context, Installer Readiness, Lazy CLI Dispatch,
-Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Update Telemetry, Work
+Peer Launch, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
+Instance Lease, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -39,9 +40,12 @@ python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-installer-readiness
 python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-peer-launch
+python tools/typecheck.py lib-process-telemetry --prepare
+python tools/typecheck.py lib-process-telemetry
 python tools/typecheck.py lib-repository-policy
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
+python tools/typecheck.py lib-single-instance-lease
 python tools/typecheck.py lib-update-telemetry
 python tools/typecheck.py lib-work-coalescing-singleton
 python tools/typecheck.py lib-worktree-identity-remaining
@@ -115,6 +119,25 @@ negative-test casts. Local variable renames avoid conflicting inferred types
 without changing receipt validation, blocking decisions or repair behavior.
 Agent Machines remains an independently pending consumer; canonical admission
 does not qualify its complete project or grant installation authority.
+
+Single Instance Lease checks all fourteen canonical source/test files strictly
+on both declared targets in the base environment. File handles, liveness probes
+and reaper collaborators have explicit types; existing malformed-input and
+descriptor-close fixtures retain narrow deliberate casts. Kernel-lock ownership,
+process identity, fork handling and release behavior are unchanged. The shipped
+Customizing Copilot copy is synchronized, but copies and consumer projects remain
+independently pending until their complete scopes are qualified.
+
+Process Telemetry checks all seventeen canonical source/test files strictly on
+both declared targets. Its separate `tools/typecheck-otlp-requirements.txt` flat
+hash lock retains the base checker pins and adds the library's declared optional
+OTLP SDK/protobuf dependencies under the same seven-day seasoning policy.
+The base package remains dependency-free; SDK imports remain optional at runtime.
+Callable, custody and exporter protocols expose concrete collaborator contracts,
+while validated JSON events retain explicit dynamic values. Native append/sync,
+fail-open callbacks, no-SDK refusal and diagnostic-only delivery semantics remain
+unchanged. Bridge, Dispatch and Worktree Manager remain independently pending
+consumer projects.
 
 Dropin Registry uses the base checker environment and checks all six canonical
 source/test files strictly on both declared targets. Its native FIFO test skips

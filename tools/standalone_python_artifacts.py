@@ -112,6 +112,7 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
             for name in (
                 "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py",
                 "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
+                "installer_dependency_arguments.py",
                 "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "runtime_launcher.py",
                 "installer_source_wheel_cache.py", "installer_source_build.py",
             )

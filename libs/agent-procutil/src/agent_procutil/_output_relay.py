@@ -50,6 +50,7 @@ class ByteRelay:
             command = [sys.executable, "-I", "-B", "-c", bootstrap]
         self.process, self.job = spawn_sync_in_kill_on_close_job(
             [*command, "--copy", str(os.getpid())],
+            executable=sys.executable,
             require_job=os.name == "nt", allow_breakaway=False,
             stdin=subprocess.PIPE, stdout=descriptor, stderr=subprocess.PIPE,
             close_fds=True, **no_window_kwargs(),

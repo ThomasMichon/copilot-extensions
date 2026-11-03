@@ -45,6 +45,10 @@ def agenda_project_unavailable(argv, message: str) -> int:
 def project_resolution_failure(argv, error: Exception) -> int:
     if argv and argv[0] in {"agenda-read", "agenda-publish", "agenda-feed"}:
         return agenda_project_unavailable(argv, str(error))
+    if argv and argv[0] in {"worktree-observations", "worktree-observation-history"}:
+        from .owner_observation_cli import project_unavailable
+
+        return project_unavailable(argv, str(error))
     if not argv or argv[0] != "record":
         raise error
     from . import output

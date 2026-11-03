@@ -10,6 +10,33 @@ PAYLOAD_ROOT="${AGENT_WORKTREES_PAYLOAD_ROOT:-}"
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
 _aw_update_entry_dir="$PAYLOAD_ROOT/bin"
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
+_aw_passive_observation=0
+_aw_skip_project=0
+_aw_worktrees_alias=0
+_aw_first_argument=1
+for _aw_arg in "$@"; do
+    if [[ "$_aw_first_argument" == 1 ]]; then
+        _aw_first_argument=0
+        [[ "$_aw_arg" != agent-worktrees ]] || continue
+    fi
+    if [[ "$_aw_skip_project" == 1 ]]; then
+        _aw_skip_project=0
+        continue
+    fi
+    case "$_aw_arg" in
+        --project|-p) _aw_skip_project=1 ;;
+        --project=*) ;;
+        worktree|worktrees)
+            [[ "$_aw_worktrees_alias" == 0 ]] || break
+            _aw_worktrees_alias=1
+            ;;
+        worktree-observations|worktree-observation-history)
+            _aw_passive_observation=1
+            break
+            ;;
+        *) break ;;
+    esac
+done
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
@@ -484,6 +511,7 @@ assert_plugin_runtime_publication() {
 
 resolve_runtime
 if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" &&
+      "$_aw_passive_observation" != 1 &&
       "${_aw_update_diagnostic:-0}" != 1 ]]; then
     assert_plugin_runtime_publication
 fi
@@ -495,6 +523,7 @@ fi
 # genuine first-ever launch instead of silently dropped (Copilot review
 # follow-up, PR #3310).
 if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" &&
+      "$_aw_passive_observation" != 1 &&
       "${_aw_update_diagnostic:-0}" != 1 ]]; then
     WILL_PROVISION=1
 fi
@@ -516,6 +545,10 @@ fi
 if [[ "${_aw_update_diagnostic:-0}" == 1 ]]; then
     printf '%s\n' '[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.' >&2
     exit 127
+fi
+if [[ "$_aw_passive_observation" == 1 ]]; then
+    printf '[agent-worktrees] observation reads require an existing runtime; self-provisioning is disabled.\n' >&2
+    exit 1
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-worktrees] runtime not provisioned (AGENT_WORKTREES_NO_SELFPROVISION set).\n' >&2

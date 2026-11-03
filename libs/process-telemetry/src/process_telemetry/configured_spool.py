@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
-from .diagnostic_logs import location
+from .diagnostic_logs import Event, location
+
+if TYPE_CHECKING:
+    from .emission import SinkSlot
+    from .buffer import BufferedSink
 
 
-def retained_directory(data: dict) -> Path:
+class _Logger(Protocol):
+    def warning(self, message: str) -> object: ...
+
+
+class _StoreStatus(Protocol):
+    @property
+    def last_error(self) -> str | None: ...
+
+
+class _RetainedSink(Protocol):
+    @property
+    def store(self) -> _StoreStatus: ...
+
+    def __call__(self, event: Event) -> None: ...
+    def maintain(self) -> None: ...
+
+
+def retained_directory(data: Event) -> Path:
     options = data["retained_spool"]
     if "sink" in data or "spool" in data:
         raise ValueError("mixed telemetry modes")
@@ -23,7 +46,7 @@ def retained_directory(data: dict) -> Path:
     return directory
 
 
-def _warn(logger) -> None:
+def _warn(logger: _Logger) -> None:
     try:
         logger.warning("configured retained telemetry unavailable")
     except Exception:
@@ -31,13 +54,15 @@ def _warn(logger) -> None:
 
 
 class _ConfiguredSpool:
-    def __init__(self, directory, factory, logger):
+    def __init__(
+        self, directory: Path, factory: Callable[[Path], _RetainedSink], logger: _Logger,
+    ) -> None:
         self.directory = directory
         self.factory = factory
         self.logger = logger
-        self.sink = None
+        self.sink: _RetainedSink | None = None
 
-    def start(self):
+    def start(self) -> None:
         # Runs only on the existing buffer's worker, never the serving producer.
         try:
             namespace = self.directory / "retained"
@@ -50,17 +75,19 @@ class _ConfiguredSpool:
             _warn(self.logger)
             raise RuntimeError("retained initialization failed") from None
 
-    def __call__(self, event):
+    def __call__(self, event: Event) -> None:
         if self.sink is None:
             raise RuntimeError("retained initialization unavailable")
         self.sink(event)
 
-    def maintain(self):
+    def maintain(self) -> None:
         if self.sink is not None:
             self.sink.maintain()
 
 
-def install_retained(data, slot, factory, logger):
+def install_retained(
+    data: Event, slot: SinkSlot, factory: Callable[[Path], _RetainedSink], logger: _Logger,
+) -> BufferedSink | None:
     """Return the selected owned buffer, or fail open without unsafe retries."""
     try:
         directory = retained_directory(data)
@@ -75,7 +102,7 @@ def install_retained(data, slot, factory, logger):
         return None
 
 
-def close_configured(slot):
+def close_configured(slot: SinkSlot) -> None:
     """Check current ownership and close under the existing configuration lock."""
     try:
         with slot._configuration_lock:
@@ -86,7 +113,9 @@ def close_configured(slot):
         pass  # optional cleanup never replaces a primary service outcome
 
 
-def configured_inventory(path, *, component, service):
+def configured_inventory(
+    path: str | Path, *, component: str, service: str,
+) -> dict[str, object]:
     """Read configuration/metadata only; never import a configured factory."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))

@@ -28,11 +28,13 @@ def pool_catalog_contract(
         "protocol": POOL_CATALOG_PROTOCOL,
         "supported_versions": [POOL_CATALOG_VERSION],
         "definition_versions": [POOL_DEFINITION_VERSION],
+        "registration_definition_versions": [POOL_DEFINITION_VERSION],
         "control_authority_configured": bool(control_token),
         "metadata_only": True,
         "lock_holder_verification": False,
         "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
+        "queue_identity_fencing_versions": [1],
         "configured_cohort_projection_versions": [1],
         "configured_cohort_projection_owner": "coordinator-registrar" if source_owned else "explicit-caller",
         "atomic_placement": False,
@@ -47,6 +49,7 @@ class PoolScopeBody(BaseModel):
     env: StrictStr
     publisher_id: StrictStr
     expected_cohort_revision: Annotated[StrictInt, Field(ge=0)] | None = None
+    expected_queue_identity: StrictStr | None = None
 
 
 class BeginPoolPublicationBody(PoolScopeBody):
@@ -141,6 +144,7 @@ def _catalog_payload(snapshot: PoolCatalogSnapshot) -> dict[str, object]:
         "version": snapshot.version,
         "revision": snapshot.revision,
         "registration_revision": snapshot.registration_revision,
+        "queue_identity": snapshot.queue_identity,
         "scopes": [_scope_payload(scope) for scope in snapshot.scopes],
         "definitions": [definition.to_dict() for definition in snapshot.definitions],
         "blockers": list(snapshot.blockers),
@@ -245,6 +249,7 @@ def register_pool_catalog_routes(
                 body.machine, body.env, body.publisher_id,
                 expected_generation=body.expected_generation,
                 expected_cohort_revision=body.expected_cohort_revision,
+                expected_queue_identity=body.expected_queue_identity,
             )
         except TaskError as exc:
             raise refused("begin", exc) from exc
@@ -270,6 +275,7 @@ def register_pool_catalog_routes(
                 definitions=definitions,
                 reason=body.reason,
                 expected_cohort_revision=body.expected_cohort_revision,
+                expected_queue_identity=body.expected_queue_identity,
             )
         except PoolDefinitionError as exc:
             raise refused("publish", exc, status=400) from exc

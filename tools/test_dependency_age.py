@@ -94,6 +94,55 @@ def write(path, text):
     return path
 
 
+def test_reviewed_otlp_prerelease_pin_keeps_seasoning(tmp_path):
+    write(tmp_path / "tools/typecheck-otlp-requirements.txt",
+          "opentelemetry-semantic-conventions==0.66b1 --hash=sha256:" + "1" * 64 + "\n"
+          "opentelemetry-sdk==1.45.1 --hash=sha256:" + "2" * 64 + "\n")
+    metadata = {"releases": {"0.66b1": release(), "1.45.1": release()}}
+    assert age.audit(
+        tmp_path, fetch=lambda _: json.dumps(metadata), now=NOW, ecosystem="python",
+    ) == (2, [])
+
+
+@pytest.mark.parametrize("filename,dependency,parent", [
+    ("other-requirements.txt", "opentelemetry-semantic-conventions==0.66b1", "opentelemetry-sdk==1.45.1"),
+    ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions==0.67b1", "opentelemetry-sdk==1.45.1"),
+    ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions>=0.66b1", "opentelemetry-sdk==1.45.1"),
+    ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions==0.66b1", ""),
+    ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions==0.66b1", "opentelemetry-sdk==1.45.2"),
+    ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions==0.66b1", "opentelemetry-sdk>=1.45.1"),
+    ("typecheck-otlp-requirements.txt", "opentelemetry-semantic-conventions==0.66b1", 'opentelemetry-sdk==1.45.1; python_version < "3"'),
+])
+def test_reviewed_otlp_pin_does_not_expand_to_other_declarations(
+    tmp_path, filename, dependency, parent,
+):
+    write(tmp_path / "tools" / filename, dependency + "\n" + parent + "\n")
+    metadata = {"releases": {
+        "0.66b1": release(), "0.67b1": release(), "1.45.1": release(), "1.45.2": release(),
+    }}
+    _, errors = age.audit(
+        tmp_path, fetch=lambda _: json.dumps(metadata), now=NOW, ecosystem="python",
+    )
+    assert any("opentelemetry-semantic-conventions:" in error for error in errors)
+
+
+@pytest.mark.parametrize("files", [
+    release(NOW), release(yanked=True), release(None), release() + release(NOW),
+])
+def test_reviewed_otlp_pin_never_waives_artifact_age_or_yank_checks(tmp_path, files):
+    write(tmp_path / "tools/typecheck-otlp-requirements.txt",
+          "opentelemetry-semantic-conventions==0.66b1\nopentelemetry-sdk==1.45.1\n")
+
+    def fetch(url):
+        return json.dumps({"releases": {
+            "0.66b1": files if "semantic-conventions" in url else release(),
+            "1.45.1": release(),
+        }})
+
+    _, errors = age.audit(tmp_path, fetch=fetch, now=NOW, ecosystem="python")
+    assert len(errors) == 1 and "opentelemetry-semantic-conventions:" in errors[0]
+
+
 def project(root, directory="plugins/demo", *, dependencies="", other=""):
     return write(root / directory / "pyproject.toml", f"""
 [build-system]

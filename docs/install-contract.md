@@ -1334,6 +1334,12 @@ only legacy selection requires a shared deployment manifest. Fresh orchestration
 re-resolves the repaired installation instead of reusing an inherited command
 that still names an older shared slot.
 Project arguments and the original invocation context cross the bootstrap.
+The final engine `update` child uses that captured caller directory even when
+fresh Manager bootstrap is executing from staging. A supplied
+`AGENT_WORKTREES_UPDATE_CONTEXT` must name an existing absolute directory;
+normal updates reject invalid context before durable submission and recheck
+it at engine launch rather than registering or guessing a project for staging.
+Other engine verbs retain their ordinary cwd.
 Installing the Manager alone never counts as suite success: repair failures
 and the eventual update's native exit status
 propagate to the caller. `--no-manager`, read-only `--auth-report`, update help,
@@ -3683,6 +3689,16 @@ release metadata; configured-feed availability remains an installation check.
 Dependabot's seven-day cooldown is complementary, not a substitute for that
 guard or the resolver cutoff.
 
+The declaration audit has one reviewed required-transitive prerelease exception:
+`opentelemetry-semantic-conventions==0.66b1` in
+`tools/typecheck-otlp-requirements.txt`, only while that same lock pins its
+requiring stable SDK to `opentelemetry-sdk==1.45.1`. Other files, versions,
+ranges and conditional parent pins remain subject to the stable-only rule.
+Every artifact of the reviewed pin must still be non-yanked and at least seven
+days old, with known timestamps. Checker preparation retains its mandatory
+SHA256 hash lock and canonical installer cutoff; this declaration exception
+does not relax installation integrity or enable an optional runtime dependency.
+
 `installer_dependency_policy.py` is the canonical stdlib-only installer policy,
 with private settings-projection and configuration-retention primitives in
 `installer_dependency_config.py`; both ship beside each versioned runtime helper
@@ -4689,6 +4705,15 @@ acquisition, offline and total elapsed time on stderr; named phase transitions
 are flushed separately without altering result framing. Those counts describe
 local wheels, not completed runtime generations or the whole update duration.
 
+`numbered_candidate(source_wheel_cache_root=...)` may select the same
+installation owner's ordinary cache for a private control bootstrap and its
+target candidate. Without that argument, caching remains local to the candidate
+root. Source, backend, tool and build-environment bindings still decide reuse;
+construction, retention and publication authority remain with each candidate.
+Worktrees scopes the cold control's payload environment to the same admitted
+authority as its child, restoring the caller's value after settlement. Compatible
+retained controls receive no new command-line argument.
+
 Ordinary source-wheel phases now renew their quiet allowance from actual child
 stdout/stderr and completed file, copy and verification units. The owned
 constructor relays child bytes immediately, including partial lines; its
@@ -5106,7 +5131,7 @@ publication is advertised only after the discovery stamp succeeds. A known
 failed-but-committed activation settles as an error without indefinitely holding
 installation locks for a permanently unready candidate. Dev release similarly retains
 the original claim and defers its exact-snapshot release to that resident;
-changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
+changed claims refuse cleanup, a pending dev-claim release refuses a rebuild, and
 duplicate release cannot bypass the original pending claim.
 Idle retirement rechecks election, accepted work, demand and pending retirement
 inside the acquired cutover custody before closing admission.
@@ -5119,8 +5144,12 @@ rollback reuses its already-held routing authority for discovery renewal; this
 is a private call-chain fact, never an instruction accepted from a wire payload.
 Release also refuses other pending dev-code retirement; cancelled attempts do
 not prevent a newly authorized release retry. Reconstruction independently
-refuses an attributable resident actually executing `dev`, regardless of a
-different selector, and reselected `dev` prevents deferred claim release.
+refuses an attributable resident actually executing mutable `dev`, regardless of a
+different selector. Immutable hashed generations may coexist under their retained
+identities; reselecting the actual retiring generation prevents deferred claim release.
+Hashed dev retirement retains the original claim snapshot too. Restoring a hashed
+rollback target changes only its expected `selected_generation` field; all other
+claim fields must still match before native-exit cleanup can release the claim.
 A retry may durably cancel exact prepared dev release under the held cutover,
 inventory and publication guards only while the original dev claim and route
 still match and no cutover witness exists. Committed grants and foreign claims
@@ -5192,12 +5221,17 @@ descriptor to owned children; `retention_lease()` remains the compatible
 path-only context over that same protocol. `ReadyCandidate.descriptor` is
 valid only within the candidate context and must not be closed by its caller.
 This keeps read-only health children under actual custody without taking a
-construction lease on reuse. The single-file, independently vendored helper's
-reviewable ceiling increases from 2,362 to 2,376 lines for this accessor; it
-introduces no deploy-time import or alternate lock protocol.
+construction lease on reuse. Fingerprint framing lives in the existing
+colocated source component; the deep-Windows UV command adapter lives in its
+existing configuration companion. Canonical synchronization carries those
+resources to each independent adopter, without a sibling-runtime or checkout
+lookup. Component initialization is serialized and its lock is reinitialized
+after fork. The checked-in module-size baseline remains shrink-only rather
+than widening ceilings to accommodate these changes.
 
-`installer_engine_process.py` owns bounded child execution. Windows uses the
-frozen canonical `agent-procutil` strict, non-breakaway Job implementation.
+`installer_engine_process.py` owns bounded child execution. Windows construction
+uses the frozen canonical `agent-procutil` strict, non-breakaway Job implementation
+by default.
 For candidate-backed Windows children, a finite guardian acquires the existing
 canonical candidate retention lease before starting the Job. It observes its
 caller's liveness pipe and retains that lease until the Job is settled even
@@ -5217,6 +5251,27 @@ their finite startup checks in either mode.
 If the parent's quiet window expires first, it closes its liveness pipe and
 continues draining the guardian's settled completion before propagating the
 timeout, preserving the child's original stdout and stderr channels.
+The guardian executes the same bounded, frozen source closure delivered over
+stdin, including for whole-operation co-retention; it never reopens a mutable
+helper path to obtain control code. Streaming output renews only the quiet
+window. An explicit absolute deadline remains a hard bound regardless of
+progress, and non-streaming children retain their original wall-clock bound.
+The production whole-operation watchdog remains 480 seconds.
+The explicit `allow_breakaway` option is reserved for a whole-operation lifecycle
+owner that launches durable services, not ordinary constructors. An optional
+Windows `retention_scope` lets that same finite guardian co-retain each nested
+constructor target before its writers start. Private, create-once request/ack
+packets bind the operation nonce, exact root and runtime version; acknowledgement
+follows actual canonical lease acquisition. The guardian keeps all registered
+leases until its owned Job is verified empty, including when nested guardians
+are terminated with that Job. This is retention bookkeeping, never a cutover
+guard or a publication-authority ticket.
+The scope guardian explicitly leaves the caller's Job so caller-Job teardown
+cannot revoke those fences first; unavailable native escape refuses rather than
+silently inheriting the unsafe lifetime. Contained tests preserve their existing
+escape suppression and qualify the process-death variant separately from the
+uncontained caller-Job-close proof. Scope registration time counts against the
+child's existing timeout; no operation or production watchdog is enlarged.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit

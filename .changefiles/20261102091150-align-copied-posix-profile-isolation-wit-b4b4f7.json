@@ -1,0 +1,9 @@
+{
+  "comment": "Align copied POSIX profile isolation with the typed account lookup",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

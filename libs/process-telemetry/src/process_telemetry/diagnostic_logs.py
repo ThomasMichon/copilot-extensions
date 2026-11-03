@@ -12,9 +12,11 @@ import stat
 import sys
 import time
 import uuid
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from .append import (
     STRICT_RECORD_BYTES, append_bytes, append_bytes_strict, strict_write_capability,
@@ -23,6 +25,11 @@ from .append import (
 RETENTION = timedelta(days=30)
 MAINTENANCE_SECONDS = 60.0
 MAX_BYTES = 5_000_000
+Event = dict[str, Any]
+CustodyFactory = Callable[[Path], AbstractContextManager[object]]
+TimestampDecoder = Callable[[Event], datetime]
+Encoder = Callable[[Event], bytes]
+Signature = tuple[int, int, int, int, int]
 
 
 def utc_now() -> datetime:
@@ -90,11 +97,12 @@ class DiagnosticLog(logging.Handler):
     """
 
     def __init__(
-        self, component: str, directory: Path, *, service: str, custody,
-        attribution: dict | None = None, timestamp_decoder=None,
-        clock=utc_now, max_bytes=MAX_BYTES, create_parent: bool = True,
-        initial_maintenance: bool = True, encoder=None, discovery_hint: str | None = None,
-    ):
+        self, component: str, directory: Path, *, service: str, custody: CustodyFactory,
+        attribution: Event | None = None, timestamp_decoder: TimestampDecoder | None = None,
+        clock: Callable[[], datetime] = utc_now, max_bytes: int = MAX_BYTES, create_parent: bool = True,
+        initial_maintenance: bool = True, encoder: Encoder | None = None,
+        discovery_hint: str | None = None,
+    ) -> None:
         super().__init__()
         if not re.fullmatch(r"[a-z][a-z0-9_-]*", component):
             raise ValueError("unknown diagnostic component")
@@ -110,7 +118,7 @@ class DiagnosticLog(logging.Handler):
         self._warned = False
         self._last_maintenance: datetime | None = None
         self._last_monotonic = 0.0
-        self._expiry: dict[Path, tuple[tuple, datetime | None, bool]] = {}
+        self._expiry: dict[Path, tuple[Signature, datetime | None, bool]] = {}
         self._custody_factory = custody
         self._create_parent = create_parent
         self.attribution = dict(attribution or {})
@@ -122,7 +130,7 @@ class DiagnosticLog(logging.Handler):
             self.maintain(force=True)
 
     @contextmanager
-    def _custody(self, *, create_parent: bool | None = None):
+    def _custody(self, *, create_parent: bool | None = None) -> Iterator[None]:
         if create_parent is None:
             create_parent = self._create_parent
         if create_parent:
@@ -152,14 +160,14 @@ class DiagnosticLog(logging.Handler):
         except (ValueError, TypeError, KeyError, UnicodeError, OverflowError):
             return None
 
-    def _event_stamp(self, event: dict) -> datetime | None:
+    def _event_stamp(self, event: Event) -> datetime | None:
         try:
             return _utc(self.timestamp_decoder(event))
         except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, OSError):
             return None
 
     @staticmethod
-    def _signature(path: Path) -> tuple:
+    def _signature(path: Path) -> Signature:
         info = path.stat()
         return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
@@ -290,7 +298,7 @@ class DiagnosticLog(logging.Handler):
         info = path.lstat()
         if (
             not stat.S_ISREG(info.st_mode) or path.is_symlink()
-            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
         ):
             raise OSError("diagnostic data path is not a plain file")
 
@@ -307,7 +315,7 @@ class DiagnosticLog(logging.Handler):
         except Exception as error:
             self._degraded(error)
 
-    def _record_fields(self, record: logging.LogRecord) -> dict:
+    def _record_fields(self, record: logging.LogRecord) -> Event:
         event = {
             "ts": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
             "service": self.service, "component": self.component,
@@ -319,7 +327,7 @@ class DiagnosticLog(logging.Handler):
         })
         return event
 
-    def write_event(self, event: dict) -> None:
+    def write_event(self, event: Event) -> None:
         """Write caller-shaped fields verbatim; maintenance is an owner operation."""
         try:
             now = _utc(self.clock())
@@ -335,7 +343,7 @@ class DiagnosticLog(logging.Handler):
         except Exception as error:
             self._degraded(error)
 
-    def write_event_strict(self, event: dict) -> None:
+    def write_event_strict(self, event: Event) -> None:
         """Synchronously persist an explicit pre-effect record or raise.
 
         No buffering, maintenance, silent age skip or automatic parent creation.
@@ -374,11 +382,11 @@ class DiagnosticLog(logging.Handler):
             raise
 
 
-def iso_timestamp(event: dict) -> datetime:
+def iso_timestamp(event: Event) -> datetime:
     return datetime.fromisoformat(event["ts"])
 
 
-def location(directory: Path, component: str, owner: str) -> dict:
+def location(directory: Path, component: str, owner: str) -> dict[str, object]:
     """Discover an owner's explicit namespace without creating it or reading logs."""
     active = directory / f"{component}.jsonl"
     return {

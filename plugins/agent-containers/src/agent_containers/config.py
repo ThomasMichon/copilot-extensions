@@ -515,6 +515,14 @@ class ContainersConfig:
     fleets: dict[str, FleetConfig] = field(default_factory=dict)
     configuration_provenance: dict[str, Any] = field(default_factory=dict)
     configuration_layers: list[str] = field(default_factory=list)
+    # Plugin-shipped fleet fragments (lowest layer); see plugin_config.
+    plugin_fragments: list[dict[str, Any]] = field(default_factory=list)
+
+    def fleet_source(self, fleet_name: str | None) -> str | None:
+        """Return the ID of the lowest layer contributing to ``fleet_name``."""
+        from .plugin_config import fleet_source
+
+        return fleet_source(self.configuration_provenance, fleet_name)
 
     def effective_acp_command(
         self, workspace_folder: str | None = None, acp_command: str | None = None
@@ -673,15 +681,32 @@ def _configuration_report() -> dict[str, Any] | None:
 
 
 def load_config(*, strict: bool = False) -> ContainersConfig:
-    """Load configuration from containers.yaml, merged over defaults."""
+    """Load configuration from containers.yaml, merged over defaults.
+
+    Fleet fragments shipped by active plugins (``containersConfig`` in their
+    ``plugin.json``) form the lowest layer beneath every composed tier or the
+    selected compatibility file; see :mod:`agent_containers.plugin_config`.
+    """
+    from . import plugin_config
+
     config = ContainersConfig()
     report = None if os.environ.get("AGENT_CONTAINERS_CONFIG") else _configuration_report()
     if report is not None:
         from configuration_context import context_from_owner
+        from configuration_layers import ConfigurationError
 
-        context_from_owner(report)
+        context = context_from_owner(report)
+        if context["binding"] == "bound" and not Path(context["knowledge_root"]).is_dir():
+            # A malformed explicit binding is a refusal, never optional absence.
+            raise ConfigurationError("bound knowledge root is not a directory")
     path = _config_path() if report is None else Path(report["context"]["base_root"])
-    if not path:
+    fragments = plugin_config.discover_plugin_fragments(
+        repository=(
+            Path(report["context"]["base_root"]) if report is not None
+            else plugin_config.invoking_repository()
+        ),
+    )
+    if not path and not fragments:
         log.debug("No containers.yaml found; using built-in defaults")
         return config
 
@@ -689,12 +714,18 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         if report is not None:
             from .configuration_layers_adapter import compose_documents
 
-            result = compose_documents(report, RUNTIME_DIR)
+            result = compose_documents(
+                report, RUNTIME_DIR,
+                plugin_fleets=frozenset(n for f in fragments for n in f.fleets),
+            )
             parsed = result["values"]
             config.configuration_provenance = result["provenance"]
             config.configuration_layers = result["layers"]
-        else:
+            operator_layers = result["operator_layers"]
+        elif path:
             parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        else:
+            parsed = {}
     except (OSError, ValueError, yaml.YAMLError) as exc:
         if strict:
             raise RuntimeError(f"Failed to read {path}: {exc}") from exc
@@ -713,11 +744,25 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     # the machine-local copy. A repo/cwd copy is only migrated in memory here.
     from . import config_migrations
 
-    before_mode = data.get("copilot_auth_mode")
-    data = config_migrations.migrate_loaded(data)
-    if before_mode is None and data.get("copilot_auth_mode") == "legacy":
-        log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
-                    "select host-copilot and its intended account for inference isolation")
+    if path:
+        before_mode = data.get("copilot_auth_mode")
+        data = config_migrations.migrate_loaded(data)
+        if before_mode is None and data.get("copilot_auth_mode") == "legacy":
+            log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
+                        "select host-copilot and its intended account for inference isolation")
+    if report is None:
+        operator_layers = [(
+            {"id": str(path), "tier": "selected_file", "origin": "selected_file"}, data,
+        )] if path else []
+    (
+        data, config.configuration_provenance, config.configuration_layers,
+        config.plugin_fragments,
+    ) = plugin_config.merge_fragments(
+        data, fragments,
+        provenance=config.configuration_provenance,
+        layers=config.configuration_layers,
+        operator_layers=operator_layers,
+    )
 
     config.exec_user = data.get("exec_user", config.exec_user)
     config.workspace_folder = data.get("workspace_folder", config.workspace_folder)

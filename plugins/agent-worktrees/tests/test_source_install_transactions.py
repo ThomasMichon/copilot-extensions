@@ -9,10 +9,12 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from types import ModuleType
 
 import pytest
 
+from agent_procutil import no_window_kwargs
 from test_installer_slot_clean_posix import _BASH
 
 pytestmark = pytest.mark.guard
@@ -90,6 +92,126 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         env={**os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1"},
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+
+
+def test_python_frontend_keeps_selected_bash_when_path_changes(tmp_path):
+    assert _BASH is not None, "native frontend qualification requires Bash"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    result = tmp_path / "frontend.json"
+    (scripts / "runtime_install.py").write_text(
+        "import json,pathlib,sys\n"
+        "args=sys.argv[1:]\n"
+        f"pathlib.Path({str(result)!r}).write_text(args[args.index('--frontend')+1])\n"
+        "pathlib.Path(args[args.index('--result')+1]).write_text(json.dumps({\n"
+        " 'deployment_manifest_published':True,'runtime_version':'fixture',\n"
+        " 'runtime_python':sys.executable,'helpers_published':True}))\n",
+        encoding="utf-8",
+    )
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "bash").write_text("#!/bin/sh\nexit 92\n", encoding="utf-8")
+    (shadow / "bash").chmod(0o755)
+    script = f"""
+set -euo pipefail
+SCRIPT_DIR={_sh(scripts)}
+PLUGIN_DIR=$SCRIPT_DIR
+INSTALL_DIR={_sh(tmp_path / "runtime")}
+VENV_DIR=$INSTALL_DIR/absent
+ACTION=dev
+OWNER_ARG=''
+CONTEXTUAL_INSTALL=false
+_bootstrap_python() {{ printf '%s\\n' {_sh(sys.executable)}; }}
+_ensure_uv() {{ :; }}
+_ensure_uv_index() {{ :; }}
+_assert_source_runtime() {{ :; }}
+ok() {{ :; }}
+err() {{ printf '%s\\n' "$*" >&2; }}
+PATH={_sh(shadow)}:$PATH
+{_function("_deploy_python_runtime", "sh")}
+_deploy_python_runtime
+case "${{OSTYPE:-}}" in
+    msys*|cygwin*) cygpath -w "$BASH" ;;
+    *) printf '%s\\n' "$BASH" ;;
+esac
+"""
+    completed = _run([str(_BASH), "-c", script], tmp_path)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    frontend = json.loads(result.read_text(encoding="utf-8"))
+    assert Path(frontend["executable"]).resolve() == Path(completed.stdout.strip()).resolve()
+    assert frontend["shell"] == "sh"
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+@pytest.mark.parametrize("code", [0, 7])
+def test_python_lifecycle_relays_stderr_before_completion(tmp_path, host, code):
+    if not host:
+        pytest.skip("PowerShell unavailable")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    release = tmp_path / "release"
+    (scripts / "runtime_install.py").write_text(
+        "import json,pathlib,sys,time\n"
+        "print('native-progress',file=sys.stderr,flush=True)\n"
+        f"release=pathlib.Path({str(release)!r})\n"
+        "while not release.exists(): time.sleep(.01)\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(json.dumps({\n"
+        " 'deployment_manifest_published':True,'runtime_version':'fixture',\n"
+        " 'runtime_python':sys.executable,'helpers_published':True,'reused':False}))\n"
+        "print('native-result',flush=True)\n"
+        f"raise SystemExit({code})\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "lifecycle.ps1"
+    script.write_text(f"""
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. {_ps(SCRIPTS / 'versioned_runtime_native.ps1')}
+$ScriptDir = {_ps(scripts)}
+$PluginDir = $ScriptDir
+$RuntimeInputPlugin = $ScriptDir
+$InstallDir = {_ps(tmp_path / 'runtime')}
+$VenvDir = Join-Path $InstallDir 'absent'
+$Action = 'repair'
+$Owner = $null
+$ContextualInstall = $false
+$SourceRuntimeIdentity = $null
+function Get-SignedBasePython {{ return {_ps(sys.executable)} }}
+function Get-ApplicationPath {{ param($Name) return {_ps(sys.executable)} }}
+function Ensure-Uv {{ return $true }}
+function Ensure-UvIndex {{ }}
+function Ensure-InstallDir($Path) {{ [void][IO.Directory]::CreateDirectory($Path) }}
+function Assert-SourceRuntime {{ }}
+function Write-ServiceOk {{ param($Message) }}
+{_function('Deploy-PythonRuntime', 'ps1')}
+Deploy-PythonRuntime
+Write-Output 'caller-finished'
+""", encoding="utf-8")
+    diagnostic = tmp_path / "stderr"
+    with diagnostic.open("wb") as stream:
+        process = subprocess.Popen(
+            [host, "-NoProfile", "-File", str(script)],
+            stdout=subprocess.PIPE, stderr=stream, **no_window_kwargs(),
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while b"native-progress" not in diagnostic.read_bytes():
+                assert process.poll() is None, "lifecycle exited before its live diagnostic"
+                assert time.monotonic() < deadline, "lifecycle buffered stderr until completion"
+                time.sleep(.02)
+            assert process.poll() is None and not release.exists()
+        finally:
+            release.touch()
+            output, _ = process.communicate(timeout=20)
+    assert output.count(b"native-result") == 1
+    if code == 0:
+        assert process.returncode == 0 and b"caller-finished" in output, (
+            output + diagnostic.read_bytes()
+        )
+    else:
+        assert process.returncode != 0 and b"caller-finished" not in output
+        assert b"Python runtime lifecycle failed (exit 7)" in diagnostic.read_bytes()
+    assert diagnostic.read_bytes().count(b"native-progress") == 1
 
 
 def _ps_setup(payload: Path, root: Path, *, real_bootstrap: bool = False) -> str:

@@ -1067,7 +1067,7 @@ def test_codespaces_mixed_explicit_files_preserve_filtered_empty_groups(
     monkeypatch, filter_mode, all_empty,
 ):
     with tempfile.TemporaryDirectory() as temporary:
-        plugin = Path(temporary)
+        plugin = Path(temporary).resolve()
         tests = plugin / "tests"
         tests.mkdir()
         files = (runner._CODESPACES_NATIVE_FILE, Path("tests") / "test_other.py")
@@ -1813,6 +1813,7 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
 
 
 def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, tmp_path):
+    driver = str(runner.REPO / "libs" / "update-driver")
     monkeypatch.setattr(runner, "REPO", tmp_path)
     assert runner._plugin_dir("worktree-manager") == tmp_path / "worktree-manager"
     assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
@@ -1821,7 +1822,9 @@ def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, 
     assert runner._plugin_dir("repository-policy") == tmp_path / "libs" / "repository-policy"
     assert runner._plugin_dir("agent-procutil") == tmp_path / "libs" / "agent-procutil"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["repository-policy"] == ("pyyaml>=6.0.3",)
-    assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
+    assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == (
+        "pyyaml>=6.0.3", "-e", driver,
+    )
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)
 
 
@@ -2094,7 +2097,7 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
     ]
     original = arguments.copy()
     with tempfile.TemporaryDirectory(prefix="profile-preparation-") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         network_scope.prepare_dependencies(
             "devcontainer", root, "container", root / "devcontainer.json",
             arguments, lambda flag: flag,
@@ -2210,7 +2213,7 @@ def test_codespaces_functional_profile_runs_assertions_despite_ambient_collect_o
     monkeypatch, profile, status, executed,
 ):
     with tempfile.TemporaryDirectory(prefix="profile-assertion-") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         tests = root / "tests"
         tests.mkdir()
         sentinel = root / "assertion-ran"

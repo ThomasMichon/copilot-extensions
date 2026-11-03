@@ -106,7 +106,13 @@ class PoolInstanceDefinition:
             raise PoolDefinitionError("pool registration must be a mapping")
         if registration.get("kind") != RegistrationKind.SUPERVISED_LANE:
             raise PoolDefinitionError("only supervised worker lanes define pool instances")
-        data = registration.get("pool_definition")
+        spec = registration.get("spec")
+        stored = spec.get("pool_definition") if isinstance(spec, Mapping) else None
+        data = registration.get("pool_definition", stored)
+        if isinstance(spec, Mapping) and "pool_definition" in spec:
+            stored_definition = cls.from_dict(stored)
+            if cls.from_dict(data) != stored_definition:
+                raise PoolDefinitionError("stored and projected pool definitions conflict")
         if not isinstance(data, Mapping):
             raise PoolDefinitionError("registration has no complete pool definition")
         definition = cls.from_dict(data)
@@ -114,7 +120,6 @@ class PoolInstanceDefinition:
             registration.get("id"), registration.get("machine"), registration.get("env"),
         ):
             raise PoolDefinitionError("pool definition conflicts with registration scope")
-        spec = registration.get("spec")
         if not isinstance(spec, Mapping):
             raise PoolDefinitionError("pool definition conflicts with registration capacity")
         try:

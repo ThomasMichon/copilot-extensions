@@ -56,3 +56,6 @@ wcs_err.log
 # periodic-refresh job should check one in instead).
 tools/ci_telemetry.sqlite3
 **/native/linux-*/daemon-instance
+
+# Candidate dependency projects are generated working inputs, not release approval.
+/bundle/pyproject.toml

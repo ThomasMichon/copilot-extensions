@@ -6,10 +6,18 @@ import ipaddress
 import math
 import re
 import time
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from .buffer import snapshot
 from .measurement import OUTCOMES, STAGES, TraceContext, _COUNTERS, _IDENTITY, _TAG
+
+if TYPE_CHECKING:
+    from .diagnostic_logs import Event
+    from ._otlp_transport import Reply
+    from opentelemetry.sdk.trace import ReadableSpan
+    from opentelemetry.sdk.trace.export import SpanExportResult
 
 _REQUIRED = frozenset({
     "schema", "kind", "component", "stage", "trace_id", "span_id", "parent_span_id",
@@ -31,7 +39,7 @@ def validate_endpoint(endpoint: str) -> str:
     return endpoint
 
 
-def validate_record(event: dict) -> dict:
+def validate_record(event: Event) -> Event:
     """Accept only the typed span schema, never legacy lifecycle payloads/logs."""
     record = snapshot(event)
     if not _REQUIRED <= record.keys() or record.keys() - (_REQUIRED | _COUNTERS | _IDENTITY):
@@ -75,16 +83,16 @@ class LocalOtlpSink:
             raise RuntimeError("optional OTLP dependencies are not installed") from exc
 
         owner = self
-        self._deadline = None
-        self._last_reply = None
+        self._deadline: float | None = None
+        self._last_reply: Reply | None = None
         self._payload_bytes = 0
-        self._service_instance_id = None
+        self._service_instance_id: str | None = None
 
         class LoopbackSpanExporter(SpanExporter):
             # The SDK HTTP exporter's constructor parses/logs ambient headers
             # even with explicit arguments. Use the public exporter extension
             # point and canonical protobuf encoder, never patch SDK globals.
-            def export(self, spans):
+            def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
                 from ._otlp_transport import post
 
                 try:
@@ -104,17 +112,17 @@ class LocalOtlpSink:
                 except Exception:
                     return SpanExportResult.FAILURE
 
-            def shutdown(self):
+            def shutdown(self) -> None:
                 pass  # Every export closes its own finite connection.
 
         self._closed = False
         self._exporter = LoopbackSpanExporter()
 
-    def __call__(self, event: dict) -> None:
+    def __call__(self, event: Event) -> None:
         """Synchronous off-path single-record compatibility adapter."""
         self.export_batch([event])
 
-    def export_batch(self, events: list[dict]) -> None:
+    def export_batch(self, events: list[Event]) -> None:
         """Export at most 32 typed SDK spans; failures propagate to buffer counters."""
         if self._closed:
             raise RuntimeError("OTLP sink closed")
@@ -129,7 +137,7 @@ class LocalOtlpSink:
 
         spans = []
         for record in records:
-            def context(span_id):
+            def context(span_id: str) -> SpanContext:
                 return SpanContext(
                     int(record["trace_id"], 16), int(span_id, 16), False,
                     trace_flags=TraceFlags(TraceFlags.SAMPLED),

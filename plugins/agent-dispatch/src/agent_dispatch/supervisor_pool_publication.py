@@ -130,6 +130,8 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                 before = PoolCatalogRead.from_dict(before)
                 if self._source_observations["pool-catalog-before"].state != "fresh":
                     reasons.append("coordinator-input-read-not-fresh")
+                    raise PoolPublicationError("pool metadata requires a fresh initial queue observation")
+                self._require_pool_metadata_target(client, before)
                 try:
                     self._effective_registrations()
                     snapshot = self._pool_source_snapshot
@@ -176,11 +178,11 @@ class SupervisorPoolPublication(SupervisorPoolSender):
             if custody.publisher_id != acquisition or custody.pending is not None:
                 raise PoolPublicationError("original pool publisher custody remains unsettled")
             client = self.client
-            self._require_pool_metadata_target(client)
             target = getattr(client, "base_url", None)
             inputs = self.capture_pool_publication_inputs()
             if self.client is not client or getattr(client, "base_url", None) != target:
                 raise PoolPublicationError("pool metadata coordinator client changed during preparation")
+            self._require_pool_metadata_target(client, inputs.catalog)
             self._close_retained_pool_metadata_client()
             request = custody.prepare(inputs)
             self._bind_pool_metadata_request(request, client)

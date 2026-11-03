@@ -1,0 +1,9 @@
+{
+  "comment": "Coalesce verified source-work progress without per-file flushing",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
