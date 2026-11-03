@@ -273,14 +273,18 @@ refuses it as ambiguous when a distinct Docker container shares it (a
 container Docker reports with the member's own id is the same member).
 An absent member is reported as not found from that fleet's answer alone;
 no other fleet is listed to describe it.
+An owning driver that cannot list is an explicit error for targeted lookups
+(including Session Host state), never evidence that the member is missing;
+full inventory stays best-effort and skips the failing fleet.
 
 Routing is reconciled against the configuration and each successful listing,
 not accumulated for the life of a process. Every inventory and targeted lookup reconciles
 first, including when a reload leaves no driver fleet at all. A fleet's driver
 registration is resolved on every inventory: when its manifest is replaced or
 removed, routes through the previous executable are retired and it is never
-invoked again. A listing still in flight from a replaced registration binds
-nothing when it completes. A Docker name collision found by a targeted lookup
+invoked again. A listing still in flight from a replaced or removed registration,
+or from a fleet the configuration no longer assigns to that driver, binds nothing
+when it completes. A Docker name collision found by a targeted lookup
 clears as soon as a later probe no longer sees it. When a configuration reload removes
 a driver fleet or assigns it another driver, the retired driver's routes for
 that fleet are dropped on the next enumeration, so its names neither reach the

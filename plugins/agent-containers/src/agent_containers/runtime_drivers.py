@@ -382,25 +382,33 @@ def driver_for_fleet(
     try:
         spec = find_driver(fleet.driver)  # the current registration, every time
     except RuntimeError:
-        with _lock:
-            _drivers.pop(key, None)
-        _forget(retire)  # a removed registration routes nothing
+        with _lock:  # a removed registration routes nothing, now or when in flight
+            _retire_locked(key)
+            _forget_locked(retire)
         raise
     with _lock:
         cached = _drivers.get(key)
-    if cached is not None and getattr(cached, "spec", None) == spec:
-        if getattr(cached, "fleet", None) == fleet:
-            return cached
-    elif cached is not None:
-        _forget(retire)  # replaced registration: never call the old executable
-    driver = ExternalDriver(spec, fleet_name, fleet)
-    with _lock:
-        _drivers[key] = driver
+        if cached is not None and getattr(cached, "spec", None) == spec:
+            if getattr(cached, "fleet", None) == fleet:
+                return cached
+        elif cached is not None:
+            _forget_locked(retire)  # replaced registration: never the old executable
+        _retire_locked(key)
+        driver = _drivers[key] = ExternalDriver(spec, fleet_name, fleet)
     return driver
 
 
+def _retire_locked(key: tuple[str, str]) -> None:
+    """Drop a cached driver; its in-flight responses then bind nothing."""
+    retired = _drivers.pop(key, None)
+    if retired is not None:
+        retired.retired = True
+
+
 def _superseded(driver: RuntimeDriver) -> bool:
-    """True when another driver now serves ``driver``'s fleet (call under ``_lock``)."""
+    """True when ``driver`` was retired or replaced (call under ``_lock``)."""
+    if getattr(driver, "retired", False):
+        return True
     current = _drivers.get((getattr(driver, "fleet_name", None), driver.name))
     return current is not None and current is not driver
 
@@ -434,12 +442,16 @@ def _claim_docker(handles, name: str) -> None:
 def _forget(predicate) -> None:
     """Drop every claim whose ``(handle, claimant)`` matches ``predicate``."""
     with _lock:
-        for handle in list(_claims):
-            claims = _claims[handle]
-            for claimant in [c for c in claims if predicate(handle, c)]:
-                del claims[claimant]
-            if not claims:
-                del _claims[handle]
+        _forget_locked(predicate)
+
+
+def _forget_locked(predicate) -> None:
+    for handle in list(_claims):
+        claims = _claims[handle]
+        for claimant in [c for c in claims if predicate(handle, c)]:
+            del claims[claimant]
+        if not claims:
+            del _claims[handle]
 
 
 def reconcile(config: ContainersConfig) -> None:
@@ -451,7 +463,10 @@ def reconcile(config: ContainersConfig) -> None:
     """
     fleets = getattr(config, "fleets", None) or {}
     current = {name: f.driver for name, f in fleets.items() if getattr(f, "driver", None)}
-    _forget(lambda handle, c: c[0] != DOCKER_CLAIM and current.get(c[1]) != c[0])
+    with _lock:
+        for key in [k for k in _drivers if current.get(k[0]) != k[1]]:
+            _retire_locked(key)  # configuration-invalid: in-flight listings bind nothing
+        _forget_locked(lambda handle, c: c[0] != DOCKER_CLAIM and current.get(c[1]) != c[0])
 
 
 def _reconcile_listing(fleet_name: str, driver: RuntimeDriver, members) -> None:
@@ -466,7 +481,7 @@ def _reconcile_listing(fleet_name: str, driver: RuntimeDriver, members) -> None:
     with _lock:
         if _superseded(driver):
             return
-    _forget(lambda handle, c: c[1] == fleet_name and c[0] == driver.name
+        _forget_locked(lambda handle, c: c[1] == fleet_name and c[0] == driver.name
             and handle == c[2] and c[2] not in reported)
 
 
@@ -567,6 +582,11 @@ def has_docker_fleets(config: ContainersConfig) -> bool:
 # that can own the addressed member when that is known.
 INVENTORY_TIMEOUT = 60.0
 DISCOVERY_TIMEOUT = 20.0
+
+
+def _owns(fleet_name: str, fleet: FleetConfig, member: str) -> bool:
+    prefix = fleet.prefix(fleet_name) + "-"
+    return member.startswith(prefix) and member[len(prefix):].isdigit()
 
 
 def _driver_fleets(
@@ -812,8 +832,19 @@ def discover(
     """
     reconcile(config)
     selected = _driver_fleets(config, fleet=fleet, member=member)
-    if selected:
-        _enumerate(config, selected, timeout=timeout)
+    if not selected:
+        return
+    failures: dict[str, str] = {}
+    _enumerate(config, selected, timeout=timeout, failures=failures)
+    # An unavailable owning driver is not evidence of absence: fail explicitly.
+    # (A name outside every namespace queries all fleets best-effort.)
+    owning = {
+        n: why for n, why in failures.items()
+        if n == fleet or (member and _owns(n, selected[n], member))
+    }
+    if owning:
+        detail = "; ".join(f"fleet '{k}': {v}" for k, v in sorted(owning.items()))
+        raise RuntimeError(f"Runtime driver for '{member or fleet}' is unavailable ({detail})")
 
 
 class RetiredIncarnation(RuntimeError):

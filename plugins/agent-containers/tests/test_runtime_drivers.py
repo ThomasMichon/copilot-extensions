@@ -1607,3 +1607,53 @@ def test_changed_driver_options_change_the_prepared_runtime_identity(
                      "--remote-env", "/home/vscode/.agent-containers/launch/env"]) != 0
     assert "no longer owns it" in capsys.readouterr().err
     assert [c["verb"] for c in fake.state()["calls"][calls:] if c["verb"] != "list"] == []
+
+
+@pytest.mark.parametrize("retire_by", ["registration", "configuration"])
+def test_in_flight_listing_after_retirement_restores_no_routes(
+    fake, no_docker, tmp_path, monkeypatch, retire_by,
+):
+    import threading
+    import time
+
+    _register(fake, "example-driver", "--delay", "list", "1.5")  # A lists slowly
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    [member] = lifecycle.list_containers(config)
+    handles = ["example-1", member.container_id, runtime_drivers.route_handle(member)]
+    driver_a = runtime_drivers.owner_of("example-1").driver
+
+    listing = threading.Thread(target=driver_a.list_members)  # A's listing is blocked
+    listing.start()
+    time.sleep(0.3)
+    if retire_by == "registration":
+        (fake.drivers / "example-driver.json").unlink()
+        monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    else:
+        (tmp_path / "containers.yaml").write_text(yaml.safe_dump({"fleets": {}}))
+        config = load_config(strict=True)
+    _docker_recorder(monkeypatch)
+    lifecycle.list_containers(config)  # retires A while its listing is in flight
+    listing.join()  # A's listing now completes
+
+    assert all(runtime_drivers.owner_of(h) is None for h in handles)
+    calls = len(fake.state()["calls"])
+    assert all(runtime_drivers.run_routed(["docker", "exec", h, "true"]) is None for h in handles)
+    assert len(fake.state()["calls"]) == calls  # nothing reaches A
+
+
+def test_session_host_state_reports_an_unavailable_driver_not_a_missing_member(
+    fake, no_docker, tmp_path, monkeypatch, capsys,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    [member] = lifecycle.list_containers(config)
+    runtime = runtime_drivers.runtime_identity("example-1")
+    runtime_drivers.clear_bindings()  # a fresh process
+    monkeypatch.setenv("FAKE_DRIVER_FAIL", "list:runtime_unavailable")
+
+    assert cli.main(["session-host-state", "example-1", "--expected-instance",
+                     member.container_id, "--expected-runtime", runtime]) != 0
+    captured = capsys.readouterr()
+    assert "missing" not in captured.out
+    assert "unavailable" in captured.err
