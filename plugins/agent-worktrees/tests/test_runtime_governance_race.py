@@ -155,16 +155,17 @@ def test_account_profile_isolation_changes_only_copied_os_lookups(
 
             ast.parse(isolated)
             assert f"profile_value = Path({str(home)!r})" in isolated
-            assert "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)" not in isolated
+            assert "profile_value = Path(get_account(get_uid()).pw_dir)" not in isolated
         elif path.suffix == ".sh":
             import shlex
 
-            assert f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"' in isolated
-            assert 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"' not in isolated
+            assert (
+                f"canonical_path_into CURRENT_PROFILE_HOME {shlex.quote(str(home))} true || return"
+                in isolated
+            )
+            assert 'canonical_path_into CURRENT_PROFILE_HOME "$home_path" true || return' not in isolated
         else:
-            quoted = "'" + str(home).replace("'", "''") + "'"
-            assert "$passwdHome = " + quoted in isolated
-            assert "$passwdHome = [CePosixAccount]::Home()" not in isolated
+            assert (payload / path).read_bytes() == source
 
 
 def test_fixture_worktree_deletion_handles_readonly_git_objects(tmp_path):

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -21,6 +23,7 @@ JOB = WORKFLOW["jobs"]["immutable-runtime-linux"]
 STEPS = {step["name"]: step for step in JOB["steps"] if "name" in step}
 SOURCE = STEPS["Validate immutable runtime commit before checkout"]
 IDENTITY = STEPS["Record actual immutable runtime qualification identity"]
+BASH = STEPS["Select the supported native installation-management Bash"]
 EXECUTION = STEPS["Qualify isolated native development lifecycle"]
 
 
@@ -268,11 +271,91 @@ def test_exact_runner_selection_budgets_and_failure_propagation(name):
     assert not job.get("continue-on-error")
     assert "defaults" not in job and "defaults" not in WORKFLOW
     commands = [step for step in job["steps"] if "run" in step]
-    assert commands == [SOURCE, IDENTITY, EXECUTION]
+    assert commands == [SOURCE, IDENTITY, BASH, EXECUTION]
+    assert BASH["if"] == "${{ matrix.mode == 'namespaced' }}"
+    assert BASH["env"] == {"NATIVE_OS": "${{ runner.os }}"}
     for step in job["steps"]:
         assert not step.get("continue-on-error")
-        assert "if" not in step and "shell" not in step
+        assert ("if" not in step or step is BASH) and "shell" not in step
         command = step.get("run", "")
         assert "${{" not in command
         assert "--allow-host-state" not in command and "sudo" not in command
         assert "secrets." not in str(step)
+
+
+@pytest.mark.parametrize("native_os,installed,install_fails", [
+    ("Linux", False, False),
+    ("macOS", True, False),
+    ("macOS", False, False),
+    ("macOS", False, True),
+])
+def test_actual_bash_prerequisite_installs_only_missing_disposable_macos(
+    tmp_path, native_os, installed, install_fails,
+):
+    bash = shutil.which("bash")
+    if os.name == "nt":
+        git = shutil.which("git")
+        assert git
+        bash = str(Path(git).resolve().parent.parent / "bin" / "bash.exe")
+    assert bash
+
+    def shell_path(path):
+        value = str(path).replace("\\", "/")
+        return "/" + value[0].lower() + value[2:] if os.name == "nt" else value
+
+    commands, prefix = tmp_path / "commands", tmp_path / "homebrew bash"
+    prefix.joinpath("bin").mkdir(parents=True)
+    source = tmp_path / "selected-bash"
+    source.write_text('#!/bin/sh\nexec "$NATIVE_TEST_BASH" "$@"\n', encoding="utf-8")
+    source.chmod(0o755)
+    if installed:
+        shutil.copyfile(source, prefix / "bin" / "bash")
+        (prefix / "bin" / "bash").chmod(0o755)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    brew = tools / "brew"
+    brew.write_text("""#!/bin/sh
+printf '%s\\n' "$*" >> "$NATIVE_TEST_COMMANDS"
+if [ "$*" = "--prefix bash" ]; then
+    test -z "$HOMEBREW_NO_AUTO_UPDATE"
+    test -z "$HOMEBREW_NO_INSTALL_CLEANUP"
+    printf '%s\\n' "$NATIVE_TEST_PREFIX"
+elif [ "$*" = "install bash" ]; then
+    test "$HOMEBREW_NO_AUTO_UPDATE" = 1
+    test "$HOMEBREW_NO_INSTALL_CLEANUP" = 1
+    test "$NATIVE_TEST_INSTALL_FAILS" = false || exit 23
+    cp "$NATIVE_TEST_SOURCE" "$NATIVE_TEST_PREFIX/bin/bash"
+    chmod +x "$NATIVE_TEST_PREFIX/bin/bash"
+else
+    exit 24
+fi
+""", encoding="utf-8")
+    brew.chmod(0o755)
+    output = tmp_path / "github-path"
+    environment = {
+        **os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+        "NATIVE_OS": native_os, "GITHUB_PATH": shell_path(output),
+        "NATIVE_TEST_BASH": shell_path(bash), "NATIVE_TEST_COMMANDS": shell_path(commands),
+        "NATIVE_TEST_PREFIX": shell_path(prefix), "NATIVE_TEST_SOURCE": shell_path(source),
+        "NATIVE_TEST_INSTALL_FAILS": str(install_fails).lower(),
+    }
+    environment.pop("HOMEBREW_NO_AUTO_UPDATE", None)
+    environment.pop("HOMEBREW_NO_INSTALL_CLEANUP", None)
+    result = subprocess.run(
+        [bash, "-e", "-c", BASH["run"]], env=environment,
+        capture_output=True, text=True, timeout=45,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    expected = ["--prefix bash"] if native_os == "macOS" else []
+    if native_os == "macOS" and not installed:
+        expected.append("install bash")
+    assert (commands.read_text().splitlines() if commands.exists() else []) == expected
+    if install_fails:
+        assert result.returncode == 23
+        assert not output.exists() and "Management Bash:" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Management Bash:" in result.stdout
+        assert output.exists() is (native_os == "macOS")
+        if native_os == "macOS":
+            assert output.read_text().strip() == shell_path(prefix / "bin")

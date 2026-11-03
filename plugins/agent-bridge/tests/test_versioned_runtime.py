@@ -1239,6 +1239,88 @@ def test_fingerprint_explicit_files_label_linearly_without_changing_digest(tmp_p
     assert vr.fingerprint_source([tmp_path, *reversed(files)]) == expected.hexdigest()
 
 
+def test_fingerprint_collects_file_digests_without_reopening_sources(tmp_path, monkeypatch):
+    import hashlib
+
+    contents = {tmp_path / "a.py": b"alpha", tmp_path / "b.dat": b"\x00\xff"}
+    expected = hashlib.sha256()
+    for path, data in contents.items():
+        path.write_bytes(data)
+        for value in (f"{path.name}/.".encode(), b"file", data):
+            expected.update(len(value).to_bytes(8, "big") + value)
+    calls = dict.fromkeys(contents, 0)
+    read_bytes = Path.read_bytes
+
+    def count_read(path):
+        calls[path] += 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", count_read)
+    collected = {}
+    assert vr.fingerprint_source(reversed(contents), file_hashes=collected) == expected.hexdigest()
+    assert collected == {path: hashlib.sha256(data).hexdigest() for path, data in contents.items()}
+    with pytest.raises(ValueError, match="collector must be empty"):
+        vr.fingerprint_source(contents, file_hashes=collected)
+    assert set(calls.values()) == {1}
+
+
+def test_fingerprint_resolves_each_parent_once_per_call(tmp_path, monkeypatch):
+    files = [tmp_path / directory / name for directory, name in (
+        ("left", "one.py"), ("left", "two.py"), ("right", "three.py"),
+    )]
+    for path in files:
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(path.name.encode())
+    counts = dict.fromkeys((path.parent for path in files), 0)
+    resolve = Path.resolve
+    denied = False
+
+    def count_resolve(path, *args, **kwargs):
+        if path in counts:
+            if denied:
+                raise PermissionError("parent resolution refused")
+            counts[path] += 1
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", count_resolve)
+    first = vr.fingerprint_source(files)
+    assert set(counts.values()) == {1}
+    files[0].write_bytes(b"changed")
+    assert vr.fingerprint_source(files) != first
+    assert set(counts.values()) == {2}
+    denied = True
+    with pytest.raises(PermissionError, match="parent resolution refused"):
+        vr.fingerprint_source(files)
+
+
+def test_fingerprint_callback_receives_hashed_bytes_once_and_propagates_failure(tmp_path, monkeypatch):
+    source = tmp_path / "source.py"
+    source.write_bytes(b"original")
+    expected = vr.fingerprint_source([source])
+    read_bytes = Path.read_bytes
+    reads = []
+
+    def read_once(path):
+        reads.append(path)
+        return read_bytes(path)
+
+    observed = []
+
+    def consume(path, data):
+        observed.append((path, data))
+        source.write_bytes(b"changed after read")
+
+    monkeypatch.setattr(Path, "read_bytes", read_once)
+    assert vr.fingerprint_source([source], on_file=consume) == expected
+    assert observed == [(source, b"original")] and reads == [source]
+
+    def refused(_path, _data):
+        raise PermissionError("source retention refused")
+
+    with pytest.raises(PermissionError, match="source retention refused"):
+        vr.fingerprint_source([source], on_file=refused)
+
+
 def test_fingerprint_source_is_stable_for_identical_content(tmp_path):
     src = tmp_path / "src"
     src.mkdir()

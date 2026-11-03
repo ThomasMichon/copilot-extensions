@@ -182,3 +182,33 @@ def test_non_editable_retention_freezes_only_private_source_metadata(
         entry = retained["tool"]["uv"]["sources"]["fixture-child"]
         assert (entry[0] if conditional else entry) == expected
         assert manifest.read_bytes() == original
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_native_launch_projection_retains_compile_operands(tmp_path, retention_policy, explicit):
+    policy = retention_policy
+    directory = tmp_path / ("deep-source-" * 30)
+    arguments = [
+        "--no-config", "-rrequirements.txt", "--output-file", "result.txt", "--quiet",
+    ]
+    if explicit:
+        arguments[:0] = ["--directory", "old-source"]
+    command, cwd = policy._configuration.uv_command(
+        "attributed-uv", arguments, cwd=directory, directory=directory,
+        operation="compile", windows=True, argument_pairs=policy._argument_pairs,
+        value_options=policy._VALUE_OPTIONS,
+    )
+    assert command[:3] == ["attributed-uv", "pip", "compile"]
+    assert cwd == Path(directory.anchor)
+    pairs = list(policy._argument_pairs(command[3:]))
+    assert pairs.count(("--directory", str(directory))) == 1
+    assert ("-r", "requirements.txt") in pairs
+    assert ("--output-file", "result.txt") in pairs
+    assert ("--quiet", "") in pairs
+
+
+def test_dependency_projection_balances_quoted_delimiters(retention_policy):
+    text = '{value: "{quoted}", nested: {item: "\\\"}"}} suffix'
+    content, end = retention_policy._balanced(text, 0, "{", "}")
+    assert content == text[1:end - 1]
+    assert text[end:] == " suffix"

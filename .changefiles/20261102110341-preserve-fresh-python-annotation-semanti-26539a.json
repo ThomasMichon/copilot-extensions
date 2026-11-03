@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve fresh Python annotation semantics in generated windowless guardian parents",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

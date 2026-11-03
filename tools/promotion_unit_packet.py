@@ -72,8 +72,7 @@ def _read_file(directory: Path, name: str) -> tuple[bytes, dict]:
     except OSError as exc:
         raise UnitEvidenceError(f"cannot read packet file {name}: {exc}") from exc
     try:
-        data = decode_json(raw)
-        json.dumps(data, allow_nan=False)
+        data = decode_json(raw, finite=True)
     except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise UnitEvidenceError(f"invalid packet JSON in {name}: {exc}") from exc
     except ValueError as exc:
