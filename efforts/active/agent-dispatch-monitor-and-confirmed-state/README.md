@@ -7,15 +7,22 @@
 - **Status:** Active - submission/output/delivery amendment proposed 2026-10-08
 - **Source umbrella:** #3681; continuing coordination is this Active ROOT's
   reviewed Plan/Validation/Journal and eligible OPEN bounded-source issues
-- **Sub-issues:** #9709 (bounded assignment/startup documentation and repair design)
+- **Sub-issues:** #9709 (bounded assignment/startup documentation and repair design);
+  #10267 (neutral-service managed lane admission)
 
 ## Guiding Intent
 
 **Current consumer-adoption prerequisite (2026-11-03):** the
 [independent resident lifetime slice](journal/2026/11.03-independent-resident-lifetime.md)
 repairs shared Linux daemon launches that remain in their caller's systemd
-cleanup cgroup. Source controls and isolated native lifetime proof do not move
+cleanup cgroup; its source merged in #10234. Source controls and isolated native lifetime proof do not move
 existing residents or qualify ordinary Dispatch recovery.
+
+The next bounded repair uses Dispatch's existing durable machine binding for
+managed-lane admission from neutral service directories, retaining project
+fallback, unavailable/mismatched-host refusal and literal execution identity.
+Its source/contained controls do not establish installed lane or allocator
+acceptance; see the [usability plan](usability-validation.md).
 
 **Operational milestone (2026-11-02):** the
 [ordinary usability plan](usability-validation.md) records earned source
@@ -307,6 +314,13 @@ live claim token. No new blanket ACK or executor appointment is created.
       after current-head approval, green CI and actual merge. Preserve strict
       completeness, native extension matching and nonblocking special-file
       refusal. Runtime/cohort/native acceptance remains open.
+- [x] Land the [independent Linux resident lifetime prerequisite](journal/2026/11.03-independent-resident-lifetime.md)
+      in [#10234](https://github.com/ThomasMichon/copilot-extensions/pull/10234)
+      after exact-head approval and green CI. Preserve container/non-systemd
+      behavior, genuine local-unit refusal and contained-test ownership.
+      Existing-resident adoption and ordinary lifecycle qualification remain
+      separate; native service-context lane admission is the next integration
+      boundary, not a completed allocator-before-spawn result.
 - [x] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
       under its actual `ordinary-bridge` driver, allocator claim and execution
       host in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123).

@@ -527,6 +527,14 @@ def test_local_machine_reads_configured_supervisor_file(monkeypatch, tmp_path):
     assert remote_dispatch.local_machine() == "box1"
 
 
+def test_local_machine_retains_legacy_unreadable_marker_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv("AGENT_DISPATCH_SUPERVISE_MACHINE", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    (tmp_path / "machine").mkdir()
+    (tmp_path / "supervisor.env").write_text("AGENT_DISPATCH_SUPERVISE_MACHINE=box1\n", encoding="utf-8")
+    assert remote_dispatch.local_machine() == "box1"
+
+
 def test_local_machine_falls_back_to_identity(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_SUPERVISE_MACHINE", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
