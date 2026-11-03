@@ -90,7 +90,7 @@
         "libs/credential-relay"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-docker-resource-producer",
