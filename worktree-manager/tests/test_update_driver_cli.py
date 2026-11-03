@@ -57,8 +57,10 @@ def test_automatic_trigger_is_retained_in_durable_request(queued, trigger):
     seen, _request = queued
     flags = [*trigger, "--project", "example"]
     assert driver.cmd_update_request(flags) == 6
-    assert seen["spec"].argv == tuple(flags)
-    assert seen["runner"].argv[-len(flags) - 1:] == ("update", *flags)
+    expected = [*flags, "--auto"]
+    assert seen["spec"].argv == tuple(expected)
+    assert seen["runner"].argv[-len(expected) - 1:] == ("update", *expected)
+    assert seen["spec"].repair is False
 
 
 def test_unattended_authentication_hint_is_manager_arguments_not_engine_context(queued, monkeypatch):
@@ -1356,7 +1358,7 @@ def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
     manager = next(record for record in records if record["phase"] == "start")
     engine = next(record for record in records if record["phase"] == "engine")
     assert manager["acquisition_budget"] == "600.0"
-    assert manager["arguments"] == forwarded
+    assert manager["arguments"] == [*forwarded, *(["--auto"] if automatic else [])]
     assert engine["no_manager"] is True and key not in engine["context_keys"]
     assert manager["pid"] != engine["pid"]
     assert "CE_UPDATE_UNATTENDED" not in engine["context_keys"]
