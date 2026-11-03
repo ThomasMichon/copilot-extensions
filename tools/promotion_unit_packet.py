@@ -39,8 +39,8 @@ def _canonical_path(value: object) -> str:
     return path
 
 
-def _manifest(value: object) -> dict:
-    data = admit_manifest(value)
+def _manifest(value: object, *, allow_windows_native: bool = False) -> dict:
+    data = admit_manifest(value, allow_windows_native=allow_windows_native)
     for path in (*data["sources"], *data["coverage_targets"]):
         _canonical_path(path)
     for node in data["nodes"]:
@@ -147,6 +147,7 @@ def verify_packet(
     directory: Path, *, expected_source_sha: str, expected_manifest: dict,
     source_root: Path | None = None,
     development_root: Path | None = None,
+    allow_windows_native: bool = False,
 ) -> dict:
     """Verify a packet against caller-owned source and manifest expectations."""
     if not isinstance(directory, Path) or (source_root is not None and not isinstance(source_root, Path)):
@@ -154,7 +155,7 @@ def verify_packet(
     if not isinstance(expected_source_sha, str):
         raise UnitEvidenceError("expected source SHA must be a string")
     expected_source_sha = source_sha(expected_source_sha)
-    trusted = _manifest(expected_manifest)
+    trusted = _manifest(expected_manifest, allow_windows_native=allow_windows_native)
     expected_digest = manifest_digest(trusted)
     try:
         if directory.is_symlink() or not directory.is_dir() or {p.name for p in directory.iterdir()} != _FILES:
@@ -164,7 +165,7 @@ def verify_packet(
     manifest_raw, manifest = _read_file(directory, "unit-manifest.json")
     proof_raw, proof = _read_file(directory, "unit-proof.json")
     coverage_raw, coverage = _read_file(directory, "coverage.json")
-    manifest = _manifest(manifest)
+    manifest = _manifest(manifest, allow_windows_native=allow_windows_native)
     if manifest_digest(manifest) != expected_digest:
         raise UnitEvidenceError("packet manifest differs from the trusted canonical manifest")
     coverage_digest = hashlib.sha256(coverage_raw).hexdigest()

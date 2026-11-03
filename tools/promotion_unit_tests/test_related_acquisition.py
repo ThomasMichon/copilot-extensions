@@ -24,7 +24,7 @@ _configuration_spec.loader.exec_module(_configuration_sdk)
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch, source_code):
     monkeypatch.setitem(sys.modules, "configuration_layers", _configuration_sdk)
     name = "promotion_related_acquisition"
     package = ModuleType(name)
@@ -49,7 +49,7 @@ def api(monkeypatch):
         module = importlib.util.module_from_spec(spec)
         monkeypatch.setitem(sys.modules, spec.name, module)
         setattr(package, child, module)
-        spec.loader.exec_module(module)
+        exec(source_code(child), module.__dict__)
         return module
 
     load("acquisition_report")
@@ -57,6 +57,19 @@ def api(monkeypatch):
     related = load("related_acquisition")
     config = load("config_acquisition")
     return SimpleNamespace(related=related, config=config, stub=stub, load=load, probes=probes)
+
+
+@pytest.fixture(scope="session")
+def source_code():
+    compiled = {}
+
+    def code(child):
+        if child not in compiled:
+            path = SOURCE / f"{child}.py"
+            compiled[child] = compile(path.read_bytes(), str(path), "exec")
+        return compiled[child]
+
+    return code
 
 
 def test_entry_uncertainty_survives_complete_activation_without_discarding_positive(api, monkeypatch):

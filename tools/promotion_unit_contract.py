@@ -12,6 +12,7 @@ from typing import BinaryIO
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
+WINDOWS_NATIVE_PROFILE = "copilot-extensions.windows-native-units/v1"
 MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
 MAX_UNIT_EVIDENCE_FILE_BYTES = 192 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -76,17 +77,19 @@ def relative_file(value: object) -> str:
     return value
 
 
-def admit_manifest(data: object) -> dict:
+def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict:
     candidate = isinstance(data, dict) and data.get("profile") == CANDIDATE_PROFILE
     fields = {
         "profile", "nodes", "sources", "coverage_targets", "max_seconds",
     } | ({"composition"} if candidate else set())
     if not isinstance(data, dict) or set(data) != fields:
         raise UnitEvidenceError("invalid unit manifest fields")
-    if data["profile"] not in (PROFILE, CANDIDATE_PROFILE) or type(data["max_seconds"]) is not int:
+    profiles = (PROFILE, CANDIDATE_PROFILE) + ((WINDOWS_NATIVE_PROFILE,) if allow_windows_native else ())
+    if data["profile"] not in profiles or type(data["max_seconds"]) is not int:
         raise UnitEvidenceError("invalid unit profile or budget")
-    if not 1 <= data["max_seconds"] <= 300:
-        raise UnitEvidenceError("the entire unit packet must fit within five minutes")
+    maximum = 600 if data["profile"] == WINDOWS_NATIVE_PROFILE else 300
+    if not 1 <= data["max_seconds"] <= maximum:
+        raise UnitEvidenceError(f"the entire unit packet must fit within {maximum} seconds")
     nodes, sources, targets = data["nodes"], data["sources"], data["coverage_targets"]
     if (
         not isinstance(nodes, list) or not nodes
@@ -150,6 +153,16 @@ def admit_manifest(data: object) -> dict:
         ):
             raise UnitEvidenceError("candidate coverage origins are incomplete")
     return data
+
+
+def windows_native_manifest(data: object, *, platform: str) -> dict:
+    template = admit_manifest(data)
+    if platform != "win32" or template["profile"] != PROFILE:
+        raise UnitEvidenceError("Windows-native execution requires Windows and a development unit manifest")
+    return admit_manifest(
+        {**template, "profile": WINDOWS_NATIVE_PROFILE, "max_seconds": 600},
+        allow_windows_native=True,
+    )
 
 
 def verify_sources(root: Path, sources: dict[str, str]) -> None:

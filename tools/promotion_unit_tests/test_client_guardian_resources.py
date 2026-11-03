@@ -234,9 +234,8 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
 def test_guardian_receives_admitted_pair_after_disk_replacement(
     installed, monkeypatch, tmp_path, member, failed,
 ):
-    construction, package, evidence = installed_procutil(installed, monkeypatch)
+    construction, package, _ = installed_procutil(installed, monkeypatch, diagnose=False)
     installed_runtime(installed, monkeypatch)
-    evidence = construction.artifact_staging.diagnose_client()
     path = Path(__file__).parents[2] / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
     owner = importlib.util.module_from_spec(spec)
