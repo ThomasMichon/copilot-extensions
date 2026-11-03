@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify reviewer-owned direct verdict publication without a per-round coordinator relay",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
