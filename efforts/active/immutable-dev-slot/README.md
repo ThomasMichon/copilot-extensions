@@ -107,6 +107,7 @@ adding operator-requested runtime scope to this documentation task.
 
 ### Phase 1 - Complete shared admission and immutable development
 - [x] Reconcile existing shared/first-adopter deliveries against the archived Phase 3 evidence before choosing the next implementation slice; do not redo delivered work.
+- [x] Deliver the bounded Worktrees source-hashed first-adopter slice in #8601 and qualify its canonical packet, six native development cells and three native repair cases; retain the broader admission, assembly, cutover and installed acceptance below.
 - [ ] Freeze every declared source, vendor and selected dependency input before construction; identify the immutable non-editable generation by source and assembly hashes separately from package version.
 - [ ] Reuse exact healthy completed content without writers; refuse conflicting completed content even under force. A new edit builds a distinct generation, never rewrites or follows a checkout.
 - [ ] Complete bounded kernel-backed first-build coalescing and revalidation, retaining the construction descriptor through publication and releasing it on success, failure, cancellation or process death.
@@ -218,6 +219,7 @@ service, runtime, or deployment operation.
 - [ ] **Claims:** competing owners refuse; iterative builds preserve the original restore target; deployed release works without the source checkout and failed restore retains attributable ownership.
 - [ ] **Portfolio:** record every canonical adopter's actual two-entrypoint, native process and installed acceptance evidence. Shared primitives or one pilot never close #5472.
 - [ ] **Platforms:** qualify Windows, Linux and macOS separately, with named tracked gaps where a lane is unavailable; use isolated roots and owned processes, never live user state as a fixture.
+- [x] **First-adopter source qualification:** verify #8601's exact candidate, canonical actor-free packet and all nine native gates with normal cleanup under the original limits. Desktop-observation skips, remaining portfolio/cold-recovery gates and installed acceptance are not passes from this slice; see the [qualification record](journal/2026/11.03-worktrees-first-adopter.md).
 - [x] **Guidance:** audit new intent, archive transfers, links and literal request capture; retain explicit implementation/rollout gaps instead of claiming documentation deploys behavior.
 
 ## Proposal
@@ -228,6 +230,12 @@ This reconciliation changes intent and effort ownership only. Implementation,
 native installation and rollout remain separately assigned and gated.
 
 ## Journal
+
+### 2026-11-03 - Worktrees first-adopter source merged; parent gates retained
+
+The [source and native qualification record](journal/2026/11.03-worktrees-first-adopter.md)
+records #8601's actual merge, exact-candidate evidence and explicit remaining
+assembly, service, adopter and installed obligations. This effort stays Active.
 
 ### 2026-10-24 - Preserve the source-size gate without widening a ceiling
 
