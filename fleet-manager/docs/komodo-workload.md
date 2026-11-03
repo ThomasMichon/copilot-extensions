@@ -114,7 +114,7 @@ drain/data compatibility admission by its existing owners.
 Success requires actual current authenticated Stack/configuration/action-state,
 service-set and direct container readback: exact image ID/reference, effective
 image command/environment/user, process state, owner/project/service labels,
-limits and complete persistent mounts. A paired container observation and
+limits, effective `unless-stopped` restart policy and complete persistent mounts. A paired container observation and
 repeated Server/image/volume/configuration checks detect drift during readback.
 An unchanged running workload issues no backend mutation. Repeating a succeeded
 receipt still performs current readback; a saved receipt alone is not success.

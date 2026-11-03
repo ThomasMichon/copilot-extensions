@@ -75,6 +75,7 @@ class Backend:
                       "Restarting": False, "Dead": False, "Pid": 123,
                       "StartedAt": "2026-01-01T00:00:00Z"},
             "HostConfig": {"Privileged": False, "Memory": selected.memory_bytes,
+                           "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
                            "MemorySwap": selected.memory_bytes,
                            "NanoCpus": selected.cpu_millis * 1000000,
                            "CapAdd": ["SYS_ADMIN"] if selected.trusted_systemd else None,
@@ -447,7 +448,8 @@ def test_current_native_absence_never_comes_from_a_stale_empty_core_cache(tmp_pa
         else:
             rig.owner.current_projects = lambda selected: KomodoProjectCensus(
                 digest(server_identity(json.loads(selected.server))) if evidence == "stale" else "0" * 64,
-                (), harness.clock.value - 5, harness.clock.value)
+                (), harness.clock.value - 5 if evidence == "stale" else harness.clock.value,
+                harness.clock.value if evidence == "stale" else harness.clock.value + 5)
         with pytest.raises(PlanError, match="absence"):
             rig.run()
         assert not backend.writes
@@ -494,6 +496,30 @@ def test_original_no_deploy_decision_recovers_readback_without_mutating(tmp_path
         backend.lost = None
         assert rig.run().to_dict()["status"] == "succeeded"
         assert not backend.writes
+
+
+@pytest.mark.parametrize("when", ["incumbent", "deployed"])
+def test_effective_restart_policy_is_required_even_with_admitted_native_custody(tmp_path, harness, when):
+    backend = Backend()
+    with protocol(backend) as endpoint:
+        rig = WorkloadRig(tmp_path, harness, backend, endpoint)
+        if when == "incumbent":
+            rig.incumbent()
+            backend.container["HostConfig"]["RestartPolicy"]["Name"] = "no"
+            rig.selected = replace(
+                rig.selected, previous_container=native_fingerprint(backend.container))
+            rig.admit_selection()
+        else:
+            def wrong_policy(path):
+                if path == "/execute/DeployStack":
+                    backend.container["HostConfig"]["RestartPolicy"]["Name"] = "no"
+            backend.hook = wrong_policy
+        with pytest.raises(PlanError, match="container"):
+            rig.run()
+        if when == "incumbent":
+            assert not backend.writes and rig.journal.inspect(rig.request) is None
+        else:
+            assert rig.journal.inspect(rig.request).to_dict()["status"] == "unknown"
 
 
 def test_retained_original_async_update_resumes_only_reads_after_deadline(tmp_path, harness):

@@ -605,6 +605,7 @@ def _verify_container(value: dict, selected: KomodoWorkloadSelection, *,
             or labels.get("com.docker.compose.project") != selected.binding.resource
             or labels.get("com.docker.compose.service") != selected.binding.role
             or host.get("Privileged") is not False
+            or host.get("RestartPolicy") != {"Name": "unless-stopped", "MaximumRetryCount": 0}
             or host.get("Memory") != selected.memory_bytes
             or host.get("MemorySwap") != selected.memory_bytes
             or host.get("CapAdd") not in allowed_caps
