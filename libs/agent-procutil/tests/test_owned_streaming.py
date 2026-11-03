@@ -282,3 +282,24 @@ def test_partial_output_initialization_cleanup_uses_same_deadline(tmp_path, monk
             process.wait(timeout=2)
         process.stdout.close()
         process.stderr.close()
+
+
+def test_finished_child_cannot_hide_expired_output_initialization(tmp_path, monkeypatch):
+    from agent_procutil.streaming import SyncProcessOutput
+
+    original = SyncProcessOutput.__init__
+    witnessed = []
+
+    def delayed(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        time.sleep(.25)
+
+    monkeypatch.setattr(SyncProcessOutput, "__init__", delayed)
+    with (tmp_path / "output").open("wb") as stream:
+        with pytest.raises(subprocess.TimeoutExpired):
+            owned.run_owned(
+                [sys.executable, "-c", "pass"], timeout=.1, inactivity_timeout=1,
+                output_fds={"stdout": stream.fileno()}, capture=False,
+                on_settled=lambda: witnessed.append(True),
+            )
+    assert witnessed == [True]

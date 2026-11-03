@@ -524,11 +524,15 @@ def _run_owned(
                 process, output_fds=output_fds, capture=capture,
                 cleanup_deadline=deadline,
             )
+            if deadline is not None:
+                _remaining(deadline, argv, timeout)
             stream_capture.wait(
                 inactivity_timeout, deadline=deadline, wait_for_eof=False,
                 exit_observer=lambda: _observe_unreaped(process) is not None,
                 cleanup_deadline=budget.deadline if budget else None,
             )
+            if deadline is not None:
+                _remaining(deadline, argv, timeout)
             stdout, stderr = None, None
         elif bounded_windows:
             stdout, stderr = _communicate_windows_bounded(
@@ -596,6 +600,9 @@ def _run_owned(
                             deadline=budget.deadline if budget else time.monotonic() + 2.0,
                         )
                         stdout, stderr = stream_capture.output() if capture else (None, None)
+                        pending = sys.exc_info()[1]
+                        if isinstance(pending, subprocess.TimeoutExpired) and capture:
+                            pending.output, pending.stderr = stdout, stderr
                     except BaseException as error:
                         retained = True
                         raise OwnedCleanupError(
