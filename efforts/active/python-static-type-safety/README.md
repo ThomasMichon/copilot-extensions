@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Plugin Resolve (#10141); source, native Linux, consumer/copy and current-head unit qualification are prepared. Required CI, review and merge remain. Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Venue Copilot (#10166); its canonical source/test typing artifact is integrated and both analysis targets, native Linux, consumer contracts and exact-source units are qualified. Review, required CI and merge gates remain. Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10141 integration, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. The Plugin Resolve source artifact is integrated and qualified; publication and completion remain with the lead.
+- **Delegates:** The #10166 slice owner's canonical Venue Copilot source/test artifact is integrated from its managed child. The lead retains integration, native Linux, consumer/copy, shared admission/coverage manifests, global documentation, the effort, publication and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -157,6 +157,7 @@ rewrite.
 - [x] Strictly admit all canonical Process Telemetry source/test modules with its declared optional-SDK checker environment (#10083).
 - [x] Strictly admit all canonical Machine Transport source/test modules with its declared YAML checker environment (#10107).
 - [x] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
+- [x] Strictly admit all canonical Plugin Resolve source/test/installer-fixture modules (#10141).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -2088,3 +2089,75 @@ composition prerequisites, and review/validation rules.
   files are accounted for rather than omitted. Review, required CI and merge
   remain separate completion gates, and the coverage tracker retains the
   last merged snapshot rather than crediting this local admission.
+
+### 2026-11-02 - Plugin Resolve merged; both metrics refreshed
+
+- #10165 merged as `c0efcffd3e1e66f73ca6b8a82473d0b3071d98ed`
+  after Copilot approval on exact head
+  `fa3af94c81e96763c62b8e44dcd286cf35f9ee11`, no open review threads and
+  green required
+  [CI run 41575317292](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41575317292)
+  and
+  [lockdown run 41575316972](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41575316972).
+  #10141 is closed; #9807 remains open. Managed campaign synchronization and
+  completed-child finalization passed; no unpublished artifact was discarded.
+- The current merged tracker has **29 / 68 strict projects (42.6%)** and
+  **250 / 7,644 physical Python files (3.3%)** in those scopes. Thirty-nine
+  projects remain pending, with no basic scopes. Newly added, independently
+  pending Vault and Fleet Manager files are reflected in their rows and area
+  totals. Complete consumer admission and embedded/source-map qualification
+  remain open rather than being credited by this library lock.
+- #10166 owns the next independent canonical Venue Copilot source/test slice.
+  Its source-only implementation is assigned in a managed child; the lead
+  retains all integration and publication gates. Payload Invocation remains
+  pending while contributor PR #10002 owns changes to its generator, tests and
+  launch-policy contract; this campaign does not supersede that work.
+- This Plan and Validation Plan remain active. A completed library PR is not
+  completion of the all-Python objective or permission to finalize the
+  campaign workspace.
+
+### 2026-11-02 - Venue Copilot source and consumer qualification prepared
+
+- #10166's complete canonical source/test artifact is integrated. Both declared
+  MyPy targets check all 12 physical Python files strictly with zero diagnostics;
+  the original Linux and Windows diagnostic counts were 189 each. All 30
+  provisionally activated projects pass both targets against the 7,644-file
+  inventory. The merged coverage tracker remains at 29 projects and 250 files
+  until this admission clears review, required CI and merge.
+- Explicit JSON/plan `Any` boundaries, callback and adapter protocols, prepared
+  delivery overloads and identity casts retain runtime behavior. Parent review
+  and independent AST checks preserve 73 production functions, 158 test/helper
+  functions, all 252 assertions and 11 parametrizations. No cleanup, ownership,
+  reservation, delivery-unknown or retry guard is removed.
+- The native Windows contained suite passes 119 tests, with three existing
+  POSIX/fcntl skips. Fresh native Python 3.10.21 Linux qualification in the
+  hardened, read-only, network-disconnected container passes all 122 tests with
+  no skips. Its exact owned container and temporary volume are removed and
+  cleanup is verified. This is library/runtime qualification, not installed
+  service rollout or live remote venue operation.
+- The normal isolated consumer runner passes Codespaces' detached/venue/plugin
+  preparation cohort (208 tests, nine platform skips), Containers' matching
+  cohort (116 tests, no skips) and SSH's detached/plugin cohort (120 tests,
+  three platform skips). Consumer projects remain independently pending.
+  There are no physical Venue Copilot vendored copies in the current source
+  inventory. The changefile names the library and all three actual release
+  consumers; no version is hand-edited.
+- Ruff `F,E9`, install-contract and documentation consistency gates pass.
+  The original 3,811-node packet retains every one of its 518 input hashes,
+  213 coverage targets and 300-second deadline. Exact-source execution passes
+  all 3,811 nodes in 233.047 seconds, with no observed effects and one coverage
+  recording. Hosted review, required CI and merge remain publication gates.
+- This annotation-only slice changes neither provisioning nor independently
+  deployed CLI/transport semantics. Clean-room installation and live external
+  venue tests are not applicable; native contained library and consumer tests
+  exercise the unchanged real consumer contracts without provisioning a service.
+  The full Plan and Validation Plan remain active.
+- Publication synchronization retains every one of the ten implementation
+  artifact blobs. Incoming Dev changes update six unrelated packet input hashes
+  without changing nodes, coverage targets or the 300-second deadline. The
+  current 3,811-node packet passes again in 257.079 seconds; independent packet
+  verification confirms source/manifest/coverage bytes and zero observed effects.
+  All 30 activated projects pass both targets against the updated 7,645-file
+  inventory. All three consumer cohorts pass again with the same counts after
+  dependency synchronization. The additional file is independently pending;
+  the tracker's previous merged snapshot is not retroactively changed.

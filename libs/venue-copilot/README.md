@@ -77,6 +77,15 @@ Run parser/recovery controls through the contained runner with
 `python tools/run-plugin-tests.py venue-copilot --test-file tests/test_refs.py`.
 Provider entry-point controls remain in each consumer's detached-launch tests.
 
+## Typing
+
+Canonical source and the complete test/helper portfolio have strict type
+annotations. JSON envelopes and launch plans retain explicit `Any` value
+boundaries; transport callbacks and prepared adapter hooks have typed contracts.
+From the repository root, run
+`python tools/typecheck.py lib-venue-copilot --strict` with a prepared checker
+environment. This probes both declared targets without changing project admission.
+
 ## Vendoring
 
 Detached model flag injection defaults to caller settings. The explicit

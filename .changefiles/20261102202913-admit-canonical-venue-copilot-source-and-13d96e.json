@@ -1,0 +1,21 @@
+{
+  "comment": "Admit canonical Venue Copilot source and tests to strict typing",
+  "changes": [
+    {
+      "plugin": "venue-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
