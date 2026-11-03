@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+Bridge's `test_wmi_broker_spawn.py`, `test_watchdog.py` and
+`test_service_process_identity.py` packet covers delayed replacement, argument
+filtering and strict daemon recognition. Its Windows native control invokes the
+real attributed launcher and service-entrypoint admission under a private,
+renewed test lifecycle, replacing only the serving body with PID/argv evidence.
+It checks same-process module execution, `__main__` identity and settled instance
+cleanup without binding a service port or touching existing sessions. This is
+source-boundary admission evidence, not installed watchdog recovery or rollout.
+
 Dispatch's actor-free `test_dispatch_runtime_resolution.py` promotion packet
 checks flat/nested physical slot selection, unchanged fallback tiers, BOM
 markers, nested precedence and redirected-environment refusal. The separate
