@@ -4557,6 +4557,11 @@ compiler and acquisition owners. Supply `--component worktree-manager` or
 Consume the returned `snapshot` path, not an inferred output directory.
 Existing feed policy, artifact seasoning, source identity and installation
 custody still apply; a local snapshot is not independent authorization.
+Native feed capture may retain repeated default/configuration references to
+one selected index. The source-profile comparison accepts them only when
+both the index URI and captured credential identity are identical, preserving
+every reference. Different supplemental indexes or credential identities
+remain refusals.
 
 The completed snapshot contains a copyable, locked UV application with its
 associated wheels and slot-local install entries. `install --stage` creates

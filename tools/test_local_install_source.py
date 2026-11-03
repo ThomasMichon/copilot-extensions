@@ -646,7 +646,10 @@ def test_complete_native_profile_inspects_bytes_and_writes_independent_source_sn
     assert native.source_inputs.select_project(prepared, component).identity == selected.identity
 
 
-@pytest.mark.parametrize("trusted,indexes", [(None, ["primary"]), (("primary", None), ["primary", "foreign"])])
+@pytest.mark.parametrize("trusted,indexes", [
+    (None, ["primary"]), (("primary", None), ["primary", "foreign"]),
+    (("primary", None), ["primary", "primary"]),
+])
 def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypatch, trusted, indexes):
     import local_install_profile as native
     import governed_feed_trust
@@ -656,7 +659,9 @@ def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypat
     monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", lambda text: "1" * 64)
     monkeypatch.setattr(
         installer_native_feed, "capture_native_feed_inputs",
-        lambda *a, **kw: SimpleNamespace(feeds=[SimpleNamespace(index_url=url) for url in indexes]),
+        lambda *a, **kw: SimpleNamespace(feeds=[
+            SimpleNamespace(index_url=url, identity=str(i)) for i, url in enumerate(indexes)
+        ]),
     )
     with pytest.raises(native.ProfileError, match="trusted|indexes"):
         native._profile_feed(
@@ -664,6 +669,30 @@ def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypat
             SimpleNamespace(environment={}), ["original", "retained"],
             uv="uv", download_origins=(), wheels=None, deadline=time.monotonic() + 5,
         )
+
+
+def test_native_profile_preserves_duplicate_selected_feed_evidence(monkeypatch):
+    import local_install_profile as native
+    import installer_native_feed
+    from governed_feed_trust import _TRUSTED_INDEX_HOSTS_ENV_VAR
+
+    url = "https://packages.example/simple/"
+    feeds = SimpleNamespace(feeds=[
+        SimpleNamespace(index_url=url, identity="same-captured-identity", role="default"),
+        SimpleNamespace(index_url=url, identity="same-captured-identity", role="configured"),
+    ])
+    monkeypatch.setattr(
+        installer_native_feed, "capture_native_feed_inputs", lambda *a, **kw: feeds,
+    )
+    _, captured = native._profile_feed(
+        SimpleNamespace(identity=SimpleNamespace(document=lambda: {})),
+        SimpleNamespace(environment={
+            "UV_DEFAULT_INDEX": url, _TRUSTED_INDEX_HOSTS_ENV_VAR: "packages.example",
+        }), ["original", "retained"],
+        uv="uv", download_origins=(), wheels=None, deadline=time.monotonic() + 5,
+    )
+    assert captured is feeds
+    assert [item.role for item in captured.feeds] == ["default", "configured"]
 
 
 @pytest.fixture
