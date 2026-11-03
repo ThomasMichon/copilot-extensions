@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from collections.abc import Callable
+from typing import Any, cast
 
 import pytest
 
@@ -20,7 +22,7 @@ from test_source_preserving_preparation import git, git_origin as git_origin_fix
 git_origin = git_origin_fixture
 
 
-def test_context_tracks_native_override_disable_and_no_skill_manifest(tmp_path):
+def test_context_tracks_native_override_disable_and_no_skill_manifest(tmp_path: Path) -> None:
     source, native, target = (tmp_path / name for name in ("source", "native", "target"))
     local_plan(source)
     plan = build_plan([{"source": "sample@local"}], [source], local_mode="reference")
@@ -33,7 +35,7 @@ def test_context_tracks_native_override_disable_and_no_skill_manifest(tmp_path):
         "extraKnownMarketplaces": {"local": definition}, "enabledPlugins": {"sample@local": True},
     })
     atomic_json(native / ".ai" / "sample" / "plugin.json", {"name": "sample", "version": "7.0.0"})
-    context = {"stale": True}
+    context: dict[str, Any] = {"stale": True}
     result = prepare({"repo": str(target), **plan, "local_mode": "reference"}, prepared_context=context)
     assert result == {"sample@local": str(native / ".ai" / "sample")}
     assert context == {
@@ -49,7 +51,7 @@ def test_context_tracks_native_override_disable_and_no_skill_manifest(tmp_path):
     assert not list(native.rglob("skills"))
 
 
-def test_context_uses_projected_identity_for_mixed_local_alias(tmp_path):
+def test_context_uses_projected_identity_for_mixed_local_alias(tmp_path: Path) -> None:
     source, other, target = (tmp_path / name for name in ("source", "other", "target"))
     local_plan(source)
     local_plan(other, name="second")
@@ -57,7 +59,7 @@ def test_context_uses_projected_identity_for_mixed_local_alias(tmp_path):
     plan = build_plan([{"source": "sample@local"}], [source], local_mode="reference")
     other_plan = build_plan([{"source": "second@local"}], [other], local_mode="reference")
     plan["plugins"].extend(other_plan["plugins"])
-    context = {}
+    context: dict[str, Any] = {}
     result = prepare({"repo": str(target), **plan, "local_mode": "reference"}, prepared_context=context)
     items = {item["logical_source"]: item for item in context["plugins"]}
     assert set(items) == set(result) == {"sample@local", "second@local"}
@@ -66,13 +68,13 @@ def test_context_uses_projected_identity_for_mixed_local_alias(tmp_path):
     assert items["second@local"]["live_marketplace_root"] == str(other / ".ai")
 
 
-def test_git_context_omits_private_acquisition_root(tmp_path, git_origin):
+def test_git_context_omits_private_acquisition_root(tmp_path: Path, git_origin: tuple[Path, str, str]) -> None:
     origin, _first, _second = git_origin
     target = tmp_path / "target"
     init_checkout(target)
     definition = {"source": {"source": "git", "url": origin.as_uri(), "ref": "first", "path": "catalog-a"}}
     plan = build_plan([{"source": "helper@git-fixture"}], [], marketplaces={"git-fixture": definition})
-    context = {}
+    context: dict[str, Any] = {}
     result = prepare(
         {"repo": str(target), **plan},
         copilot_command=(sys.executable, str(Path(__file__).parent / "fixtures" / "structured_git_installer.py")),
@@ -84,7 +86,7 @@ def test_git_context_omits_private_acquisition_root(tmp_path, git_origin):
     assert context["logical_payloads"] == result
 
 
-def test_floating_git_context_does_not_pin_isolated_cached_version(tmp_path, git_origin):
+def test_floating_git_context_does_not_pin_isolated_cached_version(tmp_path: Path, git_origin: tuple[Path, str, str]) -> None:
     origin, _first, _second = git_origin
     target, native = tmp_path / "target", tmp_path / "native"
     init_checkout(target)
@@ -92,7 +94,7 @@ def test_floating_git_context_does_not_pin_isolated_cached_version(tmp_path, git
     definition = {"source": {"source": "git", "url": origin.as_uri(), "ref": "HEAD", "path": "catalog-a"}}
     plan = build_plan([{"source": "helper@git-fixture"}], [], marketplaces={"git-fixture": definition})
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "structured_git_installer.py"))
-    context = {}
+    context: dict[str, Any] = {}
     request = {"repo": str(target), **plan}
     cached = prepare(request, copilot_command=command, prepared_context=context)
     payload = Path(cached["helper@git-fixture"])
@@ -118,19 +120,19 @@ def test_floating_git_context_does_not_pin_isolated_cached_version(tmp_path, git
         assert read_repo_settings(checkout).marketplaces["git-fixture"] == definition
 
 
-def test_failed_registration_does_not_publish_success_metadata(tmp_path):
+def test_failed_registration_does_not_publish_success_metadata(tmp_path: Path) -> None:
     source, target = tmp_path / "source", tmp_path / "target"
     local_plan(source)
     plan = build_plan([{"source": "sample@local"}], [source], local_mode="reference")
     init_checkout(target)
     (source / ".ai" / "sample" / "plugin.json").unlink()
-    context = {}
+    context: dict[str, Any] = {}
     with pytest.raises(ValueError):
         prepare({"repo": str(target), **plan}, prepared_context=context)
     assert context == {}
 
 
-def test_context_marker_is_opt_in_and_preserves_directory_parser(tmp_path):
+def test_context_marker_is_opt_in_and_preserves_directory_parser(tmp_path: Path) -> None:
     context = {"version": 1, "cwd": "/callee", "plugins": [{
         "projected_source": "helper@alias", "logical_source": "helper@original",
     }], "logical_payloads": {"helper@original": "/controller/.ai/helper"}}
@@ -144,13 +146,13 @@ def test_context_marker_is_opt_in_and_preserves_directory_parser(tmp_path):
         parse_prepared_context("__VENUE_PLUGINS__{}")
 
 
-def test_legacy_installed_only_availability_is_not_native_cli_origin_proof(tmp_path):
+def test_legacy_installed_only_availability_is_not_native_cli_origin_proof(tmp_path: Path) -> None:
     target, home = tmp_path / "target", tmp_path / "home"
     init_checkout(target)
     payload = home / "installed-plugins" / "legacy" / "helper"
     payload.mkdir(parents=True)
     atomic_json(payload / "plugin.json", {"name": "helper", "version": "1.0.0"})
-    context = {}
+    context: dict[str, Any] = {}
     plan = build_plan([{"source": "helper@legacy"}], [])
     result = prepare(
         {"repo": str(target), **plan, "local_mode": "reference"},
@@ -162,7 +164,7 @@ def test_legacy_installed_only_availability_is_not_native_cli_origin_proof(tmp_p
 
 
 @pytest.mark.parametrize("transport", ["python", "posix"])
-def test_context_transport_executes_with_only_stdlib_and_actual_receiver_checkout(tmp_path, transport):
+def test_context_transport_executes_with_only_stdlib_and_actual_receiver_checkout(tmp_path: Path, transport: str) -> None:
     target, home = tmp_path / "target", tmp_path / "home"
     init_checkout(target)
     local_plan(target)
@@ -186,25 +188,27 @@ def test_context_transport_executes_with_only_stdlib_and_actual_receiver_checkou
 
 @pytest.mark.parametrize("builder", [build_prepare_python, build_prepare_script])
 @pytest.mark.parametrize("repo", [None, "", "   ", Path("checkout")])
-def test_preparation_transport_requires_explicit_execution_checkout(builder, repo):
+def test_preparation_transport_requires_explicit_execution_checkout(
+    builder: Callable[[dict[str, Any], str], str], repo: object,
+) -> None:
     with pytest.raises(ValueError, match="execution checkout"):
-        builder({}, repo)
+        builder({}, cast(str, repo))
 
 
-def test_python_transport_has_no_shell_syntax_and_context_remains_opt_in():
+def test_python_transport_has_no_shell_syntax_and_context_remains_opt_in() -> None:
     code = build_prepare_python({}, "/callee")
     compile(code, "<plugin-preparation>", "exec")
     assert "__VENUE_PLUGIN_CONTEXT__" not in code
     assert "__VENUE_PLUGIN_CONTEXT__" in build_prepare_python({}, "/callee", include_prepared_context=True)
 
 
-def test_context_uses_final_complete_frame_not_earlier_preparation():
+def test_context_uses_final_complete_frame_not_earlier_preparation() -> None:
     old = {"version": 1, "cwd": "/old", "plugins": [{"projected_source": "old@local"}],
            "logical_payloads": {"old@local": "/old/plugin"}}
     current = {"version": 1, "cwd": "/actual", "plugins": [
         {"projected_source": "new@local"}, {"projected_source": "other@local"},
     ], "logical_payloads": {"new@local": "/actual/new", "other@local": "/actual/other"}}
-    def frame(value):
+    def frame(value: dict[str, Any]) -> str:
         return ("__VENUE_PLUGINS__" + json.dumps(value["logical_payloads"]) + "\n"
                 "__VENUE_PLUGIN_CONTEXT__" + json.dumps(value) + "\n")
     output = frame(old) + frame(current)

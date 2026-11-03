@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from plugin_resolve.marketplace import Marketplace
 
 from plugin_resolve import (
     MarketplaceSourceKind,
@@ -19,7 +21,7 @@ from plugin_resolve import (
 )
 
 
-def _w(path: Path, data: dict) -> None:
+def _w(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
 
@@ -28,7 +30,7 @@ def _w(path: Path, data: dict) -> None:
 # read_repo_settings -- native-first, Claude fallback.
 # ---------------------------------------------------------------------------
 
-def test_settings_native_only(tmp_path):
+def test_settings_native_only(tmp_path: Path) -> None:
     _w(tmp_path / ".github" / "copilot" / "settings.json", {
         "extraKnownMarketplaces": {"mp": {"source": {"source": "directory", "path": "./.ai"}}},
         "enabledPlugins": {"a@mp": True, "off@mp": False},
@@ -39,7 +41,7 @@ def test_settings_native_only(tmp_path):
     assert s.enabled_sources() == ["a@mp"]
 
 
-def test_settings_claude_fallback(tmp_path):
+def test_settings_claude_fallback(tmp_path: Path) -> None:
     _w(tmp_path / ".claude" / "settings.json", {
         "extraKnownMarketplaces": {"spo": {"source": {"source": "directory", "path": "./.ai"}}},
         "enabledPlugins": {"cps@spo": True},
@@ -49,26 +51,26 @@ def test_settings_claude_fallback(tmp_path):
     assert "spo" in s.marketplaces
 
 
-def test_settings_native_wins_over_claude(tmp_path):
+def test_settings_native_wins_over_claude(tmp_path: Path) -> None:
     _w(tmp_path / ".claude" / "settings.json", {"enabledPlugins": {"cap@mp": False}})
     _w(tmp_path / ".github" / "copilot" / "settings.json", {"enabledPlugins": {"cap@mp": True}})
     s = read_repo_settings(tmp_path)
     assert s.enabled["cap@mp"] is True  # native wins
 
 
-def test_settings_local_overrides_base(tmp_path):
+def test_settings_local_overrides_base(tmp_path: Path) -> None:
     _w(tmp_path / ".claude" / "settings.json", {"enabledPlugins": {"cap@mp": False}})
     _w(tmp_path / ".claude" / "settings.local.json", {"enabledPlugins": {"cap@mp": True}})
     s = read_repo_settings(tmp_path)
     assert s.enabled["cap@mp"] is True
 
 
-def test_settings_missing_is_empty(tmp_path):
+def test_settings_missing_is_empty(tmp_path: Path) -> None:
     s = read_repo_settings(tmp_path / "nope")
     assert s.enabled == {} and s.marketplaces == {}
 
 
-def test_settings_non_boolean_enablement_is_not_truthy(tmp_path):
+def test_settings_non_boolean_enablement_is_not_truthy(tmp_path: Path) -> None:
     _w(
         tmp_path / ".github" / "copilot" / "settings.json",
         {"enabledPlugins": {"quoted@mp": "false", "numeric@mp": 1}},
@@ -76,7 +78,7 @@ def test_settings_non_boolean_enablement_is_not_truthy(tmp_path):
     assert read_repo_settings(tmp_path).enabled == {}
 
 
-def test_marketplace_source_classification_is_typed():
+def test_marketplace_source_classification_is_typed() -> None:
     settings = read_repo_settings(Path("missing"))
     settings.marketplaces.update(
         {
@@ -99,7 +101,7 @@ def test_marketplace_source_classification_is_typed():
     )
 
 
-def test_split_source():
+def test_split_source() -> None:
     assert split_source("name@market") == ("name", "market")
     assert split_source("bare") == ("bare", "")
     assert split_source("") == ("", "")
@@ -127,7 +129,7 @@ def _make_native_marketplace(root: Path, name: str, plugin: str) -> None:
     _w(root / "plugins" / plugin / "plugin.json", {"name": plugin})
 
 
-def test_manifest_path_prefers_native(tmp_path):
+def test_manifest_path_prefers_native(tmp_path: Path) -> None:
     _w(tmp_path / ".github" / "plugin" / "marketplace.json", {"name": "n", "plugins": []})
     _w(tmp_path / ".claude-plugin" / "marketplace.json", {"name": "c", "plugins": []})
     assert marketplace_manifest_path(tmp_path) == (
@@ -135,7 +137,7 @@ def test_manifest_path_prefers_native(tmp_path):
     )
 
 
-def test_load_ai_marketplace_and_plugin_dir(tmp_path):
+def test_load_ai_marketplace_and_plugin_dir(tmp_path: Path) -> None:
     _make_ai_marketplace(tmp_path, "dotfiles-plugins", "generating-connect")
     mp = load_marketplace(tmp_path)
     assert mp is not None and mp.name == "dotfiles-plugins"
@@ -143,48 +145,48 @@ def test_load_ai_marketplace_and_plugin_dir(tmp_path):
     assert d == (tmp_path / "generating-connect").resolve()
 
 
-def test_load_native_marketplace_and_plugin_dir(tmp_path):
+def test_load_native_marketplace_and_plugin_dir(tmp_path: Path) -> None:
     _make_native_marketplace(tmp_path, "mp", "hello")
     mp = load_marketplace(tmp_path)
     assert mp is not None
     assert plugin_dir(mp, "hello") == (tmp_path / "plugins" / "hello").resolve()
 
 
-def test_plugin_root_prefix(tmp_path):
+def test_plugin_root_prefix(tmp_path: Path) -> None:
     _w(tmp_path / ".claude-plugin" / "marketplace.json", {
         "name": "mp",
         "metadata": {"pluginRoot": "./plugins"},
         "plugins": [{"name": "p", "source": "p"}],  # -> ./plugins/p
     })
     _w(tmp_path / "plugins" / "p" / ".claude-plugin" / "plugin.json", {"name": "p"})
-    mp = load_marketplace(tmp_path)
+    mp = cast(Marketplace, load_marketplace(tmp_path))
     assert plugin_dir(mp, "p") == (tmp_path / "plugins" / "p").resolve()
 
 
-def test_object_source_is_not_local(tmp_path):
+def test_object_source_is_not_local(tmp_path: Path) -> None:
     _w(tmp_path / ".claude-plugin" / "marketplace.json", {
         "name": "mp",
         "plugins": [{"name": "remote", "source": {"source": "github", "repo": "o/r"}}],
     })
-    mp = load_marketplace(tmp_path)
+    mp = cast(Marketplace, load_marketplace(tmp_path))
     assert plugin_dir(mp, "remote") is None
 
 
-def test_plugin_dir_none_without_manifest(tmp_path):
+def test_plugin_dir_none_without_manifest(tmp_path: Path) -> None:
     _w(tmp_path / ".claude-plugin" / "marketplace.json", {
         "name": "mp",
         "plugins": [{"name": "p", "source": "./p"}],
     })
     # no ./p/plugin.json created
-    mp = load_marketplace(tmp_path)
+    mp = cast(Marketplace, load_marketplace(tmp_path))
     assert plugin_dir(mp, "p") is None
 
 
-def test_load_marketplace_missing(tmp_path):
+def test_load_marketplace_missing(tmp_path: Path) -> None:
     assert load_marketplace(tmp_path / "nope") is None
 
 
-def test_marketplace_name_must_be_a_string(tmp_path):
+def test_marketplace_name_must_be_a_string(tmp_path: Path) -> None:
     _w(
         tmp_path / ".claude-plugin" / "marketplace.json",
         {"name": 123, "plugins": []},
@@ -192,7 +194,7 @@ def test_marketplace_name_must_be_a_string(tmp_path):
     assert load_marketplace(tmp_path) is None
 
 
-def test_plugin_entry_name_must_be_a_string(tmp_path):
+def test_plugin_entry_name_must_be_a_string(tmp_path: Path) -> None:
     _w(
         tmp_path / ".claude-plugin" / "marketplace.json",
         {"name": "mp", "plugins": [{"name": 123, "source": "p"}]},
@@ -204,7 +206,7 @@ def test_plugin_entry_name_must_be_a_string(tmp_path):
     assert plugin_dir(mp, "123") is None
 
 
-def test_plugin_source_cannot_escape_marketplace(tmp_path):
+def test_plugin_source_cannot_escape_marketplace(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     market = tmp_path / "market"
     _w(outside / "plugin.json", {"name": "p"})
@@ -215,11 +217,11 @@ def test_plugin_source_cannot_escape_marketplace(tmp_path):
             "plugins": [{"name": "p", "source": "../../outside"}],
         },
     )
-    mp = load_marketplace(market)
+    mp = cast(Marketplace, load_marketplace(market))
     assert plugin_dir(mp, "p") is None
 
 
-def test_plugin_root_cannot_escape_marketplace(tmp_path):
+def test_plugin_root_cannot_escape_marketplace(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     market = tmp_path / "market"
     _w(outside / "p" / "plugin.json", {"name": "p"})
@@ -231,11 +233,11 @@ def test_plugin_root_cannot_escape_marketplace(tmp_path):
             "plugins": [{"name": "p", "source": "p"}],
         },
     )
-    mp = load_marketplace(market)
+    mp = cast(Marketplace, load_marketplace(market))
     assert plugin_dir(mp, "p") is None
 
 
-def test_plugin_symlink_cannot_escape_marketplace(tmp_path):
+def test_plugin_symlink_cannot_escape_marketplace(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     market = tmp_path / "market"
     _w(outside / "plugin.json", {"name": "p"})
@@ -247,21 +249,21 @@ def test_plugin_symlink_cannot_escape_marketplace(tmp_path):
         (market / "p").symlink_to(outside, target_is_directory=True)
     except OSError:
         return
-    mp = load_marketplace(market)
+    mp = cast(Marketplace, load_marketplace(market))
     assert plugin_dir(mp, "p") is None
 
 
-def test_plugin_manifest_name_must_match_marketplace_entry(tmp_path):
+def test_plugin_manifest_name_must_match_marketplace_entry(tmp_path: Path) -> None:
     _w(
         tmp_path / ".claude-plugin" / "marketplace.json",
         {"name": "mp", "plugins": [{"name": "p", "source": "p"}]},
     )
     _w(tmp_path / "p" / "plugin.json", {"name": "other"})
-    mp = load_marketplace(tmp_path)
+    mp = cast(Marketplace, load_marketplace(tmp_path))
     assert plugin_dir(mp, "p") is None
 
 
-def test_duplicate_plugin_name_is_ambiguous(tmp_path):
+def test_duplicate_plugin_name_is_ambiguous(tmp_path: Path) -> None:
     _w(
         tmp_path / ".claude-plugin" / "marketplace.json",
         {
@@ -283,7 +285,7 @@ def test_duplicate_plugin_name_is_ambiguous(tmp_path):
 # resolve_repo_plugins -- the high-level answer.
 # ---------------------------------------------------------------------------
 
-def test_resolve_repo_plugins_ai_directory(tmp_path):
+def test_resolve_repo_plugins_ai_directory(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_ai_marketplace(repo / ".ai", "dotfiles-plugins", "generating-connect")
     _w(repo / ".github" / "copilot" / "settings.json", {
@@ -300,7 +302,7 @@ def test_resolve_repo_plugins_ai_directory(tmp_path):
     assert res.unresolved == []
 
 
-def test_resolve_repo_plugins_claude_settings(tmp_path):
+def test_resolve_repo_plugins_claude_settings(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_ai_marketplace(repo / ".ai", "spo", "cps")
     _w(repo / ".claude" / "settings.json", {
@@ -311,7 +313,7 @@ def test_resolve_repo_plugins_claude_settings(tmp_path):
     assert res.resolved["cps@spo"] == (repo / ".ai" / "cps").resolve()
 
 
-def test_resolve_repo_plugins_requires_marketplace_identity(tmp_path):
+def test_resolve_repo_plugins_requires_marketplace_identity(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_ai_marketplace(repo / ".ai", "other", "p")
     _w(
@@ -331,7 +333,7 @@ def test_resolve_repo_plugins_requires_marketplace_identity(tmp_path):
 
 
 @pytest.mark.parametrize("manifest_name", ["canonical", "wrong", "", None, 17])
-def test_local_registration_manifest_mapping_is_exact(tmp_path, manifest_name):
+def test_local_registration_manifest_mapping_is_exact(tmp_path: Path, manifest_name: object) -> None:
     repo = tmp_path / "repo"
     _make_ai_marketplace(repo / ".ai", "canonical", "p")
     settings = {
@@ -361,7 +363,7 @@ def test_local_registration_manifest_mapping_is_exact(tmp_path, manifest_name):
     assert (repo / ".github" / "copilot" / "settings.json").read_bytes() == before
 
 
-def test_stable_id_alone_does_not_bypass_manifest_identity(tmp_path):
+def test_stable_id_alone_does_not_bypass_manifest_identity(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_ai_marketplace(repo / ".ai", "canonical", "p")
     _w(repo / ".github" / "copilot" / "settings.json", {
@@ -379,7 +381,7 @@ def test_stable_id_alone_does_not_bypass_manifest_identity(tmp_path):
     assert result.unresolved == ["p@local-id"]
 
 
-def test_resolve_repo_plugins_remote_is_unresolved(tmp_path):
+def test_resolve_repo_plugins_remote_is_unresolved(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _w(repo / ".github" / "copilot" / "settings.json", {
         "extraKnownMarketplaces": {"gh": {"source": {"source": "github", "repo": "o/r"}}},
@@ -390,7 +392,7 @@ def test_resolve_repo_plugins_remote_is_unresolved(tmp_path):
     assert res.unresolved == ["x@gh"]
 
 
-def test_resolve_repo_plugins_disabled_skipped(tmp_path):
+def test_resolve_repo_plugins_disabled_skipped(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_ai_marketplace(repo / ".ai", "mp", "p")
     _w(repo / ".github" / "copilot" / "settings.json", {
@@ -424,7 +426,7 @@ def test_resolve_repo_plugins_disabled_skipped(tmp_path):
 # verified against it.
 # ---------------------------------------------------------------------------
 
-def test_import_fails_with_unknown_location_when_init_missing(tmp_path):
+def test_import_fails_with_unknown_location_when_init_missing(tmp_path: Path) -> None:
     """Simulate the mid-reinstall instant: the package dir exists on
     `sys.path` but its `__init__.py` has already been removed (as uv's
     uninstall step does) and the replacement has not yet been written. Must

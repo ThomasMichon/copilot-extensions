@@ -19,6 +19,7 @@ import os
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .conventions import (
     MARKETPLACE_MANIFEST_RELS,
@@ -52,7 +53,7 @@ class Marketplace:
     """Plugin names declared more than once; never resolvable."""
 
 
-def _load_json(path: Path) -> dict | None:
+def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         if not path.is_file():
             return None

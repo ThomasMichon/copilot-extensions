@@ -492,6 +492,17 @@ directory, and the actual elevated receiver reads its related selections and
 revalidates preparation against its own allocated checkout. This does not grant
 elevation, change context ownership, or attest to running-peer support.
 
+## Type checking
+
+From the repository root, `python tools/typecheck.py lib-plugin-resolve --strict`
+checks the canonical library, tests and installer fixtures for the declared Linux
+and Windows analysis targets. See `docs/python-typechecking.md` for checker
+preparation and admission policy; static platform analysis is not native execution.
+JSON manifests, preparation plans and registration documents retain explicit
+dynamic value boundaries, while paths, subprocess results and cancellation
+callbacks have concrete contracts. Runtime validation and source ownership rules
+are unchanged.
+
 ## Sources
 
 - Copilot CLI: docs.github.com/.../customize-copilot/plugins-marketplace

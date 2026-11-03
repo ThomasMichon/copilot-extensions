@@ -178,7 +178,7 @@ def test_contained_and_posix_installation_do_not_adopt_a_host_task(installation,
 @pytest.mark.parametrize("changed", [None, "root", "source", "slot", "version", "oversized"])
 @pytest.mark.parametrize("skip_reconcile", [False, True])
 def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application_arguments(
-    installation, monkeypatch, changed, skip_reconcile,
+    installation, monkeypatch, capsys, changed, skip_reconcile,
 ):
     state = installation
     monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
@@ -198,10 +198,15 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     state.adapter.runtime.mark_complete(state.root, "9.9.9", payload_hash="c" * 64)
     (state.root / "current-version").write_text("9.9.9\n", encoding="utf-8")
     queued = []
+
+    def wait(request, *, output):
+        output.write(log.read_text(encoding="utf-8"))
+        return SimpleNamespace(state="completed", exit_code=0, log_path=log)
+
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
         enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
-        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0, log_path=log)),
+        drain=Mock(), wait=Mock(side_effect=wait),
     )
     args = SimpleNamespace(
         payload=state.root, root=state.root, repair_update=False, recover_adopted=None,
@@ -227,7 +232,10 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
         *(("--skip-instance-reconcile",) if skip_reconcile else ()),
     )
     driver.drain.assert_called_once_with()
-    driver.wait.assert_called_once_with("request", output=sys.stdout)
+    driver.wait.assert_called_once_with("request", output=sys.stderr)
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert captured.err == log.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(("command", "repair"), [
@@ -381,6 +389,55 @@ def test_native_bootstrap_hold_preserves_interrupted_fence(installation, monkeyp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
+@pytest.mark.parametrize("appears_after_observation", [False, True])
+def test_absent_removal_never_enters_driver_or_removal(
+    installation, monkeypatch, capsys, appears_after_observation,
+):
+    import runtime_uninstall
+
+    state = installation
+    root = state.root.parent / "absent"
+    original_lstat = Path.lstat
+    native_root = Path(runtime_uninstall.native_retained_path(root))
+    original_validate = runtime_uninstall._validated_target
+
+    def observe(path, *args, **kwargs):
+        if path == native_root:
+            if appears_after_observation:
+                root.mkdir()
+                (root / "retained").write_text("new concurrent target")
+            raise FileNotFoundError(str(path))
+        return original_lstat(path, *args, **kwargs)
+
+    def validate(path, *, apply):
+        result = original_validate(path, apply=apply)
+        monkeypatch.setattr(Path, "lstat", observe)
+        return result
+
+    monkeypatch.setattr(runtime_uninstall, "_validated_target", validate)
+    driver = Mock(side_effect=AssertionError("absent removal provisioned a driver"))
+    digest = Mock(side_effect=AssertionError("absent removal hashed the source"))
+    remove = Mock(side_effect=AssertionError("absence observation entered removal"))
+    monkeypatch.setattr(state.adapter, "_execution_driver", driver)
+    monkeypatch.setattr(state.adapter, "_source_digest", digest)
+    monkeypatch.setattr(runtime_uninstall, "uninstall", remove)
+
+    assert state.adapter.main([
+        "--root", str(root), "--uninstall", "--apply", "--json",
+    ]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "absent" and result["removed"] == []
+    driver.assert_not_called()
+    digest.assert_not_called()
+    remove.assert_not_called()
+    assert not state.execution_root.exists()
+    if appears_after_observation:
+        assert (root / "retained").read_text() == "new concurrent target"
+    else:
+        assert not root.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
 @pytest.mark.parametrize("as_json", [False, True])
 def test_apply_removal_enters_the_driver_before_any_removal_custody(
     installation, monkeypatch, as_json,
@@ -419,12 +476,23 @@ def test_apply_removal_enters_the_driver_before_any_removal_custody(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
+@pytest.mark.parametrize("appears_before_observation", [False, True])
 def test_unowned_apply_removal_queues_only_the_fixed_uninstall_command(
-    installation, monkeypatch,
+    installation, monkeypatch, appears_before_observation,
 ):
     import runtime_uninstall
 
     state = installation
+    if appears_before_observation:
+        state.root = state.root.parent / "appearing"
+        original_validate = runtime_uninstall._validated_target
+
+        def validate(root, *, apply):
+            result = original_validate(root, apply=apply)
+            root.mkdir()
+            return result
+
+        monkeypatch.setattr(runtime_uninstall, "_validated_target", validate)
     direct = Mock(side_effect=AssertionError("removal before installation execution ownership"))
     monkeypatch.setattr(runtime_uninstall, "uninstall", direct)
     monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)

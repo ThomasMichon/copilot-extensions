@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -20,7 +21,7 @@ from plugin_resolve.target import repository_info
 from test_plugin_preparation import init_checkout, local_plan
 
 
-def test_preparation_path_is_anchored_without_mutating_the_productive_environment(tmp_path):
+def test_preparation_path_is_anchored_without_mutating_the_productive_environment(tmp_path: Path) -> None:
     cwd = tmp_path / "checkout"
     other = tmp_path / "other"
     environment = {"PATH": os.pathsep.join(["bin", "", str(other), "."]), "HOME": "unchanged"}
@@ -35,12 +36,12 @@ def test_preparation_path_is_anchored_without_mutating_the_productive_environmen
     False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows PATH quotes")),
 ])
 def test_git_queries_resolve_the_execution_binary_not_the_daemon_path(
-    tmp_path, monkeypatch, relative, quoted,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: bool, quoted: bool,
+) -> None:
     checkout, daemon = tmp_path / "checkout", tmp_path / "daemon"
     init_checkout(checkout)
     daemon.mkdir()
-    git = Path(shutil.which("git")).resolve()
+    git = Path(cast(str, shutil.which("git"))).resolve()
     if relative and os.path.splitdrive(str(git))[0].casefold() != os.path.splitdrive(str(checkout))[0].casefold():
         pytest.skip("A relative Git PATH requires the fixture and Git on the same drive")
     directory = os.path.relpath(git.parent, checkout) if relative else str(git.parent)
@@ -50,11 +51,11 @@ def test_git_queries_resolve_the_execution_binary_not_the_daemon_path(
     monkeypatch.chdir(daemon)
     monkeypatch.setenv("PATH", str(daemon / "missing-tools"))
     assert Path(_git(checkout, "rev-parse", "--show-toplevel", environment=environment)).resolve() == checkout
-    assert repository_info(checkout, environment=environment)[0] == checkout
+    assert cast(tuple[Path, Path], repository_info(checkout, environment=environment))[0] == checkout
     assert os.environ["PATH"] == str(daemon / "missing-tools") and Path.cwd() == daemon
 
 
-def test_missing_execution_git_does_not_borrow_the_daemon_binary(tmp_path):
+def test_missing_execution_git_does_not_borrow_the_daemon_binary(tmp_path: Path) -> None:
     checkout = tmp_path / "checkout"
     init_checkout(checkout)
     environment = {
@@ -67,7 +68,7 @@ def test_missing_execution_git_does_not_borrow_the_daemon_binary(tmp_path):
         repository_info(checkout, environment=environment)
 
 
-def test_target_binding_retains_execution_git_when_querying_a_deeper_source_checkout(tmp_path):
+def test_target_binding_retains_execution_git_when_querying_a_deeper_source_checkout(tmp_path: Path) -> None:
     target, anchor, controller = (
         tmp_path / "execution", tmp_path / "source" / "deeper" / "anchor", tmp_path / "controller",
     )
@@ -79,7 +80,7 @@ def test_target_binding_retains_execution_git_when_querying_a_deeper_source_chec
     atomic_json(settings, {"extraKnownMarketplaces": {
         "local": {"source": {"source": "directory", "path": str(anchor / ".ai")}},
     }})
-    git = Path(shutil.which("git")).resolve()
+    git = Path(cast(str, shutil.which("git"))).resolve()
     if os.path.splitdrive(str(git))[0].casefold() != os.path.splitdrive(str(target))[0].casefold():
         pytest.skip("A relative Git PATH requires the fixture and Git on the same drive")
     environment = {**os.environ, "PATH": os.path.relpath(git.parent, target)}
@@ -93,7 +94,7 @@ def test_target_binding_retains_execution_git_when_querying_a_deeper_source_chec
     assert "archive" not in plan["plugins"][0]
 
 
-def test_missing_optional_command_never_falls_back_to_the_daemon_directory(tmp_path, monkeypatch):
+def test_missing_optional_command_never_falls_back_to_the_daemon_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cwd, daemon = tmp_path / "checkout", tmp_path / "daemon"
     daemon.mkdir()
     name = "copilot.cmd" if os.name == "nt" else "copilot"
@@ -111,7 +112,7 @@ def test_missing_optional_command_never_falls_back_to_the_daemon_directory(tmp_p
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows quoted PATH entries")
 @pytest.mark.parametrize("relative", [False, True])
-def test_quoted_path_retains_execution_directory_and_runs_selected_command(tmp_path, relative):
+def test_quoted_path_retains_execution_directory_and_runs_selected_command(tmp_path: Path, relative: bool) -> None:
     cwd = tmp_path / "checkout"
     directory = cwd / "space tools"
     directory.mkdir(parents=True)
@@ -126,21 +127,22 @@ def test_quoted_path_retains_execution_directory_and_runs_selected_command(tmp_p
     assert Path(selected) == executable
     result = subprocess.run(
         windows_batch_command([selected], prepared), env=prepared, cwd=cwd,
-        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0 and result.stdout.strip() == "selected", result.stderr
     assert environment == original
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX literal quote characters in PATH")
-def test_posix_quoted_directory_name_stays_literal(tmp_path):
+def test_posix_quoted_directory_name_stays_literal(tmp_path: Path) -> None:
     cwd = tmp_path / "checkout"
     entry = '"literal"'
     assert execution_environment({"PATH": entry}, cwd)["PATH"] == str(cwd / entry)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PATHEXT lookup")
-def test_child_pathext_and_no_default_directory_are_not_taken_from_the_host(tmp_path, monkeypatch):
+def test_child_pathext_and_no_default_directory_are_not_taken_from_the_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cwd, daemon = tmp_path / "checkout", tmp_path / "daemon"
     (cwd / "bin").mkdir(parents=True)
     daemon.mkdir()
@@ -156,7 +158,7 @@ def test_child_pathext_and_no_default_directory_are_not_taken_from_the_host(tmp_
         execution_executable("tool", {**environment, "PATHEXT": ";;"}, cwd)
 
 
-def test_batch_transport_rejects_invalid_paths_before_mutating_child_environment():
+def test_batch_transport_rejects_invalid_paths_before_mutating_child_environment() -> None:
     environment = {"COMSPEC": "cmd.exe"}
     with pytest.raises(ValueError, match="invalid characters"):
         windows_batch_command(['bad"path.cmd'], environment)
@@ -165,7 +167,7 @@ def test_batch_transport_rejects_invalid_paths_before_mutating_child_environment
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows batch transport")
 @pytest.mark.parametrize("folder", ["space folder", "R&D", "%CPE_PROBE%", "bang!"])
-def test_batch_executable_path_is_literal_data_not_cmd_syntax(tmp_path, folder):
+def test_batch_executable_path_is_literal_data_not_cmd_syntax(tmp_path: Path, folder: str) -> None:
     directory = tmp_path / folder
     directory.mkdir()
     executable = directory / "probe.cmd"
@@ -185,8 +187,8 @@ def test_batch_executable_path_is_literal_data_not_cmd_syntax(tmp_path, folder):
     False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows PATH quotes")),
 ])
 def test_default_installer_uses_original_execution_cwd_before_neutral_installation(
-    tmp_path, monkeypatch, emitted, quoted,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, emitted: bool, quoted: bool,
+) -> None:
     repo, daemon, home = (tmp_path / name for name in ("checkout", "daemon", "home"))
     init_checkout(repo)
     execution = repo / "subdirectory"
@@ -248,7 +250,9 @@ def test_default_installer_uses_original_execution_cwd_before_neutral_installati
         assert len(parse_prepared(result.stdout)) == 1
     else:
         original_run = subprocess.run
-        def guarded_run(argv, *args, **kwargs):
+        def guarded_run(
+            argv: list[str], *args: Any, **kwargs: Any,
+        ) -> subprocess.CompletedProcess[str]:
             selected = list(argv)
             if "%" + BATCH_EXECUTABLE_ENV + "%" in argv:
                 selected.append(kwargs["env"][BATCH_EXECUTABLE_ENV].strip('"'))

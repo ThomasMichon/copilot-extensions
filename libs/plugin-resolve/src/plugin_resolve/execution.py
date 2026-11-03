@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 BATCH_EXECUTABLE_ENV = "COPILOT_VENUE_BATCH_EXECUTABLE"
@@ -21,7 +22,7 @@ def windows_batch_command(arguments: list[str], environment: dict[str, str]) -> 
     ]
 
 
-def execution_environment(environment: dict[str, str], cwd: str | Path) -> dict[str, str]:
+def execution_environment(environment: Mapping[str, str], cwd: str | Path) -> dict[str, str]:
     base = Path(cwd).resolve()
     entries = environment.get("PATH", os.defpath).split(os.pathsep)
     if os.name == "nt":
