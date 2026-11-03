@@ -4756,6 +4756,14 @@ and runtime paths. It refuses missing applications, changed construction inputs
 and the Manager-specific lifecycle before construction. The existing native
 session protocol and ordinary bootstrap callers are unchanged.
 
+An independent application needs no plugin manifest. Without `plugin.json`,
+the source reader uses its ordinary `pyproject.toml` project name and version;
+the normalized distribution name must match the selected component. Existing
+built-in standalone aliases retain their mappings. A present plugin manifest
+remains authoritative for other components: malformed or mismatched plugin
+metadata never falls back to the project declaration. Source/profile byte
+association and independent source approval remain required.
+
 Select the API from the exact admitted immutable source, not an installed
 module with the same name. That module's `APPLICATION_INSTALL_CONTRACT` declares
 `copilot-extensions.prepared-application-install` version one. Missing or unknown
@@ -4765,6 +4773,11 @@ and then replay through a guessed legacy path. No new CLI syntax is introduced.
 The adapter retains wheel and candidate/process custody through setup,
 publication and startup, and requires the application's successful installation
 receipt. The existing application owner handles selector/launcher rollback.
+That rollback covers publication failure before startup. Callbacks run outside
+the selector-publication lease. Startup failure retains the selected candidate
+and launchers, leaves last-known-good at its prior value and reports an unknown
+startup outcome for application-owned reconciliation; it never infers that a
+failed callback had no effects.
 The selected and completed-slot application declarations must also agree before
 callbacks execute. Changed setup/start/command declarations refuse reuse and
 require an explicitly selected distinct repair generation; completed slots are

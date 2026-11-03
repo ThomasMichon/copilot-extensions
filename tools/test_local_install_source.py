@@ -826,7 +826,8 @@ def native_source(tmp_path, request):
         '[tool.uv.sources]\nagent-procutil={path="' +
         ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n',
     )
-    (payload / "plugin.json").write_text('{"name":"demo-app","version":"1.0.0"}\n')
+    if not (isinstance(options, dict) and options.get("standalone", False)):
+        (payload / "plugin.json").write_text('{"name":"demo-app","version":"1.0.0"}\n')
     scripts = payload / "scripts"
     scripts.mkdir()
     root = Path(__file__).resolve().parents[1]
@@ -1157,8 +1158,10 @@ def test_application_adapter_refuses_incomplete_or_changed_inputs_before_constru
     assert not (tmp_path / "runtime").exists()
 
 
-@pytest.mark.parametrize("native_source", [{"entry": True}], indirect=True)
-def test_application_adapter_runs_real_install_repeat_and_failed_start_rollback(
+@pytest.mark.parametrize(
+    "native_source", [{"entry": True}, {"entry": True, "standalone": True}], indirect=True,
+)
+def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     native_source, tmp_path, monkeypatch,
 ):
     source, snapshot = native_source
@@ -1209,9 +1212,10 @@ def test_application_adapter_runs_real_install_repeat_and_failed_start_rollback(
             snapshot, "demo-app", selected.payload, root,
             arguments=("--fail-start",), repair=True, **options,
         )
-    assert {name: (root / name).read_bytes() for name in before} == before
     failed = [path for path in (root / "versions").iterdir() if path != slot]
     assert len(failed) == 1 and not (failed[0] / "install-success.json").exists()
+    assert (root / "current-version").read_text().strip() == failed[0].name
+    assert (root / "last-known-good").read_bytes() == before["last-known-good"]
     repaired = source.install_application(
         snapshot, "demo-app", selected.payload, root, repair=True, **options,
     )
