@@ -13,6 +13,11 @@ record's native mux and session locks. Only that fact gains fresh confirmation;
 Git and other unavailable facts stay unconfirmed, and the resident cache is not
 rewritten. A live or inconclusive native verdict still cannot authorize a cold
 prompt. Ordinary cached reads do not perform this extra probe.
+Forced and ordinary work are separated by the resident's coalescing boundary,
+including callers that use the legacy shared request key. Authoritative native
+liveness requires a successful, well-formed mux listing; unavailable or malformed
+listing evidence cannot confirm inactivity. Ordinary display helpers retain
+their existing best-effort fallback.
 
 ## Repository PR census
 

@@ -1288,7 +1288,7 @@ def verify_worktree_active(record) -> LiveVerdict:
     probes_ok = True
     mux_probe_ok = True
     try:
-        info = mux_status_many([wt_id]).get(wt_id) or MuxInfo()
+        info = mux_status_many([wt_id], strict=True).get(wt_id) or MuxInfo()
     except Exception:
         info = MuxInfo()
         probes_ok = False
@@ -1412,7 +1412,7 @@ def has_mux_session(worktree_id: str) -> bool:
         return False
 
 
-def _list_mux_sessions() -> dict[str, int] | None:
+def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
     """Query all mux sessions with their attached client counts.
 
     Returns a dict of session_name -> attached_client_count, or None if
@@ -1430,7 +1430,7 @@ def _list_mux_sessions() -> dict[str, int] | None:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
         if result.returncode != 0:
             return {} if is_empty_tmux_listing(cmd[0], result) else None
-        return parse_session_counts(result.stdout)
+        return parse_session_counts(result.stdout, strict=strict)
     except (OSError, subprocess.TimeoutExpired):
         # OSError covers FileNotFoundError (mux not installed) as well as
         # spawn failures such as WinError 4551 (Application Control policy
@@ -1474,16 +1474,14 @@ def _mux_session_activity() -> dict[str, int]:
     return out
 
 
-def mux_status_many(worktree_ids: list[str]) -> dict[str, MuxInfo]:
-    """Get mux session status for multiple worktrees efficiently.
+def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[str, MuxInfo]:
+    """Get mux status with one listing, falling back only for ordinary reads.
 
-    Uses a single ``list-sessions`` call when available. Falls back to
-    per-worktree ``has-session`` checks if list-sessions is unsupported
-    (clients will be None in that case).
+    Authoritative callers require a successful listing to confirm absence.
     """
     result: dict[str, MuxInfo] = {}
 
-    all_sessions = _list_mux_sessions()
+    all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
             sess_name = mux_session_name(wt_id)
@@ -1492,6 +1490,8 @@ def mux_status_many(worktree_ids: list[str]) -> dict[str, MuxInfo]:
             else:
                 result[wt_id] = MuxInfo(exists=False, clients=0)
     else:
+        if strict:
+            raise RuntimeError("Mux listing is unavailable; absence is unconfirmed")
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
             exists = has_mux_session(wt_id)

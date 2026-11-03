@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -227,6 +228,35 @@ def test_native_liveness_refresh_refuses_changed_record_identity(monkeypatch, tm
     }
     with pytest.raises(ValueError, match="identity changed"):
         worktree_status_compute.refresh_unconfirmed_liveness("proj", "wt1", bundle)
+
+
+@pytest.mark.parametrize(
+    "probe_result",
+    [OSError("blocked"), subprocess.TimeoutExpired("mux", 5),
+     subprocess.CompletedProcess("mux", 2, "", "query failed"),
+     subprocess.CompletedProcess("mux", 0, "malformed listing", "")],
+)
+def test_native_refresh_keeps_failed_or_malformed_real_mux_verifier_unknown(
+    monkeypatch, tmp_path, probe_result,
+):
+    from agent_worktrees import reclaim
+
+    record = _record()
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(tracking, "load_record_by_id", lambda *args, **kwargs: record)
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kwargs: [])
+
+    def run(*args, **kwargs):
+        if isinstance(probe_result, Exception):
+            raise probe_result
+        return probe_result
+
+    monkeypatch.setattr(subprocess, "run", run)
+    bundle = {
+        "project": "proj", "worktree_id": "wt1",
+        "facts": {"liveness": {"value": None, "confirmed": False, "observed_at": 1.0}},
+    }
+    assert worktree_status_compute.refresh_unconfirmed_liveness("proj", "wt1", bundle) is bundle
 
 
 def test_falls_back_to_direct_compute_when_daemon_unreachable(monkeypatch, tmp_path):

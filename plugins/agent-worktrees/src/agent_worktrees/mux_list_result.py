@@ -28,12 +28,16 @@ def _attached_count(value: str) -> int:
         return 0
 
 
-def parse_session_counts(stdout: str | None) -> dict[str, int]:
+def parse_session_counts(stdout: str | None, *, strict: bool = False) -> dict[str, int]:
     result: dict[str, int] = {}
     for line in (stdout or "").strip().splitlines():
         if ":" in line:
             name, _, count = line.rpartition(":")
+            if strict and (not name or not count.isdecimal() or name in result):
+                raise ValueError("Mux listing is malformed; absence is unconfirmed")
             result[name] = _attached_count(count)
+        elif strict:
+            raise ValueError("Mux listing is malformed; absence is unconfirmed")
     return result
 
 

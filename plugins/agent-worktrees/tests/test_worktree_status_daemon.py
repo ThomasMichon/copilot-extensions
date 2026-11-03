@@ -149,6 +149,58 @@ def test_force_refresh_serves_native_liveness_over_the_existing_transport(monkey
         server.close()
 
 
+def test_forced_request_cannot_join_ordinary_inflight_observation(monkeypatch, tmp_path):
+    from agent_worktrees import sessions, worktree_status_compute
+
+    entered, release = threading.Event(), threading.Event()
+    ordinary_results = []
+    bundle = {
+        "project": "proj", "worktree_id": "wt-a",
+        "facts": {"liveness": {"value": None, "confirmed": False, "observed_at": 0.0}},
+    }
+
+    def cached(project, worktree_id, *, force, compute):
+        if not force:
+            entered.set()
+            assert release.wait(10)
+        return bundle
+
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(
+        worktree_status_compute.tracking, "load_record_by_id",
+        lambda *args, **kwargs: SimpleNamespace(worktree_id="wt-a"),
+    )
+    monkeypatch.setattr(
+        sessions, "verify_worktree_active", lambda record: sessions.LiveVerdict(active=False),
+    )
+    server = worktree_status_daemon.start_server(worktree_status_daemon.build_cached_compute(
+        SimpleNamespace(get_or_refresh=cached), lambda *args: {},
+    ))
+    server.start()
+
+    def request(force):
+        return worktree_status_daemon.status_via_daemon(
+            _endpoint_dict(server), key="legacy-shared-key",
+            payload={"project": "proj", "worktree_id": "wt-a", "force": force},
+            fallback=lambda: {"unexpected": "direct fallback"},
+        )
+
+    thread = threading.Thread(target=lambda: ordinary_results.append(request(False)))
+    thread.start()
+    try:
+        assert entered.wait(5)
+        forced = request(True)
+        assert forced["facts"]["liveness"]["confirmed"] is True
+        assert forced["facts"]["liveness"]["value"]["active"] is False
+        assert not release.is_set()
+    finally:
+        release.set()
+        thread.join(10)
+        server.close()
+    assert not thread.is_alive()
+    assert ordinary_results == [bundle]
+
+
 def test_status_with_boot_uses_default_request_deadline(monkeypatch):
     expected_deadline = 8.0
     observed = {}

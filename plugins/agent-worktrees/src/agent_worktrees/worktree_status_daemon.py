@@ -179,13 +179,19 @@ def build_cached_compute(
     return _compute
 
 
+class _WorktreeStatusServer(CoalescingServer):
+    def handle_request(self, kind, key, payload, deadline):
+        scope = "forced" if payload.get("force") else "cached"
+        return super().handle_request(kind, f"{scope}:{key}", payload, deadline)
+
+
 def start_server(
     compute: Callable[[str, dict], dict],
     *,
     on_idle: Callable[[], None] | None = None,
 ) -> CoalescingServer:
     """Start the worktree-status-serving daemon side (not yet published anywhere)."""
-    return CoalescingServer(
+    return _WorktreeStatusServer(
         compute,
         linger_seconds=LINGER_SECONDS,
         subscriber_ttl=SUBSCRIBER_TTL_SECONDS,
