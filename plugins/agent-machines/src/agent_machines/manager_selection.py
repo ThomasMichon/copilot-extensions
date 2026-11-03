@@ -101,6 +101,11 @@ RETAINED_WINDOWS_SELECTION_STUB = (
     '"%SLOT%\\Scripts\\python.exe" -I -S -B -X utf8 "%SLOT%\\.runtime-bootstrap\\runtime_launcher.py" '
     '-m worktree_manager %* & call exit /b %%errorlevel%%\r\n'
 )
+# Exact current owner renderings add external bytecode caches and terminal routing.
+CURRENT_RETAINED_SELECTION_DIGESTS = {
+    "posix": "1d378d9461dcb0c892d1b64f443c8a38dee4ff666ca484db62697bb3424b2c65",
+    "nt": "60d75daa8101bfc8435426969fc4658b305067500cf3c57bfdbca0c3d8424b1b",
+}
 BOOTSTRAP_FILES = (
     "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
     "versioned_runtime_source.py", "versioned_runtime_construction.py",
@@ -221,12 +226,17 @@ def read_manager_selection(home: Path | None = None) -> ManagerSelection:
         expected = (
             RETAINED_WINDOWS_SELECTION_STUB if os.name == "nt" else RETAINED_POSIX_SELECTION_STUB
         )
-        supported = {expected.encode("utf-8")}
+        supported = {
+            hashlib.sha256(expected.encode("utf-8")).hexdigest(),
+            CURRENT_RETAINED_SELECTION_DIGESTS[os.name],
+        }
         if not retained:
             supported.add(
-                (WINDOWS_SELECTION_STUB if os.name == "nt" else POSIX_SELECTION_STUB).encode("utf-8")
+                hashlib.sha256(
+                    (WINDOWS_SELECTION_STUB if os.name == "nt" else POSIX_SELECTION_STUB).encode("utf-8")
+                ).hexdigest()
             )
-        if contents[command] not in supported:
+        if hashlib.sha256(contents[command]).hexdigest() not in supported:
             raise ManagerSelectionRefused(
                 "Manager binstub does not match the known selection protocol"
             )

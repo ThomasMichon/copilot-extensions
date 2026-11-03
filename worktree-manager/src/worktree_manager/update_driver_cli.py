@@ -403,7 +403,7 @@ def cmd_update_request(rest: list[str]) -> int:
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
             cwd=str(cwd), source=_source_key(), context=tuple(context.items()),
-            repair=not options.auto,
+            repair="--auto" not in arguments,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(

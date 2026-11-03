@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import shutil
@@ -18,9 +19,8 @@ from agent_machines import manager_compatibility as compatibility
 from agent_machines.fleet_update import CommandResult
 from agent_machines.manager_selection import (
     BOOTSTRAP_FILES,
+    CURRENT_RETAINED_SELECTION_DIGESTS,
     POSIX_SELECTION_STUB,
-    RETAINED_POSIX_SELECTION_STUB,
-    RETAINED_WINDOWS_SELECTION_STUB,
     WINDOWS_SELECTION_STUB,
     read_manager_selection,
 )
@@ -84,7 +84,7 @@ def _install_probe_cli(installation: InstalledManager) -> None:
         "elif args == ['automatic-updates', 'ownership', '--json']:\n"
         f"    print(json.dumps({{'root': str(root), 'policy': {default_policy()!r}}}))\n"
         "else:\n"
-        "    assert args == ['update', '--automatic-trigger', 'legacy-agent-machines']\n"
+        "    assert args == ['update', '--auto', '--automatic-trigger', 'legacy-agent-machines']\n"
         "    print('qualified retained generation executed')\n",
         encoding="utf-8",
     )
@@ -117,9 +117,13 @@ def test_recognized_native_stubs_match_current_manager_owned_renderers(
     )
     result = _run(installation.invocation, timeout=10)
     assert result.returncode == 0, result.output
-    assert json.loads(result.stdout) == [
-        RETAINED_POSIX_SELECTION_STUB, RETAINED_WINDOWS_SELECTION_STUB,
-    ]
+    posix, windows = json.loads(result.stdout)
+    assert hashlib.sha256(posix.encode()).hexdigest() == CURRENT_RETAINED_SELECTION_DIGESTS["posix"]
+    assert hashlib.sha256(windows.encode()).hexdigest() == CURRENT_RETAINED_SELECTION_DIGESTS["nt"]
+    installation.command.write_bytes((windows if os.name == "nt" else posix).encode())
+    selected = read_manager_selection(installation.home)
+    assert list(selected.invocation) == installation.invocation
+    assert selected.root == installation.root
 
 
 def test_current_manager_global_help_is_a_guarded_readonly_protocol() -> None:
@@ -193,11 +197,11 @@ def test_guarded_dispatch_pins_qualified_generation_across_final_boundary(
     assert result.status == "ok", result.detail
     assert result.mode == "guarded"
     assert result.command == [
-        *installation.invocation, "update", "--automatic-trigger", "legacy-agent-machines",
+        *installation.invocation, "update", "--auto", "--automatic-trigger", "legacy-agent-machines",
     ]
     assert calls == [
         ["--version"], ["--help"], ["automatic-updates", "ownership", "--json"],
-        ["update", "--automatic-trigger", "legacy-agent-machines"],
+        ["update", "--auto", "--automatic-trigger", "legacy-agent-machines"],
     ]
     evidence = [
         json.loads(line)
@@ -245,7 +249,7 @@ def test_generation_removed_after_qualification_refuses_without_legacy_dispatch(
     assert result.status == "error"
     assert result.mode == "guarded"
     assert len(calls) == 4
-    assert calls[-1] == ["update", "--automatic-trigger", "legacy-agent-machines"]
+    assert calls[-1] == ["update", "--auto", "--automatic-trigger", "legacy-agent-machines"]
     evidence = (installation.root / "dispatch-evidence.jsonl").read_text().splitlines()
     assert len(evidence) == 3
 

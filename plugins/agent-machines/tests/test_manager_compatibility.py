@@ -32,7 +32,7 @@ def test_manager_compatibility_negotiates_exact_update_command(
     installation = installed_manager(tmp_path, monkeypatch, retained=guarded)
     runner = ManagerProtocol(installation, guarded)
     result = compatibility.run_compatible_manager_update(runner=runner, home=installation.home)
-    expected = [*installation.invocation, "update"]
+    expected = [*installation.invocation, "update", "--auto"]
     if guarded:
         expected.extend(["--automatic-trigger", "legacy-agent-machines"])
     assert result.status == "ok", result.detail

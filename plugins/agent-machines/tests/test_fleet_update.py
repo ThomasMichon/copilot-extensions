@@ -242,7 +242,9 @@ def test_held_fleet_update_preserves_no_work_without_recording_success(
         return fleet_update.CommandResult(argv, returncode, "", detail)
 
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
-    assert calls == [["worktree-manager", "update", "--auto"]]
+    assert calls == [[
+        "worktree-manager", "update", "--auto", "--automatic-trigger", "legacy-agent-machines",
+    ]]
     assert result.status == result.steps[0].status == expected
     assert result.ok is (expected == "noop")
     assert detail in result.detail
@@ -569,7 +571,7 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch, home):
         invalid = replace(snapshot, arguments=snapshot.arguments.replace(old, new))
         assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
     quoted = replace(snapshot, arguments=snapshot.arguments.replace(" --tier", ' "--tier"'))
-    assert fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
+    assert not fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
     path_case = replace(snapshot, arguments=snapshot.arguments.replace(
         "agent-machines.cmd", "AGENT-MACHINES.CMD",
     ))

@@ -16,6 +16,7 @@ import pytest
 
 from agent_machines.fleet_update import CommandResult
 from agent_machines.manager_compatibility import ManagerUpdateResult
+from agent_machines.self_update_types import update_was_inhibited
 from agent_machines.manager_selection import (
     BOOTSTRAP_FILES,
     POSIX_SELECTION_STUB,
@@ -108,7 +109,7 @@ def installed_manager(
     package.mkdir(parents=True)
     (root / "current-version").write_text(generation + "\n", encoding="utf-8")
     if retained:
-        venv.EnvBuilder(with_pip=False).create(slot)
+        venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
         scripts = Path(__file__).resolve().parents[3] / "worktree-manager" / "scripts"
         bootstrap = slot / ".runtime-bootstrap"
         bootstrap.mkdir()
@@ -194,10 +195,11 @@ class ManagerProtocol:
 
 def unit_guarded_manager_update(*, runner: Any, home: Path | None = None) -> ManagerUpdateResult:
     """Existing run-result unit tests isolate negotiation, tested separately."""
-    command = ["worktree-manager", "update", "--automatic-trigger", "legacy-agent-machines"]
+    command = ["worktree-manager", "update", "--auto", "--automatic-trigger", "legacy-agent-machines"]
     outcome = runner(command, timeout=3600)
     return ManagerUpdateResult(
-        "ok" if outcome.returncode == 0 else "error",
+        "ok" if outcome.returncode == 0 else
+        "noop" if update_was_inhibited(outcome.returncode, outcome.output) else "error",
         outcome.output,
         mode="guarded",
         command=command,
