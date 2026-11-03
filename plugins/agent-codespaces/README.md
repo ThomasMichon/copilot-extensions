@@ -9,12 +9,16 @@ and `__source-start` receivers. Setup contributes the plain schema-0
 version-neutral global command even if that command or Bridge is not installed
 yet. The explicit `AGENT_BRIDGE_PROVIDERS_DIR` override wins; otherwise the
 directory belongs to `AGENT_BRIDGE_CONFIG_DIR` or the default Bridge config root.
+Without a config override, an explicit `AGENT_BRIDGE_INSTALL_DIR` precedes the
+home-directory fallback, matching Bridge's own configuration-root resolution.
 Publication is atomic, create-only and idempotent through the canonical drop-in
 writer. It never invokes a registration hook or backend.
 
 The identity-bearing payload entry `agent-codespaces.json` stays separate and
 untouched. An eligible attributed entry retains Bridge's existing filename-order
-precedence; when that plugin is disabled, the installed app remains discoverable
+precedence only for the CodeSpaces plugin identity, regardless of marketplace;
+foreign plugin namespace entries refuse. When the CodeSpaces plugin is disabled,
+the installed app remains discoverable
 without source trust, redirects or Copilot activation. Bridge's existing
 unattributed-provider compatibility advisory still applies to the plain entry;
 this is not schema-1 attribution or backend readiness. Collisions at the plain
@@ -22,7 +26,7 @@ destination or with other anonymous/foreign namespace entries refuse rather than
 overwrite, including a prior plain entry at the payload filename. Those entries
 require their owner's migration; application setup never silently downgrades one.
 Malformed or oversized unrelated peers are isolated; unsafe paths and storage
-failures still refuse publication.
+failures, including unreadable peer enumeration, still refuse publication.
 
 Startup reads merged configuration without current-directory overlays and uses
 the existing finite Connection Owner ensure only when enabled and executing

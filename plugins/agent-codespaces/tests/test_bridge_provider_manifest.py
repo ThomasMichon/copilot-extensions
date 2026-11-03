@@ -45,6 +45,7 @@ def test_installed_setup_publishes_plain_provider_before_either_install_order(
     if command_installed:
         command.parent.mkdir(parents=True)
         command.write_bytes(b"global marker forwarder")
+        command.chmod(0o700)
     assert cli.main(["__source-setup"]) == 0
     declaration = bridge / "providers.d" / "agent-codespaces.standalone.json"
     assert json.loads(declaration.read_text()) == {
@@ -150,8 +151,9 @@ def test_setup_refuses_unsafe_provider_paths(tmp_path, monkeypatch, unsafe):
 
 
 @pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("marketplace", ["copilot-extensions", "fixture-marketplace"])
 def test_plain_application_and_attributed_payload_remain_separate(
-    tmp_path, monkeypatch, enabled,
+    tmp_path, monkeypatch, enabled, marketplace,
 ):
     from dropin_registry import EntryDecision, ScanAuthority
     from plugin_activation import ActivePlugin, ActivationReport
@@ -168,7 +170,7 @@ def test_plain_application_and_attributed_payload_remain_separate(
     payload_command = payload / "payload-command"
     payload_command.write_text("fixture command\n")
     payload_command.chmod(0o700)
-    identity = "agent-codespaces@copilot-extensions"
+    identity = f"agent-codespaces@{marketplace}"
     attributed = registry / "agent-codespaces.json"
     attributed.write_text(json.dumps({
         "schema_version": 1, "plugin": identity, "plugin_root": str(payload),
@@ -189,7 +191,7 @@ def test_plain_application_and_attributed_payload_remain_separate(
     from agent_bridge import provider_sources
 
     decisions = {identity: EntryDecision.active(ActivePlugin(
-        source=identity, name="agent-codespaces", marketplace="copilot-extensions",
+        source=identity, name="agent-codespaces", marketplace=marketplace,
         root=payload.resolve(), scopes=("global",),
     ))} if enabled else {}
     found = provider_sources.scan_provider_registry(
@@ -223,23 +225,84 @@ def test_plain_setup_has_no_source_activation_or_backend_prerequisite(tmp_path, 
 
 
 @pytest.mark.parametrize("attributed", [False, True])
-def test_setup_preserves_a_foreign_namespace_contribution(tmp_path, monkeypatch, attributed):
+@pytest.mark.parametrize("filename", ["a-foreign.json", "foreign.json"])
+def test_setup_preserves_a_foreign_namespace_contribution(
+    tmp_path, monkeypatch, attributed, filename,
+):
     from agent_codespaces import owner_cli
 
     registry = tmp_path / "providers.d"
     registry.mkdir()
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
-    foreign = registry / "foreign.json"
+    foreign = registry / filename
     contents = {"namespace": "codespace:", "command": ["foreign"]}
     if attributed:
         contents.update(schema_version=1, plugin="other-plugin@other-marketplace",
                         plugin_root=str(tmp_path))
+        command = tmp_path / "foreign-command"
+        command.write_text("fixture foreign command\n")
+        command.chmod(0o700)
+        contents["command"] = [str(command)]
     foreign.write_text(json.dumps(contents))
     before = foreign.read_bytes(), foreign.stat().st_mtime_ns
     with pytest.raises(RuntimeError, match="preserved"):
         owner_cli.cmd_source_setup(None)
     assert (foreign.read_bytes(), foreign.stat().st_mtime_ns) == before
     assert list(registry.iterdir()) == [foreign]
+
+
+def test_install_root_override_matches_actual_bridge_consumer(tmp_path, monkeypatch):
+    from agent_codespaces import application_provider
+
+    home = tmp_path / "home"
+    install = tmp_path / "explicit-bridge-install"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.delenv("AGENT_BRIDGE_PROVIDERS_DIR", raising=False)
+    monkeypatch.delenv("AGENT_BRIDGE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(install))
+    command = home / ".local" / "bin" / (
+        "agent-codespaces.cmd" if os.name == "nt" else "agent-codespaces"
+    )
+    command.parent.mkdir(parents=True)
+    command.write_text("fixture installed global command\n")
+    command.chmod(0o700)
+    declaration = application_provider.register_installed_application()
+    assert declaration == install / "providers.d" / application_provider.MANIFEST_NAME
+    assert not (home / ".agent-bridge").exists()
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "plugins" / "agent-bridge" / "src"))
+    from agent_bridge import provider_sources
+
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins",
+                        lambda: pytest.fail("plain discovery must not resolve activation"))
+    found = provider_sources.scan_provider_registry()
+    assert found.manifests["codespace"].command == (str(command),)
+
+
+@pytest.mark.parametrize("already_published", [False, True])
+def test_peer_enumeration_failure_preserves_registry(tmp_path, monkeypatch, already_published):
+    from agent_codespaces import application_provider
+
+    registry = tmp_path / "providers.d"
+    registry.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    (registry / "unrelated.json").write_text('{"namespace":"other"}\n')
+    if already_published:
+        application_provider.register_installed_application()
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in registry.iterdir()}
+    original = Path.iterdir
+
+    def denied(path):
+        if path == registry:
+            raise PermissionError("fixture peer enumeration denied")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    with pytest.raises(RuntimeError) as error:
+        application_provider.register_installed_application()
+    assert isinstance(error.value.__cause__, PermissionError)
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in original(registry)} == before
 
 
 @pytest.mark.parametrize("owned", [False, True])

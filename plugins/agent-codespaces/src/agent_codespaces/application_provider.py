@@ -8,6 +8,7 @@ import stat
 import tempfile
 
 from dropin_registry import atomic_write_text
+from plugin_resolve import split_source
 
 MANIFEST_NAME = "agent-codespaces.standalone.json"
 
@@ -31,7 +32,11 @@ def register_installed_application() -> Path:
     override = os.environ.get("AGENT_BRIDGE_PROVIDERS_DIR")
     directory = (
         Path(override).expanduser() if override else
-        Path(os.environ.get("AGENT_BRIDGE_CONFIG_DIR") or Path.home() / ".agent-bridge").expanduser()
+        Path(
+            os.environ.get("AGENT_BRIDGE_CONFIG_DIR")
+            or os.environ.get("AGENT_BRIDGE_INSTALL_DIR")
+            or Path.home() / ".agent-bridge"
+        ).expanduser()
         / "providers.d"
     )
     target = directory / MANIFEST_NAME
@@ -65,7 +70,13 @@ def register_installed_application() -> Path:
                         or getattr(info, "st_file_attributes", 0) & 0x400):
                     raise RuntimeError("CodeSpaces provider directory must have ordinary ancestors")
         present = check_target()
-        for path in directory.glob("*.json"):
+        try:
+            peers = sorted(directory.iterdir(), key=lambda path: path.name)
+        except FileNotFoundError:
+            peers = []
+        for path in peers:
+            if path.suffix != ".json":
+                continue
             if path == target:
                 continue
             try:
@@ -83,8 +94,12 @@ def register_installed_application() -> Path:
                 and isinstance(other.get("plugin"), str) and "@" in other["plugin"]
                 and isinstance(other.get("plugin_root"), str) and bool(other["plugin_root"])
             )
-            # Keep eligible payload entries ahead of the plain fallback in Bridge's scan order.
-            if identity_bearing and path.name < target.name:
+            own_payload = False
+            if identity_bearing:
+                name, marketplace = split_source(other["plugin"])
+                own_payload = name == "agent-codespaces" and bool(marketplace)
+            # Only this app's payload may precede its plain fallback.
+            if own_payload and path.name < target.name:
                 continue
             raise RuntimeError(f"Existing codespace namespace provider must be preserved: {path}")
         if present:
