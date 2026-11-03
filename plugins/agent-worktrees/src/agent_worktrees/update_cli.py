@@ -406,9 +406,8 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         return 0
     from . import update_stage
 
-    stage_status = (
-        update_stage.read_status(update_stage.status_path(engine_step.runtime_root))
-        if engine_step is not None else {}
+    stage_status, stage_path, stage_lock = (
+        update_stage.application_status() if engine_step is not None else ({}, None, None)
     )
     applied_fingerprint = (
         update_stage.fingerprint(plugin_dir)
@@ -420,6 +419,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         if applied_fingerprint:
             update_stage.acknowledge_applied(
                 stage_status, plugin_dir, engine_step.runtime_root, applied_fingerprint,
+                status=stage_path, lock=stage_lock,
             )
 
     if engine_step is not None:

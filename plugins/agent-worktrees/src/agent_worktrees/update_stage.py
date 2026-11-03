@@ -77,12 +77,12 @@ _LOCK_MUTEX = threading.Lock()
 _LOCK_PROTOCOL = "kernel-lease-v1"
 
 
-def status_path(root: Path | None = None) -> Path:
-    return (root or cfg.install_dir()) / _STATUS_NAME
+def status_path() -> Path:
+    return cfg.install_dir() / _STATUS_NAME
 
 
-def lock_path(root: Path | None = None) -> Path:
-    return (root or cfg.install_dir()) / _LOCK_NAME
+def lock_path() -> Path:
+    return cfg.install_dir() / _LOCK_NAME
 
 
 def _pid_alive(pid: int) -> bool:
@@ -477,6 +477,16 @@ def read_status(status: Path | None = None) -> dict:
         return {}
 
 
+def application_status(status: Path | None = None) -> tuple[dict, Path | None, Path | None]:
+    """Keep staging's original state/lease pair separate from its deployment target."""
+    try:
+        path, lock = status or status_path(), lock_path()
+        return read_status(path), path, lock
+    except (OSError, ValueError) as error:
+        print(f"Update status acknowledgement unavailable: {error}", file=sys.stderr)
+        return {}, None, None
+
+
 def acknowledge_applied(
     prior: dict, plugin_dir: Path, runtime_root: Path, applied_fingerprint: str,
     *, status: Path | None = None, lock: Path | None = None,
@@ -492,7 +502,7 @@ def acknowledge_applied(
         or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.legacy_install_dir())) != str(runtime_root)
     ):
         return
-    status, lock = status or status_path(runtime_root), lock or lock_path(runtime_root)
+    status, lock = status or status_path(), lock or lock_path()
     if not acquire_lock(lock):
         return
     try:

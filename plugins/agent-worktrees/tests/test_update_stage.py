@@ -1002,6 +1002,38 @@ def test_same_version_successor_remains_available_after_previous_source_activate
     assert us.indicator_state() == "available"
 
 
+def test_namespaced_apply_retains_the_original_staging_lease(tmp_path, monkeypatch):
+    from agent_worktrees import __main__ as core, reconcile
+
+    legacy, cell, payload = tmp_path / "legacy", tmp_path / "cell", tmp_path / "payload"
+    cell.mkdir()
+    payload.mkdir()
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"2"}')
+    (cell / "deploy-manifest.json").write_text('{"source":{"version":"1"}}')
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: legacy)
+    monkeypatch.setattr(us, "discover_plugin_dir", lambda *a: (payload, "marketplace"))
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "unchanged"))
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a, **k: ({}, cell))
+    monkeypatch.setattr(reconcile, "publication_diagnostic", lambda *a, **k: None)
+    monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
+    prior = us.stage()
+    assert prior["plugin_changed"] and prior["runtime_root"] == str(cell)
+    original = us.status_path().read_bytes()
+    (cell / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    assert us.acquire_lock()
+    try:
+        us.acknowledge_applied(
+            prior, payload, cell, us.fingerprint(payload), status=us.status_path(),
+        )
+        assert us.status_path().read_bytes() == original
+        assert us.lock_path().is_file()
+        assert not (cell / "updater.lock.guard").exists()
+    finally:
+        us.release_lock()
+    us.acknowledge_applied(prior, payload, cell, us.fingerprint(payload))
+    assert us.read_status()["plugin_changed"] is False
+
+
 def test_legacy_status_without_runtime_root_uses_only_the_default_installation(applied_stage, monkeypatch):
     payload, root, status, lock, prior = applied_stage
     prior.pop("runtime_root")

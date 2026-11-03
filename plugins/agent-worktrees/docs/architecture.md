@@ -1981,6 +1981,12 @@ version advances. Same-version pending changes, actual runtime drift, paused
 updates and live-checker precedence remain intact.
 Rootless records belong only to the legacy installation directory, independently
 of the caller's selected cell; successful acknowledgement records that root.
+The staging status/lease pair is captured separately from the deployment target:
+an ordinary launch can stage in legacy state while applying to a namespaced cell.
+Both application paths retain that original writer lease rather than deriving
+its location from the target root. If staging state cannot be resolved, an
+explicit acknowledgement warning preserves it without blocking the independently
+validated runtime update.
 
 ### Version-cutover reap and live-launcher protection
 
