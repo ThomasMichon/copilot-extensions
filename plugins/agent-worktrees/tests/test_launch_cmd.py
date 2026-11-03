@@ -1236,7 +1236,8 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     Invoke-CopilotInvokedLog's no-runtime early-return must not affect the
     real launch -- Copilot still starts. Runs under PowerShell Core (pwsh),
     which is cross-platform, so this exercises the actual .ps1 code path
-    without requiring native Windows."""
+    without requiring native Windows. An explicit backend must not discover
+    the unused default executable."""
     shell = shutil.which("pwsh")
     if not shell:
         pytest.skip("pwsh is unavailable")
@@ -1251,6 +1252,14 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     env["USERPROFILE"] = str(home)
     env["COPILOT_LAUNCH_MARKER"] = str(marker)
     scripts = Path(__file__).resolve().parents[1] / "scripts"
+    setup = tmp_path / "default-setup.ps1"
+    setup.write_text(
+        (scripts / setup.name).read_text(encoding="utf-8").replace(
+            "function Resolve-CopilotApplication {",
+            "function Resolve-CopilotApplication { throw 'unused default discovery'",
+        ),
+        encoding="utf-8",
+    )
 
     if os.name == "nt":
         env["PATH"] = ""
@@ -1273,7 +1282,7 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
 
     proc = subprocess.run(
         [
-            shell, "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+            shell, "-NoProfile", "-NoLogo", "-File", str(setup),
             "-Machine", "test", "-CopilotPath", str(copilot),
         ],
         cwd=tmp_path,
