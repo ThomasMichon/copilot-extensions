@@ -431,6 +431,9 @@ That owner may force-terminate the exact identity-verified predecessor when
 necessary, including before incoming readiness when exclusive resources cannot
 safely overlap. Old-contract cooperation and an extra force/repair flag are not
 prerequisites.
+The replacement owner releases only the outgoing owner's endpoint reservations.
+Predecessor cleanup failure never rolls back a healthy new generation;
+rollback is reserved for failure of the incoming generation itself to start.
 
 Replacement preserves configuration, durable application data, unrelated
 installations and protected session/connectivity dependencies. Readiness,

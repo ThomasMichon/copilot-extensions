@@ -659,31 +659,21 @@ def withdraw_active_guarded(
     not merely a PID. Retaining the withdrawn row as ``previous`` ensures the
     next publication advances generation rather than restarting at one.
     """
-    if not callable(refuse_current):
-        raise TypeError("exact withdrawal requires an authority validator")
-    from .darwin_identity import valid_start_time
+    from .routing_retirement import withdraw_active_guarded as withdraw
 
-    if (
-        not isinstance(expected_active, Endpoint) or type(expected_active.pid) is not int
-        or expected_active.pid <= 0 or not valid_start_time(expected_active.process_start_time)
-        or Endpoint.from_dict(expected_active.to_dict()) != expected_active
-    ):
-        raise ActivePublicationRefused("exact withdrawal requires native process identity")
-    with _routing_lock(config_dir, deadline=lock_deadline):
-        current = _read_mutation_table(config_dir)
-        raw = current.get("active")
-        refusal = _refuse_or_changed(
-            raw if isinstance(raw, dict) else None,
-            expected_active=expected_active,
-            refuse_current=refuse_current,
-            require_expected_active=True,
-        )
-        if refusal:
-            raise ActivePublicationRefused(refusal)
-        following = {key: value for key, value in current.items() if key != "active"}
-        following["previous"] = expected_active.to_dict()
-        _atomic_write(routing_table_path(config_dir), following)
-        return _read_mutation_table(config_dir)
+    return withdraw(config_dir, expected_active=expected_active,
+                    refuse_current=refuse_current, lock_deadline=lock_deadline)
+
+
+def release_previous_guarded(
+    config_dir: str | os.PathLike[str], *,
+    expected_active: Endpoint, expected_previous: Endpoint, lock_deadline: float,
+) -> bool:
+    """Release only this transition's superseded endpoint, never a new owner's."""
+    from .routing_retirement import release_previous_guarded as release
+
+    return release(config_dir, expected_active=expected_active,
+                   expected_previous=expected_previous, lock_deadline=lock_deadline)
 
 
 def restore_previous_if_owner(

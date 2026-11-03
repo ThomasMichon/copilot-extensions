@@ -203,18 +203,32 @@ def activation(monkeypatch, owner):
     monkeypatch.setattr(control, "_reap_abandoned_passive", lambda *a: events.append("reap") or {})
     monkeypatch.setattr(status_monitor_reap_stale, "schedule_delayed_daemon_health_reap", lambda: events.append("delayed-reap"))
     monkeypatch.setattr(control, "load_or_create_control_token", lambda *a: pytest.fail("token minted"))
+    monkeypatch.setattr(recovery, "observe", lambda *a: owner.retained)
     return events
 
 
-def test_unsupported_predecessor_refuses_before_every_transition_effect(owner, activation, monkeypatch):
+@pytest.mark.parametrize("failure", [
+    recovery.RecoveryUnavailable("unsupported"), TimeoutError("predecessor timed out"),
+])
+def test_unrecoverable_predecessor_does_not_veto_incoming_startup(owner, activation, monkeypatch, failure):
+    from zdd import diagnostics
+
     def unsupported(*args, **kwargs):
-        raise recovery.RecoveryUnavailable("unsupported")
+        raise failure
+
+    def run(orch, **kwargs):
+        activation.append("incoming-startup")
+        return CutoverResult(ok=True, committed=True)
 
     monkeypatch.setattr(recovery, "negotiate", unsupported)
-    monkeypatch.setattr(control, "spawn_passive", lambda *a, **k: pytest.fail("spawned"))
+    monkeypatch.setattr(CutoverOrchestrator, "run", run)
+    monkeypatch.setattr(control, "spawn_passive", lambda *a, **k: pytest.fail("unexpected native spawn"))
+    monkeypatch.setattr(
+        diagnostics, "terminate_pid_if_identity", lambda *a, **k: pytest.fail("unexpected native termination"),
+    )
     result = control.activate_after_update()
-    assert result["action"] == "refused" and result["result"]["ok"] is False
-    assert activation == ["release"]
+    assert result["action"] == "cutover" and result["result"]["ok"] is True
+    assert "incoming-startup" in activation
 
 
 def test_actual_installer_constructor_binds_guarded_drain_first_contract(owner, activation, monkeypatch):
@@ -233,13 +247,17 @@ def test_actual_installer_constructor_binds_guarded_drain_first_contract(owner, 
 
 
 @pytest.mark.parametrize("was_live", [False, True])
-def test_guarded_live_owner_without_url_never_restarts(owner, activation, monkeypatch, was_live):
+def test_guarded_live_owner_without_listener_starts_incoming_from_exact_route(
+    owner, activation, monkeypatch, was_live,
+):
     from agent_worktrees import status_monitor_runtime
     monkeypatch.setattr(control, "_monitor_control_url_from_route", lambda: None)
-    monkeypatch.setattr(status_monitor_runtime, "_restart_status_monitor", lambda **k: activation.append("restart"))
+    monkeypatch.setattr(status_monitor_runtime, "_restart_status_monitor", lambda **k: pytest.fail("legacy restart"))
+    monkeypatch.setattr(recovery, "negotiate", lambda *a, **k: (_ for _ in ()).throw(ConnectionRefusedError()))
+    monkeypatch.setattr(CutoverOrchestrator, "run", lambda *a, **k: CutoverResult(ok=True, committed=True))
     result = control.activate_after_update(monitor_was_live=was_live)
-    assert result["action"] == "refused" and result["result"]["ok"] is False
-    assert activation == []
+    assert result["action"] == "cutover" and result["result"]["ok"] is True
+    assert activation == ["recovery", "reap", "release", "delayed-reap"]
 
 
 @pytest.mark.parametrize("accepted,exited", [(False, False), (True, False), (True, True)])
@@ -361,3 +379,190 @@ def test_successor_serving_gate_is_stricter_than_passive_preflight(owner, missin
     make_client = lambda url: SimpleNamespace(health=lambda: passive)
     assert recovery.successor_healthy("127.0.0.1", 61001, make_client) is True
     assert recovery.successor_healthy("127.0.0.1", 61001, make_client, expected=owner.route) is False
+
+
+@pytest.fixture
+def forward_cutover(tmp_path, monkeypatch):
+    from zdd import diagnostics
+
+    events = []
+    starts = {111: "1010", 222: "2020"}
+    monkeypatch.setattr(diagnostics, "process_start_time", starts.get)
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", lambda *a, **k: pytest.fail("native kill"))
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    old = routing.publish_active(tmp_path, bind="127.0.0.1", port=61001, pid=111)
+    state = SimpleNamespace(healthy=True, drain="ready", shutdown="ready", cleanup=True)
+
+    class Handle:
+        pid = 222
+        process_start_time = "2020"
+        terminated = False
+
+        def terminate(self):
+            events.append("terminate-incoming")
+            self.terminated = True
+
+        def poll(self):
+            return 0 if self.terminated else None
+
+    class Client:
+        def drain(self, **kwargs):
+            events.append("drain-old")
+            if state.drain == "timeout":
+                raise TimeoutError("old drain timed out")
+            return {"drained": state.drain == "ready", "clean": state.drain == "ready", "forced": False}
+
+        def shutdown(self):
+            events.append("shutdown-old")
+            if state.shutdown == "timeout":
+                raise TimeoutError("old shutdown timed out")
+            return {"retired": state.shutdown == "ready"}
+
+        def undrain(self):
+            events.append("undrain-old")
+            return {"draining": False}
+
+        def adopt_relay(self):
+            events.append("adopt-incoming")
+            return {"adopted": True}
+
+    def cleanup(endpoint):
+        assert endpoint == old
+        events.append("cleanup-old")
+        if state.cleanup == "error":
+            raise OSError("old cleanup unavailable")
+        return {"exit_confirmed": state.cleanup}
+
+    handle = Handle()
+    ticks = [0.0]
+
+    def clock():
+        ticks[0] += 0.1
+        return ticks[0]
+
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="new",
+        spawn_passive=lambda port: events.append("start-incoming") or handle,
+        health_check=lambda host, port: state.healthy if port == 61002 else True,
+        make_client=lambda url: Client(), pick_free_port=lambda: 61002,
+        clock=clock, sleep=lambda seconds: None, expected_old=old,
+        refuse_old=lambda current: None, drain_before_publish=True,
+        on_published=lambda endpoint: events.append("publish-incoming"),
+        retire_failed_predecessor=cleanup,
+    )
+    return orch, events, state, handle
+
+
+@pytest.mark.parametrize("failure", ["incompatible", "drain-timeout", "shutdown-refused", "shutdown-timeout"])
+@pytest.mark.parametrize("cleanup", [False, True, "error"])
+def test_real_cutover_keeps_incoming_after_predecessor_failure(forward_cutover, failure, cleanup):
+    from zdd import lifecycle
+
+    orch, events, state, handle = forward_cutover
+    state.cleanup = cleanup
+    if failure == "incompatible":
+        state.drain = "refused"
+    elif failure == "drain-timeout":
+        state.drain = "timeout"
+    elif failure == "shutdown-refused":
+        state.shutdown = "refused"
+    else:
+        state.shutdown = "timeout"
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed and not result.rolled_back
+    assert not handle.terminated and "undrain-old" not in events
+    assert events.index("start-incoming") < events.index("cleanup-old")
+    assert routing.read_table(orch.config_dir)["active"]["pid"] == handle.pid
+    assert result.to_dict()["predecessor_cleanup"]["exit_confirmed"] is (cleanup is True)
+    records = [json.loads(line) for line in (orch.config_dir / "lifecycle.log").read_text().splitlines()]
+    retirement = [row for row in records if row["action"] == lifecycle.CUTOVER_RETIRE][-1]
+    assert retirement["outcome"] == (lifecycle.OK if cleanup is True else lifecycle.FAIL)
+    assert retirement["detail"]["old_endpoint"] == orch.expected_old.to_dict()
+    assert retirement["detail"]["predecessor_cleanup"] == result.predecessor_cleanup
+
+
+def test_real_cutover_rolls_back_when_incoming_fails_to_start(forward_cutover):
+    orch, events, state, handle = forward_cutover
+    state.healthy = False
+    result = orch.run(health_timeout=0.1, drain_timeout=1)
+    assert not result.ok and not result.committed and result.rolled_back
+    assert handle.terminated and "cleanup-old" not in events
+    assert routing.read_table(orch.config_dir)["active"] == orch.expected_old.to_dict()
+
+
+@pytest.mark.parametrize("cleanup", [False, True, "error"])
+def test_async_cutover_cleanup_failure_cannot_reverse_serving_successor(forward_cutover, cleanup):
+    from zdd import lifecycle
+
+    orch, events, state, handle = forward_cutover
+    state.cleanup = cleanup
+    orch.self_retirement = True
+    orch.drain_before_publish = False
+    orch.on_published = None
+    orch.activate_successor = lambda endpoint: events.append("activate-incoming")
+    orch.serving_health_check = lambda host, port: events.append("serving-incoming") or True
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed and not result.rolled_back and not handle.terminated
+    assert "drain-old" not in events and "shutdown-old" not in events and "undrain-old" not in events
+    assert events.index("activate-incoming") < events.index("serving-incoming") < events.index("cleanup-old")
+    assert result.predecessor_cleanup["exit_confirmed"] is (cleanup is True)
+    records = [json.loads(line) for line in (orch.config_dir / "lifecycle.log").read_text().splitlines()]
+    retired = [row for row in records if row["action"] == lifecycle.CUTOVER_RETIRE][-1]
+    assert retired["outcome"] == (lifecycle.OK if cleanup is True else lifecycle.FAIL)
+    assert retired["detail"]["old_endpoint"] == orch.expected_old.to_dict()
+    assert retired["detail"]["predecessor_cleanup"] == result.predecessor_cleanup
+
+
+@pytest.mark.parametrize("identity", [
+    "matching", "reused", "unknown", "exited", "exited-retained-birth", "kill-error",
+])
+def test_failed_recovery_cleanup_preserves_foreign_processes_and_releases_only_old_route(
+    tmp_path, monkeypatch, identity,
+):
+    from zdd import diagnostics
+
+    starts = {111: "1010", 222: "2020"}
+    monkeypatch.setattr(diagnostics, "process_start_time", starts.get)
+    monkeypatch.setattr(recovery.locks, "process_start_time", starts.get)
+    old = routing.publish_active(tmp_path, bind="127.0.0.1", port=61001, pid=111)
+    new = routing.publish_active(tmp_path, bind="127.0.0.1", port=61002, pid=222, demote_existing=True)
+    table = routing.read_table(tmp_path)
+    retained = recovery.GuardedPredecessor(old, recovery.ReceiverIdentity(111, "1010", ""), "fixture")
+    calls = []
+
+    def terminate(pid, start, *, exit_timeout):
+        assert (pid, start, exit_timeout) == (111, "1010", 10.0)
+        calls.append((pid, start))
+        if identity == "kill-error":
+            raise OSError("termination denied")
+        return {"identity_verified": True, "killed": True, "exit_confirmed": True}
+
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", terminate)
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: not identity.startswith("exited"))
+    if identity == "reused":
+        starts[111] = "9999"
+    elif identity in {"unknown", "exited"}:
+        starts.pop(111)
+    result = recovery.retire_failed_predecessor(tmp_path, retained, new)
+    assert bool(calls) is (identity in {"matching", "kill-error"})
+    assert result["exit_confirmed"] is (identity in {"matching", "exited", "exited-retained-birth"})
+    assert result["route_released"] is True
+    following = routing.read_table(tmp_path)
+    assert following["active"] == table["active"] and "previous" not in following
+    assert following["publication_history"] == table["publication_history"]
+
+
+@pytest.mark.parametrize("changed", ["active", "previous"])
+def test_failed_recovery_cannot_kill_or_release_changed_route(tmp_path, monkeypatch, changed):
+    from zdd import diagnostics
+
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: str(pid * 10))
+    old = routing.publish_active(tmp_path, bind="127.0.0.1", port=61001, pid=111)
+    new = routing.publish_active(tmp_path, bind="127.0.0.1", port=61002, pid=222, demote_existing=True)
+    retained = recovery.GuardedPredecessor(old, recovery.ReceiverIdentity(111, "1110", ""), "fixture")
+    table = routing.read_table(tmp_path)
+    table[changed] = routing.Endpoint("127.0.0.1", 61003, 333, generation=9, process_start_time="3330").to_dict()
+    routing.routing_table_path(tmp_path).write_text(json.dumps(table), encoding="utf-8")
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", lambda *a, **k: pytest.fail("foreign native kill"))
+    assert recovery.retire_failed_predecessor(tmp_path, retained, new)["reason"] == "predecessor-route-changed"
+    assert routing.read_table(tmp_path) == table

@@ -61,6 +61,7 @@ def candidate_serving(root: Path, slot: Path) -> bool:
 
 def routed_identity(
     runtime_home: Path | None = None, *, require_async_retirement: bool = False,
+    require_capabilities: bool = False,
 ) -> tuple[int, str, str | None] | None:
     directory = cutover.routing_dir() if runtime_home is None else cutover.routing_dir(runtime_home)
     snapshot = routing.read_table(directory, strict=True)
@@ -102,23 +103,38 @@ def routed_identity(
     ):
         raise ValueError("Routed monitor process identity is unconfirmed")
     client_options = {} if runtime_home is None else {"token": cutover.load_or_create_control_token(runtime_home)}
-    health = cutover.ControlClient(endpoint.base_url, **client_options).health()
+    try:
+        health = cutover.ControlClient(endpoint.base_url, **client_options).health()
+    except (OSError, ValueError, ConnectionError):
+        if not require_async_retirement:
+            raise
+        health = {}
     if (
-        health.get("pid") != pid
-        or health.get("status") not in {"ready", "draining", "unavailable"}
+        (health and health.get("pid") != pid)
+        or (not require_async_retirement and health.get("status") not in {"ready", "draining", "unavailable"})
         or locks.process_start_time(pid) != before
         or routing.read_table(directory, strict=True) != snapshot
     ):
         raise ValueError("Routed monitor identity changed during admission")
     slot = health.get("runtime_slot")
     prefix = health.get("runtime_prefix")
+    authenticated_prefix = prefix
+    if require_async_retirement and not prefix:
+        record = locks.read_lock(directory.parent / "status-monitor.lock") or {}
+        if (record.get("pid"), record.get("start_time")) == (pid, before):
+            prefix = record.get("prefix")
     if isinstance(prefix, str) and Path(prefix).is_absolute():
         root = directory.parent if runtime_home is None else runtime_home
-        path = _runtime_slot(root, prefix)
-        slot = path.name if path.parent == (root / "versions").resolve() else None
+        try:
+            path = _runtime_slot(root, prefix)
+            slot = path.name if path.parent == (root / "versions").resolve() else None
+        except OSError:
+            if not require_async_retirement or require_capabilities:
+                raise
+            slot = None
     identity = pid, before, slot if isinstance(slot, str) else None
-    if require_async_retirement:
-        if not isinstance(prefix, str) or not Path(prefix).is_absolute():
+    if require_capabilities:
+        if not isinstance(authenticated_prefix, str) or not Path(authenticated_prefix).is_absolute():
             raise ValueError("Serving monitor runtime prefix is unavailable")
         from .runtime_monitor_retirements import CAPABILITY
         from .status_monitor_recovery_contract import CAPABILITY as RECOVERY_CAPABILITY, ReceiverIdentity
@@ -181,7 +197,7 @@ def retire_legacy(root: Path, expected: tuple[int, str, str | None], *, guard) -
     with routing.routing_lock(directory, deadline=time.monotonic() + 5.0):
         snapshot = routing.read_table(directory, strict=True)
         try:
-            observed = routed_identity(root, require_async_retirement=True)
+            observed = routed_identity(root, require_async_retirement=True, require_capabilities=True)
         except AsyncRetirementUnsupported as error:
             if error.identity != expected or monitor_slot(root, expected[:2]) != slot:
                 raise ValueError("Legacy predecessor ownership changed before retirement") from error
@@ -242,15 +258,40 @@ def async_predecessor(
     expected = recovery.active_endpoint(root / "status-monitor-routing")
     if (expected.pid, expected.process_start_time) != observed[:2]:
         raise ValueError("Serving predecessor route identity changed")
-    return {
-        **native, "release_claim": (predecessor or {}).get("release_claim"),
-    }, {
+    options = {
         "expected_old": expected,
         "refuse_old": lambda _active: (
             None if locks.process_start_time(expected.pid) == expected.process_start_time
             else "asynchronous predecessor identity changed"
         ),
     }
+    try:
+        from .runtime_monitor_retirements import CAPABILITY
+
+        health = cutover.ControlClient(
+            expected.base_url, token=cutover.load_or_create_control_token(root),
+        ).health()
+        capabilities = health.get("capabilities")
+        self_retiring = (
+            health.get("pid") == expected.pid
+            and isinstance(capabilities, list)
+            and CAPABILITY in capabilities
+            and recovery.CAPABILITY in capabilities
+            and isinstance(health.get("runtime_generation"), str)
+            and bool(health["runtime_generation"])
+        )
+    except (OSError, ValueError, ConnectionError):
+        self_retiring = False
+    if not self_retiring:
+        predecessor_owner = recovery.observe(root / "status-monitor-routing", cutover.control_token_path(root))
+        if predecessor_owner.route != expected:
+            raise ValueError("Serving predecessor route identity changed")
+        options["retire_failed_predecessor"] = lambda successor: recovery.retire_failed_predecessor(
+            root / "status-monitor-routing", predecessor_owner, successor,
+        )
+    return {
+        **native, "release_claim": (predecessor or {}).get("release_claim"),
+    }, options
 
 
 def publish_lock(path: Path, *, extra: dict, routing_held: bool = False) -> bool:

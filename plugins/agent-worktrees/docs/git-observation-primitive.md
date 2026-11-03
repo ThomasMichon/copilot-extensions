@@ -61,18 +61,34 @@ admission-lock separation, process-economy or broader platform/harness acceptanc
 
 ## Owner-bound recovery
 
-The opt-in Windows cutover adapter requires `guarded-undrain/v1` from one
-existing-token authenticated health response before transition effects. Legacy
-providers refuse this qualified path rather than silently receive legacy
-undrain. Existing truly absent-owner and ordinary POSIX branches are unchanged.
+The opt-in Windows cutover adapter observes the exact outgoing route and existing
+token independently of `guarded-undrain/v1` negotiation. An incompatible or
+timed-out predecessor does not veto incoming startup. Failed drain or retirement
+uses bounded native termination of only the birth-verified outgoing process.
+Changed routes, reused PIDs and unavailable identities never authorize a kill.
+After publication, only the matching outgoing fallback route is released; no OS
+port held by a foreign process is reclaimed. Unconfirmed cleanup is reported
+without rolling back or indefinitely waiting behind a healthy incoming monitor.
+Existing truly absent-owner and ordinary POSIX branches are unchanged.
 The new control action binds expected PID/native start/runtime generation and
 exact restored route/port. Under the monitor state lock then existing routing
 lock, the receiver verifies both identities before using its existing undrain
 callback. Rollback may advance route election generation without changing the
 retained process identity. Only the matching typed positive reply qualifies;
 lost/malformed/untyped replies, publication uncertainty and unconfirmed successor
-exit retain unresolved reconciliation. No new ZDD API or parallel controller is
-introduced; old callers retain their separate legacy compatibility behavior.
+exit retain unresolved reconciliation. The shared ZDD best-effort retirement
+hook preserves other callers' separate legacy compatibility behavior; no parallel
+controller is introduced.
+
+The native packet allows 60 seconds for each disposable provider's actual
+control-module imports and readiness publication, and 150 seconds per case
+including two provider starts and owned Job cleanup. This fixture allowance
+does not change monitor startup, drain or production installer deadlines.
+The same bounded fixture is used by the ordinary async cases; its maximum
+lifetime is documented in [TESTING.md](../../../TESTING.md).
+Unconfirmed predecessor cleanup is retained in the existing lifecycle history
+with the exact old endpoint and a failed retirement outcome, independently of
+the successful incoming cutover result.
 
 ## Bounded qualification
 

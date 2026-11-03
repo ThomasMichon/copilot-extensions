@@ -220,7 +220,8 @@ class GuardedPredecessor:
         )
 
 
-def negotiate(directory: Path, token_path: Path, client_type, *, timeout: float) -> GuardedPredecessor:
+def observe(directory: Path, token_path: Path) -> GuardedPredecessor:
+    """Retain route custody independently of the outgoing wire contract."""
     try:
         token = token_path.read_text(encoding="utf-8").strip()
     except OSError as exc:
@@ -228,6 +229,17 @@ def negotiate(directory: Path, token_path: Path, client_type, *, timeout: float)
     if not token:
         raise RecoveryUnavailable("existing-token-unavailable")
     route = active_endpoint(directory)
+    return GuardedPredecessor(
+        route, ReceiverIdentity(route.pid, route.process_start_time, ""), token,
+    )
+
+
+def negotiate(
+    directory: Path, token_path: Path, client_type, *, timeout: float,
+    observed: GuardedPredecessor | None = None,
+) -> GuardedPredecessor:
+    observed = observed or observe(directory, token_path)
+    route, token = observed.route, observed.token
     start = locks.process_start_time(route.pid)
     if start != route.process_start_time:
         raise RecoveryUnavailable("predecessor-identity-changed")
@@ -246,6 +258,42 @@ def negotiate(directory: Path, token_path: Path, client_type, *, timeout: float)
     ):
         raise RecoveryUnavailable("guarded-recovery-unsupported-or-owner-changed")
     return GuardedPredecessor(route, receiver, token)
+
+
+def retire_failed_predecessor(
+    directory: Path, predecessor: GuardedPredecessor, successor: routing.Endpoint | None,
+) -> dict:
+    """Attempt native retirement without making outgoing recovery a startup gate."""
+    from zdd import diagnostics
+
+    route = predecessor.route
+    with routing.routing_lock(directory, deadline=time.monotonic() + 5.0):
+        table = routing.read_table(directory, strict=True) or {}
+        expected = successor or route
+        if table.get("active") != expected.to_dict() or (
+            successor is not None and table.get("previous") != route.to_dict()
+        ):
+            return {"exit_confirmed": False, "reason": "predecessor-route-changed"}
+        if route.pid == os.getpid() or (successor is not None and route.pid == successor.pid):
+            return {"exit_confirmed": False, "reason": "predecessor-is-current-process"}
+        start = locks.process_start_time(route.pid)
+        if not diagnostics._pid_alive(route.pid):
+            outcome = {"exit_confirmed": True, "reason": "predecessor-already-exited"}
+        elif start != route.process_start_time:
+            outcome = {"exit_confirmed": False, "reason": "predecessor-identity-changed"}
+        else:
+            try:
+                outcome = diagnostics.terminate_pid_if_identity(
+                    route.pid, route.process_start_time, exit_timeout=10.0,
+                )
+            except (OSError, ValueError) as exc:
+                outcome = {"exit_confirmed": False, "reason": type(exc).__name__}
+    if successor is not None:
+        outcome["route_released"] = routing.release_previous_guarded(
+            directory, expected_active=successor, expected_previous=route,
+            lock_deadline=time.monotonic() + 5.0,
+        )
+    return outcome
 
 
 def monitor_health(

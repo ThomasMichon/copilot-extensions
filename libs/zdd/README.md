@@ -34,10 +34,14 @@ Adopters must qualify the incoming runtime's actual capability before publicatio
 and keep displaced code retained independently of the installing process until
 native exit is positively observed. The library does not supply that retention
 or prove completion of accepted work.
-They must also qualify the outgoing resident's safe retirement protocol before
-changing its selector: supersession waits for a genuinely ready successor, and
-accepted work cannot be discarded on a grace deadline. Unsupported incumbents
-are an explicit refusal, not a silent synchronous downgrade. Recovery records
+Compatible outgoing residents qualify their safe retirement protocol:
+supersession waits for a genuinely ready successor, and accepted work is not
+discarded on a grace deadline. An adopter may instead provide
+`retire_failed_predecessor` for an incompatible or unreachable incumbent.
+In self-retirement mode that bounded cleanup runs only after successor serving
+readiness, without changing publication's irreversible frontier. Cleanup failure
+is reported separately and never rolls back the healthy incoming generation.
+Native identity and exact route custody remain required. Recovery records
 include the full predecessor endpoint so uncertain publication can be reconciled
 against its original native identity. Once a ready successor is observed,
 outgoing retirement must remain latched even if that successor later dies.
@@ -123,6 +127,17 @@ reuses the same port gets mistaken for the real daemon.
 
 Key API: `Endpoint`, `read_active_endpoint`, `publish_active`,
 `clear_if_owner`, `reap_stale_active`, `routing_table_path`.
+
+`release_previous_guarded` releases one superseded endpoint only when the exact
+active successor and previous endpoint still match. It preserves publication
+history and never removes a changed owner's route.
+
+`CutoverOrchestrator` optionally accepts `retire_failed_predecessor` with an
+exact `expected_old` endpoint. This adapter-owned, bounded native cleanup runs
+when graceful drain or shutdown fails, or after a self-retirement successor
+serves when the adapter explicitly supplies that fallback; its `predecessor_cleanup` result is
+separate from incoming readiness. Cleanup failure does not roll back a healthy
+incoming generation. Without that hook, existing cutover behavior is unchanged.
 
 Publications for a live PID also record its `process_start_time`, establishing
 the process identity when the route is written rather than sampling a potentially

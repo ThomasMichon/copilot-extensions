@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import socket
 import threading
 from contextlib import nullcontext
 import sys
@@ -19,6 +20,7 @@ import test_status_monitor_guarded_recovery_native as native
 provider = native.provider
 
 pytestmark = [
+    pytest.mark.timeout(150),
     pytest.mark.skipif(sys.platform != "win32", reason="Windows Job/native identity proof"),
     pytest.mark.skipif(os.environ.get("AGENT_WORKTREES_NATIVE_RECOVERY") != "1",
                        reason="opt in with AGENT_WORKTREES_NATIVE_RECOVERY=1"),
@@ -43,21 +45,85 @@ def installer_fixture(monkeypatch, provider):
     return effects
 
 
-@pytest.mark.parametrize("provider", ["old-provider"], indirect=True)
-def test_native_installer_capability_refusal_precedes_every_transition_effect(provider, monkeypatch):
+@pytest.mark.parametrize("provider", ["old-provider", "drain-timeout"], indirect=True)
+def test_native_installer_keeps_incoming_after_failed_predecessor_recovery(provider, tmp_path, monkeypatch):
     effects = installer_fixture(monkeypatch, provider)
-    monkeypatch.setattr(control, "spawn_passive", lambda *a, **k: pytest.fail("spawned"))
-    result = control.activate_after_update(health_timeout=2, drain_timeout=2)
-    assert result["action"] == "refused" and result["result"]["ok"] is False
-    assert effects == []
-    root, data, route, _ = provider
-    health = control.ControlClient(route.base_url, token=data["token"]).health()
-    assert health["opened"] == 0 and health["health_calls"] == 2
-    assert recovery.active_endpoint(root) == route
+    root, data, old, _ = provider
+    request = control.ControlClient._request
+
+    def bounded_request(client, action, *args, **kwargs):
+        if client.base_url == old.base_url and action == "drain":
+            kwargs.update(read_timeout=0.25, total_timeout=0.25)
+        return request(client, action, *args, **kwargs)
+
+    monkeypatch.setattr(control.ControlClient, "_request", bounded_request)
+    with native.start_provider(tmp_path / "candidate", "candidate") as candidate:
+        new_data, new_route = candidate_spawn(monkeypatch, root, candidate)
+        result = control.activate_after_update(health_timeout=2, drain_timeout=2)["result"]
+        assert result["ok"] and result["committed"] and not result["rolled_back"]
+        assert result["predecessor_cleanup"]["exit_confirmed"] is True, result
+        assert result["predecessor_cleanup"]["route_released"] is True
+        assert data["process"].wait(timeout=5) is not None
+        assert new_data["process"].poll() is None
+        assert recovery.active_endpoint(root).pid == new_route.pid
+        assert "previous" not in routing.read_table(root)
+        assert not routing._listening(old.client_host, old.port)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as released:
+            released.bind((old.client_host, old.port))
+            released.listen(1)
+        health = control.ControlClient(new_route.base_url, token=data["token"]).health()
+        assert health["published"] and health["worktrees"]["status"] == "ready"
+        assert effects == ["reap", "backstop"]
+
+
+@pytest.mark.parametrize("old_mode", ["old-provider", "health-timeout"])
+@pytest.mark.parametrize("new_mode", ["candidate", "candidate-legacy"])
+def test_native_async_installer_falls_forward_only_after_successor_serves(
+    tmp_path, monkeypatch, old_mode, new_mode,
+):
+    with native.start_provider(tmp_path / "runtime" / "status-monitor-routing", old_mode) as incumbent:
+        root, data, old, token_path = incumbent
+        effects = installer_fixture(monkeypatch, incumbent)
+        monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: root.parent)
+        monkeypatch.setattr(control, "control_token_path", lambda *a: token_path)
+        monkeypatch.setattr(control, "load_or_create_control_token", lambda *a: data["token"])
+        request = control.ControlClient._request
+
+        def bounded_request(client, action, *args, **kwargs):
+            if client.base_url == old.base_url:
+                kwargs.update(read_timeout=0.25, total_timeout=0.25)
+            return request(client, action, *args, **kwargs)
+
+        monkeypatch.setattr(control.ControlClient, "_request", bounded_request)
+        with native.start_provider(tmp_path / "candidate", new_mode) as candidate:
+            new_data, new_route = candidate_spawn(monkeypatch, root, candidate)
+            result = control.activate_after_update(
+                health_timeout=2, drain_timeout=2, asynchronous_retirement=True,
+            )["result"]
+            if new_mode == "candidate-legacy":
+                assert not result["ok"] and not result["committed"]
+                assert "predecessor_cleanup" not in result
+                assert data["process"].poll() is None and new_data["process"].poll() is not None
+                assert recovery.active_endpoint(root) == old
+                assert "previous" not in routing.read_table(root)
+            else:
+                assert result["ok"] and result["committed"] and not result["rolled_back"], result
+                assert result["predecessor_cleanup"]["exit_confirmed"] is True
+                assert result["predecessor_cleanup"]["route_released"] is True
+                assert data["process"].wait(timeout=5) is not None and new_data["process"].poll() is None
+                assert recovery.active_endpoint(root).pid == new_route.pid
+                assert "previous" not in routing.read_table(root)
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as released:
+                    released.bind((old.client_host, old.port))
+                    released.listen(1)
+                health = control.ControlClient(new_route.base_url, token=data["token"]).health()
+                assert health["published"] and health["worktrees"]["status"] == "ready"
+                assert health["repositories"]["admitting"] is True
+            assert effects == ["reap"]
 
 
 @pytest.mark.parametrize("provider", ["normal", "untyped-reply", "lost-reply"], indirect=True)
-def test_native_installer_rollback_requires_typed_positive_ack(provider, tmp_path, monkeypatch, request):
+def test_native_installer_drain_receipt_failure_rolls_forward(provider, tmp_path, monkeypatch):
     root, data, old, _ = provider
     effects = installer_fixture(monkeypatch, provider)
     original_drain = control.ControlClient.drain
@@ -69,21 +135,14 @@ def test_native_installer_rollback_requires_typed_positive_ack(provider, tmp_pat
 
     monkeypatch.setattr(control.ControlClient, "drain", lose_drain_receipt)
     with native.start_provider(tmp_path / "candidate", "candidate") as candidate:
-        _, new_data, new_route, _ = candidate
-        monkeypatch.setattr(control, "spawn_passive", lambda *a, **k: new_data["process"])
-        monkeypatch.setattr(control, "pick_free_port", lambda: new_route.port)
+        new_data, new_route = candidate_spawn(monkeypatch, root, candidate)
         summary = control.activate_after_update(health_timeout=2, drain_timeout=2)
         result = summary["result"]
-        assert summary["action"] == "cutover" and result["ok"] is False
-        assert new_data["process"].poll() is not None
-        restored = recovery.active_endpoint(root)
-        assert restored.pid == old.pid and restored.generation > old.generation
-        assert restored.process_start_time == data["start"]
-        health = control.ControlClient(old.base_url, token=data["token"]).health()
-        assert health["opened"] == 1
-        acknowledged = request.node.callspec.params["provider"] == "normal"
-        assert result["rolled_back"] is acknowledged
-        assert (breadcrumb.read_breadcrumb(root) is None) is acknowledged
+        assert summary["action"] == "cutover" and result["ok"] is True
+        assert new_data["process"].poll() is None and data["process"].poll() is not None
+        assert recovery.active_endpoint(root).pid == new_route.pid
+        assert result["predecessor_cleanup"]["exit_confirmed"] is True
+        assert not result["rolled_back"] and breadcrumb.read_breadcrumb(root) is None
         assert effects == ["reap", "backstop"]
 
 

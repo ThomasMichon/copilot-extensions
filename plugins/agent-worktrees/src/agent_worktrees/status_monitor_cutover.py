@@ -541,15 +541,9 @@ def _make_client(base_url: str) -> ControlClient:
 
 
 def _predecessor_health_check(host: str, port: int) -> bool:
-    """A fenced resident can recover only after rollback restores its election."""
-    try:
-        status = ControlClient(f"http://{host}:{port}").health()
-        roster = status.get("worktrees")
-        return status.get("status") in {"ready", "draining", "unavailable"} and (
-            not isinstance(roster, dict) or roster.get("status") not in {"shutdown", "closed"}
-        )
-    except Exception:
-        return False
+    from .status_monitor_health import check_predecessor
+
+    return check_predecessor(host, port, ControlClient)
 
 
 def _is_status_monitor_cmdline(cmdline: str) -> bool:
@@ -697,6 +691,11 @@ def activate_after_update(
             summary["reason"] = "no-live-monitor"
             return summary
     active_url = _monitor_control_url_from_route()
+    if active_url is None and guarded:
+        try:
+            active_url = guarded_recovery.active_endpoint(routing_dir()).base_url
+        except (OSError, ValueError):
+            pass
     if active_url is None and not asynchronous_retirement:
         if guarded:
             summary.update(
@@ -753,16 +752,16 @@ def activate_after_update(
                 )
                 return summary
         if guarded:
+            predecessor = guarded_recovery.observe(routing_dir(), control_token_path())
             try:
                 predecessor = guarded_recovery.negotiate(
                     routing_dir(), control_token_path(), ControlClient, timeout=_READ_TIMEOUT_S,
+                    observed=predecessor,
                 )
             except (OSError, ValueError) as exc:
-                summary.update(
-                    action="refused", reason=f"guarded-recovery-unavailable:{exc}",
-                    result={"ok": False, "error": f"Guarded predecessor recovery unavailable: {exc}"},
-                )
-                return summary
+                summary["predecessor_recovery"] = {
+                    "available": False, "reason": type(exc).__name__,
+                }
 
             def make_client(base_url: str) -> ControlClient:
                 return ControlClient(
@@ -806,8 +805,11 @@ def activate_after_update(
 
             predecessor_health_check = lambda host, port: predecessor.predecessor_healthy(host, port, make_client)
             options = {
-                "expected_old": predecessor.route, "refuse_old": predecessor.refuse_old,
+                "expected_old": predecessor.route, "refuse_old": lambda current: None,
                 "drain_before_publish": True, "on_published": activate_successor,
+                "retire_failed_predecessor": lambda endpoint: guarded_recovery.retire_failed_predecessor(
+                    routing_dir(), predecessor, published_successor,
+                ),
             }
         transition_started = True
         reserved = asynchronous_retirement and retirements.reserve(
@@ -848,6 +850,9 @@ def activate_after_update(
             return handle
 
         published_successor = None
+        if asynchronous_retirement and options.get("retire_failed_predecessor") is not None:
+            retire_incompatible = options["retire_failed_predecessor"]
+            options["retire_failed_predecessor"] = lambda _old: retire_incompatible(published_successor)
 
         def activate_successor(endpoint: routing.Endpoint) -> None:
             nonlocal retirement_complete, published_successor

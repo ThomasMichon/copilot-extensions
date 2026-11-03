@@ -863,6 +863,11 @@ unsupported graceful cutover does not demand another repair flag or veto the
 update. It does not authorize unrelated cleanup or termination of separately
 owned sessions, children or connectivity. Unknown ownership and failed recovery
 remain explicit, never a false readiness claim.
+The replacement authority releases only the outgoing owner's endpoint
+reservations. Failed predecessor cleanup remains explicit; it does not
+restore the old selection or displace a healthy incoming owner. Rollback is for
+failure of the incoming generation itself to start, not failure to recover its
+predecessor. Explicit stop/uninstall retain their separate scopes.
 
 Supersession is identity inequality: an owner is displaced because its full
 generation identity is no longer current, not because another package version,

@@ -44,6 +44,10 @@ def settle_monitor(
                 result["ok"] = False
                 result["error"] = result.get("error") or "Committed successor stopped serving after publication"
         summary["result"] = result
+        cleanup = result.get("predecessor_cleanup")
+        if isinstance(cleanup, dict) and cleanup.get("exit_confirmed") is not True:
+            print("Predecessor cleanup remains unconfirmed; incoming monitor stays authoritative",
+                  file=sys.stderr, flush=True)
         return True
     announcements: set[str] = set()
 

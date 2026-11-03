@@ -715,6 +715,62 @@ def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner
         driver._monitor_identity(tmp_path)
 
 
+@pytest.mark.parametrize("exit_confirmed", [False, True])
+def test_serving_incoming_monitor_does_not_wait_for_failed_predecessor_recovery(
+    driver, tmp_path, monkeypatch, capsys, exit_confirmed,
+):
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
+    monkeypatch.setattr(driver, "_monitor_identity", lambda *_args: (222, "2020"))
+    from agent_worktrees import runtime_monitor_recovery
+
+    monkeypatch.setattr(
+        runtime_monitor_recovery, "recover_owned_publication",
+        lambda *a, **k: pytest.fail("recovered predecessor after successor commit"),
+    )
+    assert driver._settle_monitor(
+        tmp_path, tmp_path / "candidate",
+        {"action": "cutover", "result": {
+            "committed": True, "predecessor_cleanup": {"exit_confirmed": exit_confirmed},
+        }}, (111, "1010"), [],
+    ) is True
+    assert ("cleanup remains unconfirmed" in capsys.readouterr().err) is not exit_confirmed
+
+
+@pytest.mark.parametrize("wire", ["legacy", "timeout"])
+def test_async_predecessor_admission_retains_slot_without_old_wire_contract(
+    driver, tmp_path, monkeypatch, wire,
+):
+    from types import SimpleNamespace
+    from agent_worktrees import locks, status_monitor_cutover as cutover
+    from zdd import diagnostics, process_exit, routing
+
+    slot = tmp_path / "versions" / "legacy"
+    (slot / ".venv").mkdir(parents=True)
+    monkeypatch.setattr(locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, start: False)
+    monkeypatch.setattr(locks, "read_lock", lambda path: {
+        "pid": 101, "start_time": "1001", "prefix": str(slot / ".venv"),
+    })
+    monkeypatch.setattr(locks, "lock_is_live", lambda record: True)
+    monkeypatch.setattr(cutover, "load_or_create_control_token", lambda root: "fixture-token")
+    routing.publish_active(
+        tmp_path / "status-monitor-routing", bind="127.0.0.1", port=61001, pid=101,
+        process_start_time="1001",
+    )
+
+    def health():
+        if wire == "timeout":
+            raise TimeoutError("old control unavailable")
+        return {"pid": 101, "status": "ready", "capabilities": []}
+
+    monkeypatch.setattr(cutover, "ControlClient", lambda *a, **k: SimpleNamespace(health=health))
+    predecessor = driver._monitor_identity(tmp_path)
+    assert predecessor == (101, "1001")
+    assert driver._monitor_slot(tmp_path, predecessor) == "legacy"
+
+
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
 @pytest.mark.parametrize("monitor_scope,committed", [(False, False), (True, False), (True, True)])
 def test_publication_failure_retains_custody_through_observed_outcome(

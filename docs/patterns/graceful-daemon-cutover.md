@@ -30,6 +30,10 @@ fallback below when the predecessor cannot cooperate or settle; it does not
 require another force/repair flag solely for missing graceful support. Report
 the selected path and any interruption rather than silently claiming seamless
 cutover. Broad historical cleanup remains a separate explicit operation.
+Predecessor cleanup is best effort: retain a healthy incoming generation, report
+unconfirmed retirement and release only the displaced owner's endpoint
+reservations. Do not roll back because the predecessor cannot recover; rollback
+is for failure of the incoming generation itself to start.
 Existing adopters converge component by component; historical automatic-cutover
 adoption alone does not prove cold takeover or this newer lifecycle.
 
@@ -105,13 +109,13 @@ preserves the possibly admitted successor and reports failure, never passive
 disposal or rollback. The elected resident reconciles durable predecessor
 records and canonical runtime references, retaining its own demand and displaced
 code until positive native exit. This is not a new daemon or delayed reaper.
-This asynchronous path requires an outgoing runtime that supports
-readiness-gated retirement without grace-forced exit of accepted work. An
-incapable predecessor must instead use bounded cold takeover; it cannot veto
-the update merely by lacking that capability. An unrouted live process needs
-independent owner/identity attribution before any termination, never a guessed
-PID. These are target requirements, not proof that this adopter already
-implements the legacy fallback. The owner reserves canonical execution
+Compatible outgoing runtimes support readiness-gated retirement without
+grace-forced exit of accepted work. An incompatible or unreachable predecessor
+instead uses the existing cutover owner's bounded native retirement fallback
+after successor serving readiness. Cleanup failure cannot reverse that healthy
+incoming generation. An unrouted or identity-unknown owner still refuses
+installation; wire compatibility is not native ownership proof.
+The owner reserves canonical execution
 protection before persisting retirement intent, cancels exact custody only after proven precommit
 rollback, and keeps a pending dev claim through duplicate release attempts.
 Prepared intent cannot execute a retirement grant. Commitment enables native-exit
@@ -225,6 +229,14 @@ result = orch.run(health_timeout=60, drain_timeout=300, force=False)
 ```
 
 A consumer owns three things `zdd` cannot know:
+
+The monitor's qualified adapter opts into `retire_failed_predecessor`, retaining
+an exact outgoing endpoint independently of its recovery capability. Drain or
+shutdown failure calls that adapter's native cleanup without failing incoming
+startup; `predecessor_cleanup` reports its separate outcome. Other adopters keep
+their existing ordering and rollback behavior until they explicitly adopt this
+contract. `release_previous_guarded` removes an outgoing fallback route only
+when both the successor and displaced endpoint still match the transition.
 
 For conditionally authorized stale-runtime repair, the shared primitive also
 requires an adopter-owned authoritative effective-runtime snapshot and matching
