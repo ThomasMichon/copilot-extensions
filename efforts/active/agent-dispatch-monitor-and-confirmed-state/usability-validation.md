@@ -36,6 +36,19 @@ An unreadable or conflicting installed binding refuses. The next acceptance
 step remains actual selected-runtime lane admission, then complete configured
 cohort and allocator-before-spawn proof; no lifecycle acceptance row is closed.
 
+A separate controlled local check now demonstrates native managed-lane admission
+and completed reconciliation cycles while the cohort remains unprojected.
+Whole configured intent, allocator ordering and the remaining acceptance matrix
+are still open. The isolated whole-workload path first needs the existing
+clean-room runner's optional resource/lifetime controls, tracked by
+[#10274](https://github.com/ThomasMichon/copilot-extensions/issues/10274);
+a host command timeout alone cannot bound its persistent container.
+The bounded runner source now passes 81 wrapper/provider controls. A separate
+Linux witness confirms kernel resource settings and autonomous expiry; its
+short deadline interrupted shared metadata reporting, so it is not a complete
+scenario PASS. Source review/merge and the actual whole-workload scenario remain
+separate gates.
+
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational
 grant, a second effort or a requirement to wait for a marketplace release

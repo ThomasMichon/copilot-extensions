@@ -32,7 +32,7 @@ def test_run_sh_labels_every_container_it_creates() -> None:
     assert '--label "$CLEAN_ROOM_LABEL"' in text
     idx_auth = text.index("docker run -it --name cr-auth")
     assert "--label" in text[idx_auth : idx_auth + 200]
-    idx_main = text.index('docker run -d --name "$CONTAINER"')
+    idx_main = text.index('docker run -d --init --name "$CONTAINER"')
     assert "--label" in text[idx_main : idx_main + 200]
 
 
@@ -67,7 +67,7 @@ def test_run_ps1_labels_every_container_it_creates() -> None:
     assert f"$CleanRoomLabel = '{CLEAN_ROOM_LABEL}'" in text
     idx_auth = text.index("docker run -it --name cr-auth")
     assert "--label $CleanRoomLabel" in text[idx_auth : idx_auth + 200]
-    idx_main = text.index("docker run -d --name $Container")
+    idx_main = text.index("docker run -d --init --name $Container")
     assert "--label $CleanRoomLabel" in text[idx_main : idx_main + 200]
 
 
