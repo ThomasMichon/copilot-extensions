@@ -1279,6 +1279,11 @@ that copied toolkit. A separate witness admits the actual dependency-free
 Packaging seed, imports every toolkit entry in that interpreter and validates
 both a complete profile and an incomplete-closure refusal. Its installed
 distribution inventory contains only the selected Packaging wheel.
+That cold interpreter also imports the toolkit's actual `agent_procutil` and
+executes both canonical aggregate-wheel retention APIs. Exact selected bytes
+survive retention; a changed transport digest or insufficient byte budget
+refuses without changing the caller's input. No alternate extractor or
+fixture-injected process helper supplies those paths.
 These run in the existing source-build profile partition on
 Linux and Windows (`dependency_compile=true`), without a new job, longer timeout
 or required-unit expansion.
@@ -1286,6 +1291,15 @@ The credential-free fixture retains the existing deterministic opaque-identity
 seam; keyed authentication and credential-key ACLs have independent controls.
 This is fresh toolkit-delivery evidence, not first-tooling admission,
 normal-consumer enablement, production feeds or performance qualification.
+
+`worktree-manager/tests/test_runtime_source.py` copies the actual Manager
+package, process helper and runtime resources into both installed layouts:
+retained slot payloads and wheel-owned `_runtime_assets`. Fresh `-I -S`
+processes resolve a real local source while forbidding the Manager installer
+and CLI imports. A preloaded private retained-runtime alias cannot satisfy
+the public lease import; its actual loaded file must belong to that installed
+layout. Both cases reproduced the missing-helper failure before the lookup
+was routed through the existing read-only resource owner.
 
 `tools/test_runtime_profile_bootstrap.py` also runs runtime source-policy and
 actual wheel inspection in a fresh isolated Python process with the Manager

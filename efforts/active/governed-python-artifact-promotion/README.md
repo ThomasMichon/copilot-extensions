@@ -925,6 +925,33 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-11-03 - Toolkit candidate reconciled with installed resource layouts
+
+The candidate now uses Manager's existing read-only runtime-resource lookup
+for retained slot payloads and source-free wheel assets, without importing its
+installer. Both fresh-process installed-layout cases reproduced the actual
+missing lease-helper import before correction; all 52 source-acquisition
+controls then passed. Copied toolkit SDK controls passed four cases, and 69
+attestation/profile/publisher controls preserve the pinned identity and existing
+bounded initialization-only verifier retry.
+
+The copied-toolkit source/build/offline-construction/health/reuse witness and
+admitted-Packaging semantic witness both passed with normal cleanup. The latter
+also executes the canonical aggregate-wheel retention APIs and imports the
+actual payload-local process helper with only Packaging installed. Changed
+transport identity and insufficient byte budget refuse. This preserves #9319's
+custody seam and #9631's cold-caller requirement; #9453's producer work stays
+with its existing author.
+
+Current canonical packet and final published-head hosted qualification, review
+and required CI remain pending; earlier 1,836-unit results are historical, not
+proof for this integration. The toolkit gate stays unchecked until those
+outcomes pass. Ordinary promotion also retains #10117's claimed coverage-packet
+size repair as a release prerequisite; no evidence limit is widened here.
+Ordinary installers remain disabled, and the complete parent
+Plan/Validation/Coordination, production feed, measured savings, release and
+installed-acceptance obligations remain open.
+
 ### 2026-10-25 - Canonical toolkit candidate and admitted-interpreter witness
 
 - The existing payload-invocation generator now has an inert, required-context

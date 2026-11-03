@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,73 @@ print("acquisition-lease-without-installer-ok")
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "acquisition-lease-without-installer-ok"
+
+
+@pytest.mark.parametrize("layout", ["retained-payload", "wheel-resources"])
+def test_installed_source_acquisition_uses_its_own_runtime_resources(
+    repository, tmp_path, layout,
+):
+    repo, release, _development = repository
+    root = Path(__file__).resolve().parents[2]
+    slot = tmp_path / "installation" / "versions" / "1"
+    prefix = slot / ".venv"
+    site = prefix / "site-packages"
+    package = site / "worktree_manager"
+    shutil.copytree(
+        root / "worktree-manager" / "src" / "worktree_manager", package,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    shutil.copytree(
+        root / "libs" / "agent-procutil" / "src" / "agent_procutil",
+        site / "agent_procutil", ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    scripts = (
+        slot / "payload" / "scripts" if layout == "retained-payload"
+        else package / "_runtime_assets" / "scripts"
+    )
+    shutil.copytree(root / "worktree-manager" / "scripts", scripts)
+    if layout == "retained-payload":
+        shutil.copy(root / "worktree-manager" / "pyproject.toml", scripts.parent)
+    script = """
+import importlib.abc, importlib.util, pathlib, sys, time
+prefix, site, scripts, repo, owner, expected = sys.argv[1:]
+sys.prefix = prefix
+sys.path.insert(0, site)
+class RejectInstaller(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"worktree_manager.self_install", "worktree_manager.__main__"}:
+            raise AssertionError("acquisition imported the Manager installer")
+sys.meta_path.insert(0, RejectInstaller())
+spec = importlib.util.spec_from_file_location(
+    "_retained_versioned_runtime", pathlib.Path(scripts) / "versioned_runtime.py",
+)
+retained = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = retained
+spec.loader.exec_module(retained)
+assert "versioned_runtime" not in sys.modules
+from worktree_manager.runtime_source import acquire
+from worktree_manager.runtime_source_config import RuntimeSource
+with acquire(
+    RuntimeSource("main", repo), root=pathlib.Path(owner),
+    deadline=time.monotonic() + 30,
+) as resolved:
+    assert resolved.commit == expected
+    assert resolved.checkout != pathlib.Path(repo)
+    assert (resolved.checkout / "payload.txt").read_text() == "release one"
+assert pathlib.Path(sys.modules["versioned_runtime"].__file__).resolve() == (
+    pathlib.Path(scripts) / "versioned_runtime.py"
+).resolve()
+assert "worktree_manager.self_install" not in sys.modules
+assert "worktree_manager.__main__" not in sys.modules
+print("installed-source-acquisition-without-installer-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(prefix), str(site),
+         str(scripts), str(repo), str(tmp_path / "owner"), release],
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "installed-source-acquisition-without-installer-ok"
 
 
 def git(path: Path, *arguments: str) -> str:

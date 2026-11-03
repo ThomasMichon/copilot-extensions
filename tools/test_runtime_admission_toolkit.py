@@ -55,12 +55,49 @@ def test_admitted_seed_runs_payload_local_semantic_validation(
         with seed.retain_packaging_seed(**arguments) as tooling:
             python = tooling.slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             script = """
-import importlib.metadata, json, pathlib, sys
+import hashlib, importlib.metadata, json, pathlib, sys, time, zipfile
 root = pathlib.Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(root.parent))
 import _runtime_admission
 _runtime_admission.activate()
 assert {d.metadata["Name"] for d in importlib.metadata.distributions()} == {"packaging"}
+import agent_procutil
+assert pathlib.Path(agent_procutil.__file__).resolve().is_relative_to(root)
+from installer_wheel_inputs import WheelError
+from installer_wheel_snapshot import retain_wheel_bundle, open_wheel_bundle_snapshot
+workspace = pathlib.Path(sys.argv[2]).parent / "bundle-custody"
+workspace.mkdir()
+bundle = workspace / "wheels.zip"
+name, content = "example-1-py3-none-any.whl", b"opaque selected wheel bytes"
+with zipfile.ZipFile(bundle, "w") as archive:
+    archive.writestr("wheels/" + name, content)
+original = bundle.read_bytes()
+expected = {name: "sha256:" + hashlib.sha256(content).hexdigest()}
+limits = dict(
+    bundle_sha256="sha256:" + hashlib.sha256(original).hexdigest(),
+    max_bundle_bytes=len(original), max_wheels=1, max_archive_bytes=len(content),
+    max_total_bytes=len(content), max_snapshot_bytes=2 * len(content),
+    deadline=time.monotonic() + 10,
+)
+owner = workspace / "caller-owner"
+owner.mkdir(mode=0o700)
+for context in (
+    retain_wheel_bundle(bundle, expected, **limits),
+    open_wheel_bundle_snapshot(owner, bundle, expected, **limits),
+):
+    with context as snapshot:
+        assert snapshot.archives[name].read() == content
+        snapshot.verify()
+for changed in (
+    {"bundle_sha256": "sha256:" + "0" * 64},
+    {"max_total_bytes": len(content) - 1},
+):
+    try:
+        with retain_wheel_bundle(bundle, expected, **(limits | changed)):
+            raise AssertionError("copied toolkit accepted invalid transport evidence")
+    except WheelError:
+        pass
+assert bundle.read_bytes() == original
 from runtime_profile import ProfileError, validate_profile
 record = json.loads(pathlib.Path(sys.argv[2]).read_text())
 profile = validate_profile(record)

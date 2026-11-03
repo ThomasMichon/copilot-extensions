@@ -23,6 +23,7 @@ import time
 from agent_procutil import no_window_kwargs
 
 from .runtime_source_config import RuntimeSource
+from .self_install_runtime import running_payload_dir, runtime_scripts
 from .source_config import absolute_local_source, default_root
 
 _GIT_ROUTING_ENV = {
@@ -143,7 +144,8 @@ def acquire(
     environment: dict[str, str] | None = None,
 ) -> Iterator[ResolvedSource]:
     # The payload owns the lease library; acquisition needs no installer or CLI.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
+    sys.path.insert(0, str(scripts))
     from versioned_runtime import construction_lease
 
     _remaining(deadline)
