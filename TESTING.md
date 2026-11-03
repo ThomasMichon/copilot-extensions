@@ -9,6 +9,26 @@ It checks same-process module execution, `__main__` identity and settled instanc
 cleanup without binding a service port or touching existing sessions. This is
 source-boundary admission evidence, not installed watchdog recovery or rollout.
 
+The explicit `agent-worktrees` native packet
+`--test-file tests/test_python_runtime_install.py -k real_installer_returns_before_resident_owned_monitor_drain --allow-explicit-tiers`
+contains the three compatible routed/lock-layout controls plus one legacy-peer
+control. The latter removes the old process's asynchronous-retirement capability,
+keeps an admitted request blocked, then invokes the real retained-slot installer.
+It requires forced native predecessor exit, interrupted request reporting and an
+authenticated ready published successor, without invoking generic stale-runtime
+cleanup. It uses disposable roots and real UV construction, not installed-host
+rollout or a package-version simulation. The actor-free
+`tests/test_runtime_monitor_legacy.py` and focused installer controls separately
+cover owner/route/birth changes, absent cutover custody, unconfirmed exit and
+failed candidate activation. Required unit-only CI does not gain a native matrix.
+Windows and Linux use the shared pinned external-retirement primitive; macOS
+force-legacy support remains explicitly unavailable rather than PID-only signaling.
+The separate `Legacy monitor native acceptance` workflow selects only the
+live compatible and `legacy-protocol` cases on Linux and Windows. It runs on
+demand and is path-gated on its workflow, owning lifecycle source and native
+fixture changes on PR branches. This is a focused smoke lane, not an expansion
+of required unit-only CI. Existing serving-slot retention selectors remain unchanged.
+
 Dispatch's actor-free `test_dispatch_runtime_resolution.py` promotion packet
 checks flat/nested physical slot selection, unchanged fallback tiers, BOM
 markers, nested precedence and redirected-environment refusal. The separate

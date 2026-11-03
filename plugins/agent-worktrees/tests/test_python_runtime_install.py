@@ -1024,9 +1024,14 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
 
 
 @pytest.mark.timeout(900)
-@pytest.mark.parametrize("legacy_lock", ["live", "absent", "stale"])
+@pytest.mark.parametrize(("legacy_lock", "legacy_protocol"), [
+    ("live", False), ("absent", False), ("stale", False),
+    pytest.param("live", True, id="legacy-protocol", marks=pytest.mark.skipif(
+        sys.platform == "darwin", reason="shared pinned external retirement supports Windows and Linux",
+    )),
+])
 def test_real_installer_returns_before_resident_owned_monitor_drain(
-    driver, tmp_path, native_runtime_source, legacy_lock,
+    driver, tmp_path, native_runtime_source, legacy_lock, legacy_protocol,
 ):
     from agent_worktrees import classify_daemon, locks
     from agent_worktrees.status_monitor_cutover import ControlClient
@@ -1096,8 +1101,18 @@ def test_real_installer_returns_before_resident_owned_monitor_drain(
     monitor_probe = """
 import runpy, sys, threading
 from pathlib import Path
-from agent_worktrees import classify_daemon
-started, release = map(Path, sys.argv[1:])
+from agent_worktrees import classify_daemon, status_monitor_health
+started, release = map(Path, sys.argv[1:3])
+if sys.argv[3] == "legacy":
+    original_health = status_monitor_health.response
+    def legacy_health(**kwargs):
+        health = original_health(**kwargs)
+        health["capabilities"] = [
+            capability for capability in health["capabilities"]
+            if capability != status_monitor_health.CAPABILITY
+        ]
+        return health
+    status_monitor_health.response = legacy_health
 start_server = classify_daemon.start_server
 def controlled_server(compute, **kwargs):
     def controlled_compute(kind, payload):
@@ -1118,7 +1133,8 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
     try:
         with (tmp_path / "monitor.log").open("w", encoding="utf-8") as monitor_log:
             monitor = subprocess.Popen(
-                [python, "-I", "-B", "-c", monitor_probe, str(request_started), str(request_release)],
+                [python, "-I", "-B", "-c", monitor_probe, str(request_started), str(request_release),
+                 "legacy" if legacy_protocol else "supported"],
                 env=monitor_environment, cwd=tmp_path, stdin=subprocess.DEVNULL,
                 stdout=monitor_log, stderr=subprocess.STDOUT, **no_window_kwargs(),
             )
@@ -1206,6 +1222,16 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 assert transition.wait(timeout=60) == 0, log.read_text(encoding="utf-8", errors="replace")
                 demand_stop.set()
                 demand_thread.join(timeout=5)
+                if legacy_protocol:
+                    assert monitor_exit.result(timeout=5) != 0
+                    hook_thread.join(timeout=15)
+                    assert not hook_thread.is_alive() and "error" in hook_result
+                    assert "bounded legacy takeover" in log.read_text(encoding="utf-8")
+                    new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+                    assert new_lock["pid"] == successor.pid
+                    health = ControlClient(successor.base_url, token=token.read_text().strip()).health()
+                    assert health["published"] is True and health["status"] == "ready"
+                    return
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors
                 assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
@@ -1250,11 +1276,14 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
             demand_stop.set()
             if demand_thread is not None:
                 demand_thread.join(timeout=5)
-            if demand_endpoint is not None:
+            if demand_endpoint is not None and not legacy_protocol:
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
+            from zdd import process_exit
+
             for pid, identity in identities.items():
                 if identity is not None:
-                    diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)
+                    cleanup = diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)
+                    assert cleanup.get("exit_confirmed") is True or process_exit.observe_original_exit(pid, identity)
         finally:
             try:
                 for process in processes:
@@ -1378,6 +1407,8 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monk
         assert result.returncode != 0
         if missing == "installer_retained_content.py":
             assert missing in result.stderr
+        elif missing == "installer_dependency_arguments.py":
+            assert "FileNotFoundError" in result.stderr and missing in result.stderr
         else:
             assert f"No module named '{Path(missing).stem}'" in result.stderr
     else:
@@ -1560,3 +1591,71 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
         assert json.loads(subprocess.check_output(
             info_probe, env=environment, text=True, timeout=30, **no_window_kwargs(),
         )) == info
+
+
+@pytest.mark.parametrize("activation_fails", [False, True])
+def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_truthful(
+    driver, tmp_path, monkeypatch, activation_fails,
+):
+    from agent_worktrees import config as cfg, runtime_monitor_identity as monitor, status_monitor_cutover as cutover
+
+    root = tmp_path / "runtime"
+    _slot(driver, root, "1.0.0")
+    _slot(driver, root, "2.0.0")
+    driver.runtime.activate(root, "1.0.0", link_free=True)
+    events = []
+    class Governance:
+        def __init__(self, requested, payload):
+            self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
+        def signature(self):
+            return {}
+        def recheck(self):
+            pass
+        def held(self, **kwargs):
+            return nullcontext()
+    class Guard:
+        def release(self):
+            events.append("released")
+    guard = Guard()
+    predecessor = (202, "2002", "1.0.0")
+    def unsupported(_root):
+        raise monitor.AsyncRetirementUnsupported("legacy fixture", predecessor)
+    def retire(requested, expected, *, guard):
+        assert requested == root and expected == predecessor
+        assert guard is not None and driver.runtime.current_version(root) == "1.0.0"
+        events.append("retired")
+        return {"pid": 202, "exit_confirmed": True, "forced": True}
+    def activate(**kwargs):
+        assert events == ["retired"]
+        assert driver.runtime.current_version(root) == "2.0.0"
+        assert kwargs["monitor_was_live"] is False
+        assert kwargs["retired_predecessor"] == predecessor[:2]
+        assert kwargs["asynchronous_retirement"] is True
+        assert kwargs["retirement_predecessor"] is None
+        assert kwargs["cutover_guard"] is guard
+        events.append("activation")
+        return {"action": "cutover", "result": {
+            "ok": not activation_fails, "committed": not activation_fails,
+            "rolled_back": activation_fails, "error": "fixture health failure" if activation_fails else None,
+        }}
+    monkeypatch.setattr(driver, "Governance", Governance)
+    monkeypatch.setattr(driver, "_load_installed", lambda slot: None)
+    monkeypatch.setattr(driver, "_monitor_identity", unsupported)
+    monkeypatch.setattr(driver, "_monitor_slot", lambda *a: "1.0.0")
+    monkeypatch.setattr(driver, "_candidate_serving", lambda *a: (
+        "activation" in events and not activation_fails
+    ))
+    monkeypatch.setattr(monitor, "retire_legacy", retire)
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda directory: guard)
+    monkeypatch.setattr(cutover, "activate_after_update", activate)
+    kwargs = dict(payload=tmp_path, payload_hash="previous", expected_governance={}, previous="1.0.0")
+    if activation_fails:
+        with pytest.raises(driver.InstallationRefused, match="rolled back"):
+            driver.settle_candidate(root, "2.0.0", **kwargs)
+        assert driver.runtime.current_version(root) == "1.0.0"
+    else:
+        result = driver.settle_candidate(root, "2.0.0", **kwargs)
+        assert result["runtime_version"] == "2.0.0" and result["retirement_pending"] is False
+    assert events == ["retired", "activation", "released"]

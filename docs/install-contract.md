@@ -5030,18 +5030,39 @@ installer opts into resident-owned predecessor retirement: it promotes and
 attests the published successor, then finishes without an old drain RPC or a
 predecessor-exit wait. The outgoing resident observes supersession and drains
 and retires independently; `retirement_pending` is not an exit receipt.
-Monitor identity and retirement accept both an owned version directory as the
-interpreter prefix and its managed `.venv` child. Health keeps the version slot
+Serving attestation follows the authenticated active route, exact native birth,
+runtime prefix/slot and generation, rechecking route and birth after health.
+An outgoing discovery lock may lag while that owner drains; it cannot veto a
+healthy published successor. Monitor identity and retirement accept both an
+owned version directory as the interpreter prefix and its managed `.venv` child. Health keeps the version slot
 name; slot retention, serving attestation and retained-helper lookup normalize
 only that owned layout, without treating an unrelated external environment as
 an installed slot.
-Both the outgoing and incoming monitors must advertise
-`status-monitor-async-retirement-v1` for this flow. The outgoing peer is
-authenticated before selector mutation; an unsupported or unrouted incumbent
-is an explicit refusal, not unsafe self-exit, a synchronous fallback or a
-package-version guess. Both peers also need guarded preparation recovery and
-a valid receiver generation; generation-less source/legacy residents refuse
-before selector mutation rather than leaving an unrecoverable preparation.
+Both the outgoing and incoming monitors advertise
+`status-monitor-async-retirement-v1`, guarded preparation recovery and a valid
+receiver generation for this asynchronous flow. Missing predecessor capability
+selects a bounded cold fallback, not an update veto or a package-version guess.
+The installer authenticates the routed owner, retains its actual runtime slot
+and verifies candidate/helper inputs first. Under its existing cutover and
+publication authority it rechecks the exact selection, authenticated route and
+native birth, then force-terminates only that predecessor through the canonical
+`agent_procutil.process_retirement.PinnedProcess`. Native exit is confirmed on
+that same handle/pidfd before selector activation and fresh successor startup.
+No shutdown RPC, old-contract cooperation, extra repair flag, generic restart
+or broad stale-runtime sweep is required. The incoming generation still passes
+the existing prepared-child, promotion and serving-health checks. Interrupted
+old requests and failed activation remain explicit, not graceful completion.
+
+This forced fallback supports Windows and Linux. macOS remains explicitly
+unsupported for forced legacy retirement because the shared external pinned
+termination primitive does not provide it; no birth-check-then-raw-PID kill is
+substituted. Candidate construction is independent, but unsafe activation reports
+failure. Unrouted or unauthenticated owners, changed native identity, foreign
+runtime prefixes and failed exit confirmation are not termination authority.
+Capability-advertising peers with invalid recovery identities retain their
+explicit contract refusal. Compatible predecessors keep asynchronous retirement
+and its unchanged custody below; a positively exited cold predecessor needs no
+deferred drain grant. This fallback does not authorize on-demand historical cleanup.
 Preparation health binds the responding PID and native birth to the captured
 spawned child before publication. The captured birth is rechecked at the
 publication boundary; another authenticated listener on the port is not that

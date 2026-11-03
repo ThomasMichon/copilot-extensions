@@ -1,0 +1,9 @@
+{
+  "comment": "Replace authenticated legacy monitors without asynchronous retirement support through bounded identity-pinned cold takeover; preserve the capable asynchronous path.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

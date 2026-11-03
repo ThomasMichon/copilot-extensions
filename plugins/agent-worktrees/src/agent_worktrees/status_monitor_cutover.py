@@ -626,6 +626,7 @@ def activate_after_update(
     transition_custody: ExitStack | None = None,
     asynchronous_retirement: bool = False,
     retirement_predecessor: dict | None = None,
+    retired_predecessor: tuple[int, str] | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
     from . import status_monitor_reap_stale
@@ -663,6 +664,18 @@ def activate_after_update(
     if spawned_handles is not None:
         restart_arguments["spawned_handles"] = spawned_handles
     lock_live = _monitor_lock_is_live()
+    if retired_predecessor is not None:
+        from zdd import process_exit
+
+        if not asynchronous_retirement or cutover_guard is None or spawned_handles is None:
+            raise ValueError("Cold startup requires the owning installer and cutover guard")
+        record = locks.read_lock(smr._monitor_lock_path()) or {}
+        if lock_live and (record.get("pid"), record.get("start_time")) != retired_predecessor:
+            raise ValueError("A different monitor owns the lock after legacy retirement")
+        if process_exit.observe_original_exit(*retired_predecessor) is not True:
+            raise ValueError("Legacy predecessor native exit is unconfirmed before startup")
+        # A retained exited object can still satisfy the legacy existence probe.
+        lock_live = monitor_was_live = False
     if asynchronous_retirement:
         if retirement_predecessor is None and retirements.retirement_only(
             smr._aw_runtime_home(), locks.read_lock(smr._monitor_lock_path()),
@@ -692,7 +705,7 @@ def activate_after_update(
             if cutover_guard is None or spawned_handles is None:
                 status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
-        if not monitor_was_live:
+        if not monitor_was_live and retired_predecessor is None:
             summary["reason"] = "no-live-monitor"
             return summary
     active_url = _monitor_control_url_from_route()
