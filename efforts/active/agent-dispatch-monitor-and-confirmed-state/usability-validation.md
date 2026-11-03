@@ -12,11 +12,17 @@ configured-source publication, ordinary first-prompt admission and actual
 allocator-instance binding have merged source coverage through #10182.
 They are foundations, not proof that the ordinary running service is usable.
 
-Ordinary ACP retry/decision integration retains the original Bridge/native
+Ordinary ACP retry/decision integration merged in #10191 and retains the original Bridge/native
 binding and routing/charter seed. It accepts the real idle `at_rest` projection,
 negotiates receiver-side no-resume enforcement under the turn lock, and keeps
 ordinary receipt observation compatible with the previous strict receiver.
 Unknown outcomes permit receipt observation, not replay or replacement.
+The [managed CLI integration journal](journal/2026/11.03-managed-cli-startup.md)
+records the next source slice: explicit CLI placement, post-claim generation
+refresh and a first prompt that accepts its existing assignment. Contained
+tests are not native qualification. A live ordinary baseline reached worker
+acceptance, but used legacy claim-after-prompt ordering, so allocator-before-
+spawn and whole-cohort adoption remain unproven.
 Installed/native acceptance, complete cohort adoption and the remaining
 worker-side lifecycle behavior are still unqualified.
 
@@ -40,8 +46,8 @@ before an otherwise authorized source-backed test.
    attempts/backoff. Worktree finalization must precede `SUBMITTED` and evaluator
    execution. Failures remain visible without surrendering unknown capacity.
 3. **Complete ordinary/mixed-driver integration.** Reconcile remaining direct
-   legacy definitions and CLI first-prompt ordering, preserve restricted and
-   legacy compatibility, and enable only the intended complete cohort through
+   legacy definitions, qualify managed CLI first-prompt ordering on a real
+   native, preserve restricted and legacy compatibility, and enable only the intended complete cohort through
    existing source/registration owners. No independent registry or bypass worker
    launch may substitute for the ordinary path.
 4. **Exercise a complete real workload in isolation.** Reuse the existing

@@ -11,7 +11,10 @@ from .queue_records import TaskError
 KEYED_NATIVE_PROTOCOL = 45
 
 
-def startup_seed(task: dict, client, *, route: str = "", all_repos: bool = False) -> str:
+def startup_seed(
+    task: dict, client, *, route: str = "", all_repos: bool = False,
+    driver: str = "ordinary-bridge",
+) -> str:
     """Use one original-lineage seed for both ordinary launch entry points."""
     from .embody import autopilot_worker_prompt
     if not callable(getattr(client, "get_reservation", None)):
@@ -19,17 +22,26 @@ def startup_seed(task: dict, client, *, route: str = "", all_repos: bool = False
         raise BridgeUnavailable("ordinary coordinator reservation read-back is unavailable")
     from .client import DispatchError
     try:
+        if driver == "cli":
+            from .client_pool_placement import _validate_contract
+            _validate_contract(
+                client.pool_placement_contract(), driver=driver, explicit_start=True, initial_start=True,
+            )
         reservation = client.get_reservation(task["spawn_reservation_key"])
     except (DispatchError, TaskError) as exc:
         from .bridge import BridgeCarriedSessionBusy
         raise BridgeCarriedSessionBusy(f"ordinary startup seed reservation read failed: {exc}") from exc
     from .ordinary_pool_startup import assignment
     try:
-        placed = assignment(task, reservation)
+        placed = assignment(task, reservation, driver=driver)
         if placed is not None:
             from .client_pool_placement import _validate_contract
             from .embody_prompts import pool_worker_prompt
-            _validate_contract(client.pool_placement_contract(), driver="ordinary-bridge")
+            if driver == "cli":
+                from .ordinary_pool_startup import require_cli_initial_admission
+                require_cli_initial_admission(reservation)
+            else:
+                _validate_contract(client.pool_placement_contract(), driver=driver)
             return pool_worker_prompt(
                 task["id"], generation=placed["task_generation"], route=route,
                 repo=None if all_repos else task.get("repo"), all_repos=all_repos,
