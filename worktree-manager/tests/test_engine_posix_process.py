@@ -19,16 +19,19 @@ from worktree_manager import companion_client, engine_client
 from worktree_manager import picker_review
 from threading import Event
 from worktree_manager.companion_timeline_attachment import TimelineAttachment
-from worktree_manager.companion_timeline_controller import TimelineCleanupError
+from worktree_manager.companion_timeline_controller import TimelineCleanupError, TimelineController
+from worktree_manager.companion_timeline_contract import HistoryPage, Completeness, Provider
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.engine_process import EngineCleanupError
 from test_companion_timeline_widget import TimelineApp
+from test_companion_timeline_controller import Source, token, position, snapshot
 from test_companion_worktree_source import configured as configured
 from test_companion_agenda_live import current_data, until
 from test_agenda_posix_process import provider as provider
 from test_agenda_contract import publication
 from contextlib import contextmanager
 import asyncio
+from dataclasses import replace
 
 
 @pytest.mark.parametrize("outcome", ["success", "timeout", "interrupt", "invalid", "closed", "launch-failed"])
@@ -319,3 +322,74 @@ def test_review_reader_retains_terminal_cleanup_without_relaxing_read_only_polic
     with pytest.raises(picker_review.ReadOnlyError):
         picker_review.require_writable()
     review.reads.close()
+
+
+@pytest.mark.parametrize("failure_kind", ["page", "reader"])
+@pytest.mark.parametrize("retirement", ["select", "close"])
+def test_terminal_failure_survives_second_read_and_task_slot_replacement(failure_kind, retirement):
+    async def run():
+        result = asyncio.get_running_loop().create_future()
+        delivered, errors = [], []
+        changed = asyncio.Event()
+        selected, other = token(), token(Provider.BRIDGE)
+
+        def second_request():
+            assert not errors, "the done callback ran before the race witness"
+            try:
+                accepted = controller.request_history(selected, position(selected))
+            except TimelineCleanupError as failure:
+                result.set_result(failure)
+            else:
+                result.set_result(accepted)
+
+        class FailedSource(Source):
+            async def observe(self, requested, *, stop):
+                if failure_kind == "reader":
+                    yield snapshot(requested)
+                    asyncio.get_running_loop().call_soon(second_request)
+                    raise TimelineCleanupError("reader resource retirement failed")
+                async for value in super().observe(requested, stop=stop):
+                    yield value
+
+            async def history(self, requested, before, *, stop):
+                if failure_kind == "page" and not self.page_started.is_set():
+                    self.page_started.set()
+                    asyncio.get_running_loop().call_soon(second_request)
+                    raise TimelineCleanupError("page resource retirement failed")
+                return HistoryPage(requested, before, None, (), Completeness.PARTIAL)
+
+        healthy = Source()
+
+        def receive(value):
+            delivered.append(value)
+            if value.purpose == "other provider still usable":
+                changed.set()
+
+        controller = TimelineController(
+            {Provider.WORKTREES: FailedSource(), Provider.BRIDGE: healthy},
+            observation=receive, page=lambda value: None, error=lambda requested, message: errors.append(message),
+        )
+        try:
+            await controller.select((selected, other))
+            if failure_kind == "page":
+                assert controller.request_history(selected, position(selected))
+            witness = await asyncio.wait_for(result, 1)
+            assert isinstance(witness, TimelineCleanupError), "a second read replaced terminal failure custody"
+            await healthy.queue.put(replace(snapshot(other), purpose="other provider still usable"))
+            await asyncio.wait_for(changed.wait(), 1)
+            assert controller.request_history(other, position(other))
+            healthy.page_release.set()
+            controller._pages[Provider.WORKTREES] = asyncio.create_task(asyncio.sleep(0))
+            action = controller.close() if retirement == "close" else controller.select((token(epoch=1),))
+            with pytest.raises(TimelineCleanupError):
+                await action
+            with pytest.raises(TimelineCleanupError):
+                await controller.close()
+            assert controller.reader_count == controller.page_count == 0
+        finally:
+            try:
+                await controller.close()
+            except TimelineCleanupError:
+                pass
+
+    asyncio.run(run())

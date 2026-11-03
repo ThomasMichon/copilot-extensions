@@ -12,7 +12,7 @@ import pytest
 from textual.widgets import Button, TabbedContent
 
 from worktree_manager.companion_timeline_contract import (
-    Availability, Completeness, EventRef, EvidenceKind, SourceToken, TimelineContractError,
+    Availability, Completeness, EventRef, EvidenceKind, Provider, SourceToken, TimelineContractError,
     TimelineGap, TimelineKind, TimelineSnapshot,
 )
 from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
@@ -351,7 +351,8 @@ def fixtures_to_ref(token: SourceToken, event_id: str) -> EventRef:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="owned POSIX fixture executable")
-def test_actual_retirement_failure_is_latched_and_blocks_new_reads(configured, monkeypatch) -> None:
+@pytest.mark.parametrize("failure_kind", ["reader", "history"])
+def test_actual_retirement_failure_is_latched_and_blocks_new_reads(configured, monkeypatch, failure_kind) -> None:
     root, calls = configured
     resource = root / "descriptor-lease"
     resource.write_bytes(b"private fixture resource")
@@ -362,7 +363,10 @@ def test_actual_retirement_failure_is_latched_and_blocks_new_reads(configured, m
         stream = frames(argv, cancelled=cancelled, cwd=cwd)
         lease = None
         try:
-            if "--follow" in argv:
+            if (
+                failure_kind == "reader" and "--follow" in argv
+                or failure_kind == "history" and "--before-cursor" in argv
+            ):
                 lease = resource.open("rb")
                 leases.append(lease)
             yield from stream
@@ -380,6 +384,16 @@ def test_actual_retirement_failure_is_latched_and_blocks_new_reads(configured, m
             attachment = TimelineAttachment(panel, cwd=str(root))
             try:
                 await attachment.set_selection(("example", "selected", "head-a"))
+                if failure_kind == "history":
+                    await until(pilot, lambda: len(panel.window.events) == 20)
+                    selected = next(iter(panel.window.sources.values()))
+                    assert selected.before is not None
+                    assert attachment.controller is not None
+                    assert attachment.controller.request_history(selected.token, selected.before)
+                    page = attachment.controller._pages[Provider.WORKTREES]
+                    await asyncio.gather(page, return_exceptions=True)
+                    with pytest.raises(TimelineCleanupError):
+                        attachment.controller.request_history(selected.token, selected.before)
                 await until(pilot, lambda: bool(leases))
                 await attachment.set_selection(None)
                 assert attachment._cleanup_error is not None

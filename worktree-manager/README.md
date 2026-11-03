@@ -94,6 +94,12 @@ again. Only a typed failure of owned process/pipe retirement latches cleanup
 and blocks replacement; ordinary transport failures do not poison that gate.
 Adapters normalize read failures into `TimelineSourceError` and tag failed
 owned-resource retirement with `TimelineCleanupError`, including during stop.
+Controller terminal failures retain their source identity and exception custody
+independently of reader/page task slots for the controller's lifetime. They fence
+further reads and cooperatively stop the affected source, not healthy providers.
+Recording precedes task completion, with synchronous completed-task harvesting
+before new page admission; delayed done callbacks cannot lose the fence.
+Selection retirement and repeated close still propagate the retained failure.
 The same retirement marker covers POSIX group sweep/reaping and portable
 process/pipe cleanup; an ordinary read timeout remains distinct. Legacy Agenda
 reports terminal retirement failures without retrying its subscription or
