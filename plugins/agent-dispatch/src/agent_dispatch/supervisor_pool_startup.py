@@ -10,7 +10,8 @@ import httpx
 
 from .action_controls import action_inhibited
 from .client_errors import DispatchError
-from .queue_records import SpawnState, Status
+from .pool_startup_retry_contract import driver_binding
+from .queue_records import SpawnState, Status, TaskError
 from .tracking import LIVE
 
 if TYPE_CHECKING:
@@ -45,10 +46,13 @@ def supervise_pool_startup(
         budget, current, assigned = (
             snapshot["budget"], snapshot["reservation"], snapshot["task"],
         )
-        if current.get("driver") == "ordinary-bridge":
-            log.info("ordinary pool startup retained for %s: automatic retry transport is not qualified",
-                     current["key"])
-            return False
+        ordinary = current.get("driver") == "ordinary-bridge"
+        if ordinary:
+            contract = owner.client.pool_startup_contract()
+            if contract.get("ordinary_same_native_retry") is not True or (
+                "ordinary-bridge" not in contract.get("supported_drivers", [])
+            ):
+                return False
         if (
             current["key"] != reservation["key"]
             or current["startup_revision"] != reservation["startup_revision"]
@@ -58,7 +62,7 @@ def supervise_pool_startup(
             or assigned.get("hold_reason") is not None or assigned.get("awaiting_steer")
             or budget["exhausted_at"] is not None or budget["startup_deadline"] is None
             or current["state"] not in {SpawnState.RESERVING, SpawnState.SPAWNED}
-            or current.get("driver") != "cli"
+            or current.get("driver") != reservation.get("driver")
             or current.get("release_requested") or current.get("startup_fenced")
             or current.get("conversation_retired") or current.get("cooling_token") is not None
             or current.get("conclusion_state") == "pending"
@@ -111,6 +115,7 @@ def supervise_pool_startup(
         if not all(isinstance(value, str) and value.strip() for value in (native, worktree, machine)):
             log.info("pool startup retained for %s: exact native/workspace/host is unavailable", current["key"])
             return False
+        driver = driver_binding(current, native)
         if pending_retry:
             from .pool_startup_delivery import deliver_retry
             kind, detail = deliver_retry(invocation, observe_only=True)
@@ -120,11 +125,16 @@ def supervise_pool_startup(
             owner.client.complete_pool_startup(
                 task["id"], current["key"], native_id=native, worktree=worktree, machine=machine,
                 reserved_by=owner.supervisor_id, outcome_kind=kind, detail=detail, **arguments,
+                **driver,
             )
             return True
         try:
-            verdict = owner.verdict_fn(worktree, machine, native)
-            session = owner.liveness_fn(worktree, machine) if verdict == LIVE else None
+            if ordinary:
+                from .pool_startup_acp import reachable
+                session = {"session_id": native, "worktree_id": worktree} if reachable(current, native) else None
+            else:
+                verdict = owner.verdict_fn(worktree, machine, native)
+                session = owner.liveness_fn(worktree, machine) if verdict == LIVE else None
         except Exception:
             log.warning("pool startup probe unavailable for %s; native remains unknown", current["key"],
                         exc_info=True)
@@ -138,6 +148,7 @@ def supervise_pool_startup(
             pending = owner.client.retry_pool_startup(
                 task["id"], current["key"], native_id=native, worktree=worktree,
                 machine=machine, reserved_by=owner.supervisor_id, **arguments,
+                **driver,
             )
             invocation = pending["invocation"]
             kind, detail = deliver_retry(invocation, observe_only=False)
@@ -145,6 +156,7 @@ def supervise_pool_startup(
                 task["id"], current["key"], native_id=native, worktree=worktree, machine=machine,
                 reserved_by=owner.supervisor_id, outcome_kind=kind, detail=detail,
                 generation=budget["generation"], startup_revision=invocation["startup_revision"],
+                **driver,
             )
             if kind == "startup_unknown":
                 log.warning("pool retry delivery remains unknown for %s; retained without replay", current["key"])
@@ -169,17 +181,30 @@ def supervise_pool_startup(
             "a notification is not acceptance. Record a blocker if you cannot decide. "
             "Do not acquire a second claim or release another owner's assignment."
         )
+        key = (
+            f"pool-startup:{current['key']}:{budget['generation']}:"
+            f"{current['startup_revision']}:{slot['next_nudge_at']}"
+        )
+        if ordinary:
+            from .pool_startup_acp import deliver
+            from .pool_startup_retry_contract import ordinary_prompt
+            message += "\n\n" + ordinary_prompt({
+                "task_id": task["id"], "generation": budget["generation"],
+                "native_id": native, "worktree": worktree,
+            }, current)
+            kind, _ = deliver({
+                **driver, "native_id": native, "machine": machine,
+                "idempotency_key": key, "prompt": message,
+            }, observe_only=False)
+            return kind == "startup_succeeded"
         delivered = bridge.send_nudge(
             worktree, message, machine=machine, expected_session_id=native,
-            idempotency_key=(
-                f"pool-startup:{current['key']}:{budget['generation']}:"
-                f"{current['startup_revision']}:{slot['next_nudge_at']}"
-            ),
+            idempotency_key=key,
         )
         if not delivered:
             log.warning("pool startup nudge delivery is unknown for %s; slot is not acceptance", current["key"])
         return delivered
-    except (DispatchError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+    except (DispatchError, TaskError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
         log.warning("pool startup supervision unavailable or changed for %s; legacy recovery refused",
                     reservation.get("key"), exc_info=True)
         return False

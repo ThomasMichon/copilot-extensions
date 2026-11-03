@@ -8,7 +8,7 @@ import sqlite3
 from typing import Any
 
 from .ordinary_native_bindings import reservation_native_identity
-from .pool_startup_retry_contract import retry_invocation
+from .pool_startup_retry_contract import driver_binding, retry_invocation, session_handle
 from .queue_pool_placement import pool_worker_matches
 from .queue_pool_startup import STARTUP_ATTEMPTS, _current
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
@@ -23,6 +23,9 @@ def prepare_mutation(
         "version", "task_id", "reservation_key", "generation", "startup_revision",
         "native_id", "worktree", "machine", "reserved_by", "action",
     }
+    ordinary = row["driver"] == "ordinary-bridge"
+    if ordinary:
+        expected_fields |= {"driver", "bridge_session_id"}
     action = binding.get("action")
     fields = expected_fields | ({"outcome_kind", "detail"} if action == "complete" else set())
     if (
@@ -46,7 +49,7 @@ def prepare_mutation(
         or row["key"] != binding["reservation_key"]
         or assignment["task_generation"] != binding["generation"]
         or row["startup_revision"] != binding["startup_revision"]
-        or row["driver"] != "cli" or row["conversation_retired"]
+        or row["driver"] not in {"cli", "ordinary-bridge"} or row["conversation_retired"]
         or row["worktree"] != binding["worktree"]
         or row["execution_machine"] != binding["machine"]
         or row["reserved_by"] != binding["reserved_by"]
@@ -54,6 +57,10 @@ def prepare_mutation(
         or row["cooling_token"] is not None
     ):
         raise TaskError("pool retry incarnation, caller or retained native changed")
+    retained = {**dict(row), "agent_info": json.loads(row["agent_info"]) if row["agent_info"] else None}
+    expected_driver = driver_binding(retained, binding["native_id"])
+    if any(binding.get(name) != value for name, value in expected_driver.items()):
+        raise TaskError("pool retry ordinary Bridge binding changed")
     base = {name: binding[name] for name in expected_fields - {"action"}}
     if action == "retry":
         owner.require_worker_admission()
@@ -76,7 +83,7 @@ def prepare_mutation(
             conn, task, f"{assignment['machine']}/{row['worktree']}",
             binding["native_id"], binding["generation"],
         )
-        invocation = retry_invocation(base, row["startup_revision"] + 1)
+        invocation = retry_invocation(base, row["startup_revision"] + 1, reservation=retained)
         conn.execute(
             "UPDATE task_pool_assignments SET retry_invocation=? WHERE reservation_key=?",
             (json.dumps(invocation, sort_keys=True), row["key"]),
@@ -89,7 +96,7 @@ def prepare_mutation(
         ) or completion is not (None if outcome == "startup_unknown" else True):
             raise TaskError("pool retry completion requires the original classified caller return")
         retained_invocation = json.loads(assignment["retry_invocation"]) if assignment["retry_invocation"] else None
-        if retained_invocation != retry_invocation(base, row["startup_revision"]):
+        if retained_invocation != retry_invocation(base, row["startup_revision"], reservation=retained):
             raise TaskError("pool retry completion does not own this invocation")
         current = task.generation == binding["generation"] and (
             task.status == Status.CLAIMED and task.owner is None
@@ -152,7 +159,7 @@ def record_retry(owner: Any, key: str, binding: dict) -> SpawnReservation:
         None if binding["outcome_kind"] == "startup_unknown" else True
     )
     result: SpawnReservation = owner.record_spawn(
-        key, session_handle=binding["native_id"], worktree=binding["worktree"],
+        key, session_handle=session_handle(binding), worktree=binding["worktree"],
         startup_revision=binding["startup_revision"], startup_complete=completion,
         pool_startup_retry=binding,
     )

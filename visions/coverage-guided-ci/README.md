@@ -5,7 +5,7 @@
   actually needs to run
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-11-02
 - **Reality docs:** none yet (see Provenance)
 
 ## Purpose & Intent
@@ -38,6 +38,21 @@ multi-process or end-to-end integration as a release prerequisite. Those
 families run periodically in containers.
 
 ## Concepts & Components
+
+### coverage auditability
+
+Each test's coverage auditability is independent of its portfolio tier and
+effects. Only tests whose relevant execution and dependency attribution is
+complete and trustworthy for the admitted profile may be conditionally
+excluded by a diff. A tag, a coverage hit or a high coverage percentage alone
+cannot establish that property. Tests with external behavior, missing or partial
+attribution, or unknown classification remain mandatory within their existing
+eligible lane, regardless of coverage selection or fallback budgets.
+
+The goal is to reduce this always-run footprint by making tests more
+auditable without weakening their assertions, not to instrument every native
+process or environment configuration. Platform restrictions, manual admission
+and periodic integration cadence remain independent of coverage auditability.
 
 ### coverage baseline
 
@@ -163,7 +178,9 @@ tiered and budgeted portfolio run for a given change — it does not introduce
 a competing notion of which tests are worth keeping. `test-portfolio`'s own
 contract map, tiering, and budgets remain the source of truth for what
 exists; this capability only narrows *when* each already-justified test
-runs.
+runs when complete, profile-correct coverage auditability supports it.
+Selection and fallback always retain the eligible unauditable and unclassified
+inventory; absence from a baseline is not permission to omit a test.
 
 ### never quieter than the evidence supports
 

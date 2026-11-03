@@ -279,7 +279,8 @@ def test_real_send_parser_keeps_the_native_target_and_gates_the_receiving_daemon
     args.func(args)
     assert len(calls) == 1
     assert calls[0] == (
-        "POST", "/api/v1/sessions/bridge-a/turns/native-bound/send", request.model_dump(),
+        "POST", "/api/v1/sessions/bridge-a/turns/native-bound/send",
+        request.model_dump(exclude={"no_resume"}),
     )
     assert json.loads(capsys.readouterr().out)["invocation_key"] == "same-operation"
     assert session.turn_count == 1
@@ -377,3 +378,49 @@ async def test_strict_resume_reaches_actual_cold_reconnect_without_holding_turn_
     assert turn["acquisition_delivery_id"] == "cold-outage:fixture-outage"
     assert session.acp_session_id == "native-a"
     assert turn["prompt"] != request.prompt
+
+
+@pytest.mark.asyncio
+async def test_no_resume_rechecks_stopped_native_after_waiting_for_turn_lock(native_send, tmp_db):
+    manager, session, request = native_send
+    request = request.model_copy(update={"no_resume": True})
+    async with session._turn_start_lock:
+        pending = asyncio.create_task(submit(manager, session.session_id, request))
+        await asyncio.sleep(0)
+        session.status = SessionStatus.STOPPED
+    with pytest.raises(ValueError, match="native_session_stopped"):
+        await pending
+    assert session.turn_count == 0 and tmp_db.get_turns(session.session_id) == []
+    manager.resume_session.assert_not_awaited()
+    manager.handoff_session.assert_not_awaited()
+    manager._run_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_resume_replays_only_original_receipt_even_when_stopped(native_send):
+    manager, session, request = native_send
+    assert session.public_state() == (SessionStatus.IDLE, True, None)
+    request = request.model_copy(update={"no_resume": True})
+    saved = await submit(manager, session.session_id, request)
+    await session._prompt_task
+    session.status = SessionStatus.STOPPED
+    assert await submit(manager, session.session_id, request) == saved
+    assert session.turn_count == 1
+    manager.resume_session.assert_not_awaited()
+
+
+@pytest.mark.parametrize("capabilities", [{}, {"native_send_no_resume": True}, {"native_send_no_resume": 1}])
+def test_cli_no_resume_negotiates_and_binds_the_original_native(
+    native_send, monkeypatch, capsys, capabilities,
+):
+    _, session, _ = native_send
+    args, calls = _command(native_send, monkeypatch, capabilities=capabilities)
+    args.no_resume = True
+    if type(capabilities.get("native_send_no_resume")) is not int:
+        with pytest.raises(SystemExit) as refused:
+            args.func(args)
+        assert refused.value.code == 69 and not calls and session.turn_count == 0
+    else:
+        args.func(args)
+        assert calls[0][2]["no_resume"] is True and session.turn_count == 1
+        assert json.loads(capsys.readouterr().out)["admission"] == "accepted"

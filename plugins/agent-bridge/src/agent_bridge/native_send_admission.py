@@ -14,6 +14,7 @@ class NativeSendPrompt(BaseModel):
     expected_native_session_id: str = Field(min_length=1, max_length=1024)
     prompt: str = Field(min_length=1)
     caller_id: str | None = None
+    no_resume: bool = Field(default=False, strict=True)
 
     @field_validator("invocation_key", "expected_native_session_id")
     @classmethod
@@ -26,6 +27,7 @@ class NativeSendPrompt(BaseModel):
         return {
             "version": 1, "operation": "send", "source": "agent-bridge",
             "native_session_id": self.expected_native_session_id, "caller_id": self.caller_id,
+            **({"no_resume": True} if self.no_resume else {}),
         }
 
     def delivery_id(self) -> str:
@@ -72,6 +74,8 @@ async def submit(
                 return saved
             if manager.is_draining:
                 raise DaemonDrainingError("turn")
+            if request.no_resume and session.status == SessionStatus.STOPPED:
+                raise ValueError("native_session_stopped")
             if may_resume and session.status == SessionStatus.STOPPED:
                 return None
             await manager._submit_prompt_locked(

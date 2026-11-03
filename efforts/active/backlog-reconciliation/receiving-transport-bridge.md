@@ -25,6 +25,17 @@ current receiving readback precede separate source-condition judgments.
 The exact receiving conditions require direct ROOT retention; this unit
 does not reorganize incumbent effort history or substitute a sidecar link.
 
+**Actual reviewed delivery:** #9516 merged at 2026-10-29 04:47:46 UTC
+(2026-10-28 21:47:46 Pacific), merge
+`f0ef6d995be1cbd87cb50a325fdd1a0196c1d6c0`. Copilot approved exact head
+`2fe82749cd603e4d33376f52e374e63794f7d00c` with no active review issues;
+the complete thread connection was empty and all three required checks
+passed. All eleven authored file blobs survived managed publication and
+merge unchanged. The campaign README was reread and remains Active.
+Subsequent complete current receiving readback and separate source judgments
+are recorded below; the merge itself is reviewed document delivery, not
+technical acceptance or disposition.
+
 ## Receiving contracts and retained limits
 
 Priority and sequencing below are **agent-recommended**, not executor
@@ -67,10 +78,59 @@ appointments or authority to run product/native experiments.
    exists. #4050 remains standalone rather than broadening a historical
    review merely to obtain a lower issue count.
 
-The last complete census remains **923 open at 2026-10-29 04:24:56 UTC**
-(2026-10-28 21:24:56 Pacific), **194 above the fixed 729 checkpoint**.
-This unit has performed no provider disposition and supplies no numerical
-reduction credit. The campaign stays Active.
+At proposal time the last complete census was **923 open at 2026-10-29
+04:24:56 UTC** (2026-10-28 21:24:56 Pacific), **194 above the fixed 729
+checkpoint**. No reduction was credited to document authorship or merge.
+
+## Complete readback and separate source judgments
+
+After actual #9516 delivery, the coordinator read all five COMPLETE current
+ROOTs and all strict annexes, including the shared Dispatch conversation
+contract and operator direction. The twelve read documents match the
+actual merged bytes. Fresh complete metadata qualified all ten source
+originals and their eligible refinements, current assignments, edit histories
+and necessary keepers against the full eleven-member collaborator roster.
+The separate judgments used 55 whole current source records and 52 whole
+necessary-keeper records; no product execution supplied this evidence.
+
+Two independently guarded administrative `not_planned` supersessions were
+published and read back:
+
+| Source | Actual disposition | Continuing unfinished work |
+|---|---|---|
+| #2860 | [Verified explanation](https://github.com/ThomasMichon/copilot-extensions/issues/2860#issuecomment-6488384159) | Direct Index P.2860/V.2860/G2860 retain all FOUR feed/SSH/CUDA-and-CPU/existing-data-cutover witnesses, inputs, alternatives and actual adopter/canary/data/model/deployment custody. #5768/#6383 and assigned #1843/#1941 remain open. |
+| #2885 | [Verified explanation](https://github.com/ThomasMichon/copilot-extensions/issues/2885#issuecomment-6488391153) | Direct Dispatch P.2885/V.2885/G2885 retain semantic category AND explanation, age/query/presentation, all clarification cases and LONG-TERM GENERAL per-session viewer compatibility. #2879/#2887 and actual backend/UI/native custody remain independent. |
+
+Eight sources remain OPEN and unchanged:
+
+- #84 expressly keeps the lifecycle canonical OPEN; its complete current
+  body and the merged ROOT coordination still name that live source.
+  Preserve the literal token/operative-pointer condition and protected
+  #912/#3000/#3584/#6579. A separate reviewed tracking reconciliation may
+  resolve that condition later; no new product/native-completion or owner
+  acknowledgement gate is imposed.
+- #954 retains its explicit WHOLE-programme OPEN condition, P0-P5 and P3
+  reservations, with #4227's independent affected-scope condition.
+- #1460 remains the live foundation/final-open registry receiver with an
+  actual Draft effort; #9362 concludes only its own bounded correction.
+- #1843/#1941 retain their actual assigned-source disposition conditions.
+- #1138 remains the external semantic owner; #4049 has no complete
+  receiving home/selected-target equivalent proof; #4050 does not fit the
+  historical-review ROOT. No competing owner or missing implementation is
+  invented for any of them.
+
+The **2026-10-29 05:02:13 UTC / 2026-10-28 22:02:13 Pacific** complete
+census is **920 whole open = 664 creator-eligible + 256 excluded**:
+686 original-cohort issues and 234 inflow remain, **191 above 729**.
+The delta from 923 is two verified own original-cohort folds plus the
+metadata-only externally observed departure #9510; there were no arrivals.
+That external departure is not campaign closure credit or a researched
+technical outcome. The 772 original-cohort issues not currently open are
+not all attributed to this campaign.
+
+The campaign and receiving efforts remain open at their actual status.
+Document delivery, source judgments and census do not complete technical
+acceptance, discharge resource claims or authorize implementation.
 
 No product implementation/import/test collection, live venue/UI/native
 experiment, process/service operation, rollout, source reassignment or
