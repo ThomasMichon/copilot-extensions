@@ -10,7 +10,7 @@ import sqlite3
 from .allocation import (RELEASE_INDEX, check_released_generation, create_release_history,
                          verify_release_index)
 from .operations import AllocationRelease, OperationIntent, TargetReceipt
-from .planning import PlanError, identifier, integer
+from .planning import PlanError, canonical, decode, identifier, integer
 
 
 class NodeJournal:
@@ -86,9 +86,23 @@ class NodeJournal:
                     "operation_id INTEGER NOT NULL UNIQUE REFERENCES operations(id))"
                 )
                 connection.execute("PRAGMA user_version=4")
+                version = 4
+            if version == 4:
+                if connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='external_evidence' COLLATE NOCASE"
+                ).fetchone():
+                    raise PlanError("unrecognized node external evidence schema")
+                connection.execute(
+                    "CREATE TABLE external_evidence("
+                    "operation_id INTEGER NOT NULL REFERENCES operations(id),"
+                    "name TEXT NOT NULL,evidence BLOB NOT NULL,"
+                    "PRIMARY KEY(operation_id,name))"
+                )
+                # Generation 5 belongs to an incompatible historical journal.
+                connection.execute("PRAGMA user_version=6")
 
-    def _verify(self, connection, *, version=4):
-        if version not in (1, 2, 3, 4) or connection.execute(
+    def _verify(self, connection, *, version=6):
+        if version not in (1, 2, 3, 4, 6) or connection.execute(
             "PRAGMA user_version"
         ).fetchone()[0] != version:
             raise PlanError("unsupported node journal schema")
@@ -104,6 +118,8 @@ class NodeJournal:
             verify_release_index(connection)
         if version >= 4:
             columns["external_owners"] = ("resource", "operation_id")
+        if version >= 6:
+            columns["external_evidence"] = ("operation_id", "name", "evidence")
         for name, expected in columns.items():
             kind = connection.execute(
                 "SELECT type FROM sqlite_master WHERE name=?", (name,),
@@ -306,7 +322,7 @@ class NodeJournal:
     @contextmanager
     def _cooperative(self, connection):
         owned = {"identity", "operations", "receipts", "allocation_owners", "allocation_releases",
-                 "external_owners"}
+                 "external_owners", "external_evidence"}
         def authorize(action, first, second, *_):
             if action in (
                 sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
@@ -473,6 +489,57 @@ class NodeJournal:
             receipt = self._latest(connection, held[0])
             receipt.check_intent(request)
             return receipt
+
+    def retain_external_evidence(self, intent, *, name, evidence):
+        """Retain bounded immutable original-attempt facts, never effect permission."""
+        identifier(name, "external evidence name")
+        encoded = canonical(evidence)
+        if len(encoded) > 65536:
+            raise PlanError("external evidence exceeds byte bound")
+        with self._transaction() as connection:
+            operation_id, receipt = self._accepted(connection, intent)
+            if connection.execute(
+                "SELECT 1 FROM external_owners WHERE operation_id=?", (operation_id,),
+            ).fetchone() is None:
+                raise PlanError("external evidence requires current named ownership")
+            previous = connection.execute(
+                "SELECT evidence FROM external_evidence WHERE operation_id=? AND name=?",
+                (operation_id, name),
+            ).fetchone()
+            if previous is not None:
+                if bytes(previous[0]) != encoded:
+                    raise PlanError("original external evidence changed")
+                return
+            if receipt.to_dict()["status"] not in ("accepted", "unknown"):
+                raise PlanError("terminal external evidence is immutable")
+            if connection.execute(
+                "SELECT count(*) FROM external_evidence WHERE operation_id=?", (operation_id,),
+            ).fetchone()[0] >= 16:
+                raise PlanError("external evidence exceeds record bound")
+            connection.execute(
+                "INSERT INTO external_evidence VALUES(?,?,?)", (operation_id, name, encoded),
+            )
+
+    def external_evidence(self, intent):
+        """Read the original operation's facts without retrying its effects."""
+        with self._transaction(write=False) as connection:
+            operation_id, _ = self._accepted(connection, intent)
+            rows = connection.execute(
+                "SELECT name,evidence FROM external_evidence WHERE operation_id=? LIMIT 17",
+                (operation_id,),
+            ).fetchall()
+            if len(rows) > 16:
+                raise PlanError("external evidence exceeds record bound")
+            result = {}
+            for name, encoded in rows:
+                identifier(name, "external evidence name")
+                if len(encoded) > 65536:
+                    raise PlanError("external evidence exceeds byte bound")
+                value = decode(bytes(encoded))
+                if canonical(value) != bytes(encoded):
+                    raise PlanError("external evidence is not canonical")
+                result[name] = value
+            return result
 
     def results(self, *, after=0, limit=100):
         """Read append-only receipt history; transport owns its durable replay cursor."""

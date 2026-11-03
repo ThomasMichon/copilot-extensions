@@ -27,9 +27,9 @@ trusted upstream installer / explicit manual recovery entry
     -> copy complete application projects into immutable version slots
     -> stage selected apps with bounded parallelism (incumbents unchanged)
     -> qualify every member required by the chosen activation strategy
-    -> publish selection and start admitted incoming generations
+    -> activate through preferred graceful cutover or bounded cold takeover
     -> verify real command/service readiness and record installation result
-    -> outgoing owners observe supersession, settle work and self-retire
+    -> settle remaining outgoing retirement obligations
     -> retain last-good state, recovery evidence and unfinished obligations
 ```
 
@@ -69,10 +69,11 @@ new command spelling merely to satisfy this document.
 
 ## Additional contract for a resident service
 
-1. **Start independently.** An admitted incoming generation can start beside
-   the incumbent on its own endpoint. Ordinary update/repair does not first
-   stop, uninstall, delete or unregister the old version, depend on its IPC, or
-   seize its exclusive resources.
+1. **Prepare independently.** An admitted incoming generation is constructed
+   independently and preferably starts beside the incumbent on its own endpoint.
+   Ordinary update/repair does not depend on old IPC, uninstall or artifact
+   deletion. Bounded cold takeover may retire the exact verified predecessor
+   before incoming readiness; exclusive resources still require old-owner exclusion.
 2. **Be non-mutating before ownership.** Candidate hydration cannot mark the
    incumbent's sessions stopped, interrupt open turns, dequeue tasks, claim
    live hosts or start competing jobs. Register read-only/HTTP credential
@@ -83,7 +84,7 @@ new command spelling merely to satisfy this document.
    generation, native PID/birth identity, authentication, required data access
    and app-specific work admission. Publish discovery through the existing
    routing owner, not a second stable-port proxy or an installer-owned reaper.
-4. **Let the outgoing owner retire.** It observes a ready selected successor,
+4. **Prefer outgoing self-retirement.** It observes a ready selected successor,
    closes its own admission, preserves/checkpoints supported in-flight work,
    detaches transferable children and releases only its own claims. Confirm
    actual predecessor exit before exclusive takeover or cold replay. The
@@ -91,8 +92,11 @@ new command spelling merely to satisfy this document.
    recorded owner obligation, not an unobserved background success.
 5. **Keep recovery explicit.** Compatible transfer is preferred, not a
    universal zero-loss guarantee. Incompatible, unavailable and non-settling
-   peers follow the existing bounded cold-recovery contract under its own
-   authority; ordinary installation must not silently turn into forced cleanup.
+   peers follow the existing bounded cold-takeover contract through the same
+   authorized replacement owner, without another force/repair flag solely for
+   unsupported graceful cutover. Report interruption and prove native identity,
+   owned termination scope and exit/write exclusion. This does not authorize
+   broad historical cleanup or termination of separately owned sessions.
    Consumers re-resolve and reconnect with bounded retry, reconciling unknown
    effects rather than blindly replaying them.
 6. **Settle cancellation.** Async cancellation or a shutdown reply does not

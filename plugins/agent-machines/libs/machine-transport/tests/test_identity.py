@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from collections.abc import Callable, Mapping
+from typing import NoReturn
 import pytest
 
 from machine_transport.identity import is_local_machine
-from machine_transport.registry import MachineEntry
+from machine_transport.registry import MachineEntry, MachineIdentity
 
 
-def _entries(**kw):
-    return {"box-a": MachineEntry(key="box-a", display_name="Box A", **kw)}
+def _entries(*, alias: str = "", hostname: str = "") -> dict[str, MachineEntry]:
+    return {"box-a": MachineEntry(key="box-a", display_name="Box A", alias=alias, hostname=hostname)}
 
 
-def _loader(entries):
+def _loader(entries: Mapping[str, MachineIdentity]) -> Callable[[], Mapping[str, MachineIdentity]]:
     return lambda: entries
 
 
@@ -20,7 +22,7 @@ class TestIsLocalMachine:
         ("box-a", ""), ("box-a", "windows"), ("box-a-wsl", "windows"),
     ])
     @pytest.mark.parametrize("case", [False, True])
-    def test_guest_exact_match_cannot_bypass_native_configured_entry(self, key, declared, case):
+    def test_guest_exact_match_cannot_bypass_native_configured_entry(self, key: str, declared: str, case: bool) -> None:
         native = MachineEntry(key=key, display_name="Native", execution_platform=declared)
         guest = MachineEntry(
             key="guest-cell", display_name="Guest", execution_platform="wsl",
@@ -33,11 +35,11 @@ class TestIsLocalMachine:
 
     @pytest.mark.parametrize("key", ["box-a-wsl", "guest-cell"])
     @pytest.mark.parametrize("case", [False, True])
-    def test_guest_exact_match_accepts_registered_guest_even_without_suffix(self, key, case):
+    def test_guest_exact_match_accepts_registered_guest_even_without_suffix(self, key: str, case: bool) -> None:
         guest = MachineEntry(key=key, display_name="Guest", execution_platform="wsl")
         calls = []
 
-        def load():
+        def load() -> dict[str, MachineEntry]:
             calls.append(True)
             return {key: guest}
 
@@ -48,16 +50,16 @@ class TestIsLocalMachine:
 
     @pytest.mark.parametrize("missing", [False, True])
     @pytest.mark.parametrize("key,expected", [("box-a-wsl", True), ("box-a", False), ("guest-cell", False)])
-    def test_guest_standalone_exact_match_requires_guest_qualification(self, missing, key, expected):
-        def load():
+    def test_guest_standalone_exact_match_requires_guest_qualification(self, missing: bool, key: str, expected: bool) -> None:
+        def load() -> dict[str, MachineEntry]:
             if missing:
                 raise FileNotFoundError("registry absent")
             return {}
 
         assert is_local_machine(key, config_machine=key, load_entries=load, guest=True) is expected
 
-    def test_guest_malformed_registry_does_not_authorize_an_exact_match(self):
-        def load():
+    def test_guest_malformed_registry_does_not_authorize_an_exact_match(self) -> None:
+        def load() -> NoReturn:
             raise ValueError("invalid registry")
 
         assert not is_local_machine(
@@ -65,7 +67,7 @@ class TestIsLocalMachine:
         )
 
     @pytest.mark.parametrize("scoped", [False, True])
-    def test_qualified_guest_self_keeps_legacy_host_only_fallback_not_scoped_unknown(self, scoped):
+    def test_qualified_guest_self_keeps_legacy_host_only_fallback_not_scoped_unknown(self, scoped: bool) -> None:
         native = MachineEntry(
             key="box-a", display_name="Native", execution_platform="windows" if scoped else "",
         )
@@ -75,7 +77,7 @@ class TestIsLocalMachine:
         ) is (not scoped)
 
     @pytest.mark.parametrize("configured", ["", "unregistered"])
-    def test_consumer_identity_without_optional_scope_fields(self, configured):
+    def test_consumer_identity_without_optional_scope_fields(self, configured: str) -> None:
         entry = SimpleNamespace(
             key="legacy-box", alias="", hostname="local-host", display_name="Legacy",
         )
@@ -84,27 +86,27 @@ class TestIsLocalMachine:
             load_entries=lambda: {entry.key: entry}, real_hostname=entry.hostname,
         )
 
-    def test_exact_match_against_config_machine(self):
+    def test_exact_match_against_config_machine(self) -> None:
         assert is_local_machine(
             "aurora-cloud2", config_machine="aurora-cloud2",
             load_entries=_loader({}),
         ) is True
 
-    def test_case_insensitive_direct_match(self):
+    def test_case_insensitive_direct_match(self) -> None:
         assert is_local_machine(
             "AURORA-CLOUD2", config_machine="aurora-cloud2",
             load_entries=_loader({}),
         ) is True
 
-    def test_direct_match_never_calls_load_entries(self):
-        def _boom():
+    def test_direct_match_never_calls_load_entries(self) -> None:
+        def _boom() -> NoReturn:
             raise AssertionError("load_entries must not be called")
 
         assert is_local_machine(
             "aurora-cloud2", config_machine="aurora-cloud2", load_entries=_boom,
         ) is True
 
-    def test_alias_vs_key_both_resolve_to_this_machine(self):
+    def test_alias_vs_key_both_resolve_to_this_machine(self) -> None:
         # config_machine is the alias; a caller passing the registry KEY for
         # the very same entry must still be recognized as local.
         entries = _entries(alias="aurora-cloud2")
@@ -112,7 +114,7 @@ class TestIsLocalMachine:
             "box-a", config_machine="aurora-cloud2", load_entries=_loader(entries),
         ) is True
 
-    def test_raw_hostname_vs_canonical_alias_both_resolve_to_this_machine(self):
+    def test_raw_hostname_vs_canonical_alias_both_resolve_to_this_machine(self) -> None:
         # The exact bug class this helper exists to fix: a stale
         # claim/codename recorded under the raw COMPUTERNAME before the
         # hostname-field decoupling landed, compared against the current
@@ -124,7 +126,7 @@ class TestIsLocalMachine:
             load_entries=_loader(entries), real_hostname="CPC-FAKE-HOST1",
         ) is True
 
-    def test_devtunnel_hostname_mismatch_still_resolves_local(self):
+    def test_devtunnel_hostname_mismatch_still_resolves_local(self) -> None:
         """A cloud/devtunnel-provisioned box whose real OS hostname differs
         entirely from its configured alias -- the exact production bug this
         library was extracted to fix generally."""
@@ -134,7 +136,7 @@ class TestIsLocalMachine:
             load_entries=_loader(entries), real_hostname="happy-field-devtunnel",
         ) is True
 
-    def test_genuinely_different_machine_is_not_local(self):
+    def test_genuinely_different_machine_is_not_local(self) -> None:
         entries = {
             "box-a": MachineEntry(key="box-a", display_name="A", alias="aurora-cloud2"),
             "box-b": MachineEntry(key="box-b", display_name="B", alias="aurora-cloud1"),
@@ -144,19 +146,19 @@ class TestIsLocalMachine:
             load_entries=_loader(entries),
         ) is False
 
-    def test_unknown_name_is_not_local(self):
+    def test_unknown_name_is_not_local(self) -> None:
         assert is_local_machine(
             "nonexistent-box", config_machine="aurora-cloud2",
             load_entries=_loader({}),
         ) is False
 
-    def test_empty_name_is_not_local(self):
+    def test_empty_name_is_not_local(self) -> None:
         assert is_local_machine(
             "", config_machine="aurora-cloud2", load_entries=_loader({}),
         ) is False
 
-    def test_missing_registry_falls_back_gracefully(self):
-        def _boom():
+    def test_missing_registry_falls_back_gracefully(self) -> None:
+        def _boom() -> NoReturn:
             raise FileNotFoundError("no registry")
 
         assert is_local_machine(
@@ -166,16 +168,16 @@ class TestIsLocalMachine:
             "some-other-box", config_machine="aurora-cloud2", load_entries=_boom,
         ) is False
 
-    def test_malformed_registry_degrades_to_false(self):
-        def _boom():
+    def test_malformed_registry_degrades_to_false(self) -> None:
+        def _boom() -> NoReturn:
             raise ValueError("malformed machines.yaml")
 
         assert is_local_machine(
             "some-other-box", config_machine="aurora-cloud2", load_entries=_boom,
         ) is False
 
-    def test_unexpected_exception_propagates(self):
-        def _boom():
+    def test_unexpected_exception_propagates(self) -> None:
+        def _boom() -> NoReturn:
             raise RuntimeError("not a degrade-safe case")
 
         with pytest.raises(RuntimeError):
@@ -183,7 +185,7 @@ class TestIsLocalMachine:
                 "some-other-box", config_machine="aurora-cloud2", load_entries=_boom,
             )
 
-    def test_empty_config_machine_does_not_blanket_match_empty_alias(self):
+    def test_empty_config_machine_does_not_blanket_match_empty_alias(self) -> None:
         """A legitimately empty ``config_machine`` must never blanket-match
         every roster entry's own unset/empty alias -- the entry-identity
         comparison (not a string comparison against ``config_machine``)
@@ -193,14 +195,14 @@ class TestIsLocalMachine:
             "box-a", config_machine="", load_entries=_loader(entries),
         ) is False
 
-    def test_empty_config_machine_with_matching_real_hostname_is_still_local(self):
+    def test_empty_config_machine_with_matching_real_hostname_is_still_local(self) -> None:
         entries = _entries(hostname="real-hostname")
         assert is_local_machine(
             "box-a", config_machine="", load_entries=_loader(entries),
             real_hostname="real-hostname",
         ) is True
 
-    def test_guest_does_not_treat_native_host_as_local(self):
+    def test_guest_does_not_treat_native_host_as_local(self) -> None:
         entries = {
             "box-a": MachineEntry(
                 key="box-a",

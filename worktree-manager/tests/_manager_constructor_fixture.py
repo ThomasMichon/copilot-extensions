@@ -4,7 +4,7 @@ Real governed construction, origin health and native execution are exercised by
 the separate cold acceptance lane; these existing units never install packages.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 import shutil
@@ -16,6 +16,7 @@ def apply_constructor_fixture(monkeypatch):
     adapter = si._runtime_installer()
     runtime = adapter.runtime
     monkeypatch.setattr(si, "_runtime_installer", lambda: adapter)
+    monkeypatch.setattr(adapter, "_installation_custody", lambda: nullcontext(object()))
 
     def healthy(slot):
         return runtime.is_complete(slot.parent.parent, slot.name) and all(

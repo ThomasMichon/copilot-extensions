@@ -1,5 +1,27 @@
 # Node acceptance, effects and result spool
 
+## Immutable external-attempt evidence
+
+The generation-6 journal adds bounded original-attempt facts in the existing
+database, used by the explicit [Komodo workload owner](komodo-workload.md).
+Normal writable opening migrates generation 4 transactionally; existing intents,
+named ownership and receipt history are unchanged. Existing-only opening requires
+the current schema. Generation 5 remains incompatible and rejected; no retained
+historical database is rewritten by its separate read-only observer. Older SDKs
+refuse generation 6, so select/qualify the new writer before migration; returning
+to an older writer requires an independently owned storage/recovery procedure.
+
+`retain_external_evidence(intent, name=..., evidence=...)` requires original
+acceptance and current named-external ownership. It retains at most 16 immutable
+canonical records of at most 64 KiB each per original operation. Exact repeats
+are inert; changed facts and new facts after a terminal receipt refuse.
+`external_evidence(intent)` reads the original bounded records, including after
+restart. Cooperative callbacks cannot write these journal-owned tables.
+Records contain no secrets and authenticate nothing themselves. A returned
+backend ID can support original-operation readback; it never grants another
+mutation or makes UNKNOWN successful. `begin_external` and named-resource
+generation/UNKNOWN fences remain unchanged.
+
 Back to [operation contract](operation-contract.md) and
 [Fleet Control V2](../../efforts/active/fleet-control-v2/README.md).
 

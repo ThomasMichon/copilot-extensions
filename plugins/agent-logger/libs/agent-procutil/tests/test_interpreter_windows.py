@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
+from types import SimpleNamespace
 import venv
 
 import pytest
@@ -15,6 +17,84 @@ import agent_procutil as pu
 from agent_procutil._interpreter import physical_executable
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows interpreter contract")
+
+
+def test_caller_owned_accepts_deep_selected_interpreter(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+
+    root = tmp_path
+    while len(str(root / "Scripts" / "python.exe")) <= 280:
+        root /= "selected-" + "x" * 40
+    venv.EnvBuilder(with_pip=False).create(root)
+    interpreter = root / "Scripts" / "python.exe"
+    assert len(str(interpreter)) > 260
+    (root / "Lib" / "site-packages" / "selected_context.py").write_text(
+        "VALUE = 'selected-venv'\n",
+    )
+    for cycle in range(2):
+        result = run_caller_owned(
+            [
+                str(interpreter), "-I", "-c",
+                "import json,sys,selected_context;"
+                "print(json.dumps([sys.prefix,selected_context.VALUE,sys.argv[1]]));"
+                "sys.stderr.write('diagnostic');sys.exit(7)",
+                f"cycle {cycle}",
+            ],
+            timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+        assert result.returncode == 7
+        assert json.loads(result.stdout) == [str(root), "selected-venv", f"cycle {cycle}"]
+        assert result.stderr == "diagnostic"
+
+    result = run_caller_owned(
+        ["cmd.exe", "/d", "/c", "echo bare-command"],
+        timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "bare-command\n" and result.stderr == ""
+    result = run_caller_owned(
+        [
+            str(Path(sys.executable).with_suffix("")), "-I", "-c",
+            "import sys;print(sys.prefix)",
+        ],
+        timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == sys.prefix and result.stderr == ""
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_output_relay_accepts_deep_selected_interpreter(tmp_path, monkeypatch, retained):
+    from agent_procutil import _output_relay
+
+    root = tmp_path
+    while len(str(root / "Scripts" / "python.exe")) <= 280:
+        root /= "selected-" + "x" * 40
+    venv.EnvBuilder(with_pip=False).create(root)
+    interpreter = root / "Scripts" / "python.exe"
+    assert len(str(interpreter)) > 260
+    monkeypatch.setattr(
+        _output_relay, "sys", SimpleNamespace(executable=str(interpreter)),
+    )
+    if retained:
+        monkeypatch.setattr(
+            _output_relay, "_retained_source_bytes",
+            Path(_output_relay.__file__).read_bytes(), raising=False,
+        )
+    for cycle in range(2):
+        output = tmp_path / f"output-{cycle}"
+        with output.open("wb") as stream:
+            relay = _output_relay.ByteRelay(stream.fileno())
+            try:
+                assert relay.offer(b"native relay output")
+                deadline = time.monotonic() + 10
+                while not relay.end():
+                    assert time.monotonic() < deadline, "native relay did not finish"
+                    time.sleep(.01)
+                relay.close()
+            finally:
+                relay.abort(10)
+        assert output.read_bytes() == b"native relay output"
 
 
 def _guard_flags():

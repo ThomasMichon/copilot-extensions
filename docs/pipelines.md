@@ -211,8 +211,15 @@ and qualification receipts retain their 128 MiB limits. The three-file packet's
 as does the retained release-evidence ZIP's 512 MiB + 64 KiB bound. Exact packet
 membership, source hashes, context completeness and the five-minute execution
 budget are unchanged.
-The complete expanded version-1 coverage projection is retained without a
-new report encoding merely to fit the former 16 MiB bound.
+Candidate packets retain every raw file/line/context hit and the complete
+byte-bound development mapping. The verifier reconstructs the development
+projection from those inputs rather than requiring its redundant raw-copy,
+per-copy and aggregate views in `coverage.json`. Historical packets carrying
+the expanded version-1 projection still require an exact comparison with that
+reconstruction. The evidence encoding, byte bounds and raw-file digest binding
+are unchanged. Producer and verifier are selected together from the admitted
+source revision; an older verifier that requires the expanded field refuses
+a new compact packet rather than accepting weaker evidence.
 
 After qualification, the existing publisher attaches the exact three packet
 files and canonical `qualification.json` in one deterministic ZIP to the same
@@ -361,6 +368,11 @@ remain separate production operations. Main's proposed CI is metadata-only;
 neither that status nor a skipped integration lane is unit qualification.
 
 ## Python artifact-builder toolchain policy
+
+Candidate **runtime** dependency inputs are generated separately by
+`tools/bundle_lock.py`; see [candidate release-lock inputs](../bundle/README.md).
+They are inert constraints, not an approved runtime lock or the builder's
+toolchain lock. Generation does not resolve, publish or install dependencies.
 
 `tools/build_python_artifacts.py` can run standalone and is also invoked by
 promotion's credential-separated `build-python-artifacts` job. Its default

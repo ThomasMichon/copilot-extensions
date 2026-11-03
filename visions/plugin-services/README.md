@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-11-02
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -846,29 +846,32 @@ path, not an unconditional guarantee or a veto on replacement. Where contracts
 interoperate, health-gate the incoming owner, switch routing, hand off work and
 drain the predecessor before retirement. An incompatible, unavailable or
 non-settling handoff instead permits independent startup and cold recovery from
-reasonably durable state. The outgoing daemon observes the new current owner,
-stops the work and sub-daemons it owns and exits after incoming startup. A transient outage, cut-off stream or
+reasonably durable state. A cooperative outgoing daemon observes the new current
+owner, stops the work and sub-daemons it owns and exits after incoming startup.
+A transient outage, cut-off stream or
 interrupted in-memory unit is an expected failure mode, not by itself a reason
 to refuse the selected generation.
 
 Ordinary updates and repair/force-install start the incoming generation without
-requiring a prior-version existence check, matched handoff or installer-driven
-old-runtime teardown. Brief process overlap is expected; it does not permit
-duplicate exclusive work ownership. The outgoing runtime notices that it is no
-longer current, stops the work and children it owns, and exits after the new
-owner starts. A compatible handoff improves continuity but is not an incumbent
-veto on incoming construction or startup. An uncooperative predecessor remains
-an explicit convergence failure, not implicit authority for the installer to
-terminate it. Explicit stop/uninstall and separately authorized recovery retain
-their own scopes.
+requiring a prior-version existence check or matched handoff. Brief process
+overlap is preferred; it does not permit duplicate exclusive work ownership.
+If the predecessor cannot self-retire or settle within the bounded handoff,
+the authorized replacement owner may force-terminate that exact attributable
+predecessor using native identity checks and confirmed exit/write exclusion.
+This cold fallback may precede incoming readiness where exclusivity requires it;
+unsupported graceful cutover does not demand another repair flag or veto the
+update. It does not authorize unrelated cleanup or termination of separately
+owned sessions, children or connectivity. Unknown ownership and failed recovery
+remain explicit, never a false readiness claim.
 
 Supersession is identity inequality: an owner is displaced because its full
 generation identity is no longer current, not because another package version,
 source hash or generation sorts after it. Selecting a different completed
 generation starts that incoming owner through the same lifecycle in either
 direction, including rollback. Prefer healthy handoff and drain; old-owner
-self-retirement follows incoming startup, not the reverse. An ambiguous marker
-read alone is not replacement
+self-retirement follows incoming startup on that compatible path. Bounded cold
+takeover instead establishes old-owner exclusion before exclusive recovery.
+An ambiguous marker read alone is not replacement
 authority. State compatibility still gates rollback; breaking an in-memory
 handoff contract is not the same as being unable to recover durable state.
 Release-channel ordering may choose a desired release; it never determines
@@ -881,8 +884,8 @@ through that same authority rather than repairing one another's live work.
 An unfinished transition is not automatically abandoned: recovery establishes
 that its owner is gone or has yielded before changing the serving generation,
 releasing its drain, or retiring its candidate.
-Repair follows the same incoming-start-first lifecycle rather than terminating
-old managed daemons to make room. Stale lifecycle markers cannot veto the new
+Repair follows the same preferred graceful lifecycle and bounded cold fallback
+as ordinary installation. Stale lifecycle markers cannot veto the new
 installation. Successful convergence leaves only the selected generation
 serving and old activation paths inert; unrelated services and application data
 remain untouched. The

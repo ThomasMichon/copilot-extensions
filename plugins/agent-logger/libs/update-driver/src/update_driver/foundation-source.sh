@@ -78,7 +78,7 @@ _native_foundation_files() {
     done
     for name in installer-engine.ps1 installer-engine.sh \
         installer_engine.py installer_engine_process.py installer_dependency_policy.py \
-        installer_dependency_config.py runtime_launcher.py versioned_runtime.py \
+        installer_dependency_config.py installer_dependency_arguments.py runtime_launcher.py versioned_runtime.py \
         versioned_runtime_leases.py versioned_runtime_construction.py \
         versioned_runtime_source.py versioned_runtime_publication.py; do
         _native_foundation_plain "$plugin/scripts/$name" file || return 1

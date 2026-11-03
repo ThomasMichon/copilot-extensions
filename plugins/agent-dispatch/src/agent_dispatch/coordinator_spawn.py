@@ -35,7 +35,7 @@ class PoolPlacementBody(BaseModel):
     version: int = Field(default=1, ge=1, le=1, strict=True)
     reserved_by: str = Field(min_length=1)
     catalog_revision: int = Field(ge=0, strict=True)
-    driver: Literal["cli"] = "cli"
+    driver: Literal["cli", "ordinary-bridge"] = "cli"
 
 
 class RoutingAssignmentBody(BaseModel):

@@ -58,18 +58,18 @@ def parse_control_plane(
     if isinstance(value, str):
         if not value.strip():
             return None
-        project = _repository(value.strip(), "project")
-        return ControlPlaneRepositories(project, legacy_project=project)
+        legacy_name = _repository(value.strip(), "project")
+        return ControlPlaneRepositories(legacy_name, legacy_project=legacy_name)
     if not isinstance(value, Mapping):
         raise ControlPlaneError("control_plane must be a repository name or mapping")
     unknown = set(value) - {"project", "harness", "knowledge"}
     if unknown:
         raise ControlPlaneError("control_plane contains unsupported fields")
     if "harness" not in value and "knowledge" not in value:
-        project = value.get("project")
-        if project is None:
+        project_value = value.get("project")
+        if project_value is None:
             return None
-        name = _repository(project, "project")
+        name = _repository(project_value, "project")
         return ControlPlaneRepositories(name, legacy_project=name)
 
     harness = _repository(value.get("harness"), "harness")

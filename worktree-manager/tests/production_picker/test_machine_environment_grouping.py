@@ -13,11 +13,13 @@ from worktree_manager.production_picker.picker_tui.engine_input import PickerScr
 from worktree_manager.production_picker.picker_tui.engine_model import PickerScreenModelMixin
 
 
-class _Tabs(PickerScreenRenderingMixin):
+class _Tabs(PickerScreenModelMixin, PickerScreenRenderingMixin):
     def __init__(self, sources: list[data_ssh.Source]) -> None:
         self.machines = data_ssh.machines(sources)
         self.source_tabs = data_ssh.source_tabs(sources)
         self.machine_idx = 1
+        self.live = False
+        self.loader = None
 
     def _in_configuration(self) -> bool:
         return False
@@ -55,7 +57,7 @@ def test_grouping_respects_explicit_physical_association() -> None:
     assert roster.display_machine(inferred) == "Example-Host"
 
 
-class _NavigableTabs(PickerScreenInputMixin, PickerScreenModelMixin, _Tabs):
+class _NavigableTabs(PickerScreenInputMixin, _Tabs):
     def __init__(self, sources: list[data_ssh.Source]) -> None:
         super().__init__(sources)
         self.machines.insert(0, ("All", None, None, True))

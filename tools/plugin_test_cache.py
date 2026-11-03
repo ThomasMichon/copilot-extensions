@@ -38,6 +38,8 @@ def dependency_fingerprint(
         resources = standalone_build_resources("fleet-manager", source_root=repo)
     if name == "agent-dispatch":
         entries.append(repo / "plugins" / "agent-pull-requests")
+    if name == "payload-invocation":
+        entries.append(repo / "libs" / "update-driver")
     roots = set(resources)
     for entry in entries:
         roots.update(_package_roots(entry))

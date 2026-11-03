@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import errno
-import os
+import os as os
 import stat
-import sys
+import sys as sys
 from pathlib import Path
 
 STRICT_RECORD_BYTES = 64 * 1024
@@ -19,7 +19,7 @@ def strict_write_capability() -> str | None:
         return "linux-file-directory-fsync-v1"
     return None
 
-if os.name == "nt":
+if sys.platform == "win32":
     import ctypes
     from ctypes import wintypes
 
@@ -45,7 +45,7 @@ def append_bytes(path: str | os.PathLike[str], data: bytes) -> None:
     short write can leave a partial record: this is not a transaction, durable
     delivery, network-filesystem guarantee, or repair of an existing bad tail.
     """
-    if os.name == "nt":
+    if sys.platform == "win32":
         _append_windows(path, data)
     else:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
@@ -68,11 +68,13 @@ def append_bytes_strict(path: str | os.PathLike[str], data: bytes) -> None:
     if type(data) is not bytes or not 0 < len(data) <= STRICT_RECORD_BYTES:
         raise ValueError("strict diagnostic record must be 1..65536 encoded bytes")
     target = Path(path)
-    directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    directory = os.open(
+        target.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY") | getattr(os, "O_NOFOLLOW"),
+    )
     try:
         fd = os.open(
-            target.name, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
-            | os.O_NONBLOCK, 0o600, dir_fd=directory,
+            target.name, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW")
+            | getattr(os, "O_NONBLOCK"), 0o600, dir_fd=directory,
         )
         try:
             info = os.fstat(fd)
@@ -92,22 +94,23 @@ def _check_written(written: int, expected: int) -> None:
         raise OSError(errno.EIO, "short diagnostic spool append; partial record may remain")
 
 
-def _append_windows(path: str | os.PathLike[str], data: bytes) -> None:
-    if len(data) > 0xFFFFFFFF:
-        raise OverflowError("diagnostic spool record exceeds WriteFile size")
-    name = os.fspath(path)
-    if "\0" in name:
-        raise ValueError("embedded null character")
-    # FILE_APPEND_DATA, not GENERIC_WRITE: the kernel positions each write at
-    # EOF, unlike the CRT's O_APPEND seek-then-write across independent handles.
-    handle = _kernel.CreateFileW(name, 0x0004, 0x0007, None, 4, 0x80, None)
-    if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        written = wintypes.DWORD()
-        if not _kernel.WriteFile(handle, data, len(data), ctypes.byref(written), None):
+if sys.platform == "win32":
+    def _append_windows(path: str | os.PathLike[str], data: bytes) -> None:
+        if len(data) > 0xFFFFFFFF:
+            raise OverflowError("diagnostic spool record exceeds WriteFile size")
+        name = os.fspath(path)
+        if "\0" in name:
+            raise ValueError("embedded null character")
+        # FILE_APPEND_DATA, not GENERIC_WRITE: the kernel positions each write at
+        # EOF, unlike the CRT's O_APPEND seek-then-write across independent handles.
+        handle = _kernel.CreateFileW(name, 0x0004, 0x0007, None, 4, 0x80, None)
+        if handle == ctypes.c_void_p(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
-        _check_written(written.value, len(data))
-    finally:
-        if not _kernel.CloseHandle(handle):
-            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            written = wintypes.DWORD()
+            if not _kernel.WriteFile(handle, data, len(data), ctypes.byref(written), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            _check_written(written.value, len(data))
+        finally:
+            if not _kernel.CloseHandle(handle):
+                raise ctypes.WinError(ctypes.get_last_error())

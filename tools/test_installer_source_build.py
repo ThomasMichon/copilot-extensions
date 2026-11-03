@@ -96,6 +96,7 @@ def test_source_progress_coalesces_output_not_completed_work(monkeypatch, capsys
     monkeypatch.setattr(wheels, "time", clock)
     elapsed = {}
     chunks = []
+    last_emission = None
     with builds._source_phase("offline", 10, elapsed) as progress:
         chunks.append(capsys.readouterr().err)
         for unit in range(1, 20001):
@@ -104,13 +105,17 @@ def test_source_progress_coalesces_output_not_completed_work(monkeypatch, capsys
             assert progress.deadline == now[0] + 10
             output = capsys.readouterr()
             assert output.out == ""
-            assert output.err
-            chunks.append(output.err)
+            if output.err:
+                chunks.append(output.err)
+                last_emission = now[0]
+            assert last_emission is not None
+            assert now[0] - last_emission <= 1.001 + 1e-9
     assert progress.units == 20000
     assert elapsed["offline"] == 20
     output = capsys.readouterr()
     assert output.out == ""
     chunks.append(output.err)
+    assert len(chunks) <= 25
     assert len("".join(chunks).encode("utf-8")) <= 65536
     assert "".join(chunks).count("Source wheel progress:") <= 21
     assert "completed-units=20000" in output.err
@@ -354,6 +359,38 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
     expected = installed_modules[0].read_bytes()
     cached_module.unlink()
     assert all(path.read_bytes() == expected for path in installed_modules)
+    assert engine.runtime.current_version(root) is None
+
+
+def test_control_and_target_share_only_verified_installation_wheels(engine, ordinary, tmp_path):
+    root = tmp_path / "installation"
+    root.mkdir()
+    control_root = root / ".installer-inputs" / "control-owner"
+    plugin, _uv, counter, _state = ordinary
+    with _candidate(
+        engine, control_root, ordinary, "control", source_wheel_cache_root=root,
+    ) as control:
+        assert _value(engine, control) == 1
+        marker = control.slot / ".install-complete.json"
+        original_marker = marker.read_bytes()
+        original_module = next(control.slot.rglob("example_leaf/__init__.py"))
+        original_bytes = original_module.read_bytes()
+    assert len(counter.read_text().splitlines()) == 3
+    assert not (control_root / ".source-wheel-cache").exists()
+    with _candidate(engine, root, ordinary, "1.0.0+repair.first") as target:
+        assert not target.reused and _value(engine, target) == 1
+        assert len(counter.read_text().splitlines()) == 3
+        origins = json.loads((target.slot / ".runtime-input-origins.json").read_text())
+        assert all(
+            value.startswith((root / ".source-wheel-cache").as_uri() + "/")
+            for value in origins["packages"].values()
+        )
+    (plugin.parent / "leaf" / "src" / "example_leaf" / "__init__.py").write_text("VALUE=42\n")
+    with _candidate(engine, root, ordinary, "1.0.0+repair.changed") as changed:
+        assert _value(engine, changed) == 42
+        assert len(counter.read_text().splitlines()) == 4
+    assert marker.read_bytes() == original_marker
+    assert original_module.read_bytes() == original_bytes
     assert engine.runtime.current_version(root) is None
 
 

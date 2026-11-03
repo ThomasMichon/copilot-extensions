@@ -485,6 +485,7 @@ def test_generation_migration_and_unsettled_resource_ownership(rig):
         store.accept_named_external(request, resource="physical-release")
     with sqlite3.connect(store.path) as connection:
         connection.execute("DROP TABLE external_owners")
+        connection.execute("DROP TABLE external_evidence")
         connection.execute("PRAGMA user_version=3")
     reopened = NodeJournal(store.path, authority="gateway-a", installation="install-a", target="worker-a")
     assert reopened.inspect(request).to_dict()["status"] == "succeeded"
@@ -496,11 +497,12 @@ def test_two_installed_processes_cannot_claim_one_external_release(rig):
     first, second = rig["request"](), rig["request"]("contender", generation=2)
     worker = """
 import json,sys,time
+sys.path.insert(0,sys.argv[5])
 from pathlib import Path
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent
 from fleet_manager.planning import PlanError
-path,encoded,ready,go=sys.argv[1:]
+path,encoded,ready,go=sys.argv[1:5]
 node=NodeJournal(path,authority='gateway-a',installation='install-a',target='worker-a')
 Path(ready).touch()
 deadline=time.monotonic()+10
@@ -523,7 +525,7 @@ else:
             processes.append(pool.submit(run_caller_owned, [
                 sys.executable, "-I", "-c", worker, str(rig["journal"].path),
                 request.encoded.decode(), str(rig["root"] / f"ready-{index}"),
-                str(rig["root"] / "go"),
+                str(rig["root"] / "go"), str(Path(inspect.getfile(NodeJournal)).resolve().parents[1]),
             ], cwd=rig["root"], env=dict(os.environ), timeout=15,
                 max_stdout_bytes=1024, max_stderr_bytes=4096))
         deadline = time.monotonic() + 10

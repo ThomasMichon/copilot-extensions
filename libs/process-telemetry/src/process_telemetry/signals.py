@@ -6,7 +6,11 @@ import ipaddress
 import math
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from .diagnostic_logs import Event
 
 SIGNALS = ("traces", "logs", "metrics")
 STAGES = frozenset({
@@ -40,7 +44,7 @@ class SignalEndpoints:
     logs: str | None = None
     metrics: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for signal in SIGNALS:
             value = getattr(self, signal)
             if value is not None:
@@ -58,7 +62,7 @@ class SignalIdentity:
     selected_version: str | None = None
     serving_version: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for value in vars(self).values():
             if value is not None and (
                 type(value) is not str or not re.fullmatch(r"[a-zA-Z0-9_.+-]{1,80}", value)
@@ -77,7 +81,7 @@ class SignalResult:
     requests: int = 0
     attempted_payload_bytes: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.status not in STATUSES:
             raise ValueError("invalid signal status")
         if any(type(v) is not int or not 0 <= v < 2**63 for k, v in vars(self).items() if k != "status"):
@@ -86,7 +90,7 @@ class SignalResult:
             raise ValueError("invalid signal outcome partition")
 
     @property
-    def generated_records(self):
+    def generated_records(self) -> int:
         return self.attempted_records + self.not_attempted_records
 
 
@@ -96,12 +100,12 @@ class SignalBatchResult:
     logs: SignalResult
     metrics: SignalResult
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(type(getattr(self, signal)) is not SignalResult for signal in SIGNALS):
             raise ValueError("closed signal results required")
 
 
-def validate_source_records(spans: list[dict]) -> list[dict]:
+def validate_source_records(spans: list[Event]) -> list[Event]:
     from .otlp import validate_record
 
     if type(spans) is not list or not 1 <= len(spans) <= 32:
@@ -128,12 +132,12 @@ def validate_source_records(spans: list[dict]) -> list[dict]:
     return records
 
 
-def metric_points(records: list[dict]) -> list[dict]:
+def metric_points(records: list[Event]) -> list[Event]:
     """Fixed-cardinality DELTA aggregation of this observed batch, not estimates."""
-    groups = {}
+    groups: dict[tuple[str, str, str, str], list[float]] = {}
     for record in records:
         labels = (record["stage"], record["outcome"])
-        measures = [("ce.source.observations", "{observation}", 1)]
+        measures: list[tuple[str, str, float]] = [("ce.source.observations", "{observation}", 1)]
         if record["stage"] in ("first_refresh", "input_ack") and record["outcome"] != "unavailable":
             measures.append(("ce.source.duration", "s", record["duration_ns"] / 1e9))
         if "queue_wait_ns" in record:
@@ -142,7 +146,7 @@ def metric_points(records: list[dict]) -> list[dict]:
             groups.setdefault((name, unit, *labels), []).append(value)
     points = []
     for (name, unit, stage, outcome), values in sorted(groups.items()):
-        point = {"name": name, "unit": unit, "stage": stage, "outcome": outcome}
+        point: Event = {"name": name, "unit": unit, "stage": stage, "outcome": outcome}
         if unit == "{observation}":
             point["value"] = len(values)
         else:
@@ -158,7 +162,7 @@ def metric_points(records: list[dict]) -> list[dict]:
     return points
 
 
-def validate_metric_points(points):
+def validate_metric_points(points: list[Event]) -> list[Event]:
     """Validate sender-side batch metadata before it can enter a run report."""
     from .measurement import OUTCOMES
 

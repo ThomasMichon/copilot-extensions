@@ -200,6 +200,7 @@ def _spec_fingerprint(reg: dict) -> str:
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
+    spec.pop("pool_definition", None)
     runtime_revision = reg.get("runtime_revision")
     return json.dumps(
         {
@@ -219,6 +220,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
+    spec.pop("pool_definition", None)
     if kind in {RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR}:
         defaults = {
             "labels": [],
@@ -322,6 +324,23 @@ class DesiredRegistrationSet:
     replacements: dict[str, str] = field(default_factory=dict)
 
 
+def _pool_policy_equivalent(direct: dict, declared: dict) -> bool:
+    """Never let runtime-equivalent launch flags erase an explicit pool policy."""
+    spec = direct.get("spec") or {}
+    if "pool_definition" not in direct and "pool_definition" not in spec:
+        return True
+    from .pool_instances import PoolDefinitionError, PoolInstanceDefinition
+
+    try:
+        left = PoolInstanceDefinition.from_registration(direct).to_dict()
+        right = PoolInstanceDefinition.from_registration(declared).to_dict()
+    except PoolDefinitionError:
+        return False
+    left.pop("registration_id")
+    right.pop("registration_id")
+    return left == right
+
+
 def merge_registration_sources(
     direct: Iterable[dict], declared: Iterable[dict]
 ) -> DesiredRegistrationSet:
@@ -345,7 +364,10 @@ def merge_registration_sources(
             direct_id = direct_reg["id"]
             if direct_id not in result.registrations:
                 continue
-            if _runtime_equivalence_fingerprint(direct_reg) == declared_fp:
+            if (
+                _runtime_equivalence_fingerprint(direct_reg) == declared_fp
+                and _pool_policy_equivalent(direct_reg, declared_reg)
+            ):
                 result.registrations.pop(direct_id, None)
                 result.deduplicated.append(direct_id)
                 result.replacements[direct_id] = declared_reg["id"]

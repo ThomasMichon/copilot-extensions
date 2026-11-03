@@ -453,6 +453,9 @@ def spawn(
                 startup.StartupInfo.hStdError = stdio
             startup.lpAttributeList = ctypes.cast(attributes, wintypes.LPVOID)
             command = ctypes.create_unicode_buffer(subprocess.list2cmdline(argv))
+            application = (
+                argv[0] if os.path.isabs(argv[0]) and os.path.splitext(argv[0])[1] else None
+            )
             try:
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
@@ -460,7 +463,7 @@ def spawn(
                     remaining(launch_deadline)
                 creation_attempted = True
                 if not kernel.CreateProcessW(
-                    None, command, None, None, True,
+                    application, command, None, None, True,
                     0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
                     environment, cwd, ctypes.byref(startup), ctypes.byref(info),
                 ):

@@ -39,6 +39,15 @@ def request_scopes(engine, pivot):
     return tuple(scopes)
 
 
+def _read_state(states):
+    states = tuple(states)
+    if not states:
+        return "error"
+    if any(state in {"idle", "loading"} for state in states):
+        return "loading"
+    return "error" if "error" in states else "ready"
+
+
 def aggregate(runtime, pivot, scopes, *, annotate=True):
     """Keep failed and pending scope evidence alongside any available rows."""
     snapshots, rows, failures, pending = [], [], [], []
@@ -76,7 +85,7 @@ def aggregate(runtime, pivot, scopes, *, annotate=True):
             )
     if not scopes:
         return "error", [], "No declared machine scopes are available.", summary
-    state = "loading" if pending else "error" if failures else "ready"
+    state = _read_state(snapshot["state"] for snapshot in snapshots)
     return state, rows, "; ".join(failures), summary
 
 
@@ -108,5 +117,29 @@ def summary(engine, pivot):
 def refresh(engine, pivot):
     runtime = engine._pivot_runtime(pivot)
     reload_scope = getattr(runtime, "refresh_read", None) or runtime.repoll
-    for scope in request_scopes(engine, pivot):
+    scopes = request_scopes(engine, pivot)
+    engine.debug = f"{pivot.label}: refresh requested"
+    engine._registered_refresh_note = (engine._pivot_descriptor_key(), scopes, engine.debug)
+    for scope in scopes:
         reload_scope(scope)
+
+
+def refresh_footer(engine, status):
+    note = getattr(engine, "_registered_refresh_note", None)
+    if note is None or status != note[2]:
+        return status
+    pivot = engine._reg_pivot()
+    if (pivot is None or engine._pivot_descriptor_key() != note[0]
+            or request_scopes(engine, pivot) != note[1]):
+        return "ready"
+    runtime = engine._pivot_runtime(pivot)
+    pending = getattr(runtime, "read_pending", None)
+    state = _read_state(
+        "loading" if pending is not None and pending(scope) else runtime.get(scope)[0]
+        for scope in note[1]
+    )
+    return f"{pivot.label}: " + {
+        "loading": "reading declared scope(s)",
+        "error": "read failed or incomplete; see source errors",
+        "ready": "read settled",
+    }.get(state, state)

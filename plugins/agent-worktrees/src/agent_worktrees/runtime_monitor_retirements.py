@@ -48,6 +48,22 @@ def _reference_owner(pid: int, start: str) -> str:
     return f"{_REFERENCE_PREFIX}v2:{pid}:{start}"
 
 
+def _dev_slot(version: object) -> bool:
+    return version == "dev" or (
+        isinstance(version, str)
+        and re.fullmatch(r"dev-(?:[0-9a-f]{32}|[0-9a-f]{64})", version) is not None
+    )
+
+
+def _restored_claim(claim: dict | None) -> dict | None:
+    if claim is not None:
+        previous = claim.get("previous_version")
+        if previous != "dev" and _dev_slot(previous):
+            # Activating a hashed rollback target updates this one claim field.
+            return {**claim, "selected_generation": previous}
+    return claim
+
+
 def _validate(record: dict, path: Path) -> None:
     if (
         not isinstance(record, dict)
@@ -76,7 +92,7 @@ def _validate(record: dict, path: Path) -> None:
         or (
             record["release_claim"] is not None
             and (
-                record["slot"] != "dev"
+                not _dev_slot(record["slot"])
                 or not isinstance(record["release_claim"], dict)
                 or not isinstance(record["release_claim"].get("owner"), str)
             )
@@ -297,7 +313,7 @@ def _completed_commit(root: Path, record: dict, runtime: ModuleType | None) -> b
         if _owned_references(root, record, helper):
             raise RuntimeError("Missing monitor retirement still owns runtime references")
         if record["release_claim"] is not None and (
-            helper.current_version(root) == "dev"
+            helper.current_version(root) == record["slot"]
             or helper.read_dev_claim(root, strict=True) is not None
         ):
             raise RuntimeError("Missing monitor retirement dev grant is not settled")
@@ -423,13 +439,13 @@ def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = 
                 claim = record["release_claim"] if record["state"] == "retiring" else None
                 if claim is not None:
                     with helper._publication_lease(root):
-                        if helper.current_version(root) == "dev":
+                        if helper.current_version(root) == record["slot"]:
                             raise RuntimeError(
                                 "Dev runtime is selected before resident-owned release"
                             )
                         current = helper.read_dev_claim(root, strict=True)
                         if current is not None:
-                            if current != claim:
+                            if current != _restored_claim(claim):
                                 raise RuntimeError(
                                     "Dev claim changed before resident-owned release"
                                 )
@@ -466,7 +482,13 @@ def pending_slot(root: Path, slot: str, *, include_cancelled: bool = True) -> bo
 def pending_claim(root: Path, claim: dict) -> bool:
     """Observe exact deferred custody without releasing or repairing anything."""
     return any(
-        record["state"] != "cancelled" and record["release_claim"] == claim
+        record["state"] != "cancelled" and (
+            record["release_claim"] == claim
+            or (
+                record["state"] == "retiring"
+                and _restored_claim(record["release_claim"]) == claim
+            )
+        )
         for _path, record in _records(root)
     )
 
@@ -507,7 +529,7 @@ def cancel_abandoned_preparations(root: Path, *, runtime: ModuleType | None = No
                     helper = runtime if runtime is not None else _runtime()
                     with helper._publication_lease(root):
                         if (
-                            helper.current_version(root) != "dev"
+                            helper.current_version(root) != record["slot"]
                             or helper.read_dev_claim(root, strict=True) != claim
                         ):
                             raise RuntimeError("Prepared monitor dev custody changed before cancellation")
@@ -540,7 +562,8 @@ def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleTy
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
         records = [
             (path, record) for path, record in _records(root)
-            if record["slot"] == "dev" and record["state"] != "cancelled"
+            if record["slot"] == (claim.get("selected_generation") or "dev")
+            and record["state"] != "cancelled"
         ]
         if not records or any(
             record["state"] != "prepared" or record["release_claim"] != claim
@@ -548,7 +571,10 @@ def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleTy
         ):
             return False
         with runtime._publication_lease(root):
-            if runtime.current_version(root) != "dev" or runtime.read_dev_claim(root, strict=True) != claim:
+            if (
+                runtime.current_version(root) != (claim.get("selected_generation") or "dev")
+                or runtime.read_dev_claim(root, strict=True) != claim
+            ):
                 return False
             table = routing.read_table(route_root, strict=True)
             routing._validate_endpoint_rows(table)

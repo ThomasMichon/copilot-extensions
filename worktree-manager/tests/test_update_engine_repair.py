@@ -499,6 +499,8 @@ def repair_case(
     calls = []
 
     def execute_actual_installer(command, **options):
+        from agent_procutil.owned_process import run_caller_owned
+
         assert not options.get("start_new_session")
         if os.name == "nt" and any(Path(part).name == "install.ps1" for part in command):
             if "-BootstrapPython" not in command:
@@ -510,8 +512,11 @@ def repair_case(
         # Scoped preflight performs the real repeated governance reads before
         # the fence; its measured native path needs headroom beyond shared admission.
         timeout = 45 if options.get("env", {}).get("COPILOT_EXTENSIONS_CONTEXT") else 30
-        result = REAL_RUN(
-            command, **options, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        environment = options.pop("env", None)
+        assert options == no_window_kwargs()
+        result = run_caller_owned(
+            command, env=environment, cwd=cwd, timeout=timeout,
+            max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
         )
         calls.append((list(command), result))
         return result
@@ -525,36 +530,16 @@ def repair_case(
     monkeypatch.setattr(update_bootstrap, "_wait", observe_lifecycle)
 
     def run_manager_request(operation):
-        from update_driver import core
-        from update_driver.participant import ENVIRONMENT_KEY, participant
-        from worktree_manager import update_driver_cli
+        from update_driver import borrowed_custody, participant_environment
 
-        queued = core.enqueue(
-            core.RequestSpec(
-                "manager", ("--repair-engine", str(source)), project=str(home),
-                cwd=str(home), source=update_driver_cli._source_key(),
-                context=tuple(update_driver_cli.request_context().items()), repair=True,
-            ),
-            runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(home)),
-        )
-
-        def execute(transaction):
-            transaction.assert_owned()
-            with participant(
-                root=transaction.root,
-                witness=transaction.participant_env()[ENVIRONMENT_KEY],
-            ) as custody:
-                custody.assert_owned()
-                result = operation()
-                custody.assert_owned()
-            transaction.assert_owned()
-            return result
-
-        assert core.drain(executor=execute) == 0
-        settled = core.status(queued.id)
-        assert settled.state == "completed", settled.error
-        assert type(settled.exit_code) is int
-        return settled.exit_code
+        custody = borrowed_custody(environ=participant_environment())
+        assert custody is not None, "repair fixture requires its live outer update owner"
+        with custody:
+            custody.assert_owned()
+            result = operation()
+            custody.assert_owned()
+        assert type(result) is int
+        return result
 
     @contextmanager
     def admitted_incumbent():

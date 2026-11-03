@@ -6,7 +6,29 @@ import os
 import shlex
 import shutil
 import stat
+import subprocess
 from pathlib import Path
+
+
+def run_native_installer(argv: list[str], *, env: dict[str, str], timeout: float):
+    from agent_procutil.owned_process import run_caller_owned
+
+    try:
+        result = run_caller_owned(
+            argv, env=env, timeout=timeout, binary=True,
+            max_stdout_bytes=8 << 20, max_stderr_bytes=8 << 20,
+        )
+    except subprocess.TimeoutExpired as error:
+        for field in ("output", "stderr"):
+            value = getattr(error, field)
+            if isinstance(value, bytes):
+                setattr(error, field, value.decode("utf-8", errors="backslashreplace"))
+        raise
+    return subprocess.CompletedProcess(
+        result.args, result.returncode,
+        (result.stdout or b"").decode("utf-8", errors="backslashreplace"),
+        (result.stderr or b"").decode("utf-8", errors="backslashreplace"),
+    )
 
 
 def remove_fixture_worktree(owner: Path) -> None:
@@ -36,24 +58,16 @@ def isolate_account_profile(
     for directory in directories:
         resolution = directory / "_installation_context_resolution.py"
         source = resolution.read_text(encoding="utf-8")
-        lookup = "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+        lookup = "profile_value = Path(get_account(get_uid()).pw_dir)"
         assert source.count(lookup) == 1
         resolution.write_text(source.replace(
             lookup, f"profile_value = Path({str(home)!r})",
         ), encoding="utf-8")
     shell_context = plugin / "scripts" / "installation-context" / "installation-context.sh"
     source = shell_context.read_text(encoding="utf-8")
-    lookup = 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"'
+    lookup = 'canonical_path_into CURRENT_PROFILE_HOME "$home_path" true || return'
     assert source.count(lookup) == 1
     shell_context.write_text(source.replace(
         lookup,
-        f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"',
-    ), encoding="utf-8")
-    powershell_context = plugin / "scripts" / "installation-context" / "installation-context.ps1"
-    source = powershell_context.read_text(encoding="utf-8")
-    lookup = "$passwdHome = [CePosixAccount]::Home()"
-    assert source.count(lookup) == 1
-    quoted_home = "'" + str(home).replace("'", "''") + "'"
-    powershell_context.write_text(source.replace(
-        lookup, "$passwdHome = " + quoted_home,
+        f'canonical_path_into CURRENT_PROFILE_HOME {shlex.quote(str(home))} true || return',
     ), encoding="utf-8")

@@ -76,7 +76,7 @@ if ($plugin -ceq 'agent-bridge') {
         'installer-engine.ps1', 'installer-engine.sh',
         'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
         'installer_wheel_inputs.py', 'installer_wheel_snapshot.py', 'installer_wheel_acquisition.py',
-        'installer_dependency_policy.py', 'installer_dependency_config.py',
+        'installer_dependency_policy.py', 'installer_dependency_config.py', 'installer_dependency_arguments.py',
         'installation-context\installation_context.py',
         'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
         'install.ps1', 'install.sh', 'repair-scheduled-task.ps1',

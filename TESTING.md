@@ -1222,6 +1222,8 @@ controls give acquisition and offline work independent allowances, identify
 the expired phase with its original deadline cause and preserve non-timeout
 integrity refusals. Phase diagnostics stay on stderr; unsupported fallback and
 the caller's subsequent installation are outside offline timing.
+Every verified work unit renews its phase deadline, while transport emits only
+at the existing bounded heartbeat interval and phase boundaries, not per file.
 `test_manager_source_native.py` exercises the real standalone Manager adapter and immutable
 constructor with a complete synthetic Manager/process-owner wheel closure:
 offline construction, retained reuse, changed binding, missing first-party
@@ -1634,13 +1636,40 @@ performed. This is an explicit native lane, not additional required PR CI.
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
-`immutable_runtime=true` runs only `tests/test_python_runtime_dev_live.py` through
-the canonical isolated `agent-worktrees` plugin runner. Its four native matrix
+`immutable_runtime=true` runs `tests/test_python_runtime_dev_live.py` through
+the canonical isolated `agent-worktrees` plugin runner, preceded by the focused
+installation-context descriptor-metadata regression. That regression retains an
+open file's identity across path replacement without trusting its fdescfs entry.
+The legacy lifecycle fixture declares its disposable directory marketplace and
+verifies that the original command binding survives removal of the source.
+Its four native matrix
 cells use two explicit jobs with literal Linux (`ubuntu-latest`) and macOS
 (`macos-latest`) runner routes, each with a `legacy`/`namespaced` mode matrix
 and fail-fast disabled. Python and `UV_PYTHON` are 3.11,
 matching the supported first-adopter floor. No host-state opt-in, live
 installation or service deployment is used.
+
+Namespaced installation management requires Bash 4.4+. The macOS namespaced
+cell selects Homebrew Bash and records its actual version;
+it does not weaken the guard or skip the case. Legacy macOS keeps stock Bash.
+The Worktrees installer carries its already-selected Bash into context queries,
+staged children and helper publication instead of rediscovering a different
+`bash` after a PATH change. Missing supported native tooling fails qualification.
+Only that disposable optional macOS namespaced cell installs a missing Homebrew
+Bash, without Homebrew auto-update or installation cleanup. Existing Bash is reused;
+legacy macOS and all other cells never install it. Canonical test-dependency
+seasoning and the Bash version guard remain unchanged. Copied POSIX
+fixtures redirect the SDK's current `canonical_path_into` account-home seam;
+they leave the source SDK and the runner's actual account profile unchanged.
+The copied Python fixture follows the typed passwd accessors; its existing
+POSIX/Windows regression checks quoted homes and unchanged original SDK bytes.
+The PowerShell transport uses the already-redirected Python SDK resolution.
+
+`tools/test_installer_dependency_policy.py` checks that copied configuration
+loads its sibling argument grammar even with a foreign ambient module, and
+refuses a missing sibling. The real application handoff and changed-wheel,
+installed-content and origin controls in `tools/test_local_install_source.py`
+exercise that companion loading through staged nested environments.
 
 ```bash
 gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \
@@ -1657,6 +1686,9 @@ The workflow definition's dispatch ref is distinct from the source SHA tested.
 Each matrix cell runs:
 
 ```bash
+python tools/run-plugin-tests.py installation-context \
+  --test-file tests/test_digest_cache_hardening.py -k darwin_metadata \
+  --timeout 120 --plugin-timeout 240
 python tools/run-plugin-tests.py agent-worktrees \
   --test-file tests/test_python_runtime_dev_live.py -k <legacy-or-namespaced> \
   --timeout 2500 --plugin-timeout 2700
@@ -3013,6 +3045,11 @@ named Windows UV commands through real guarded SDK/Python-owned installs.
 Named controls use an owned child's fixture-only PATH; external `*-system`
 qualification retains the target's actual PATH and verifies it is unchanged.
 
+`tools/test_installer_dependency_policy.py` also exercises real Windows UV
+configuration probes beyond the native subprocess cwd limit. Plain cwd,
+relative/inline `--directory` and `UV_WORKING_DIR` retain the selected project's
+stricter cutoff while UV starts from a short native cwd.
+
 Repository-tool installer-sync and vendor-guard link controls use the shared
 `native_file_symlink` fixture. Only Windows error 1314, raised by actual file-link
 creation, produces an explicit missing-privilege skip; other failures propagate.
@@ -3314,6 +3351,15 @@ native symlink/aliased-parent controls remain in the existing integration suites
 The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
+Packet JSON rejects nonfinite numbers during decoding, including nested values
+and exponent overflow, without serializing another evidence-sized buffer.
+Local packet and qualification reads use at most one-MiB input chunks instead
+of reserving their full file allowance for every small source read. The existing
+file-boundary regression retains full-size archive/readback coverage and checks
+small-file allocations and growth across the unchanged byte limit.
+The retained client-resource units substitute fixture-confined artifact handles
+at the native open boundary. Resource framing, hashing and retention remain real;
+these units do not qualify Windows read-sharing fences.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process
@@ -3417,8 +3463,13 @@ Coverage preserves file/line/context attribution directly from coverage.py.
 Call contexts start at the actual Python test-function frame and end when it
 returns; observer/reporting bookkeeping cannot keep a completed call active.
 Redundant per-function/class expansions are intentionally omitted, not unit
-outcomes or line evidence. Packet verification retains the sixteen-MiB per-file
-bound and requires every admitted unit to contribute production call coverage.
+outcomes or line evidence. Candidate packets also omit the redundant stored
+development projection: qualification reconstructs it from the complete raw
+hits and verified byte-bound mapping. The qualification cases cover both this
+form and legacy expanded packets, including refusal of missing/forged mappings,
+unknown contexts and altered stored projections. Packet verification retains
+the 192-MiB per-file evidence bound and requires every admitted unit to
+contribute production call coverage.
 The runner applies `promotion_unit_packet.py` to its actual three-file output
 before returning success. An in-process adversarial collector fixture proves
 that a passing assertion without production calls is refused by both paths;
@@ -3849,6 +3900,11 @@ cycles, visible and Default Terminal windows, and foreground transitions. Its
 timeout and owner-cancellation cases require pinned process handles to signal
 exit and canonical cleanup custody to become available. Breakaway remains
 refused; no resident service is installed or escaped from test containment.
+
+The focused generated-parent startup case in `test_installer_guardian.py`
+launches an isolated interpreter, without inherited future-annotation flags,
+and loads a sibling through the actual generated prelude. Desktop observation
+remains the separate opt-in check above.
 
 The existing `test_python_installer_engine.py` teardown-fault regression injects
 its first accounting failure inside the guardian, not through parent-only
@@ -5361,6 +5417,36 @@ only declared driver audit files, the known PowerShell startup cache and Python
 bytecode for existing payload modules are accounted separately. Driver requests
 must finish nonzero without unresolved execution. Same-size/same-mtime source,
 runtime and command mutations remain detected.
+
+The payload-lifecycle controls retain the complete process-helper package,
+including its lazy Job-accounting module. Windows deadline and early-parent-exit
+checks require an empty owned Job before admission releases. The source-only
+test target prepares the update driver and binds its transitive source bodies
+to the test-cache key. Real-installer fixtures materialize the complete
+execution closure once while retaining each preflight refusal and product-byte
+snapshot.
+
+Retained-control origin validation uses the constructor's PEP 610 archive
+contract. Empty `archive_info` retains the exact hash-pinned URL and version
+binding; an explicit wrong hash, contradictory hash fields or unsupported
+archive metadata remains a refusal.
+
+The process SDK's native interpreter controls launch both file-backed and
+retained-byte output relays twice from a selected Windows venv whose executable
+path exceeds 260 characters, preserving exact output and owned-Job settlement.
+The caller-owned launcher also preserves that selected venv's imports, arguments,
+streams and exit status over two cycles; bare executable lookup remains supported.
+
+Native development and repair fixtures use the SDK's caller-owned runner with
+their existing absolute command limits and eight-MiB per-channel capture bounds.
+Timeouts settle the complete owned Job or process group before returning; output
+does not renew the command limit. Focused controls retain stream bytes and exit
+status and refuse completion while a nested child survives.
+The offline source-build controls construct private control and target candidates
+through one installation cache, then change a dependency body to require a new
+wheel without rewriting the earlier completed control.
+Both PowerShell hosts also prove that lifecycle diagnostics arrive before child
+completion, once only, with stdout/result framing and failing exit status intact.
 
 The copied-pane boundary controls are an explicit, non-serving native lane:
 

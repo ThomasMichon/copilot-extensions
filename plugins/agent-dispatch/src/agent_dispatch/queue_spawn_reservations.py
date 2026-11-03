@@ -207,8 +207,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             type(allocation_revision) is not int or not 1 <= allocation_revision <= 2**63 - 1
         ):
             raise TaskError("allocation revision must be a positive integer")
-        if pool_catalog_revision is not None and driver != "cli":
-            raise TaskError("pool placement supports only the qualified cli startup driver")
+        if pool_catalog_revision is not None and driver not in {"cli", "ordinary-bridge"}:
+            raise TaskError("pool placement requires a qualified startup driver")
         from .ci_repair_spawn import authority_snapshot, reservation_authorized
         admission = None
         with self._connect() as probe:

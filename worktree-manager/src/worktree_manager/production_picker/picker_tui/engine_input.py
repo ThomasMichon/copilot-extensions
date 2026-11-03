@@ -157,7 +157,6 @@ class PickerScreenInputMixin:
             if self._kind() == "registered":
                 from .registered_scopes import refresh
                 refresh(self, self._reg_pivot())
-                self.debug = f"{self._reg_pivot().label}: refreshing selected declared scope(s)"
                 return
             if self._in_configuration():
                 if self._kind() == "config_section":

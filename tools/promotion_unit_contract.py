@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
@@ -36,7 +37,7 @@ def bounded_bytes(stream: BinaryIO, maximum: int) -> bytes:
     return b"".join(chunks)
 
 
-def decode_json(text: str | bytes) -> object:
+def decode_json(text: str | bytes, *, finite: bool = False) -> object:
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -45,7 +46,21 @@ def decode_json(text: str | bytes) -> object:
             result[key] = value
         return result
 
-    return json.loads(text, object_pairs_hook=unique)
+    if not finite:
+        return json.loads(text, object_pairs_hook=unique)
+
+    def number(token):
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError("unit evidence contains a nonfinite number")
+        return value
+
+    def constant(_token):
+        raise ValueError("unit evidence contains a nonfinite number")
+
+    return json.loads(
+        text, object_pairs_hook=unique, parse_float=number, parse_constant=constant,
+    )
 
 
 def relative_file(value: object) -> str:

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import ModuleType
 
 import pytest
 
@@ -29,6 +30,38 @@ SPEC = importlib.util.spec_from_file_location("installer_dependency_policy", PAT
 policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_copied_configuration_loads_only_its_sibling_argument_grammar(
+    tmp_path, monkeypatch, missing,
+):
+    for name in (
+        "installer_dependency_config.py", "installer_dependency_arguments.py",
+        "installer_retained_content.py",
+    ):
+        if not (missing and name == "installer_dependency_arguments.py"):
+            shutil.copyfile(PATH.with_name(name), tmp_path / name)
+    foreign = ModuleType("installer_dependency_arguments")
+
+    def refused(*args, **kwargs):
+        pytest.fail("copied configuration used an ambient argument grammar")
+
+    for name in ("argument_pairs", "balanced", "uv_command"):
+        setattr(foreign, name, refused)
+    monkeypatch.setitem(sys.modules, foreign.__name__, foreign)
+    spec = importlib.util.spec_from_file_location(
+        "copied_dependency_configuration", tmp_path / "installer_dependency_config.py",
+    )
+    copied = importlib.util.module_from_spec(spec)
+    if missing:
+        with pytest.raises(FileNotFoundError):
+            spec.loader.exec_module(copied)
+    else:
+        spec.loader.exec_module(copied)
+        assert list(copied.argument_pairs(
+            ["--python", "python", "example"], {"--python"}, error_type=ValueError,
+        )) == [("--python", "python"), ("", "example")]
 
 
 @pytest.mark.parametrize("names", [
@@ -318,6 +351,54 @@ def test_probe_preserves_arguments_environment_and_cwd(monkeypatch, tmp_path):
     assert calls[0][1]["env"] == environment
     assert calls[0][1]["cwd"] == tmp_path
     assert calls[0][1]["timeout"] == 30
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows subprocess cwd limit")
+@pytest.mark.parametrize("selection", ["cwd", "relative", "inline", "environment", "repeated"])
+def test_native_probe_preserves_configuration_beyond_windows_cwd_limit(tmp_path, monkeypatch, selection):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required"
+    deep = tmp_path / ("a" * 100) / ("b" * 100) / ("c" * 50)
+    deep.mkdir(parents=True)
+    assert len(str(deep)) >= 260
+    selected = deep if selection == "cwd" else deep / "selected"
+    selected.mkdir(exist_ok=True)
+    (selected / "uv.toml").write_text(
+        'exclude-newer="2020-01-01T00:00:00Z"\n', encoding="utf-8",
+    )
+    environment = offline_environment(tmp_path)
+    arguments = ["--no-index", "fixture-unresolved>=1"]
+    if selection in ("relative", "repeated"):
+        arguments.extend(["--directory", "selected"])
+        if selection == "repeated":
+            arguments.extend(["--directory", "selected"])
+    elif selection == "inline":
+        arguments.append("--directory=selected")
+    elif selection == "environment":
+        environment["UV_WORKING_DIR"] = "selected"
+    actual = policy.subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return actual(command, **kwargs)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    if selection == "repeated":
+        with pytest.raises(policy.DependencyPolicyError, match="configuration probe failed"):
+            policy.prepare_uv_install(uv, arguments, env=environment, cwd=deep, now=NOW)
+    else:
+        admitted = policy.prepare_uv_install(
+            uv, arguments, env=environment, cwd=deep, now=NOW,
+        )
+        assert admitted[:len(arguments)] == arguments
+        assert admitted[admitted.index("--exclude-newer") + 1] == "2020-01-01T00:00:00Z"
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command.count("--directory") == (2 if selection == "repeated" else 1)
+    assert command[command.index("--directory") + 1] == str(selected.resolve())
+    assert options["cwd"] == Path(deep.anchor)
+    assert options["env"] == environment
 
 
 def test_probe_error_never_prints_credential_projection(monkeypatch):
@@ -1897,6 +1978,7 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     helper.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(PATH, helper)
     shutil.copyfile(PATH.with_name("installer_dependency_config.py"), helper.with_name("installer_dependency_config.py"))
+    shutil.copyfile(PATH.with_name("installer_dependency_arguments.py"), helper.with_name("installer_dependency_arguments.py"))
     shutil.copyfile(PATH.with_name("installer_retained_content.py"), helper.with_name("installer_retained_content.py"))
     import subprocess
 
@@ -2333,6 +2415,10 @@ def materialized_broken_helper(root):
     shutil.copyfile(
         PATH.with_name("installer_dependency_config.py"),
         helper.with_name("installer_dependency_config.py"),
+    )
+    shutil.copyfile(
+        PATH.with_name("installer_dependency_arguments.py"),
+        helper.with_name("installer_dependency_arguments.py"),
     )
     shutil.copyfile(
         PATH.with_name("installer_retained_content.py"),

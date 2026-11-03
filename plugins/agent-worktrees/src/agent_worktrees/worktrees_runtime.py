@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
 
@@ -113,6 +114,9 @@ class WorktreesRuntime:
         from .agenda_runtime import AgendaRuntime
 
         self.agendas = AgendaRuntime(self)
+        from .owner_observation_adapter import OwnerObservationAdapter
+
+        self.observations = OwnerObservationAdapter(self)
 
     @property
     def _read_elected(self):
@@ -158,6 +162,7 @@ class WorktreesRuntime:
                 self._unready_demand.clear()
             self.feed.activate()
             self.agendas.activate()
+            self.observations.activate()
             if self._wake is not None:
                 self._wake.set()
 
@@ -167,12 +172,13 @@ class WorktreesRuntime:
             self._reason = reason
         self.feed.close(reason)
         self.agendas.close(reason)
+        self.observations.close_admission(reason)
 
     def health(self) -> dict:
         from .worktrees_feed import FEED_CAPABILITY
 
         with self._lock:
-            return {
+            result = {
                 "capabilities": [
                     CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
                     "worktree-agendas-v1",
@@ -185,14 +191,61 @@ class WorktreesRuntime:
                     "error": self._error,
                 },
             }
+        result["capabilities"].extend(self.observations.capabilities())
+        result["worktree_observations"] = self.observation_status()
+        return result
+
+    def observation_read(self, payload: dict) -> dict:
+        return self.observations.point(payload)
+
+    def observation_history(self, payload: dict) -> dict:
+        return self.observations.point(payload, history=True)
+
+    def observation_status(self) -> dict:
+        return self.observations.status()
+
+    def observation_counts(self, server) -> dict[str, int]:
+        from .owner_observation_transport import FEED_ACTION, HISTORY_ACTION, READ_ACTION
+
+        counts = self.observations.counts()
+        return {
+            FEED_ACTION: counts["streams"],
+            READ_ACTION: server.current_read_count(READ_ACTION),
+            HISTORY_ACTION: server.current_read_count(HISTORY_ACTION),
+            "worktree-observations-call": counts["readers"],
+            "worktree-observations-producer": counts["producer"],
+            "worktree-observations-publication": counts["publication"],
+            "worktree-observations-demand": counts["demand"],
+        }
+
+    def observation_busy(self, server) -> list[str]:
+        return [key for key, count in self.observation_counts(server).items() if count]
+
+    def observation_wait_closed(self, timeout: float) -> None:
+        from .owner_observation_contract import ObservationError
+
+        if not self.observations.wait_closed(timeout):
+            raise ObservationError("observation requests have not settled", "unavailable")
 
     def agenda_handle(self, action: str, payload: dict) -> dict:
-        return self.agendas.publish(payload) if action == "agenda-publish" else self.agendas.read(payload)
+        return (
+            self.agendas.publish(payload) if action == "agenda-publish"
+            else self.agendas.read(payload)
+        )
 
-    def stream(self, action, payload, disconnected):
+    def stream(
+        self, action: str, payload: dict, disconnected: Callable[[], bool],
+    ) -> Iterator[dict]:
+        from .owner_observation_contract import error
+        from .owner_observation_transport import FEED_ACTION
+
+        if action == FEED_ACTION:
+            return self.observations.stream(payload, disconnected)
         if action == "agenda-feed":
             return self.agendas.stream(payload, disconnected)
-        return self.feed.stream(payload, disconnected)
+        if action == "worktrees-feed":
+            return self.feed.stream(payload, disconnected)
+        return iter((error("unsupported-action", "action is not a held observation feed"),))
 
     def agenda_counts(self, server) -> dict:
         return {
@@ -216,7 +269,9 @@ class WorktreesRuntime:
             generation = self.store.generation
         try:
             result = picker_bootstrap_runtime.build(payload)
-        except (ExecutionSpaceError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        except (
+            ExecutionSpaceError, OSError, ValueError, KeyError, subprocess.SubprocessError,
+        ) as error:
             return self._failure("unavailable", str(error))
         if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
@@ -293,15 +348,23 @@ class WorktreesRuntime:
             self._demand = {p: at for p, at in self._demand.items() if at >= cutoff}
             self._unready_demand.intersection_update(self._demand)
             projects = set(self._demand)
-        return projects | self.feed.projects() | self.agendas.feed.projects()
+        return (
+            projects | self.feed.projects() | self.agendas.feed.projects()
+            | self.observations.projects()
+        )
 
     def publish(self, project: str, rows, *, observed_at: float) -> None:
+        project = _identity(project, name="project")
         with self._activation_lock:
             with self._lock:
                 if not self._admitting:
                     raise ProjectionUnavailable("current-roster publisher is not admitted")
             try:
-                self.store.publish(project, rows, observed_at=observed_at, authority_check=self._elected)
+                with self.observations.publication(project):
+                    self.store.publish(
+                        project, rows, observed_at=observed_at, authority_check=self._elected,
+                    )
+                    self.observations.accepted(project)
                 self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:
                 if self.store.superseded:
@@ -320,6 +383,7 @@ class WorktreesRuntime:
         project = _identity(project, name="project")
         with self._lock:
             self._publication_errors[project] = str(error)[:1024] or type(error).__name__
+        self.observations.publication_failed(project, error)
         self.feed.changed(project)
 
     def producer_failed(self, error: Exception) -> None:
@@ -330,4 +394,5 @@ class WorktreesRuntime:
         with self._activation_lock:
             self._terminated = True
             self.close_admission("closed")
+            self.observations.shutdown()
             self.store.close()

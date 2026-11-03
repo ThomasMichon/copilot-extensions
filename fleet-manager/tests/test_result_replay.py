@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
+from pathlib import Path
 import sqlite3
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import sys
 import pytest
 
 from fleet_manager.ledger import OperationLedger
+from fleet_manager import node_journal
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent
 from fleet_manager.planning import PlanError
@@ -196,11 +198,11 @@ def test_schema_upgrade_refuses_foreign_node_state_without_mutation(tmp_path):
     NodeJournal(path, authority="fleet-1", installation="gateway-1", target="node-1")
     with closing(sqlite3.connect(path)) as connection:
         before = connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
-    with pytest.raises(PlanError, match="unrecognized"):
+    with pytest.raises(PlanError, match="unsupported"):
         gateway(path)
     with closing(sqlite3.connect(path)) as connection:
         assert connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall() == before
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -230,6 +232,7 @@ def test_schema_upgrade_preserves_unknown_inventory_or_columns(tmp_path, sql, ve
 
 PROCESS = """
 import json,os,sys
+sys.path.insert(0,sys.argv[4])
 from fleet_manager.ledger import OperationLedger
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent
@@ -243,7 +246,7 @@ after=g.result_cursor(target='node-1',installation='install-node-1')
 def run_process(store, owner, intent, body):
     return subprocess.run(
         [sys.executable, "-I", "-c", PROCESS + body, str(store.path), str(owner.path),
-         json.dumps(intent.to_dict())],
+         json.dumps(intent.to_dict()), str(Path(node_journal.__file__).resolve().parents[1])],
         capture_output=True, text=True, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )

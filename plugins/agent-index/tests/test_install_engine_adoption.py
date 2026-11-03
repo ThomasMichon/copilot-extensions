@@ -133,14 +133,16 @@ def stage_procutil_layout(repository: Path, *, materialized: bool) -> Path:
     assert (local / "pyproject.toml").is_file()
     if not materialized:
         canonical = repository / "libs" / "agent-procutil"
-        shutil.copytree(local, canonical, dirs_exist_ok=True)
+        shutil.copytree(payload / "libs", canonical.parent, dirs_exist_ok=True)
         sources = _materializer()["uer"]
         project = payload / "pyproject.toml"
         assert sources.can_rewrite_uv_source_to_editable(project, "agent-procutil")
-        sources.rewrite_uv_source_to_editable(
-            project, "agent-procutil", "../../libs/agent-procutil",
-        )
-        shutil.rmtree(local)
+        for library in (payload / "libs").iterdir():
+            if sources.can_rewrite_uv_source_to_editable(project, library.name):
+                sources.rewrite_uv_source_to_editable(
+                    project, library.name, f"../../libs/{library.name}",
+                )
+        shutil.rmtree(payload / "libs")
         assert not local.exists()
         assert (canonical / "pyproject.toml").is_file()
     return payload
@@ -669,11 +671,17 @@ def snapshot_source(tmp_path: Path) -> Path:
         shutil.copy2(PLUGIN / name, source / name)
     for ext in ("sh", "ps1"):
         shutil.copy2(PLUGIN / "scripts" / f"install.{ext}", source / "scripts" / f"install.{ext}")
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
+    for name in (
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_arguments.py", "installer_retained_content.py",
+    ):
         shutil.copy2(ENGINE / name, source / "scripts" / name)
     (source / "server").mkdir()
     shutil.copy2(PLUGIN / "server/pyproject.toml", source / "server/pyproject.toml")
-    for library in ("zdd", "agent-procutil", "dropin-registry"):
+    for library in (
+        "zdd", "agent-procutil", "dropin-registry", "single-instance-lease", "update-driver",
+        "configuration-layers",
+    ):
         origin = (PLUGIN if library == "dropin-registry" else REPO) / "libs" / library
         destination = (source if library == "dropin-registry" else source.parents[1]) / "libs" / library
         destination.mkdir(parents=True)
@@ -695,6 +703,7 @@ def snapshot_functions() -> str:
 @pytest.mark.parametrize("library,filename", [
     ("installer-engine", "installer-engine.sh"),
     ("zdd", "fixture.py"),
+    ("configuration-layers", "fixture.py"),
 ])
 def test_powershell_snapshot_dependency_content_changes_identity(tmp_path: Path, library, filename):
     source = snapshot_source(tmp_path)

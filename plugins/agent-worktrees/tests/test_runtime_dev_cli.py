@@ -79,6 +79,37 @@ def test_origin_verifier_normalizes_wheel_names_but_preserves_directory_names(
         runtime_candidate.verify_installed_origins()
 
 
+@pytest.mark.parametrize(("archive", "accepted"), [
+    ({}, True),
+    ({"hashes": {"sha256": "b" * 64}}, False),
+    ({"hash": "sha256=" + "b" * 64, "hashes": {"sha256": "a" * 64}}, False),
+    ({"hashes": {"sha256": "a" * 64}, "extra": True}, False),
+    (None, False),
+])
+def test_retained_source_wheel_archive_metadata_matches_construction(
+    tmp_path, monkeypatch, archive, accepted,
+):
+    digest = "a" * 64
+    url = "file:///gone/example.whl#sha256=" + digest
+    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(tmp_path))
+    (tmp_path / ".runtime-input-origins.json").write_text(json.dumps({
+        "schema": "installer-engine.frozen-input-origins", "version": 1,
+        "packages": {"example-app": url},
+        "source_wheels": {"example-app": {"version": "1.0", "sha256": "sha256:" + digest}},
+    }), encoding="utf-8")
+    distribution = SimpleNamespace(
+        metadata={"Name": "example-app"}, version="1.0",
+        locate_file=lambda _path: tmp_path,
+        read_text=lambda _path: json.dumps({"url": url, "archive_info": archive}),
+    )
+    monkeypatch.setattr(runtime_candidate, "distributions", lambda: [distribution])
+    if accepted:
+        runtime_candidate.verify_installed_origins()
+    else:
+        with pytest.raises(RuntimeError, match="non-editable"):
+            runtime_candidate.verify_installed_origins()
+
+
 def test_deployed_release_uses_whole_operation_without_owner_checkout(tmp_path, monkeypatch):
     import sys
 

@@ -239,7 +239,9 @@ def request(value: dict, *, history: bool = False) -> tuple[Selection, dict]:
     fields = {"contract_version", "project", "worktree_id", "expected_head_session_id"}
     fields |= {"source_generation", "before_cursor", "limit"} if history else {"after_cursor"}
     exact(value, fields)
-    if type(value["contract_version"]) is not int or value["contract_version"] != VERSION:
+    if type(value["contract_version"]) is not int:
+        raise ObservationError("owner observation version must be an integer")
+    if value["contract_version"] != VERSION:
         raise ObservationError("unsupported owner observation contract", "unsupported")
     selected = Selection(value["project"], value["worktree_id"], value["expected_head_session_id"])
     if history:

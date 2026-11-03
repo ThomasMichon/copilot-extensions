@@ -72,8 +72,7 @@ def _read_file(directory: Path, name: str) -> tuple[bytes, dict]:
     except OSError as exc:
         raise UnitEvidenceError(f"cannot read packet file {name}: {exc}") from exc
     try:
-        data = decode_json(raw)
-        json.dumps(data, allow_nan=False)
+        data = decode_json(raw, finite=True)
     except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise UnitEvidenceError(f"invalid packet JSON in {name}: {exc}") from exc
     except ValueError as exc:
@@ -223,7 +222,8 @@ def verify_packet(
         )
         raw = {key: value for key, value in coverage.items()
                if key not in ("development_mapping", "development_projection")}
-        if coverage.get("development_projection") != project_coverage(raw, mapping):
+        projection = project_coverage(raw, mapping)
+        if "development_projection" in coverage and coverage["development_projection"] != projection:
             raise UnitEvidenceError("development coverage projection differs from verified raw hits")
     raw_digests = {
         "manifest_file_sha256": hashlib.sha256(manifest_raw).hexdigest(),

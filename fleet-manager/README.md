@@ -72,6 +72,12 @@ requirements without contacting Core, installing a manager or authorizing
 effects. Default planning preserves its optional configuration namespace without
 selecting it; actual managed lifecycle and production readiness remain separate.
 
+The opt-in [Komodo workload SDK](docs/komodo-workload.md) executes one exact
+container-role Stack on an independently authenticated existing Server, through
+content-bound admission and original-attempt journaling. Explicit provider
+Gateway composition selects it; ordinary role planning remains inert.
+It is not installed/live adoption or a direct Docker reconciler.
+
 The explicit Linux host [Komodo substrate owner](docs/komodo-owner.md) supplies
 fixed native Core/Periphery/Mongo convergence, preserving adoption, current
 authenticated status and receipt-owned container withdrawal. It also exposes

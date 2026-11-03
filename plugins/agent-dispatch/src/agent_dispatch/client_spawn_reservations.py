@@ -55,6 +55,7 @@ class SpawnReservationClientMixin:
     def record_created_agent(
         self, key: str, *, task_generation: int, agent_info: dict,
         worktree_record: dict | None = None, startup_invocation: dict | None = None,
+        execution_machine: str | None = None,
     ) -> dict:
         """Persist ordinary Bridge readiness before any first task prompt."""
         body = {"task_generation": task_generation, "agent_info": agent_info}
@@ -62,6 +63,8 @@ class SpawnReservationClientMixin:
             body["worktree_record"] = worktree_record
         if startup_invocation is not None:
             body["startup_invocation"] = startup_invocation
+        if execution_machine is not None:
+            body["execution_machine"] = execution_machine
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/created-agent",
             json=body,
@@ -70,12 +73,14 @@ class SpawnReservationClientMixin:
     def record_resumed_agent(
         self, key: str, *, task_generation: int, session_info: dict, worktree_record: dict,
         startup_invocation: dict | None = None,
+        execution_machine: str | None = None,
     ) -> dict:
         """Store actual resumed SessionInfo without asserting a new creation."""
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/resumed-agent",
             json={"task_generation": task_generation, "session_info": session_info,
                   "worktree_record": worktree_record,
+                  **({"execution_machine": execution_machine} if execution_machine is not None else {}),
                   **({"startup_invocation": startup_invocation} if startup_invocation is not None else {})},
         ))
 

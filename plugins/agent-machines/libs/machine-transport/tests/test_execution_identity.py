@@ -19,12 +19,12 @@ from machine_transport import (
 )
 
 
-def test_resolve_identity_qualifies_guest_once():
+def test_resolve_identity_qualifies_guest_once() -> None:
     assert resolve_identity("example-host", guest=True).canonical == "example-host-wsl"
     assert resolve_identity("example-host-wsl", guest=True).canonical == "example-host-wsl"
 
 
-def test_resolve_identity_prefers_guest_entry_and_warns_when_missing():
+def test_resolve_identity_prefers_guest_entry_and_warns_when_missing() -> None:
     entries = [
         TopologyEntry("example-host", hostname="generated-host", alias="host-label"),
         TopologyEntry("example-host-wsl", hostname="generated-host", alias="guest-label"),
@@ -40,7 +40,7 @@ def test_resolve_identity_prefers_guest_entry_and_warns_when_missing():
     assert "no guest entry" in fallback.warnings[0]
 
 
-def test_resolve_identity_rejects_ambiguous_labels_and_warns_on_missing_guest():
+def test_resolve_identity_rejects_ambiguous_labels_and_warns_on_missing_guest() -> None:
     with pytest.raises(IdentityError, match="ambiguous.*machine-a, machine-b"):
         resolve_identity(
             "shared",
@@ -59,7 +59,7 @@ def test_resolve_identity_rejects_ambiguous_labels_and_warns_on_missing_guest():
     assert "no guest entry" in fallback.warnings[0]
 
 
-def test_shared_display_names_are_metadata_until_unique_lookup():
+def test_shared_display_names_are_metadata_until_unique_lookup() -> None:
     entries = (
         TopologyEntry("example-host", hostname="generated-host", display_name="Example"),
         TopologyEntry("example-host-wsl", hostname="generated-host", display_name="Example"),
@@ -69,7 +69,7 @@ def test_shared_display_names_are_metadata_until_unique_lookup():
         resolve_identity("Example", entries)
 
 
-def test_machine_entry_projection_and_resolution():
+def test_machine_entry_projection_and_resolution() -> None:
     entries = {
         "example-host": MachineEntry(
             key="example-host",
@@ -96,8 +96,8 @@ def test_machine_entry_projection_and_resolution():
     [("Windows", "10", "windows"), ("Linux", "6.6-microsoft-standard-WSL2", "wsl"), ("Linux", "6.6-generic", "linux")],
 )
 def test_detect_platform_ignores_inherited_environment(
-    monkeypatch, system, release, expected,
-):
+    monkeypatch: pytest.MonkeyPatch, system: str, release: str, expected: str,
+) -> None:
     monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
     monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release), raising=False)
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
@@ -111,7 +111,7 @@ def test_detect_platform_ignores_inherited_environment(
     "0::/docker/example", "0::/kubepods/example", "0::/containerd/example",
     "0::/lxc/example", "0::/libpod/example",
 ])
-def test_markerless_containers_do_not_inherit_wsl_identity(monkeypatch, cgroup):
+def test_markerless_containers_do_not_inherit_wsl_identity(monkeypatch: pytest.MonkeyPatch, cgroup: str) -> None:
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"), raising=False)
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
@@ -119,7 +119,7 @@ def test_markerless_containers_do_not_inherit_wsl_identity(monkeypatch, cgroup):
     assert detect_platform() == "linux"
 
 
-def test_platform_fixture_uname_patches_support_native_windows_absence():
+def test_platform_fixture_uname_patches_support_native_windows_absence() -> None:
     root = Path(__file__).resolve().parents[3]
     fixtures = [
         Path(__file__).relative_to(root),

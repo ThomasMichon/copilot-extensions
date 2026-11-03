@@ -47,7 +47,7 @@ completeness or a supervisor process identity.
 
 | Route | Metadata operation |
 |-------|--------------------|
-| `GET /pool-catalog` | One unfiltered transaction over every retained scope, the catalog/registration revisions, original definitions, blockers and `metadata_ready` |
+| `GET /pool-catalog` | One unfiltered transaction over every retained scope with its original definitions, current required definitions, catalog/registration revisions, blockers and `metadata_ready` |
 | `POST /pool-catalog/scopes/begin` | Compare `expected_generation` for the explicit machine/environment/publisher incarnation |
 | `POST /pool-catalog/scopes/publish` | Compare generation, publication and registration revisions and replace the whole scope, or record unavailable inputs |
 
@@ -91,6 +91,34 @@ legacy registration or to reject an otherwise-supported legacy operation.
 Publisher enrollment, consumer migration and the retirement/rollback window
 remain gated by the integration obligations below.
 
+### Configured withdrawal without execution retirement
+
+A complete projected cohort is the authority for which execution
+machine/environment scopes are required **now**. The snapshot still returns
+every retained scope, including each obsolete scope's original definitions,
+publisher generation, revision and expiry. Its top-level `definitions` and
+readiness blockers cover only scopes selected by that complete cohort. Missing
+current members still block the whole catalog; removed pending, unavailable or
+expired scopes do not block unrelated current members or supply new candidates.
+An explicit empty cohort is `configured_metadata_ready` with no candidates,
+but is not `metadata_ready`. Unconfirmed/unavailable observations still block;
+unprojected legacy catalogs still require every enrolled scope.
+
+Exclusion changes no stored scope, generation, publication history, task
+assignment, reservation, native binding or effect. Retained work can finish its
+original claim/start path; a later retry cannot silently move to another pool.
+Accountable capacity and exclusive keys remain held under their existing
+retirement rules, including after removal and re-addition. Re-adding a scope
+requires publication against the new cohort revision before new placement.
+Old accepted-request replay can recover its original result without renewing
+freshness or restoring eligibility; unfenced, removed-scope and stale writes
+remain refused. A predecessor generation cannot overwrite a successor.
+
+No new wire form or caller prerequisite is introduced. Older providers may
+conservatively block on obsolete enrollment; callers must preserve that refusal,
+not replay a legacy reservation. This source behavior does not enable ordinary
+allocation, prove a runtime stopped, or authorize cleanup.
+
 ## Implemented local collection boundary
 
 `SupervisorSources`, composed through the existing `BoundedReconciliation`
@@ -105,7 +133,12 @@ set but are not pool definitions.
 Each attempt requires observations from all three sources and an identified
 machine/environment. Effective worker rows need complete, scope-consistent
 normalized definitions. A missing or invalid definition cannot simply disappear
-from the pool list. Failed or cached reads, a future consumed from an earlier
+from the pool list. Explicit direct rows retain their complete definition in
+the existing spec JSON through the
+[negotiated registration boundary](pool-instances.md#direct-registrations).
+Equivalent-source deduplication compares explicit pool policy as well as launch
+behavior, so a different priority or full predicate is not erased by matching
+legacy flags. Failed or cached reads, a future consumed from an earlier
 attempt, unconfirmed declaration writes/withdrawals and duplicate source IDs
 make the entire collection unavailable. Inspecting the retained snapshot does
 not perform I/O or renew freshness; unsuccessful attempts do not expose a partial
