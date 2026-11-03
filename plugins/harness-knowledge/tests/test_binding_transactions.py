@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 
@@ -14,6 +15,8 @@ SCRIPT = (
     / "skills" / "binding-knowledge" / "scripts" / "binding_yaml.py"
 )
 spec = importlib.util.spec_from_file_location("transaction_binding_yaml", SCRIPT)
+if spec is None or spec.loader is None:
+    raise ImportError(f"Cannot load binding transactions from {SCRIPT}")
 binding = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(binding)
 
@@ -42,29 +45,29 @@ print(json.dumps({'bound':name}))
 """
 
 
-def _start(config, name, mode="preserve"):
+def _start(config: Path, name: str, mode: str = "preserve") -> subprocess.Popen[str]:
     return subprocess.Popen(
         [sys.executable, "-c", CHILD, str(SCRIPT), str(config), name, mode],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
     )
 
 
-def _wait_ready(config, names):
+def _wait_ready(config: Path, names: Iterable[str]) -> None:
     deadline = time.monotonic() + 5
     while not all(config.with_name(f"ready-{name}").exists() for name in names):
         assert time.monotonic() < deadline, "binding child did not reach the start barrier"
         time.sleep(0.01)
 
 
-def _cleanup(children):
+def _cleanup(children: Iterable[subprocess.Popen[str]]) -> None:
     for child in children:
         if child.poll() is None:
             child.kill()
         child.wait(timeout=5)
 
 
-def test_competing_first_touch_writers_observe_the_winning_selection(tmp_path):
+def test_competing_first_touch_writers_observe_the_winning_selection(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     config.write_text("repo_name: harness\n", encoding="utf-8")
     children = [_start(config, name) for name in ("first", "second")]
@@ -82,7 +85,7 @@ def test_competing_first_touch_writers_observe_the_winning_selection(tmp_path):
         _cleanup(children)
 
 
-def test_explicit_repoint_writer_uses_the_same_os_lock(tmp_path):
+def test_explicit_repoint_writer_uses_the_same_os_lock(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     config.write_text("knowledge_repo: original\n", encoding="utf-8")
     children = []
@@ -103,13 +106,13 @@ def test_explicit_repoint_writer_uses_the_same_os_lock(tmp_path):
         _cleanup(children)
 
 
-def test_capability_probe_is_available_before_repository_selection_without_effects(tmp_path):
+def test_capability_probe_is_available_before_repository_selection_without_effects(tmp_path: Path) -> None:
     command = SCRIPT.with_name("bind_knowledge.py")
     result = subprocess.run(
         [sys.executable, str(command), "--capabilities", "--json"],
         cwd=tmp_path, capture_output=True, text=True, timeout=5,
         env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {

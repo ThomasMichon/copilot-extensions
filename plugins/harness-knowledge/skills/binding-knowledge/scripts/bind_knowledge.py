@@ -29,16 +29,71 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Protocol, TYPE_CHECKING, TypedDict, cast
 from urllib.parse import urlparse, urlsplit, urlunsplit
+
+if TYPE_CHECKING:
+    from assemble_plugins import ComposerSummary
+
+
+Registration = TypedDict("Registration", {
+    "status": str, "canonical": bool, "path_source": str, "name": str,
+    "expected_path": str, "resolved_path": str, "class": str, "remote": str,
+    "default_branch": str, "account": str, "account_status": str, "reason": str,
+    "registration_argv": list[str], "registration_command": str,
+})
+
+
+class StateRoot(TypedDict):
+    status: str
+    bound: bool
+    repo: str
+    state_root: str
+    reason: str
+
+
+class _BindingFields(TypedDict):
+    harness: str
+    knowledge_repo: str
+    knowledge_path: str
+    config: str
+    registration: Registration
+    state_root: StateRoot
+    issues: dict[str, str]
+
+
+class BindSummary(_BindingFields, total=False):
+    plugins: ComposerSummary
+    plugins_error: str
+    control_plane: dict[str, Any]
+    control_plane_source: object
+
+
+class _YamlModule(Protocol):
+    strip_yaml_comment: Callable[[str], str]
+    yaml_scalar: Callable[[str], str]
+    check_existing_binding: Callable[[str, str], bool]
+    read_issue_route: Callable[[Path], dict[str, str] | None]
+    set_top_yaml_key: Callable[[str, str, str], str]
+    write_binding: Callable[..., None]
+
+
+class _GitModule(Protocol):
+    origin: Callable[[str], str]
+    default_branch: Callable[[str], str]
+
 
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
 
 _yaml_spec = importlib.util.spec_from_file_location(
     "binding_yaml", Path(__file__).with_name("binding_yaml.py")
 )
-_binding_yaml = importlib.util.module_from_spec(_yaml_spec)
-_yaml_spec.loader.exec_module(_binding_yaml)
+if _yaml_spec is None or _yaml_spec.loader is None:
+    raise ImportError("Cannot load the binding YAML module")
+_binding_yaml = cast(_YamlModule, importlib.util.module_from_spec(_yaml_spec))
+_yaml_spec.loader.exec_module(cast(Any, _binding_yaml))
 _strip_yaml_comment = _binding_yaml.strip_yaml_comment
 _yaml_scalar = _binding_yaml.yaml_scalar
 _check_existing_binding = _binding_yaml.check_existing_binding
@@ -48,8 +103,10 @@ set_top_yaml_key = _binding_yaml.set_top_yaml_key
 _git_spec = importlib.util.spec_from_file_location(
     "binding_git", Path(__file__).with_name("binding_git.py")
 )
-_binding_git = importlib.util.module_from_spec(_git_spec)
-_git_spec.loader.exec_module(_binding_git)
+if _git_spec is None or _git_spec.loader is None:
+    raise ImportError("Cannot load the binding Git module")
+_binding_git = cast(_GitModule, importlib.util.module_from_spec(_git_spec))
+_git_spec.loader.exec_module(cast(Any, _binding_git))
 
 
 def knowledge_origin(knowledge_path: str) -> str:
@@ -143,7 +200,7 @@ def _run_agent_worktrees(
             text=True,
             stdin=subprocess.DEVNULL if noninteractive else None,
             timeout=120,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -258,8 +315,8 @@ def inspect_registration(
     knowledge_path: str,
     agent_worktrees_path: str,
     account_override: str = "",
-    *, platform_key: str = "", registry: dict | None = None,
-) -> dict[str, object]:
+    *, platform_key: str = "", registry: dict[str, Any] | None = None,
+) -> Registration:
     """Inspect canonical registration, optionally sharing a read-only preflight inventory.
 
     The binding writer does not supply an inventory: it must re-read registration
@@ -268,7 +325,7 @@ def inspect_registration(
     remote = knowledge_origin(knowledge_path)
     default_branch = knowledge_default_branch(knowledge_path)
     account = ""
-    base = {
+    base: Registration = {
         "status": "unverified",
         "canonical": False,
         "path_source": "unverified",
@@ -338,9 +395,10 @@ def inspect_registration(
     )
     if entry is None and case_collision is not None:
         collision_name = str(case_collision.get("name", "") or "")
+        raw_collision_paths = case_collision.get("paths")
         collision_paths = (
-            case_collision.get("paths")
-            if isinstance(case_collision.get("paths"), dict)
+            raw_collision_paths
+            if isinstance(raw_collision_paths, dict)
             else {}
         )
         return {
@@ -372,7 +430,8 @@ def inspect_registration(
             ),
         }
     if entry is not None:
-        paths = entry.get("paths") if isinstance(entry.get("paths"), dict) else {}
+        raw_paths = entry.get("paths")
+        paths = raw_paths if isinstance(raw_paths, dict) else {}
         resolved_path = str(paths.get(platform_key, "") or "")
         repo_class = str(entry.get("class", "") or "")
         account = str(entry.get("resolved_account", "") or entry.get("account", "") or "")
@@ -504,7 +563,7 @@ def ensure_registration(
     agent_worktrees_path: str,
     account_override: str = "",
     *, platform_key: str = "",
-) -> dict[str, object]:
+) -> Registration:
     registration = inspect_registration(
         knowledge,
         knowledge_path,
@@ -560,7 +619,7 @@ def inspect_state_root(
     agent_worktrees_path: str,
     *,
     harness: str = "",
-) -> dict[str, object]:
+) -> StateRoot:
     if not harness_path or not Path(harness_path).is_dir():
         return {
             "status": "unverified",
@@ -716,7 +775,7 @@ def bind(
     preserve_binding: bool = False,
     config_root: Path | None = None,
     platform_key: str = "",
-) -> dict:
+) -> BindSummary:
     """Write the machine-local binding. Idempotent. Returns a summary dict."""
     del product_repos  # Retained as a compatibility argument for existing callers.
     registration = (
@@ -759,7 +818,7 @@ def bind(
         except OSError:
             pass
 
-    summary = {
+    summary: BindSummary = {
         "harness": harness,
         "knowledge_repo": knowledge,
         "knowledge_path": knowledge_path,
@@ -784,6 +843,8 @@ def bind(
             import importlib.util as _ilu
             _p = Path(__file__).resolve().parent / "assemble_plugins.py"
             _spec = _ilu.spec_from_file_location("assemble_plugins", _p)
+            if _spec is None or _spec.loader is None:
+                raise ImportError("Cannot load the plugin assembler")
             _mod = _ilu.module_from_spec(_spec)
             _spec.loader.exec_module(_mod)
             assemble = _mod.assemble
@@ -862,6 +923,8 @@ def main(argv: list[str] | None = None) -> int:
 
             path = Path(__file__).with_name("control_plane_binding.py")
             spec = importlib.util.spec_from_file_location("control_plane_binding", path)
+            if spec is None or spec.loader is None:
+                raise ImportError("Cannot load the control-plane binding module")
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             declaration = module.resolve_binding(

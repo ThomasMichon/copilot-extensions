@@ -15,6 +15,33 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Any, Literal, TypedDict, cast
+
+
+class ConflictLists(TypedDict):
+    marketplaces: list[str]
+    enabled_plugins: list[str]
+
+
+class _ComposerFields(TypedDict):
+    action: Literal["composed", "retired", "no-op"]
+    paired: bool
+    changed: bool
+
+
+class ComposerSummary(_ComposerFields, total=False):
+    settings_local: str
+    harness_path: str
+    knowledge_path: str
+    marketplaces: list[str]
+    enabled_plugins: list[str]
+    count: int
+    conflicts: ConflictLists
+    retired: bool
+    pair_error: str
+    retired_entries: ConflictLists
+    preserved_modified: ConflictLists
+    file_removed: bool
 
 
 class KnowledgePluginError(RuntimeError):
@@ -22,12 +49,12 @@ class KnowledgePluginError(RuntimeError):
 
 
 def _require_type(
-    summary: dict,
+    summary: dict[str, Any],
     field: str,
-    expected_type: type,
+    expected_type: type[Any],
     *,
     action: str,
-):
+) -> Any:
     value = summary.get(field)
     if not isinstance(value, expected_type) or (
         expected_type is int and isinstance(value, bool)
@@ -40,23 +67,23 @@ def _require_type(
     return value
 
 
-def _require_string_list(summary: dict, field: str, *, action: str) -> list[str]:
+def _require_string_list(summary: dict[str, Any], field: str, *, action: str) -> list[str]:
     value = _require_type(summary, field, list, action=action)
     if not all(isinstance(item, str) for item in value):
         raise KnowledgePluginError(
             "agent-worktrees knowledge compose-plugins returned an invalid "
             f"{action!r} summary: {field!r} must contain only strings"
         )
-    return value
+    return cast(list[str], value)
 
 
-def _require_conflict_lists(summary: dict, field: str, *, action: str) -> None:
+def _require_conflict_lists(summary: dict[str, Any], field: str, *, action: str) -> None:
     value = _require_type(summary, field, dict, action=action)
     for nested in ("marketplaces", "enabled_plugins"):
         _require_string_list(value, nested, action=action)
 
 
-def _validate_summary(summary: dict) -> dict:
+def _validate_summary(summary: dict[str, Any]) -> ComposerSummary:
     action = summary.get("action")
     if not isinstance(action, str) or action not in {
         "composed",
@@ -95,7 +122,7 @@ def _validate_summary(summary: dict) -> dict:
         for field in ("settings_local", "harness_path"):
             if field in summary:
                 _require_type(summary, field, str, action=action)
-    return summary
+    return cast(ComposerSummary, summary)
 
 
 def _resolve_command(preferred: str | None = None) -> list[str]:
@@ -128,7 +155,7 @@ def _resolve_command(preferred: str | None = None) -> list[str]:
     return [command]
 
 
-def _delegate(arguments: list[str], agent_worktrees_command: str | None = None) -> dict:
+def _delegate(arguments: list[str], agent_worktrees_command: str | None = None) -> ComposerSummary:
     command = [
         *_resolve_command(agent_worktrees_command),
         "knowledge",
@@ -186,7 +213,7 @@ def assemble(
     knowledge_path: os.PathLike[str] | str,
     *,
     agent_worktrees_command: str | None = None,
-) -> dict:
+) -> ComposerSummary:
     """Compose plugins for an explicit harness/knowledge checkout pair."""
     return _delegate(
         [
@@ -199,7 +226,7 @@ def assemble(
     )
 
 
-def assemble_from_pair(*, agent_worktrees_command: str | None = None) -> dict:
+def assemble_from_pair(*, agent_worktrees_command: str | None = None) -> ComposerSummary:
     """Compose plugins using the pair containing the current directory."""
     return _delegate([], agent_worktrees_command)
 
@@ -242,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.knowledge_path,
                 agent_worktrees_command=args.agent_worktrees_path,
             )
-        summary = _validate_summary(summary)
+        summary = _validate_summary(cast(dict[str, Any], summary))
     except KnowledgePluginError as exc:
         if args.json:
             print(json.dumps({"paired": False, "error": str(exc)}, indent=2))

@@ -9,7 +9,22 @@ import re
 import tempfile
 import time
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Protocol, cast
+
+
+class _WindowsLock(Protocol):
+    locking: Callable[[int, int, int], None]
+    LK_NBLCK: int
+    LK_UNLCK: int
+
+
+class _PosixLock(Protocol):
+    flock: Callable[[int, int], None]
+    LOCK_EX: int
+    LOCK_NB: int
+    LOCK_UN: int
 
 
 def strip_yaml_comment(value: str) -> str:
@@ -121,7 +136,7 @@ def check_existing_binding(existing: str, knowledge: str) -> bool:
 
 
 @contextmanager
-def binding_lock(base: Path):
+def binding_lock(base: Path) -> Iterator[None]:
     """All explicit and preserving writers share one stable OS-locked file."""
     base.mkdir(parents=True, exist_ok=True)
     with (base / ".knowledge-binding.lock").open("a+b") as stream:
@@ -129,14 +144,18 @@ def binding_lock(base: Path):
             stream.write(b"\0")
             stream.flush()
         stream.seek(0)
+        acquire: Callable[[], None]
+        release: Callable[[], None]
         if os.name == "nt":
             import msvcrt
-            acquire = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-            release = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            windows_lock = cast(_WindowsLock, msvcrt)
+            acquire = lambda: windows_lock.locking(stream.fileno(), windows_lock.LK_NBLCK, 1)
+            release = lambda: windows_lock.locking(stream.fileno(), windows_lock.LK_UNLCK, 1)
         else:
             import fcntl
-            acquire = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            release = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            posix_lock = cast(_PosixLock, fcntl)
+            acquire = lambda: posix_lock.flock(stream.fileno(), posix_lock.LOCK_EX | posix_lock.LOCK_NB)
+            release = lambda: posix_lock.flock(stream.fileno(), posix_lock.LOCK_UN)
         deadline = time.monotonic() + 10
         while True:
             try:

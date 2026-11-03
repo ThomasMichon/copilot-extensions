@@ -6,21 +6,43 @@ import json
 import importlib.util
 import os
 import re
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from types import ModuleType
+from typing import Any, Protocol, TypedDict, cast
+
+
+class NativeOwner(Protocol):
+    _run_agent_worktrees: Callable[..., subprocess.CompletedProcess[str] | None]
+    _same_path: Callable[[str, str], bool]
+    _check_existing_binding: Callable[[str, str], bool]
+    inspect_registration: Callable[..., dict[str, object]]
+
+
+class BindingDeclaration(TypedDict):
+    harness: str
+    knowledge: str
+    harness_path: str
+    knowledge_path: str
+    config_root: str
+    platform_key: str
+    control_plane: dict[str, Any]
+    source: object
 
 _git_spec = importlib.util.spec_from_file_location(
     "binding_git", Path(__file__).with_name("binding_git.py")
 )
+if _git_spec is None or _git_spec.loader is None:
+    raise ImportError("Cannot load the binding Git module")
 _binding_git = importlib.util.module_from_spec(_git_spec)
 _git_spec.loader.exec_module(_binding_git)
-validate_checkout = _binding_git.validate_checkout
+validate_checkout = cast(Callable[[str], None], _binding_git.validate_checkout)
 
 
 def _json_result(
-    owner: ModuleType, command: str, argv: list[str], *,
+    owner: NativeOwner, command: str, argv: list[str], *,
     cwd: str = "", accepted: tuple[int, ...] = (0,),
-) -> dict:
+) -> dict[str, Any]:
     result = owner._run_agent_worktrees(command, argv, cwd=cwd, noninteractive=True)
     if result is None or result.returncode not in accepted:
         detail = (
@@ -39,7 +61,7 @@ def _json_result(
 
 
 def resolve_binding(
-    owner: ModuleType,
+    owner: NativeOwner,
     topology: str,
     command: str,
     *,
@@ -48,7 +70,7 @@ def resolve_binding(
     knowledge: str = "",
     harness_path: str = "",
     knowledge_path: str = "",
-) -> dict:
+) -> BindingDeclaration:
     """Resolve an already-registered pair; never infer names, register or write."""
     if not command:
         raise RuntimeError("--control-plane requires the exact --agent-worktrees-path")
@@ -169,7 +191,8 @@ def resolve_binding(
     return {
         "harness": harness,
         "knowledge": knowledge,
-        **resolved,
+        "harness_path": resolved["harness_path"],
+        "knowledge_path": resolved["knowledge_path"],
         "config_root": str(root),
         "platform_key": platform,
         "control_plane": roles,
