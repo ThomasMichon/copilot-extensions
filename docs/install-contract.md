@@ -28,6 +28,11 @@ and maintenance inhibition apply only to automatic requests, including scheduled
 sessionStart and Manager-launch preparation; explicit update retains those
 preferences without being suppressed by them.
 
+Old-runtime/footprint recovery and migration are optional optimizations, not
+permission to install. Necessary state-preserving application-data/schema
+migrations remain part of safe incoming readiness; failed migration is a real
+incoming readiness failure, not a reason to discard a preserved database.
+
 Success requires every requested incoming runtime ready, all required central
 services running the incoming generation, and every applicable current-version
 pointer, route, launcher and service/task registration selecting it. Do not
@@ -42,7 +47,10 @@ prerequisite. Actual OS I/O/permission failures remain failures; owner metadata
 alone is not one.
 
 Outgoing central daemons observe supersession, close admission, attempt drain
-and self-clean independently. Neither predecessor drain/exit nor cleanup gates
+and self-clean independently. Transfer or exclude conflicting work admission
+before incoming serving readiness where needed, without waiting for install
+completion, final exit or indefinite old-lease release.
+Neither predecessor drain/exit nor cleanup gates
 success or rolls back a healthy incoming generation. One optional finite
 asynchronous fallback may force-retire remaining outgoing central daemons and
 obsolete central-service schedules after a grace longer than expected cutover.

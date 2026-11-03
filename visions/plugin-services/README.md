@@ -861,9 +861,11 @@ requiring a prior-version existence check or matched handoff. Brief process
 overlap is preferred; it does not permit duplicate exclusive work ownership.
 The incoming owner starts and attempts handoff first. The outgoing owner sees
 that announcement and independently detects that its full generation is stale.
-New installation completion follows all requested incoming readiness and all
-applicable current selections, not old-process exit. After that completion, the
-outgoing central owner attempts drain and self-cleanup. One optional finite
+Conflicting admission closes/transfers or is excluded before incoming serving
+readiness when needed, without waiting for installation completion or indefinite
+old-lease release. New installation completion follows all requested incoming
+readiness and all applicable current selections, not final old-process exit.
+Outgoing central drain/self-cleanup continue independently. One optional finite
 asynchronous fallback may retire remaining outgoing central daemons and obsolete
 central-service schedules after a longer-than-cutover grace. It rechecks native
 identity, central role, installation and then-current selection at each mutation,

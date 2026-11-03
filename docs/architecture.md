@@ -163,6 +163,10 @@ Explicit/manual update is an authoritative runtime replacement, not a request
 for permission from the incumbent. Old recovery/ZDD, custody/provenance,
 capability support and stale transaction/queue state cannot veto it; only
 automatic updates are subject to automatic-maintenance inhibition.
+Bounded internal write coordination cannot become a persistent live-writer
+refusal or separate operator-recovery demand. Required state-preserving data/
+schema migrations remain part of real incoming readiness, not optional legacy
+recovery.
 
 The target success boundary is all requested incoming versions actually ready
 and running where required, with every applicable current-version pointer,
@@ -175,6 +179,9 @@ native identity, installation and central-service role exclude later/reselected
 generations, session hosts/keepers, session-owned Bridge/agent processes,
 foreground clients and unrelated processes. Configuration, credentials,
 repositories, worktrees, sessions and databases are retained.
+Conflicting work admission may close/transfer or be excluded before incoming
+serving readiness; do not make that transfer wait for installation completion,
+final predecessor exit or indefinite old-lease release.
 
 **Current implementation, not target qualification:**
 Current Worktrees asynchronous installation already separates ready successor

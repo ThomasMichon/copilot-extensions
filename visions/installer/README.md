@@ -156,8 +156,11 @@ compatibility mechanism must not redefine the goal.
 - **The incoming installation stands on its own.** Acquire authentic, admitted
   source, construct fresh immutable runtime generations, start the incoming
   central services and publish their current-version selections and invocation/
-  service registrations. Reuse, old-state recovery, migration and zero-downtime
-  handoff are best-effort optimizations, not prerequisites. Missing old monitor
+  service registrations. Reuse, old-runtime/footprint recovery or migration and
+  zero-downtime handoff are best-effort optimizations, not prerequisites.
+  Necessary state-preserving application-data/schema migrations remain part of
+  safe incoming readiness; they do not depend on old-runtime permission.
+  Missing old monitor
   capabilities, unknown legacy layout/custody/provenance, maintenance banners,
   stale locks, transaction records or queue fences cannot veto this explicit
   replacement. Preserve prior attempts' real outcomes without requiring their
@@ -172,7 +175,12 @@ compatibility mechanism must not redefine the goal.
   activate a failed candidate or call a partial result complete.
 - **Retirement is independent of success.** Outgoing central daemons detect
   that they are no longer current, close admission, attempt handoff/drain and
-  clean up their own obsolete runtime registrations. The installer does not
+  clean up their own obsolete runtime registrations. Admission closure and
+  transfer/exclusion of conflicting work may precede incoming serving readiness;
+  neither waits for installation completion. An uncooperative predecessor is
+  handled through the incoming owner's bounded transition, not an indefinite
+  old-lease wait. Final predecessor exit and cleanup remain independent.
+  The installer does not
   wait for or fence success on their drain, exit or cleanup. It may launch
   one finite asynchronous fallback for the addressed replacement, after a
   grace period longer than expected cutover, to force-retire remaining
@@ -522,9 +530,12 @@ Construction does not require uninstalling, deleting or unregistering the old
 runtime first. Current binstubs and applicable task registrations select the new
 generation. The incoming owner starts first and attempts handoff with the outgoing
 owner. The predecessor recognizes both that announcement and its independently
-observable staleness. Once the new owner is ready and authoritative, the new
-installation declares completion without waiting for predecessor retirement.
-The predecessor then closes admission and attempts to drain and self-clean.
+observable staleness. Close/transfer or exclude conflicting work admission as
+needed before incoming serving readiness; do not make that transfer depend on
+installation completion or indefinite old-lease release. Once all requested
+incoming readiness and current selections are established, declare completion
+without waiting for final predecessor exit or cleanup. Outgoing self-retirement
+and self-cleanup continue independently.
 An optional single finite asynchronous fallback may retire remaining outgoing
 central daemons and obsolete central-service schedules after a longer grace
 period, under [authoritative-runtime-replacement](#authoritative-runtime-replacement).

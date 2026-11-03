@@ -75,17 +75,21 @@ old wire contract still works:
 START NEW (prepared, not a second exclusive writer)
   -> NEW attempts handoff / announces the selected replacement to OLD
   -> OLD observes the announcement and independently recognizes staleness
+  -> selected incoming authority closes/transfers or excludes conflicting work
   -> all requested NEW runtimes are ready; all current selections name NEW
   -> NEW declares installation complete, without waiting for OLD
-  -> OLD closes admission and attempts drain
-  -> OLD self-retires and cleans its obsolete central-service registrations
+  -> OLD finishes best-effort drain, self-retires and self-cleans independently
   -> optionally, one finite async fallback waits a longer-than-cutover grace
   -> fallback revalidates current selection and retires only outgoing central roles
 ```
 
 The announcement flows new-to-old; transferred state flows through the owning
-handoff contract. Announcement receipt is not permission to retire before the
-successor is ready, and absence of a receipt is not an installation veto.
+handoff contract. Conflicting admission can close/transfer or be excluded before
+serving readiness: otherwise an old exclusive lease could prevent the readiness
+needed to trigger its own release. Do not wait for final old-process exit or
+successful old IPC to establish this incoming transition. Announcement receipt
+alone is not permission for final retirement, and absence of a receipt is not an
+installation veto.
 Full current-generation identity, not numeric version ordering, lets the old
 owner recognize supersession even if notification is lost.
 

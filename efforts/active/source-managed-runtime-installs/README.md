@@ -1259,6 +1259,11 @@ implementation, rollout or parent completion is declared.
   worktrees/sessions, incoming build/auth/health failure, and cleanup delayed past
   another selection. Retain old uncertain outcomes without making them vetoes;
   neither queue release nor predecessor exit is the incoming success witness.
+- [ ] Prove readiness with an old exclusive-work lease: admission transfer or
+  exclusion must not wait for installation completion, final predecessor exit
+  or indefinitely for old IPC/lease release. Qualify required state-preserving
+  data/schema migrations separately from optional old-runtime recovery and keep
+  migration failure an honest incoming-readiness failure.
 - [x] Compare the contributor request capture with the operator's words and inventory every declared runtime root plus the separate SSH Manager dependency. Keep target behavior, released bounded evidence and unproven app/platform/rollout gates distinct.
 - [ ] Maintain the [app qualification matrix](wheel-first-contributors.md#per-app-tracking) against real front-door, failure/retry, state and native-lifetime evidence as contributions land; satisfy the [common app test contract](../../../docs/patterns/fast-application-install-and-cutover.md#app-specific-implementation-and-acceptance) for each claimed boundary.
 - [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
