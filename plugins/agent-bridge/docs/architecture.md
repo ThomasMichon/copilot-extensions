@@ -922,6 +922,9 @@ versioned runtime with the original `start` flags, and then hard-exits the
 wedged frontend to release the singleton lock. Session Hosts remain independent
 and the replacement frontend reattaches them from the durable ledger; recovery
 does not wait for a later CLI command to notice the dead endpoint.
+The delayed Windows helper runs the module in its already-admitted process,
+preserving its native PID and instance custody; Windows CRT `exec` would create
+a different PID carrying stale admission metadata. POSIX retains `exec`.
 
 ### Installer wiring (both platforms)
 

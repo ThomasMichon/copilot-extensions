@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import sys
+import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -140,6 +144,98 @@ def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
     assert "agent_bridge" in argv[2]
     assert argv[3] == "1.5"
     assert argv[4:] == ["start", "--passive", "--idle-shutdown", "30"]
+
+
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+def test_watchdog_replacement_executes_platform_handoff(monkeypatch, platform):
+    import runpy
+    from agent_bridge import service_process_cli
+
+    captured = []
+    calls = []
+    monkeypatch.setattr(service_process_cli, "os", SimpleNamespace(name=platform))
+    monkeypatch.setattr(m, "_spawn_detached_argv", captured.append)
+    m._spawn_watchdog_replacement(delay=1.5, start_args=["start", "--idle-shutdown", "30"])
+    argv = captured[0]
+    monkeypatch.setattr(sys, "argv", ["-c", *argv[3:]])
+    monkeypatch.setattr(time, "sleep", lambda delay: calls.append(("sleep", delay)))
+    monkeypatch.setattr(os, "execv", lambda exe, args: calls.append(("exec", exe, args)))
+    monkeypatch.setattr(
+        runpy, "run_module",
+        lambda module, **kwargs: calls.append(("run", module, kwargs, sys.argv.copy())),
+    )
+    exec(argv[2], {})
+    assert calls == [
+        ("sleep", 1.5),
+        ("run", "agent_bridge", {"run_name": "__main__", "alter_sys": True},
+         ["agent_bridge", "start", "--idle-shutdown", "30"])
+        if platform == "nt" else
+        ("exec", sys.executable,
+         [sys.executable, "-m", "agent_bridge", "start", "--idle-shutdown", "30"]),
+    ]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows CRT exec changes the admitted PID")
+@pytest.mark.portfolio_tier("T2")
+def test_watchdog_replacement_retains_native_instance_admission(tmp_path, monkeypatch):
+    from agent_procutil.daemon_instances import (
+        daemon_test_lifecycle, inspect_instances,
+    )
+    from agent_bridge import service_process_cli
+
+    package = tmp_path / "agent_bridge"
+    package.mkdir()
+    source = str(Path(service_process_cli.__file__).parent)
+    (package / "__init__.py").write_text(f"__path__.append({source!r})\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import argparse,json,os,sys\n"
+        "from pathlib import Path\n"
+        "from agent_bridge import service_start_cli\n"
+        "def record(args, **kwargs):\n"
+        " Path('admitted.json').write_text(json.dumps({"
+        "'pid':os.getpid(),'argv':sys.argv,'main':sys.modules['__main__'].__file__}))\n"
+        "service_start_cli._run_start=record\n"
+        "service_start_cli._cmd_start(argparse.Namespace())\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
+    spawned = []
+    launch = m._spawn_detached_argv
+
+    def observe(argv):
+        process = launch(argv)
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(m, "_spawn_detached_argv", observe)
+    registry = tmp_path / "instances"
+    cleanup = []
+    with daemon_test_lifecycle(
+        owner="bridge-watchdog-admission", registry_root=registry, cleanup_results=cleanup,
+    ) as environment:
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        started = time.monotonic()
+        m._spawn_watchdog_replacement(
+            delay=.2, start_args=["start", "--idle-shutdown", "30"],
+        )
+        assert len(spawned) == 1
+        process = spawned[0]
+        assert process.wait(timeout=15) == 0, (tmp_path / "agent-bridge-err.log").read_text()
+        assert time.monotonic() - started >= .2
+        proof = tmp_path / "admitted.json"
+        assert proof.is_file(), (tmp_path / "agent-bridge-err.log").read_text()
+        admitted = json.loads(proof.read_text())
+        assert admitted["pid"] == process.pid
+        assert admitted["argv"] == [
+            str(package / "__main__.py"), "start", "--idle-shutdown", "30",
+        ]
+        assert admitted["main"] == str(package / "__main__.py")
+        records = inspect_instances(registry)
+        assert len(records) == 1
+        assert records[0]["state"] == "finished"
+        assert records[0]["purpose"] == "unattended-test"
+    assert cleanup and all(result.status == "settled" for result in cleanup)
 
 
 def test_watchdog_replacement_promotes_active_passive_generation(monkeypatch):

@@ -9,6 +9,15 @@ import re
 import sys
 
 
+WINDOWS_WATCHDOG_START_CODE = (
+    "import os,sys,time;"
+    "time.sleep(float(sys.argv[1]));"
+    "import runpy;"
+    "sys.argv=['agent_bridge',*sys.argv[2:]];"
+    "runpy.run_module('agent_bridge',run_name='__main__',alter_sys=True)"
+)
+
+
 def _basename(value: str) -> str:
     return ntpath.basename(value).lower() if sys.platform == "win32" else posixpath.basename(value)
 
@@ -36,6 +45,12 @@ def bridge_daemon_argv(arguments: list[str]) -> bool:
             return (
                 arguments[index + 1:index + 2] == ["agent_bridge"]
                 and _starts_daemon(arguments[index + 2:])
+            )
+        if option == "-c":
+            return (
+                sys.platform == "win32"
+                and arguments[index + 1:index + 2] == [WINDOWS_WATCHDOG_START_CODE]
+                and _starts_daemon(arguments[index + 3:])
             )
         if option == "--":
             index += 1
