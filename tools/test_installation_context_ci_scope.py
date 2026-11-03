@@ -808,13 +808,26 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         job = workflow["jobs"][key]
         assert job["timeout-minutes"] == 6
         matrix = job["strategy"]["matrix"]
-        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal"]
+        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal", "toolkit"]
         normal = next(item for item in matrix["include"] if item["suite"] == "normal")
         assert normal["normal_expression"] == f"not ({refusal_expression} or {groups})"
         profiles = next(item for item in matrix["include"] if item["suite"] == "profiles")
         refusals = next(item for item in matrix["include"] if item["suite"] == "refusals")
         assert profiles["constructor_expression"] == groups
         assert refusals["constructor_expression"] == refusal_expression
+        admission = next(step for step in job["steps"] if step.get("name", "").startswith("Real authenticated source,"))
+        assert admission["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
+        assert shlex.split(admission["run"]) == [
+            "python", "-m", "pytest", "-q",
+            "tools/test_runtime_source_build.py", "tools/test_runtime_source_wheel_cache.py",
+            "-k", "${{ matrix.expression }}",
+        ]
+        toolkit = next(step for step in job["steps"] if step.get("name") == "Copied admission toolkit and fresh interpreter")
+        assert toolkit["if"] == "${{ matrix.suite == 'toolkit' }}"
+        assert shlex.split(toolkit["run"]) == [
+            "python", "-m", "pytest", "-q", "tools/test_runtime_admission_toolkit.py",
+            "libs/payload-invocation/tests/test_runtime_admission.py",
+        ]
         execution = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructors,"))
         assert set(shlex.split(execution["run"])[4:6]) == expected_files
         assert '${{ matrix.normal_expression || \'\' }}' in execution["run"]
@@ -825,7 +838,7 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
             "-k", "${{ matrix.constructor_expression }}",
         ]
         backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
-        assert backend["if"] == "${{ matrix.suite != 'manager' }}"
+        assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' }}"
         assert job["steps"].index(backend) < job["steps"].index(refusal)
     for key in ("source-cache-linux", "source-cache-windows"):
         matrix = workflow["jobs"][key]["strategy"]["matrix"]

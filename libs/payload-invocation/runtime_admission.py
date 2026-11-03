@@ -9,7 +9,7 @@ import sys
 
 ENTRY_MODULES = (
     "runtime_profile_policy", "runtime_source_build", "runtime_source_reuse",
-    "runtime_marketplace_source",
+    "runtime_marketplace_source", "artifact_release_discovery",
 )
 REPOSITORY_ADAPTERS = {
     "runtime_source_manager", "worktree_manager.self_install",

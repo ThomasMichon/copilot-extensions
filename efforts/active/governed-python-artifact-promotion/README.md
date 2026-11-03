@@ -937,6 +937,67 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-11-03 - Read-only source-channel discovery prerequisite
+
+Extracted the existing frozen-source release reader into
+`tools/artifact_release_discovery.py` and included that standard-library
+owner in the opt-in admission toolkit. Promotion reuse, tag lookup, release
+readiness and supplementary-evidence grammar retain compatibility adapters.
+Discovery preserves the frozen Dev tag, exact composition, independently
+acquired Main ancestry, original subject attestation and complete immutable
+asset set. Only an actual channel 404 denotes absence; discovery downloads
+the bounded index, not executable bundles.
+
+The copied-toolkit subprocess witness rejects publication imports and
+exercises success, genuine absence, permission, digest and ancestry refusals.
+Focused contained validation passed 90 reuse/readiness/evidence cases, all
+three full toolkit witnesses, 35 metadata/tag/attestation cases, all 12
+Git-backed alias cases in complementary bounded cohorts, and the final
+69-case packager/release-helper/discovery packet with one declared
+POSIX-only skip. Each passing invocation retained the original 300-second
+limit and completed normal cleanup with a clean host-state audit. Earlier
+aggregate timeouts and host-state-audit failures remain non-passing evidence;
+the later cohorts do not relabel them.
+
+Native Windows whole-packet qualification remains incomplete.
+Two uninstrumented native Windows attempts exhausted the unchanged
+300-second budget at approximately 79% and 91%; a separate per-file timing
+diagnostic also exhausted that budget. All three completed normal Job and
+temporary-environment cleanup. The trace showed cumulative execution cost
+across the existing suite rather than a discovery-reader stall. These are
+non-passing results, not permission to increase the budget, omit nodes or
+claim native Windows whole-packet qualification. Required CI run
+[41628266101](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41628266101)
+qualified the reconciled 3,857-node packet in 99.047 seconds and retained
+fresh evidence. This does not relabel the native Windows attempts; packet
+qualification and native consumer evidence remain distinct.
+
+The native acceptance run exposed a stale queued-source test double on both
+platforms: its partial request lacked the retained `killswitch_path` and
+`cwd` fields now read by the participant boundary. The fixture uses the
+existing `update_driver.RequestSpec` instead, preserving the assertion that
+a changed source refuses before participant execution. The focused native
+Windows case passed with normal containment cleanup. The failed native run
+remains failed; the corrected head still owes a new native qualification.
+
+On the corrected head, both Manager jobs passed and required CI freshly
+qualified the merged candidate's 3,879-unit inventory in 116.279 seconds.
+The native run's remaining Windows profile job reached its six-minute
+deadline: its first 52-case packet passed, but the following constructor
+cohort was interrupted. The copied-toolkit and payload-generation witnesses
+therefore move together into a disjoint `toolkit` matrix row on both
+platforms. Source/profile, refusal, normal-constructor and Manager selections
+are retained; no test, timeout or required-unit bound is removed or widened.
+The workflow-scope regression checks the exact file routing, backend-fixture
+selection and unchanged six-minute limits. The interrupted run remains
+non-passing evidence; the split head needs fresh native qualification.
+
+This closes no ordinary-consumer checkbox. Worktrees still needs its actual
+source/provider selection, admitted tooling, planning and current-policy
+custody through health, publication and rollback. Default enablement remains
+false; actual feed/profile publication, full consumer qualification and
+installed-state proof remain open under #4876 and the #9009 plan.
+
 ### 2026-11-03 - Fresh Manager validation closes first-party source imports
 
 Candidate `c7c4ffe9824536e6bf00c0e31272bf1dbcb74039` completed the canonical
