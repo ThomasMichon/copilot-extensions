@@ -3324,6 +3324,18 @@ profiles/source/artifacts, duplicate refusal and exact new manifest bindings.
 The native-facing suite additionally runs `--artifact-index` through the
 existing artifact-set validator; the emitted subject is still not approved.
 
+`tools/test_core_native_delivery.py` checks the combined source projection,
+retained wheel and material custody, refusal paths and candidate delivery.
+Its native integration uses a disposable Git source, a selected native lock
+and a local TLS acquisition feed, including deep Windows output paths; it
+skips if Git or UV is unavailable.
+Separate controls check that dependency resolution is not invoked, preserve
+first-party exclusions and refuse before an unapproved redirect is contacted.
+The fixture excludes inherited Git selectors, and Linux projection refuses
+the active Manager wheel mapping rather than silently changing its origin.
+The fixture feed and source do not qualify a production feed, release or
+installation.
+
 The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
 supersedes the historical full-suite promotion requirement below. Source CI
 and the independently governed Main control consume the unit-profile contract.

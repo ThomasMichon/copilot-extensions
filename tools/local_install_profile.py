@@ -318,7 +318,7 @@ def _write_snapshot(
 
 def _profile_feed(
     selected, transaction, projections, *, uv: str, download_origins: tuple[str, ...],
-    wheels, deadline: float,
+    wheels, deadline: float, excluded_local_packages: tuple[str, ...] = (),
 ):
     from governed_feed_trust import _opaque_index_identity, _validated_trusted_index_url
     from installer_native_feed import capture_native_feed_inputs
@@ -335,7 +335,7 @@ def _profile_feed(
     feed = capture_native_feed_inputs(
         transaction, projections[1], projections[0], None, policy, uv, deadline,
         wheels=wheels, profile_policy="native-source-profile",
-        opaque_identity=_opaque_index_identity,
+        opaque_identity=_opaque_index_identity, excluded_local_packages=excluded_local_packages,
     )
     if tuple(item.index_url for item in feed.feeds) != (trusted[0],):
         raise ProfileError("native profile indexes differ from the selected governed feed")

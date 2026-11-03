@@ -7,6 +7,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _SCRIPT = _PLUGIN / "scripts" / "extension_load_reliability.py"
 _SPEC = importlib.util.spec_from_file_location(
@@ -47,7 +49,7 @@ def _write_log(
     return path
 
 
-def test_parse_log_classifies_ready(tmp_path):
+def test_parse_log_classifies_ready(tmp_path: Path) -> None:
     path = _write_log(
         tmp_path, "context-handoff", launch_ms=1_700_000_000_000, pid=1,
         terminal_marker="ready", disposition="stopped-normally",
@@ -58,7 +60,7 @@ def test_parse_log_classifies_ready(tmp_path):
     assert record.launch_time == datetime.fromtimestamp(1_700_000_000, tz=timezone.utc)
 
 
-def test_parse_log_classifies_ready_timeout(tmp_path):
+def test_parse_log_classifies_ready_timeout(tmp_path: Path) -> None:
     path = _write_log(
         tmp_path, "context-handoff", launch_ms=1_700_000_000_000, pid=2,
         terminal_marker="ready-timeout",
@@ -66,7 +68,7 @@ def test_parse_log_classifies_ready_timeout(tmp_path):
     assert reliability.parse_log(path).outcome == "ready-timeout"
 
 
-def test_parse_log_classifies_peer_closed_before_ready(tmp_path):
+def test_parse_log_classifies_peer_closed_before_ready(tmp_path: Path) -> None:
     path = _write_log(
         tmp_path, "context-handoff", launch_ms=1_700_000_000_000, pid=3,
         terminal_marker="peer-closed-before-ready", disposition="startup-failure",
@@ -74,7 +76,7 @@ def test_parse_log_classifies_peer_closed_before_ready(tmp_path):
     assert reliability.parse_log(path).outcome == "peer-closed-before-ready"
 
 
-def test_parse_log_classifies_crash(tmp_path):
+def test_parse_log_classifies_crash(tmp_path: Path) -> None:
     path = _write_log(
         tmp_path, "context-handoff", launch_ms=1_700_000_000_000, pid=4,
         terminal_marker=None, disposition="crash",
@@ -82,7 +84,7 @@ def test_parse_log_classifies_crash(tmp_path):
     assert reliability.parse_log(path).outcome == "crash"
 
 
-def test_parse_log_older_format_is_unknown_not_failure(tmp_path):
+def test_parse_log_older_format_is_unknown_not_failure(tmp_path: Path) -> None:
     # Pre-disposition-tracking CLI versions only wrote "=== exit <ts> code=N
     # signal=null ===" with no ready/ready-timeout/disposition marker at all.
     # These must be bucketed separately, never silently counted as a failure.
@@ -97,7 +99,7 @@ def test_parse_log_older_format_is_unknown_not_failure(tmp_path):
     assert reliability.parse_log(path).outcome == "unknown"
 
 
-def test_iter_plugin_logs_filters_to_matching_plugin_prefix(tmp_path):
+def test_iter_plugin_logs_filters_to_matching_plugin_prefix(tmp_path: Path) -> None:
     _write_log(tmp_path, "context-handoff", launch_ms=1_700_000_000_000, pid=1, terminal_marker="ready")
     _write_log(tmp_path, "agent-bridge", launch_ms=1_700_000_000_000, pid=2, terminal_marker="ready")
     paths = list(reliability.iter_plugin_logs(tmp_path, "context-handoff"))
@@ -105,7 +107,7 @@ def test_iter_plugin_logs_filters_to_matching_plugin_prefix(tmp_path):
     assert "context-handoff" in paths[0].name
 
 
-def test_summarize_counts_outcomes_and_versions(tmp_path):
+def test_summarize_counts_outcomes_and_versions(tmp_path: Path) -> None:
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready", cli_version="1.0.87-0")
     _write_log(tmp_path, "p", launch_ms=now_ms, pid=2, terminal_marker="ready-timeout", cli_version="1.0.86")
@@ -117,13 +119,13 @@ def test_summarize_counts_outcomes_and_versions(tmp_path):
     assert summary.ready_timeout_rate == 0.5
 
 
-def test_summarize_ready_timeout_rate_is_none_when_empty():
+def test_summarize_ready_timeout_rate_is_none_when_empty() -> None:
     summary = reliability.summarize([], label="w")
     assert summary.total == 0
     assert summary.ready_timeout_rate is None
 
 
-def test_load_records_excludes_logs_before_since(tmp_path):
+def test_load_records_excludes_logs_before_since(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     old_ms = int((now - timedelta(days=30)).timestamp() * 1000)
     new_ms = int(now.timestamp() * 1000)
@@ -134,7 +136,7 @@ def test_load_records_excludes_logs_before_since(tmp_path):
     assert records[0].launch_time == datetime.fromtimestamp(new_ms / 1000, tz=timezone.utc)
 
 
-def test_report_without_split_returns_single_window(tmp_path):
+def test_report_without_split_returns_single_window(tmp_path: Path) -> None:
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready")
     summaries = reliability.report(tmp_path, "p", days=7)
@@ -143,7 +145,7 @@ def test_report_without_split_returns_single_window(tmp_path):
     assert summaries[0].total == 1
 
 
-def test_report_with_split_at_partitions_before_and_after(tmp_path):
+def test_report_with_split_at_partitions_before_and_after(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     split_at = now - timedelta(hours=1)
     before_ms = int((split_at - timedelta(minutes=30)).timestamp() * 1000)
@@ -161,7 +163,7 @@ def test_report_with_split_at_partitions_before_and_after(tmp_path):
     assert after.outcomes == {"ready": 2}
 
 
-def test_main_json_output_is_parseable(tmp_path, capsys):
+def test_main_json_output_is_parseable(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready")
     exit_code = reliability.main(["--plugin", "p", "--log-dir", str(tmp_path), "--json"])
@@ -172,7 +174,7 @@ def test_main_json_output_is_parseable(tmp_path, capsys):
     assert payload[0]["total"] == 1
 
 
-def test_main_missing_log_dir_reports_zero_not_error(tmp_path, capsys):
+def test_main_missing_log_dir_reports_zero_not_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "does-not-exist"
     exit_code = reliability.main(["--plugin", "p", "--log-dir", str(missing), "--json"])
     assert exit_code == 0
@@ -182,7 +184,7 @@ def test_main_missing_log_dir_reports_zero_not_error(tmp_path, capsys):
     assert payload[0]["total"] == 0
 
 
-def test_parse_split_at_treats_naive_timestamp_as_utc():
+def test_parse_split_at_treats_naive_timestamp_as_utc() -> None:
     # Log launch times are always timezone-aware; a naive --split-at value
     # (no offset, e.g. "2026-09-21T05:00:00") must not raise TypeError when
     # compared against them.
@@ -191,12 +193,12 @@ def test_parse_split_at_treats_naive_timestamp_as_utc():
     assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
 
 
-def test_parse_split_at_preserves_explicit_offset():
+def test_parse_split_at_preserves_explicit_offset() -> None:
     parsed = reliability._parse_split_at("2026-09-21T05:00:00+00:00")
     assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
 
 
-def test_parse_split_at_accepts_trailing_z():
+def test_parse_split_at_accepts_trailing_z() -> None:
     # datetime.fromisoformat() does not accept a trailing "Z" on this
     # repository's supported Python versions (added only in 3.11+); a
     # Z-suffixed timestamp is standard ISO-8601 and must not raise.
@@ -204,7 +206,7 @@ def test_parse_split_at_accepts_trailing_z():
     assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
 
 
-def test_main_accepts_naive_split_at_without_raising(tmp_path, capsys):
+def test_main_accepts_naive_split_at_without_raising(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     now = datetime.now(timezone.utc)
     now_ms = int(now.timestamp() * 1000)
     _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready")
@@ -219,7 +221,7 @@ def test_main_accepts_naive_split_at_without_raising(tmp_path, capsys):
     assert [s["label"] for s in payload] == ["before", "after"]
 
 
-def test_human_report_includes_cli_version_breakdown(tmp_path, capsys):
+def test_human_report_includes_cli_version_breakdown(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready", cli_version="1.0.87-0")
     exit_code = reliability.main(["--plugin", "p", "--log-dir", str(tmp_path)])

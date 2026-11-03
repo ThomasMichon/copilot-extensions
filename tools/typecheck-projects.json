@@ -475,7 +475,7 @@
         "plugins/context-handoff"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "copilot-extensions-harness",
@@ -523,7 +523,7 @@
         "services/dispatch"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "service-index",
