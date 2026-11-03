@@ -254,7 +254,12 @@ def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatc
         "source": str(path), "reason": "invalid-index",
         "detail": "Template layer must be a directory.",
     } for path in expected_sources], key=lambda finding: finding["source"])
-    assert wt.layered_repo_surface_dirs(root, "templates") == [healthy]
+    assert wt.layered_repo_surface_dirs(
+        root, "templates", include_unavailable=True,
+    ) == [
+        path for path in (canonical, legacy, overlay)
+        if path == healthy or path in expected_sources
+    ]
     assert bytes_at(tmp_path) == before and not rd.pointers_file().exists()
 
 

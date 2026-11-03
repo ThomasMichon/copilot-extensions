@@ -8,8 +8,10 @@ import logging
 import os
 import re
 import stat
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 from .state import PluginStateError, read_json_object, write_json_object_atomic
 
@@ -20,13 +22,15 @@ _VERSION = 1
 def _regular(info: os.stat_result, *, directory: bool = False) -> bool:
     kind = stat.S_ISDIR if directory else stat.S_ISREG
     return kind(info.st_mode) and not (
-        info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        getattr(info, "st_file_attributes") & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
         if hasattr(info, "st_file_attributes") else False
     )
 
 
 @lru_cache(maxsize=1)
-def _windows_file_api():
+def _windows_file_api() -> tuple[
+    Callable[[Path], int], Callable[[int], tuple[int, ...]], Callable[[int], int],
+]:
     import ctypes
     from ctypes import wintypes
 
@@ -38,7 +42,7 @@ def _windows_file_api():
     class FileId(ctypes.Structure):
         _fields_ = [("volume", ctypes.c_uint64), ("id", ctypes.c_ubyte * 16)]
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -50,22 +54,22 @@ def _windows_file_api():
     kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
-    def open_file(path):
+    def open_file(path: Path) -> int:
         handle = kernel.CreateFileW(str(path), 0x80, 7, None, 3, 0x02200000, None)
         if handle == ctypes.c_void_p(-1).value:
             raise OSError("project identity write-version handle unavailable")
-        return handle
+        return cast(int, handle)
 
-    def read_version(handle):
+    def read_version(handle: int) -> tuple[int, ...]:
         basic, identity = BasicInfo(), FileId()
         for kind, info in ((0, basic), (18, identity)):
             if not kernel.GetFileInformationByHandleEx(handle, kind, ctypes.byref(info), ctypes.sizeof(info)):
                 raise OSError("project identity write-version query unavailable")
-        if basic.changed <= 0 or basic.attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        if basic.changed <= 0 or basic.attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT"):
             raise OSError("project identity write-version evidence uncertain")
-        return identity.volume, int.from_bytes(bytes(identity.id), "little"), basic.changed
+        return int(identity.volume), int.from_bytes(bytes(identity.id), "little"), int(basic.changed)
 
-    return open_file, read_version, kernel.CloseHandle
+    return open_file, read_version, cast(Callable[[int], int], kernel.CloseHandle)
 
 
 def _windows_write_version(path: Path) -> tuple[int, ...]:
@@ -89,7 +93,7 @@ def _write_version(info: os.stat_result, path: Path) -> tuple[int, ...]:
 
 def _owned_directory(path: Path, info: os.stat_result) -> bool:
     if os.name != "nt":
-        return info.st_uid == os.geteuid()
+        return info.st_uid == cast(Callable[[], int], getattr(os, "geteuid"))()
     try:
         from agent_procutil._daemon_instance_owner import assert_path_owner
     except ImportError:
@@ -117,7 +121,7 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
             gitdir / "branches" / "origin",
         )):
             return None
-        directories = []
+        directories: list[tuple[str, tuple[int, ...] | None]] = []
         optional = (gitdir / "remotes", gitdir / "branches")
         for path in dict.fromkeys((root, gitdir, gitdir / "objects", gitdir / "refs", *optional)):
             try:
@@ -136,7 +140,7 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
             if not _regular(info, directory=True):
                 return None
             bindings.append((str(parent), _write_version(info, parent)))
-        files = []
+        files: list[tuple[str, None] | tuple[str, tuple[int, ...], str]] = []
         for name in ("HEAD", "config", "config.worktree"):
             path = gitdir / name
             try:
