@@ -13,6 +13,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol
+
+
+class _OwnerRefResult(Protocol):
+    stdout: str
+    returncode: int
 
 _OWNER_REF_ENV = "AGENT_WORKTREES_OWNER_REF"
 
@@ -24,7 +31,11 @@ def worktree_ref(ref: str | None) -> str:
     return base if base.count("/") >= 2 else ""
 
 
-def supervisor_ref(*, env=None, which=shutil.which, run=subprocess.run) -> str:
+def supervisor_ref(
+    *, env: Mapping[str, str] | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[..., _OwnerRefResult] = subprocess.run,
+) -> str:
     """The caller's qualified worktree ref, or ``""``: ``AGENT_WORKTREES_OWNER_REF``
     (set for sessions agent-worktrees launches), else ``agent-worktrees get
     owner-ref`` from the current directory. Best-effort; never raises."""
@@ -42,7 +53,7 @@ def supervisor_ref(*, env=None, which=shutil.which, run=subprocess.run) -> str:
     return worktree_ref(proc.stdout) if proc.returncode == 0 else ""
 
 
-def with_supervisor(venue: dict, ref: str | None = None) -> dict:
+def with_supervisor(venue: dict[str, Any], ref: str | None = None) -> dict[str, Any]:
     """``venue`` plus ``supervisor_ref`` when one resolves (unchanged if not)."""
     ref = supervisor_ref() if ref is None else worktree_ref(ref)
     return {**venue, "supervisor_ref": ref} if ref else dict(venue)

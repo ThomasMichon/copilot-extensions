@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import shutil
 import sys
 
 import pytest
@@ -25,6 +27,14 @@ def test_terminal_settlement_decides_helper_outcome(
     from agent_worktrees import config as cfg, runtime_deployment as deployment, status_monitor_cutover as cutover
 
     driver, root, slot, owner, content, _identity = publication_case
+    installed = root.parent / ".copilot/installed-plugins/example/agent-worktrees"
+    shutil.copytree(owner, installed)
+    (root.parent / ".copilot/settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    owner = installed
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
     monkeypatch.setattr(cfg, "install_dir", lambda: root if candidate_live else root / "other")
     monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)

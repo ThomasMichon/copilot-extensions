@@ -11,8 +11,8 @@ import json
 
 from .companion_timeline_contract import (
     Availability, Completeness, EventRef, HistoryPage, LiveDelta, MAX_EXPANDED_GROUPS,
-    MAX_LANES, MAX_WINDOW_BYTES, MAX_WINDOW_EVENTS, Provider, RelationKind,
-    SourcePosition, SourceToken, TimelineEvent, TimelineSnapshot,
+    MAX_LANES, MAX_WINDOW_BYTES, MAX_WINDOW_EVENTS, Provider, RelationKind, TimelineContractError,
+    SourcePosition, SourceToken, TimelineEvent, TimelineGap, TimelineSnapshot,
 )
 
 MAX_EVENT_PROOFS = MAX_WINDOW_EVENTS * 4
@@ -78,6 +78,7 @@ class TimelineWindow:
         self._head: str | None = None
         self._anchor: EventRef | None = None
         self.reconciliation_required: frozenset[str] = frozenset()
+        self.source_gaps: dict[str, TimelineGap] = {}
 
     def _result(
         self, applied: bool, code: ResultCode, reason: str, *, evicted: int = 0,
@@ -119,6 +120,7 @@ class TimelineWindow:
             self._cursors.clear()
             self._lanes.clear()
             self.reconciliation_required = frozenset()
+            self.source_gaps.clear()
             old = None
         self._scope = scope
         if head is not None:
@@ -134,6 +136,7 @@ class TimelineWindow:
             self._cursors.pop(key, None)
             self._lanes = {actor: lane for actor, lane in self._lanes.items() if actor[0] != key}
             self.reconciliation_required -= {key}
+            self.source_gaps.pop(key, None)
             old = None
         self.sources[key] = replace(old, token=token, requested_before=None) if old else SourceState(token)
         self._by_ref = {event.ref: event for event in self.events}
@@ -310,11 +313,7 @@ class TimelineWindow:
             return self._result(True, ResultCode.APPLIED, f"Source availability: {snapshot.availability.value}.")
         if snapshot.position != state.position and snapshot.position in self._cursors.get(snapshot.token.identity.source_key, set()):
             return self._result(False, ResultCode.CURSOR_MISMATCH, "Snapshot returned an older known live position.")
-        digest = sha256(json.dumps({
-            "events": [event.content() for event in snapshot.events],
-            "purpose": snapshot.purpose, "effort": snapshot.effort_ref,
-            "creation": snapshot.creation_context, "facts": snapshot.facts_json,
-        }, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).digest()
+        digest = self._snapshot_digest(snapshot)
         if snapshot.position == state.snapshot_position and state.snapshot_digest is not None:
             if digest != state.snapshot_digest:
                 return self._result(False, ResultCode.CONTENT_CONFLICT, "Snapshot content changed at the same position.")
@@ -331,6 +330,84 @@ class TimelineWindow:
             availability=snapshot.availability, completeness=snapshot.completeness,
             snapshot=replace(snapshot, events=()), snapshot_position=snapshot.position, snapshot_digest=digest,
         ), replace_source=True)
+
+    @staticmethod
+    def _snapshot_digest(snapshot: TimelineSnapshot) -> bytes:
+        return sha256(json.dumps({
+            "purpose": snapshot.purpose, "effort": snapshot.effort_ref,
+            "creation": snapshot.creation_context, "facts": snapshot.facts_json,
+        }, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).digest()
+
+    def reconciliation_window(self, snapshot: TimelineSnapshot) -> TimelineWindow:
+        """Validate an explicit fresh baseline without changing this window or its evidence."""
+        key = snapshot.token.identity.source_key
+        state = self.sources.get(key)
+        if (
+            state is None or key not in self.reconciliation_required
+            or snapshot.token.identity != state.token.identity
+            or snapshot.token.request_epoch <= state.token.request_epoch
+        ):
+            raise TimelineContractError("reconciliation requires a new request for this exhausted source")
+        if (
+            snapshot.availability is not Availability.OBSERVED or snapshot.position is None
+            or snapshot.as_of is None or snapshot.facts_json is None
+            or snapshot.token.identity.owner_ref is None
+        ):
+            raise TimelineContractError("reconciliation requires fresh owner-qualified observed facts")
+        if snapshot.position != state.position and snapshot.position in self._cursors.get(key, set()):
+            raise TimelineContractError("reconciliation snapshot returned an older known live position")
+        if (
+            snapshot.position == state.snapshot_position and state.snapshot_digest is not None
+            and self._snapshot_digest(snapshot) != state.snapshot_digest
+        ):
+            raise TimelineContractError("reconciliation changed facts at the same live position")
+        if any(
+            event.ref in self._proofs and self._proofs[event.ref] != self._digest(event)
+            for event in snapshot.events
+        ):
+            raise TimelineContractError("reconciliation changed immutable event evidence")
+        candidate = TimelineWindow(max_events=self.max_events, max_bytes=self.max_bytes, max_proofs=self.max_proofs)
+        bound = candidate.bind(snapshot.token)
+        if not bound.applied:
+            raise TimelineContractError("reconciliation source was not admitted: " + bound.reason)
+        accepted = candidate.apply_snapshot(snapshot)
+        if not accepted.applied:
+            raise TimelineContractError("reconciliation baseline was not admitted: " + accepted.reason)
+        visible = frozenset(event.ref for event in candidate.events)
+        candidate.follow_live = self.follow_live
+        candidate.expanded = self.expanded & visible
+        candidate.unread = (
+            (self.unread | visible.difference(self._proofs)) & visible
+            if not self.follow_live else frozenset()
+        )
+        return candidate
+
+    def apply_gap(self, gap: TimelineGap) -> WindowResult:
+        state = self._source(gap.token)
+        if state is None or gap.before is not None and gap.before != state.requested_before:
+            return self._result(False, ResultCode.STALE_TOKEN, "Gap belongs to an old source or page request.")
+        if gap.availability is Availability.HEAD_CHANGED:
+            self.apply_snapshot(TimelineSnapshot(
+                gap.token, gap.position, Availability.HEAD_CHANGED, gap.completeness,
+            ))
+            state = self.sources[gap.token.identity.source_key]
+        self.source_gaps[gap.token.identity.source_key] = gap
+        self.sources[gap.token.identity.source_key] = replace(
+            state, completeness=gap.completeness,
+            requested_before=None if gap.before is not None else state.requested_before,
+        )
+        self.revision += 1
+        return self._result(False, ResultCode.SOURCE_ERROR, f"History gap: {gap.reason}: {gap.details}")
+
+    def source_error(self, token: SourceToken, message: str) -> WindowResult:
+        state = self._source(token)
+        if state is None:
+            return self._result(False, ResultCode.STALE_TOKEN, "Error belongs to a retired source.")
+        self.sources[token.identity.source_key] = replace(
+            state, availability=Availability.UNAVAILABLE, requested_before=None,
+        )
+        self.revision += 1
+        return self._result(False, ResultCode.SOURCE_ERROR, message)
 
     def apply_delta(self, delta: LiveDelta) -> WindowResult:
         state = self._source(delta.token)

@@ -22,7 +22,7 @@ from textual.widgets import Button, Static
 
 from .companion_timeline_contract import (
     Availability, EventRef, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, OVERSCAN_LINES,
-    SourcePosition, SourceToken, TimelineSnapshot, ViewportAnchor, aware_time,
+    SourcePosition, SourceToken, TimelineGap, TimelineSnapshot, ViewportAnchor, aware_time,
 )
 from .companion_timeline_layout import TimelineLayout, display_text, wrap_lines
 from .companion_timeline_model import TimelineWindow, WindowResult
@@ -113,18 +113,33 @@ class SubwayTimeline(ScrollView, can_focus=True):
 
     def _reflow(self, anchor: ViewportAnchor | None) -> None:
         self.layout_index.rebuild(self.window, self.size.width or 1, now=self._clock)
+        anchor_row = None
+        screen_row = 0
+        if anchor is not None and not self.window.follow_live:
+            anchor_row = self.layout_index.anchor_row(
+                anchor, character_offset=self._anchor_character_offset,
+            )
+            screen_row = min(anchor.screen_row, max(0, self.size.height - 1))
         self._padding = max(0, self.size.height - self.layout_index.height)
-        self.virtual_size = Size(max(1, self.size.width), max(self.size.height, self.layout_index.height))
+        if anchor_row is not None:
+            self._padding = max(self._padding, screen_row - anchor_row)
         self._layout_generation += 1
         self._clear_cache()
         self._programmatic = True
         try:
+            self.virtual_size = Size(
+                max(1, self.size.width), max(self.size.height, self.layout_index.height + self._padding),
+            )
             if self.window.follow_live:
                 self.scroll_end(animate=False, immediate=True, x_axis=False)
-            elif anchor is not None:
-                row = self.layout_index.anchor_row(anchor, character_offset=self._anchor_character_offset)
-                if row is not None:
-                    self.scroll_to(y=max(0, row + self._padding - anchor.screen_row), animate=False, immediate=True)
+            elif anchor_row is not None:
+                self.scroll_to(
+                    y=max(0, anchor_row + self._padding - screen_row), animate=False, immediate=True,
+                )
+            else:
+                self.scroll_to(
+                    y=min(self.scroll_offset.y, self.max_scroll_y), animate=False, immediate=True,
+                )
         finally:
             self._programmatic = False
         if self.window.follow_live:
@@ -158,6 +173,12 @@ class SubwayTimeline(ScrollView, can_focus=True):
 
     def prepend_page(self, page: HistoryPage) -> WindowResult:
         return self._change(lambda: self.window.prepend_page(page))
+
+    def apply_gap(self, gap: TimelineGap) -> WindowResult:
+        return self._change(lambda: self.window.apply_gap(gap))
+
+    def source_error(self, token: SourceToken, message: str) -> WindowResult:
+        return self._change(lambda: self.window.source_error(token, message))
 
     def set_cached_time(self, now: datetime) -> None:
         """Update labels from a caller-owned cached clock, never from source polling."""
@@ -196,6 +217,24 @@ class SubwayTimeline(ScrollView, can_focus=True):
             self._programmatic = False
         self._select_event(self.window.events[-1].ref if self.window.events else None)
         self._post_timeline_message(self.Changed())
+
+    def _begin_upward_browse(self) -> None:
+        self.window.set_follow_live(False)
+        anchor = self.capture_anchor()
+        self._select_event(anchor.event if anchor is not None else None)
+        if self.scroll_offset.y <= OVERSCAN_LINES:
+            self.action_request_history()
+        self._post_timeline_message(self.Changed())
+
+    def action_page_up(self) -> None:
+        self._begin_upward_browse()
+        if self.allow_vertical_scroll:
+            super().action_page_up()
+
+    def action_scroll_up(self) -> None:
+        self._begin_upward_browse()
+        if self.allow_vertical_scroll:
+            super().action_scroll_up()
 
     def action_browse_oldest(self) -> None:
         self.window.set_follow_live(False)
@@ -313,6 +352,30 @@ class CompanionTimelinePanel(Vertical):
     def bind_source(self, token: SourceToken) -> WindowResult:
         return self.query_one(SubwayTimeline).bind_source(token)
 
+    def capture_viewport(self) -> tuple[ViewportAnchor | None, int]:
+        timeline = self.query_one(SubwayTimeline)
+        anchor = timeline.capture_anchor()
+        return anchor, timeline._anchor_character_offset
+
+    def restore_viewport(self, viewport: tuple[ViewportAnchor | None, int]) -> None:
+        timeline = self.query_one(SubwayTimeline)
+        anchor, timeline._anchor_character_offset = viewport
+        timeline._reflow(anchor)
+
+    def replace_window(
+        self, window: TimelineWindow, *, viewport: tuple[ViewportAnchor | None, int] | None = None,
+    ) -> None:
+        """Install an admitted window, retaining a browsing anchor when still present."""
+        timeline = self.query_one(SubwayTimeline)
+        anchor, offset = self.capture_viewport() if viewport is None else viewport
+        selected = timeline.selected
+        self.window = window
+        timeline.window = window
+        timeline._anchor_character_offset = offset
+        timeline.selected = selected if selected is not None and window.event(selected) is not None else None
+        timeline._reflow(anchor)
+        self._update_context()
+
     def apply_snapshot(self, snapshot: TimelineSnapshot) -> WindowResult:
         return self.query_one(SubwayTimeline).apply_snapshot(snapshot)
 
@@ -321,6 +384,12 @@ class CompanionTimelinePanel(Vertical):
 
     def prepend_page(self, page: HistoryPage) -> WindowResult:
         return self.query_one(SubwayTimeline).prepend_page(page)
+
+    def apply_gap(self, gap: TimelineGap) -> WindowResult:
+        return self.query_one(SubwayTimeline).apply_gap(gap)
+
+    def source_error(self, token: SourceToken, message: str) -> WindowResult:
+        return self.query_one(SubwayTimeline).source_error(token, message)
 
     def set_cached_time(self, now: datetime) -> None:
         self.query_one(SubwayTimeline).set_cached_time(now)
@@ -341,6 +410,8 @@ class CompanionTimelinePanel(Vertical):
             status += f"\n{self.window.last_result.code.value}: {self.window.last_result.reason}"
         if self.window.evicted:
             status += f"; {self.window.evicted} display rows evicted; source history not erased"
+        for gap in self.window.source_gaps.values():
+            status += f"\nHistory gap: {gap.reason}; floor {gap.floor.cursor}; {gap.reconcile}: {gap.details}"
         self.query_one(".timeline-state", Static).update(Text(display_text(status)))
         context = self.query_one(".timeline-creation", Static)
         context.display = self.creation_expanded

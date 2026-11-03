@@ -23,6 +23,7 @@ import yaml
 
 from . import config as cfg
 from . import disposition_history, record_cache
+from . import tracking_save_notifications as save_notifications
 from .tracking_lookup import (
     find_paired_record as find_paired_record,
     load_record_by_id as load_record_by_id,
@@ -2351,6 +2352,7 @@ def _save_record_contents_unlocked(
         path = record.yaml_path
     from . import receiving_allocation
 
+    capture_before = save_notifications.prepare(current, path)
     receiving_allocation.preserve(record, current, path)
     if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
@@ -2954,7 +2956,7 @@ def _save_record_contents_unlocked(
         )
 
     pr_authority.write_record(record, path, content)
-    record_cache.store(path, record)
+    record_cache.store(path, record, content=content, capture_before=capture_before)
     receiving_allocation.persist_conclusion(record)
 
 
@@ -3766,61 +3768,25 @@ def _stamp_older_than(stamped: str, secs: float) -> bool:
 class _RecordLock:
     """Short-lived lock for a read-modify-write on a tracking YAML.
 
-    Acquires an **in-process** re-entrant per-path lock (``_path_write_lock``) so
-    concurrent read-modify-writes in the SAME process -- the picker's background
-    stamp threads and a foreground resume -- are serialized on every platform.
-    It ALSO takes a real **cross-process** advisory lock on a ``.lock`` sidecar so
-    that two *separate* processes (e.g. two Picker reconcilers, or a Picker and a
-    foreground CLI) can't interleave their read -> modify -> write and clobber one
-    another's update:
+    A per-path in-process RLock serializes threads. A sidecar adds cross-process
+    exclusion with POSIX flock or Windows msvcrt byte-range locking.
 
-    - **POSIX** -- ``fcntl.flock(LOCK_EX)`` on the sidecar fd.
-    - **Windows** -- ``msvcrt.locking(LK_NBLCK)`` on the sidecar fd. Windows has
-      no ``fcntl``; before dotfiles#1860 the Windows path held ONLY the
-      in-process RLock, which is a no-op across processes, so concurrent Picker
-      reconcilers' RMW cycles clobbered each other (last-writer-wins silently
-      dropping the other's update). The ``msvcrt`` byte-range lock closes that
-      gap so cross-process exclusion holds on Windows too.
+    Critical blocking callers wait for the sidecar up to ``timeout``, then may
+    degrade to the in-process lock. ``require_sidecar=True`` instead refuses
+    that degradation with TimeoutError. Best-effort ``blocking=False`` callers
+    try both locks once and must check ``acquired`` inside the context before
+    writing. A failed best-effort acquire holds nothing.
 
-    **Criticality-aware acquisition (#4547).** The caller picks how it competes:
+    Every successful record hold, including nested/reentrant and degraded
+    holds, defers optional notifications. Dispatch begins only after physical
+    release, inactive instance flags, and all record/pair notification holds.
+    Failed release retains notification custody rather than guessing it ended.
 
-    - ``blocking=True`` (default) -- a **critical writer** (finalize, a lifecycle
-      transition, a handoff). It waits up to ``timeout`` for the sidecar, then
-      **proceeds anyway** on the in-process lock alone (graceful degradation; the
-      atomic temp+replace retry in ``_atomic_write`` is the last line of defence)
-      -- so a critical update is never dropped. ``acquired`` is always True.
-      Callers that cannot safely degrade may set ``require_sidecar=True`` to
-      raise :class:`TimeoutError` instead.
-    - ``blocking=False`` -- a **best-effort background writer** (a Picker sweep's
-      liveness/session-state stamp). It makes a **single** non-blocking attempt at
-      both the in-process and the sidecar lock; if either is already held it
-      **skips** -- ``acquired`` is False and the caller must no-op its write this
-      pass (these writers are idempotent and self-heal next sweep). This is the
-      guarantee that an inconsequential sweep never blocks, nor is blocked by, a
-      critical updater.
-
-    Always check ``acquired`` inside a ``blocking=False`` ``with`` block before
-    writing; for the default ``blocking=True`` it is always True.
-
-    **Scope -- keep normal RMW locks short (#4547).** Do not hold across fetch,
-    push, rebase, or provider I/O. Cleanup is the deliberate exception: under
-    ``FinalizeLock``, its record-writer fence spans local removal so no new
-    responsibility appears between validation and deletion. Ordinary writers
-    use the following short-RMW protocol:
-
-    - **Foreground CLI verbs** whose RMW is self-contained (``set-pr``,
-      ``set-disposition``, ``mark-complete``, resume's ``mark_resumed``, the
-      resource-claim verbs, ``set-pr --title-only``) load *inside* a blocking
-      lock and save before releasing -- so a best-effort sweep skips while they
-      hold it, completing the cooperative protocol.
-    - **Long I/O-spanning flows** (``create_pr`` / ``_push_changes_pr`` writes
-      that follow a rebase+push, ``finalize``'s terminal status write) load the
-      record once and thread it across heavy I/O by design, so they *cannot* be
-      one short locked RMW. Their write-atomicity is guaranteed by
-      ``_atomic_write`` and their staleness is self-healed by the reconcile
-      guards; they deliberately stay outside the fine lock rather than hold it
-      across I/O. A pre-I/O sub-write (e.g. ``push_changes`` setting the title
-      before the push) is reload-merged under a tight lock instead.
+    Ordinary writers load, modify and save inside one short lock; never hold
+    it across fetch/push/rebase/provider I/O. Long I/O flows retain their existing
+    atomic-write and stale-merge guards, using a short lock for pre-I/O stamps.
+    FinalizeLock's fence spanning local removal remains the deliberate cleanup
+    exception, preventing new responsibility between validation and deletion.
     """
 
     def __init__(
@@ -3847,8 +3813,18 @@ class _RecordLock:
         #: Whether this lock is held (write is safe). Always True for a blocking
         #: acquire; reflects a successful try for a best-effort one.
         self.acquired = False
+        self._notification_hold: save_notifications.Hold | None = None
+        self._notification_reentries: list[_RecordLock] = []
 
     def __enter__(self) -> _RecordLock:
+        if self._notification_hold is not None:
+            nested = _RecordLock(
+                self._yaml_path, self._timeout, blocking=self._blocking,
+                require_sidecar=self._require_sidecar,
+            )
+            result = nested.__enter__()
+            self._notification_reentries.append(nested)
+            return result
         # In-process serialization first (serializes same-process threads on
         # every platform; the cross-process sidecar lock below adds inter-process
         # exclusion).
@@ -3871,6 +3847,7 @@ class _RecordLock:
             return self
 
         try:
+            self._notification_hold = save_notifications.acquire(path=self._yaml_path)
             counts = _thread_sidecar_counts()
             if counts.get(self._sidecar_key, 0) > 0:
                 counts[self._sidecar_key] += 1
@@ -3893,12 +3870,14 @@ class _RecordLock:
                 # Sidecar held by another process -- best-effort skip: drop the
                 # fd and the in-process lock so we hold nothing.
                 self._release()
+                self._notifications_released()
             if self.acquired and self._held is not None:
                 counts[self._sidecar_key] = (
                     counts.get(self._sidecar_key, 0) + 1)
             return self
         except BaseException:
             self._release()
+            self._notifications_released()
             raise
 
     def _sidecar_try(self) -> bool:
@@ -3991,7 +3970,25 @@ class _RecordLock:
                 self._plock_held = False
 
     def __exit__(self, *_: object) -> None:
-        self._release()
+        if self._notification_reentries:
+            nested = self._notification_reentries[-1]
+            nested.__exit__(*_)
+            self._notification_reentries.pop()
+            return
+        try:
+            self._release()
+        except BaseException:
+            logging.getLogger(__name__).exception(
+                "Record lock release incomplete; deferred save notifications remain held"
+            )
+            raise
+        self._notifications_released()
+
+    def _notifications_released(self) -> None:
+        self.acquired = False
+        token, self._notification_hold = self._notification_hold, None
+        if token is not None:
+            save_notifications.release(token)
 
 
 from .tracking_lifecycle import (  # noqa: F401

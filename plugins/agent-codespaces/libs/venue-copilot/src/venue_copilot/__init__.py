@@ -28,7 +28,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 DEFAULT_TTL_SECONDS = 300.0
 
@@ -92,7 +92,7 @@ def _daemon_health(daemon_port: int) -> dict[str, Any]:
     from urllib.request import urlopen
 
     with urlopen(f"http://127.0.0.1:{int(daemon_port)}/health", timeout=5.0) as resp:
-        return json.loads(resp.read().decode("utf-8") or "{}")
+        return cast(dict[str, Any], json.loads(resp.read().decode("utf-8") or "{}"))
 
 
 #: Seed outcomes that prove no keystroke reached the pane (safe to deliver over
@@ -101,7 +101,7 @@ def _daemon_health(daemon_port: int) -> dict[str, Any]:
 SEED_NEVER_TYPED_REASONS = frozenset({"not-ready-timeout", "pane-target-unresolved", "pane-target-lost"})
 
 
-def seed_outcome(embodied: dict, *, created: bool, seed: str | None) -> tuple[str | None, bool]:
+def seed_outcome(embodied: dict[str, Any], *, created: bool, seed: str | None) -> tuple[str | None, bool]:
     """How a launcher follows up a venue's typed seed: ``(status, bridge_send)``.
 
     ``"typed"`` when it was submitted. ``bridge_send`` only when nothing can have
@@ -120,7 +120,7 @@ def seed_outcome(embodied: dict, *, created: bool, seed: str | None) -> tuple[st
     return None, True
 
 
-def pending_seed_report(embodied: dict, *, seed: str | None) -> dict:
+def pending_seed_report(embodied: dict[str, Any], *, seed: str | None) -> dict[str, Any]:
     """A launch can deliver the worktree's own pending seed (embody claims it)
     when it has no seed of its own, or rejoins a running session (a rejoin
     ignores the host seed); report how that went, never resending it:
@@ -437,7 +437,10 @@ def reserve_with_retry(
                 try:
                     return reserve_cli_mode(worktree_id, ttl_seconds=ttl_value, venue=venue)
                 except TypeError:
-                    return reserve_cli_mode(worktree_id, ttl_value, venue)
+                    legacy_reserve = cast(
+                        Callable[[str, float, dict[str, Any]], dict[str, Any]], reserve_cli_mode,
+                    )
+                    return legacy_reserve(worktree_id, ttl_value, venue)
         except VenueCopilotError as exc:
             if "reservation_active" not in str(exc) or time.monotonic() >= deadline:
                 raise

@@ -1,0 +1,46 @@
+name: Legacy monitor native acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["pr/**"]
+    paths:
+      - ".github/workflows/legacy-monitor-native-acceptance.yml"
+      - "plugins/agent-worktrees/scripts/runtime_install.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_identity.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py"
+      - "plugins/agent-worktrees/tests/test_python_runtime_install.py"
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-monitor-linux:
+    name: Legacy monitor (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps: &legacy-monitor-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Qualify pinned legacy retirement through the real installer
+        env:
+          AGENT_WORKTREES_NATIVE_RECOVERY: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_python_runtime_install.py
+          -k "real_installer_returns_before_resident_owned_monitor_drain and not absent and not stale"
+          --allow-explicit-tiers
+          --test-timeout 900 --timeout 900 --plugin-timeout 900
+
+  legacy-monitor-windows:
+    name: Legacy monitor (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps: *legacy-monitor-steps

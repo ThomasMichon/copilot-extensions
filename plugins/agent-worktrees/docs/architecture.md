@@ -311,6 +311,10 @@ verb), so the round-trip preserves every overlay. A forward-compat guard test
 by a writer that touches only one field leaves all other overlays intact; if you
 add a field, extend that test.
 
+[Committed-save notifications](committed-save-notifications.md) describes the
+bounded optional capture and after-all-record/pair-holds delivery boundary.
+It does not make canonical persistence and observation history atomic.
+
 ### Profile assignment state
 
 Balanced profile assignment follows the same single-owner rule with two

@@ -22,7 +22,7 @@ import time
 import uuid
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast, overload
 from collections.abc import Callable
 from pathlib import Path
 
@@ -146,18 +146,20 @@ class OwnedDelivery:
     message_id: int | None = None
     reason: str | None = None
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return self.status == "admitted"
 
-    def recovery(self) -> dict:
+    def recovery(self) -> dict[str, Any]:
         return {**self.__dict__, "version": 1}
 
 
-def _owned_input(note: str, context: dict) -> str:
+def _owned_input(note: str, context: dict[str, Any]) -> str:
     return json.dumps({"prompt": note, "plugin_context": context}, sort_keys=True, separators=(",", ":"))
 
 
-def owned_result(value, *, session_id: str, operation: str, note: str, context: dict) -> OwnedDelivery:
+def owned_result(
+    value: object, *, session_id: str, operation: str, note: str, context: dict[str, Any],
+) -> OwnedDelivery:
     if isinstance(value, OwnedDelivery):
         return value
     # A legacy false/exception is not evidence that the server admitted nothing.
@@ -168,10 +170,35 @@ def owned_result(value, *, session_id: str, operation: str, note: str, context: 
     )
 
 
+@overload
 def deliver_note(
-    session_id: str, note: str, *, run=subprocess.run, min_daemon_protocol: int | None = None,
+    session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
+    min_daemon_protocol: int | None = None, operation: str | None = None,
+    prepared_context: dict[str, Any], admission_unknown: bool = False,
+) -> OwnedDelivery: ...
+
+
+@overload
+def deliver_note(
+    session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
+    min_daemon_protocol: int | None = None, operation: str | None = None,
+    prepared_context: None = None, admission_unknown: bool = False,
+) -> bool: ...
+
+
+@overload
+def deliver_note(
+    session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
+    min_daemon_protocol: int | None = None, operation: str | None = None,
+    prepared_context: dict[str, Any] | None, admission_unknown: bool = False,
+) -> bool | OwnedDelivery: ...
+
+
+def deliver_note(
+    session_id: str, note: str, *, run: Callable[..., object] = subprocess.run,
+    min_daemon_protocol: int | None = None,
     operation: str | None = None,
-    prepared_context: dict | None = None,
+    prepared_context: dict[str, Any] | None = None,
     admission_unknown: bool = False,
 ) -> bool | OwnedDelivery:
     """Tell a running session about references; prepared sends return admission evidence.
@@ -259,9 +286,9 @@ def deliver_note(
 
 
 def owned_delivery_journal(
-    session_id: str, note: str, context: dict, *, operation: str, plan: dict,
-    reservation_id: str | None, creation_receipt: dict | None, daemon_port: int,
-) -> dict:
+    session_id: str, note: str, context: dict[str, Any], *, operation: str, plan: dict[str, Any],
+    reservation_id: str | None, creation_receipt: dict[str, Any] | None, daemon_port: int,
+) -> dict[str, Any]:
     return {
         **owned_result(False, session_id=session_id, operation=operation, note=note, context=context).recovery(),
         "envelope": {"prompt": note, "plugin_context": context},
@@ -270,7 +297,9 @@ def owned_delivery_journal(
     }
 
 
-def reconcile_owned_delivery(pending: dict, *, run=subprocess.run) -> OwnedDelivery:
+def reconcile_owned_delivery(
+    pending: dict[str, Any], *, run: Callable[..., object] = subprocess.run,
+) -> OwnedDelivery:
     envelope = pending["envelope"]
     expected = owned_result(
         False, session_id=pending["session_id"], operation=pending["operation"],
@@ -286,13 +315,13 @@ def reconcile_owned_delivery(pending: dict, *, run=subprocess.run) -> OwnedDeliv
             "admitted", expected.operation, expected.session_id, expected.idempotency_key,
             expected.input_digest, message_id,
         )
-    return deliver_note(
+    return cast(OwnedDelivery, deliver_note(
         pending["session_id"], envelope["prompt"], run=run, operation=pending["operation"],
-        prepared_context=envelope["plugin_context"], admission_unknown=True,
-    )
+        prepared_context=cast(dict[str, Any], envelope["plugin_context"]), admission_unknown=True,
+    ))
 
 
-def require_cli_context(context: dict) -> dict:
+def require_cli_context(context: dict[str, Any]) -> dict[str, Any]:
     if (
         not isinstance(context, dict) or type(context.get("version")) is not int or context["version"] != 1
         or not isinstance(context.get("cwd"), str) or not context["cwd"]
@@ -304,7 +333,9 @@ def require_cli_context(context: dict) -> dict:
     return context
 
 
-def deferred_seed(embodied: dict, seed: str | None, operation: str) -> tuple[str | None, str, dict | None]:
+def deferred_seed(
+    embodied: dict[str, Any], seed: str | None, operation: str,
+) -> tuple[str | None, str, dict[str, Any] | None]:
     from . import SEED_NEVER_TYPED_REASONS
     if (
         embodied.get("bridge_seed_deferred") is not True or embodied.get("seed_submitted")
@@ -323,7 +354,10 @@ def deferred_seed(embodied: dict, seed: str | None, operation: str) -> tuple[str
     return seed, operation, receipt if creation else None
 
 
-def settle_deferred_seed(run_input, identity: str, workspace: str, receipt: dict | None) -> bool:
+def settle_deferred_seed(
+    run_input: Callable[[str, bytes], tuple[int, str, str] | None],
+    identity: str, workspace: str, receipt: dict[str, Any] | None,
+) -> bool:
     if receipt is None:
         return True
     import shlex

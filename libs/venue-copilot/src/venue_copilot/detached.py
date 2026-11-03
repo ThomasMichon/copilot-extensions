@@ -5,10 +5,11 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
-from typing import Any, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol, TypedDict, cast
 
 from . import (
-    LIVE_SESSION_ALIAS_PROTOCOL,
+    LIVE_SESSION_ALIAS_PROTOCOL as LIVE_SESSION_ALIAS_PROTOCOL,
     VenueCopilotError,
     await_claim,
     bridge_probe_script,
@@ -60,6 +61,22 @@ class DetachAdapter(Protocol):
     def stop_command(self, plan: dict[str, Any]) -> str:
         """Verified stop command for the running venue session."""
         ...
+
+
+class _PreparedDetachAdapter(DetachAdapter, Protocol):
+    def prepare(self, plan: dict[str, Any]) -> dict[str, Any]: ...
+
+    def record_pending_delivery(
+        self, plan: dict[str, Any], pending: dict[str, Any] | None,
+    ) -> None: ...
+
+
+class _AliasFloor(TypedDict, total=False):
+    min_daemon_protocol: int
+
+
+class _PreparedOptions(TypedDict, total=False):
+    prepared_context: dict[str, Any]
 
 
 # Runner configuration a venue passes in its plan: never part of a printed handle.
@@ -171,7 +188,7 @@ def launch_detached(
     copilot_args: list[str],
     ensure_mux: bool,
     register_timeout: float,
-    progress: Any,
+    progress: Callable[[str, str], None],
     refs: tuple[str, bytes, list[tuple[str, int]]] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     reservation: dict[str, Any] | None = None
@@ -265,7 +282,8 @@ def launch_detached(
         owned = bool(plan.get("bridge_owned_seed"))
         if owned:
             from .refs import require_cli_context
-            prepared = adapter.prepare(plan)
+            prepared_adapter = cast(_PreparedDetachAdapter, adapter)
+            prepared = prepared_adapter.prepare(plan)
             plan["plugin_context"] = require_cli_context(prepared)
             plan["workspace"] = prepared["cwd"]
         progress("launch", _venue_text(plan, "launch_detail", "`agent-worktrees embody` on the venue"))
@@ -322,7 +340,7 @@ def launch_detached(
         handoff_keeper = getattr(adapter, "handoff_keeper", None)
         if handoff_keeper is not None:
             handoff_keeper(plan)
-        creation_receipt = None
+        creation_receipt: dict[str, Any] | None = None
         operation = reservation["reservation_id"]
         if owned:
             from .refs import deferred_seed
@@ -360,20 +378,21 @@ def launch_detached(
         # with live-session aliases carries a bridge message (seed or note) across it.
         # A rejoin's own flags say nothing about how the running session was
         # launched (it may still be resuming), so it always needs that floor.
-        alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
+        alias_floor: _AliasFloor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
                        if resuming or may_switch_session_id(copilot_args) else {})
         if owned:
             alias_floor["min_daemon_protocol"] = max(41, alias_floor.get("min_daemon_protocol", 0))
         if seed_needs_bridge:
             from .refs import deliver_note
+            bridge_seed = cast(str, seed)  # Both seed-needed paths above require a nonempty seed.
             if owned:
                 from .refs import owned_result, owned_delivery_journal
                 ledger = owned_delivery_journal(
-                    session_id, seed, plan["plugin_context"], operation=operation, plan=plan,
+                    session_id, bridge_seed, plan["plugin_context"], operation=operation, plan=plan,
                     reservation_id=reservation.get("reservation_id"),
                     creation_receipt=creation_receipt, daemon_port=daemon_port,
                 )
-                adapter.record_pending_delivery(plan, ledger)
+                prepared_adapter.record_pending_delivery(plan, ledger)
                 pending_delivery = True
 
             reason = embodied.get("seed_reason")
@@ -381,30 +400,34 @@ def launch_detached(
                 "seed was never typed; delivering over bridge"
             )
             progress("seed-bridge", detail)
+            prepared_options: _PreparedOptions = (
+                {"prepared_context": plan["plugin_context"]} if owned else {}
+            )
             delivery_result = deliver_note(
-                session_id, seed, operation=operation,
-                **({"prepared_context": plan["plugin_context"]} if owned else {}), **alias_floor,
+                session_id, bridge_seed, operation=operation,
+                **prepared_options, **alias_floor,
             )
             if owned:
-                delivery_result = owned_result(
+                owned_delivery = owned_result(
                     delivery_result, session_id=session_id, operation=operation,
-                    note=seed, context=plan["plugin_context"],
+                    note=bridge_seed, context=plan["plugin_context"],
                 )
-                ledger.update(delivery_result.recovery())
-                adapter.record_pending_delivery(plan, ledger)
-                if delivery_result.status == "unknown":
+                delivery_result = owned_delivery
+                ledger.update(owned_delivery.recovery())
+                prepared_adapter.record_pending_delivery(plan, ledger)
+                if owned_delivery.status == "unknown":
                     return 75, _payload(
                         False, plan, pending=True, session_id=session_id,
-                        pending_delivery=delivery_result.recovery(),
-                        recovery_handle=f"{plan['scope_id']}:{delivery_result.idempotency_key}",
+                        pending_delivery=owned_delivery.recovery(),
+                        recovery_handle=f"{plan['scope_id']}:{owned_delivery.idempotency_key}",
                         error="owned seed admission is unknown; native session and ownership retained",
                     )
-                if delivery_result.status == "refused":
-                    adapter.record_pending_delivery(plan, None)
+                if owned_delivery.status == "refused":
+                    prepared_adapter.record_pending_delivery(plan, None)
                     pending_delivery = False
-                    detail = f" ({delivery_result.reason})" if delivery_result.reason else ""
+                    detail = f" ({owned_delivery.reason})" if owned_delivery.reason else ""
                     return 1, _payload(
-                        False, plan, refusal_reason=delivery_result.reason,
+                        False, plan, refusal_reason=owned_delivery.reason,
                         error="owned seed was not admitted after plugin readiness" + detail,
                     )
             seed_delivery_status = "bridge" if delivery_result else "failed"
@@ -416,9 +439,9 @@ def launch_detached(
                     plan["identity"], plan["workspace"], creation_receipt,
                 ):
                     return 75, _payload(False, plan, pending=True, session_id=session_id, seed_admitted=True,
-                                       pending_delivery=delivery_result.recovery(),
+                                       pending_delivery=owned_delivery.recovery(),
                                        error="owned seed admitted; creation receipt settlement unconfirmed")
-                adapter.record_pending_delivery(plan, None)
+                prepared_adapter.record_pending_delivery(plan, None)
                 pending_delivery = False
         refs_extra: dict[str, Any] = {}
         if notes:

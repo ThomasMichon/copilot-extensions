@@ -14,7 +14,7 @@ from worktree_manager.companion_timeline_contract import (
     SourceIdentity, SourcePosition, SourceToken, TimelineContractError, TimelineSnapshot,
 )
 from worktree_manager.companion_timeline_controller import (
-    TimelineController, TimelineSourceError,
+    TimelineCleanupError, TimelineController, TimelineSourceError,
 )
 
 
@@ -152,7 +152,7 @@ class FailedCleanupSource(SlowCleanupSource):
             try:
                 return await super().history(selected, before, stop=stop)
             finally:
-                raise OSError("history cleanup failed")
+                raise TimelineCleanupError("history cleanup failed")
 
 
 @pytest.mark.parametrize("operation", ["select", "close"])
@@ -303,9 +303,42 @@ def test_unexpected_adapter_failure_is_visible_before_close() -> None:
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         assert errors == ["Timeline adapter failed: broken provider contract"]
-        with pytest.raises(TimelineSourceError, match="cleanup failed"):
-            await controller.close()
+        await controller.close()
         assert controller.reader_count == 0
+    asyncio.run(run())
+
+
+def test_expected_source_failures_arriving_during_stop_do_not_fail_cleanup() -> None:
+    class LateSource(Source):
+        async def observe(self, selected: SourceToken, *, stop: asyncio.Event):
+            try:
+                yield snapshot(selected)
+                await stop.wait()
+                raise TimelineSourceError("disconnected during stop")
+            finally:
+                self.closed.set()
+
+        async def history(self, selected: SourceToken, before: SourcePosition, *, stop: asyncio.Event):
+            self.page_started.set()
+            await stop.wait()
+            raise TimelineSourceError("history read timed out during stop")
+
+    async def run() -> None:
+        errors = []
+        source = LateSource()
+        controller = TimelineController(
+            {Provider.WORKTREES: source}, observation=lambda value: None,
+            page=lambda value: None, error=lambda selected, message: errors.append(message),
+        )
+        selected = token()
+        await controller.select((selected,))
+        await asyncio.sleep(0)
+        assert controller.request_history(selected, position(selected))
+        await source.page_started.wait()
+        await controller.close()
+        assert source.closed.is_set() and not errors
+        assert controller.reader_count == controller.page_count == 0
+
     asyncio.run(run())
 
 

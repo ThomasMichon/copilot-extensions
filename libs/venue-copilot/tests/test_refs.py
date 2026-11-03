@@ -5,17 +5,20 @@ from __future__ import annotations
 import base64
 import io
 import tarfile
+from pathlib import Path
+from typing import Any, BinaryIO, cast
+from types import SimpleNamespace
 
 import pytest
 from venue_copilot import refs as venue_refs
 
 
-def test_prepared_delivery_retains_unknown_after_timeout_even_if_retry_refuses():
+def test_prepared_delivery_retains_unknown_after_timeout_even_if_retry_refuses() -> None:
     import json
     import subprocess
     from types import SimpleNamespace
-    calls = []
-    def run(argv, **kwargs):
+    calls: list[tuple[list[str], str]] = []
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs["input"]))
         if len(calls) == 1:
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
@@ -33,7 +36,7 @@ def test_prepared_delivery_retains_unknown_after_timeout_even_if_retry_refuses()
     assert "--expected-session-id" in calls[0][0]
 
 
-def test_prepared_delivery_requires_structured_admission_or_confirmed_refusal():
+def test_prepared_delivery_requires_structured_admission_or_confirmed_refusal() -> None:
     import json
     from types import SimpleNamespace
     context = {"version": 1, "cwd": "/workspace", "plugins": []}
@@ -60,13 +63,15 @@ def test_prepared_delivery_requires_structured_admission_or_confirmed_refusal():
         ({"detail": "untrusted diagnostic"}, None),
     ],
 )
-def test_prepared_delivery_preserves_only_fixed_refusal_reasons(reason, expected):
+def test_prepared_delivery_preserves_only_fixed_refusal_reasons(
+    reason: str | dict[str, str], expected: str | None,
+) -> None:
     import json
     from types import SimpleNamespace
 
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(returncode=69, stdout=json.dumps({
             "owned_delivery_version": 1, "admission_status": "not_admitted",
@@ -82,7 +87,7 @@ def test_prepared_delivery_preserves_only_fixed_refusal_reasons(reason, expected
     assert "raw diagnostic" not in repr(result.recovery())
 
 
-def test_confirmed_admission_recovery_never_resends_after_native_session_exits():
+def test_confirmed_admission_recovery_never_resends_after_native_session_exits() -> None:
     context = {"version": 1, "cwd": "/workspace", "plugins": []}
     pending = {
         **venue_refs.owned_result(
@@ -105,10 +110,10 @@ def test_confirmed_admission_recovery_never_resends_after_native_session_exits()
 
 def _members(payload: bytes) -> dict[str, bytes]:
     tf = tarfile.open(fileobj=io.BytesIO(base64.b64decode(payload)), mode="r:gz")
-    return {m.name: tf.extractfile(m).read() for m in tf.getmembers() if m.isfile()}
+    return {m.name: cast(BinaryIO, tf.extractfile(m)).read() for m in tf.getmembers() if m.isfile()}
 
 
-def test_files_travel_over_stdin_into_a_batch_dir_outside_the_repo(tmp_path):
+def test_files_travel_over_stdin_into_a_batch_dir_outside_the_repo(tmp_path: Path) -> None:
     (tmp_path / "a").mkdir()
     har = tmp_path / "a" / "trace.har"
     har.write_bytes(b"HAR")
@@ -120,7 +125,7 @@ def test_files_travel_over_stdin_into_a_batch_dir_outside_the_repo(tmp_path):
     assert files == [("trace.har", 3)]
 
 
-def test_same_named_files_do_not_collide(tmp_path):
+def test_same_named_files_do_not_collide(tmp_path: Path) -> None:
     (tmp_path / "x").mkdir()
     (tmp_path / "y").mkdir()
     (tmp_path / "x" / "notes.md").write_text("one")
@@ -132,7 +137,7 @@ def test_same_named_files_do_not_collide(tmp_path):
     assert _members(payload) == {"notes.md": b"one", "notes-2.md": b"two"}
 
 
-def test_a_folder_is_sent_whole(tmp_path):
+def test_a_folder_is_sent_whole(tmp_path: Path) -> None:
     logs = tmp_path / "logs"
     logs.mkdir()
     (logs / "one.log").write_text("1")
@@ -142,7 +147,7 @@ def test_a_folder_is_sent_whole(tmp_path):
     assert set(_members(payload)) == {"logs/one.log", "logs/two.log"}
 
 
-def test_missing_and_oversized_inputs_are_refused(tmp_path, monkeypatch):
+def test_missing_and_oversized_inputs_are_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(venue_refs.RefFileError, match="not found"):
         venue_refs.build_refs_upload([str(tmp_path / "nope.har")], "b")
     big = tmp_path / "big.bin"
@@ -152,7 +157,7 @@ def test_missing_and_oversized_inputs_are_refused(tmp_path, monkeypatch):
         venue_refs.build_refs_upload([str(big)], "b")
 
 
-def test_note_names_exact_venue_paths_and_asks_not_to_commit():
+def test_note_names_exact_venue_paths_and_asks_not_to_commit() -> None:
     note = venue_refs.refs_note(
         "/home/codespace/.agent-bridge/refs/b", [("trace.har", 3 * 1024 * 1024)],
     )
@@ -160,10 +165,10 @@ def test_note_names_exact_venue_paths_and_asks_not_to_commit():
     assert "never" in note and "commit" in note
 
 
-def test_deliver_note_sends_over_stdin():
-    calls = []
+def test_deliver_note_sends_over_stdin() -> None:
+    calls: list[tuple[list[str], Any]] = []
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> object:
         calls.append((argv, kw.get("input")))
         return type("R", (), {"returncode": 0})()
 
@@ -172,7 +177,7 @@ def test_deliver_note_sends_over_stdin():
     assert argv[1:7] == ["send", "sid-1", "--prompt-file", "-", "--no-wait", "--steer"]
     assert stdin == "see /x/y.har"
 
-    def key(i):
+    def key(i: int) -> str:
         return calls[i][0][calls[i][0].index("--idempotency-key") + 1]
 
     # A retry of the same delivery reuses its key: the bridge answers an
@@ -193,10 +198,10 @@ def test_deliver_note_sends_over_stdin():
     assert key(6) == key(0)
 
 
-def test_deliver_note_is_steered_and_bounded():
-    seen = {}
+def test_deliver_note_is_steered_and_bounded() -> None:
+    seen: dict[str, Any] = {}
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> object:
         seen.update(kw)
         return type("R", (), {"returncode": 0})()
 
@@ -204,10 +209,10 @@ def test_deliver_note_is_steered_and_bounded():
     assert seen.get("timeout") == 60
 
 
-def test_deliver_note_can_require_a_daemon_protocol():
-    calls = []
+def test_deliver_note_can_require_a_daemon_protocol() -> None:
+    calls: list[list[str]] = []
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> object:
         calls.append(argv)
         return type("R", (), {"returncode": 3})()  # the daemon is too old
 
@@ -215,10 +220,10 @@ def test_deliver_note_can_require_a_daemon_protocol():
     assert calls[0][-2:] == ["--min-daemon-protocol", "20"]
 
 
-def test_a_wedged_bridge_reports_failed_delivery():
+def test_a_wedged_bridge_reports_failed_delivery() -> None:
     import subprocess
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> object:
         raise subprocess.TimeoutExpired(cmd=argv, timeout=60)
 
     assert venue_refs.deliver_note("sid-1", "note", run=run) is False

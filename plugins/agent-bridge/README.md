@@ -2,6 +2,10 @@
 
 [Configuration reference](docs/configuration.md)
 
+The optional [known-session semantic observation/history reads](docs/session-observations.md)
+reuse admitted retained event logs without starting an actor. Runtime capability
+negotiation, partial coverage and cursor/lifetime qualification remain explicit.
+
 Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
 generated resolver files and deployment metadata, rather than treating the
 installation root as disposable. Configuration, databases, authentication,

@@ -11,6 +11,10 @@ Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
 
+The continuing rich-agenda source candidate is documented in its
+[owning passive-reader contract](../../../plugins/efforts/skills/driving-effort-agendas/references/agenda-history.md).
+Its source qualification is not installed adoption or Manager integration.
+
 ## Ownership and passive discovery
 
 Worktree, agenda and Bridge owners supply their own source records. Manager's
