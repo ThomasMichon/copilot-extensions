@@ -3,9 +3,70 @@
 from __future__ import annotations
 
 import json
+import ast
+import inspect
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 import sys
+import textwrap
+import time
+from worktree_manager import agenda_transport, engine_posix_process
+
+
+def _retirement_timeout(function, operation: str) -> float:
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    values = [
+        option.value.value for call in ast.walk(tree) if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute) and call.func.attr == operation
+        for option in call.keywords if option.arg == "timeout"
+        and isinstance(option.value, ast.Constant) and type(option.value.value) in (int, float)
+    ]
+    assert values, f"production retirement bound missing: {operation}"
+    return float(max(values))
+
+
+JOIN_PREPARATION_READS = 4  # One probe and selected read/latest-page/replay.
+JOIN_PIPE_READERS = 3
+JOIN_PROBE_CLEANUP = _retirement_timeout(engine_posix_process.run, "communicate")
+JOIN_COMMAND_CLEANUP = (
+    _retirement_timeout(agenda_transport._owned_process, "wait")
+    + JOIN_PIPE_READERS * _retirement_timeout(agenda_transport.command_frames, "join")
+)
+JOIN_PREPARATION_SECONDS = (
+    JOIN_PREPARATION_READS * agenda_transport.STARTUP_TIMEOUT
+    + JOIN_PROBE_CLEANUP + (JOIN_PREPARATION_READS - 1) * JOIN_COMMAND_CLEANUP
+)
+JOIN_ADMISSION_SECONDS = agenda_transport.STARTUP_TIMEOUT
+JOIN_CLEANUP_SECONDS = JOIN_PREPARATION_READS * JOIN_COMMAND_CLEANUP
+JOIN_TEST_SECONDS = (
+    JOIN_PREPARATION_SECONDS + JOIN_ADMISSION_SECONDS + agenda_transport.IDLE_TIMEOUT
+    + agenda_transport.STARTUP_TIMEOUT + JOIN_COMMAND_CLEANUP + JOIN_CLEANUP_SECONDS
+)
+
+
+class JoinPhase:
+    """One fixed monotonic fixture deadline; observations never renew it."""
+
+    def __init__(self, name: str, seconds: float, *, clock=time.monotonic) -> None:
+        self.name, self.seconds, self.clock = name, seconds, clock
+        self.started = clock()
+        self.deadline = self.started + seconds
+
+    async def wait(self, condition, pause, failure, diagnostic) -> None:
+        while True:
+            error = failure()
+            now = self.clock()
+            if error is not None or now >= self.deadline:
+                details = {
+                    "phase": self.name, "started": self.started, "now": now,
+                    "deadline": self.deadline, "budget": self.seconds, **diagnostic(),
+                }
+                if error is not None:
+                    raise AssertionError(details) from error
+                raise AssertionError(details)
+            if condition():
+                return
+            await pause(min(0.025, self.deadline - now))
 
 OWNER_SOURCE = Path(__file__).resolve().parents[2] / "plugins" / "agent-worktrees" / "src"
 if str(OWNER_SOURCE) not in sys.path:
@@ -293,7 +354,24 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
     assert owner.observation_read(selection)["error"]["code"] == "unready"
     first = project(1)
     owner.publish("example", [first], observed_at=1)
-    actions, streams = [], []
+    actions, streams, stages, failures = [], [], [], []
+
+    def mark(name: str) -> None:
+        stages.append((name, time.monotonic()))
+
+    prepare = companion_worktree_source.WorktreeTimelineSource.prepare
+
+    async def traced_prepare(source, epoch, *, stop):
+        mark("prepare.begin")
+        try:
+            return await prepare(source, epoch, stop=stop)
+        except (companion_worktree_source.OwnerReadError, ValueError, OSError) as exc:
+            failures.append(exc)
+            raise
+        finally:
+            mark("prepare.end")
+
+    monkeypatch.setattr(companion_worktree_source.WorktreeTimelineSource, "prepare", traced_prepare)
 
     def publish(slice_name: str, at: float) -> dict:
         loaded = tracking.load_record(record_path)
@@ -311,6 +389,7 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
         return SimpleNamespace(health=lambda: {"capabilities": [], field: {"status": "unavailable"}})
 
     def handle(action, payload):
+        mark("rpc." + action)
         actions.append((action, payload.copy()))
         if action == "health":
             return health.response(
@@ -325,6 +404,7 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
         raise AssertionError(f"unexpected private point action: {action}")
 
     def stream(action, payload, disconnected):
+        mark("feed.request")
         streams.append((action, payload.copy()))
         assert action == "worktree-observations-feed"
         return owner.stream(action, payload, disconnected)
@@ -336,7 +416,7 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
     endpoint = f"http://127.0.0.1:{server.port}"
     trace = root / "children.jsonl"
     startup = f'''
-import json,os,sys
+import json,os,sys,time
 from pathlib import Path
 from types import SimpleNamespace
 sys.path[:0]={list(map(str, SOURCE_PATHS))!r}
@@ -361,7 +441,7 @@ config.install_dir=lambda:Path({str(route)!r})
 worktrees_client.resident_endpoint=lambda root:SimpleNamespace(base_url={endpoint!r})
 with Path({str(trace)!r}).open("a",encoding="utf-8") as out:
     out.write(json.dumps({{"pid":os.getpid(),"birth":locks.process_start_time(os.getpid()),
-                         "argv":sys.argv[1:]}})+"\\n")
+                         "argv":sys.argv[1:],"monotonic":time.monotonic()}})+"\\n")
 '''
     (bootstrap / "sitecustomize.py").write_text(startup, encoding="utf-8")
     actual_environment = agenda_transport._engine_environment
@@ -397,6 +477,7 @@ with Path({str(trace)!r}).open("a",encoding="utf-8") as out:
             "owner": owner, "server": server, "record_path": record_path, "checkout": checkout,
             "row": expected, "publish": publish, "selection": selection,
             "actions": actions, "streams": streams, "settled": settled, "forbidden": forbidden,
+            "stages": stages, "failures": failures, "trace": trace, "mark": mark,
         }
     finally:
         owner.close_admission("closed")

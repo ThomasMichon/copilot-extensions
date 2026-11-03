@@ -319,6 +319,7 @@ def fixtures_to_late_gap(token: SourceToken) -> TimelineGap:
     )
 
 
+@pytest.mark.timeout(fixtures.JOIN_TEST_SECONDS)
 def test_actual_record_projection_resident_cli_and_textual_private_join(tmp_path, monkeypatch) -> None:
     with fixtures.resident_join(tmp_path, monkeypatch) as joined:
         owner, server = joined["owner"], joined["server"]
@@ -329,21 +330,58 @@ def test_actual_record_projection_resident_cli_and_textual_private_join(tmp_path
                 await until(pilot, lambda: not app._loading)
                 assert app.query_one("#views", TabbedContent).active == "summary-tab"
                 assert not joined["streams"], "initial Summary started a timeline observer"
+                preparation = fixtures.JoinPhase("prepared-events", fixtures.JOIN_PREPARATION_SECONDS)
+                joined["mark"]("test.prepare.begin")
                 app.query_one("#views", TabbedContent).active = "timeline-tab"
                 timeline = app.query_one(SubwayTimeline)
-                try:
-                    await until(pilot, lambda: (
-                        len(timeline.window.events) == 2
-                        and owner.observations.counts()["streams"] == 1
-                    ))
-                except AssertionError as exc:
-                    raise AssertionError({
+
+                def failure():
+                    if joined["failures"]:
+                        return joined["failures"][0]
+                    attachment = app._timeline_attachment
+                    if attachment._cleanup_failure is not None:
+                        return attachment._cleanup_failure
+                    if attachment.controller is not None:
+                        for task in attachment.controller._readers.values():
+                            if task.done():
+                                return (RuntimeError("timeline reader cancelled") if task.cancelled()
+                                        else task.exception() or RuntimeError("timeline reader ended"))
+                        for task in attachment.controller._pages.values():
+                            if task.done() and not task.cancelled() and task.exception() is not None:
+                                return task.exception()
+                    if timeline.window.source_gaps or any(
+                        state.availability in {Availability.UNAVAILABLE, Availability.UNSUPPORTED, Availability.HEAD_CHANGED}
+                        for state in timeline.window.sources.values()
+                    ):
+                        return RuntimeError("selected owner became unavailable or reported a gap")
+                    return None
+
+                def diagnostic():
+                    controller = app._timeline_attachment.controller
+                    return {
                         "status": status(app), "sources": timeline.window.sources,
                         "event_count": len(timeline.window.events),
                         "owner": owner.observations.counts(),
                         "actions": joined["actions"], "streams": joined["streams"],
-                        "producer_row": joined["row"],
-                    }) from exc
+                        "stages": joined["stages"],
+                        "children": joined["trace"].read_text() if joined["trace"].exists() else "",
+                        "tasks": [] if controller is None else [
+                            {"name": task.get_name(), "done": task.done(), "cancelled": task.cancelled(),
+                             "exception": repr(task.exception()) if task.done() and not task.cancelled() else None,
+                             "stack": [(frame.f_code.co_name, frame.f_lineno) for frame in task.get_stack(limit=1)]}
+                            for task in controller._readers.values()
+                        ],
+                    }
+
+                await preparation.wait(
+                    lambda: len(timeline.window.events) == 2, pilot.pause, failure, diagnostic,
+                )
+                joined["mark"]("test.prepare.visible")
+                admission = fixtures.JoinPhase("held-stream-admission", fixtures.JOIN_ADMISSION_SECONDS)
+                await admission.wait(
+                    lambda: owner.observations.counts()["streams"] == 1, pilot.pause, failure, diagnostic,
+                )
+                joined["mark"]("test.feed.admitted")
                 row = joined["row"]
                 state = next(iter(timeline.window.sources.values()))
                 observed = state.snapshot
@@ -368,10 +406,11 @@ def test_actual_record_projection_resident_cli_and_textual_private_join(tmp_path
                 assert row["summary"] in str(app.query_one(".timeline-context", Static).content)
                 old_position = state.position
                 updated = await asyncio.to_thread(joined["publish"], "Live accepted slice", 4)
-                await until(pilot, lambda: (
-                    len(timeline.window.events) == 3
-                    and timeline.window.context()[0] == updated["summary"]
-                ))
+                await fixtures.JoinPhase("live-update", agenda_transport.IDLE_TIMEOUT).wait(
+                    lambda: len(timeline.window.events) == 3 and timeline.window.context()[0] == updated["summary"],
+                    pilot.pause, failure, diagnostic,
+                )
+                joined["mark"]("test.live.visible")
                 current = next(iter(timeline.window.sources.values()))
                 assert current.position is not None and current.position != old_position
                 live = timeline.window.events[-1]
@@ -382,7 +421,13 @@ def test_actual_record_projection_resident_cli_and_textual_private_join(tmp_path
                 live_position = current.position
                 timeline.focus()
                 await pilot.press("home")
-                await until(pilot, lambda: next(iter(timeline.window.sources.values())).before is None)
+                await fixtures.JoinPhase(
+                    "backward-page", agenda_transport.STARTUP_TIMEOUT + fixtures.JOIN_COMMAND_CLEANUP,
+                ).wait(
+                    lambda: next(iter(timeline.window.sources.values())).before is None,
+                    pilot.pause, failure, diagnostic,
+                )
+                joined["mark"]("test.history.visible")
                 assert next(iter(timeline.window.sources.values())).position == live_position
                 pages = [payload for action, payload in joined["actions"]
                          if action == "worktree-observations-history"]

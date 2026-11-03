@@ -38,6 +38,45 @@ def codec() -> WorktreeCodec:
     return WorktreeCodec("example", "selected", "head-a", RESIDENT)
 
 
+@pytest.mark.parametrize("outcome", ["within-phase", "beyond-phase", "terminal"])
+def test_private_join_phase_budget_is_fixed_and_fail_fast_without_wall_sleep(outcome: str) -> None:
+    now = [0.0]
+    budget = fixtures.JOIN_ADMISSION_SECONDS
+    old_scan = 80 * 0.025
+    ready_at = (old_scan + budget) / 2 if outcome != "beyond-phase" else budget + 0.025
+    assert old_scan < (old_scan + budget) / 2 < budget
+    phase = fixtures.JoinPhase("admission-contract", budget, clock=lambda: now[0])
+    deadline = phase.deadline
+    provider_error = RuntimeError("actual provider failure witness")
+    polls = []
+
+    async def pump(delay: float) -> None:
+        now[0] += delay
+        polls.append(now[0])  # Heartbeats/UI activity are deliberately not deadline renewals.
+        assert phase.deadline == deadline
+
+    async def check() -> None:
+        wait = phase.wait(
+            lambda: now[0] >= ready_at, pump,
+            lambda: provider_error if outcome == "terminal" and now[0] >= 0.5 else None,
+            lambda: {"last_observation": now[0]},
+        )
+        if outcome == "within-phase":
+            await wait
+            assert old_scan < now[0] < budget
+        else:
+            with pytest.raises(AssertionError) as failed:
+                await wait
+            assert failed.value.args[0]["deadline"] == deadline
+            if outcome == "terminal":
+                assert failed.value.__cause__ is provider_error and now[0] < budget
+            else:
+                assert now[0] == deadline and failed.value.__cause__ is None
+
+    asyncio.run(check())
+    assert polls and phase.deadline == deadline
+
+
 def test_actual_owner_snapshot_projects_current_facts_without_created_event() -> None:
     reader = codec()
     value = reader.decode(raw(snapshot()))
