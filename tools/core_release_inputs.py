@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+import subprocess
 import time
 import zipfile
 import zlib
@@ -124,7 +125,10 @@ def retain_released_core(
     def bounded_gh(argv, **kwargs):
         _check_deadline(deadline)
         kwargs["timeout"] = min(kwargs.get("timeout", 120), deadline - time.monotonic())
-        return _gh(argv, **kwargs)
+        try:
+            return _gh(argv, **kwargs)
+        except subprocess.TimeoutExpired:
+            raise PromotionArtifactError("source release request timed out") from None
 
     with _temporary_inputs(None) as temporary:
         root = Path(native_retained_path(_private_retained_root(Path(temporary)).resolve()))

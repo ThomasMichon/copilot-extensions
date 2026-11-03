@@ -180,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, sort_keys=True))
         return 0
+    except subprocess.TimeoutExpired:
+        parser.exit(1, "release delivery refused: a required operation timed out\n")
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"release delivery refused: {error}\n")
 

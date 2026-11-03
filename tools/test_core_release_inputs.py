@@ -207,6 +207,42 @@ def test_release_intake_refuses_an_expired_deadline_before_network(release):
     assert not server.calls and not proofs
 
 
+@pytest.mark.parametrize("stage", ["release", "index", "bundle", "attestation"])
+def test_release_intake_normalizes_a_timed_out_request(release, monkeypatch, stage):
+    _producer, _arguments, server, _proofs, entry, options = release
+    original_gh = intake._gh
+    original_verify = intake.verify_attestation_subject
+    reached = []
+
+    def request(argv, **kwargs):
+        target = (
+            stage == "release" and any("/releases/tags/" in item for item in argv)
+            or stage == "index" and kwargs.get("binary") and any(
+                item.endswith("/" + str(server.assets["python-artifacts.json"]["id"])) for item in argv
+            )
+            or stage == "bundle" and kwargs.get("binary") and any(
+                item.endswith("/" + str(server.assets[entry["filename"]]["id"])) for item in argv
+            )
+            or stage == "attestation" and argv[0] == "attestation"
+        )
+        if target:
+            reached.append(stage)
+            raise subprocess.TimeoutExpired(["gh", "sensitive-request-details"], 1)
+        return original_gh(argv, **kwargs)
+
+    def verify(path, **identity):
+        if stage == "attestation":
+            identity["runner"](["attestation", "fixture"], verification=True)
+        return original_verify(path, **identity)
+
+    monkeypatch.setattr(intake, "_gh", request)
+    monkeypatch.setattr(intake, "verify_attestation_subject", verify)
+    with pytest.raises(artifacts.PromotionArtifactError, match="timed out") as failure, \
+            intake.retain_released_core(**options):
+        pytest.fail("timed-out release inputs were exposed")
+    assert reached == [stage] and "sensitive-request-details" not in str(failure.value)
+
+
 def test_release_intake_refuses_an_oversized_core_before_downloading_it(release):
     _producer, _arguments, server, proofs, entry, options = release
     options["max_bytes"] = 1

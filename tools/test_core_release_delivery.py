@@ -338,6 +338,56 @@ def test_release_delivery_cli_passes_explicit_inputs(tmp_path, monkeypatch, caps
     assert captured[0]["offline_wheel_pool"] == tmp_path / "pool.json"
 
 
+def test_release_delivery_cli_refuses_release_request_timeout(selected_release, tmp_path, monkeypatch, capsys):
+    import core_release_delivery as orchestration
+
+    _producer, _server, _proofs, _entry, _state, options, _git = selected_release
+    materials = tmp_path / "materials.json"
+    materials.write_text("{}", encoding="utf-8")
+    called = []
+
+    def timeout(*_args, **_kwargs):
+        called.append(True)
+        raise subprocess.TimeoutExpired(["gh", "sensitive-request-details"], 1)
+
+    monkeypatch.setattr(intake, "_gh", timeout)
+    with pytest.raises(SystemExit) as failure:
+        orchestration.main([
+            "--repository", options["repository"], "--source-checkout", str(options["source_checkout"]),
+            "--source-commit", options["source_commit"], "--main-head", options["main_head"],
+            "--materials", str(materials), "--material-dir", str(tmp_path),
+            "--native-lock", str(options["native_lock"]), "--uv", options["uv"],
+            "--output", str(options["destination"]), "--timeout", "120",
+        ])
+    error = capsys.readouterr().err
+    assert called and failure.value.code == 1
+    assert "release delivery refused" in error and "timed out" in error
+    assert "Traceback" not in error and "sensitive-request-details" not in error
+    assert not options["destination"].exists()
+
+
+def test_release_delivery_cli_refuses_downstream_timeout(tmp_path, monkeypatch, capsys):
+    import core_release_delivery as orchestration
+
+    materials = tmp_path / "materials.json"
+    materials.write_text("{}", encoding="utf-8")
+
+    def timeout(**_kwargs):
+        raise subprocess.TimeoutExpired(["child", "sensitive-request-details"], 1)
+
+    monkeypatch.setattr(orchestration, "prepare_release_delivery", timeout)
+    with pytest.raises(SystemExit) as failure:
+        orchestration.main([
+            "--repository", "example/plugins", "--source-checkout", str(tmp_path),
+            "--source-commit", "a" * 40, "--main-head", "b" * 40,
+            "--materials", str(materials), "--material-dir", str(tmp_path),
+            "--guarded-feed", "--uv", "fixture", "--output", str(tmp_path / "delivery.zip"),
+        ])
+    error = capsys.readouterr().err
+    assert failure.value.code == 1 and "release delivery refused" in error and "timed out" in error
+    assert "Traceback" not in error and "sensitive-request-details" not in error
+
+
 def test_release_delivery_command_imports_without_ambient_python_paths(tmp_path):
     result = subprocess.run(
         [sys.executable, "-I", str(ROOT / "tools" / "core_release_delivery.py"), "--help"],

@@ -1,15 +1,18 @@
-"""Actor-free release-to-delivery source and custody decisions."""
+"""Actor-free contracts for release-to-delivery source and custody."""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import subprocess
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import core_release_delivery as delivery
+import core_release_inputs as intake
 import pytest
+from artifact_attestation import PromotionArtifactError
 
 COMMIT = "a" * 40
 DEV = "b" * 40
@@ -117,3 +120,49 @@ def test_publication_follows_release_custody_exit(tmp_path, monkeypatch, fail_cl
         result = delivery.prepare_release_delivery(**options)
         assert events == ["retained", "built", "released", "linked"]
         assert destination.read_bytes() == content and result["approval"] == "unattested"
+
+
+def test_release_intake_timeout_is_sanitized(tmp_path, monkeypatch):
+    @contextmanager
+    def temporary(_parent):
+        yield tmp_path
+
+    def request(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(["gh", "sensitive-request-details"], 1)
+
+    def discover(*_args, runner, **_kwargs):
+        return runner(["api", "fixture"], verification=True)
+
+    monkeypatch.setattr(intake, "_temporary_inputs", temporary)
+    monkeypatch.setattr(intake, "_private_retained_root", lambda path: path)
+    monkeypatch.setattr(intake, "native_retained_path", str)
+    monkeypatch.setattr(intake, "_gh", request)
+    monkeypatch.setattr(intake, "read_admitted_source_index", discover)
+    with (
+        pytest.raises(PromotionArtifactError, match="timed out") as failure,
+        intake.retain_released_core(
+            repository="example/plugins", dev_head=DEV, main_head=COMMIT, content_tree=CONTENT,
+            is_ancestor=lambda _a, _b: True, deadline=time.monotonic() + 60,
+            max_bytes=1024, max_wheels=2,
+        ),
+    ):
+        pytest.fail("timed-out release inputs were exposed")
+    assert "sensitive-request-details" not in str(failure.value)
+
+
+def test_cli_sanitizes_unexpected_child_timeout(monkeypatch, capsys):
+    def timeout(**_kwargs):
+        raise subprocess.TimeoutExpired(["child", "sensitive-request-details"], 1)
+
+    monkeypatch.setattr(delivery, "_read_json", lambda *_args: {})
+    monkeypatch.setattr(delivery, "prepare_release_delivery", timeout)
+    with pytest.raises(SystemExit) as failure:
+        delivery.main([
+            "--repository", "example/plugins", "--source-checkout", "fixture",
+            "--source-commit", COMMIT, "--main-head", COMMIT, "--materials", "materials.json",
+            "--material-dir", "materials", "--guarded-feed", "--uv", "fixture",
+            "--output", "delivery.zip",
+        ])
+    error = capsys.readouterr().err
+    assert failure.value.code == 1 and "release delivery refused" in error and "timed out" in error
+    assert "sensitive-request-details" not in error
