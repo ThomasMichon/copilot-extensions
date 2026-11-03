@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
@@ -91,7 +92,7 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
-def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
+def write_session_guidance(payload: dict[str, Any], *, home: Path | None = None) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
     if (

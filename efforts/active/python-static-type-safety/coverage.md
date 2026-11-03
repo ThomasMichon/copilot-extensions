@@ -8,17 +8,17 @@ not a second checker configuration.
 ## Snapshot and counting rules
 
 Snapshot: **2026-11-02**, merged Dev policy
-`d7b1490dce01f3163a3146a057a13f149206a0eb`, reconciled with
+`02fedf0688003fcab6a5bc4ae24bd85ada936880`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
-- **30 / 68 checker projects (44.1%)** have merged strict admission.
-- **262 / 7,665 physical Python files (3.4%)** belong to those strict scopes.
-- **38 projects remain pending; none are basic.**
-- All 7,665 tracked physical Python paths are classified. Classification,
+- **31 / 68 checker projects (45.6%)** have merged strict admission.
+- **267 / 7,666 physical Python files (3.5%)** belong to those strict scopes.
+- **37 projects remain pending; none are basic.**
+- All 7,666 tracked physical Python paths are classified. Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
-- Venue Copilot's 12 files are included after #10170 merged with exact-head
-  approval, required CI, native qualification and all three consumer contracts.
+- AI Attribution's five files are included after #10176 merged with exact-head
+  approval, required CI, native qualification and minimum-helper-runtime proof.
   Newly added files in independently pending projects are reflected in their
   rows rather than being credited by this library admission.
 
@@ -31,10 +31,10 @@ owned files; the manifest remains authoritative for their exact boundaries.
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
 | Shared libraries | 37 | 29 | 713 | 258 |
-| Plugins | 20 | 0 | 5,384 | 0 |
+| Plugins | 20 | 1 | 5,385 | 5 |
 | Services and managers | 7 | 0 | 922 | 0 |
 | Tools and support | 4 | 1 | 646 | 4 |
-| **Total** | **68** | **30** | **7,665** | **262** |
+| **Total** | **68** | **31** | **7,666** | **267** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -111,8 +111,8 @@ cross-cutting qualification gate below.
 | `agent-pull-requests` | 209 | Pending | Provider/runtime contracts, scripts, fixtures and copies |
 | `agent-ssh` | 157 | Pending | Transport/configuration, native helpers, fixtures and copies |
 | `agent-vault` | 166 | Pending | Secret/runtime boundaries, native fixtures and copies |
-| `agent-worktrees` | 1,403 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
-| `ai-attribution` | 5 | Pending | Complete helper/test admission |
+| `agent-worktrees` | 1,404 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
+| `ai-attribution` | 5 | **Locked** | #10171 / merged #10176; both targets, native policy/hook controls and Python 3.9 helper compatibility |
 | `budget-guidance` | 86 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
 | `context-handoff` | 6 | Pending | Complete Python helper/test admission |
 | `copilot-extensions-harness` | 17 | Pending | Complete Python helper/test admission |

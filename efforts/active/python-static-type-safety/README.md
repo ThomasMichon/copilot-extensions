@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** AI Attribution (#10171); the five-file Python helper/test artifact is integrated and strict targets, native Windows/Linux, minimum helper runtime and exact-source units are qualified. Review, required CI and merge remain. Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Selecting the next independent Python scope. AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The completed Venue Copilot source child is finalized. The #10171 source artifact is integrated from its managed child. The lead retains integration, native Linux, consumer/copy, shared admission/coverage manifests, global documentation, the effort, publication and full completion judgment.
+- **Delegates:** The completed AI Attribution and Venue Copilot source children are finalized. No implementation delegate is active. The lead retains integration, native Linux, consumer/copy, shared admission/coverage manifests, global documentation, the effort, publication and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -171,7 +171,7 @@ rewrite.
 
 ### Phase 5 - Tests, tools and bootstrap
 
-- [ ] Strictly admit AI Attribution's complete five-file Python helper/test portfolio (#10171), preserving shell emission and signature/disclosure behavior.
+- [x] Strictly admit AI Attribution's complete five-file Python helper/test portfolio (#10171), preserving shell emission and signature/disclosure behavior.
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
 - [ ] Admit tests in bounded package/fixture-family PRs, typing fixtures, doubles and monkeypatch interfaces without weakening assertions.
 - [ ] Admit installer/bootstrap, hooks, payload-only Python, `.devcontainer`, effort-hosted executable helpers and every remaining inventory path.
@@ -2234,3 +2234,101 @@ composition prerequisites, and review/validation rules.
   Native helper/CLI/hook tests are the simple integration lane; clean-room
   installation and live external venue operation are not applicable to this
   annotation-only change, which installs or deploys no service.
+
+### 2026-11-02 - AI Attribution merged; both metrics refreshed
+
+- #10176 merged as `02fedf0688003fcab6a5bc4ae24bd85ada936880`
+  after Copilot approval on exact head
+  `45b1e116eb0d6208ee3e92f73fbf94efa81df956`, zero open review threads and
+  green required
+  [CI run 41585084858](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41585084858)
+  and
+  [lockdown run 41585085294](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41585085294).
+  #10171 is closed; #9807 remains open. Managed campaign synchronization and
+  completed-child synchronization/finalization passed; no useful artifact was
+  discarded and no runtime rollout occurred.
+- The current merged tracker records **31 / 68 strict projects (45.6%)** and
+  **267 / 7,666 physical Python files (3.5%)**. Thirty-seven projects remain
+  pending with none basic. AI Attribution is the first plugin's complete
+  physical Python scope admitted; embedded/generated-source qualification
+  remains independently open. The newly added, pending Worktrees file is
+  reflected in its row and area total rather than omitted.
+- Select the next independent, bounded Python scope through public ownership
+  checks and the existing typed-boundary qualification flow. Versioned Runtime
+  needs component-sized preparation rather than one rewrite; Payload Invocation
+  remains behind contributor PR #10002. This Plan and Validation Plan remain
+  active, and completing one plugin does not complete the all-Python campaign.
+
+### 2026-11-02 - Context Handoff Python helpers selected
+
+- #10179 reserves the complete six-file Python project. Open-PR file inspection
+  found no overlapping Context Handoff source or checker-manifest change.
+  The strict Linux baseline has 37 diagnostics across five files.
+- This is below-altitude helper/fixture typing, not a change to continuity,
+  native selection, handoff storage, process custody or launch behavior.
+  Existing Node sources, test nodes, assertions and runtime contracts stay
+  intact; dynamic JSON and imported-module boundaries remain honestly typed.
+- Admission is prepared in an independent managed implementation worktree.
+  Both declared checker targets, native Python and Node contracts, a
+  disconnected Linux helper run and the original source-unit packet must pass
+  before reviewed publication. The tracker remains at the last merged
+  **31 / 68 projects** and **267 / 7,666 physical files** until this admission
+  actually merges.
+
+### 2026-11-02 - Independent project fleet authorized
+
+- The operator requested: "Worth fanning out into a sub-agent fleet to drive
+  changes across projects; submit PRs in parallel using worktrees per sub-agent".
+  Independent implementation worktrees now own Dispatch service (#10184),
+  Harness Knowledge (#10185) and devcontainer helpers (#10183), alongside
+  Context Handoff (#10179).
+- Each worker owns one complete declared project and its reviewed Dev PR.
+  The coordinator owns this canonical effort and both coverage metrics.
+  Implementation and public reviews may run concurrently; local heavy packet
+  execution and shared-clone allocation/synchronization are staggered to
+  preserve existing deadlines and avoid actual Git-ref/codename contention.
+  This is resource scheduling, not a public merge queue or a new review gate.
+- Diagnostic count is a decomposition signal, not a qualification exemption
+  or an arbitrary blocker. Devcontainer's 165/166 and Harness Knowledge's
+  235/241 Linux/Windows diagnostics are being addressed through their diagnosed
+  coherent source/fixture components. No incomplete scope is credited as locked.
+- Context Handoff's native Python suite passes 48 tests with one fixture
+  path-length skip. Its original Node suite passes 285 tests with 11 native/
+  tool skips. An inherited Git line-ending conversion policy initially rejected
+  fixture staging and left the checkout dirty; explicit fixture-local
+  `core.autocrlf=false` and checked setup exits correct that portability issue.
+  Sync behavior and all original refusal/exit/JSON assertions remain unchanged.
+
+### 2026-11-03 - Context Handoff exact source qualified
+
+- Prepared source `25d3ee1fd8c3dc7e27ff5a22a741287d33280033` admits the
+  complete six-file Python project. The normal front door passes all 32 locally
+  admitted projects on both declared analysis targets. Independent comparison
+  preserves all 74 Python functions, 165 assertions, 43 test definitions and
+  decorator ASTs; no Python control is removed or weakened.
+- Native Windows Python passes 48 of the original 49 cases, with the oversized
+  catalog fixture skipped for Windows path limits. Disconnected Python 3.10.21
+  Linux passes 47 cases with two PowerShell-only skips. Together these exercise
+  every original case, not a single-platform 49-pass run. Native Windows Node
+  passes 285 of 296 cases; its 11 POSIX mode/signal/symlink/FIFO skips are not
+  claimed as qualification of the unchanged Node production portfolio.
+- The Linux container was retained after its prepared dependency archive lacked
+  `pytest-timeout`. The existing prepared, portable 2.5.0 plugin satisfies the
+  runner's `>=2.3,<3` requirement. Transfer through the same container's exec
+  boundary and explicit plugin loading preserved the 30-second test and
+  300-second contained deadlines. In-place diagnosis, rerun and exact owned
+  container/volume cleanup were verified; no network reconnection, new
+  container retry or dependency-policy relaxation was used.
+- The original packet retains 3,811 admitted nodes, 520 bound inputs, 213
+  coverage targets and its 300-second ceiling. Exact-source execution passes
+  every admitted unit in 256.344 seconds, with no observed effects and one
+  coverage recording. Independent packet verification confirms outcome,
+  source, manifest and coverage bindings; this change enrolls no new tests or
+  effects into that packet.
+- Ruff `F,E9`, install-contract, documentation consistency, generated plugin-only
+  patch changefile, whitespace and scoped source-size checks pass. The two
+  changed production modules remain within their existing 1,000-line cap.
+  Clean-room provisioning and live external service/venue operation are not
+  applicable to this annotation-only payload change. The fresh isolated Linux
+  helper run proves the supported Python 3.10 path without installation or
+  rollout. Embedded/generated Python remains an independently open gate.

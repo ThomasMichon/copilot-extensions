@@ -271,15 +271,21 @@ test("sync-worktree shares the same lock/rebase-safe helper the force-tier path 
   // sync and a skill-guided sync could then race on the same worktree.
   const root = mkdtempSync(join(tmpdir(), "context-handoff-cli-sync-"));
   try {
-    spawnSync("git", ["init", "-q"], { cwd: root });
-    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
-    spawnSync("git", ["config", "user.name", "Test"], { cwd: root });
+    const git = (args) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git(["init", "-q"]);
+    git(["config", "core.autocrlf", "false"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
     writeFileSync(join(root, "file.txt"), "one\n");
-    spawnSync("git", ["add", "."], { cwd: root });
-    spawnSync("git", ["commit", "-q", "-m", "initial"], { cwd: root });
+    git(["add", "."]);
+    git(["commit", "-q", "-m", "initial"]);
     const result = spawnSync(
       process.execPath, [cli, "sync-worktree", "--json", "--cwd", root],
-      { encoding: "utf8" },
+      { encoding: "utf8", windowsHide: true },
     );
     const parsed = JSON.parse(result.stdout);
     // No reachable agent-worktrees catalog in this bare test environment,
