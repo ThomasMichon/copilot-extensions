@@ -110,6 +110,7 @@ from .queue_agent_backed_repo import AgentBackedRepoMixin
 from .queue_routing_assignments import RoutingAssignmentMixin
 from .queue_schema_migrations import run_queue_schema_migrations
 from .queue_pool_catalog import QueuePoolCatalogMixin
+from .queue_pool_decline import PoolDeclineMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
 from .queue_spawn_rearm import SpawnRearmMixin
 from .queue_spawn_conclusion import SpawnConclusionMixin
@@ -160,6 +161,7 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    PoolDeclineMixin,
     TaskRecoveryMixin,
     QueuePoolCatalogMixin,
     QueueExecutionWakesMixin,

@@ -70,8 +70,31 @@ neutral service directory. The bounded correction reuses strict installed
 machine admission, with project fallback only when no binding exists.
 The coupled ordinary-startup/lane packet passes 118 contained controls,
 including actual binding-file and unreadable/mismatched negative cases.
-Source review/merge and a fresh whole-stack worker acceptance remain required;
-there is no affirmative worker-start or complete lifecycle credit yet.
+[#10290](https://github.com/ThomasMichon/copilot-extensions/pull/10290)
+merged as `fe099a79dc4a5ea1030db2f93df732890904b1b9` after the current-head
+review and successful CI. A distinct whole-stack case now passes
+machine admission and creates its real workspace/native after the claim.
+Its synthetic project omitted committed receiving-side authority configuration,
+so Bridge correctly refuses binding before a prompt. Correct that fixture
+through normal committed project setup, preserving the original native and
+failed attempt; affirmative worker start and complete lifecycle remain open.
+
+After committing the normal receiving-side configuration in a distinct fresh
+fixture, the five-stage ordinary path passes. The real master publishes its
+complete isolated pool, the allocator claims before workspace/native creation,
+and the synthetic ACP worker independently accepts through the actual worker
+CLI in its created worktree under the same retained native identity. The
+controller only creates and reads; no model, ID review, decline, recovery,
+submission or complete-workload acceptance is credited. This qualifies the
+supported-default ordinary Bridge thin path in isolation, not managed CLI,
+no-pair consumers, production cohort activation or the full usability matrix.
+The next source/integration work is worker decline and owned-worktree closeout,
+then the remaining recovery and submission contracts.
+The [decline preparation source](journal/2026/11.03-worker-decline-preparation.md)
+now retains a current worker's scoped decision and failed-closeout blocker,
+with 648 contained coupled controls. It does not finalize a workspace, apply
+exclusions or requeue, and ordinary prompts are not migrated to it. Complete
+decline closeout remains unqualified.
 
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational

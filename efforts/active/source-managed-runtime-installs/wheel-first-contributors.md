@@ -28,6 +28,12 @@ organization, not additional operator prerequisites.
 
 ## Ideal install and update sequence
 
+Every app slice evaluates the canonical
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+contract. The sequence below does not add an old-recovery, provenance or stale
+transaction permission gate. Current source evidence is not qualification of
+that complete target.
+
 This is the intended complete flow, including unimplemented integration.
 Exact current commands remain with their component owners; proposed switches in
 the transition document are not instructions to execute them against old tools.
@@ -68,12 +74,17 @@ the transition document are not instructions to execute them against old tools.
    and launch it independently of the predecessor. No stop/uninstall/delete
    prerequisite and no dependence on old IPC. Verify authenticated installed
    readiness and a real app operation before reporting that app installed.
-8. **Settle outgoing owners asynchronously.** Old owners observe supersession,
+8. **Retire outgoing central owners independently.** Old owners observe supersession,
    stop taking new work, preserve/checkpoint supported work and self-retire.
    Transfer compatible hosts/queues through existing contracts; acquire
    exclusive resources or cold replay only at their permitted exit boundary.
-   The caller need not wait for full drain, but unfinished retirement/recovery
-   remains observable and owned.
+   Success requires all requested incoming readiness and all current selections,
+   never predecessor drain/exit. One optional finite async fallback after a
+   longer-than-cutover grace may target remaining outgoing central daemons and
+   obsolete central schedules, not session hosts/keepers, session-owned Bridge/
+   agent processes, foreground clients or connectivity. Recheck then-current
+   selection and role at each mutation; no periodic resident reaper is required.
+   Unfinished retirement/recovery remains separately observable.
 9. **Recover honestly.** Before the app's serving commit, guarded rollback
    preserves the still-owned incumbent. After commit, use the app's existing
    commit-forward/reconciliation contract. Keep configuration, data, unrelated

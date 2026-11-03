@@ -336,6 +336,8 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
+        "worker_decline_preparation_versions": [1],
+        "worker_decline_closeout_complete": False,
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
     body = {"task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision, "driver": "cli"}

@@ -54,6 +54,8 @@ def pool_placement_contract() -> dict[str, object]:
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
+        "worker_decline_preparation_versions": [1],
+        "worker_decline_closeout_complete": False,
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
 
@@ -162,6 +164,8 @@ def migrate_pool_placement(conn: sqlite3.Connection) -> None:
     )
     from .queue_pool_startup import migrate_pool_startup
     migrate_pool_startup(conn)
+    from .queue_pool_decline import migrate_pool_decline
+    migrate_pool_decline(conn)
 
 
 def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | None:
@@ -442,11 +446,15 @@ def pool_worker_matches(worker_id: str | None, machine: str, worktree: str | Non
 def require_pool_start(
     conn: sqlite3.Connection, task: Task, worker_id: str | None,
     native_id: object, expected_generation: int | None,
+    *, declining: bool = False,
 ) -> bool:
     """Only an explicit current worker may accept a placed claim; delivery cannot."""
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
         return False
+    if not declining:
+        from .queue_pool_decline import require_no_pool_decline
+        require_no_pool_decline(conn, task.id)
     row = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key = ?", (assignment.reservation_key,),
     ).fetchone()

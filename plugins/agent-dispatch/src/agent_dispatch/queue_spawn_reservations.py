@@ -53,7 +53,7 @@ from .queue_spawn_release import SpawnReleaseMixin
 from .queue_spawn_workspace import SpawnWorkspaceMixin
 from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment
 from .queue_pool_startup import PoolStartupMixin, advance_pool_startup
-from .queue_spawn_cooling import require_no_cooling, validate_cooling_publication
+from .queue_spawn_cooling import validate_cooling_publication
 from .queue_execution_handoff import require_execution_admission
 from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_execution_wakes import require_no_wake_for_release
@@ -601,6 +601,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
+            if (
+                to_state != row["state"] or startup_complete is False or release_requested
+            ):
+                from .queue_pool_decline import require_no_pool_decline
+                require_no_pool_decline(conn, row["task_id"], reservation_key=key)
             if pool_startup_retry is not None:
                 from .queue_pool_startup_retry import prepare_mutation
                 if prepare_mutation(
@@ -884,84 +889,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             require_no_native=force and not confirmed_absent,
             now=now,
         )
-
-    def retire_spawn(
-        self,
-        key: str,
-        *,
-        exact_absence: bool,
-        detail: str | None = None,
-        conclusion_state: str | None = None,
-        conclusion_detail: str | None = None,
-        now: float | None = None,
-    ) -> SpawnReservation:
-        """Retire a release on exact absence without reviving historical ownership."""
-        if not exact_absence:
-            raise TaskError("spawn retirement requires exact absence proof")
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such reservation: {key}")
-            historical = bool(row["native_release_pending"]) and row["state"] not in SpawnState.ACTIVE
-            if row["state"] != SpawnState.RELEASING and not historical:
-                conn.execute("COMMIT")
-                raise TaskError(f"reservation {key} is {row['state']!r}, not releasing")
-            require_no_cooling(row)
-            if not row["startup_complete"] and not row["startup_fenced"]:
-                raise TaskError("spawn retirement requires completed startup; original caller remains unresolved")
-            if historical and (conclusion_state is not None or conclusion_detail is not None):
-                if _newer_worktree_reservation(conn, row, key) is not None:
-                    raise TaskError("historical native retirement cannot mutate carried workspace cleanup")
-                _validate_conclusion_claim(
-                    row["cleanup_claim_token"], row["cleanup_claim_expires_at"], None,
-                    now=ts, required=row["conclusion_state"] == "pending",
-                )
-            to_state = row["state"] if historical else (
-                SpawnState.SETTLED if row["release_disposition"] == "settled" else SpawnState.FAILED
-            )
-            conn.execute(
-                "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
-                "native_release_pending = 0, "
-                "conversation_retired = CASE WHEN ? THEN 1 ELSE conversation_retired END, "
-                "detail = COALESCE(?, detail), "
-                "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
-                "ELSE conclusion_state END, "
-                "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
-                "ELSE conclusion_detail END WHERE key = ?",
-                (
-                    to_state,
-                    ts,
-                    historical,
-                    detail,
-                    conclusion_state,
-                    conclusion_state,
-                    conclusion_detail,
-                    conclusion_detail,
-                    key,
-                ),
-            )
-            latest = conn.execute(
-                "SELECT key FROM spawn_reservations WHERE task_id = ? "
-                "ORDER BY attempt DESC LIMIT 1",
-                (row["task_id"],),
-            ).fetchone()
-            if latest is not None and latest["key"] == key:
-                conn.execute(
-                    "UPDATE tasks SET activity = NULL, activity_updated_at = ? WHERE id = ?",
-                    (ts, row["task_id"]),
-                )
-            updated = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            conn.execute("COMMIT")
-        return SpawnReservation._from_row(updated)
 
     def settle_spawn(
         self,

@@ -156,24 +156,45 @@ self-provisioning path remains independent and authoritative.
 
 ### Replacement lifecycle: target and current adoption
 
-The [service vision](../visions/plugin-services/README.md#zero-downtime-cutover)
-and [cutover pattern](patterns/graceful-daemon-cutover.md#successor-first-replacement-target)
-define the successor-first architecture: start new; new announces replacement
-and attempts handoff with old; old observes that handoff and independently
-recognizes its stale generation; new proves readiness and declares installation
-completion; old attempts drain; the new owner's existing retirement authority
-waits a bounded grace period, then attempts identity-bound forced old-process
-cleanup. No old reply or cleanup failure displaces a healthy new owner.
-Installation completion is not a predecessor-exit receipt.
+The installer's
+[authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement)
+is the durable target for installer bugs, efforts and implementation reviews.
+Explicit/manual update is an authoritative runtime replacement, not a request
+for permission from the incumbent. Old recovery/ZDD, custody/provenance,
+capability support and stale transaction/queue state cannot veto it; only
+automatic updates are subject to automatic-maintenance inhibition.
+Bounded internal write coordination cannot become a persistent live-writer
+refusal or separate operator-recovery demand. Required state-preserving data/
+schema migrations remain part of real incoming readiness, not optional legacy
+recovery.
 
+The target success boundary is all requested incoming versions actually ready
+and running where required, with every applicable current-version pointer,
+route, launcher and service/task registration selecting them. Outgoing central
+daemons self-retire on supersession. An optional single finite asynchronous
+fallback may retire remaining outgoing central daemons and obsolete central
+schedules after a longer-than-cutover grace period, never a periodic resident
+reaper or predecessor-exit success fence. At mutation time, current selection,
+native identity, installation and central-service role exclude later/reselected
+generations, session hosts/keepers, session-owned Bridge/agent processes,
+foreground clients and unrelated processes. Configuration, credentials,
+repositories, worktrees, sessions and databases are retained.
+Conflicting work admission may close/transfer or be excluded before incoming
+serving readiness; do not make that transfer wait for installation completion,
+final predecessor exit or indefinite old-lease release.
+
+**Current implementation, not target qualification:**
 Current Worktrees asynchronous installation already separates ready successor
 publication from predecessor drain/exit and retains canonical retirement custody
 with the selected resident. The incompatible-predecessor fallback uses bounded
 native cleanup after successor serving readiness. The complete successor-originated
-handoff announcement and resident-owned grace-expiry escalation remain realization
-work; current compatibility paths and native cleanup tests do not prove that
-whole target. The [actual install contract](install-contract.md) records the
-implemented boundaries. Other services adopt the pattern independently.
+handoff announcement, removal of incumbent-admission/queue fences and the optional
+finite central-only fallback remain realization work. Existing resident-owned
+retirement custody is an adoption detail, not the required target mechanism.
+Current compatibility paths and native cleanup tests do not qualify the whole
+contract. The [install contract](install-contract.md#authoritative-replacement-and-completion)
+records this distinction; other services adopt independently. Real source/build,
+authentication, I/O and incoming-health failures remain failures.
 
 Each plugin is vendored by the Copilot CLI into `installed-plugins/`, then its
 installer deploys a self-contained runtime under `~/.agent-*`. **At run time

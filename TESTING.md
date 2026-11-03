@@ -3470,7 +3470,11 @@ skips if Git or UV is unavailable. Separate controls verify that selected-lock
 mode does not resolve, while an inspected held pool resolves only offline and
 then uses the same guarded feed. They exercise the actual pool CLI, altered and
 malformed pool refusal, retained local file identity, first-party exclusions
-and an unapproved redirect that must not be contacted.
+and an explicitly restricted redirect that must not be contacted.
+`tools/test_core_native_delivery_index.py` also checks the optional combined
+delivery/index handoff, exact release-state binding, input mutation during
+final guarded verification and the actual CLI. It does not authenticate the
+input index or approve the changed subject.
 `tools/test_core_native_pool_index.py` injects an unlisted wheel during the
 real offline resolver call and verifies it cannot change the selection; it
 also checks deep Windows pool inputs and bounded, private failure diagnostics.
@@ -3479,7 +3483,8 @@ source hashing and settlement after a worker failure; the core producer still
 revalidates source changes before exposing a delivery.
 `tools/test_core_guarded_feed.py` exercises the opt-in guarded-feed CLI and real
 UV against local TLS fixtures: transitive selection, seasoning, withdrawn files,
-credential isolation, redirect refusal, late index and source rechecks, retained inputs,
+configured-feed redirects, credential isolation, explicit redirect refusal,
+late index and source rechecks, retained inputs,
 one-download selected wheels, tampered retained bytes, shared budgets and Windows
 owned-worker timeout cleanup. Actor-free projection,
 candidate-witness and recheck controls live in
@@ -3544,6 +3549,10 @@ whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. Each admitted file is collected once; an exact
 node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
+preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
+This keeps exact node admission; it does not truncate, rename or omit long
+parameter cases when the framework's default changes.
 Its actor-free PowerShell SDK controls compare Windows physical-path spellings
 through a synthetic resolver boundary, including DOS/UNC aliases and unrelated
 roots. Native path reads and concurrent first publication remain separate

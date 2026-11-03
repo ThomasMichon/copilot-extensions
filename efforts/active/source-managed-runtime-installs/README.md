@@ -12,6 +12,19 @@
 
 ## Guiding Intent
 
+The governing completion target is
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+explicit/manual update is independent of old recovery/ZDD, custody/provenance
+and stale installer fences; success is all requested incoming versions ready
+and all current selections updated. Outgoing central-daemon retirement and
+obsolete central schedules are independent, with at most one optional finite
+async fallback after a longer grace. Preserve sessions/keepers and user state;
+recheck then-current generation and role at cleanup. This supersedes conflicting
+legacy acceptance language below and in the linked transition/execution/app
+plans, not historical evidence or existing source ownership. Bounded manual
+continuation applies within the addressed installation; foreign scope remains
+protected. No installed adoption is claimed by this plan amendment.
+
 **Contributor entry:** the [fast-install and cutover guide](../../../docs/patterns/fast-application-install-and-cutover.md)
 defines each app's required boundaries and qualification. The
 [ideal sequence, per-app status and contribution handoff](wheel-first-contributors.md)
@@ -147,6 +160,15 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**Authoritative replacement and completion (2026-11-03), verbatim:**
+
+> install is considered a success once all the *new* versions are up and running, and all the current-version pointers are updated to the incoming version. Outgoing versions are expected to self-retire and clean up after themselves when they detect they are not current; we can kick one async task from the install flow to force-kill all remaining outgoing daemons and schedules after a longer grace period than we expect cutover to take. Note that we don't kill session-keeping processes like session-host/etc, just the central daemons
+
+The [canonical installer contract](../../../visions/installer/README.md#authoritative-runtime-replacement)
+captures the settled manual-update, state-preservation and mutation-time
+current-generation/central-role boundaries. This plan amendment does not
+authorize installed rollout or claim that current installers already conform.
 
 **Contributor-ready fast-install/cutover documentation (2026-11-02), summary:**
 link the exact per-app support guide, record the ideal end-to-end sequence even
@@ -960,6 +982,16 @@ reuse/admission behavior is not an exception to the fresh-default revision.
 - [ ] Prove every installed service/tool in the adopter's declared inventory, including Manager, rather than treating a canary or all-adopter installer tests as the native transition.
 
 ### Completion and scope control
+- [ ] Qualify the authoritative replacement target through the real explicit
+  updater: old recovery/capability/provenance failures and stale queue/foundation
+  fences do not block incoming installation; only automatic requests are
+  inhibited. Prove every requested incoming readiness/current-selection result
+  independently of predecessor drain/cleanup, preserving user state and sessions.
+  A recorded or running old installer receives bounded internal wait/join or
+  replacement, never persistent denial or a separate operator-recovery demand.
+- [ ] If the finite delayed fallback is adopted, prove central-only role and
+  schedule selection, longer-than-cutover grace, mutation-time protection for
+  future/reselected generations and exclusion of session keepers/clients.
 - [ ] Resolve all Plan and Validation Plan items; record or transfer remaining discrete work to a named tracked objective before marking Done.
 - [x] Deferred to `#7031`: implement exclusive local-checkout sourcing of Copilot plugin content after the runtime-only campaign.
 - [x] Deferred to `#7250`: **Agent-recommended follow-up, operator-approved tracking:** preserve legacy Python-free redirect sets through a separate native publication mechanism; do not add a bootstrap interpreter prerequisite.
@@ -1223,6 +1255,17 @@ implementation, rollout or parent completion is declared.
 
 ## Validation Plan
 
+- [ ] Exercise the [authoritative replacement contract](../../../docs/install-contract.md#authoritative-replacement-and-completion)
+  across explicit versus automatic calls, missing/incompatible old monitor,
+  stale transactions/fences, preserved configuration/credentials/DBs/repositories/
+  worktrees/sessions, incoming build/auth/health failure, and cleanup delayed past
+  another selection. Retain old uncertain outcomes without making them vetoes;
+  neither queue release nor predecessor exit is the incoming success witness.
+- [ ] Prove readiness with an old exclusive-work lease: admission transfer or
+  exclusion must not wait for installation completion, final predecessor exit
+  or indefinitely for old IPC/lease release. Qualify required state-preserving
+  data/schema migrations separately from optional old-runtime recovery and keep
+  migration failure an honest incoming-readiness failure.
 - [x] Compare the contributor request capture with the operator's words and inventory every declared runtime root plus the separate SSH Manager dependency. Keep target behavior, released bounded evidence and unproven app/platform/rollout gates distinct.
 - [ ] Maintain the [app qualification matrix](wheel-first-contributors.md#per-app-tracking) against real front-door, failure/retry, state and native-lifetime evidence as contributions land; satisfy the [common app test contract](../../../docs/patterns/fast-application-install-and-cutover.md#app-specific-implementation-and-acceptance) for each claimed boundary.
 - [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
