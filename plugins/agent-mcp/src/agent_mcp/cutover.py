@@ -408,7 +408,8 @@ def source_data_owner(fixed: Path) -> int | None:
     from . import serve
 
     if serve._HAS_AF_UNIX:
-        if not hasattr(_socket, "SO_PEERCRED"):
+        darwin = sys.platform == "darwin"
+        if not darwin and not hasattr(_socket, "SO_PEERCRED"):
             raise ControlError("Native Unix data-listener identity is unavailable")
         with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as peer:
             peer.settimeout(0.25)
@@ -416,9 +417,22 @@ def source_data_owner(fixed: Path) -> int | None:
                 peer.connect(str(fixed))
             except (FileNotFoundError, ConnectionRefusedError):
                 return None
-            return struct.unpack("3i", peer.getsockopt(
-                _socket.SOL_SOCKET, _socket.SO_PEERCRED, 12,
-            ))[0]
+            try:
+                if darwin:
+                    # Darwin sys/un.h: SOL_LOCAL=0, LOCAL_PEERPID=2. Unlike
+                    # getpeereid(), this returns the connected peer's native PID.
+                    identity = peer.getsockopt(0, 2, struct.calcsize("i"))
+                    pid = struct.unpack("i", identity)[0]
+                else:
+                    identity = peer.getsockopt(
+                        _socket.SOL_SOCKET, _socket.SO_PEERCRED, struct.calcsize("3i"),
+                    )
+                    pid = struct.unpack("3i", identity)[0]
+            except (OSError, struct.error) as error:
+                raise ControlError("Native Unix data-listener identity is unavailable") from error
+            if pid <= 0:
+                raise ControlError("Native Unix data-listener identity is unavailable")
+            return pid
     endpoint = serve._read_endpoint(fixed)
     if endpoint is None:
         return None

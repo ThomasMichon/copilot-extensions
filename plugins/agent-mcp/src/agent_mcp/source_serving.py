@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -40,6 +41,23 @@ def generation_selected(server) -> bool:
     except (OSError, UnicodeError):
         return False
     return selected == server._version
+
+
+@contextlib.contextmanager
+def startup_transaction(server):
+    """Serialize fixed-handle startup with the existing application cutover owner."""
+    if server._runtime_root is None or server._passive:
+        yield generation_selected(server)
+        return
+    from zdd import CutoverLock, CutoverLockedError
+
+    with contextlib.ExitStack() as transaction:
+        try:
+            transaction.enter_context(CutoverLock(server.socket_path.parent))
+        except CutoverLockedError:
+            yield False
+        else:
+            yield generation_selected(server)
 
 
 def data_handle_matches(fixed: Path, data_socket: Path) -> bool:

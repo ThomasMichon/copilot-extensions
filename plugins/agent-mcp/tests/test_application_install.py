@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.metadata
 import importlib.util
 import json
 import os
+import struct
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -18,6 +21,58 @@ import agent_mcp
 from agent_mcp import __main__ as main
 from agent_mcp import config, cutover
 from agent_mcp import serve
+
+
+@pytest.mark.parametrize("pid", [4321, 0, -1, b"\x01", OSError("native probe refused")])
+def test_darwin_data_owner_uses_native_peer_pid(tmp_path, monkeypatch, pid):
+    monkeypatch.setattr(serve, "_HAS_AF_UNIX", True)
+    monkeypatch.setattr(cutover.sys, "platform", "darwin")
+    monkeypatch.delattr(cutover._socket, "SO_PEERCRED", raising=False)
+    monkeypatch.setattr(cutover._socket, "AF_UNIX", 1, raising=False)
+    queries = []
+
+    class Peer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def settimeout(self, value):
+            assert value == 0.25
+
+        def connect(self, path):
+            assert path == str(tmp_path / "serve.sock")
+
+        def getsockopt(self, level, option, size):
+            queries.append((level, option, size))
+            if isinstance(pid, OSError):
+                raise pid
+            if isinstance(pid, bytes):
+                return pid
+            return struct.pack("i", pid)
+
+    monkeypatch.setattr(cutover._socket, "socket", lambda *args: Peer())
+    if isinstance(pid, int) and pid > 0:
+        assert cutover.source_data_owner(tmp_path / "serve.sock") == pid
+    else:
+        with pytest.raises(cutover.ControlError, match="identity"):
+            cutover.source_data_owner(tmp_path / "serve.sock")
+    assert queries == [(0, 2, 4)]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires native Darwin Unix peer identity")
+def test_darwin_data_owner_identifies_actual_listener(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    fixed = Path("serve.sock")
+    with cutover._socket.socket(cutover._socket.AF_UNIX, cutover._socket.SOCK_STREAM) as listener:
+        listener.bind(str(fixed))
+        listener.listen(1)
+        try:
+            assert cutover.source_data_owner(fixed) == os.getpid()
+        finally:
+            fixed.unlink()
+    assert cutover.source_data_owner(fixed) is None
 
 
 def _installed_callback(tmp_path, monkeypatch, layout):
@@ -729,6 +784,249 @@ def test_incoming_health_requires_a_serving_data_listener(tmp_path):
     assert reply["data_socket"] == str(server.socket_path)
     server._draining = True
     assert server._control_dispatch(request)["ready"] is False
+
+
+async def test_paused_ordinary_start_cannot_replace_committed_successor(tmp_path, monkeypatch):
+    from agent_procutil.daemon_instances import daemon_test_lifecycle, inspect_instances
+    from zdd.diagnostics import process_start_time
+    from zdd import routing
+
+    birth = process_start_time(os.getpid())
+    fixture = _published_incumbent(tmp_path, monkeypatch, incumbent=False)
+    fixture.births[os.getpid()] = birth
+    (fixture.root / "current-version").write_text("outgoing", encoding="utf-8")
+    server = serve.Server(fixture.fixed, version="outgoing")
+    server._runtime_root = fixture.root
+    server._version = "outgoing"
+    server._stop.set()
+    entered, release = threading.Event(), threading.Event()
+    acquire = server._acquire_lease
+
+    def paused_acquire():
+        entered.set()
+        assert release.wait(timeout=5)
+        return acquire()
+
+    monkeypatch.setattr(server, "_acquire_lease", paused_acquire)
+    with daemon_test_lifecycle(
+        owner="mcp-startup-race", registry_root=tmp_path / "instances",
+    ) as environment:
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        task = asyncio.create_task(asyncio.to_thread(
+            lambda: asyncio.run(server.serve_forever()),
+        ))
+        try:
+            async def until_paused():
+                while not entered.is_set():
+                    if task.done():
+                        await task
+                        pytest.fail("ordinary startup exited before lease admission")
+                    await asyncio.sleep(0.001)
+            await asyncio.wait_for(until_paused(), 5)
+            (fixture.root / "current-version").write_text(
+                fixture.generation, encoding="utf-8",
+            )
+            result = fixture.module.source_start()
+            assert result["ok"]
+            endpoint = serve._endpoint_path(fixture.fixed)
+            before = endpoint.read_bytes()
+            route = routing.read_table(fixture.home, strict=True)
+            release.set()
+            await asyncio.wait_for(asyncio.shield(task), 5)
+            assert endpoint.read_bytes() == before
+            assert routing.read_table(fixture.home, strict=True) == route
+            assert server._server is None
+            assert server._lease is None
+            assert inspect_instances(tmp_path / "instances")[0]["state"] == "finished"
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("passive", [False, True])
+async def test_startup_transaction_keeps_passive_admission_independent(
+    tmp_path, monkeypatch, passive,
+):
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from zdd import CutoverLock, routing
+
+    root = tmp_path / "installation"
+    root.mkdir()
+    (root / "current-version").write_text("incoming", encoding="utf-8")
+    fixed = tmp_path / "sockets" / "serve.sock"
+    fixed.parent.mkdir()
+    server = serve.Server(fixed, version="incoming", passive=passive)
+    server._runtime_root = root
+    server._stop.set()
+    with daemon_test_lifecycle(
+        owner="mcp-startup-contention", registry_root=tmp_path / "instances",
+    ) as environment:
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        with CutoverLock(fixed.parent):
+            await asyncio.wait_for(server.serve_forever(), 5)
+        assert (server._server is not None) is passive
+        assert server._lease is None
+        assert serve._read_endpoint(fixed) is None
+        assert routing.read_table(fixed.parent) is None
+
+
+async def test_ordinary_startup_releases_transaction_before_resident_wait(tmp_path, monkeypatch):
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from zdd import CutoverLock
+
+    root = tmp_path / "installation"
+    root.mkdir()
+    (root / "current-version").write_text("incoming", encoding="utf-8")
+    fixed = tmp_path / "sockets" / "serve.sock"
+    server = serve.Server(fixed, version="incoming")
+    server._runtime_root = root
+    with daemon_test_lifecycle(
+        owner="mcp-startup-release", registry_root=tmp_path / "instances",
+    ) as environment:
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        task = asyncio.create_task(server.serve_forever())
+        try:
+            async def until_ready():
+                while server._control_server is None or server._lease is None:
+                    if task.done():
+                        await task
+                    await asyncio.sleep(0.001)
+            await asyncio.wait_for(until_ready(), 5)
+            with CutoverLock(fixed.parent):
+                assert not task.done()
+        finally:
+            server._stop.set()
+            await asyncio.wait_for(asyncio.shield(task), 5)
+        assert server._lease is None
+        assert serve._read_endpoint(fixed) is None
+
+
+@pytest.mark.parametrize("boundary", ["listener", "route"])
+async def test_selection_change_during_bind_refuses_route_and_settles_listeners(
+    tmp_path, monkeypatch, boundary,
+):
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from zdd import CutoverLock, routing
+
+    root = tmp_path / "installation"
+    root.mkdir()
+    selector = root / "current-version"
+    selector.write_text("outgoing", encoding="utf-8")
+    fixed = tmp_path / "sockets" / "serve.sock"
+    server = serve.Server(fixed, version="outgoing")
+    server._runtime_root = root
+    server._stop.set()
+    start_control = server._start_control_listener
+    close_pool = server.pool.close_all
+
+    async def close_after_transaction_release():
+        with CutoverLock(fixed.parent):
+            pass
+        await close_pool()
+
+    monkeypatch.setattr(server.pool, "close_all", close_after_transaction_release)
+
+    async def supersede_before_control():
+        assert server._server.is_serving()
+        if boundary == "listener":
+            selector.write_text("incoming", encoding="utf-8")
+        await start_control()
+
+    monkeypatch.setattr(server, "_start_control_listener", supersede_before_control)
+    if boundary == "route":
+        route_lock = routing._routing_lock
+
+        @contextlib.contextmanager
+        def supersede_under_route_lock(*args, **kwargs):
+            with route_lock(*args, **kwargs):
+                selector.write_text("incoming", encoding="utf-8")
+                yield
+
+        monkeypatch.setattr(routing, "_routing_lock", supersede_under_route_lock)
+    with daemon_test_lifecycle(
+        owner="mcp-startup-selection", registry_root=tmp_path / "instances",
+    ) as environment:
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        with pytest.raises(
+            (cutover.ControlError, routing.ActivePublicationRefused), match="selected generation",
+        ):
+            await asyncio.wait_for(server.serve_forever(), 5)
+        assert not server._server.is_serving()
+        assert not server._control_server.is_serving()
+        assert server._lease is None
+        assert routing.read_table(fixed.parent) is None
+        assert not serve._control_token_path(fixed.parent, os.getpid()).exists()
+        with CutoverLock(fixed.parent):
+            assert serve._read_endpoint(fixed) is None
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(30)
+def test_native_ordinary_listener_publication_and_transaction_release(tmp_path):
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+
+    program = """
+import asyncio, json, os
+from pathlib import Path
+from agent_mcp import cutover, serve
+from agent_procutil.daemon_instances import inspect_instances
+from zdd import CutoverLock, routing
+
+async def main():
+    root = Path.cwd()
+    (root / "current-version").write_text("fixture", encoding="utf-8")
+    server = serve.Server(Path("serve.sock"), version="fixture")
+    server._runtime_root = root
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        async def ready():
+            while server._control_server is None or server._lease is None:
+                if task.done():
+                    await task
+                await asyncio.sleep(0.001)
+        await asyncio.wait_for(ready(), 5)
+        endpoint = routing.read_active_endpoint(root, verify_listener=False)
+        assert endpoint.pid == os.getpid()
+        owner = cutover.source_data_owner(Path("serve.sock"))
+        assert owner == os.getpid()
+        with CutoverLock(root):
+            assert not task.done()
+    finally:
+        server.stop()
+        await asyncio.wait_for(asyncio.shield(task), 5)
+    assert server._lease is None
+    assert not server._server.is_serving()
+    assert not server._control_server.is_serving()
+    assert not Path("serve.sock").exists()
+    assert not serve._endpoint_path(Path("serve.sock")).exists()
+    assert not routing.read_table(root).get("active")
+    return {"ready": True, "native_owner": owner, "pid": os.getpid(), "settled": True}
+
+result = asyncio.run(main())
+records = inspect_instances(Path.cwd() / "instances")
+assert records and all(record["state"] == "finished" for record in records)
+print(json.dumps(result))
+"""
+    cleanup = []
+    with daemon_test_lifecycle(
+        owner="mcp-native-startup", registry_root=tmp_path / "instances",
+        cleanup_results=cleanup,
+    ) as environment:
+        result = subprocess.run(
+            [sys.executable, "-c", program], cwd=tmp_path,
+            env={**os.environ, **environment, "AGENT_MCP_HOME": str(tmp_path)},
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        proof = json.loads(result.stdout)
+        assert proof["ready"] and proof["settled"]
+        assert proof["native_owner"] == proof["pid"] != os.getpid()
+    assert cleanup and all(outcome.status != "held" for outcome in cleanup)
 
 
 async def test_replacement_inspection_settles_before_cancelled_sweeper_exits(

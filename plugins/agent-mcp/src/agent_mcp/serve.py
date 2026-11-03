@@ -642,46 +642,39 @@ class Server:
         if not self._acquire_lease():
             return
         try:
-            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-            if _HAS_AF_UNIX:
-                # Clear a stale socket from a previous run (safe: we hold the
-                # lease). Path.exists() follows symlinks and returns False for
-                # a BROKEN one -- if this socket path is the fixed cutover
-                # handle and the promoted daemon it pointed at already exited
-                # (idle-evicted, crashed), the symlink itself still exists on
-                # disk but dangles; is_symlink() catches that case too, so a
-                # fresh bind here always starts from a clean path.
-                if self.socket_path.exists() or self.socket_path.is_symlink():
-                    self.socket_path.unlink()
-                self._server = await asyncio.start_unix_server(
-                    self._handle, path=str(self.socket_path))
-                log.info("serving on unix:%s", self.socket_path)
-            else:
-                # No AF_UNIX (Windows): bind loopback TCP and advertise the port +
-                # a fresh auth token in the endpoint sidecar for port-discovery.
-                self._token = secrets.token_hex(16)
-                self._server = await asyncio.start_server(
-                    self._handle, host=_TCP_HOST, port=0)
-                port = self._server.sockets[0].getsockname()[1]
-                self._token_port = port
-                self._write_endpoint(port, self._token)
-                log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
-                         self.socket_path)
-            # Once the data-plane server above is bound, EVERYTHING from here
-            # (the control listener, the sweep loop, the wait) is wrapped in
-            # one try/finally that always tears down every resource this
-            # daemon acquired -- including a failure raised by
-            # _start_control_listener() itself, before the sweep loop or the
-            # stop-wait ever start. `_stop_control_listener()` is a safe no-op
-            # if the control listener never finished binding.
-            sweeper = late_lease = None
-            try:
-                await self._start_control_listener()
-                sweeper = asyncio.create_task(self._sweep_loop())
-                late_lease = asyncio.create_task(self._late_lease_loop())
-                await self._stop.wait()
-            finally:
-                await _join_cleanup(asyncio.create_task(self._close(sweeper, late_lease)))
+            with contextlib.ExitStack() as startup:
+                if not startup.enter_context(source_serving.startup_transaction(self)):
+                    return
+                self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+                if _HAS_AF_UNIX:
+                    # The lease and cutover transaction exclude other fixed-handle
+                    # writers, including a committed passive successor.
+                    if self.socket_path.exists() or self.socket_path.is_symlink():
+                        self.socket_path.unlink()
+                    self._server = await asyncio.start_unix_server(
+                        self._handle, path=str(self.socket_path))
+                    log.info("serving on unix:%s", self.socket_path)
+                else:
+                    self._token = secrets.token_hex(16)
+                    self._server = await asyncio.start_server(
+                        self._handle, host=_TCP_HOST, port=0)
+                    port = self._server.sockets[0].getsockname()[1]
+                    self._token_port = port
+                    self._write_endpoint(port, self._token)
+                    log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
+                             self.socket_path)
+                sweeper = late_lease = None
+                try:
+                    await self._start_control_listener()
+                    # Only listener admission/publication is serialized, not the
+                    # resident lifetime, readiness callbacks or natural drain.
+                    startup.close()
+                    sweeper = asyncio.create_task(self._sweep_loop())
+                    late_lease = asyncio.create_task(self._late_lease_loop())
+                    await self._stop.wait()
+                finally:
+                    startup.close()
+                    await _join_cleanup(asyncio.create_task(self._close(sweeper, late_lease)))
         finally:
             self._release_lease()
 
@@ -748,12 +741,32 @@ class Server:
             os.chmod(tmp_token_path, 0o600)
         os.replace(tmp_token_path, token_path)
         if not self._passive:
+            if not source_serving.generation_selected(self):
+                from .cutover import ControlError
+
+                raise ControlError("MCP startup slot is not the selected generation")
             try:
-                routing.publish_active(
+                publication = routing.publish_active
+                guards = {}
+                if self._runtime_root is not None:
+                    publication = routing.publish_active_with_previous_guarded
+                    guards = {
+                        "require_expected_active": False,
+                        "refuse_current": lambda _raw: (
+                            None if source_serving.generation_selected(self)
+                            else "MCP startup slot is not the selected generation"
+                        ),
+                    }
+                publication(
                     self._config_dir(), bind=_TCP_HOST, port=control_port,
-                    pid=os.getpid(), version=self._version, demote_existing=True,
+                    pid=os.getpid(), version=self._version, demote_existing=True, **guards,
                 )
-            except Exception:
+            except Exception as error:
+                if (
+                    self._runtime_root is not None
+                    and isinstance(error, routing.ActivePublicationRefused)
+                ):
+                    raise
                 log.warning(
                     "serve: failed to publish control endpoint to the "
                     "routing table; a future `agent-mcp cutover` may not "
