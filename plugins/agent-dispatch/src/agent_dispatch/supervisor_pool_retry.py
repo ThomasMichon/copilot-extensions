@@ -10,7 +10,8 @@ import httpx
 from .action_controls import action_inhibited
 from .client_errors import DispatchError
 from . import pool_startup_delivery
-from .queue_records import SpawnState, Status
+from .pool_startup_retry_contract import driver_binding
+from .queue_records import SpawnState, Status, TaskError
 
 if TYPE_CHECKING:
     from .supervisor import Supervisor
@@ -23,7 +24,7 @@ def reconcile_retry_completion(
 ) -> bool | None:
     """Observe only; None means unrelated, False retains an unresolved caller."""
     if (
-        reservation.get("driver") != "cli" or reservation.get("startup_complete") is not False
+        reservation.get("driver") not in {"cli", "ordinary-bridge"} or reservation.get("startup_complete") is not False
         or task.get("status") not in {Status.STARTED, Status.SUBMITTED, Status.COMPLETED, Status.QUEUED}
         or task.get("status") == Status.QUEUED and not reservation.get("release_requested")
     ):
@@ -59,9 +60,10 @@ def reconcile_retry_completion(
             startup_revision=current["startup_revision"], native_id=snapshot["native_id"],
             worktree=current["worktree"], machine=current["execution_machine"],
             reserved_by=owner.supervisor_id, outcome_kind=kind, detail=detail,
+            **driver_binding(current, snapshot["native_id"]),
         )
         return True
-    except (DispatchError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+    except (DispatchError, TaskError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
         log.warning("original pool retry completion is unavailable for %s; no send replayed",
                     reservation.get("key"), exc_info=True)
         return False

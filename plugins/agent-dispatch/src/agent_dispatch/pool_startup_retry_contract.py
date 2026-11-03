@@ -3,6 +3,36 @@
 from __future__ import annotations
 
 
+def driver_binding(reservation: dict, native: str | None) -> dict:
+    """Keep the original CLI wire form; ACP also binds its distinct Bridge ID."""
+    if reservation.get("driver") == "cli":
+        return {}
+    from .ordinary_agent_facts import identity
+    from .queue_records import TaskError
+
+    info = reservation.get("agent_info")
+    if reservation.get("driver") != "ordinary-bridge" or not isinstance(info, dict):
+        raise TaskError("pool retry requires retained ordinary Bridge facts")
+    actual = identity(info)
+    if (
+        actual.native != native or actual.worktree != reservation.get("worktree")
+        or reservation.get("session_handle") != f"local-body:{actual.bridge}"
+    ):
+        raise TaskError("pool retry Bridge, native or workspace identity changed")
+    return {"driver": "ordinary-bridge", "bridge_session_id": actual.bridge}
+
+
+def session_handle(binding: dict) -> str:
+    """Never publish an ACP native UUID as a Bridge or live-CLI handle."""
+    if binding.get("driver") == "ordinary-bridge":
+        from .queue_records import TaskError
+        bridge = binding.get("bridge_session_id")
+        if not isinstance(bridge, str) or not bridge.strip():
+            raise TaskError("ordinary retry requires its retained Bridge session")
+        return f"local-body:{bridge}"
+    return binding["native_id"]
+
+
 def retry_invocation(binding: dict, revision: int) -> dict:
     """Describe one work-bearing send without queueing or replacing its native."""
     return {

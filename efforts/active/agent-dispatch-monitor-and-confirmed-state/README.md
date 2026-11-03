@@ -286,11 +286,17 @@ live claim token. No new blanket ACK or executor appointment is created.
       Initial delivery does not reacquire an evaluation lease; automatic
       allocator-instance selection, ordinary retry/decline and native
       qualification remain separate integration gates.
-- [ ] Land the [managed ordinary allocator instance integration](journal/2026/11.02-managed-pool-allocation.md)
-      through current-head independent review, required CI and actual merge.
-      The default-off source seam must preserve global selection, exact launch
+- [x] Land the [managed ordinary allocator instance integration](journal/2026/11.02-managed-pool-allocation.md)
+      in [#10182](https://github.com/ThomasMichon/copilot-extensions/pull/10182),
+      with actual current-head approval, required CI and merge.
+      The default-off source seam preserves global selection, exact launch
       ownership and retained reservation custody; it does not qualify ordinary
       retry/decline, complete mixed-driver adoption or installed/native effects.
+- [ ] Land [driver-correct ordinary ACP startup retries and decisions](journal/2026/11.02-ordinary-startup-retry.md)
+      through the existing exact retry/completion and supervision owners;
+      preserve unknown effects and separate Bridge/native identity. This does
+      not qualify worker decline/closeout, complete CLI/mixed-driver adoption
+      or installed/native effects.
 - [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
       without erasing publication history, task assignments or accountable
       capacity. Source regressions cover current readiness and remove/re-add;

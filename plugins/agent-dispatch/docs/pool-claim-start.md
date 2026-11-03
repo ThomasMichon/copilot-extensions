@@ -157,7 +157,7 @@ admission read exposes deadline ineligibility; storage rechecks the deadline
 transactionally so an expiry during creation cannot deliver a first prompt.
 It does not choose another pool or forward a local create to a
 different host. The managed allocator opt-in remains disabled by default;
-ordinary startup retry consumers are not yet integrated.
+driver-correct startup supervision is described below.
 
 `ordinary_invocation.startup_seed` selects a distinct allocator-claimed worker
 prompt for this assignment. It retains coordinator routing, the charter and
@@ -184,13 +184,12 @@ can be observed after acceptance without replaying the prompt or resetting a
 budget. Unsupported or rolled-back providers do not cause a legacy claim,
 reservation or send fallback.
 
-This is **initial admission only**. The separate `pool_startup/v1` descriptor
-continues to advertise only `cli`, because its current retry transport is the
-live-CLI inbox operation, not ordinary Bridge's ACP native-turn operation.
-Existing supervision retains an ordinary allocator claim rather than passing
-it to legacy gone-worker recovery or claiming that CLI retry qualified it.
-Automatic ordinary retry, decline/closeout, comprehensive allocator integration,
-publication activation and installed/native qualification remain open gates.
+Initial admission and later startup supervision remain distinct operations.
+The `pool_startup/v1` descriptor advertises `ordinary-bridge` together with
+`ordinary_same_native_retry: true`. New callers require both before ordinary
+retry effects; older providers retain the claim without a CLI or legacy
+fallback. Decline/closeout, complete mixed-driver adoption, publication/allocation
+activation and installed/native qualification remain open gates.
 
 ## Worker acceptance transport
 
@@ -312,7 +311,7 @@ A completed successful invocation needs positive liveness for the retained
 native, workspace and execution machine before the supervisor records
 reachability. A different or missing live-session result is unknown, not
 absence. A failed, rejected or unknown original invocation is not reclassified
-as successful merely because its process is live. Once reachable, the durable
+as successful merely because its process is live. For CLI workers, the durable
 five-minute slot controls notification through the existing host-bound Bridge
 transport and its [distinct exact-native informational operation](../../agent-bridge/docs/delegation-contract.md#exact-live-cli-inbox-admission-and-observation).
 The provider refuses classified failed, rejected or unknown startup outcomes
@@ -338,7 +337,7 @@ charge or send a second invocation. An incomplete or unknown original call is
 not retry eligibility. Legacy spawn/outcome calls cannot complete or advance an
 invocation acquired through the explicit retry route.
 
-The transport uses Bridge's [exact live-CLI admission and keyed receipt
+The CLI transport uses Bridge's [exact live-CLI admission and keyed receipt
 observation](../../agent-bridge/docs/delegation-contract.md#exact-live-cli-inbox-admission-and-observation),
 not the ACP native-turn helper or the legacy queued redrive prompt. It sends only
 after a validated new retry admission. Its prompt uses `--pool-generation`, not
@@ -346,6 +345,24 @@ legacy evaluation claiming. After a lost admission reply, transport response or
 supervisor restart, only an observation of the retained invocation is permitted.
 Missing, malformed or unsupported receipt evidence remains unknown; it cannot
 authorize a send replay, new native or replacement capacity.
+
+Ordinary ACP retains both its Bridge session ID and its distinct native UUID in
+the same retry descriptor. Its exact full Bridge status must match the stored
+native, workspace, project and path on the recorded execution machine before
+reachability or a new retry. It never uses the CLI liveness lookup or follows a
+worktree alias. Publication preserves the `local-body:<bridge-id>` handle; the
+native UUID is not substituted for that handle.
+
+ACP retry and decision prods use the existing native-bound ordinary
+`send --expected-native-session-id --idempotency-key` operation, not the live-CLI
+inbox or a keyed first-turn invocation. Each first observes that key's ordinary
+`--receipt-only` result. Only the original acknowledged new admission may send
+after a qualified missing-receipt response. Recovery is observation-only even
+on a receipt miss. Exact accepted receipts settle delivery; a proven busy-turn
+refusal counts as `startup_rejected`, not a worker decline, while malformed,
+unsupported and lost responses retain an unknown effect. ACP decision prods can
+start a turn on the same idle native, but cannot queue, force, resume, replace
+or accept work. A lost due-slot reply does not authorize that prod.
 
 The original caller reports `startup_succeeded`, `startup_failed`,
 `startup_rejected` or `startup_unknown` through exact completion. Success closes
@@ -363,15 +380,15 @@ cooldown already established by those independent transitions and keeps a
 `RELEASING` reservation's capacity and release intent. Conflicting completion
 and unrelated caller identities refuse.
 
-Automatic ordinary placement/worker-prompt migration and installed qualification still
-gate the complete policy. These explicit consumers do not activate that lane.
+Complete mixed-driver/worker-prompt migration and installed qualification still
+gate the complete policy. These consumers do not activate allocation/publication.
 
 ## Integration boundary
 
 The descriptor still reports `automatic_lane_migration: false` and
-`startup_retry_policy_complete: false`. Complete configured-source publication,
-mixed-cohort exclusion, reservation-preserving startup attempts, decision
-nudges/exhaustion/cooldowns and automatic ordinary supervisor/prompt migration remain
-required integration work. Neither these callers nor their source tests
+`startup_retry_policy_complete: false`. Source support for ordinary ACP retries,
+decision clocks, nudges and exhaustion does not qualify decline/closeout,
+complete CLI and mixed-driver prompt migration, or installed activation.
+Neither these callers nor their source tests
 authorize installed activation, free unresolved effects or qualify the full
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).

@@ -106,9 +106,12 @@ class PoolStartupClientMixin(PoolStartupRetryClientMixin):
     def _pool_startup_request(
         self, method: str, path: str, body: dict | None = None, *,
         required_features: tuple[str, ...] = (),
+        required_driver: str = "cli",
     ) -> object:
         contract = self.pool_startup_contract()
-        if any(contract.get(feature) is not True for feature in required_features):
+        if required_driver not in contract["supported_drivers"] or any(
+            contract.get(feature) is not True for feature in required_features
+        ):
             raise DispatchUpgradeRequired("running coordinator lacks exact same-native retry/completion")
         try:
             if method == "GET":
@@ -179,12 +182,18 @@ class PoolStartupClientMixin(PoolStartupRetryClientMixin):
             raise _unknown("inconsistent startup snapshot binding")
         invocation = budget.get("retry_invocation")
         if invocation is not None:
-            from .pool_startup_retry_contract import retry_invocation
+            from .pool_startup_retry_contract import driver_binding, retry_invocation
+            from .queue_records import TaskError
+            try:
+                driver = driver_binding(reservation, native)
+            except TaskError as exc:
+                raise _unknown("retained retry driver binding changed") from exc
             expected = {
                 "version": 1, "task_id": task_id, "reservation_key": reservation["key"],
                 "generation": budget["generation"], "startup_revision": reservation["startup_revision"],
                 "native_id": native, "worktree": reservation.get("worktree"),
                 "machine": reservation.get("execution_machine"), "reserved_by": reservation.get("reserved_by"),
+                **driver,
             }
             if not isinstance(invocation, dict) or invocation != retry_invocation(
                 expected, reservation["startup_revision"],
