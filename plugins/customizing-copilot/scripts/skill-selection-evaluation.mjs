@@ -51,9 +51,10 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
     const report = { status: "unavailable", requestedProfile: profile, result: null, requests: [],
         cleanup: { runtimeStopped: null, errors: [] } };
     const usage = selectionUsage(), started = performance.now();
-    let session, client, unsubscribe, usageError, cancelListener;
+    let session, client, unsubscribe, usageError, cancelListener, closing = false;
     class Guard extends sdk.CopilotRequestHandler {
         async sendRequest(request, context) {
+            if (closing || signal?.aborted || context.signal?.aborted) throw new Error("evaluation request cancelled");
             if (request.method === "GET" && /\/models\/?$/.test(new URL(request.url).pathname)) {
                 return super.sendRequest(request, context);
             }
@@ -61,7 +62,7 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
                 throw new Error("unowned, cancelled or excess evaluation request refused");
             }
             const body = await request.clone().json();
-            if (signal?.aborted || context.signal.aborted) throw new Error("evaluation cancelled during request inspection");
+            if (closing || signal?.aborted || context.signal.aborted) throw new Error("evaluation cancelled during request inspection");
             const messages = body.messages ?? body.input ?? [];
             const system = [body.instructions, ...messages.filter(item => ["system", "developer"].includes(item.role))
                 .map(item => typeof item.content === "string" ? item.content
@@ -120,6 +121,7 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
         report.status = "completed";
     } catch (error) { report.error = safeError(error); }
     finally {
+        closing = true;
         signal?.removeEventListener("abort", cancelListener);
         if (session && report.status !== "completed") {
             try { await deadline(session.abort()); } catch (error) { report.cleanup.errors.push(safeError(error)); }

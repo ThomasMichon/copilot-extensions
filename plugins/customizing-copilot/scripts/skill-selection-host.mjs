@@ -81,6 +81,7 @@ export function selectionRequestHandler(Base, { owned, profile, requests, maxReq
     const seed = syntheticHandler(Base, owned, seedRequests);
     return new class extends Base {
         async sendRequest(request, context) {
+            if (context.signal?.aborted || isCancelled()) throw new Error("selector request cancelled");
             if (request.method === "GET" && /\/models\/?$/.test(new URL(request.url).pathname)) {
                 if (++metadata > 4) throw new Error("selector model-metadata allowance exhausted");
                 return super.sendRequest(request, context);

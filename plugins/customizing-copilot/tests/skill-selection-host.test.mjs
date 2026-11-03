@@ -105,7 +105,7 @@ test("owned request guard checks effective profile and tools without consuming t
 
 function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = false,
     stopError = false, hang = false, signal, toolFailure = false, forkMismatch = false,
-    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal, lateUsage } = {}) {
+    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal, lateUsage, waitFailure = false } = {}) {
     const observed = { stops: 0, aborts: 0, sends: 0, forwards: 0 };
     const histories = new Map(), subscriptions = new Set();
     let serial = 0;
@@ -159,6 +159,10 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
                         }
                         observed.lastRequest = thisClient.options.requestHandler.sendRequest(outbound,
                             { sessionId: id, signal: requestSignal ?? new AbortController().signal });
+                        if (waitFailure) {
+                            observed.lastRequest.then(() => {}, error => { observed.requestFailure = error; });
+                            throw new Error("fixture wait failed");
+                        }
                         await observed.lastRequest;
                     }
                     history.push({ id: `user-${++serial}`, type: "user.message", data: { content: prompt } },
@@ -387,6 +391,33 @@ test("final profile checks include distinct accounting events received during sh
             assert.equal(report.result, null);
             assert.match(report.error, /usage .*mismatched/);
         } else assert(report.result);
+    }
+});
+
+test("a failed wait closes pending requests before owned cleanup finishes", async t => {
+    for (const host of ["selector", "evaluator"]) {
+        const parent = await mkdtemp(join(tmpdir(), "selector-failed-wait-"));
+        t.after(() => rm(parent, { recursive: true, force: true }));
+        let releaseBody, releaseStop, reachedStop;
+        const bodyGate = new Promise(resolve => { releaseBody = resolve; });
+        const stopGate = new Promise(resolve => { releaseStop = resolve; });
+        const stopping = new Promise(resolve => { reachedStop = resolve; });
+        const fake = fakeSdk({ waitFailure: true, bodyInspection: () => bodyGate,
+            stopGate: async () => { reachedStop(); await stopGate; } });
+        const running = (host === "selector" ? runOwnedSelection : runSelectionEvaluation)({
+            ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+            profile, snapshot, trustedRoots: [parent], request, evidence: { reports: [{ id: "fixture" }] },
+        });
+        await stopping;
+        releaseBody();
+        await assert.rejects(fake.observed.lastRequest, /cancelled/);
+        assert.equal(fake.observed.forwards, 0);
+        releaseStop();
+        const report = await running;
+        assert.equal(report.status, "unavailable");
+        assert.match(report.error, /wait failed/);
+        assert.equal(report.result, null);
+        assert.equal(report.cleanup.runtimeStopped, true);
     }
 });
 
