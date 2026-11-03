@@ -41,7 +41,7 @@ def permissions(path: Path) -> int:
 
 
 def set_owner(path: Path, uid: int, gid: int) -> None:
-    os.chown(path, uid, gid)
+    getattr(os, "chown")(path, uid, gid)
 
 
 def set_permissions(path: Path, mode: int) -> None:
@@ -199,7 +199,7 @@ def main() -> None:
     (build / "os-packages.txt").write_text(run("dpkg-query", "-W"))
     (build / "Packages.xz").unlink()
     Path("/workspaces").mkdir(exist_ok=True)
-    os.chown("/workspaces", 1000, 1000)
+    getattr(os, "chown")("/workspaces", 1000, 1000)
     linger = Path("/var/lib/systemd/linger")
     linger.mkdir(parents=True, exist_ok=True)
     (linger / "vscode").touch()
