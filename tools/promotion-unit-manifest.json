@@ -7,6 +7,9 @@
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_hold_reader_normalizes_missing_parent_segments",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_drive_relative_manager_root_never_borrows_worker_drive",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_direct_manager_recheck_keeps_its_invocation_directory",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_submission_context_freezes_the_same_selected_policy[absolute]",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_submission_context_freezes_the_same_selected_policy[relative]",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_submission_context_freezes_the_same_selected_policy[home]",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_borrowed_manager_context_freezes_root_and_restores_worker[absolute]",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_borrowed_manager_context_freezes_root_and_restores_worker[relative]",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_borrowed_manager_context_freezes_root_and_restores_worker[home]",
@@ -3835,9 +3838,9 @@
         "tools/promotion_unit_tests/test_bundle_inputs.py::TestBundleInputs::test_target_render_attributes_complete_context_without_approval"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_automatic_update_policy.py": "e51e5be7b2f003f35550772c947a17d3a42ed1f12142218dcbfdd44ac0421489",
-        "worktree-manager/scripts/runtime_install.py": "29810d269ff7b9b491a01a079925dae2f88d6da5631cb8189b36ea9b485ab2b3",
-        "worktree-manager/src/worktree_manager/update_driver_cli.py": "1a8d179dae5cf3df30ecd0f8153ff6793dd344296f3e66b5cd35d4cd472f8a10",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py": "5b876ab84bf80de7a5486ae3e1e90c4e226f65ebc971b50c62c05648bb53535b",
+        "worktree-manager/scripts/runtime_install.py": "e20aff258c66013a8bf080b2124714cd54d7602cb79717164b81277c29263cc1",
+        "worktree-manager/src/worktree_manager/update_driver_cli.py": "93aa19ba130f145b06482b26236dbf49bc6ca8d8f4bb1fb7d1fd522cd0154c13",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
         "libs/update-driver/src/update_driver/core.py": "3a50209b723b7777b383e0e53de3fb7219c858350e69fc9972dd755221b987d5",
         "worktree-manager/src/worktree_manager/__init__.py": "1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",
