@@ -1,0 +1,9 @@
+{
+  "comment": "Retain native-fenced worker decline decisions and failed-closeout blockers without releasing assigned capacity.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -12,6 +12,11 @@
 
 ## Guiding Intent
 
+The [worker-decline preparation slice](journal/2026/11.03-worker-decline-preparation.md)
+retains a native-fenced decision and failed-closeout blocker without releasing
+the allocator's assignment. Own-workspace finalization, atomic routing/requeue
+and ordinary/native decline qualification remain the immediate integration work.
+
 **Current consumer-adoption prerequisite (2026-11-03):** the
 [independent resident lifetime slice](journal/2026/11.03-independent-resident-lifetime.md)
 repairs shared Linux daemon launches that remain in their caller's systemd
@@ -247,10 +252,12 @@ live claim token. No new blanket ACK or executor appointment is created.
       suspended recovery, finalize-before-submission and a complete workload's
       same-native continuation. Keep source, simulation and local running
       results separate; no merged sub-slice alone closes this milestone.
-- [ ] Land and qualify the bounded ordinary neutral-service startup follow-up
+- [x] Land and source-qualify the bounded ordinary neutral-service startup follow-up
       [#10289](https://github.com/ThomasMichon/copilot-extensions/issues/10289).
-      Lane admission and allocator claim now precede its concrete CWD-bound
-      initial-machine refusal; source controls alone do not prove worker start.
+      [#10290](https://github.com/ThomasMichon/copilot-extensions/pull/10290)
+      merged after current-head review and green CI. Its 118-control packet
+      and fresh progression to workspace/native creation qualify the machine
+      lookup correction, not affirmative worker start or the whole lifecycle.
 - [x] Land the #9709 vision/current-versus-target architecture and
       [repair amendment](assignment-startup-amendment.md) through normal review,
       without behavioral changes. Merged in
