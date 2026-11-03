@@ -6,10 +6,12 @@ retired baseline node IDs. Missing nodes outside those files still fail closed.
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
 from plugin_test_selection import load_selection, selection_diagnostic
+from coverage_guided_selection.auditability import declaration, profile, verified_exclusions
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -41,12 +43,34 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if empty_files:
         raise pytest.UsageError(selection_diagnostic("selected test files collected no tests", empty_files))
     requested = set(selection.nodes)
+    exclusions = None
+    if selection.coverage_profile is not None:
+        cov_source = selection.coverage_profile.get("cov_source")
+        current_profile = profile(plugin, cov_source) if isinstance(cov_source, str) else {}
+        # The manifest uses repository-relative dependencies; pytest executes
+        # in the plugin root under the existing contained runner.
+        root = Path.cwd().parents[1]
+        exclusions = verified_exclusions(
+            root, selection.coverage_exclusions or {}, current_profile,
+        )
     kept, deselected = [], []
+    mandatory = []
     for item in items:
-        if (
+        retain = (
             item.nodeid in requested or item.nodeid.split("::", 1)[0] in files
             or (selection.include_guards and item.get_closest_marker("guard") is not None)
-        ):
+        )
+        if exclusions is not None and not retain:
+            markers = list(item.iter_markers("coverage_auditability"))
+            proof = exclusions.get(item.nodeid)
+            try:
+                declared = declaration(markers[0].args, markers[0].kwargs) if len(markers) == 1 else None
+            except ValueError:
+                declared = None
+            if proof is None or declared != proof["declaration"]:
+                retain = True
+                mandatory.append(item.nodeid)
+        if retain:
             kept.append(item)
         else:
             deselected.append(item)
@@ -54,3 +78,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         raise pytest.UsageError("exact test selection collected no runnable items")
     config.hook.pytest_deselected(items=deselected)
     items[:] = kept
+    if exclusions is not None:
+        print(json.dumps({
+            "coverage_retained_nodes": sorted(mandatory),
+            "coverage_excluded_nodes": sorted(item.nodeid for item in deselected),
+            "coverage_selected_nodes": sorted(item.nodeid for item in kept),
+        }, sort_keys=True))

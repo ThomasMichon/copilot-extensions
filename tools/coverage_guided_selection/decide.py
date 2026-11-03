@@ -36,6 +36,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+try:
+    from .auditability import baseline_exclusions
+except ImportError:
+    from auditability import baseline_exclusions
 
 try:
     from ancestor_resolution import ResolvedBaseline, remap_or_invalidate_baseline, resolve_nearest_baseline
@@ -104,9 +108,10 @@ class SelectionDecision:
     debt: dict | None = None
     selection_fallback_reasons: tuple[dict, ...] = field(default_factory=tuple)
     fallback_set: dict | None = None
+    coverage_exclusions: dict | None = None
 
     def as_dict(self) -> dict:
-        return {
+        result = {
             "mode": self.mode,
             "selected_tests": None if self.selected_tests is None else list(self.selected_tests),
             "reason": self.reason,
@@ -116,6 +121,9 @@ class SelectionDecision:
             "selection_fallback_reasons": list(self.selection_fallback_reasons),
             "fallback_set": self.fallback_set,
         }
+        if self.coverage_exclusions is not None:
+            result["coverage_exclusions"] = self.coverage_exclusions
+        return result
 
 
 def decide(
@@ -131,6 +139,8 @@ def decide(
     fallback_runtime_budget_s: float = 300.0,
     eligible_tests: frozenset[str] | None = None,
     include_smoke_floor: bool = False,
+    auditability_profile: dict | None = None,
+    eligible_test_files: frozenset[str] | None = None,
 ) -> SelectionDecision:
     """Decide which tests to run for `plugin` at `fork_commit`.
 
@@ -219,6 +229,22 @@ def decide(
         if eligible_tests is None
         else eligible_tests
     )
+    if eligible_test_files is not None:
+        effective_eligible_tests = frozenset(
+            node for node in effective_eligible_tests
+            if node.split("::", 1)[0] in eligible_test_files
+        )
+    exclusions = None
+    mandatory = set()
+    if auditability_profile is not None:
+        exclusions = baseline_exclusions(
+            repo_root, full_baseline, auditability_profile, effective_eligible_tests,
+        )
+        exclusions = {
+            node: proof for node, proof in exclusions.items()
+            if not set(proof["dependencies"]).intersection(changed_lines)
+        }
+        mandatory = set(effective_eligible_tests) - set(exclusions)
 
     if assessment.exceeded and not include_smoke_floor:
         # Curate from the FULL earned baseline, never `remapped`: the
@@ -233,12 +259,13 @@ def decide(
         )
         return SelectionDecision(
             mode="fallback",
-            selected_tests=fb.selected_tests,
+            selected_tests=tuple(sorted(set(fb.selected_tests) | mandatory)),
             reason=f"{COVERAGE_DEBT_PREFIX}{'; '.join(assessment.reasons)}",
             baseline_generation=measured_commit,
             baseline_commit_on_main=resolved.baseline_commit,
             debt=assessment.as_dict(),
             fallback_set=fb.as_dict(),
+            coverage_exclusions=exclusions,
         )
 
     remapped = remap_or_invalidate_baseline(
@@ -266,6 +293,10 @@ def decide(
         # fallback -- the fallback must only ever ADD safety-net coverage
         # for what's unattributed, never remove coverage already earned.
         combined_tests = tuple(sorted(set(sel.selected_tests) | set(fb.selected_tests)))
+        if exclusions is not None:
+            combined_tests = tuple(sorted(
+                (set(combined_tests) | mandatory) & set(effective_eligible_tests)
+            ))
         if assessment.exceeded:
             reason = f"{COVERAGE_DEBT_PREFIX}{'; '.join(assessment.reasons)}"
         elif sel.fallback_triggered:
@@ -281,13 +312,18 @@ def decide(
             debt=assessment.as_dict(),
             selection_fallback_reasons=tuple(sel.as_dict()["fallback_reasons"]),
             fallback_set=fb.as_dict(),
+            coverage_exclusions=exclusions,
         )
 
     return SelectionDecision(
         mode="selected",
-        selected_tests=sel.selected_tests,
+        selected_tests=(
+            tuple(sorted((set(sel.selected_tests) | mandatory) & set(effective_eligible_tests)))
+            if exclusions is not None else sel.selected_tests
+        ),
         reason=FRESH_SELECTION,
         baseline_generation=measured_commit,
         baseline_commit_on_main=resolved.baseline_commit,
         debt=assessment.as_dict(),
+        coverage_exclusions=exclusions,
     )
