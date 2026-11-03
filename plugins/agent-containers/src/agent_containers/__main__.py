@@ -220,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     host_state.add_argument("name", help="Container name")
     host_state.add_argument("--expected-instance", default=None)
+    host_state.add_argument("--expected-runtime", default=None)
     host_cleanup = sub.add_parser(
         "session-host-cleanup",
         help="Remove one launch-only trusted-container environment file",
@@ -227,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     host_cleanup.add_argument("name", help="Container name")
     host_cleanup.add_argument("--expected-instance", default=None)
     host_cleanup.add_argument("--expected-user", default=None)
+    host_cleanup.add_argument("--expected-runtime", default=None)
     host_cleanup.add_argument("--remote-env", required=True)
 
     sub.add_parser("version", help="Show version")
@@ -512,6 +514,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         acp_command,
         remote_env,
     )
+    runtime = _runtime_drivers().runtime_identity(args.name)  # retained through cleanup
     print(json.dumps({
         "name": args.name,
         "workspace_folder": workspace,
@@ -522,6 +525,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "remote_command": remote_command,
         "remote_env": remote_env,
         "execution_instance": instance_id or None,
+        "execution_runtime": runtime if instance_id else None,
         "preference_wrapper": (
             {"version": 1, "launcher": launcher_token} if token_count else None
         ),
@@ -529,6 +533,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "state_command": [
             *payload_command_argv(), "session-host-state", args.name,
             *(["--expected-instance", instance_id] if args.expected_instance else []),
+            *(["--expected-runtime", runtime] if args.expected_instance else []),
         ],
     }))
     return 0
@@ -541,10 +546,10 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
     drivers = _runtime_drivers()
     drivers.discover(load_config(), member=args.name)
     try:
-        details = drivers.inspect_pinned(args.name, args.expected_instance) or inspect_container(
-            drivers.prepared_handle(args.name, args.expected_instance)
-            if args.expected_instance else args.name
-        )
+        handle = args.expected_instance and drivers.prepared_handle(  # runtime checked first
+            args.name, args.expected_instance, args.expected_runtime)
+        details = (drivers.inspect_pinned(args.name, args.expected_instance)
+                   or inspect_container(handle or args.name))
     except drivers.RetiredIncarnation:
         details = {}  # the prepared member is gone; its id now names another
     except RuntimeError as exc:
@@ -572,7 +577,7 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
 
         drivers = _runtime_drivers()
         drivers.discover(load_config(), member=args.name)
-        target = drivers.prepared_handle(args.name, args.expected_instance)
+        target = drivers.prepared_handle(args.name, args.expected_instance, args.expected_runtime)
         user = cleanup_user(args.expected_instance, args.expected_user, target)
     else:
         _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)

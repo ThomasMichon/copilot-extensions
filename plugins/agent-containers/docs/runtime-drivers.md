@@ -291,10 +291,14 @@ preparation and its `ProxyCommand`, credential staging, shared plugin
 preparation and cleanup all carry the validated instance id, so a member
 recreated after validation is refused by its driver rather than receiving the
 launch or its credentials.
-Session Host state and cleanup address a prepared driver member by its
-fleet-qualified handle. If the member's fleet has since been removed and a
-different runtime now reports the same bare instance id, cleanup is refused
-and state reports the prepared member missing.
+Session Host preparation records the member's runtime identity
+(`execution_runtime`: `docker` or `driver:<driver>/<fleet>`), which agent-bridge
+hands back to state and cleanup as `--expected-runtime`. If that exact runtime
+no longer owns the member -- for example its fleet was removed or re-driven --
+cleanup is refused and state reports the prepared member missing. A driver
+member is addressed by its fleet-qualified handle; a bare instance id is used
+only when no driver claims it, so cleanup never reaches a different runtime's
+member that shares the id.
 
 ## Not part of the protocol
 

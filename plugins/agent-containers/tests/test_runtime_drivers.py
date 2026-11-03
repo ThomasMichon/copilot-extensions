@@ -1415,8 +1415,9 @@ def test_namespace_resolve_of_absent_driver_member_never_queries_other_fleets(
     assert not slow_root.exists()  # the unrelated driver was never invoked
 
 
+@pytest.mark.parametrize("retained_runtime", [True, False])
 def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member(
-    fake, no_docker, tmp_path, monkeypatch, capsys,
+    fake, no_docker, tmp_path, monkeypatch, capsys, retained_runtime,
 ):
     other_root = tmp_path / "other-runtime"
     config = _two_driver_config(tmp_path, monkeypatch, fake, ["--root", str(other_root)])
@@ -1425,24 +1426,29 @@ def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member
     members = {m.name: m for m in lifecycle.list_containers(config)}
     shared = members["example-1"].container_id
     assert members["slow-1"].container_id == shared  # independent runtimes, same id
+    # What session-host-prepare records for A and the bridge hands back to cleanup.
+    runtime = runtime_drivers.runtime_identity("example-1")
+    assert runtime == "driver:example-driver/example"
+    assert runtime_drivers.prepared_handle("example-1", shared, runtime) == f"example-1.{shared}"
 
-    # The prepared member's fleet is removed; the other driver still owns ``shared``.
+    # Only A's fleet is removed (A itself stays alive); a fresh process.
     (tmp_path / "containers.yaml").write_text(yaml.safe_dump({"fleets": {
         "slow": {"driver": "other-driver", "size": 1, "relay_enabled": False},
     }}))
-    lifecycle.list_containers(load_config(strict=True))
-    assert runtime_drivers.owner_of("example-1") is None
-    assert runtime_drivers.owner_of(shared).name == "slow-1"
+    runtime_drivers.clear_bindings()
 
     def other_calls():
         return json.loads((other_root / "state.json").read_text())["calls"]
 
     before = len(other_calls())
+    expected = ["--expected-runtime", runtime] if retained_runtime else []
     assert cli.main(["session-host-cleanup", "example-1", "--expected-instance", shared,
-                     "--expected-user", "vscode",
+                     "--expected-user", "vscode", *expected,
                      "--remote-env", "/home/vscode/.agent-containers/launch/env"]) != 0
-    assert "no longer routed by its runtime" in capsys.readouterr().err
-    assert cli.main(["session-host-state", "example-1", "--expected-instance", shared]) == 0
+    err = capsys.readouterr().err
+    assert ("no longer owns it" if retained_runtime else "no longer routed by its runtime") in err
+    assert cli.main(["session-host-state", "example-1", "--expected-instance", shared,
+                     *expected]) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "missing"
-    # Inventory reads aside, nothing is inspected, executed or copied on slow-1.
+    # Inventory reads aside, nothing is inspected, executed or copied on B.
     assert [c["verb"] for c in other_calls()[before:] if c["verb"] != "list"] == []

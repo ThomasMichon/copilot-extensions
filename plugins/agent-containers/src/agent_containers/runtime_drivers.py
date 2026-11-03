@@ -927,16 +927,30 @@ class RetiredIncarnation(RuntimeError):
     """A prepared member's runtime is gone and its bare id names another member."""
 
 
-def prepared_handle(name: str, instance_id: str) -> str:
+def runtime_identity(name: str) -> str:
+    """``docker`` or ``driver:<driver>/<fleet>``: the runtime that owns ``name``."""
+    route = owner_of(name)
+    if route is None:
+        return "docker"
+    return f"driver:{route.driver.name}/{getattr(route.driver, 'fleet_name', None)}"
+
+
+def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> str:
     """The handle for exactly the prepared incarnation ``instance_id`` of ``name``.
 
-    A driver member is addressed by its fleet-qualified handle. When ``name``
-    no longer routes to a driver (for example its fleet was removed) the bare
-    id is used only if no driver claims it -- it is then a Docker container
-    id -- and otherwise refused, so cleanup never reaches another runtime's
-    member that happens to share the instance id.
+    ``runtime`` is the :func:`runtime_identity` recorded when the member was
+    prepared; if that exact runtime no longer owns ``name`` the request is
+    refused. A driver member is addressed by its fleet-qualified handle. A
+    bare id is used only when no driver claims it -- it is then a Docker
+    container id -- so cleanup never reaches another runtime's member that
+    happens to share the instance id.
     """
     route = owner_of(name)
+    if runtime is not None and runtime_identity(name) != runtime:
+        raise RetiredIncarnation(
+            f"'{name}' was prepared in runtime '{runtime}', which no longer owns "
+            f"it (now '{runtime_identity(name)}'); refusing to act on it"
+        )
     if route is not None:
         return f"{route.name}.{instance_id}"
     if owner_of(instance_id) is not None:
