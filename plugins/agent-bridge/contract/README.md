@@ -4,6 +4,28 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+## Current HTTP-52 owner-membership evidence
+
+Owner membership introduces HTTP generation 52 and
+`OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52`. Its named
+`bridge-owner-membership-v1` contract remains version 1. Both declarations are
+retained: generation-aware clients can recognize the endpoint's introduction,
+while passive callers still require its exact named capability. Minimum HTTP
+support and every earlier feature's introduction floor remain unchanged.
+
+The current capture owner is `tools/capture_bridge_http52.py`, using the same
+43 actual parser, authenticated ASGI, canonical producer, transport and payload
+cases with a new independent HTTP-52 vector. Retained test-function names do not
+select capture identity: the owning generation, source-bound request, protocol
+assertion, vector and evidence family all require 52.
+
+Commit source and the generation declaration, run the new owner's `--prepare`,
+commit and publish that checkpoint, then run `--write`, no-write verification
+and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared
+declarations are not execution evidence. All HTTP-51 and earlier packets and
+provenance remain historical, unmodified inputs; never run the HTTP-51 writer
+against HTTP-52 source or relabel its observations as a new generation.
+
 ## Lossless provenance layout
 
 The shared reader in `tools/agent_bridge_contract_registry.py` accepts the
@@ -241,7 +263,10 @@ HTTP generation 51, the existing evidence family and all prior protocol floors
 remain unchanged. The original 24 required cases retain their counts; two
 installation-mode observation boundary cases, four transport/lifetime cases,
 eight finite/follow EOF controls and two native-shell payload-abbreviation cases
-expand the required portfolio to 40. The original operation report gains
+expand that portfolio to 40. Two owner-membership producer/reader cases bring
+the portfolio to 42 without removing any of those cases. An existing-only
+writable-adoption membership regression brings the current required count to 43.
+The original operation report gains
 independently expected observation
 results without replacing its native-send, receipt or live-CLI observations.
 
@@ -266,6 +291,15 @@ owning client must supply its existing 15-second I/O silence timeout.
 A separate concurrent-EventLog case cancels one captured observer and verifies
 the second subscriber still receives actual appended evidence. These are source
 resource-boundary tests, not timed installed-network or native qualification.
+
+Membership writer notification performs no projection queries. Audited
+membership producers mark a revision; event/turn/cursor/control/prompt-only
+writes are excluded. Coalesced materialization uses a separate existing-only
+read-only connection with a shared VM-step/deadline budget, source-file/authority
+fences and explicit gap handling. The source closure includes
+`owner_membership_read.py`, `owner_membership_signal.py` and the physical-work
+controls in `test_owner_membership_budget.py`; these files must be committed
+before source-bound capture. Row limits alone are not physical-work evidence.
 
 The EOF controls execute the owning CLI loop against actual stdlib
 `HTTPResponse` objects: empty/truncated point and history reads, and follow EOF

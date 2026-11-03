@@ -1,6 +1,7 @@
 """Atomic claiming, withdrawal and inspection of extension controls."""
 
 from __future__ import annotations
+from .owner_membership_signal import commit as commit_membership
 
 from typing import Any
 
@@ -54,7 +55,7 @@ class LiveControlsMixin:
                         f"UPDATE live_messages SET claimed_at=? WHERE id IN ({placeholders})",
                         (now, *(r["id"] for r in rows)),
                     )
-                conn.commit()
+                commit_membership(conn, membership=False)
             except Exception:
                 conn.rollback()
                 raise

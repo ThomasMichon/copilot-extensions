@@ -329,7 +329,7 @@ async def _connect_remote_client(manager, session, spec, cwd, remote_session_id,
                     manager._db.save_relationship_native_id(session.session_id, sid)
                     manager._db.execute_write(
                         "UPDATE remote_acp_relationships SET phase='conflict' WHERE session_id=?",
-                        (session.session_id,),
+                        (session.session_id,), membership=True,
                     )
                 raise RelationshipRefused("Remote native conversation already has a Bridge relationship")
         if relationships.owned(session):

@@ -39,6 +39,7 @@ class Prepared:
     before: capture.Projection
     observers: tuple[ReceiptObserver, ...]
     record_held: bool
+    sidecar_held: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,12 @@ def _state() -> _State:
 
 def _key(path: Path) -> str:
     return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
+def capture_idle() -> bool:
+    """Whether a new optional compute scope can exclude earlier deferred saves."""
+    state = _state()
+    return not (state.holds or state.pending or state.delivering or state.omitted_count)
 
 
 def acquire(*, path: Path | None = None) -> Hold:
@@ -142,6 +149,8 @@ def observe_receipts(callback: ReceiptObserver) -> Callable[[], None]:
 
 
 def prepare(record: WorktreeRecord | None, path: Path) -> Prepared | None:
+    from . import tracking
+
     with _registry_lock:
         observers = tuple(_receipts)
     if not observers:
@@ -152,7 +161,12 @@ def prepare(record: WorktreeRecord | None, path: Path) -> Prepared | None:
     except Exception:
         logger.exception("Optional before-save evidence capture failed")
         before = capture.omitted("before-capture-failed")
-    return Prepared(before, observers, _state().paths.get(_key(path), 0) > 0)
+    return Prepared(
+        before,
+        observers,
+        _state().paths.get(_key(path), 0) > 0,
+        tracking._thread_sidecar_counts().get(_key(path), 0) > 0,
+    )
 
 
 def _omit(state: _State, count: int, size: int | None, reason: str) -> None:
@@ -206,6 +220,8 @@ def committed(
             logger.exception("Optional committed-save after evidence capture failed")
             after = capture.omitted("after-capture-failed")
         try:
+            from . import tracking
+
             result = capture.receipt(
                 uuid.uuid4().hex,
                 path,
@@ -213,6 +229,8 @@ def committed(
                 after,
                 raw,
                 record_held=prepared.record_held and _state().paths.get(_key(path), 0) > 0,
+                sidecar_held=prepared.sidecar_held
+                and (tracking._thread_sidecar_counts().get(_key(path), 0) > 0),
             )
             if result.coverage == "partial":
                 logger.warning(

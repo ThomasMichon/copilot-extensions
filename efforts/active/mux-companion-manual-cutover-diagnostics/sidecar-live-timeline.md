@@ -14,6 +14,12 @@ Timeline view and unattached owner projection/evidence primitives. This closes
 S1 source delivery, not feed, qualified-measurement, joined-app or native
 acceptance.
 
+The next source slice merged in #10131 as
+`3acbd63fd221d7d82857772fee485087a68ae6c0`: the selected worktree Manager
+adapter, rich agenda owner reader, safe process-local committed-save capture
+and known-session Bridge provider. The [merge readback](journal/2026/11.02-sidecar-owner-consumers.md)
+records their exact source tiers and continuing gaps; it does not close S2-S5.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -241,6 +247,10 @@ attached by this foundation. Current-source integration begins at S2.
 
 ### S2 - Worktree and agenda owner observations
 
+The [durable worktree-state proposal](worktree-state-lifetime.md) records the
+operator's shared-discovery and archival requirement. It is a producer-first
+design prerequisite, not authorization to guess a home or move existing data.
+
 The first attachment consumes actual elected-owner roster observations and
 exposes qualified read/history/feed transport. Its generic observed-change
 history has partial coverage; it does not deliver native mutation capture.
@@ -261,19 +271,40 @@ publication and installed support retain their separate qualification.
   Isolate optional post-save callback failures so a completed canonical save is
   not reported as failed and remaining notifications still run. Capture under
   record/pair locks is bounded only; publication/RPC happens after release.
+- [x] Deliver bounded immutable process-local committed-save evidence and
+  lock-safe optional notification delivery. #10131 supplies this primitive;
+  resident/native index intake and cross-process delivery remain in the
+  preceding open item.
 - [ ] Supply live reported subagent/tool activity and owner-qualified accumulated
   statistics with explicit coverage; preserve unknown current concurrency when
   the native/ACP source does not establish it.
-- [ ] Supply rich agenda-history access through its actual owner and an admitted
+- [x] Supply rich agenda-history access through its actual owner and an admitted
   locator for supported sources. Test old/missing sources as explicitly
   unavailable/observed-only, not as delivery of rich history.
+  #10131 delivers the passive owner CLI with explicit state/store/worktree
+  selection; Manager locator admission and consumption remain below.
+- [ ] Review and deliver the owner-managed placement/discovery, retained-data
+  lifetime and archival acceptance in the
+  [linked worktree-state design](worktree-state-lifetime.md). Existing source
+  approvals do not authorize actual data relocation, collection or deletion.
+- [x] Attach the selected worktree provider to the actual Manager Timeline
+  through the owning process boundary, with independent page/live cursors and
+  request/source/head fences. #10131 includes the resident-to-CLI-to-Textual
+  join, explicit integrity reconciliation and typed retirement custody.
 - [ ] Integrate Manager adapters with independent cursors, atomic view updates,
   stale/head/source replacement and cancellation.
+  The selected worktree adapter is delivered; rich agenda and Bridge consumers
+  and their joined coverage remain open.
 
 ### S3 - Bridge relationships and problem evidence
 
+- [x] Deliver the Bridge-owned known-session observation/history provider and
+  passive owning CLI. #10131 preserves existing local, represented and locally
+  hosted remote evidence bounds; arbitrary federated handles, canonical head,
+  current answerability and active pre-window capacity remain unqualified.
 - [ ] Integrate known-session observation/history with independent observer
   audiences and the existing local/remote/represented boundaries.
+  The owner provider is delivered; Manager consumption remains open.
 - [ ] Add owner-qualified membership snapshot/deltas and retirement semantics,
   retaining relationship/custody authority and remote unknowns.
 - [ ] Expose actual pending/cleared input and permission evidence without answer
@@ -302,6 +333,12 @@ publication and installed support retain their separate qualification.
 
 ## Validation Plan
 
+- [x] Qualify the selected worktree's real private resident, owning CLI and
+  Textual join, including live publication, backward history and observer
+  cleanup. #10131's final recovery packet also covers explicit fresh baselines,
+  retained exhausted-window proof, expected transport failures and terminal
+  resource custody independent of replaceable task slots. This is not the
+  three-source or native-client acceptance below.
 - [ ] Exact field/enumeration, numeric/boolean, cursor/generation/identity,
   duplicate and malformed-source tests; no render-path I/O or inferred custody.
 - [ ] History/live splice and gap tests: coalescing is current state, not lost

@@ -23,6 +23,7 @@ import logging
 from typing import Any
 
 from .db_core import LIVE_SESSION_STALE_SECONDS, local_pid_alive
+from .owner_membership_signal import commit
 
 log = logging.getLogger("agent-bridge")
 
@@ -110,7 +111,7 @@ _REGISTER_SQL = (
 
 
 def _incarnation_mismatch(
-    conn: Any, session_id: str, *, machine: str | None, pid: int | None,
+    row: Any, *, machine: str | None, pid: int | None,
     process_started_at: float | None, aliased: bool, now: float,
 ) -> bool:
     """Whether a registration's own identity contradicts the canonical row it
@@ -127,11 +128,6 @@ def _incarnation_mismatch(
     ``wedged``, never dead) -- belongs to no running process, so the new
     incarnation revives it: that is a conversation resumed in a new process
     (after a restart, or its CodeSpace stopping), which keeps its session id."""
-    row = conn.execute(
-        "SELECT machine, pid, process_started_at, status, updated_at, venue "
-        "FROM live_sessions WHERE session_id=?",
-        (session_id,),
-    ).fetchone()
     if row is None:
         return False
     status = row["status"] or "live"
@@ -173,12 +169,31 @@ def register_live_session_atomic(
         try:
             requested = session_id
             session_id = db.resolve_live_session_id(session_id)
+            metadata = {
+                "machine": machine, "cwd": cwd, "worktree_id": worktree_id,
+                "repo": repo, "branch": branch, "pid": pid, "role": role,
+                "driven_by": driven_by, "venue": venue,
+                "process_started_at": process_started_at,
+            }
+            existing = conn.execute(
+                "SELECT machine, cwd, worktree_id, repo, branch, pid, role, driven_by, "
+                "venue, process_started_at, status, updated_at "
+                "FROM live_sessions WHERE session_id=?", (session_id,),
+            ).fetchone()
             mismatch = _incarnation_mismatch(
-                conn, session_id, machine=machine, pid=pid, process_started_at=process_started_at,
+                existing, machine=machine, pid=pid, process_started_at=process_started_at,
                 aliased=session_id != requested, now=now)
             if mismatch:
                 conn.rollback()
                 return "incarnation_mismatch"
+            membership_changed = (
+                existing is None
+                or existing["status"] != "live"
+                or any(value is not None and value != existing[key]
+                       for key, value in metadata.items())
+                or clear_targeting_metadata
+                and any(existing[key] is not None for key in ("machine", "worktree_id", "repo"))
+            )
             cur = conn.execute(
                 _REGISTER_SQL,
                 (session_id, session_id, machine, cwd, worktree_id, repo, branch, pid,
@@ -210,6 +225,7 @@ def register_live_session_atomic(
                     "WHERE worktree_id=? AND claimed_by_session_id IS NULL AND expires_at > ?",
                     (session_id, worktree_id, now),
                 ).rowcount == 1:
+                    membership_changed = True
                     conn.execute(
                         "UPDATE live_sessions SET cli_mode=1, venue=COALESCE("
                         "(SELECT venue FROM cli_mode_reservations "
@@ -217,8 +233,9 @@ def register_live_session_atomic(
                         "WHERE session_id=?",
                         (worktree_id, session_id, session_id),
                     )
-                _fold_in_predecessor(conn, worktree_id, session_id, now=now)
-            conn.commit()
+                predecessor = _fold_in_predecessor(conn, worktree_id, session_id, now=now)
+                membership_changed = membership_changed or predecessor is not None
+            commit(conn, membership=membership_changed)
             return "live"
         except Exception:
             conn.rollback()

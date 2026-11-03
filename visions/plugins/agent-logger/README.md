@@ -6,7 +6,7 @@
 - **Scope:** branch (a per-plugin vision; a **consumer** that rides the
   [agent-fabric](../../agent-fabric/README.md) delegation layer, not a layer of it)
 - **Status:** Draft
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-11-02
 - **Reality docs:** [`plugins/agent-logger/docs/architecture.md`](../../../plugins/agent-logger/docs/architecture.md) ·
   [`plugins/agent-logger/docs/deployment-topologies.md`](../../../plugins/agent-logger/docs/deployment-topologies.md) ·
   [`plugins/agent-logger/docs/manifest-contract.md`](../../../plugins/agent-logger/docs/manifest-contract.md)
@@ -202,6 +202,18 @@ surfaces while retaining their own presentation and workflow policy. The
 The fleet's session activity is recorded **automatically, on a schedule, from one
 elected place**, with no operator prompting. The record stays current as a
 background fact; a gap in execution is closed by catch-up, not lost.
+
+### worktree-state-collections
+
+Owner-exported worktree state can accompany the session corpus as its own typed
+collection, retaining worktree/store identity, revision and references from all
+contributing sessions. Discovery uses the existing worktree owner's admitted
+locator, not a second archive-specific path map. Complete owner exports remain
+distinct from digests and presentation history; archival evidence identifies the
+exact revision actually retained. The archivist never becomes a canonical
+agenda writer or acquires live agency authority. The
+[worktree-data vision](../agent-worktrees/worktree-data/README.md) governs that
+data's independent lifetime and reclamation boundary.
 
 ### two-pluggable-seams
 The daemon is generic: a **session-source** seam supplies *which sessions and

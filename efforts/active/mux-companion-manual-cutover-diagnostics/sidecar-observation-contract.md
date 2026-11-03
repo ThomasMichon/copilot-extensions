@@ -6,14 +6,20 @@ Canonical effort: [README.md](README.md), Step 7.
 This is the reviewed cross-owner design target. The first worktree-observation
 source implementation is documented in the
 [owning provider contract](../../../plugins/agent-worktrees/docs/worktree-observations.md);
-the remaining Bridge and rich-agenda surfaces below are still proposed.
+the rich agenda owner reader and known-session Bridge surfaces also have source
+implementations from #10131. Membership, qualified pre-window measurement and
+the remaining consumer joins below retain their proposed/unqualified status.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
 
-The continuing rich-agenda source candidate is documented in its
+The rich-agenda source reader is documented in its
 [owning passive-reader contract](../../../plugins/efforts/skills/driving-effort-agendas/references/agenda-history.md).
 Its source qualification is not installed adoption or Manager integration.
+The [known-session Bridge contract](../../../plugins/agent-bridge/docs/session-observations.md)
+owns its implemented coverage and lifetime limits; the
+[merge readback](journal/2026/11.02-sidecar-owner-consumers.md) records the source
+receipt without strengthening those guarantees.
 
 ## Ownership and passive discovery
 
@@ -33,8 +39,9 @@ preflight subprocess for every history page or update.
 ## New source surfaces
 
 Names below identify the v1 source expansion. Installed support is negotiated,
-not inferred from this plan; only the worktree family has the first source
-implementation in this slice.
+not inferred from this plan. Worktree, rich agenda and known-session Bridge
+providers have source delivery; membership and definitive measurement support
+are not inferred from that receipt.
 
 | Owner | Capability | Read boundary |
 | --- | --- | --- |

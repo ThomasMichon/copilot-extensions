@@ -283,26 +283,75 @@ def test_migration_v23_to_v24_adds_live_session_aliases(tmp_path: Path) -> None:
         db.close()
 
 
-def test_migration_v24_alone_installs_aliases_triggers_and_start_time(tmp_path: Path) -> None:
+def test_migration_v24_alone_installs_aliases_triggers_and_start_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The v24 migration is self-contained: run on its own (without the
     every-init ensure path) it still installs the alias table, both triggers
     and ``live_sessions.process_started_at``."""
-    db = Database(tmp_path / "b.db")
-    try:
-        conn = db._get_conn()
-        from agent_bridge.inbox_consumer_schema import definitions as consumer_schema
+    from agent_bridge.db_core import _SCHEMA_SQL
+    from agent_bridge.db_schema import _SchemaMixin
+    from agent_bridge.inbox_custody import validate_schema as validate_inbox_schema
 
-        # Remove later-schema dependencies before reconstructing the v23 shape.
-        for name, (kind, _table, _) in reversed(list(consumer_schema().items())):
-            conn.execute(f"DROP {kind} {name}")
+    # Match the guard-free bootstrap at production's migration entry, not a
+    # current Database whose future custody guards survive a marker rewind.
+    conn = sqlite3.connect(tmp_path / "b.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    migrations = _SchemaMixin()
+    versions: list[int] = []
+    install_aliases = migrations._ensure_live_session_aliases
+
+    def observe_v24_install(connection: sqlite3.Connection) -> None:
+        version = connection.execute("SELECT version FROM schema_version").fetchone()[0]
+        install_aliases(connection)
+        if not versions:
+            # Later _ensure_current_columns must not heal a missing v24 step.
+            assert version == 23
+            names = {
+                row[0] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='trigger'",
+                )
+            }
+            assert {"live_sessions_retired_id_fence", "live_sessions_drop_orphaned_aliases"} <= names
+            column = next(
+                row for row in connection.execute("PRAGMA table_info(live_sessions)")
+                if row["name"] == "process_started_at"
+            )
+            assert column["type"].upper() == "REAL" and column["notnull"] == 0
+            connection.execute(
+                "INSERT INTO live_sessions(session_id,registered_at,updated_at) VALUES('current',1,1)",
+            )
+            connection.execute(
+                "INSERT INTO live_session_aliases VALUES('retired','current',1)",
+            )
+            connection.execute(
+                "INSERT INTO live_sessions(session_id,registered_at,updated_at) VALUES('retired',1,1)",
+            )
+            assert connection.execute(
+                "SELECT 1 FROM live_sessions WHERE session_id='retired'",
+            ).fetchone() is None
+            connection.execute("DELETE FROM live_sessions WHERE session_id='current'")
+            assert connection.execute("SELECT 1 FROM live_session_aliases").fetchone() is None
+        versions.append(version)
+
+    monkeypatch.setattr(migrations, "_ensure_live_session_aliases", observe_v24_install)
+    try:
+        assert type(conn) is sqlite3.Connection
+        conn.executescript(_SCHEMA_SQL)
         conn.executescript(
-            "DROP TRIGGER live_sessions_retired_id_fence;"
-            "DROP TRIGGER live_sessions_drop_orphaned_aliases;"
             "DROP TABLE live_session_aliases;"
             "ALTER TABLE live_sessions DROP COLUMN process_started_at;"
-            "UPDATE schema_version SET version = 23;"
+            "INSERT INTO schema_version VALUES(23);"
         )
-        db._migrate(conn, 23)
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'",
+        ).fetchall() == []
+        assert "process_started_at" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(live_sessions)")
+        }
+        migrations._migrate(conn, 23)
+        assert versions and versions[0] == 23
         triggers = {
             r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
         }
@@ -310,9 +359,42 @@ def test_migration_v24_alone_installs_aliases_triggers_and_start_time(tmp_path: 
         assert {fence, cleanup} <= triggers
         columns = {r[1] for r in conn.execute("PRAGMA table_info(live_sessions)")}
         assert "process_started_at" in columns
-        assert db.execute_read("SELECT version FROM schema_version")[0]["version"] == SCHEMA_VERSION
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == SCHEMA_VERSION
+        validate_inbox_schema(conn)
     finally:
-        db.close()
+        conn.close()
+
+
+def test_migration_fixture_rejects_mixed_current_inbox_guard(tmp_path: Path) -> None:
+    """A marker rewind cannot make a current exact-native guard legacy SQL."""
+    from agent_bridge.db_core import _SCHEMA_SQL
+    from agent_bridge.inbox_custody import ensure_schema, schema_triggers, validate_schema
+    from agent_bridge.runtime_custody import (
+        RuntimeCustodyError, _normalized_schema, ensure_schema as ensure_runtime_schema,
+    )
+
+    conn = sqlite3.connect(tmp_path / "mixed.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        assert type(conn) is sqlite3.Connection
+        conn.executescript(_SCHEMA_SQL)
+        ensure_runtime_schema(conn)
+        ensure_schema(conn, exact_native=True)
+        ensure_schema(conn, exact_native=False)
+        name = "live_messages_handoff_input_immutable"
+        actual = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name=?", (name,),
+        ).fetchone()[0]
+        assert _normalized_schema(actual) == _normalized_schema(schema_triggers()[name][1])
+        assert _normalized_schema(actual) != _normalized_schema(
+            schema_triggers(exact_native=False)[name][1],
+        )
+        with pytest.raises(RuntimeCustodyError, match=name):
+            validate_schema(conn, exact_native=False)
+        validate_schema(conn)
+    finally:
+        conn.close()
 
 
 # -- Route layer ------------------------------------------------------------

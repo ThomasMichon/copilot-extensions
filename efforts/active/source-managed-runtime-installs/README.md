@@ -547,19 +547,24 @@ matrix; no schedule or cadence is enabled by this plan.
 The [bounded control refinement](automatic-update-control.md) extends the
 existing maintenance and installation workspace owners, not another updater.
 
-- [ ] Review the automatic-control intent and validation plan before implementation.
-- [ ] Expose the applicable existing automatic-update control and independent
+- [x] Review the automatic-control intent and validation plan before implementation (#10056).
+- [x] Implement the applicable existing automatic-update control and independent
   maintenance veto in Configuration / Installation & Updates with truthful
   scope, persistence, errors and an actionable ON/OFF interaction.
-- [ ] Route automatic software updates after Manager startup and before
-  worktree creation/resume through canonical `<repo> update --auto`, preserving
+- [x] Implement canonical automatic software-update routing after Manager startup and before
+  worktree creation/resume through `<repo> update --auto`, preserving
   origin through queued execution and retaining the existing single executor.
-- [ ] Prove that disabling automatic updates blocks only automatic requests;
+- [x] Prove that disabling automatic updates blocks only automatic requests;
   explicit user/agent and selected-component updates retain their ordinary
   path and re-entrancy guards without requiring force.
-- [ ] Qualify UI cancellation/persistence, queued policy changes, both launcher
+- [x] Qualify UI cancellation/persistence, queued policy changes, both launcher
   adapters and supported mixed-version behavior; update owner docs and land
   the bounded source through normal review and required CI.
+
+Source qualification merged in #10103; its explicit platform/publication limits are
+recorded in the [control refinement](automatic-update-control.md#implementation-and-qualification).
+The implementation rows above do not credit native rollout or the parent
+maintenance/adoption gate.
 
 ### Phase 4b - Durable installation execution driver
 The [execution-driver slice](execution-driver.md), tracked by #7758, separates
@@ -1346,6 +1351,15 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-11-03 - Automatic-update controls qualified and merged
+
+#10103 merged the bounded Phase 4a.1 implementation after exact-head native
+functional qualification, independent approval and required CI. The
+[qualification record](automatic-update-control.md#source-gate-closed-2026-11-03)
+keeps the failed 300-second attempt distinct from the separately authorized
+passing attempt. Phase 4a recurring maintenance, Manager-first setup and
+installed/native-lifecycle acceptance remain open under their existing owners.
 
 - [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
 

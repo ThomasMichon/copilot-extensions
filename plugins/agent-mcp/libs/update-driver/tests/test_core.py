@@ -47,6 +47,124 @@ def test_readonly_absent(area):
     assert not root.exists()
 
 
+def test_manager_policy_rechecks_queued_auto_without_blocking_manual(area):
+    manager = area / "manager"
+    manager.mkdir()
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    context = (("WORKTREE_MANAGER_ROOT", str(manager)),)
+    automatic = sample(area, argv=("update", "--auto"), context=context)
+    manual = sample(area, argv=("update",), context=context)
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    observed = []
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == [manual.id]
+    refused = status(automatic.id, root=area / "state")
+    assert refused.exit_code == 3 and refused.started_at is None
+    assert "maintenance.automatic is false" in refused.error
+    assert status(manual.id, root=area / "state").exit_code == 0
+
+
+@pytest.mark.parametrize("no_update", [False, True])
+@pytest.mark.parametrize("root_form", ["relative", "home", "missing-parent"])
+def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_update, root_form):
+    monkeypatch.setenv("HOME", str(area))
+    monkeypatch.setenv("USERPROFILE", str(area))
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    caller = area / "caller"
+    manager = caller / "manager"
+    manager.mkdir(parents=True)
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    runner = TrustedRunner((sys.executable, "-c", "pass"), str(area))
+    flags = ("--no-update",) if no_update else ()
+    arguments = ("--auto", *flags, "--with-reconcile")
+    roots = {"relative": "manager", "home": "~/caller/manager", "missing-parent": "missing/../manager"}
+    context = (("WORKTREE_MANAGER_ROOT", roots[root_form]),)
+    automatic = enqueue(RequestSpec(
+        "engine-launch-update", arguments, cwd=str(caller), context=context,
+    ), runner=runner, root=area / "state")
+    manual = enqueue(RequestSpec(
+        "engine-launch-update", flags, cwd=str(caller), context=context, repair=True,
+    ), runner=runner, root=area / "state")
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    monkeypatch.chdir(area)
+    observed = []
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == [manual.id]
+    refused = status(automatic.id, root=area / "state")
+    assert refused.exit_code == 3 and refused.started_at is None
+    assert "maintenance.automatic is false" in refused.error
+    assert status(manual.id, root=area / "state").exit_code == 0
+
+
+@pytest.mark.parametrize("no_update", [False, True])
+def test_queued_launch_rechecks_maintenance_even_without_software_updates(area, no_update):
+    manager = area / "manager"
+    manager.mkdir()
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    runner = TrustedRunner((sys.executable, "-c", "pass"), str(area))
+    flags = ("--no-update",) if no_update else ()
+    automatic = enqueue(RequestSpec(
+        "engine-launch-update", ("--auto", *flags, "--with-reconcile"),
+        context=(("WORKTREE_MANAGER_ROOT", str(manager)),),
+    ), runner=runner, root=area / "state")
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    observed = []
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == []
+    refused = status(automatic.id, root=area / "state")
+    assert refused.exit_code == 3 and refused.started_at is None
+    assert "maintenance.automatic is false" in refused.error
+
+
+@pytest.mark.parametrize("no_update", [False, True])
+def test_launch_software_hold_does_not_inhibit_intentional_reconciliation(area, no_update):
+    from update_driver.core import automatic_update_refusal
+
+    switch = area / "hold.json"
+    switch.write_text('{"active":true}', encoding="utf-8")
+    flags = ("--no-update",) if no_update else ()
+    reason = automatic_update_refusal(RequestSpec(
+        "engine-launch-update", ("--auto", *flags, "--with-reconcile"),
+        context=(("WORKTREE_MANAGER_ROOT", str(area / "manager")),),
+        killswitch_path=str(switch),
+    ))
+    assert (reason is None) is no_update
+    if not no_update:
+        assert "KillSwitch active" in reason
+
+
+@pytest.mark.parametrize("content", ["[", "[maintenance]\nautomatic = 'false'\n"])
+def test_invalid_manager_policy_blocks_only_explicitly_automatic_work(area, content):
+    from update_driver.core import automatic_update_refusal
+
+    manager = area / "manager"
+    manager.mkdir()
+    (manager / "config.toml").write_text(content, encoding="utf-8")
+    context = (("WORKTREE_MANAGER_ROOT", str(manager)),)
+    assert automatic_update_refusal(RequestSpec("engine", ("--auto",), context=context))
+    assert automatic_update_refusal(RequestSpec("engine", (), context=context)) is None
+
+
+def test_manager_policy_preserves_unrelated_cell_scope(area, monkeypatch):
+    from pathlib import Path
+    from update_driver.core import automatic_update_refusal
+
+    monkeypatch.setattr(Path, "home", lambda: area)
+    manager = area / ".worktree-manager"
+    manager.mkdir()
+    (manager / "config.toml").write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    cell = (("COPILOT_EXTENSIONS_CONTEXT", "separate-cell"),)
+    assert automatic_update_refusal(RequestSpec("engine", ("--auto",), context=cell)) is None
+    addressed = (*cell, ("WORKTREE_MANAGER_ROOT", str(manager)))
+    assert "maintenance.automatic is false" in automatic_update_refusal(
+        RequestSpec("engine", ("--auto",), context=addressed),
+    )
+
+
 def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkeypatch, capsys):
     root = area / "state"
     switch = area / "killswitch.json"

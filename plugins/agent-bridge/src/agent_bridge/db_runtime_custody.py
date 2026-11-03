@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
 import sqlite3
+from .owner_membership_signal import commit as commit_membership
 
 from .runtime_custody import (
     RuntimeAdmission, RuntimeCustodyError, RuntimeEpoch, RuntimeInstallation,
@@ -16,7 +17,7 @@ from .runtime_custody import (
 class _RuntimeCustodyMixin:
     @contextmanager
     def _runtime_transaction(
-        self, *, write: bool, full_sync: bool = True,
+        self, *, write: bool, full_sync: bool = True, membership: bool = False,
     ) -> Iterator[sqlite3.Connection]:
         if write and self.read_only:
             raise PermissionError("Read-only database cannot change runtime custody")
@@ -32,7 +33,7 @@ class _RuntimeCustodyMixin:
             try:
                 conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 yield conn
-                conn.commit()
+                commit_membership(conn, membership=membership)
             except BaseException:
                 conn.rollback()
                 raise
@@ -43,11 +44,12 @@ class _RuntimeCustodyMixin:
     def _execute_runtime_admitted_write(
         self, statement: str, parameters: tuple[object, ...],
         admission: RuntimeAdmission | None,
+        *, membership: bool = False,
     ) -> sqlite3.Cursor:
         """Sync retained admission without changing ordinary event writes."""
         if admission is None:
-            return self.execute_write(statement, parameters)
-        with self._runtime_transaction(write=True) as conn:
+            return self.execute_write(statement, parameters, membership=membership)
+        with self._runtime_transaction(write=True, membership=membership) as conn:
             return conn.execute(statement, parameters)
 
     def _runtime_installation(self, installation: RuntimeInstallation) -> str:

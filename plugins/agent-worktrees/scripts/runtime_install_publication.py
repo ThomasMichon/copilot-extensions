@@ -10,6 +10,7 @@ from typing import Any
 import versioned_runtime as runtime
 
 HOOKS = (
+    "killswitch_mutation.py",
     "session-conduct.ps1", "session-conduct.sh", "session-machine.ps1", "session-machine.sh",
     "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
     "bootstrap-check.ps1", "bootstrap-check.sh", "project-hooks.ps1", "project-hooks.sh",

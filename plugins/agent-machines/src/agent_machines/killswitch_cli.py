@@ -28,12 +28,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .fleet_update_lock import _pid_alive
+from .killswitch_mutation import mutate
 
 
 def _state_file() -> Path:
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
     if override:
-        return Path(override).expanduser()
+        path = Path(override).expanduser()
+        return path.parent.resolve() / path.name
     return Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
 
 
@@ -131,7 +133,6 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_on(args: argparse.Namespace) -> int:
     path = _state_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
     reason = getattr(args, "reason", None) or ""
     who = f"{getpass.getuser()}@{socket.gethostname()}"
     state = {
@@ -146,13 +147,7 @@ def cmd_on(args: argparse.Namespace) -> int:
     # every session start; writing in place would leave a window where it
     # could observe a truncated/partial file, fail OPEN, and let a reconcile
     # through even though the switch was (or was about to be) active.
-    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=2)
-        fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    mutate(path, state=state)
     live = _live_reconciling_plugins()
     if getattr(args, "json", False):
         payload = {"ok": True, "path": str(path), **state}
@@ -182,7 +177,7 @@ def cmd_off(args: argparse.Namespace) -> int:
         paths.append(_legacy_state_file())
     existed = any(candidate.exists() for candidate in paths)
     for candidate in paths:
-        candidate.unlink(missing_ok=True)
+        mutate(candidate, state=None)
     if getattr(args, "json", False):
         print(json.dumps({"ok": True, "cleared": existed, "path": str(path)}, indent=2))
         return 0

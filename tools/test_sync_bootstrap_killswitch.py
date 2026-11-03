@@ -22,6 +22,7 @@ def fake_repo(tmp_path, monkeypatch):
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "bootstrap-killswitch-guard.sh").write_text("canonical sh\n", encoding="utf-8")
     (canonical_dir / "bootstrap-killswitch-guard.ps1").write_text("canonical ps1\n", encoding="utf-8")
+    (canonical_dir / "killswitch_mutation.py").write_text("canonical mutation\n", encoding="utf-8")
     (canonical_dir / "pretool_killswitch.py").write_text("canonical pretool\n", encoding="utf-8")
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
@@ -73,6 +74,28 @@ def test_sync_writes_both_guard_files_for_each_adopter(fake_repo):
     assert rc == 0
     assert (scripts / "bootstrap-killswitch-guard.sh").read_text() == "canonical sh\n"
     assert (scripts / "bootstrap-killswitch-guard.ps1").read_text() == "canonical ps1\n"
+
+
+def test_standalone_manager_ships_controllers_without_a_bootstrap_hook(fake_repo):
+    _mk_adopter(fake_repo, "agent-example")
+    manager = fake_repo / "worktree-manager"
+    manager.mkdir()
+    (manager / "pyproject.toml").write_text("[project]\nname = 'fixture-manager'\n")
+    assert sync_bootstrap_killswitch.main([]) == 0
+    for name in sync_bootstrap_killswitch.GUARD_NAMES:
+        assert (manager / "scripts" / name).read_bytes() == (
+            fake_repo / "libs/bootstrap-killswitch" / name
+        ).read_bytes()
+    assert not (manager / "scripts/bootstrap-check.sh").exists()
+    assert sync_bootstrap_killswitch.main(["--check"]) == 0
+    (manager / "scripts/bootstrap-killswitch-guard.sh").write_text("wrong source\n")
+    assert sync_bootstrap_killswitch.main(["--check"]) == 1
+
+
+def test_plugin_only_fixture_does_not_create_a_manager(fake_repo):
+    _mk_adopter(fake_repo, "agent-example")
+    assert sync_bootstrap_killswitch.main([]) == 0
+    assert not (fake_repo / "worktree-manager").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX executable mode bits")

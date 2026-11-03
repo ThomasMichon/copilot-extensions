@@ -60,18 +60,25 @@ _ABBREVIATED_OBSERVER_ARGS = [
     ["agent-bridge", "--project", "demo", "observe-session", "fixture"],
     ["--project", "observe-session", "create", "fixture"],
     ["--project=session-observation-history", "create", "fixture"],
+    pytest.param(["observe-owner"], id="membership-direct"),
+    pytest.param(["--proj=demo", "--j", "observe-owner"], id="membership-project-json"),
+    pytest.param(["-p", "observe-owner", "create", "fixture"], id="membership-value-not-verb"),
 ] + _ABBREVIATED_OBSERVER_ARGS)
 def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, mode, argv):
     """Run the shipped dispatcher with inert context/publication/installer spies."""
     from agent_bridge.__main__ import build_parser
 
-    parser_argv = argv[1:] if argv[0] == "agent-bridge" else list(argv)
-    if parser_argv[-2] != "create":
-        parser_argv += ["--worktree-id", "fixture-worktree", "--contract-version", "1", "--json"]
+    argv = list(argv)
+    verb = "observe-owner" if argv[-1] == "observe-owner" else argv[-2]
+    if verb == "observe-owner":
+        argv += ["--owner-ref", "fixture-host/demo/parent-worktree", "--contract-version", "1", "--json"]
+    elif verb != "create":
+        argv += ["--worktree-id", "fixture-worktree", "--contract-version", "1", "--json"]
+    parser_argv = argv[1:] if argv[0] == "agent-bridge" else argv
     parsed = build_parser().parse_args(parser_argv)
-    assert parsed.command == argv[-2]
-    if argv[-2] == "create":
-        assert parsed.project in {"observe-session", "session-observation-history"}
+    assert parsed.command == verb
+    if verb == "create":
+        assert parsed.project in {"observe-session", "session-observation-history", "observe-owner"}
     host = shutil.which(shell)
     if host is None:
         pytest.skip(f"{shell} is unavailable")
@@ -174,7 +181,7 @@ def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, m
         command, cwd=tmp_path, env=env, capture_output=True, text=True,
         encoding="utf-8", timeout=15, **no_window_kwargs(),
     )
-    passive = argv[-2] != "create"
+    passive = verb != "create"
     recorded = calls.read_text(encoding="utf-8").splitlines()
     if passive:
         assert result.returncode == 1, result.stdout + result.stderr

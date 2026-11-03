@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http52-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-source-cutover_drain-py-3536e2a4101a.json",
+    "sha256": "9c3ba2cef019477be89f0bd7b092c813cd8874c21aa0ec0d7587f8fd421327da"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
+    "sha256": "da34f770fa4d39e5553a33ed16e77bbd0655c548a151130ce9e4a41500899fbc"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "cd24101d43ce66421e3f382d78bd25cc131559e1",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 52,
+    "source_path": "libs/zdd/src/zdd/cutover_drain.py",
+    "source_git_blob": "f778fc809a13102a7a2d45f99cc6c5dc2029da17",
+    "source_sha256": "53bf38dbc5081f3457689f3a0e6b597bd2112b8cd982a6eea4ba4b2625a21e69"
+  }
+}

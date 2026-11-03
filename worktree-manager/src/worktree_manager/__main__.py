@@ -1477,52 +1477,10 @@ def _extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
 
 
 def _cmd_update(rest: list[str]) -> int:
-    """Update the harness — the Worktree Manager AS the plugin updater/aligner.
+    """Delegate update admission while retaining the existing CLI callback seam."""
+    from .update_orchestration import execute_update
 
-    Two steps: (1) self-update the Manager (best-effort; effective next run);
-    (2) orchestrate via the engine (``agent-worktrees update --no-manager``,
-    the seam bypass) -- refreshing plugin payloads/runtimes, syncing anchors.
-    The run is recorded through ``update_events``; the exit code follows the
-    shared update table (0 success, non-zero failure classes).
-    """
-    if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
-        from .installation_updates import run_targeted_update
-
-        return run_targeted_update(rest)
-    from .update_bootstrap import prepare_update
-    from .update_events import UpdateRun
-    from .update_orchestration import preflight_runtime_source
-    from .runtime_source import SourceAcquisitionError
-    from .runtime_source_update import repair_selection
-
-    if not preflight_runtime_source(suite=True):
-        return 1
-    run = None
-    try:
-        with repair_selection(rest) as runtime_source:
-            source_arguments = (
-                {"runtime_source": runtime_source} if runtime_source is not None else {}
-            )
-            prepared = prepare_update(rest, **source_arguments)
-            if prepared.exit_code:
-                return prepared.exit_code
-            run = UpdateRun()
-            rc = _cmd_update_steps(
-                prepared.arguments, run, fresh_manager=prepared.fresh_manager,
-                environment=prepared.environment, **source_arguments,
-            )
-        return run.finish(rc)
-    except (OSError, ValueError, SourceAcquisitionError) as error:
-        if run is None:
-            print(f"Runtime source: {error}", file=sys.stderr)
-            return 1
-        run.say(f"Runtime source: {error}", state="failed")
-        run.record_engine_error(str(error), missing=False)
-        return run.finish(1)
-    except BaseException as exc:
-        if run is not None:
-            run.abort(exc)
-        raise
+    return execute_update(rest, _cmd_update_steps)
 
 
 def _cmd_update_steps(

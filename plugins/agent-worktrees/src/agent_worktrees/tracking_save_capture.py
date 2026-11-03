@@ -193,6 +193,9 @@ class Identity:
     machine: str
     incarnation: str | None
     head_session_id: str | None
+    machine_identity_version: int | None = None
+    environment: str | None = None
+    execution_machine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +231,7 @@ class SaveReceipt:
     actor_qualification: Literal["unknown"] = "unknown"
     actor_id: None = None
     history_completeness: Literal["unknown"] = "unknown"
+    exclusion: Literal["sidecar", "in-process", "unverified"] = "unverified"
 
     @property
     def encoded_bytes(self) -> int:
@@ -250,6 +254,8 @@ class SaveReceipt:
                     state.identity.machine,
                     state.identity.incarnation,
                     state.identity.head_session_id,
+                    state.identity.environment,
+                    state.identity.execution_machine,
                 )
                 if value is not None
             )
@@ -346,6 +352,9 @@ def project(record: WorktreeRecord | None) -> Projection:
             required_reference(record.machine),
             reference(record.creation_nonce, nullable=True),
             head,
+            record.machine_fields.get("machine_identity_version"),
+            record.machine_fields.get("environment"),
+            record.machine_fields.get("execution_machine"),
         )
         fence = encode(
             {
@@ -431,6 +440,7 @@ def receipt(
     raw: bytes | None,
     *,
     record_held: bool,
+    sidecar_held: bool = False,
 ) -> SaveReceipt:
     path_text = text(str(path))
     if path_text is None:
@@ -460,6 +470,7 @@ def receipt(
         "partial" if partial else "selected-fields",
         changed,
         "record-lock-held" if record_held else "unverified",
+        exclusion="sidecar" if sidecar_held else ("in-process" if record_held else "unverified"),
     )
     if result.encoded_bytes > MAX_RECEIPT_BYTES:
         raise CaptureOmitted("receipt-byte-bound")
