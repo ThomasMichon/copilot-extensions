@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import json
 import importlib.util
-import argparse
 import ast
 import os
-import shlex
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -439,44 +438,26 @@ def test_workflow_policy_never_executes_function_calls():
         _policy_value("make_green()", plugin="agent-dispatch", event="pull_request")
 
 
-def test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline():
+def test_required_ci_stays_unit_only_and_manual_qualification_is_bounded():
     import yaml
 
     workflow = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
     )
-    job = workflow["jobs"]["smoke"]
-    selected = next(
-        step for step in job["steps"]
-        if "tools/run-coverage-selected-tests.py" in shlex.split(step.get("run", ""))
+    assert not {"smoke", "discover", "full"} & set(workflow["jobs"])
+    job = workflow["jobs"]["unit-tests"]
+    assert job["timeout-minutes"] == 5
+    assert any("tools/ci_pr_unit_reuse.py" in step.get("run", "") for step in job["steps"])
+    assert all(
+        "tools/run-plugin-tests.py" not in step.get("run", "")
+        and "tools/run-coverage-selected-tests.py" not in step.get("run", "")
+        for step in job["steps"]
     )
-    ordinary = next(
-        step for step in job["steps"]
-        if "tools/run-plugin-tests.py" in shlex.split(step.get("run", ""))
-    )
-    for plugin in ("agent-dispatch", "agent-index", "agent-bridge", "other", "agent-dispatch-other"):
-        for event in ("pull_request", "push", "workflow_dispatch", "pull_request_target"):
-            context = {"plugin": plugin, "event": event}
-            expected_deadline = 12 if plugin in {"agent-dispatch", "agent-index", "agent-bridge"} else 8
-            assert _policy_value(job["timeout-minutes"], **context) == expected_deadline
-            is_pilot = plugin == "agent-dispatch" and event == "pull_request"
-            assert bool(_policy_value(selected.get("if", "true"), **context)) == is_pilot
-            assert bool(_policy_value(ordinary.get("if", "true"), **context)) != is_pilot
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("--smoke-budget", type=float)
-    parser.add_argument("--commit-volume-threshold", type=int)
-    parser.add_argument("--age-threshold-seconds", type=float)
-    budgets, _ = parser.parse_known_args(shlex.split(selected["run"]))
-    assert budgets.smoke_budget == 120
-    assert budgets.commit_volume_threshold == 200
-    assert budgets.age_threshold_seconds == 604800
-    assert workflow["env"]["COVERAGE_GUIDED_SELECTION_MODE"] == "shadow"
-    full = next(
-        shlex.split(step["run"])
-        for step in workflow["jobs"]["full"]["steps"]
-        if "tools/run-plugin-tests.py" in shlex.split(step.get("run", ""))
-    )
-    assert not {"--selection-file", "--guards", "--collect-only", "--test-file", "-k"} & set(full)
+    manual = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/installation-context-full.yml").read_text(),
+    )["jobs"]["coverage-selection"]
+    assert manual["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'"
+    assert manual["timeout-minutes"] == 12
 
 
 def test_cli_missing_suite_cannot_turn_full_fallback_into_a_successful_skip(tmp_path, monkeypatch):
@@ -498,49 +479,49 @@ def test_cli_missing_suite_cannot_turn_full_fallback_into_a_successful_skip(tmp_
     assert error.value.code == 2
 
 
-def _run_discovery(
-    history: tuple[Path, str, dict], changed: str, event: str, listed: tuple[str, ...] = (),
+def _run_unit_impact(
+    history: tuple[Path, str, dict], changed: str, event: str,
 ) -> dict[str, str]:
     import yaml
 
     root, _, _ = history
     tools = root / "tools"
-    tools.mkdir()
+    tools.mkdir(exist_ok=True)
     stub = tools / "run-plugin-tests.py"
-    stub.write_text(f"print({json.dumps(list(listed))!r})\n", encoding="utf-8")
+    stub.write_text("raise AssertionError('unit impact must not run a full plugin')\n", encoding="utf-8")
     shutil.copyfile(
-        Path(__file__).resolve().parent / "ci_plugin_partitions.py",
-        tools / "ci_plugin_partitions.py",
+        Path(__file__).resolve().parent / "promotion_unit_contract.py",
+        tools / "promotion_unit_contract.py",
     )
-    _git(root, "add", "tools/run-plugin-tests.py", "tools/ci_plugin_partitions.py")
-    _git(root, "commit", "-qm", "discovery list stub")
+    _git(root, "add", "tools/run-plugin-tests.py", "tools/promotion_unit_contract.py")
+    _git(root, "commit", "-qm", "unit impact source")
     base = _git(root, "rev-parse", "HEAD")
     target = root / changed
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8") as stream:
         stream.write("# changed input\n")
     _git(root, "add", changed)
-    _git(root, "commit", "-qm", "changed discovery input")
+    _git(root, "commit", "-qm", "changed unit input")
+    head = _git(root, "rev-parse", "HEAD")
     workflow = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
     )
     script = next(
-        step["run"] for step in workflow["jobs"]["discover"]["steps"]
-        if step.get("id") == "set"
-    ).replace("${{ github.event_name }}", event).replace(
-        "${{ github.event.pull_request.base.sha }}", base,
-    )
-    output = root / "discovery-output"
+        step["run"] for step in workflow["jobs"]["unit-tests"]["steps"]
+        if step.get("id") == "impact"
+    ).splitlines()
+    assert script[0] == "python - <<'PY'" and script[-1] == "PY"
+    output = root / "unit-impact-output"
     env = ar.scrubbed_git_env()
-    env.update(HEAVY_PLUGIN="agent-worktrees", GITHUB_OUTPUT=str(output))
+    env.update(EVENT=event, BASE=base, HEAD=head, GITHUB_OUTPUT=str(output))
     subprocess.run(
-        ["bash", "-e", "-c", script], cwd=root, env=env,
+        [sys.executable, "-c", "\n".join(script[1:-1])], cwd=root, env=env,
         capture_output=True, text=True, check=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the discovery job executes Bash on Linux")
 @pytest.mark.parametrize("changed,event,expected", [
     ("tools/coverage_guided_selection/fallback.py", "pull_request", True),
     ("tools/run-coverage-selected-tests.py", "pull_request", True),
@@ -553,33 +534,25 @@ def _run_discovery(
     ("tools/_devcontainer_network_scope.py", "pull_request", True),
     (".github/workflows/ci.yml", "pull_request", True),
     ("docs/unrelated.md", "pull_request", False),
-    ("tools/unrelated.py", "pull_request", False),
+    ("tools/unrelated.py", "pull_request", True),
     ("tools/plugin_test_selection.py", "push", False),
 ])
-def test_discovery_runs_dispatch_for_its_selection_inputs(history, changed, event, expected):
-    values = _run_discovery(history, changed, event)
-    assert json.loads(values["smoke"]) == (["agent-dispatch"] if expected else [])
-    assert values["heavy"] == "false"
-    assert json.loads(values["smoke_matrix"]) == (
-        [{"plugin": "agent-dispatch", "partition": 0, "partitions": 1, "name": "agent-dispatch"}]
-        if expected else []
-    )
+def test_current_ci_impact_runs_units_without_reactivating_dispatch(history, changed, event, expected):
+    values = _run_unit_impact(history, changed, event)
+    assert values == {"run": str(expected).lower()}
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the discovery job executes Bash on Linux")
 @pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch"])
-def test_discovery_keeps_full_partition_defaults_outside_the_pr_pilot(history, event):
-    from tools.ci_plugin_partitions import smoke_matrix
+def test_current_unit_lane_keeps_event_admission_without_plugin_matrices(history, event):
+    import yaml
 
-    listed = ("agent-dispatch", "agent-bridge")
-    values = _run_discovery(history, "docs/unrelated.md", event, listed)
-    rows = json.loads(values["smoke_matrix"])
-    override = frozenset({"agent-dispatch"}) if event == "pull_request" else frozenset()
-    assert rows == smoke_matrix(list(listed), single_job_plugins=override)
-    assert len({row["name"] for row in rows}) == len(rows)
-    assert sum(row["plugin"] == "agent-dispatch" for row in rows) == (
-        1 if event == "pull_request" else 3
-    )
+    values = _run_unit_impact(history, "docs/unrelated.md", event)
+    assert values == {"run": str(event == "workflow_dispatch").lower()}
+    job = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
+    )["jobs"]["unit-tests"]
+    assert "plugin" not in job.get("strategy", {}).get("matrix", {})
+    assert bool(_policy_value(job["if"], plugin="agent-dispatch", event=event)) == (event != "push")
 
 
 @pytest.mark.skipif(
@@ -699,6 +672,10 @@ def test_auditability_requires_observed_unchanged_complete_profile(tmp_path):
     assert proof is not None
     assert auditability.verified_exclusions(tmp_path, {node: proof}, current) == {node: proof}
     assert auditability.evidence(tmp_path, node, metadata, {}, current) is None
+    assert auditability.evidence(
+        tmp_path, node, metadata,
+        {**coverage, "src/undeclared.py": {"1": [node]}}, current,
+    ) is None
     assert auditability.evidence(
         tmp_path, node, {**metadata, "effects": ["process"]}, coverage, current,
     ) is None

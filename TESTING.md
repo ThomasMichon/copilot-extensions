@@ -7012,8 +7012,10 @@ are unclassified and equally conservative.
 
 The ordinary schema-v4 collector qualifies only the bounded T0/T1 in-process
 families with no declared effects beyond filesystem. Every declared production
-Python dependency needs runtime-context attribution; its bytes and all input
-digests must agree before/after collection and at selection/execution. This is
+Python dependency needs runtime-context attribution, and an undeclared
+runtime-covered source refuses qualification rather than trusting an incomplete
+closure. Its bytes and all input digests must agree before/after collection and
+at selection/execution. This is
 not a claim of 100% line/branch coverage. A changed dependency file retains the
 test even if line attribution is incomplete. Native/process/network/service
 behavior has no qualification in this collector and remains always retained

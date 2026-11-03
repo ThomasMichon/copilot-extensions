@@ -82,7 +82,7 @@ def evidence(
             name for name, lines in coverage.items()
             if any(node in contexts for contexts in lines.values())
         }
-        if not sources or not sources <= observed or not any(
+        if not sources or sources != observed or not any(
             name == current_profile["cov_source"]
             or name.startswith(current_profile["cov_source"].rstrip("/") + "/")
             for name in sources
@@ -131,7 +131,13 @@ def baseline_exclusions(root: Path, baseline: dict, current_profile: dict, eligi
             name for name in declared.get("dependencies", ())
             if name.endswith(".py")
         }
-        if sources and all(
+        observed = {
+            name for name, lines in coverage.items()
+            if isinstance(lines, dict) and any(
+                isinstance(contexts, list) and node in contexts for contexts in lines.values()
+            )
+        }
+        if sources and sources == observed and all(
             isinstance(coverage.get(name), dict)
             and any(isinstance(contexts, list) and node in contexts for contexts in coverage[name].values())
             for name in sources
