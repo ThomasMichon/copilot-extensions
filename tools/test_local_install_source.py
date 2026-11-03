@@ -1195,6 +1195,15 @@ def test_application_adapter_runs_real_install_repeat_and_failed_start_rollback(
     marker = source.engine.runtime.marker_path(root, slot.name).read_bytes()
     assert source.install_application(snapshot, "demo-app", selected.payload, root, **options) == result
     assert source.engine.runtime.marker_path(root, slot.name).read_bytes() == marker
+    installed_declaration = (slot / "application.json").read_bytes()
+    callbacks = {name: (root / name).read_bytes() for name in ("setup.json", "started.json")}
+    record.update(setup=["--setup", "--new-setup"], start=["--start", "--new-start"])
+    path.write_text(json.dumps(record))
+    with pytest.raises(source.engine.ContentRepairRequired, match="distinct repair generation"):
+        source.install_application(snapshot, "demo-app", selected.payload, root, **options)
+    assert {name: (root / name).read_bytes() for name in callbacks} == callbacks
+    assert {name: (root / name).read_bytes() for name in before} == before
+    assert (slot / "application.json").read_bytes() == installed_declaration
     with pytest.raises(subprocess.CalledProcessError):
         source.install_application(
             snapshot, "demo-app", selected.payload, root,
@@ -1203,6 +1212,15 @@ def test_application_adapter_runs_real_install_repeat_and_failed_start_rollback(
     assert {name: (root / name).read_bytes() for name in before} == before
     failed = [path for path in (root / "versions").iterdir() if path != slot]
     assert len(failed) == 1 and not (failed[0] / "install-success.json").exists()
+    repaired = source.install_application(
+        snapshot, "demo-app", selected.payload, root, repair=True, **options,
+    )
+    repaired_slot = Path(repaired["slot"])
+    assert repaired_slot != slot and ".repair." in repaired_slot.name
+    assert (root / "current-version").read_text().strip() == repaired_slot.name
+    assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
+    assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
+    assert (slot / "application.json").read_bytes() == installed_declaration
     launcher = home / ".local" / "bin" / ("demo-app.ps1" if os.name == "nt" else "demo-app")
     command = (
         [shutil.which("powershell.exe"), "-NoProfile", "-NonInteractive", "-File", str(launcher)]

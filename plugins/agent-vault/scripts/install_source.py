@@ -318,6 +318,13 @@ def install_application(
             if candidate.payload_hash != expected_hash:
                 raise ValueError("application candidate differs from its admitted construction inputs")
             inputs.verify()
+            if _read(application / "application.json") != declaration:
+                raise ValueError("prepared application declaration changed during construction")
+            if _read(candidate.slot / "application.json") != declaration:
+                raise engine.ContentRepairRequired(
+                    "application declaration differs from its completed slot; "
+                    "select a distinct repair generation"
+                )
             frozen = engine.FrozenInputs(
                 candidate.frozen_plugin, engine._package_roots(candidate.frozen_plugin),
                 candidate.payload_hash, wheel_inputs=inputs,

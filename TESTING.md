@@ -1781,8 +1781,9 @@ The same file's `application_adapter` packet qualifies the explicit prepared
 downstream composition API. Four refusal controls stop changed selection,
 missing application, mismatched construction and Manager-native ownership
 before construction. Its contained synthetic application executes real UV
-construction, setup/start, unchanged repeat, failed-start selector rollback and
-the published stable command. The source receipt and application are fixtures,
+construction, setup/start, unchanged repeat, changed-declaration refusal before
+callbacks, failed-start selector rollback, distinct repair with the new
+declaration and the published stable command. The source receipt and application are fixtures,
 not authenticated release/deployment evidence. Native Windows qualification
 does not qualify Linux, resident-service readiness or an adopter's host rollout;
 these cases do not expand required unit-only CI.

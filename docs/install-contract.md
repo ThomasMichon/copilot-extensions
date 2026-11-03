@@ -4680,8 +4680,12 @@ and then replay through a guessed legacy path. No new CLI syntax is introduced.
 
 The adapter retains wheel and candidate/process custody through setup,
 publication and startup, and requires the application's successful installation
-receipt. The existing application owner handles selector/launcher rollback;
-application callbacks still own service readiness, irreversible effects and
+receipt. The existing application owner handles selector/launcher rollback.
+The selected and completed-slot application declarations must also agree before
+callbacks execute. Changed setup/start/command declarations refuse reuse and
+require an explicitly selected distinct repair generation; completed slots are
+never rewritten to fit new declarations.
+Application callbacks still own service readiness, irreversible effects and
 partial-transition recovery. A thrown exception is not proof of no effects and
 does not authorize replay. This entry neither acquires/authenticates source nor
 builds a downstream project's initial snapshot, grants deployment authority or
