@@ -234,6 +234,7 @@ async def test_cold_checkout_hook_runs_after_relay_with_launch_environment(
 @pytest.mark.parametrize("workspace_kind", ["dynamic", "literal"])
 async def test_dynamic_hook_created_checkout_full_start_sequence(
     session_manager, monkeypatch, tmp_path, mode, hook_creates_checkout, workspace_kind,
+    permitted_provider_hosting,  # no live GitHub CodeSpace lookup from a unit test
 ):
     import os
     import shlex

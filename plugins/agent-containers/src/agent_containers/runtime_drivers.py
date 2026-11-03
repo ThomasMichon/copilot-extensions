@@ -1,0 +1,941 @@
+"""Container runtime driver seam.
+
+A fleet's members live in a *runtime*. Docker is the built-in default
+runtime; a fleet that sets ``driver: <name>`` delegates every runtime
+operation to an external driver command instead (see
+``external_driver.py`` and ``docs/runtime-drivers.md``).
+
+Leases, borrow/release, fleet sizing, readiness, trust posture and the
+agent-bridge ``container:<name>`` resolver stay in agent-containers and are
+runtime-agnostic. Only the operations below cross the seam:
+
+* provision a named member tagged with its fleet/instance identity,
+* enumerate members (including stopped ones) and inspect one member,
+* start / stop / remove,
+* non-interactive exec with a captured result,
+* interactive streaming exec (ACP stdio and the SSH ``ProxyCommand``),
+* copy host files into a member.
+
+The pre-existing Docker call sites keep building their exact ``docker
+exec``/``docker cp`` argv. :func:`run_routed` and :func:`stream_routed` sit at
+their subprocess boundary: a command aimed at a member owned by an external
+driver is re-targeted at that driver; every other command is left untouched,
+so Docker behavior is byte-for-byte unchanged. Members become owned by a
+driver when discovery (:func:`list_driver_members`) or provisioning reports
+them, which every dispatch path performs before it executes anything.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import subprocess
+import threading
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from .config import INTERNAL_LIFECYCLE_OWNER, ContainersConfig, FleetConfig
+
+if TYPE_CHECKING:
+    from .lifecycle import DockerContainerInfo
+
+log = logging.getLogger("agent-containers")
+
+DOCKER_DRIVER = "docker"
+DRIVER_LABEL = "agent-containers.driver"
+INSTANCE_LABEL = "agent-containers.instance"
+
+# Docker/devcontainer provisioning keys a driver fleet must not set: the
+# driver owns image selection, workspace setup and container creation.
+DRIVER_CONFLICTING_KEYS = (
+    "repo", "devcontainer_path", "devcontainer_config", "image",
+    "network", "memory", "cpus", "pids_limit", "workspace_size", "home_size",
+    "host_workspace_path", "host_home_path", "home_folder", "systemd_capable",
+    "native_inference", "dispatch_only",
+)
+
+
+def _is_set(value: Any) -> bool:
+    return not (value is None or value is False or value == "")
+
+
+def validate_driver_fleet(fleet: FleetConfig) -> None:
+    """Validate ``driver``/``driver_options`` and reject conflicting keys."""
+    import json
+    import re
+
+    if fleet.driver is None:
+        if fleet.driver_options:
+            raise RuntimeError("driver_options requires 'driver'")
+        return
+    if not isinstance(fleet.driver, str) or not re.fullmatch(
+        r"[a-z0-9][a-z0-9._-]{0,63}", fleet.driver
+    ):
+        raise RuntimeError(
+            "driver must be a lowercase driver name "
+            "([a-z0-9][a-z0-9._-]{0,63})"
+        )
+    if fleet.driver == DOCKER_DRIVER:
+        raise RuntimeError(
+            "driver: docker is the built-in default; omit 'driver' instead"
+        )
+    if not isinstance(fleet.driver_options, dict):
+        raise RuntimeError("driver_options must be a key/value mapping")
+    try:
+        json.dumps(fleet.driver_options)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"driver_options must be JSON-serializable: {exc}"
+        ) from exc
+    if fleet.restricted:
+        raise RuntimeError(
+            "driver fleets must be trusted; the restricted profile requires "
+            "the built-in Docker runtime"
+        )
+    if fleet.lifecycle_owner != INTERNAL_LIFECYCLE_OWNER:
+        raise RuntimeError(
+            "driver fleets are lifecycle-managed through their driver; "
+            "lifecycle_owner must be agent-containers"
+        )
+    conflicting = [
+        key for key in DRIVER_CONFLICTING_KEYS if _is_set(getattr(fleet, key))
+    ]
+    if conflicting:
+        raise RuntimeError(
+            f"driver fleets cannot set {', '.join(conflicting)}: the driver "
+            "owns image, workspace and container settings; pass them through "
+            "driver_options instead"
+        )
+
+
+@dataclass(frozen=True)
+class DriverCapabilities:
+    """What a runtime driver guarantees beyond the required verbs."""
+
+    # The driver provides the in-container credential-relay env contract
+    # (LC_GIT_CREDENTIAL_RELAY, _HOST, _TOKEN) itself, so neither
+    # agent-containers nor agent-bridge wires a relay or reverse forward.
+    owns_relay: bool = False
+    # Members run sshd and the driver's streaming exec may run it as root,
+    # so the trusted OpenSSH transport can ride on it as a ProxyCommand.
+    ssh_transport: bool = False
+
+
+@dataclass(frozen=True)
+class ExecResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+class DriverError(RuntimeError):
+    """A typed runtime-driver failure (``code`` is the protocol error code)."""
+
+    def __init__(self, driver: str, verb: str, code: str, message: str) -> None:
+        super().__init__(
+            f"runtime driver '{driver}' {verb} failed ({code}): {message}"
+        )
+        self.driver = driver
+        self.verb = verb
+        self.code = code
+
+
+class RuntimeDriver(ABC):
+    """Runtime operations for the members of one fleet."""
+
+    name: str
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> DriverCapabilities: ...
+
+    @abstractmethod
+    def provision(
+        self, *, name: str, workspace_folder: str, exec_user: str,
+    ) -> str:
+        """Create member ``name`` tagged with this fleet; return its name."""
+
+    @abstractmethod
+    def list_members(self, *, timeout: float | None = None) -> list[DockerContainerInfo]:
+        """Every member of this fleet, including stopped ones."""
+
+    # Every per-member operation accepts ``instance_id``: when set, the
+    # operation must apply to that incarnation only and fail otherwise.
+
+    @abstractmethod
+    def inspect(self, name: str, *, instance_id: str | None = None) -> dict:
+        """A Docker-inspect-shaped document (Id, Name, State, Config.Labels)."""
+
+    @abstractmethod
+    def state(self, name: str, *, instance_id: str | None = None) -> str | None:
+        """The member's state, or ``None`` when it does not exist."""
+
+    @abstractmethod
+    def start(self, name: str, *, instance_id: str | None = None) -> None: ...
+
+    @abstractmethod
+    def stop(self, name: str, *, instance_id: str | None = None) -> None: ...
+
+    @abstractmethod
+    def remove(
+        self, name: str, *, force: bool = False, instance_id: str | None = None,
+    ) -> None: ...
+
+    @abstractmethod
+    def exec(
+        self,
+        name: str,
+        argv: list[str],
+        *,
+        user: str | None = None,
+        env: dict[str, str] | None = None,
+        workdir: str | None = None,
+        stdin: str | None = None,
+        timeout: float = 30.0,
+        instance_id: str | None = None,
+    ) -> ExecResult:
+        """Run ``argv`` to completion and capture its result."""
+
+    @abstractmethod
+    def stream_exec_argv(
+        self,
+        name: str,
+        argv: list[str],
+        *,
+        user: str | None = None,
+        env: dict[str, str] | None = None,
+        inherit_env: list[str] | None = None,
+        workdir: str | None = None,
+        instance_id: str | None = None,
+    ) -> list[str]:
+        """Host argv that runs ``argv`` in the member with stdio passed through.
+
+        ``env`` values appear in host argv and must never be secret; secrets
+        are named in ``inherit_env`` and read from the spawned process's own
+        environment.
+        """
+
+    @abstractmethod
+    def copy_in(
+        self, name: str, source: Path, target: str, *, instance_id: str | None = None,
+    ) -> None:
+        """Copy host path ``source`` into the member as ``target``."""
+
+
+class DockerDriver(RuntimeDriver):
+    """The built-in runtime: the existing Docker/devcontainer code paths."""
+
+    name = DOCKER_DRIVER
+
+    def __init__(self, config: ContainersConfig, fleet_name: str, fleet: FleetConfig):
+        self.config = config
+        self.fleet_name = fleet_name
+        self.fleet = fleet
+
+    @property
+    def capabilities(self) -> DriverCapabilities:
+        return DriverCapabilities(owns_relay=False, ssh_transport=True)
+
+    def provision(self, *, name: str, workspace_folder: str, exec_user: str) -> str:
+        from . import fleet as fleet_mod
+
+        if self.fleet.devcontainer_path:
+            return fleet_mod._devcontainer_up(
+                self.fleet_name, self.fleet, name,
+                dotfiles=self.config.dotfiles, harness=self.config.harness,
+                exec_user=exec_user,
+            )
+        return fleet_mod._image_run(
+            self.fleet_name, self.fleet, name,
+            workspace_folder=workspace_folder, exec_user=exec_user,
+        )
+
+    def list_members(self, *, timeout: float | None = None) -> list[DockerContainerInfo]:
+        from . import fleet as fleet_mod
+
+        return fleet_mod._fleet_members(self.config, self.fleet_name)
+
+    # Docker pins an incarnation by addressing its container id directly.
+
+    def inspect(self, name, *, instance_id=None) -> dict:
+        from . import lifecycle
+
+        return lifecycle.inspect_container(instance_id or name)
+
+    def state(self, name, *, instance_id=None) -> str | None:
+        from . import lifecycle
+
+        return lifecycle.inspect_state(instance_id or name)
+
+    def start(self, name, *, instance_id=None) -> None:
+        from . import lifecycle
+
+        lifecycle.start_container(instance_id or name)
+
+    def stop(self, name, *, instance_id=None) -> None:
+        from . import lifecycle
+
+        lifecycle.stop_container(instance_id or name)
+
+    def remove(self, name, *, force=False, instance_id=None) -> None:
+        from . import lifecycle
+
+        lifecycle.remove_container(instance_id or name, force=force)
+
+    def _exec_prefix(
+        self, name, *, interactive, user, env, inherit_env, workdir,
+    ) -> list[str]:
+        args = ["docker", "exec"]
+        if interactive:
+            args.append("-i")
+        for key, value in sorted((env or {}).items()):
+            args += ["-e", f"{key}={value}"]
+        for key in inherit_env or []:
+            args += ["-e", key]
+        if workdir:
+            args += ["-w", workdir]
+        if user:
+            args += ["-u", user]
+        return [*args, name]
+
+    def exec(self, name, argv, *, user=None, env=None, workdir=None,
+             stdin=None, timeout=30.0, instance_id=None) -> ExecResult:
+        from agent_procutil import no_window_flags
+
+        command = self._exec_prefix(
+            instance_id or name, interactive=stdin is not None, user=user, env=env,
+            inherit_env=None, workdir=workdir,
+        ) + list(argv)
+        try:
+            done = subprocess.run(
+                command, input=stdin, capture_output=True, text=True,
+                timeout=timeout, creationflags=no_window_flags(),
+            )
+        except FileNotFoundError:
+            raise RuntimeError("docker CLI not found on PATH") from None
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"docker exec {name} timed out") from exc
+        return ExecResult(done.returncode, done.stdout, done.stderr)
+
+    def stream_exec_argv(self, name, argv, *, user=None, env=None,
+                         inherit_env=None, workdir=None, instance_id=None) -> list[str]:
+        return self._exec_prefix(
+            instance_id or name, interactive=True, user=user, env=env,
+            inherit_env=inherit_env, workdir=workdir,
+        ) + list(argv)
+
+    def copy_in(self, name, source, target, *, instance_id=None) -> None:
+        from . import lifecycle
+
+        res = lifecycle._docker(
+            ["cp", str(source), f"{instance_id or name}:{target}"], timeout=300,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"docker cp into {name} failed: {res.stderr.strip()}")
+
+
+# ---------------------------------------------------------------------------
+# Driver selection and member ownership
+
+
+_lock = threading.Lock()
+_drivers: dict[tuple[str, str], RuntimeDriver] = {}
+# Routing claims: handle (member name, instance id or ``<name>.<id>``) ->
+# claimant -> (driver, member name, pinned id). A claimant is
+# ``(driver name, fleet name, member name)`` for a driver member, or
+# ``(DOCKER_CLAIM, None, name)`` for a distinct Docker container sharing the
+# handle. A handle with more than one claimant is ambiguous and never routed.
+_Claimant = tuple[str, "str | None", str]
+_claims: dict[str, dict[_Claimant, tuple[RuntimeDriver | None, str, str | None]]] = {}
+DOCKER_CLAIM = "\0docker"
+# member name -> stack of (token, Route) pinned by an in-flight launch
+_pins: dict[str, list[tuple[object, "Route"]]] = {}
+
+
+@dataclass(frozen=True)
+class Route:
+    """An externally owned member as addressed by one caller.
+
+    ``instance_id`` is set when the caller addressed a specific incarnation
+    (an instance id rather than the mutable name); every driver request then
+    carries it so a recreated member is refused instead of acted on.
+    """
+
+    driver: RuntimeDriver
+    name: str
+    instance_id: str | None
+
+
+def driver_for_fleet(
+    config: ContainersConfig, fleet_name: str, fleet: FleetConfig,
+) -> RuntimeDriver:
+    """Resolve the runtime driver for one fleet (Docker when unset)."""
+    if not fleet.driver:
+        return DockerDriver(config, fleet_name, fleet)
+    from .external_driver import ExternalDriver, find_driver
+
+    key = (fleet_name, fleet.driver)
+    retire = (lambda handle, c: c[0] == fleet.driver and c[1] == fleet_name)  # noqa: E731
+    try:
+        spec = find_driver(fleet.driver)  # the current registration, every time
+    except RuntimeError:
+        with _lock:  # a removed registration routes nothing, now or when in flight
+            _retire_locked(key)
+            _forget_locked(retire)
+        raise
+    with _lock:
+        cached = _drivers.get(key)
+        if cached is not None and getattr(cached, "spec", None) == spec:
+            if getattr(cached, "fleet", None) == fleet:
+                return cached
+        elif cached is not None:
+            _forget_locked(retire)  # replaced registration: never the old executable
+        _retire_locked(key)
+        driver = _drivers[key] = ExternalDriver(spec, fleet_name, fleet)
+    return driver
+
+
+def _retire_locked(key: tuple[str, str]) -> None:
+    """Drop a cached driver; its in-flight responses then bind nothing."""
+    retired = _drivers.pop(key, None)
+    if retired is not None:
+        retired.retired = True
+
+
+def _superseded(driver: RuntimeDriver) -> bool:
+    """True when ``driver`` was retired or replaced (call under ``_lock``)."""
+    if getattr(driver, "retired", False):
+        return True
+    current = _drivers.get((getattr(driver, "fleet_name", None), driver.name))
+    return current is not None and current is not driver
+
+
+def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
+    """Record that ``info`` lives in ``driver``'s runtime.
+
+    A handle already bound to a different member or runtime (for example two
+    drivers both reporting instance id ``1``) becomes ambiguous and is
+    refused rather than silently re-pointed.
+    """
+    handles = {info.name: None}
+    if info.container_id:
+        handles[info.container_id] = info.container_id
+        handles[route_handle(info)] = info.container_id
+    claimant = (driver.name, getattr(driver, "fleet_name", None), info.name)
+    with _lock:
+        if _superseded(driver):
+            return  # a delayed listing from a replaced registration binds nothing
+        for handle, pinned in handles.items():
+            _claims.setdefault(handle, {})[claimant] = (driver, info.name, pinned)
+
+
+def _claim_docker(handles, name: str) -> None:
+    with _lock:
+        for handle in handles:
+            if handle:
+                _claims.setdefault(handle, {})[(DOCKER_CLAIM, None, name)] = (None, name, None)
+
+
+def _forget(predicate) -> None:
+    """Drop every claim whose ``(handle, claimant)`` matches ``predicate``."""
+    with _lock:
+        _forget_locked(predicate)
+
+
+def _forget_locked(predicate) -> None:
+    for handle in list(_claims):
+        claims = _claims[handle]
+        for claimant in [c for c in claims if predicate(handle, c)]:
+            del claims[claimant]
+        if not claims:
+            del _claims[handle]
+
+
+def reconcile(config: ContainersConfig) -> None:
+    """Forget routing for fleets that are gone or now use another driver.
+
+    Called whenever driver fleets are enumerated, so a configuration reload in
+    the same process never leaves a removed fleet's names routed to its
+    retired driver, nor a replaced driver's names ambiguous.
+    """
+    fleets = getattr(config, "fleets", None) or {}
+    current = {name: f.driver for name, f in fleets.items() if getattr(f, "driver", None)}
+    with _lock:
+        for key in [k for k in _drivers if current.get(k[0]) != k[1]]:
+            _retire_locked(key)  # configuration-invalid: in-flight listings bind nothing
+        _forget_locked(lambda handle, c: c[0] != DOCKER_CLAIM and current.get(c[1]) != c[0])
+
+
+def _reconcile_listing(fleet_name: str, driver: RuntimeDriver, members) -> None:
+    """Make a successful listing the truth for its fleet's mutable names.
+
+    Names the driver no longer reports stop routing. Instance-id and
+    ``<name>.<id>`` claims are kept, so a caller still holding a previous
+    incarnation keeps being refused by the driver rather than reaching a
+    replacement or Docker.
+    """
+    reported = {m.name for m in members}
+    with _lock:
+        if _superseded(driver):
+            return
+        _forget_locked(lambda handle, c: c[1] == fleet_name and c[0] == driver.name
+            and handle == c[2] and c[2] not in reported)
+
+
+def route_handle(info: DockerContainerInfo) -> str:
+    """The handle that addresses exactly this member incarnation.
+
+    Docker members use their container id. A driver member's instance id is
+    only unique within its own runtime, so it is qualified by the member's
+    fleet name (``<name>.<id>``) and stays routable even when another
+    runtime reports the same id.
+    """
+    if not getattr(info, "driver", None) or not info.container_id:
+        return info.container_id
+    return f"{info.name}.{info.container_id}"
+
+
+def pin_incarnation(name: str, handle: str | None) -> object | None:
+    """Bind ``name`` to the driver incarnation ``handle`` until :func:`unpin`.
+
+    A launch validates one member incarnation and then addresses it by its
+    mutable name (SSH preparation, credential staging, cleanup). While pinned,
+    every routed call naming ``name`` carries the validated instance id, so a
+    member recreated after validation is refused by its driver instead of
+    receiving the launch. Docker members are not pinned (returns ``None``).
+    """
+    route = owner_of(handle) if handle and handle != name else None
+    if route is None or route.name != name or route.instance_id is None:
+        return None
+    token = object()
+    with _lock:
+        _pins.setdefault(name, []).append((token, route))
+    return token
+
+
+def unpin(token: object | None) -> None:
+    if token is None:
+        return
+    with _lock:
+        for name, stack in list(_pins.items()):
+            stack[:] = [entry for entry in stack if entry[0] is not token]
+            if not stack:
+                del _pins[name]
+
+
+def owner_of(target: str) -> Route | None:
+    """The external-driver route for member/instance ``target``, if any."""
+    with _lock:
+        if _pins.get(target):
+            return _pins[target][-1][1]
+        claims = dict(_claims.get(target) or {})
+    drivers = [v for c, v in claims.items() if c[0] != DOCKER_CLAIM]
+    if not drivers:
+        return None
+    if len(claims) > 1:
+        raise RuntimeError(
+            f"'{target}' identifies members of more than one runtime "
+            "driver; address the member by its unique fleet name"
+        )
+    driver, name, pinned = drivers[0]
+    return Route(driver, name, pinned)
+
+
+def dispatch(target: str, operation: str, **kwargs: Any) -> tuple[bool, Any]:
+    """Run a lifecycle ``operation`` on an externally owned member.
+
+    Returns ``(False, None)`` when ``target`` is not owned by an external
+    driver, so the caller continues on its Docker path.
+    """
+    route = owner_of(target)
+    if route is None:
+        return False, None
+    method = getattr(route.driver, operation)
+    return True, method(route.name, instance_id=route.instance_id, **kwargs)
+
+
+def require_docker_member(target: str, operation: str) -> None:
+    route = owner_of(target)
+    if route is not None:
+        raise RuntimeError(
+            f"{operation} is not supported for '{route.name}' (runtime driver "
+            f"'{route.driver.name}')"
+        )
+
+
+def clear_bindings() -> None:
+    with _lock:
+        _claims.clear()
+        _pins.clear()
+        _drivers.clear()
+
+
+def has_docker_fleets(config: ContainersConfig) -> bool:
+    return not config.fleets or any(not f.driver for f in config.fleets.values())
+
+
+# Inventory waits at most one listing timeout overall. Targeted discovery
+# fits inside agent-bridge's 30s provider inspect and queries only the fleet
+# that can own the addressed member when that is known.
+INVENTORY_TIMEOUT = 60.0
+DISCOVERY_TIMEOUT = 20.0
+
+
+def _owns(fleet_name: str, fleet: FleetConfig, member: str) -> bool:
+    prefix = fleet.prefix(fleet_name) + "-"
+    return member.startswith(prefix) and member[len(prefix):].isdigit()
+
+
+def _driver_fleets(
+    config: ContainersConfig, *, fleet: str | None = None, member: str | None = None,
+) -> dict[str, FleetConfig]:
+    fleets = {name: f for name, f in config.fleets.items() if f.driver}
+    if fleet is not None:
+        return {fleet: fleets[fleet]} if fleet in fleets else {}
+    if member:
+        owning = {
+            name: f for name, f in fleets.items()
+            if member.startswith(f.prefix(name) + "-")
+            and member[len(f.prefix(name)) + 1:].isdigit()
+        }
+        if owning:
+            return owning
+    return fleets
+
+
+def _enumerate(
+    config: ContainersConfig, fleets: dict[str, FleetConfig], *, timeout: float,
+    failures: dict[str, str] | None = None,
+) -> list[DockerContainerInfo]:
+    """List ``fleets`` concurrently within one overall deadline.
+
+    Each fleet is its own fault boundary: a failing or hung driver is logged
+    and skipped. Every listing runs as an owned process tree bounded by the
+    deadline, so none outlives it and none delays another fleet. Results are
+    bound only after all listings settle or the deadline passes, so a handle
+    two answering drivers report is always detected as ambiguous.
+    """
+    import queue
+    import time
+
+    reconcile(config)
+    deadline = time.monotonic() + timeout
+    results: queue.Queue = queue.Queue()
+    pending: set[str] = set()
+    drivers_by_fleet: dict[str, RuntimeDriver] = {}
+
+    def worker(fleet_name: str, driver: RuntimeDriver) -> None:
+        try:
+            limit = max(0.1, deadline - time.monotonic())
+            results.put((fleet_name, driver.list_members(timeout=limit), None))
+        except Exception as exc:  # noqa: BLE001 -- always report, never strand the wait
+            results.put((fleet_name, None, exc))
+
+    for fleet_name, fleet in fleets.items():
+        try:
+            driver = driver_for_fleet(config, fleet_name, fleet)
+        except RuntimeError as exc:
+            log.warning("Runtime driver for fleet '%s' is unavailable: %s", fleet_name, exc)
+            if failures is not None:
+                failures[fleet_name] = str(exc)
+            continue
+        pending.add(fleet_name)
+        drivers_by_fleet[fleet_name] = driver
+        threading.Thread(target=worker, args=(fleet_name, driver), daemon=True).start()
+    members: list[DockerContainerInfo] = []
+    while pending:
+        try:
+            fleet_name, listed, error = results.get(
+                timeout=max(0.0, deadline - time.monotonic()) + 1.0,
+            )
+        except queue.Empty:
+            break
+        pending.discard(fleet_name)
+        if error is not None:
+            log.warning("Runtime driver for fleet '%s' is unavailable: %s", fleet_name, error)
+            if failures is not None:
+                failures[fleet_name] = str(error)
+        else:
+            _reconcile_listing(fleet_name, drivers_by_fleet[fleet_name], listed)
+            members.extend(listed)
+    for fleet_name in sorted(pending):
+        log.warning("Runtime driver for fleet '%s' did not answer within %.0fs",
+                    fleet_name, timeout)
+        if failures is not None:
+            failures[fleet_name] = f"did not answer within {timeout:.0f}s"
+    return members
+
+
+def list_driver_members(
+    config: ContainersConfig, *, timeout: float = INVENTORY_TIMEOUT,
+) -> list[DockerContainerInfo]:
+    """Enumerate every external-driver fleet; failing or slow drivers are skipped."""
+    return _enumerate(config, _driver_fleets(config), timeout=timeout)
+
+
+def merge_driver_members(
+    config: ContainersConfig, containers: list, all_containers: bool,
+) -> list:
+    """Append driver-reported members to a Docker inventory.
+
+    Docker rows labelled with a driver fleet are dropped even when its driver
+    is unavailable, so they are never managed around the driver. A Docker row
+    that is the same container as a driver member (same id) is shown once.
+    """
+    members = list_driver_members(config)
+    driver_fleets = {n for n, f in config.fleets.items() if f.driver}
+    by_handle = {h: m for m in members for h in (m.name, m.container_id)}
+    _forget(lambda handle, c: c[0] == DOCKER_CLAIM)  # recomputed from this snapshot
+    kept = []
+    for row in containers:
+        if row.fleet in driver_fleets:
+            continue  # a driver fleet's members come only from its driver
+        clashes = [by_handle[h] for h in (row.name, row.container_id) if h in by_handle]
+        if clashes and all(m.container_id == row.container_id for m in clashes):
+            continue  # the same container, also visible to the Docker CLI
+        if clashes:
+            # Distinct Docker and driver members share a handle: keep both
+            # visible but refuse to route that handle anywhere.
+            _claim_docker({row.name, row.container_id} & set(by_handle), row.name)
+        kept.append(row)
+    if not all_containers:
+        members = [m for m in members if m.is_running]
+    return kept + members
+
+
+# ---------------------------------------------------------------------------
+# Launch planning
+
+
+@dataclass(frozen=True)
+class LaunchPlan:
+    """How a trusted ACP launch reaches one member."""
+
+    driver: RuntimeDriver | None  # None: built-in Docker
+    ssh: bool  # trusted OpenSSH transport (else direct streaming exec)
+    agent_relay: bool  # agent-containers/agent-bridge wire the relay
+
+
+def launch_plan(
+    fleet: FleetConfig, name: str, relay_enabled: bool, *, require_ssh: bool = False,
+) -> LaunchPlan:
+    """Resolve transport and relay wiring, failing closed on missing capability.
+
+    ``require_ssh`` is for SSH-only launches (interactive ``copilot`` and
+    Session Host), which a driver without ``ssh_transport`` cannot serve.
+    """
+    if not getattr(fleet, "driver", None):
+        return LaunchPlan(None, True, relay_enabled)
+    route = owner_of(name)
+    if route is None:
+        raise RuntimeError(
+            f"Container '{name}' belongs to driver fleet but was not reported "
+            f"by runtime driver '{fleet.driver}'; refusing dispatch"
+        )
+    driver = route.driver
+    caps = driver.capabilities
+    if require_ssh and not caps.ssh_transport:
+        raise RuntimeError(
+            f"Container '{name}': this launch needs the trusted SSH transport, "
+            f"which runtime driver '{driver.name}' does not support"
+        )
+    agent_relay = relay_enabled and not caps.owns_relay
+    if agent_relay and not caps.ssh_transport:
+        raise RuntimeError(
+            f"Container '{name}': the credential relay is enabled but runtime "
+            f"driver '{driver.name}' neither owns the relay (owns_relay) nor "
+            "supports the SSH transport (ssh_transport) needed to forward it; "
+            "set relay_enabled: false for this fleet or use a driver with one "
+            "of those capabilities"
+        )
+    return LaunchPlan(driver, caps.ssh_transport, agent_relay)
+
+
+def scoped_member(
+    config: ContainersConfig, name: str, *, timeout: float = DISCOVERY_TIMEOUT,
+) -> tuple[bool, DockerContainerInfo | None]:
+    """Find ``name`` through only the driver fleet whose namespace owns it.
+
+    Returns ``(False, None)`` when ``name`` is outside every driver fleet's
+    deterministic namespace; callers then use the ordinary inventory. Inside
+    a namespace the answer is final -- ``(True, member)`` or ``(True, None)``
+    for an absent member -- and an unavailable or slow driver raises instead
+    of falling back to the (slower) full inventory. An unrelated hung driver
+    is never queried. A distinct Docker container with the same name makes
+    the name ambiguous, exactly as the full inventory would.
+    """
+    reconcile(config)
+    fleets = {
+        fleet_name: fleet for fleet_name, fleet in config.fleets.items()
+        if fleet.driver and name.startswith(fleet.prefix(fleet_name) + "-")
+        and name[len(fleet.prefix(fleet_name)) + 1:].isdigit()
+    }
+    if not fleets:
+        return False, None
+    failures: dict[str, str] = {}
+    matches = [
+        m for m in _enumerate(config, fleets, timeout=timeout, failures=failures)
+        if m.name == name
+    ]
+    if failures:
+        detail = "; ".join(f"fleet '{k}': {v}" for k, v in sorted(failures.items()))
+        raise RuntimeError(f"Runtime driver for '{name}' is unavailable ({detail})")
+    if len(matches) != 1:
+        return True, None
+    member = matches[0]
+    docker_id = _docker_id_for_name(name)
+    if docker_id is not None and docker_id != member.container_id:
+        _claim_docker({name}, name)
+        raise RuntimeError(
+            f"'{name}' identifies both a runtime-driver member and a distinct "
+            "Docker container; resolve the name collision before dispatch"
+        )
+    # This probe is the current truth for the name: a resolved collision clears.
+    _forget(lambda handle, c: handle == name and c[0] == DOCKER_CLAIM)
+    return True, member
+
+
+def _docker_id_for_name(name: str) -> str | None:
+    """The id of a Docker container named ``name``, bounded; ``None`` if absent.
+
+    An unavailable Docker CLI/daemon cannot manage any container, so it is
+    reported as "no Docker container" rather than blocking the driver path.
+    """
+    import re
+
+    from . import lifecycle
+
+    try:
+        result = lifecycle._docker(
+            ["inspect", "--type", "container", "--format", "{{.Id}}", name], timeout=10,
+        )
+    except RuntimeError:
+        return None
+    value = (result.stdout or "").strip() if result.returncode == 0 else ""
+    return value if re.fullmatch(r"[0-9a-f]{64}", value) else None
+
+
+def discover(
+    config: ContainersConfig, *, fleet: str | None = None, member: str | None = None,
+    timeout: float = DISCOVERY_TIMEOUT,
+) -> None:
+    """Bind driver members for entry points that address one directly.
+
+    Fresh CLI processes that receive a member name or instance id without
+    first enumerating call this so the handle routes to its driver. Only the
+    named ``fleet`` -- or, for a member name, the fleets whose deterministic
+    names can own it -- is queried, so an unrelated hung driver cannot
+    consume the caller's deadline or answer for another fleet's handle.
+    """
+    reconcile(config)
+    selected = _driver_fleets(config, fleet=fleet, member=member)
+    if not selected:
+        return
+    failures: dict[str, str] = {}
+    _enumerate(config, selected, timeout=timeout, failures=failures)
+    # An unavailable owning driver is not evidence of absence: fail explicitly.
+    # (A name outside every namespace queries all fleets best-effort.)
+    owning = {
+        n: why for n, why in failures.items()
+        if n == fleet or (member and _owns(n, selected[n], member))
+    }
+    if owning:
+        detail = "; ".join(f"fleet '{k}': {v}" for k, v in sorted(owning.items()))
+        raise RuntimeError(f"Runtime driver for '{member or fleet}' is unavailable ({detail})")
+
+
+class RetiredIncarnation(RuntimeError):
+    """A prepared member's runtime is gone and its bare id names another member."""
+
+
+def runtime_identity(name: str) -> str:
+    """``docker`` or ``driver:<driver>/<fleet>@<registration>``: who owns ``name``.
+
+    The registration digest covers the driver's resolved command and source
+    and the fleet's effective ``driver_options``, so a fleet re-pointed at
+    another driver, a replaced registration or changed driver options (which
+    can select another runtime) is a different runtime even for the same name
+    and id.
+    """
+    route = owner_of(name)
+    if route is None:
+        return "docker"
+    spec = getattr(route.driver, "spec", None)
+    options = getattr(getattr(route.driver, "fleet", None), "driver_options", None)
+    registration = json.dumps(
+        [spec.name, list(spec.command), spec.source, options] if spec else route.driver.name,
+        sort_keys=True, default=str,
+    )
+    digest = hashlib.sha256(registration.encode("utf-8")).hexdigest()[:16]
+    return f"driver:{route.driver.name}/{getattr(route.driver, 'fleet_name', None)}@{digest}"
+
+
+def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> str:
+    """The handle for exactly the prepared incarnation ``instance_id`` of ``name``.
+
+    ``runtime`` is the :func:`runtime_identity` recorded when the member was
+    prepared; if that exact runtime no longer owns ``name`` the request is
+    refused. A driver member is addressed by its fleet-qualified handle. A
+    bare id is used only when no driver claims it -- it is then a Docker
+    container id -- so cleanup never reaches another runtime's member that
+    happens to share the instance id.
+    """
+    route = owner_of(name)
+    if route is not None and runtime is None:
+        raise RetiredIncarnation(
+            f"'{name}' is a runtime-driver member; acting on a prepared instance "
+            "requires the runtime identity recorded when it was prepared"
+        )
+    if runtime is not None and runtime_identity(name) != runtime:
+        raise RetiredIncarnation(
+            f"'{name}' was prepared in runtime '{runtime}', which no longer owns "
+            f"it (now '{runtime_identity(name)}'); refusing to act on it"
+        )
+    if route is not None:
+        return f"{route.name}.{instance_id}"
+    if owner_of(instance_id) is not None:
+        raise RetiredIncarnation(
+            f"'{name}' instance {instance_id} is no longer routed by its runtime; "
+            "the id now identifies a different member, refusing to act on it"
+        )
+    return instance_id
+
+
+def inspect_pinned(name: str, instance_id: str | None) -> dict | None:
+    """Inspect ``instance_id`` through the driver owning member ``name``.
+
+    A recreated member's previous incarnation is no longer enumerated, so its
+    id alone does not route; the member name does. Returns ``None`` when
+    ``name`` is not driver-owned (the caller continues on Docker).
+    """
+    route = owner_of(name)
+    if route is None:
+        return None
+    return route.driver.inspect(route.name, instance_id=instance_id)
+
+
+def require_ssh_transport(config: ContainersConfig, name: str, operation: str) -> None:
+    """Refuse an SSH-only operation on a driver member that lacks SSH."""
+    reconcile(config)
+    if not any(f.driver for f in config.fleets.values()):
+        return
+    # Only the fleet whose namespace owns ``name`` is asked: a name outside every
+    # driver namespace is never a driver member, and an unrelated hung driver
+    # must not delay a healthy member's launch.
+    scoped, info = scoped_member(config, name)
+    if not scoped or info is None or not getattr(info, "driver", None):
+        return
+    route = owner_of(name)
+    if route is None or not route.driver.capabilities.ssh_transport:
+        raise RuntimeError(
+            f"{operation} needs the trusted SSH transport, which runtime "
+            f"driver '{info.driver}' does not support for '{name}'"
+        )
+
+
+# Docker-shaped argv routing lives in its own module; re-exported here for the
+# existing call sites (lifecycle, ssh_transport, container_shims, ...).
+from .routed_exec import run_routed, stream_routed  # noqa: E402,F401

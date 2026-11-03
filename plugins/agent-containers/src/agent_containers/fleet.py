@@ -12,6 +12,10 @@ Two provisioning backends:
   ``<prefix>-<n>``. This is Model A (repo cloned inside the container).
 * ``image`` set -> ``docker run`` a warm container directly (lightweight; for
   images that already carry their tooling).
+
+Both are the built-in Docker runtime. A fleet with ``driver`` set instead
+provisions and manages members through that external runtime driver
+(``runtime_drivers.py``); sizing, naming and leases stay here.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import logging
 import os
 from pathlib import Path
 
+from . import runtime_drivers
 from .config import (
     SECURITY_GID_LABEL,
     SECURITY_HOME_LABEL,
@@ -41,7 +46,7 @@ from .lifecycle import (
     start_container,
     stop_container,
 )
-from .devcontainer_launch import _devcontainer_up
+from .devcontainer_launch import _devcontainer_up  # noqa: F401 -- DockerDriver.provision looks it up here
 from .lifecycle_ownership import lifecycle_blocker, require_internal_fleet
 from .fleet_results import FleetOperationResult, RecreateMemberError
 
@@ -55,9 +60,15 @@ def _fleet_members(config: ContainersConfig, fleet_name: str) -> list[DockerCont
     fleet's deterministic slot, so callers can report/defer the conflict rather
     than silently ignoring or acting through the foreign configuration.
     """
+    fleet = config.fleets.get(fleet_name)
+    if fleet is not None and fleet.driver:
+        # Strict: an unavailable driver fails the fleet operation instead of
+        # making the fleet look empty.
+        return runtime_drivers.driver_for_fleet(
+            config, fleet_name, fleet,
+        ).list_members()
     members = list_containers(config)
     prefix = None
-    fleet = config.fleets.get(fleet_name)
     if fleet:
         prefix = fleet.prefix(fleet_name)
     out = []
@@ -431,8 +442,10 @@ def reconcile_up(
             f"Fleet '{fleet_name}' is not defined in containers.yaml"
         )
     require_internal_fleet(fleet)
-    _check_docker()
-    if not fleet.devcontainer_path and not fleet.image:
+    driver = runtime_drivers.driver_for_fleet(config, fleet_name, fleet)
+    if not fleet.driver:
+        _check_docker()
+    if not fleet.driver and not fleet.devcontainer_path and not fleet.image:
         raise RuntimeError(
             f"Fleet '{fleet_name}' needs either 'devcontainer_path' or 'image'"
         )
@@ -448,7 +461,7 @@ def reconcile_up(
     target = count if count is not None else fleet.size
     existing = _fleet_members(config, fleet_name)
     for member in existing:
-        reason = lifecycle_blocker(config, member.name, member.labels)
+        reason = lifecycle_blocker(config, member.name, member.labels, getattr(member, "container_id", None))
         if reason:
             raise RuntimeError(reason)
     workspace_folder = fleet.workspace_folder or config.workspace_folder
@@ -558,25 +571,12 @@ def reconcile_up(
     indices = _next_indices(existing, prefix, need)
     for idx in indices:
         name = f"{prefix}-{idx}"
-        log.info("Provisioning fleet container %s", name)
-        if fleet.devcontainer_path:
-            result.created.append(
-                _devcontainer_up(
-                    fleet_name, fleet, name,
-                    dotfiles=config.dotfiles, harness=config.harness,
-                    exec_user=exec_user,
-                )
+        log.info("Provisioning fleet container %s (runtime %s)", name, driver.name)
+        result.created.append(
+            driver.provision(
+                name=name, workspace_folder=workspace_folder, exec_user=exec_user,
             )
-        else:
-            result.created.append(
-                _image_run(
-                    fleet_name,
-                    fleet,
-                    name,
-                    workspace_folder=workspace_folder,
-                    exec_user=exec_user,
-                )
-            )
+        )
         if name in result.removed:
             result.recreated.append(name)
     return result
@@ -607,7 +607,8 @@ def recreate_member(
     timeout: float = 600.0,
 ) -> dict[str, str | bool]:
     """Recreate one trusted fleet member after an identity-checked remove."""
-    _check_docker()
+    if runtime_drivers.has_docker_fleets(config):
+        _check_docker()
     info = get_container(config, name)
     if info is None:
         raise RuntimeError(f"Container '{name}' is not a discovered fleet member")
@@ -622,7 +623,7 @@ def recreate_member(
             f"Container '{name}' has no matching fleet configuration"
         )
     require_internal_fleet(fleet)
-    reason = lifecycle_blocker(config, info.name, info.labels)
+    reason = lifecycle_blocker(config, info.name, info.labels, getattr(info, "container_id", None))
     if reason:
         raise RuntimeError(reason)
     if fleet.restricted or info.security_profile != "trusted":
@@ -631,27 +632,19 @@ def recreate_member(
         )
 
     old_id = info.container_id
-    remove_container(old_id, force=True, timeout=timeout)
+    # Remove the exact selected incarnation. A driver member's raw id may be
+    # shared by another runtime, so its fleet-qualified handle is used; the
+    # raw id remains the identity compared above and below.
+    remove_container(
+        runtime_drivers.route_handle(info) if info.driver else old_id,
+        force=True, timeout=timeout,
+    )
     workspace_folder = fleet.workspace_folder or config.workspace_folder
     exec_user = fleet.exec_user or config.exec_user
     try:
-        if fleet.devcontainer_path:
-            _devcontainer_up(
-                fleet_name,
-                fleet,
-                name,
-                dotfiles=config.dotfiles,
-                harness=config.harness,
-                exec_user=exec_user,
-            )
-        else:
-            _image_run(
-                fleet_name,
-                fleet,
-                name,
-                workspace_folder=workspace_folder,
-                exec_user=exec_user,
-            )
+        runtime_drivers.driver_for_fleet(config, fleet_name, fleet).provision(
+            name=name, workspace_folder=workspace_folder, exec_user=exec_user,
+        )
     except Exception as exc:
         raise RecreateMemberError(
             f"Container '{name}' was removed but its replacement failed",
@@ -707,7 +700,7 @@ def down_fleet(
     if fleet is not None:
         require_internal_fleet(fleet)
     for c in _fleet_members(config, fleet_name):
-        reason = lifecycle_blocker(config, c.name, c.labels)
+        reason = lifecycle_blocker(config, c.name, c.labels, getattr(c, "container_id", None))
         if reason:
             result.deferred[c.name] = reason
             continue
@@ -865,7 +858,7 @@ def start(config: ContainersConfig, fleet_name: str) -> list[str]:
     require_internal_fleet(fleet)
     started = []
     for c in _fleet_members(config, fleet_name):
-        reason = lifecycle_blocker(config, c.name, c.labels)
+        reason = lifecycle_blocker(config, c.name, c.labels, getattr(c, "container_id", None))
         if reason:
             raise RuntimeError(reason)
         if not c.is_running:
@@ -903,7 +896,7 @@ def remove_fleet(
     if requested_fleet is not None:
         require_internal_fleet(requested_fleet)
     for c in _fleet_members(config, fleet_name):
-        reason = lifecycle_blocker(config, c.name, c.labels)
+        reason = lifecycle_blocker(config, c.name, c.labels, getattr(c, "container_id", None))
         if reason:
             result.deferred[c.name] = reason
             continue

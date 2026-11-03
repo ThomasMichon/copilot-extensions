@@ -61,7 +61,7 @@ def _patch_cmd_context(monkeypatch, *, profile: str = "trusted"):
         },
     )
     monkeypatch.setattr(lifecycle, "restricted_policy_errors", lambda *a, **k: [])
-    monkeypatch.setattr(cli, "_launch_container_agent", lambda *args: 0)
+    monkeypatch.setattr(cli, "_launch_container_agent", lambda *args, **kwargs: 0)
 
 
 def test_trusted_exec_holds_namespaced_target_lock(monkeypatch):
