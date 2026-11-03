@@ -1,6 +1,6 @@
 """Instance policy and shared public contract."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 import zipfile
@@ -12,6 +12,46 @@ from agent_procutil.daemon_instances import (
     instance_environment,
 )
 from agent_procutil import _daemon_instance_store as store
+
+
+@pytest.mark.parametrize("root", [PurePosixPath("/runtime"), PureWindowsPath(r"C:\runtime")])
+@pytest.mark.parametrize("nested", [False, True])
+def test_runtime_slot_layout_preserves_generation_and_installation_root(root, nested):
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
+    generation = "1.0+source." + "a" * 40 + "." + "b" * 16
+    slot = root / "versions" / generation
+    prefix = slot / ".venv" if nested else slot
+    assert runtime_slot_paths(prefix) == (generation, slot, root)
+    assert runtime_slot_paths(root / "ordinary-venv") is None
+    assert runtime_slot_paths(slot / ".." / generation) is None
+    assert runtime_slot_paths(type(root)("versions") / generation) is None
+
+
+@pytest.mark.parametrize("contained", [False, True])
+def test_native_lease_guard_preserves_independent_daemon_lifetime(tmp_path, monkeypatch, contained):
+    import os
+    from types import SimpleNamespace
+    import agent_procutil
+
+    created = []
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1" if contained else "0")
+    monkeypatch.setattr(store, "os", SimpleNamespace(name="nt", getpid=os.getpid))
+    monkeypatch.setattr(store, "_expiry_job", None)
+    monkeypatch.setattr(store, "_guards", {})
+    monkeypatch.setattr(store, "_monitor_pid", os.getpid())
+    monkeypatch.setattr(store, "_ensure_monitor", lambda: None)
+    monkeypatch.setattr(
+        agent_procutil, "_assign_suspended_to_kill_on_close_job",
+        lambda pid, *, allow_breakaway: created.append((pid, allow_breakaway)) or object(),
+    )
+
+    store._register_monitor(
+        DaemonInstanceReceipt("a" * 32, tmp_path / "registry"),
+        {"purpose": "unattended-test"},
+    )
+
+    assert created == [(os.getpid(), not contained)]
 
 
 @pytest.fixture

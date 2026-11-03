@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -123,7 +124,7 @@ def _run(
 def _context(result: subprocess.CompletedProcess[str]) -> str:
     payload = json.loads(result.stdout)
     assert set(payload) == {"additionalContext"}
-    return payload["additionalContext"]
+    return cast(str, payload["additionalContext"])
 
 
 def _write(path: Path, text: str) -> None:
@@ -1667,8 +1668,8 @@ def test_malicious_input_rejection_has_live_shell_parity(tmp_path: Path) -> None
         f"contribution_guide={hostile}\n",
     )
     extra = {"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": str(inside)}
-    bash = _run(BASH_HOOK, repo, home, **extra)
-    powershell = _run(POWERSHELL_HOOK, repo, home, **extra)
+    bash = _run(BASH_HOOK, repo, home, COPILOT_CUSTOM_INSTRUCTIONS_DIRS=extra["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"])
+    powershell = _run(POWERSHELL_HOOK, repo, home, COPILOT_CUSTOM_INSTRUCTIONS_DIRS=extra["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"])
     assert powershell.stdout == bash.stdout
     assert powershell.stderr == bash.stderr
     context = _context(bash)

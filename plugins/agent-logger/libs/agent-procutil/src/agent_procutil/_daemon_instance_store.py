@@ -500,8 +500,8 @@ def _register_monitor(receipt, record):
     if record["purpose"] == "production":
         return
     if os.name == "nt" and _expiry_job is None:
-        from . import _assign_suspended_to_kill_on_close_job
-        _expiry_job = _assign_suspended_to_kill_on_close_job(os.getpid(), allow_breakaway=False)
+        from . import _assign_suspended_to_kill_on_close_job as assign_job, contained_test_mode
+        _expiry_job = assign_job(os.getpid(), allow_breakaway=not contained_test_mode())
         if _expiry_job is None:
             raise OSError("disposable daemon descendant custody unavailable")
     with _local_lock:

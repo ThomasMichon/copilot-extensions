@@ -302,11 +302,13 @@ time.sleep(.1)
         instance=DaemonInstanceSpec(
             "artifact-fixture", tmp_path, Path(__file__).resolve(),
             purpose="unattended-test", registry_root=registry,
-            lease=DaemonLeasePolicy(.7, 3),
+            # Leave cold-start margin; reconcile still waits for observed expiry.
+            lease=DaemonLeasePolicy(5, 15),
         ),
     )
     try:
         process.wait(timeout=5)
+        assert process.returncode == 0, (tmp_path / "daemon.log").read_text()
         assert artifact.is_file()
         deadline = float(inspect_instances(registry)[0]["deadline"])
         time.sleep(max(0, deadline - time.time()) + .05)

@@ -908,7 +908,13 @@ immutable maximum lifetime.
 Leased Python commands receive same-process startup admission before application
 code. Windows venv redirectors are bypassed using `direct_python`, retaining
 venv imports. The child observes expiry independently of its launcher;
-Windows disposable children establish a strict kill-on-close descendant Job.
+Windows disposable children establish a kill-on-close descendant Job.
+Ordinary contained tests prohibit breakaway. Explicit non-contained native
+lifetime fixtures permit an independently admitted, separately leased daemon
+to break away and survive its earlier frontend's exit. Bounded children remain
+caller-owned. Such fixtures still require every caller Job to close, retained
+native identity/exit evidence, renewal and exact instance cleanup; this is not
+permission to launch an untracked detached test process.
 One local lifecycle thread handles renewal/expiry per process.
 
 The default discovery root comes from the OS user's profile rather than an

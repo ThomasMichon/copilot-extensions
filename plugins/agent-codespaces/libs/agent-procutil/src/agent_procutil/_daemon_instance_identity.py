@@ -6,7 +6,18 @@ import os
 import select
 import signal
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
+
+
+def runtime_slot_paths(prefix: str | os.PathLike[str]) -> tuple[str, PurePath, PurePath] | None:
+    """Describe supported prefix layouts without granting installation authority."""
+    path = prefix if isinstance(prefix, PurePath) else Path(prefix)
+    if not path.is_absolute() or ".." in path.parts:
+        return None
+    slot = path.parent if path.name == ".venv" else path
+    if slot.parent.name != "versions" or slot.name in ("", ".", "..", ".venv"):
+        return None
+    return slot.name, slot, slot.parent.parent
 
 
 def path_identity(path: Path) -> tuple[str, str]:
