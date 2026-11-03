@@ -5,6 +5,8 @@ from pathlib import Path
 
 from tools.coverage_guided_selection.ancestor_resolution import _git, _parse_hunks
 from tools.coverage_guided_selection.decide import decide
+from tools.coverage_guided_selection.auditability import profile
+from tools.plugin_test_selection import default_collection_files
 
 
 def execution_diff(
@@ -59,12 +61,20 @@ def build_execution_payload(
     fork, changed_lines, test_files = execution_diff(
         repo_root, base_ref, head_ref, plugin=plugin, cov_source=cov_source,
     )
+    current_profile = profile(plugin, cov_source)
+    plugin_root = repo_root / "plugins" / plugin
+    eligible_files = frozenset(
+        path.relative_to(plugin_root).as_posix()
+        for path in default_collection_files(plugin_root)
+    )
     result = decide(
         repo_root, repo, plugin, fork, changed_lines, main_ref=main_ref,
         fallback_runtime_budget_s=smoke_budget_s,
         commit_volume_threshold=commit_volume_threshold,
         age_threshold_seconds=age_threshold_seconds,
         include_smoke_floor=True,
+        auditability_profile=current_profile,
+        eligible_test_files=eligible_files,
     )
     payload = result.as_dict()
     payload.update(
@@ -103,7 +113,9 @@ def build_execution_payload(
     payload["changed_test_files"] = list(test_files)
     payload["execution"] = "selected"
     payload["selection"] = {
-        "version": 1, "plugin": plugin, "nodes": list(result.selected_tests),
+        "version": 2, "plugin": plugin, "nodes": list(result.selected_tests),
         "files": list(test_files), "include_guards": True,
+        "coverage_profile": current_profile,
+        "coverage_exclusions": result.coverage_exclusions or {},
     }
     return payload

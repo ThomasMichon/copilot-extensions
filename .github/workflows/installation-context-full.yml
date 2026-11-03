@@ -36,6 +36,7 @@ on:
           - dispatch-publication
           - dispatch-maintenance
           - promotion-controls
+          - coverage-selection
           - pane-argv
           - manager-uninstall
           - komodo-recovery
@@ -48,6 +49,52 @@ permissions:
   contents: read
 
 jobs:
+  coverage-selection-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'
+    name: Coverage auditability selection (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps: &coverage-selection-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Install seasoned qualification tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest coverage pytest-json-report pytest-timeout packaging pyyaml
+      - name: Qualify current inventory, ordinary coverage and exact execution
+        shell: python
+        env:
+          PYTHONPATH: tools
+          CGS_RUN_INTEGRATION_TEST: "1"
+        run: |
+          import pathlib
+          import sys
+          sys.path.insert(0, str(pathlib.Path("libs/agent-procutil/src").resolve()))
+          from agent_procutil.owned_process import run_caller_owned
+          result = run_caller_owned(
+              [sys.executable, "-m", "pytest", "-q",
+               "tools/test_plugin_test_selection.py",
+               "tools/test_coverage_selected_execution.py",
+               "tools/test_coverage_guided_selection.py::TestMergeChunkResults",
+               "tools/test_coverage_guided_selection.py::TestBaselineCollectionErrorContract"],
+              timeout=600, max_stdout_bytes=16 * 1024 * 1024,
+              max_stderr_bytes=16 * 1024 * 1024,
+          )
+          print(result.stdout, end="", flush=True)
+          print(result.stderr, end="", file=sys.stderr, flush=True)
+          result.check_returncode()
+  coverage-selection-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'
+    name: Coverage auditability selection (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps: *coverage-selection-steps
   codespaces-installer-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
     name: CodeSpaces canonical and materialized installers (Linux)
