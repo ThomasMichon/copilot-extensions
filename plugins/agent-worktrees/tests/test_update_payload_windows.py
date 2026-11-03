@@ -20,21 +20,14 @@ def test_strict_job_return_requires_confirmation_and_reaping(monkeypatch, tmp_pa
     class Process:
         returncode = 0
 
-        def communicate(self, timeout):
-            order.append("communicate")
-            if failure == "read":
-                error = OSError("post-launch pipe sharing failure")
-                error.winerror = 32
-                raise error
-            if failure == "drain" and order.count("communicate") == 2:
-                raise subprocess.TimeoutExpired("fixture", timeout)
-            return "captured", None
-
     class Job:
+        handle = 123
+
         def terminate_and_wait(self, timeout):
             order.append("confirm")
             if failure == "termination":
                 raise OSError("cannot query owned Job")
+            self.handle = None
 
         def close(self):
             order.append("close")
@@ -43,22 +36,43 @@ def test_strict_job_return_requires_confirmation_and_reaping(monkeypatch, tmp_pa
         seen.update(kwargs)
         return Process(), Job()
 
+    class Capture:
+        def __init__(self, process, **kwargs):
+            pass
+
+        def wait(self, timeout, **kwargs):
+            order.append("wait")
+            assert kwargs["wait_for_eof"] is False
+            if failure == "read":
+                raise OSError("post-launch pipe sharing failure")
+
+        def finish(self, timeout):
+            order.append("finish")
+            if failure == "drain":
+                raise subprocess.TimeoutExpired("fixture", timeout)
+
+        def deliver(self):
+            order.append("deliver")
+
     monkeypatch.setattr(installer_run, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(installer_run, "SyncProcessOutput", Capture)
     call = lambda: installer_run.run_installer(
         ["fixture"], cwd=tmp_path, env={}, deadline_s=1, log=lambda line: None,
         require_tree_exit=True,
     )
     if failure:
-        with pytest.raises(installer_run.InstallerCleanupError, match="cleanup unverified"):
+        expected = "verified cleanup" if failure == "read" else "cleanup unverified"
+        with pytest.raises(installer_run.InstallerCleanupError, match=expected):
             call()
     else:
         assert call().status == "OK"
     assert seen["require_job"] is True
     assert seen["allow_breakaway"] is False
     assert seen["creationflags"] & subprocess.CREATE_NO_WINDOW
-    assert order[:2] == (["communicate", "close"] if failure == "read" else
-                         ["communicate", "confirm"])
-    assert ("close" in order) is (failure in ("termination", "read"))
+    assert order[:2] == ["wait", "confirm"]
+    assert "close" not in order
+    assert ("finish" in order) is (failure != "termination")
+    assert ("deliver" in order) is (failure not in ("termination", "drain"))
 
 
 def test_cleanup_failure_never_retries_the_payload(monkeypatch, tmp_path):
@@ -73,6 +87,39 @@ def test_cleanup_failure_never_retries_the_payload(monkeypatch, tmp_path):
     status = update_acquisition.acquire("agent-example", "m", "fixture")
     assert status.startswith("payload cleanup failed")
     assert len(calls) == 1
+
+
+def test_activity_observation_failure_never_retries(monkeypatch, tmp_path):
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: tmp_path)
+    calls = []
+
+    def fail(argv, **kwargs):
+        calls.append(kwargs)
+        raise installer_run.InstallerActivityError("native accounting unavailable after cleanup")
+
+    monkeypatch.setattr(update_acquisition, "_run_update", fail)
+    assert update_acquisition.acquire("agent-example", "m", "fixture").startswith(
+        "payload activity observation failed",
+    )
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("windows,installed", [(True, True), (True, False), (False, True)])
+def test_native_activity_is_only_installed_windows_update(monkeypatch, tmp_path, windows, installed):
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", windows)
+    monkeypatch.setattr(update_acquisition, "monotonic", lambda: 10)
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: tmp_path if installed else None)
+    calls = []
+
+    def run(argv, *args, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(update_acquisition, "_run_update", run)
+    monkeypatch.setattr(update_acquisition, "_run_install", run)
+    assert update_acquisition.acquire("agent-example", "m", "fixture").startswith("OK")
+    assert calls[0].get("native_write_deadline") == (220 if windows and installed else None)
+    assert calls[0]["timeout"] == 120
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native spawn errors")
@@ -143,7 +190,7 @@ def test_only_quiescent_nonrefused_timeout_retries(monkeypatch, tmp_path, refusa
 
 @pytest.mark.parametrize("elapsed,expected", [(209.5, [120, 0.5]), (211, [120])])
 def test_windows_budget_reserves_the_cleanup_grace(monkeypatch, tmp_path, elapsed, expected):
-    clock, timeouts = iter([0, 0, elapsed]), []
+    clock, timeouts, deadlines = iter([0, 0, elapsed]), [], []
     monkeypatch.setattr(update_acquisition, "monotonic", lambda: next(clock))
     monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
     monkeypatch.setattr(update_acquisition, "_WINDOWS", True)
@@ -151,12 +198,29 @@ def test_windows_budget_reserves_the_cleanup_grace(monkeypatch, tmp_path, elapse
 
     def run(argv, **kwargs):
         timeouts.append(kwargs["timeout"])
+        deadlines.append(kwargs["native_write_deadline"])
         return subprocess.CompletedProcess(argv, 1 if len(timeouts) == 1 else 0, "", "ECONNRESET")
 
     monkeypatch.setattr(update_acquisition, "_run_update", run)
     status = update_acquisition.acquire("agent-example", "m", "fixture")
     assert timeouts == expected
+    assert deadlines == [210] * len(expected)
     assert status.startswith("OK") is (len(expected) == 2)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="strict Windows write deadline")
+def test_expired_absolute_budget_never_spawns(monkeypatch, tmp_path):
+    import time
+
+    monkeypatch.setattr(
+        installer_run, "_spawn",
+        lambda *args, **kwargs: pytest.fail("expired budget launched a child"),
+    )
+    with pytest.raises(installer_run.InstallerLaunchError, match="before launch"):
+        installer_run.run_installer(
+            ["fixture"], cwd=tmp_path, env={}, deadline_s=120,
+            require_tree_exit=True, native_write_deadline=time.monotonic() - 1,
+        )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX observation prerequisite")

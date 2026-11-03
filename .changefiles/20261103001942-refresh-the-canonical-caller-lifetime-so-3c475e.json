@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical caller-lifetime source archive and declared adopters for the optional native-write observer",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}

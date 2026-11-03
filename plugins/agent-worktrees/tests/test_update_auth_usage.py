@@ -155,7 +155,7 @@ def test_activation_state_errors_preserve_actual_usage_evidence(
     )
 
 
-@pytest.mark.parametrize("outcome", ["completed", "timeout", "cleanup", "launch", "missing"])
+@pytest.mark.parametrize("outcome", ["completed", "timeout", "cleanup", "activity", "launch", "missing"])
 def test_windows_payload_owner_preserves_scoped_auth_and_usage(prepared, monkeypatch, outcome):
     import os
 
@@ -175,6 +175,8 @@ def test_windows_payload_owner_preserves_scoped_auth_and_usage(prepared, monkeyp
                                               None, False, 0)
         if outcome == "cleanup":
             raise installer_run.InstallerCleanupError("owned Job cleanup refused")
+        if outcome == "activity":
+            raise installer_run.InstallerActivityError("accounting failed after verified cleanup")
         if outcome == "launch":
             raise installer_run.InstallerLaunchError("owned Job assignment refused before resume")
         if outcome == "missing":

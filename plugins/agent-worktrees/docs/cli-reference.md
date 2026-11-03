@@ -1240,6 +1240,15 @@ Both failed-attempt history and the final result keep that classification;
 a successful bounded retry remains advisory history rather than a failed run.
 The classification identifies an error class, not the process holding a file.
 
+On Windows, an already-installed payload's update also observes completed write
+bytes from its existing strict containment Job. Useful silent copying may renew
+the unchanged 120-second quiet allowance; reads, CPU use and unchanged counters
+cannot. The 240-second target budget remains absolute, with its existing
+process-tree cleanup reserve. Accounting failure stops acquisition after strict
+settlement and never licenses a retry. Default installer, activation-preserving
+install and POSIX observation are unchanged. Write activity does not establish
+payload validity, successful publication or runtime health.
+
 The engine collects the logical target selection before acquisition, refreshes
 its own payload once, and attempts required registered payloads before inactive
 inventory. A required failure stops remaining payload attempts immediately;

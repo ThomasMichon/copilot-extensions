@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import codecs
 import io
+import math
 import os
 import signal
 import subprocess
@@ -69,6 +70,10 @@ class InstallerCleanupError(RuntimeError):
 
 class InstallerLaunchError(RuntimeError):
     """The strict launcher refused the child before execution."""
+
+
+class InstallerActivityError(RuntimeError):
+    """Native activity observation failed after verified process-tree settlement."""
 
 
 def _spawn(
@@ -287,17 +292,25 @@ def run_installer(
     output_fd: int | None = None,
     require_tree_exit: bool = False,
     on_settled: Callable[[], None] | None = None,
+    native_write_deadline: float | None = None,
 ) -> InstallerRun:
     """Keep native output live; deliver legacy logs after verified producer settlement.
 
     Strict POSIX execution uses the existing unreaped-group owner. Its optional
     settlement callback runs only after native scope and output-worker cleanup;
     Windows retains its existing strict Job executor and external witness.
+    ``native_write_deadline`` opts a strict Windows caller into held-Job write
+    activity, with this absolute monotonic cap and unchanged inactivity allowance.
     """
     if log is not None and output_fd is not None:
         raise ValueError("installer output_fd and log are mutually exclusive")
     if on_settled is not None and (not require_tree_exit or os.name == "nt"):
         raise ValueError("installer settlement callback requires the strict POSIX group owner")
+    if native_write_deadline is not None and (
+        os.name != "nt" or not require_tree_exit
+        or isinstance(native_write_deadline, bool) or not math.isfinite(native_write_deadline)
+    ):
+        raise ValueError("native write activity requires a strict Windows Job and finite deadline")
     with ExitStack() as resources:
         try:
             spools = {
@@ -319,6 +332,7 @@ def run_installer(
             target_version=target_version, receipt=receipt, log=log,
             output_fd=output_fd, require_tree_exit=require_tree_exit,
             output_spools=spools,
+            native_write_deadline=native_write_deadline,
         )
 
 
@@ -378,6 +392,7 @@ def _run_installer(
     receipt: Callable[[], str | None] | None, log: Callable[[str], None] | None,
     output_fd: int | None, require_tree_exit: bool,
     output_spools: Mapping[str, BinaryIO] | None,
+    native_write_deadline: float | None = None,
 ) -> InstallerRun:
     """Run ``argv`` until it exits or emits nothing for ``deadline_s``; never raises for a
     spawn failure (it becomes the status).
@@ -440,6 +455,8 @@ def _run_installer(
             while chunk := spool.read(4096):
                 relay(name, chunk)
 
+    if native_write_deadline is not None and time.monotonic() >= native_write_deadline:
+        raise InstallerLaunchError("payload absolute budget expired before launch")
     try:
         strict = {"require_tree_exit": True} if require_tree_exit else {}
         proc, job = _spawn(argv, cwd, env, True, **strict)
@@ -459,8 +476,16 @@ def _run_installer(
             output_fds={name: fd for name, fd in descriptors.items() if fd is not None},
             capture=False,
         )
+        activity = {}
+        if native_write_deadline is not None:
+            from agent_procutil.job_activity import JobWriteActivity
+
+            activity = {
+                "activity_observer": JobWriteActivity(job),
+                "deadline": native_write_deadline,
+            }
         try:
-            capture.wait(deadline_s, wait_for_eof=False)
+            capture.wait(deadline_s, wait_for_eof=False, **activity)
             rc: int | None = proc.returncode
         except subprocess.TimeoutExpired:
             expired, rc = True, None
@@ -489,6 +514,13 @@ def _run_installer(
                 deliver_output()
             except BaseException as delivery_error:
                 exc.add_note(f"deferred output delivery failed: {delivery_error}")
+        if native_write_deadline is not None:
+            from agent_procutil.job_activity import JobActivityError
+
+            if isinstance(exc, JobActivityError):
+                raise InstallerActivityError(
+                    f"native write observation failed after verified cleanup: {exc}",
+                ) from exc
         if require_tree_exit and isinstance(exc, OSError):
             raise InstallerCleanupError(f"installer output failed after verified cleanup: {exc}") from exc
         raise
