@@ -2,6 +2,8 @@
 
 The SQLite member retains original stored text, not a paginated projection or a
 replay. A manifest is a content/identity check, not a signature or restore grant.
+Older observations retain an unknown projection time; matching an owner clock
+frontier verifies their complete shape without inventing that missing timestamp.
 Publication requires file and directory barriers, using native owned-directory
 flush and write-through publication on Windows. Unsupported filesystems or
 access fail closed; no administrative volume handle is opened.
@@ -286,26 +288,44 @@ def _ledger(
     revision, observation_text, status = db.execute(
         "SELECT revision,observation,status FROM delivery").fetchone()
     observation = decode(observation_text.encode())
-    # Delivery is an immutable acceptance-time observation. Live reads may
-    # project different due/recheck fields without any intervening commit.
-    accepted_snapshot = asdict(project(
-        state["documents"], state["records"],
-        now=_time(state["committed_at"], "accepted commit time"),
-    ))
-    expected_observation = {
-        "schema": "efforts.agenda-observation", "version": 2, "source": latest["source"],
-        "revision": state["revision"], "committed_at": state["committed_at"],
-        "snapshot": accepted_snapshot,
-    }
-    if len(store.encode(expected_observation).encode()) + 1 > 32768:
-        expected_observation = {
-            "schema": "efforts.agenda-undeliverable", "version": 1, "revision": state["revision"],
-            "error": {"code": "observation-too-large",
-                      "message": "Observation exceeds 32 KiB; no argv invoked."},
-        }
-    if revision != state["revision"] or observation != expected_observation:
+    if revision != state["revision"] or not _delivery_matches(
+            observation, state, latest["source"], budget):
         raise ExportError("delivery observation does not match the captured state")
     _object(decode(status.encode()), "delivery status")
+
+
+def _delivery_matches(observation: dict, state: dict, source: dict, budget: _Budget) -> bool:
+    accepted_at = _time(state["committed_at"], "accepted commit time")
+
+    def matches(at: Any) -> bool:
+        budget.check()
+        candidate = {
+            "schema": "efforts.agenda-observation", "version": 2, "source": source,
+            "revision": state["revision"], "committed_at": state["committed_at"],
+            "snapshot": asdict(project(state["documents"], state["records"], now=at)),
+        }
+        if len(store.encode(candidate).encode()) + 1 > 32768:
+            candidate = {
+                "schema": "efforts.agenda-undeliverable", "version": 1, "revision": state["revision"],
+                "error": {"code": "observation-too-large",
+                          "message": "Observation exceeds 32 KiB; no argv invoked."},
+            }
+        return observation == candidate
+
+    if matches(accepted_at):
+        return True
+    # Older producers captured committed_at before apply/validation but projected
+    # afterward, without recording that projection's time. The owner projection
+    # changes only at these declared boundaries. Check each whole possible shape,
+    # never mix temporal fields or claim that a matched boundary was the real
+    # projection time. Work is bounded by the validated current deferred list.
+    boundaries = set()
+    for saved in state["documents"]["cursor"]["deferred"]:
+        budget.check()
+        boundary = _time(saved["revisit_at"], "deferred revisit")
+        if boundary > accepted_at:
+            boundaries.add(boundary)
+    return any(matches(boundary) for boundary in sorted(boundaries))
 
 
 def _table_hashes(db: sqlite3.Connection, budget: _Budget) -> dict:

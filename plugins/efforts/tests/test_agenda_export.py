@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from test_agenda_store import AGENDA, STORE, documents as documents, proof, request
-from test_agenda_v2_core import current, lane as lane, outcome, revisit, update
+from test_agenda_v2_core import context, current, lane as lane, outcome, revisit, update
 
 EXPORT = importlib.import_module("agenda_export")
 POSIX = pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory-fsync qualification")
@@ -124,15 +124,78 @@ def test_deferred_acceptance_observation_survives_revisit_deadline(lane: Path) -
     assert source_bytes(lane) == before_bytes and rows(target) == before_rows
     assert STORE.delivery_record(target)[1] == accepted
 
-    # Substituting today's otherwise-valid projection is not a valid immutable
-    # observation: strict verification still checks acceptance-time semantics.
-    changed_observation = {**accepted, "snapshot": live}
+    # A legacy producer could have projected after the deadline, but no real
+    # owner projection combines due rechecks with the pre-deadline action/flags.
+    changed_observation = {
+        **accepted, "snapshot": {**accepted["snapshot"], "due_rechecks": live["due_rechecks"]},
+    }
     with closing(sqlite3.connect(target / STORE.DATABASE, isolation_level=None)) as db:
         db.execute("UPDATE delivery SET observation=?", (STORE.encode(changed_observation),))
     rewrite_member_manifest(target)
     with pytest.raises(AGENDA.AgendaError, match="delivery observation"):
         EXPORT.verify_export(target, **selected, expected_revision=2)
     assert source_bytes(lane) == before_bytes
+
+
+@POSIX
+@pytest.mark.parametrize("legacy_projection", [False, True])
+def test_actual_producer_crosses_revisit_deadline_during_mutation(
+    lane: Path, monkeypatch: pytest.MonkeyPatch, legacy_projection: bool,
+) -> None:
+    frame, _, _ = current(lane)
+    real_apply, real_project = EXPORT.owner.apply, EXPORT.owner.project_at
+    first_revisit = datetime.now(timezone.utc) + timedelta(seconds=3)
+    last_revisit = first_revisit + timedelta(seconds=2)
+    first = update(lane, {
+        "operation": "defer", "frame_id": frame, "decision_ref": "first pending decision",
+        "decision_packet_ref": "first packet", "revisit_at": first_revisit.isoformat(),
+        "evidence": proof(),
+    })["transition"]["deferred_id"]
+    update(lane, {
+        "operation": "assign-root", "items": [{"definition_ref": "nested"}],
+        "assignment_ref": "fixture independent work",
+        "baseline_context": context({"content": "independent fixture input"}), "evidence": proof(),
+    })
+    second_frame, _, _ = current(lane)
+
+    def delayed_apply(queue: object, change: dict) -> dict:
+        transition = real_apply(queue, change)
+        remaining = (first_revisit - datetime.now(timezone.utc)).total_seconds()
+        assert 0 < remaining <= 3
+        threading.Event().wait(remaining + 0.01)
+        return transition
+
+    def old_producer_projection(documents: dict, records: dict, **kwargs: object) -> object:
+        # Exercise the historical producer's actual live-clock projection,
+        # ignoring only the new producer's explicit acceptance-clock argument.
+        return real_project(documents, records)
+
+    monkeypatch.setattr(EXPORT.owner, "apply", delayed_apply)
+    if legacy_projection:
+        monkeypatch.setattr(EXPORT.owner, "project_at", old_producer_projection)
+    result = update(lane, {
+        "operation": "defer", "frame_id": second_frame, "decision_ref": "second pending decision",
+        "decision_packet_ref": "second packet", "revisit_at": last_revisit.isoformat(),
+        "evidence": proof(),
+    })
+    assert datetime.fromisoformat(result["committed_at"].replace("Z", "+00:00")) < first_revisit
+    second = result["transition"]["deferred_id"]
+    accepted = STORE.delivery_record(lane)[1]
+    assert STORE.read(lane)["snapshot"]["due_rechecks"] == [first]
+    assert accepted["snapshot"]["due_rechecks"] == ([first] if legacy_projection else [])
+    original_rows, original_bytes = rows(lane), source_bytes(lane)
+    # Read back after a second boundary: neither today's projection nor the
+    # acceptance-time projection reproduces the older intermediate observation.
+    remaining = (last_revisit - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < remaining <= 2
+    threading.Event().wait(remaining + 0.01)
+    assert STORE.read(lane)["snapshot"]["due_rechecks"] == [first, second]
+    selected, target = selection(lane), destination(lane)
+    manifest = EXPORT.export_store(lane, target, **selected, expected_revision=4)
+    assert EXPORT.verify_export(target, **selected, expected_revision=4) == manifest
+    assert rows(target) == original_rows and source_bytes(lane) == original_bytes
+    assert STORE.delivery_record(target)[1] == accepted
+    assert "projected_at" not in accepted and "projected_at" not in manifest
 
 
 @POSIX

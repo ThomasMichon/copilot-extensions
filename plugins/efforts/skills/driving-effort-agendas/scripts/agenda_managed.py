@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -13,12 +12,9 @@ import sys
 from typing import Any
 
 from agenda import AgendaError, _read, _text, decode
-from agenda_context import context_body
-from agenda_operations import fields
 from agenda_publish import _invoke
-from agenda_queue import init_queue
 from agenda_store import DATABASE, encode, mutate, safe_path
-from agenda_v2_schema import CAPS, MODE, board, validate
+from agenda_store_v2 import validate_initialization
 
 CAPABILITY = "agenda-managed-placement-v1"
 PLACEMENT_SCHEMA = "agent-worktrees.worktree-data"
@@ -60,35 +56,6 @@ def _owner(provider_python: str, project: str, command: list[str]) -> dict[str, 
     return reply
 
 
-def _request(request: dict[str, Any], worktree: str) -> None:
-    fields(request, {"schema", "version", "mode", "expected_revision", "operation_id", "change"})
-    if (
-        request["schema"] != "efforts.agenda-request"
-        or type(request["version"]) is not int or request["version"] != 2
-        or request["mode"] != MODE
-        or type(request["expected_revision"]) is not int or request["expected_revision"] != 0
-    ):
-        raise AgendaError("managed initialization requires a fresh context-qualified request")
-    if len(_text(request["operation_id"], "operation identity").encode()) > 1024:
-        raise AgendaError("operation identity exceeds 1 KiB")
-    change = fields(request["change"], {
-        "operation", "worktree", "board", "baseline_context", "resource_caps",
-    })
-    if change["operation"] != "init" or change["worktree"] != worktree:
-        raise AgendaError("managed initialization request must select the exact worktree")
-    board(change["board"])
-    fields(change["resource_caps"], CAPS)
-    subjects = {subject for item in change["board"]["items"].values()
-                for subject in item["relevant_subjects"]}
-    baseline = context_body(change["baseline_context"], subjects)
-    queue = init_queue(change["board"], worktree, change["resource_caps"], baseline,
-                       datetime.now(timezone.utc).isoformat(), {
-                           "actor": None, "session": None, "qualification": "unknown",
-                       })
-    validate(queue.documents, queue.records)
-    decode(encode(request).encode(), "managed initialization request")
-
-
 def initialize(
     provider_python: str, project: str, worktree: str, creation_nonce: str, lane: str,
     store_id: str, request: dict[str, Any], *, actor: str | None = None,
@@ -98,10 +65,9 @@ def initialize(
     if not isinstance(store_id, str) or re.fullmatch(r"[0-9a-f]{32}", store_id) is None:
         raise AgendaError("managed store ID must be 32 lowercase hexadecimal characters")
     request = decode(encode(request).encode(), "managed initialization request")
-    _request(request, worktree)
-    for value in (actor, session):
-        if value is not None and len(_text(value, "caller metadata").encode()) > 1024:
-            raise AgendaError("caller metadata exceeds 1 KiB")
+    validate_initialization(request, actor=actor, session=session, initial_store_id=store_id)
+    if request["change"]["worktree"] != worktree:
+        raise AgendaError("managed initialization request must select the exact worktree")
     support = _owner(provider_python, project, ["worktree-data-read", "--capabilities", "--json"])
     if support.get("capabilities") != ["worktree-data-v1"]:
         raise AgendaError("actual placement owner does not support worktree-data-v1")

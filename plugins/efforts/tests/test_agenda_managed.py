@@ -170,6 +170,21 @@ def test_changed_owner_binding_never_initializes_the_domain_store(
     assert not list(owner.rglob(STORE.DATABASE))
 
 
+@pytest.mark.parametrize("caller", [{}, {"actor": "asserted-actor", "session": "asserted-session"}])
+def test_generated_initialization_result_limits_precede_allocation(
+    owner: Path, monkeypatch: pytest.MonkeyPatch, caller: dict[str, str],
+) -> None:
+    request = initialization()
+    request["change"]["board"]["items"]["parent"]["action"] = "x" * 50000
+    assert len(STORE.encode(request).encode()) < 128 * 1024
+    monkeypatch.setattr(MANAGED, "_owner", lambda *args: pytest.fail("oversized result allocated a lane"))
+    with pytest.raises(MANAGED.AgendaError, match="128 KiB"):
+        MANAGED.initialize(
+            sys.executable, PROJECT, WORKTREE, NONCE, "main", STORE_ID, request, **caller,
+        )
+    assert list(owner.iterdir()) == []
+
+
 def test_missing_provider_refuses_without_fallback_or_new_store(
     owner: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

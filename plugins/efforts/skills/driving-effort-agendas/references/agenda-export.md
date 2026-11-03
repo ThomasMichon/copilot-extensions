@@ -44,10 +44,15 @@ records, metadata and delivery state. The online backup preserves that cut
 under concurrent mutation. Neither page limits nor display omissions truncate
 the export.
 
-Persisted delivery is validated with the owner's projection at its accepted
-commit time, not the current presentation clock. Crossing a deferred
-`revisit_at` can change live due/next-action fields without a database write;
-it does not invalidate unchanged accepted evidence or a verified export.
+New delivery is projected at the writer's captured accepted time, not a fresh
+clock after applying the operation. Export validates that complete projection.
+Older accepted observations lack an exact projection-time witness: compatibility
+checks the complete owner projection at acceptance and distinct declared revisit
+boundaries, retaining the existing deadline. A matching candidate is not recorded
+as the actual projection time or used to rewrite accepted bytes.
+Crossing a deferred `revisit_at` can change live due/next-action fields without
+a database write; it does not invalidate unchanged accepted evidence or a
+verified export. Inconsistent mixtures of temporal fields still refuse.
 
 The completed export contains `agenda.sqlite3` and `manifest.json`.
 The manifest uses schema `efforts.agenda-export`, version 1, and records

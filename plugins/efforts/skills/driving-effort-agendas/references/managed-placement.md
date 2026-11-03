@@ -37,6 +37,10 @@ expected revision zero and the exact selected worktree. Invalid initialization
 data is rejected before allocation. The initial agenda accepts the same store
 identity as the descriptor; the chosen identity is part of the stable retry
 fence, not a way to rewrite an existing store's identity.
+Preflight shares the writer's initialization preparation, including generated
+document, immutable-record, result and caller-metadata bounds. A request that
+fits its input limit cannot allocate a lane before deterministic output-size
+failure.
 
 Keep the store ID, operation ID, request and caller assertions unchanged for
 an exact retry. Retrying preserves the original accepted result and does not
