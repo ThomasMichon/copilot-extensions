@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import ast
 import hashlib
 import importlib.util
+from importlib.abc import Loader
+from importlib.machinery import ModuleSpec
 import io
 import json
 import os
@@ -16,19 +18,20 @@ import sys
 import tarfile
 import time
 from types import SimpleNamespace
+from typing import Any, cast
 import unittest
 from unittest import mock
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("trusted_base_build", ROOT / "build.py")
+spec = cast(ModuleSpec, importlib.util.spec_from_file_location("trusted_base_build", ROOT / "build.py"))
 builder = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(builder)
+cast(Loader, spec.loader).exec_module(builder)
 previous_build = sys.modules.get("build")
 sys.modules["build"] = builder
-install_spec = importlib.util.spec_from_file_location("trusted_base_install", ROOT / "install.py")
+install_spec = cast(ModuleSpec, importlib.util.spec_from_file_location("trusted_base_install", ROOT / "install.py"))
 installer = importlib.util.module_from_spec(install_spec)
-install_spec.loader.exec_module(installer)
+cast(Loader, install_spec.loader).exec_module(installer)
 if previous_build is None:
     del sys.modules["build"]
 else:
@@ -36,8 +39,8 @@ else:
 NOW = datetime(2026, 10, 24, tzinfo=timezone.utc)
 
 
-def archive(path: Path, *, architecture="amd64", corrupt=False) -> None:
-    entries = {}
+def archive(path: Path, *, architecture: str = "amd64", corrupt: bool = False) -> None:
+    entries: dict[str, bytes] = {}
 
     def blob(value: bytes) -> str:
         digest = "sha256:" + hashlib.sha256(value).hexdigest()
@@ -63,7 +66,7 @@ def archive(path: Path, *, architecture="amd64", corrupt=False) -> None:
 
 
 class ContractTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.work = ROOT.parents[1] / ".trusted-base-test-runs" / uuid.uuid4().hex
         self.work.mkdir(parents=True)
         if os.name == "nt":
@@ -71,17 +74,17 @@ class ContractTests(unittest.TestCase):
             patch = mock.patch.object(builder, "fsync_directory")
             patch.start()
             self.addCleanup(patch.stop)
-        self.files = builder.context_files()
-        self.inputs = {"schema_version": 1, "source_revision": "a" * 40,
+        self.files: dict[str, bytes] = builder.context_files()
+        self.inputs: dict[str, Any] = {"schema_version": 1, "source_revision": "a" * 40,
                        "context_sha256": builder.context_digest(self.files),
                        "timeout_seconds": 60,
                        "builder": {"name": "image-proof", "container_id": "b" * 64,
                                    "max_memory_bytes": 1073741824, "max_cpus": 2}}
-        self.lock = json.loads(self.files["dependencies.lock.json"])
+        self.lock: dict[str, Any] = json.loads(self.files["dependencies.lock.json"])
         self.docker_config = self.work / "ambient-docker"
         self.buildx_config = self.work / "ambient-buildx"
         (self.buildx_config / "instances").mkdir(parents=True)
-        self.metadata = {"Name": "image-proof", "Driver": "docker-container", "Dynamic": False,
+        self.metadata: dict[str, Any] = {"Name": "image-proof", "Driver": "docker-container", "Dynamic": False,
                          "Nodes": [{"Name": "image-proof0", "Endpoint": "default", "Files": {},
                                     "Platforms": None,
                                     "Flags": ["--allow-insecure-entitlement=network.host"],
@@ -99,7 +102,7 @@ class ContractTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def inspect(self, argv):
+    def inspect(self, argv: list[str]) -> str:
         self.assertEqual(argv[1:3], ["--context", "default"])
         if argv[3:5] == ["context", "inspect"]:
             return json.dumps({"Host": "unix:///var/run/docker.sock", "SkipTLSVerify": False})
@@ -117,20 +120,20 @@ class ContractTests(unittest.TestCase):
             }])
         self.fail("Unexpected inspection")
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.work)
         try:
             self.work.parent.rmdir()
         except OSError:
             pass
 
-    def test_locked_recipe_is_seasoned(self):
+    def test_locked_recipe_is_seasoned(self) -> None:
         builder.validate_age(self.lock, NOW)
         self.assertIn(self.lock["base"]["image"], self.files["Dockerfile"].decode())
         self.assertNotIn("ARG ", self.files["Dockerfile"].decode())
         self.assertEqual(self.lock["archives"]["copilot"]["version"], "1.0.98")
 
-    def test_age_boundary_future_and_snapshot(self):
+    def test_age_boundary_future_and_snapshot(self) -> None:
         for section in ("base", "apt"):
             lock = deepcopy(self.lock)
             lock[section]["published_at"] = "2026-10-18T00:00:01Z"
@@ -145,7 +148,7 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             builder.validate_age(lock, NOW)
 
-    def test_unknown_inputs_bool_schema_and_changed_context_refused(self):
+    def test_unknown_inputs_bool_schema_and_changed_context_refused(self) -> None:
         for patch in ({"token": "not-a-credential"}, {"platform": "linux/arm64"},
                       {"schema_version": True}, {"source_revision": "main"},
                       {"context_sha256": "0" * 64}):
@@ -153,14 +156,14 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 builder.validate_inputs(inputs, self.inputs["context_sha256"])
 
-    def test_context_is_allowlisted_and_line_ending_stable(self):
+    def test_context_is_allowlisted_and_line_ending_stable(self) -> None:
         self.assertEqual(set(self.files), set(builder.CONTEXT))
         self.assertEqual(builder.context_digest(self.files),
                          builder.context_digest({k: v for k, v in reversed(list(self.files.items()))}))
         changed = dict(self.files, **{"entrypoint.sh": b"changed"})
         self.assertNotEqual(builder.context_digest(changed), self.inputs["context_sha256"])
 
-    def test_build_command_is_fixed_and_preserves_path_boundaries(self):
+    def test_build_command_is_fixed_and_preserves_path_boundaries(self) -> None:
         argv = builder.build_command("docker", "image-proof", self.work / "context with spaces",
                                      self.work / "image with spaces.oci.tar")
         self.assertEqual(argv[:9], ["docker", "--context", "default",
@@ -170,26 +173,26 @@ class ContractTests(unittest.TestCase):
         for forbidden in ("--push", "--load", "--build-arg", "--secret", "--ssh"):
             self.assertNotIn(forbidden, argv)
 
-    def test_real_subprocess_preserves_metacharacters(self):
+    def test_real_subprocess_preserves_metacharacters(self) -> None:
         marker = str(self.work / "must-not-exist")
         payload = "space ; & | $() " + marker
         builder.execute([sys.executable, "-B", "-c",
                          "import sys; assert sys.argv[1] == " + repr(payload), payload])
         self.assertFalse(Path(marker).exists())
 
-    def test_real_cli_describe(self):
-        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    def test_real_cli_describe(self) -> None:
+        flags: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
         result = subprocess.run(
             [sys.executable, "-B", str(ROOT / "build.py"), "--describe"],
             capture_output=True, text=True, check=True, **flags,
         )
         self.assertEqual(json.loads(result.stdout)["context_sha256"], self.inputs["context_sha256"])
 
-    def test_actual_subprocess_timeout_is_bounded(self):
+    def test_actual_subprocess_timeout_is_bounded(self) -> None:
         with self.assertRaises(subprocess.TimeoutExpired):
             builder.execute([sys.executable, "-B", "-c", "import time; time.sleep(60)"], timeout=0.1)
 
-    def test_actual_descendant_pipe_timeout_is_bounded_and_contained(self):
+    def test_actual_descendant_pipe_timeout_is_bounded_and_contained(self) -> None:
         pid_file = self.work / "descendant.pid"
         descendant = (
             "import os,pathlib,signal,sys,time; "
@@ -213,7 +216,7 @@ class ContractTests(unittest.TestCase):
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
             kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             kernel.OpenProcess.restype = wintypes.HANDLE
             kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
@@ -239,7 +242,7 @@ class ContractTests(unittest.TestCase):
             else:
                 self.fail("Invocation-owned descendant survived cleanup")
 
-    def test_cleanup_bounds_final_pipe_drain_and_child_wait(self):
+    def test_cleanup_bounds_final_pipe_drain_and_child_wait(self) -> None:
         process = mock.Mock()
         process.pid = 123
         process.communicate.side_effect = [
@@ -257,7 +260,7 @@ class ContractTests(unittest.TestCase):
                          [0.1, builder.CLEANUP_TIMEOUT, builder.CLEANUP_TIMEOUT])
         process.wait.assert_called_once_with(timeout=builder.CLEANUP_TIMEOUT)
 
-    def test_lost_or_reused_posix_custody_never_signals(self):
+    def test_lost_or_reused_posix_custody_never_signals(self) -> None:
         for disposition, returncode, status in (
             (signal.SIG_DFL, None, ChildProcessError()),
             (signal.SIG_DFL, None, SimpleNamespace(si_pid=456)),
@@ -289,28 +292,28 @@ class ContractTests(unittest.TestCase):
                 process.stdout.close.assert_called_once()
                 process.stderr.close.assert_called_once()
 
-    def test_posix_leader_stays_unreaped_until_group_retirement(self):
+    def test_posix_leader_stays_unreaped_until_group_retirement(self) -> None:
         process = mock.Mock(pid=123, returncode=None)
-        events = []
+        events: list[str] = []
 
-        def drain(*args):
+        def drain(*args: Any) -> tuple[str, str]:
             self.assertIsNone(process.returncode)
             process.wait.assert_not_called()
             events.append("drain")
             return "captured", ""
 
-        def observe(*args):
+        def observe(*args: Any) -> SimpleNamespace:
             events.append("observe")
             self.assertIsNone(process.returncode)
             return SimpleNamespace(si_pid=123)
 
-        def retire(pid, sig):
+        def retire(pid: int, sig: int) -> None:
             self.assertEqual((pid, sig), (123, 9))
             self.assertIsNone(process.returncode)
             process.wait.assert_not_called()
             events.append("retire")
 
-        def wait(*, timeout):
+        def wait(*, timeout: float) -> None:
             self.assertEqual(timeout, builder.CLEANUP_TIMEOUT)
             events.append("wait")
             process.returncode = 0
@@ -331,7 +334,7 @@ class ContractTests(unittest.TestCase):
         process.poll.assert_not_called()
         process.kill.assert_not_called()
 
-    def test_unconfirmed_cleanup_cannot_return_success(self):
+    def test_unconfirmed_cleanup_cannot_return_success(self) -> None:
         process = mock.Mock(returncode=0)
         process.communicate.return_value = ("completed", "")
         process.wait.side_effect = subprocess.TimeoutExpired(["fixture"], builder.CLEANUP_TIMEOUT)
@@ -339,7 +342,7 @@ class ContractTests(unittest.TestCase):
             with self.assertRaisesRegex(builder.ChildCustodyError, "cleanup is unconfirmed"):
                 builder.execute_contained(["fixture"], ["fixture"], 1, mock.Mock(), mock.Mock())
 
-    def test_job_docker_config_snapshots_only_selected_local_builder(self):
+    def test_job_docker_config_snapshots_only_selected_local_builder(self) -> None:
         self.docker_config.mkdir()
         (self.docker_config / "config.json").write_text(json.dumps({
             "auths": {"registry.invalid": {"auth": "synthetic-credential"}},
@@ -379,7 +382,8 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(environment["BUILDX_CONFIG"], str(client / "buildx"))
         self.assertNotIn("synthetic", json.dumps(environment))
 
-    def test_job_docker_metadata_fails_closed_on_unknown_or_foreign_builder(self):
+    def test_job_docker_metadata_fails_closed_on_unknown_or_foreign_builder(self) -> None:
+        patch: dict[str, Any]
         for patch in ({"Name": "foreign"}, {"Driver": "remote"}, {"Dynamic": True},
                       {"Nodes": []}, {"Nodes": [{"Name": "node", "Endpoint": "ssh://foreign.invalid"}]},
                       {"Nodes": [{"Name": "node", "Endpoint": "default", "Files": {"key": "value"}}]},
@@ -391,7 +395,7 @@ class ContractTests(unittest.TestCase):
                     builder.docker_environment(self.inputs["builder"], self.work)
                 self.assertFalse((self.work / "docker-client").exists())
 
-    def test_bounded_buildx_metadata_preserves_admitted_real_shape(self):
+    def test_bounded_buildx_metadata_preserves_admitted_real_shape(self) -> None:
         inputs = deepcopy(self.inputs)
         inputs["builder"].update(max_memory_bytes=8 * 1024**3, max_cpus=4)
         metadata = deepcopy(self.metadata)
@@ -401,9 +405,9 @@ class ContractTests(unittest.TestCase):
         )
         self.instance.write_text(json.dumps(metadata))
         output = self.work / "bounded-build"
-        calls = []
+        calls: list[list[str]] = []
 
-        def runner(argv, *, timeout, env):
+        def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
             calls.append(argv)
             client = Path(env["DOCKER_CONFIG"])
             copied = json.loads((Path(env["BUILDX_CONFIG"]) / "instances" / "image-proof").read_text())
@@ -426,8 +430,9 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(len(calls), 9)
         self.assertEqual(sum(argv[3] == "inspect" for argv in calls), 2)
 
-    def test_unsafe_bounded_metadata_refused_before_any_cli_command(self):
-        cases = []
+    def test_unsafe_bounded_metadata_refused_before_any_cli_command(self) -> None:
+        cases: list[dict[str, Any]] = []
+        patch: dict[str, Any]
         for patch in (
             {"env.HTTP_PROXY": "http://synthetic-proxy.invalid"},
             {"env.HTTPS_PROXY": "http://synthetic-proxy.invalid"},
@@ -470,7 +475,7 @@ class ContractTests(unittest.TestCase):
                     cli.assert_not_called()
                 self.assertFalse((output / "build-receipt.json").exists())
 
-    def test_actual_job_docker_environment_isolated_at_cli_boundary(self):
+    def test_actual_job_docker_environment_isolated_at_cli_boundary(self) -> None:
         self.docker_config.mkdir()
         (self.docker_config / "config.json").write_text(json.dumps({
             "auths": {"registry.invalid": {"auth": "synthetic-sensitive"}},
@@ -491,10 +496,10 @@ class ContractTests(unittest.TestCase):
             "['HTTP_PROXY','https_proxy','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_AUTH_CONFIG']); "
             "print('isolated')"
         )
-        calls = []
+        calls: list[list[str]] = []
         real_execute = builder.execute
 
-        def runner(argv, *, timeout, env):
+        def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
             # A later ambient mutation cannot alter the already-selected snapshot.
             self.instance.write_text("unsafe later replacement")
             self.assertEqual(real_execute([sys.executable, "-B", "-c", fixture],
@@ -516,19 +521,19 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(default_runner.call_count, 9)
         self.assertEqual(len(calls), 9)
 
-    def test_output_and_receipt_directory_entries_sync_before_buildx(self):
+    def test_output_and_receipt_directory_entries_sync_before_buildx(self) -> None:
         output = self.work / "new-parent" / "new-child" / "artifact"
-        events = []
+        events: list[str | Path] = []
         real_fsync = os.fsync
 
-        def sync_file(descriptor):
+        def sync_file(descriptor: int) -> None:
             events.append("file")
             real_fsync(descriptor)
 
-        def sync_directory(path):
+        def sync_directory(path: Path) -> None:
             events.append(path)
 
-        def runner(argv, *, timeout, env):
+        def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             self.assertEqual(events, [self.work, output.parent.parent, output.parent,
@@ -544,18 +549,18 @@ class ContractTests(unittest.TestCase):
                 builder.build(self.inputs, output, runner=runner, now=NOW)
         self.assertEqual(events[-2:], ["file", output])
 
-    def test_failed_directory_sync_never_launches_buildx(self):
+    def test_failed_directory_sync_never_launches_buildx(self) -> None:
         for failure in ("ancestor", "receipt"):
             with self.subTest(failure=failure):
                 output = self.work / failure / "artifact"
-                build_calls = []
+                build_calls: list[list[str]] = []
 
-                def sync_directory(path):
+                def sync_directory(path: Path) -> None:
                     if ((failure == "ancestor" and path == self.work)
                             or path == output and (output / "build-receipt.json").exists()):
                         raise OSError("directory durability unavailable")
 
-                def runner(argv, *, timeout, env):
+                def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
                     if argv[3:5] == ["buildx", "build"]:
                         build_calls.append(argv)
                         self.fail("Buildx launched without a durable initial receipt")
@@ -571,18 +576,18 @@ class ContractTests(unittest.TestCase):
                 else:
                     self.assertFalse((output / "build-receipt.json").exists())
 
-    def test_final_receipt_sync_failure_does_not_claim_durable_success(self):
+    def test_final_receipt_sync_failure_does_not_claim_durable_success(self) -> None:
         output = self.work / "final-sync-failure"
         syncs = 0
 
-        def sync_directory(path):
+        def sync_directory(path: Path) -> None:
             nonlocal syncs
             if path == output and (output / "build-receipt.json").exists():
                 syncs += 1
                 if syncs == 2:
                     raise OSError("final receipt sync failed")
 
-        def runner(argv, *, timeout, env):
+        def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             archive(output / "image.oci.tar")
@@ -593,13 +598,13 @@ class ContractTests(unittest.TestCase):
                 builder.build(self.inputs, output, runner=runner, now=NOW)
 
     @unittest.skipIf(os.name == "nt", "Directory fsync requires the Linux build host")
-    def test_actual_directory_fsync(self):
+    def test_actual_directory_fsync(self) -> None:
         builder.fsync_directory(self.work)
 
-    def test_build_stages_only_approved_bytes_and_inspects_archive(self):
+    def test_build_stages_only_approved_bytes_and_inspects_archive(self) -> None:
         output = self.work / "artifact directory"
 
-        def runner(argv, *, timeout, env):
+        def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             self.assertEqual(timeout, 60)
@@ -623,10 +628,10 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             builder.build(self.inputs, output, runner=runner, now=NOW)
 
-    def test_failed_engine_keeps_failure_receipt_without_success_claim(self):
+    def test_failed_engine_keeps_failure_receipt_without_success_claim(self) -> None:
         output = self.work / "failed"
 
-        def runner(argv, *, timeout, env):
+        def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             raise subprocess.CalledProcessError(1, argv)
@@ -639,31 +644,31 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(receipt["builder_container_id"], "b" * 64)
         self.assertEqual(len(receipt["approval_sha256"]), 64)
 
-    def test_wrong_platform_and_corrupt_layer_refused(self):
+    def test_wrong_platform_and_corrupt_layer_refused(self) -> None:
         for name, options in (("wrong", {"architecture": "arm64"}),
                               ("corrupt", {"corrupt": True})):
             path = self.work / name
-            archive(path, **options)
+            archive(path, **cast(dict[str, Any], options))
             with self.assertRaises(ValueError):
                 builder.oci_identity(path)
 
-    def test_output_injection_and_own_recipe_refused_before_engine(self):
+    def test_output_injection_and_own_recipe_refused_before_engine(self) -> None:
         for output in (ROOT / "output", self.work / "name,extra=value"):
             with self.assertRaises(ValueError):
                 builder.build(self.inputs, output, runner=lambda _: self.fail("engine called"), now=NOW)
 
-    def test_default_or_unbounded_builder_refused(self):
+    def test_default_or_unbounded_builder_refused(self) -> None:
         for bounds in ({"Memory": 0}, {"NanoCpus": 0, "CpuQuota": -1},
                        {"MemorySwap": -1}, {"Memory": 2147483648},
                        {"NanoCpus": 4000000000}):
-            def runner(argv, *, timeout):
+            def runner(argv: list[str], *, timeout: float) -> str:
                 result = json.loads(self.inspect(argv))
                 if argv[3] == "inspect":
                     result[0]["HostConfig"].update(bounds)
                 return json.dumps(result)
             with self.assertRaises(ValueError):
                 builder.verify_builder("docker", self.inputs["builder"], runner)
-        def wrong_driver(argv, *, timeout):
+        def wrong_driver(argv: list[str], *, timeout: float) -> str:
             result = json.loads(self.inspect(argv))
             if argv[3:5] == ["buildx", "ls"]:
                 result["Driver"] = "docker"
@@ -671,8 +676,8 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             builder.verify_builder("docker", self.inputs["builder"], wrong_driver)
 
-    def test_wrong_builder_instance_and_timeout_inputs_refused(self):
-        def runner(argv, *, timeout):
+    def test_wrong_builder_instance_and_timeout_inputs_refused(self) -> None:
+        def runner(argv: list[str], *, timeout: float) -> str:
             result = json.loads(self.inspect(argv))
             if argv[3] == "inspect":
                 result[0]["Name"] = "/unrelated-service"
@@ -684,15 +689,16 @@ class ContractTests(unittest.TestCase):
                 builder.validate_inputs(dict(self.inputs, timeout_seconds=timeout),
                                         self.inputs["context_sha256"])
 
-    def test_running_builder_image_checked_before_and_after_build(self):
+    def test_running_builder_image_checked_before_and_after_build(self) -> None:
         for stage in ("preflight", "postbuild"):
             for index, image in enumerate((None, "moby/buildkit:latest",
                                            "moby/buildkit@sha256:" + "0" * 64)):
                 with self.subTest(stage=stage, image=image):
                     output = self.work / (stage + "-" + str(index))
-                    inspections, builds = 0, []
+                    inspections = 0
+                    builds: list[list[str]] = []
 
-                    def runner(argv, *, timeout, env):
+                    def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
                         nonlocal inspections
                         if argv[3:5] == ["buildx", "build"]:
                             builds.append(argv)
@@ -715,12 +721,12 @@ class ContractTests(unittest.TestCase):
                     else:
                         self.assertFalse((output / "build-receipt.json").exists())
 
-    def test_cancelled_build_retains_unknown_outcome(self):
+    def test_cancelled_build_retains_unknown_outcome(self) -> None:
         for error in (subprocess.TimeoutExpired(["fixture"], 60), KeyboardInterrupt(),
                       builder.ChildCustodyError("CLI child identity changed")):
             with self.subTest(error=type(error).__name__):
                 output = self.work / type(error).__name__
-                def runner(argv, *, timeout, env):
+                def runner(argv: list[str], *, timeout: float, env: dict[str, str]) -> str:
                     if argv[3:5] != ["buildx", "build"]:
                         return self.inspect(argv)
                     raise error
@@ -733,9 +739,9 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(receipt["builder_container_id"], "b" * 64)
                 self.assertEqual(len(receipt["approval_sha256"]), 64)
 
-    def test_foreign_node_endpoint_cannot_borrow_local_container_limits(self):
+    def test_foreign_node_endpoint_cannot_borrow_local_container_limits(self) -> None:
         for endpoint in ("other-context", "ssh://remote.invalid", "unix:///other/socket"):
-            def runner(argv, *, timeout):
+            def runner(argv: list[str], *, timeout: float) -> str:
                 self.assertNotEqual(argv[3], "inspect", "must refuse before inspecting local container")
                 result = json.loads(self.inspect(argv))
                 if argv[3:5] == ["buildx", "ls"]:
@@ -744,9 +750,9 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 builder.verify_builder("docker", self.inputs["builder"], runner)
 
-    def test_foreign_default_context_and_changed_context_refused(self):
+    def test_foreign_default_context_and_changed_context_refused(self) -> None:
         calls = 0
-        def runner(argv, *, timeout):
+        def runner(argv: list[str], *, timeout: float) -> str:
             nonlocal calls
             result = json.loads(self.inspect(argv))
             if argv[3:5] == ["context", "inspect"]:
@@ -757,12 +763,12 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             builder.verify_builder("docker", self.inputs["builder"], runner)
 
-    def test_buildx_json_lines_deduplicate_only_identical_selected_records(self):
+    def test_buildx_json_lines_deduplicate_only_identical_selected_records(self) -> None:
         selected = json.loads(self.inspect(["docker", "--context", "default", "buildx", "ls"]))
         selected["Nodes"][0]["Endpoint"] = "unix:///var/run/docker.sock"
         unrelated = {"Name": "default", "Driver": "docker", "Nodes": []}
         for conflicting in (False, True):
-            def runner(argv, *, timeout):
+            def runner(argv: list[str], *, timeout: float) -> str:
                 if argv[3:5] == ["buildx", "ls"]:
                     second = deepcopy(selected)
                     if conflicting:
@@ -777,7 +783,7 @@ class ContractTests(unittest.TestCase):
                     builder.verify_builder("docker", self.inputs["builder"], runner)["cpus"], 2,
                 )
 
-    def test_runtime_identity_and_auth_boundary(self):
+    def test_runtime_identity_and_auth_boundary(self) -> None:
         entry = self.files["entrypoint.sh"].decode()
         self.assertIn("mountpoint -q", entry)
         self.assertIn('[ "$$" != 1 ]', entry)
@@ -824,7 +830,7 @@ class ContractTests(unittest.TestCase):
 
 
 class RuntimePersistenceTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.work = ROOT.parents[1] / ".trusted-base-test-runs" / uuid.uuid4().hex
         self.home = self.work / "home"
         self.workspace = self.work / "workspaces"
@@ -832,10 +838,10 @@ class RuntimePersistenceTests(unittest.TestCase):
         for path in (self.home, self.workspace, self.etc):
             path.mkdir(parents=True)
         (self.etc / "machine-id").write_text("")
-        self.owners = {}
-        self.modes = {}
+        self.owners: dict[Path, tuple[int, int]] = {}
+        self.modes: dict[Path, int] = {}
         self.public = "ssh-ed25519 AAAAtestkey fixture\n"
-        self.commands = []
+        self.commands: list[tuple[str, ...]] = []
         self.patches = mock.patch.multiple(
             installer, ownership=lambda p: self.owners.get(p, (0, 0)),
             permissions=lambda p: self.modes.get(p, 0o700 if p.is_dir() else 0o644),
@@ -845,7 +851,7 @@ class RuntimePersistenceTests(unittest.TestCase):
         )
         self.patches.start()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         self.patches.stop()
         shutil.rmtree(self.work)
         try:
@@ -853,7 +859,7 @@ class RuntimePersistenceTests(unittest.TestCase):
         except OSError:
             pass
 
-    def keygen(self, *args):
+    def keygen(self, *args: str) -> str:
         self.commands.append(args)
         if "-y" in args:
             return self.public
@@ -862,7 +868,7 @@ class RuntimePersistenceTests(unittest.TestCase):
         private.with_suffix(".pub").write_text(self.public)
         return ""
 
-    def dbus_reference(self):
+    def dbus_reference(self) -> None:
         reference = self.work / "var/lib/dbus/machine-id"
         reference.parent.mkdir(parents=True)
         try:
@@ -870,12 +876,12 @@ class RuntimePersistenceTests(unittest.TestCase):
         except OSError as error:
             self.skipTest("Host cannot create symlinks: " + str(error))
 
-    def initialize(self):
+    def initialize(self) -> Path:
         self.dbus_reference()
         installer.prepare_runtime(self.home, self.workspace, self.etc)
         return self.home / ".local/state/trusted-harness/identity"
 
-    def test_public_regular_projection_with_private_home_and_identity(self):
+    def test_public_regular_projection_with_private_home_and_identity(self) -> None:
         identity = self.initialize()
         self.modes[self.home] = 0o700
         original = {p.name: p.read_bytes() for p in identity.iterdir()}
@@ -889,7 +895,7 @@ class RuntimePersistenceTests(unittest.TestCase):
         self.assertEqual({p.name: p.read_bytes() for p in identity.iterdir()}, original)
         self.assertEqual(len([args for args in self.commands if "-q" in args]), 1)
 
-    def test_foreign_and_nonempty_root_mounts_refused_without_adoption(self):
+    def test_foreign_and_nonempty_root_mounts_refused_without_adoption(self) -> None:
         for owner, content in (((1234, 1234), False), ((0, 1000), False), ((0, 0), True)):
             self.owners[self.home] = owner
             if content:
@@ -903,7 +909,7 @@ class RuntimePersistenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             installer.prepare_runtime(self.home, self.workspace, self.etc)
 
-    def test_partial_identity_never_regenerates_host_key(self):
+    def test_partial_identity_never_regenerates_host_key(self) -> None:
         identity = self.initialize()
         original_pub = (identity / "ssh_host_ed25519_key.pub").read_bytes()
         (identity / "ssh_host_ed25519_key").unlink()
@@ -914,7 +920,7 @@ class RuntimePersistenceTests(unittest.TestCase):
         self.assertEqual((identity / "ssh_host_ed25519_key.pub").read_bytes(), original_pub)
         self.assertFalse((identity / "ssh_host_ed25519_key").exists())
 
-    def test_missing_public_key_or_machine_id_and_empty_identity_refused(self):
+    def test_missing_public_key_or_machine_id_and_empty_identity_refused(self) -> None:
         identity = self.initialize()
         for name in ("ssh_host_ed25519_key.pub", "machine-id"):
             path = identity / name
@@ -931,7 +937,7 @@ class RuntimePersistenceTests(unittest.TestCase):
             installer.prepare_runtime(self.home, self.workspace, self.etc)
         self.assertFalse(any(identity.iterdir()))
 
-    def test_malformed_machine_and_keypair_refused_without_rewriting(self):
+    def test_malformed_machine_and_keypair_refused_without_rewriting(self) -> None:
         identity = self.initialize()
         machine = identity / "machine-id"
         machine.write_text("invalid\n")
@@ -946,7 +952,7 @@ class RuntimePersistenceTests(unittest.TestCase):
             installer.prepare_runtime(self.home, self.workspace, self.etc)
         self.assertEqual((identity / "ssh_host_ed25519_key").read_bytes(), private_before)
 
-    def test_foreign_or_wrong_mode_identity_refused(self):
+    def test_foreign_or_wrong_mode_identity_refused(self) -> None:
         identity = self.initialize()
         for target, owner, mode in (
             (identity, (1000, 1000), 0o700),
@@ -961,7 +967,7 @@ class RuntimePersistenceTests(unittest.TestCase):
                 installer.prepare_runtime(self.home, self.workspace, self.etc)
             self.owners[target], self.modes[target] = old_owner, old_mode
 
-    def test_linked_mount_home_subdirectory_and_identity_file_refused(self):
+    def test_linked_mount_home_subdirectory_and_identity_file_refused(self) -> None:
         identity = self.initialize()
         for original in (identity / "machine-id", identity / "ssh_host_ed25519_key",
                          identity / "ssh_host_ed25519_key.pub", identity,
@@ -976,7 +982,7 @@ class RuntimePersistenceTests(unittest.TestCase):
                 original.unlink(missing_ok=True)
                 saved.rename(original)
 
-    def test_linked_projection_refused_without_changing_canonical_id(self):
+    def test_linked_projection_refused_without_changing_canonical_id(self) -> None:
         identity = self.initialize()
         original = (identity / "machine-id").read_bytes()
         projected = self.etc / "machine-id"
