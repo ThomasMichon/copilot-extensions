@@ -51,14 +51,14 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
     const report = { status: "unavailable", requestedProfile: profile, result: null, requests: [],
         cleanup: { runtimeStopped: null, errors: [] } };
     const usage = selectionUsage(), started = performance.now();
-    let session, client, unsubscribe, usageError, cancelListener, closing = false;
+    let session, client, unsubscribe, usageError, cancelListener, closing = false, requestAttempts = 0;
     class Guard extends sdk.CopilotRequestHandler {
         async sendRequest(request, context) {
             if (closing || signal?.aborted || context.signal?.aborted) throw new Error("evaluation request cancelled");
             if (request.method === "GET" && /\/models\/?$/.test(new URL(request.url).pathname)) {
                 return super.sendRequest(request, context);
             }
-            if (signal?.aborted || context.signal.aborted || context.sessionId !== session?.sessionId || report.requests.length >= 8) {
+            if (signal?.aborted || context.signal.aborted || context.sessionId !== session?.sessionId || ++requestAttempts > 8) {
                 throw new Error("unowned, cancelled or excess evaluation request refused");
             }
             const body = await request.clone().json();

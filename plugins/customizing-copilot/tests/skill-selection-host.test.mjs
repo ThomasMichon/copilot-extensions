@@ -105,7 +105,8 @@ test("owned request guard checks effective profile and tools without consuming t
 
 function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = false,
     stopError = false, hang = false, signal, toolFailure = false, forkMismatch = false,
-    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal, lateUsage, waitFailure = false } = {}) {
+    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal, lateUsage, waitFailure = false,
+    requestProbe } = {}) {
     const observed = { stops: 0, aborts: 0, sends: 0, forwards: 0 };
     const histories = new Map(), subscriptions = new Set();
     let serial = 0;
@@ -157,13 +158,16 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
                             const clone = outbound.clone.bind(outbound);
                             outbound.clone = () => ({ json: async () => { await bodyInspection(); return clone().json(); } });
                         }
-                        observed.lastRequest = thisClient.options.requestHandler.sendRequest(outbound,
-                            { sessionId: id, signal: requestSignal ?? new AbortController().signal });
-                        if (waitFailure) {
-                            observed.lastRequest.then(() => {}, error => { observed.requestFailure = error; });
-                            throw new Error("fixture wait failed");
+                        const context = { sessionId: id, signal: requestSignal ?? new AbortController().signal };
+                        if (requestProbe) await requestProbe(thisClient.options.requestHandler, outbound, context);
+                        else {
+                            observed.lastRequest = thisClient.options.requestHandler.sendRequest(outbound, context);
+                            if (waitFailure) {
+                                observed.lastRequest.then(() => {}, error => { observed.requestFailure = error; });
+                                throw new Error("fixture wait failed");
+                            }
+                            await observed.lastRequest;
                         }
-                        await observed.lastRequest;
                     }
                     history.push({ id: `user-${++serial}`, type: "user.message", data: { content: prompt } },
                         { id: `assistant-${++serial}`, type: "assistant.message", data: { content: "fixture reply" } });
@@ -419,6 +423,27 @@ test("a failed wait closes pending requests before owned cleanup finishes", asyn
         assert.equal(report.result, null);
         assert.equal(report.cleanup.runtimeStopped, true);
     }
+});
+
+test("the evaluator reserves its allowance before concurrent request inspection", async t => {
+    const parent = await mkdtemp(join(tmpdir(), "evaluation-request-limit-"));
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    let outcomes;
+    const fake = fakeSdk({ requestProbe: async (handler, outbound, context) => {
+        outcomes = await Promise.allSettled(Array.from({ length: 9 }, () =>
+            handler.sendRequest(outbound.clone(), context)));
+    } });
+    const report = await runSelectionEvaluation({
+        ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+        profile, evidence: { reports: [{ id: "fixture" }] },
+    });
+    assert.equal(outcomes.filter(item => item.status === "fulfilled").length, 8);
+    const rejected = outcomes.filter(item => item.status === "rejected");
+    assert.equal(rejected.length, 1);
+    assert.match(rejected[0].reason.message, /excess/);
+    assert.equal(fake.observed.forwards, 8);
+    assert.equal(report.requests.length, 8);
+    assert.equal(report.cleanup.runtimeStopped, true);
 });
 
 test("matched strategies seed only synthetic traffic and preserve fork/omission evidence", async t => {
