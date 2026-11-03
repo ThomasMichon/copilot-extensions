@@ -315,6 +315,9 @@ two measured forwarding roles, with live process-tree evidence.)_
 - The operator expects Picker Python to exit after launch/resume. The proposed
   first target is a shell-owned handoff, with direct PSMux attachment a preferred
   follow-on simplification only if lifecycle duties remain covered.
+- Planning only: no runtime implementation, retained-session migration, process
+  termination or installed rollout. The parent Plan and Validation Plan remain
+  open; creating this sub-plan is not completion of the launch-reduction work.
 
 ### 2026-11-03 - Bounded pending-work continuation
 
@@ -334,6 +337,3 @@ two measured forwarding roles, with live process-tree evidence.)_
   contract pass. Review, required CI, source merge and installed observation
   remain separate gates. The authorized rollout blockers and selected-runtime
   query evidence are journaled in the linked Picker mini-effort.
-- Planning only: no runtime implementation, retained-session migration, process
-  termination or installed rollout. The parent Plan and Validation Plan remain
-  open; creating this sub-plan is not completion of the launch-reduction work.
