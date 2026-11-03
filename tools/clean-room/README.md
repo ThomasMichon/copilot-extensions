@@ -153,6 +153,61 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.sh prune                            # remove EVERY clean-room container this rig created
 ```
 
+### Optional bounded Linux containers
+
+Both host wrappers support explicit, independent creation limits:
+
+```bash
+./run.sh --scenario <credential-free-scenario> --name-suffix bounded-proof \
+  --cpus 2 --memory 4g --pids-limit 256 --lifetime-seconds 600 run
+```
+
+```powershell
+./run.ps1 -Scenario <credential-free-scenario> -NameSuffix bounded-proof `
+  -Cpus 2 -Memory 4g -PidsLimit 256 -LifetimeSeconds 600 -Mode run
+```
+
+| Bash / PowerShell option | Contract |
+|---|---|
+| `--cpus` / `-Cpus` | Positive decimal CPU quota, at most 1,000,000, with up to nine fractional digits. |
+| `--memory` / `-Memory` | Integer bytes or a `b`, `k`, `m`, `g` suffix (case-insensitive, binary units), one to nine digits, at least 6 MiB. Also sets Docker's total memory-plus-swap ceiling to the same value: no additional swap. |
+| `--pids-limit` / `-PidsLimit` | Positive integer PID limit, at most 2,147,483,647. |
+| `--lifetime-seconds` / `-LifetimeSeconds` | Positive integer seconds, at most 2,147,483,647; the container's existing `sleep` command receives this duration instead of `infinity`. |
+
+Omitted limits remain unbounded; finite lifetime is not implied by a resource
+quota. Supply all four for a fully bounded scenario container. Values and mode
+compatibility are checked before Docker, authentication or build effects.
+Limits apply to the persistent Linux scenario container, not image builds or
+the runner's short-lived mount-permission helpers.
+
+Any explicit limit enables fresh-only custody: an existing running **or stopped**
+container with the selected name is refused, never reused or removed. Docker's
+atomic name reservation also refuses a creation-time collision. Within the same
+invocation, re-entry (for example `--then shell`) checks the captured physical
+container ID and running state; it neither recreates an expired container nor
+renews its lifetime. Scenario exec calls use that physical ID. A later invocation
+cannot adopt it merely by supplying the same name and flags.
+Bounded Bridge registration uses the same ID through the adapter's existing
+`--container` and `--name-filter` options; its address is `cleanroom:<physical-id>`,
+and unregister uses that same registration key. Replacing the original Docker
+name cannot redirect registration or provider resolution to another container.
+
+Bounded options support `run`, `eval`, `shell` and `bridge-register` modes only.
+They reject `--then down` / `-Then down`, interactive auth-container creation,
+and PowerShell's Windows-container arm before those effects. Select a manifest
+with Tier `P` and `auth.copilot: "none"` for a credential-free run; `--no-token`
+alone still means the historical cached-auth-image/device-code path.
+Existing interactive defaults and unbounded replacement behavior are unchanged.
+
+Expiry belongs to the container, not a host watchdog or host command timeout.
+It stops the container even if the runner has exited; the stopped container and
+mounted results remain for inspection, with no automatic removal. Work still
+running at expiry fails normally. A failed create or failed access probe is
+also retained rather than force-removed in bounded mode. Capture the printed
+physical ID and inspect its actual Docker resource settings and start/finish
+timestamps for native evidence; passing wrapper tests alone is not a native
+resource-enforcement qualification.
+
 ## Scenarios & the scenario contract
 
 The [Gateway role-tunnel proof](gateway-role-tunnels/README.md) is an opt-in,

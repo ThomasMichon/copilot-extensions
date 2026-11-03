@@ -86,6 +86,10 @@ param(
     # `cleanroom-base-agc`. Empty = the legacy `cr-<image>` name. Docker-name-safe.
     [ValidatePattern('^$|^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')]
     [string]$NameSuffix = '',
+    [string]$Cpus = '',
+    [string]$Memory = '',
+    [string]$PidsLimit = '',
+    [string]$LifetimeSeconds = '',
     # Scenario to run: a name under scenarios/ or an explicit dir path.
     [string]$Scenario = 'generic-single-plugin',
     # Stop the scenario after this stage number, or 'all' (default) for every stage.
@@ -163,6 +167,51 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+$script:Bounded = @('Cpus', 'Memory', 'PidsLimit', 'LifetimeSeconds').Where({
+    $PSBoundParameters.ContainsKey($_)
+}).Count -gt 0
+$script:CreatedContainerId = ''
+$LimitArgs = @()
+$SleepDuration = 'infinity'
+if ($script:Bounded) {
+    if ($Os -eq 'windows') { throw 'Container limits are not supported with -Os windows' }
+    if ($Mode -notin @('run', 'eval', 'shell', 'bridge-register')) {
+        throw 'Container limits require run, eval, shell or bridge-register mode'
+    }
+    if ($Then -eq 'down') { throw 'Bounded containers are retained; -Then down is not supported' }
+    if ($PSBoundParameters.ContainsKey('Cpus')) {
+        if ($Cpus -notmatch '^[0-9]{1,7}([.][0-9]{1,9})?$' -or
+            [decimal]::Parse($Cpus, [cultureinfo]::InvariantCulture) -le 0 -or
+            [decimal]::Parse($Cpus, [cultureinfo]::InvariantCulture) -gt 1000000) {
+            throw '-Cpus must be a positive decimal <= 1000000 (up to 9 fractional digits)'
+        }
+        $LimitArgs += @('--cpus', $Cpus)
+    }
+    if ($PSBoundParameters.ContainsKey('Memory')) {
+        if ($Memory -notmatch '^([1-9][0-9]{0,8})([bBkKmMgG]?)$') {
+            throw '-Memory must be an integer size >= 6 MiB (up to 9 digits, optional b/k/m/g)'
+        }
+        $bytes = [long]$Matches[1]
+        switch ($Matches[2].ToLowerInvariant()) {
+            'k' { $bytes *= 1024 }
+            'm' { $bytes *= 1024 * 1024 }
+            'g' { $bytes *= 1024 * 1024 * 1024 }
+        }
+        if ($bytes -lt 6 * 1024 * 1024) { throw '-Memory must be >= 6 MiB' }
+        $LimitArgs += @('--memory', $Memory, '--memory-swap', $Memory)
+    }
+    foreach ($key in @('PidsLimit', 'LifetimeSeconds')) {
+        if ($PSBoundParameters.ContainsKey($key)) {
+            $value = $PSBoundParameters[$key]
+            if ($value -notmatch '^[1-9][0-9]{0,9}$' -or [long]$value -gt 2147483647) {
+                throw "-$key must be a positive integer <= 2147483647"
+            }
+        }
+    }
+    if ($PidsLimit) { $LimitArgs += @('--pids-limit', $PidsLimit) }
+    if ($LifetimeSeconds) { $SleepDuration = $LifetimeSeconds }
+}
 
 if (-not $PSBoundParameters.ContainsKey('UvIndex')) {
     $configuredIndex = [Environment]::GetEnvironmentVariable('CR_UV_INDEX')
@@ -380,6 +429,7 @@ function Invoke-Build {
 }
 
 function Invoke-Auth {
+    if ($script:Bounded) { throw 'Bounded runs cannot create an interactive auth container; authenticate separately' }
     if (-not (Test-Image $BaseTag)) { Invoke-Build }
     Write-Host "== one-time device-code login ($AuthTag) ==" -ForegroundColor Cyan
     Write-Host "An interactive Copilot session opens. Run '/login' if not prompted," -ForegroundColor Yellow
@@ -412,7 +462,24 @@ function Resolve-CopilotToken {
 # Auth: prefer a host-grabbed Copilot token injected as COPILOT_GITHUB_TOKEN
 # (no interactive step; runs against the plain unauthed image). Fall back to the
 # committed device-code :authed image only when no token is available.
+function Get-ContainerTarget {
+    if ($script:CreatedContainerId) { return $script:CreatedContainerId }
+    return $Container
+}
+
 function Start-Container {
+    if ($script:Bounded) {
+        if ($script:CreatedContainerId) {
+            $current = (& docker inspect -f '{{.Id}} {{.State.Running}}' $Container | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $current -ne "$($script:CreatedContainerId) true") {
+                throw "Bounded container identity changed or lifetime ended; retained $script:CreatedContainerId"
+            }
+            return
+        }
+        $existing = (& docker ps -aq --filter "name=^/${Container}$" | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not check bounded container name availability' }
+        if ($existing) { throw "Bounded container name already exists: $Container; refusing reuse or replacement" }
+    }
     $manifestPath = Join-Path $ScenarioDir 'manifest.json'
     $noScenarioAuth = $false
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
@@ -447,14 +514,16 @@ function Start-Container {
         }
         $img = $AuthTag
     }
-    $existingContainer = (
-        docker ps -aq --filter "name=^/${Container}$" 2>$null |
-            Select-Object -First 1
-    )
-    if ($existingContainer) {
-        docker rm -f $Container 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "could not remove prior clean-room container $Container"
+    if (-not $script:Bounded) {
+        $existingContainer = (
+            docker ps -aq --filter "name=^/${Container}$" 2>$null |
+                Select-Object -First 1
+        )
+        if ($existingContainer) {
+            docker rm -f $Container 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "could not remove prior clean-room container $Container"
+            }
         }
     }
     New-Item -ItemType Directory -Force -Path $Results | Out-Null
@@ -521,8 +590,9 @@ function Start-Container {
     }
     $uvArgs = @()
     if ($UvIndex) { $uvArgs = @('-e', "UV_DEFAULT_INDEX=$UvIndex") }
-    docker run -d --init --name $Container `
+    $createdId = docker run -d --init --name $Container `
         --label $CleanRoomLabel `
+        @LimitArgs `
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `
         -v "${res}:/home/operator/out" `
@@ -541,13 +611,20 @@ function Start-Container {
         -e "CR_REPORT=/home/operator/out/cr-report.json" `
         @tokenArgs `
         @passArgs `
-        --entrypoint sleep $img infinity | Out-Null
+        --entrypoint sleep $img $SleepDuration
+    if ($LASTEXITCODE -ne 0) { throw "Container creation failed; any failed container is retained: $Container" }
+    if ($script:Bounded) {
+        $createdId = ($createdId | Out-String).Trim()
+        if ($createdId -notmatch '^[a-f0-9]{64}$') { throw 'docker run returned no valid container identity; refusing further effects' }
+        $script:CreatedContainerId = $createdId
+        Write-Host "bounded container id=$createdId lifetime=$SleepDuration seconds (not renewed)"
+    }
     if ($token) { Remove-Item Env:\COPILOT_GITHUB_TOKEN -ErrorAction SilentlyContinue }
     Write-Host "container $Container up (results -> $Results)" -ForegroundColor DarkGray
 }
 
 function Ensure-Container {
-    if (-not (Test-Running $Container)) { Start-Container }
+    if ($script:Bounded -or -not (Test-Running $Container)) { Start-Container }
 }
 
 function Invoke-Run {
@@ -555,7 +632,7 @@ function Invoke-Run {
     $untilArgs = @()
     if ($Until -ne 'all') { $untilArgs = @('-e', "CR_UNTIL=$Until") }
     Write-Host "== running clean-room scenario '$ScenarioName' ($Image, through stage $Until) ==" -ForegroundColor Cyan
-    docker exec @untilArgs $Container /bin/bash -lc `
+    docker exec @untilArgs (Get-ContainerTarget) /bin/bash -lc `
         'bash /home/operator/scenario/scenario.sh; rc=$?; cp -r $HOME/cr-logs /home/operator/out/ 2>/dev/null; exit $rc'
     $rc = $LASTEXITCODE
     Write-Host "`n== report ==" -ForegroundColor Cyan
@@ -574,7 +651,7 @@ function Invoke-Shell {
     Ensure-Container
     Write-Host "== entering $Container (interactive login shell; 'exit' to leave, container stays up) ==" -ForegroundColor Cyan
     Write-Host "   run './run.ps1 -Image $Image$(if($NameSuffix){" -NameSuffix $NameSuffix"}) -Mode down' to remove it." -ForegroundColor DarkGray
-    docker exec -it $Container /bin/bash -l
+    docker exec -it (Get-ContainerTarget) /bin/bash -l
 }
 
 function Invoke-Down {
@@ -665,7 +742,8 @@ function Invoke-BridgeRegister {
     if (-not $py) { throw "python not found on PATH (needed to register the agent-bridge provider)" }
     $bridgeArgs = @('--acp-command', $script:AcpCommand)
     if ($script:AcpCwd) { $bridgeArgs += @('--acp-cwd', $script:AcpCwd) }
-    $bridgeArgs += @('register', '--container', $Container, '--name', $AgentName)
+    if ($script:CreatedContainerId) { $bridgeArgs += @('--name-filter', $script:CreatedContainerId) }
+    $bridgeArgs += @('register', '--container', (Get-ContainerTarget), '--name', $AgentName)
     $response = (& $py.Source (Join-Path $Here 'bridge_register.py') @bridgeArgs | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw "bridge registration failed" }
     try {
@@ -677,6 +755,7 @@ function Invoke-BridgeRegister {
     if (-not $script:BridgeContainerId) {
         throw "bridge registration returned no container ID"
     }
+    if ($script:CreatedContainerId) { $script:DriveAgent = "cleanroom:$script:CreatedContainerId" }
     Write-Host $response
     Write-Host "drive it:  agent-bridge create $DriveAgent `"<prompt>`"" -ForegroundColor Green
 }
@@ -687,10 +766,11 @@ function Invoke-BridgeUnregister([string]$ContainerId = '') {
     }
     if (-not $py) { throw "python not found on PATH" }
     if (-not $ContainerId) { $ContainerId = $script:BridgeContainerId }
+    if (-not $ContainerId) { $ContainerId = $script:CreatedContainerId }
     if (-not $ContainerId) {
         $ContainerId = (& docker inspect -f '{{.Id}}' $Container 2>$null | Out-String).Trim()
     }
-    $unregisterArgs = @('unregister', '--name', $AgentName, '--container', $Container)
+    $unregisterArgs = @('unregister', '--name', $AgentName, '--container', (Get-ContainerTarget))
     if ($ContainerId) {
         $unregisterArgs += @('--container-id', $ContainerId)
     } else {
@@ -751,7 +831,7 @@ function Invoke-ContainerPython(
     $success = $false
     try {
         $ErrorActionPreference = 'Continue'
-        $output = & docker exec $Container python3 -c `
+        $output = & docker exec (Get-ContainerTarget) python3 -c `
             $bootstrap $encoded @encodedArguments 2>&1
         $success = $?
         $output
@@ -978,7 +1058,7 @@ function Invoke-Eval {
     New-Item -ItemType Directory -Force -Path $evalDir | Out-Null
     function Write-ScenarioInvalidEvidence([string]$Jam) {
         if (-not $invalidEvidenceWriter) { return }
-        & docker exec $Container python3 `
+        & docker exec (Get-ContainerTarget) python3 `
             "/home/operator/scenario/$invalidEvidenceWriter" `
             --manifest /home/operator/scenario/manifest.json `
             --output "/home/operator/out/$invalidEvidenceOutput" `
@@ -991,7 +1071,7 @@ function Invoke-Eval {
     # --- 1) start box + 2) establish starting state --------------------------
     Start-Container
     Write-Host "== eval: establishing starting state ($setupRel) ==" -ForegroundColor Cyan
-    docker exec $Container /bin/bash -lc `
+    docker exec (Get-ContainerTarget) /bin/bash -lc `
         "bash /home/operator/scenario/$setupRel; rc=`$?; cp -r `$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit `$rc"
     $setupExitCode = $LASTEXITCODE
     $setupReport = Join-Path $Results 'cr-report.json'
@@ -1044,7 +1124,7 @@ print(cwd)
     # for the wrong reason. On by default; -SkipTierPGate forces past it.
     if (-not $SkipTierPGate -and $tierPCmd) {
         Write-Host "== eval: Tier-P precondition ($tierPCmd) ==" -ForegroundColor Cyan
-        docker exec $Container /bin/bash -lc "$tierPCmd" | Out-Null
+        docker exec (Get-ContainerTarget) /bin/bash -lc "$tierPCmd" | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-ScenarioInvalidEvidence 'scenario-fixture'
             throw "eval: Tier-P precondition '$tierPCmd' failed (exit $LASTEXITCODE) -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass -SkipTierPGate to force."
@@ -1267,7 +1347,7 @@ print(digest.hexdigest()[:16])
     # --- 6) optional programmatic post-check (ground-truth evidence) ---------
     if ($postCheck -and (Test-Path (Join-Path $ScenarioDir $postCheck))) {
         Write-Host "== eval: programmatic post-check ($postCheck) ==" -ForegroundColor Cyan
-        docker exec $Container /bin/bash -lc `
+        docker exec (Get-ContainerTarget) /bin/bash -lc `
             "bash /home/operator/scenario/$postCheck; cp -r `$HOME/cr-logs /home/operator/out/ 2>/dev/null" | Out-Null
     }
 
@@ -1281,7 +1361,7 @@ print(digest.hexdigest()[:16])
     }
 
     # --- write the eval run-manifest (judge packet index) --------------------
-    $copilotVer = (docker exec $Container /bin/bash -lc 'copilot --version 2>/dev/null' 2>$null | Select-Object -First 1)
+    $copilotVer = (docker exec (Get-ContainerTarget) /bin/bash -lc 'copilot --version 2>/dev/null' 2>$null | Select-Object -First 1)
     $evalMeta = [ordered]@{
         scenario     = $ScenarioName
         tier         = 'E'

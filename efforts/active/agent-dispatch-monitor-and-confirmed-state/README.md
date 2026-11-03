@@ -18,7 +18,9 @@ repairs shared Linux daemon launches that remain in their caller's systemd
 cleanup cgroup; its source merged in #10234. Source controls and isolated native lifetime proof do not move
 existing residents or qualify ordinary Dispatch recovery.
 
-The next bounded repair uses Dispatch's existing durable machine binding for
+The neutral-service source repair merged in
+[#10268](https://github.com/ThomasMichon/copilot-extensions/pull/10268).
+It uses Dispatch's existing durable machine binding for
 managed-lane admission from neutral service directories, retaining project
 fallback, unavailable/mismatched-host refusal and literal execution identity.
 Its source/contained controls do not establish installed lane or allocator
@@ -321,6 +323,12 @@ live claim token. No new blanket ACK or executor appointment is created.
       Existing-resident adoption and ordinary lifecycle qualification remain
       separate; native service-context lane admission is the next integration
       boundary, not a completed allocator-before-spawn result.
+- [x] Land neutral-service managed lane admission in
+      [#10268](https://github.com/ThomasMichon/copilot-extensions/pull/10268)
+      after exact-head approval, green CI and actual merge. Reuse durable
+      settings without arbitrary project selection, ambient assertions or
+      physical/guest-name collapse; retain unreadable and mismatched refusal.
+      Complete cohort, allocator ordering and lifecycle acceptance remain open.
 - [x] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
       under its actual `ordinary-bridge` driver, allocator claim and execution
       host in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123).
