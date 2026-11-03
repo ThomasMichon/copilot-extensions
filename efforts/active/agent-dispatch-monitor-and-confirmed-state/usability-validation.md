@@ -72,8 +72,7 @@ The coupled ordinary-startup/lane packet passes 118 contained controls,
 including actual binding-file and unreadable/mismatched negative cases.
 [#10290](https://github.com/ThomasMichon/copilot-extensions/pull/10290)
 merged as `fe099a79dc4a5ea1030db2f93df732890904b1b9` after the current-head
-review and successful CI. The sole Low description-assessment finding was
-addressed without changing source. A distinct whole-stack case now passes
+review and successful CI. A distinct whole-stack case now passes
 machine admission and creates its real workspace/native after the claim.
 Its synthetic project omitted committed receiving-side authority configuration,
 so Bridge correctly refuses binding before a prompt. Correct that fixture

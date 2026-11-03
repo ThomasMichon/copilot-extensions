@@ -3544,6 +3544,10 @@ whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. Each admitted file is collected once; an exact
 node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
+preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
+This keeps exact node admission; it does not truncate, rename or omit long
+parameter cases when the framework's default changes.
 Its actor-free PowerShell SDK controls compare Windows physical-path spellings
 through a synthetic resolver boundary, including DOS/UNC aliases and unrelated
 roots. Native path reads and concurrent first publication remain separate
