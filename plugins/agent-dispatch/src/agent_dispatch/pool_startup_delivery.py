@@ -24,6 +24,9 @@ def _receipt(value: object, native: str) -> bool:
 
 def deliver_retry(invocation: dict, *, observe_only: bool) -> tuple[str, str]:
     """Only the caller with a confirmed new admission can send on a receipt miss."""
+    if invocation.get("driver") == "ordinary-bridge":
+        from .pool_startup_acp import deliver
+        return deliver(invocation, observe_only=observe_only)
     native, key, prompt = (
         invocation["native_id"], invocation["idempotency_key"], invocation["prompt"],
     )

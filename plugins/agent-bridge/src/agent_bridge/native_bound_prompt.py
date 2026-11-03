@@ -20,6 +20,7 @@ def submit_native_bound_prompt(
     client: BridgeClient, session_id: str, prompt: str, *,
     expected_native_session_id: str, caller_id: str | None,
     idempotency_key: str | None = None,
+    no_resume: bool = False,
 ) -> dict[str, Any]:
     """Submit only to the exact running native conversation under its turn lock."""
     if not expected_native_session_id or not client.daemon_supports(NATIVE_BOUND_PROMPT_PROTOCOL_VERSION):
@@ -30,10 +31,17 @@ def submit_native_bound_prompt(
     if idempotency_key is not None:
         from .client import BridgeConnectionError
         from .client_protocol_floor import protocol_floored_request
-        from .protocol import NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION
+        from .protocol import (
+            NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION,
+            NATIVE_SEND_NO_RESUME_CAPABILITY, NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
+        )
         from .startup_observation import StartupObservationError
 
-        client._request = protocol_floored_request(client, NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION)
+        client._request = protocol_floored_request(  # type: ignore[method-assign]
+            client, NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION,
+            capabilities={NATIVE_SEND_NO_RESUME_CAPABILITY: NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION}
+            if no_resume else None,
+        )
         started = time.monotonic()
         attempted = False
 
@@ -58,7 +66,8 @@ def submit_native_bound_prompt(
             result = client._request(
                 "POST", f"/api/v1/sessions/{quote(native_target, safe='')}/turns/native-bound/send",
                 {"prompt": prompt, "expected_native_session_id": expected_native_session_id,
-                 "invocation_key": idempotency_key, "caller_id": caller_id},
+                 "invocation_key": idempotency_key, "caller_id": caller_id,
+                 **({"no_resume": True} if no_resume else {})},
             )
         except BridgeClientError as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {}
@@ -69,6 +78,7 @@ def submit_native_bound_prompt(
                 or exc.status == 404 and code == "native_session_unavailable"
                 or exc.status == 409 and (busy or code in {
                     "native_invocation_conflict", "expected_native_mismatch",
+                    "native_session_stopped",
                 })
             )
             if attempted and not proven_refusal:
@@ -104,12 +114,12 @@ def submit_native_bound_prompt(
     except BridgeClientError as exc:
         if exc.status not in (404, 409):
             raise
-        detail = str(exc.detail)
-        busy = exc.status == 409 and "not idle" in detail
+        error = str(exc.detail)
+        busy = exc.status == 409 and "not idle" in error
         raise SendRefused(
             "refused_busy" if busy else "refused_unavailable",
             reason="busy" if busy else "native_admission_refused",
-            retryable=busy, target=session_id, error=detail,
+            retryable=busy, target=session_id, error=error,
         ) from exc
     if (result.get("session_id") != session_id
             or result.get("native_session_id") != expected_native_session_id

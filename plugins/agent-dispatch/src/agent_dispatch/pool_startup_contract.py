@@ -12,7 +12,7 @@ def pool_startup_contract() -> dict[str, object]:
     return {
         "protocol": POOL_STARTUP_PROTOCOL,
         "supported_versions": [POOL_STARTUP_VERSION],
-        "supported_drivers": ["cli"],
+        "supported_drivers": ["cli", "ordinary-bridge"],
         "configured_startup_timeout": True,
         "durable_claim_budget": True,
         "same_native_decision": True,
@@ -20,6 +20,7 @@ def pool_startup_contract() -> dict[str, object]:
         "classified_startup_outcomes": True,
         "fenced_same_native_retry": True,
         "fenced_retry_completion": True,
+        "ordinary_same_native_retry": True,
         "startup_attempt_limit": 3,
         "nudge_seconds": 300,
         "decision_seconds": 1800,

@@ -85,10 +85,11 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                 startup_complete=startup_complete, startup_revision=startup_revision,
                 session_handle=session_handle, worktree=worktree, now=now,
             )
+        from .pool_startup_retry_contract import session_handle as retry_handle
         if pool_startup_retry is not None and (
             ordinary_redrive is not None or authority_expected is not None
             or worktree != pool_startup_retry.get("worktree")
-            or session_handle != pool_startup_retry.get("native_id")
+            or session_handle != retry_handle(pool_startup_retry)
         ):
             raise TaskError("pool retry requires its own exact publication operation")
 

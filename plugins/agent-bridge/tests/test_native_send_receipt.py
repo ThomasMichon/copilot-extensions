@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, ConfigDict
 from test_native_send_admission import _command
 from test_native_send_admission import native_send as native_send
 
@@ -20,6 +21,15 @@ from agent_bridge.native_send_admission import submit
 from agent_bridge.routes.sessions import router
 
 PATH = "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+
+
+class PreviousNativeSendPrompt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    invocation_key: str
+    expected_native_session_id: str
+    prompt: str
+    caller_id: str | None = None
 
 
 def test_running_health_route_advertises_receipt_capability(monkeypatch):
@@ -37,6 +47,7 @@ def test_running_health_route_advertises_receipt_capability(monkeypatch):
     assert response.status_code == 200
     assert response.json()["protocol_version"] >= 51
     assert response.json()["capabilities"]["native_send_receipt"] == 1
+    assert response.json()["capabilities"]["native_send_no_resume"] == 1
 
 
 def _app(manager):
@@ -280,8 +291,49 @@ async def test_real_cli_observes_route_without_send_resume_or_fallback(
         assert payload["outcome"] == "refused_unavailable"
         assert payload["reason"] == "native_receipt_missing"
         assert "not_sent" not in json.dumps(payload)
-    assert calls == [("POST", PATH, request.model_dump())]
+    assert calls == [("POST", PATH, request.model_dump(exclude={"no_resume"}))]
     assert session.status == SessionStatus.STOPPED
+    _assert_no_effects(manager)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("no_resume", [False, True])
+async def test_receipt_wire_shape_preserves_previous_strict_schema_and_explicit_fence(
+    native_send, monkeypatch, no_resume,
+):
+    from agent_bridge import __main__ as core
+    from agent_bridge.native_send_admission import NativeSendPrompt, read_receipt
+    from agent_bridge.native_send_receipt import observe
+
+    manager, session, request = native_send
+    request = request.model_copy(update={"no_resume": no_resume})
+    receipt = await _seed((manager, session, request))
+    _forbid_effects(manager)
+    if no_resume:
+        app = _app(manager)
+    else:
+        app = FastAPI()
+
+        @app.post(PATH)
+        async def previous_receipt(body: PreviousNativeSendPrompt):
+            return await read_receipt(
+                manager, session.session_id, NativeSendPrompt(**body.model_dump()),
+            )
+
+    capabilities = {"native_send_receipt": 1}
+    if no_resume:
+        capabilities["native_send_no_resume"] = 1
+    with TestClient(app) as api:
+        _, calls = _command(native_send, monkeypatch, api=api, capabilities=capabilities)
+        result = observe(
+            core._get_client(), session.session_id, request.prompt,
+            expected_native_session_id=request.expected_native_session_id,
+            idempotency_key=request.invocation_key, caller_id=request.caller_id,
+            no_resume=no_resume,
+        )
+    expected = request.model_dump(exclude=set() if no_resume else {"no_resume"})
+    assert result == receipt
+    assert calls == [("POST", PATH, expected)]
     _assert_no_effects(manager)
 
 

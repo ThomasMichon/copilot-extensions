@@ -221,7 +221,8 @@ process exists; a launched process or delivered prompt does not prove acceptance
 The [managed allocator source slice](journal/2026/11.02-managed-pool-allocation.md)
 connects the ordinary caller to its selected registration/machine/environment
 instance behind a separate default-off opt-in. It retains global transactional
-selection and refuses another instance's win before claim insertion. This is
+selection and refuses another instance's win before claim insertion. Source
+merged in [#10182](https://github.com/ThomasMichon/copilot-extensions/pull/10182). This is
 bounded source integration, not ordinary retry/decline or rollout qualification.
 
 The following sequencing and transaction means are **agent-recommended**;

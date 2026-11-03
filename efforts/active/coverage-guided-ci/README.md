@@ -119,12 +119,44 @@ The [wave plan](windows-pr-waves.md) below is an agent-recommended
 decomposition of that direction, not permission to weaken the original
 Windows acceptance requirement or to execute before the plan is reviewed.
 
+### Follow-up: distinguish coverage-auditable tests
+
+Operator direction, verbatim, 2026-11-02:
+
+> I think what we need to do is tag tests by whether or not they can be completely audited via coverage: the ones whic can can be conditionally run based on PR diffs; the ones which can't should probably run all the time. Our goal is just to cut down on the ones which can't not aggressively try to collect coverage from every test configuration
+
+Operator-selected scope:
+
+> Never coverage-skip tests within their existing eligible lane; preserve platform/manual gates
+
+> Re-scope the existing PR to tagged selection; preserve the old prototype separately
+
+In the first selected answer, "Never coverage-skip tests" refers to the
+unauditable and unclassified tests in the preceding direction, not to
+proven-auditable tests eligible for conditional diff selection.
+
+The [auditability amendment](coverage-auditability-selection.md) is the
+agent-recommended implementation and validation decomposition. It does not
+replace independent Windows waves, baseline publication or shadow-consumer
+obligations, or declare the overall effort complete.
+
 _(agent-recommended)_ Everything below this point — the phase breakdown,
 sequencing, and validation plan — is the agent's own structuring of how to
 realize the above; the operator did not specify phases or an implementation
 order.
 
 ## Plan
+
+### Coverage-auditability selection amendment
+
+- [ ] Review and merge the [plan-only auditability amendment](coverage-auditability-selection.md)
+      before changing selection behavior.
+- [ ] Re-scope #6783 to metadata, conservative eligible-inventory selection
+      and focused qualification; preserve its native prototype separately,
+      without shipping it or crediting its unearned acceptance.
+- [ ] Qualify the actual metadata-to-selected-run consumer contract, merge
+      the re-scoped change, and journal the bounded result. Existing
+      unrelated Plan and Validation Plan items remain owned and open.
 
 ### Remaining Windows PR work - reviewed waves
 
@@ -678,6 +710,10 @@ regardless of this effort's local fixes.
 
 ## Validation Plan
 
+- [ ] Coverage-auditability amendment: resolve every acceptance item in the
+      [focused validation plan](coverage-auditability-selection.md#validation-plan),
+      including unknown-test retention, profile isolation and actual selected
+      execution/failure. A tag or a nonempty coverage map alone is not proof.
 - [ ] Phase 3.5: `python tools/run-plugin-tests.py --all` completes a full
       pass over every one of the 20 plugins (reaching and reporting a
       pass/fail summary for each one), with no single plugin's own test
