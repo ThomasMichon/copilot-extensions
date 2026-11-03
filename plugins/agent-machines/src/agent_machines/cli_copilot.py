@@ -12,7 +12,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 from plugin_activation import PluginStateError, read_json_object
@@ -85,7 +85,7 @@ def _native(
             command, timeout=timeout, env=environment,
             max_stdout_bytes=512 * 1024, max_stderr_bytes=512 * 1024,
         )
-    except (OSError, subprocess.SubprocessError, OwnedCleanupError) as exc:
+    except (OSError, RuntimeError, UnicodeError, subprocess.SubprocessError, OwnedCleanupError) as exc:
         raise CopilotControlError(
             f"Native Copilot operation did not settle successfully: {exc}",
             effects="unknown" if effectful else "none",
@@ -268,7 +268,7 @@ def _auto_update(args: argparse.Namespace) -> dict[str, Any]:
         _native(executable, command, environment=environment, effectful=True)
     try:
         verified = _settings()
-    except (PluginStateError, OSError) as exc:
+    except (PluginStateError, OSError, UnicodeError) as exc:
         raise CopilotControlError(
             f"Native configuration read-back failed: {exc}. Inspect before retrying.",
             effects="unknown" if write_needed else "none",
@@ -295,6 +295,12 @@ def _update(args: argparse.Namespace) -> dict[str, Any]:
             native_output=_native(executable, command, timeout=600, effectful=True),
         )
     return result
+
+
+def _attended_launch(command: list[str], environment: dict[str, str]) -> NoReturn:
+    if os.name == "nt":
+        raise SystemExit(subprocess.call(command, env=environment))
+    os.execvpe(command[0], command, environment)
 
 
 def _launch(args: argparse.Namespace) -> dict[str, Any]:
@@ -333,7 +339,7 @@ def _launch(args: argparse.Namespace) -> dict[str, Any]:
             _cached_version(directory, args.version).ready for directory in _cache_directories()
         ):
             raise CopilotControlError("The selected native cache changed before launch.")
-        os.execvpe(command[0], command, environment)
+        _attended_launch(command, environment)
     return result
 
 
@@ -350,7 +356,7 @@ def _command(args: argparse.Namespace) -> int:
         else:
             result = _launch(args)
         payload = {"contract": CONTRACT, "operation": args.operation, "ok": True, **result}
-    except (CopilotControlError, PluginStateError, OSError) as exc:
+    except (CopilotControlError, PluginStateError, OSError, UnicodeError) as exc:
         payload = {
             "contract": CONTRACT, "operation": args.operation, "ok": False,
             "error": str(exc), "effects": getattr(exc, "effects", "none"),

@@ -90,8 +90,10 @@ operation reports an unknown outcome rather than replaying it automatically.
 
 Launch requires a standalone native binary, not a batch/npm launcher, and
 previews a cached-version invocation by default. `--apply` verifies the
-native version answer, rechecks cache readiness and transfers the current
-command to the native CLI. The native front door selects its architecture from
+native version answer and rechecks cache readiness. POSIX replaces the current
+process; Windows waits for the foreground child with inherited stdio and
+propagates its exit status. Neither path detaches the session.
+The native front door selects its architecture from
 the reported cache candidates. `--arg` forwards one argument at a time; it cannot
 override the selected version. Only the inherited package-directory selector
 is removed for that invocation. No persistent pin, binary replacement, cache

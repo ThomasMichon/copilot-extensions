@@ -163,3 +163,7 @@ global version pin. Deliberate cached-version launch is explicit per invocation.
 - Addressed the implementation review's post-write failure finding: configuration
   read errors now report unknown effects after a native write, leave overrides
   untouched and do not replay the write. All 33 focused control cases passed.
+- Subsequent review added real Windows foreground lifetime/exit propagation and
+  structured caller-owned runtime/UTF-8 error handling; all 39 focused control
+  cases passed. POSIX retains exec. Refreshed only the implementation-only
+  transport fingerprint and rationale; wire captures and provenance are unchanged.

@@ -153,7 +153,7 @@ def test_configuration_failure_never_clears_overrides_or_replays(
     assert json.loads(settings.read_text())["autoUpdate"] is False
 
 
-@pytest.mark.parametrize("error", [control.PluginStateError, PermissionError])
+@pytest.mark.parametrize("error", [control.PluginStateError, PermissionError, UnicodeError])
 def test_post_write_readback_failure_preserves_overrides_and_reports_unknown(
     native: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     error: type[Exception],
@@ -320,11 +320,11 @@ def test_launch_checks_native_selection_and_transfers_only_the_owned_invocation(
     class Executed(BaseException):
         pass
 
-    def execute(executable: str, arguments: list[str], environment: dict[str, str]) -> None:
-        executions.append((executable, arguments, environment))
+    def execute(arguments: list[str], environment: dict[str, str]) -> None:
+        executions.append((arguments[0], arguments, environment))
         raise Executed
 
-    monkeypatch.setattr(os, "execvpe", execute)
+    monkeypatch.setattr(control, "_attended_launch", execute)
     with pytest.raises(Executed):
         cli.main([
             "copilot-cli", "launch", "1.0.100-1", "--apply", "--arg=--no-auto-update",
@@ -399,3 +399,32 @@ def test_native_failure_retains_nonzero_outcome_and_process_bounds(
     assert failure.value.effects == "unknown"
     assert captured["timeout"] == 600
     assert captured["max_stdout_bytes"] == 512 * 1024
+
+
+@pytest.mark.parametrize("effectful", [False, True])
+@pytest.mark.parametrize("error", [RuntimeError, UnicodeError])
+def test_native_execution_and_decode_failures_keep_structured_effects(
+    monkeypatch: pytest.MonkeyPatch, effectful: bool, error: type[Exception],
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise error("native completion unavailable")
+
+    monkeypatch.setattr(control, "run_caller_owned", fail)
+    with pytest.raises(control.CopilotControlError, match="native completion unavailable") as failure:
+        control._native("fixture-copilot", ["update"], effectful=effectful)
+    assert failure.value.effects == ("unknown" if effectful else "none")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows foreground launch lifetime")
+def test_windows_attended_launch_waits_for_real_child_and_propagates_status(tmp_path: Path) -> None:
+    completed = tmp_path / "completed"
+    command = [
+        sys.executable, "-I", "-c",
+        "import pathlib,sys,time; time.sleep(0.2); "
+        "pathlib.Path(sys.argv[1]).write_text('settled'); sys.exit(7)",
+        str(completed),
+    ]
+    with pytest.raises(SystemExit) as result:
+        control._attended_launch(command, dict(os.environ))
+    assert result.value.code == 7
+    assert completed.read_text() == "settled"
