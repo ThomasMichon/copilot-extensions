@@ -298,6 +298,20 @@ core readiness, then invokes the engine's
 with inherited stdio. An older/absent engine refuses this optional stage, not
 the completed core installation. Repository failure never uninstalls core.
 
+After installing Manager, the equivalent repository-first entry is:
+
+```text
+worktree-manager register <https-git-url> --apply
+  [--repository-target <absolute-path>] [--repository-commit <full-commit-id>]
+  [--trust-repository-setup] [--context <declared-name>]
+```
+
+`register` requires one repository URL and reuses the same prerequisite, core,
+acquisition and trusted-setup flow. Without `--apply`, it only previews the plan.
+It does not replace the engine's project-name `register` command or grant setup
+trust implicitly. The selected repository's explicitly trusted setup owns any
+further consented configuration; Manager does not add another setup engine.
+
 `--repository-commit` requires a full 40- or 64-hex commit ID. It is forwarded
 as the engine's explicit `immutable-commit` capability request, never replaced
 with remote HEAD if that selected engine refuses it. Existing targets must
