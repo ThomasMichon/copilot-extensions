@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "dda4a89b3bc3e0fd84682f0ab0a773be344404b7358238c6a90f5823187f31a5"
+    "sha256": "2c65dea75528b9065ce2f4b69eacd5fb239f9fc624e6b083c09c3f3fcbf15b3c"
   },
   "scope": "unchanged source and immutable prior operation; no new runtime observation",
   "captured_from": {
-    "commit": "5cead5efcf55e91d07d20aadce6eac29a6844056",
+    "commit": "01d166b1131e992515c640e3cde17f606beacd89",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/live_inbox_models.py",
