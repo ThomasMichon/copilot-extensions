@@ -1292,7 +1292,14 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert 0 <= time.time() - grace_record["ready_at"] < grace.GRACE_SECONDS
                     assert grace_record["old"]["pid"] == old_pid
                     assert grace_record["successor"] == successor.to_dict()
-                    assert retirements.pending_slot(root, old.name)
+                    def old_slot_retained():
+                        return old.name in {
+                            version
+                            for versions in driver.runtime._leases.read_runtime_references(root).values()
+                            for version in versions
+                        }
+
+                    assert old_slot_retained()
                     grace_record["ready_at"] = time.time() - grace.GRACE_SECONDS - 1
                     retirements._write_record(grace_path, grace_record)
                     assert ControlClient(
@@ -1309,7 +1316,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert routing.read_active_endpoint(route_root) == successor
                     assert "previous" not in routing.read_table(route_root)
                     _wait_for(
-                        lambda: not retirements.pending_slot(root, old.name),
+                        lambda: not old_slot_retained(),
                         message="resident did not settle the exited predecessor's runtime custody",
                     )
                     return
