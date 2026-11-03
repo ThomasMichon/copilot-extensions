@@ -4082,7 +4082,7 @@
         "tools/promotion_unit_tests/test_typecheck.py": "11041bb55c64477edde098224e93225e0eff5b9d2cc7b610332159e230a32023",
         "tools/accumulate_bumps.py": "8e669617f4cd77418fd49da6928775dd3dc558f0d64ae36dde94f8836da15136",
         "tools/artifact_builder_cli.py": "876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
-        "tools/artifact_attestation.py": "b65357070515cfe45ead993994999f9ec415c3e4ea964bd29a312e04c2f58be6",
+        "tools/artifact_attestation.py": "75aafefab3ff8e11fae93990d943496556d31edcfb4be6413eb072525abbd0fe",
         "tools/artifact_source_build.py": "ff444dfa9bc770c63d9931d61e64cf1eafba9d8a41af70e8e01ef92ed018ed8d",
         "tools/build_python_artifacts.py": "b5e8ae982a7d02526cc7df2b0da68e1a1b14961c970a1a789495c552a3653ba3",
         "tools/build_toolchain_lock.py": "11efa6396593d97e3ff27e64649113e73b9c52914316d33fea7cd4f205a37e44",
@@ -4129,7 +4129,7 @@
         "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-        "tools/promotion_python_artifacts.py": "9e6d39cf112effb33f5576f0094818d860407206ee10b57a33787ab705295511",
+        "tools/promotion_python_artifacts.py": "487655d0e12fd61d7f0d826c2364e2096820c59ce630797e31fe35542558e8f6",
         "tools/promotion_release_evidence.py": "d034995538104f96e66095c7bebe5f2edcaaa23ea55b701b2f98f08660c6a94a",
         "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
         "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
@@ -4229,7 +4229,7 @@
         "tools/run-promotion-unit-tests.py": "55ca139a83228cb2b2fae3d3423aff7e716203c141c671d2372e866a6a2ef931",
         "tools/runtime_profile.py": "d55ed6a4263e6349d452364e3abb4fb39c232d558efd384e0f1898fffbe080e5",
         "tools/runtime_profile_policy.py": "3534c89ee067231bb75fe6d74eab0816c2a2bed77653b2a66a21ff602426ca22",
-        "tools/runtime_profile_release.py": "ffad6703e9a76a4e2492a6b1c3284bd4640fb52e39cf485889e99212e0de7ae7",
+        "tools/runtime_profile_release.py": "74807d5cee4a4c6f20ae1dc0e57c28e0afa8c6911cc4ea4649eb9fce82045ce8",
         "tools/runtime_profile_wheels.py": "aefc19e0d18e85fc037fffe11708d0830a27101fb854353e9e4e079961257659",
         "tools/runtime_source_lock.py": "9671393010b41107b0003f8ce2941addffd2f7df336649ec07c46e333f2b39a4",
         "tools/runtime_source_wheels.py": "2207ebc4e104ce642a305e248a91f39f88bee5770221d3cb960d7ea0929c057d",
@@ -4332,7 +4332,8 @@
         "tools/bundle_lock.py": "83fb9d1cfd1b8901db4e8d72a521799d00fcc23390ddeb11dc6584f698c1b2f4",
         "tools/bundle_input_cases.py": "e7cd20d8ac9fb1ebeb8c9033cd77dbb6c888230dabf85117fe28795405236075",
         "tools/promotion_unit_tests/test_bundle_inputs.py": "58fe264c28fe361c0e0417b6ed4f09d3ff04ebd053dcfb9310485093fa590d20",
-        "tools/dependency_age.py": "f7b76d7b94eb0b44b973ad76f76a941da256e1ac0a3ed9be53e8b10cd542350b"
+        "tools/dependency_age.py": "f7b76d7b94eb0b44b973ad76f76a941da256e1ac0a3ed9be53e8b10cd542350b",
+        "worktree-manager/src/worktree_manager/runtime_source.py": "b31589778a1d85f09db80cdef66fb2f60f9f6bf6aeaa92b3e8d6d82aee3be1bb"
     },
     "coverage_targets": [
         "libs/configuration-layers/src/configuration_context/runtime.py",

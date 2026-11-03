@@ -146,7 +146,7 @@ def acquire(
     # The payload owns the lease library; acquisition needs no installer or CLI.
     scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
     sys.path.insert(0, str(scripts))
-    from versioned_runtime import construction_lease
+    from versioned_runtime import construction_lease, _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF
 
     _remaining(deadline)
     git_command = _git if deadline is None and environment is None else partial(
@@ -177,10 +177,24 @@ def acquire(
                 marker = staging / ".git" / "runtime-source-owner.json"
                 _ordinary(marker)
                 marker.write_text(json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8")
-                _validate(staging, owner, deadline=deadline, environment=environment)
-                if checkout.exists() or checkout.is_symlink():
-                    raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
-                staging.rename(checkout)
+                initial_head = _validate(staging, owner, deadline=deadline, environment=environment)
+                for attempt in range(_AV_RETRY_ATTEMPTS):
+                    _remaining(deadline)
+                    _ordinary(checkout)
+                    if checkout.exists() or checkout.is_symlink():
+                        raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
+                    try:
+                        staging.rename(checkout)
+                        break
+                    except OSError as error:
+                        if (
+                            getattr(error, "winerror", None) not in (5, 32, 33)
+                            or attempt == _AV_RETRY_ATTEMPTS - 1
+                        ):
+                            raise
+                        time.sleep(min(_AV_RETRY_BACKOFF * (attempt + 1), _remaining(deadline)))
+                        if _validate(staging, owner, deadline=deadline, environment=environment) != initial_head:
+                            raise SourceAcquisitionError("Runtime source checkout moved during initialization")
         head = _validate(checkout, owner, deadline=deadline, environment=environment)
         branch = selection.branch
         remote_ref = f"refs/remotes/origin/{branch}"

@@ -106,6 +106,13 @@ rollout or expands required unit-only CI.
 The Windows source-cache job has a ten-minute outer guard: its completed
 64-pass packet and action cleanup reached the previous six-minute limit on a
 native runner. Constructor/item deadlines and the Linux job are unchanged.
+The `dependency_compile` selector's existing source-build rows distribute
+ordinary constructor profiles, source-input refusal controls and normal
+constructor/cache reuse across `profiles`, `refusals` and `normal`. Their
+selections preserve all 75 constructor/cache cases; the standalone
+`source_cache` selector still runs the complete selection. The four-row matrix,
+Manager row and six-minute source-build jobs are unchanged. Profile and refusal
+constructor controls use the same hash-pinned real backend as the normal row.
 The Logger Linux fixture explicitly qualifies its daemon-supervision interpreter
 through the shipped custody checks, rather than weakening those checks when a
 hosted toolcache interpreter is writable.

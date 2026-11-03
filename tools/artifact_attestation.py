@@ -12,6 +12,7 @@ from artifact_source_build import PromotionArtifactError
 
 INDEX_NAME = "python-artifacts.json"
 INDEX_SCHEMA = "copilot-extensions.promotion-python-artifacts"
+INDEX_LIMIT = 1 << 20
 _ATTESTATION_TIMEOUT = 120
 _PUBLIC_GOOD_INIT_ERROR = (
     "Error: failed to choose verifier based on provided bundle issuer: "

@@ -101,7 +101,7 @@ def with_release_profiles(index: dict, records: list[dict], manifests: dict) -> 
     pre-signing revalidation. This authenticates neither input nor changed subject;
     existing validation and fresh attestation remain required.
     """
-    from promotion_python_artifacts import INDEX_LIMIT, SCHEMA as INDEX_SCHEMA
+    from artifact_attestation import INDEX_LIMIT, INDEX_SCHEMA
 
     if (
         not isinstance(index, dict) or index.get("schema") != INDEX_SCHEMA

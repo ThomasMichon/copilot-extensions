@@ -97,6 +97,9 @@ builder and immutable constructor remain the owners of those decisions.
 The repository's Manager installation adapter is `tools/runtime_source_manager.py`;
 it is not part of this reusable toolkit. Subject attestation remains the same
 pinned hosted-workflow verifier, factored out of the publishing adapter.
+The shared index schema and byte limit belong to that reusable attestation
+module. Release-profile readers import them without reaching the repository's
+publication adapter; the publisher retains the same exported index contract.
 
 The payload-only native witness authenticates a synthetic Git source, admits
 its synthetic feed closure, builds first-party wheels, constructs and health

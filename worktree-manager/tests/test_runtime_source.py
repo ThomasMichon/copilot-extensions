@@ -160,6 +160,48 @@ def repository(tmp_path):
     return repo, first, development
 
 
+@pytest.mark.parametrize("after_denial", ["released", "changed", "destination"])
+def test_checkout_publication_retries_only_unchanged_owned_source(
+    tmp_path, monkeypatch, repository, after_denial,
+):
+    repo, first, _ = repository
+    selection = config.RuntimeSource("main", str(repo))
+    original = Path.rename
+    attempts = []
+    destination = []
+
+    def denied_once(path, target):
+        if path.name == "checkout" and path.parent.name.startswith(".acquire-"):
+            attempts.append(path)
+            destination[:] = [target]
+            if len(attempts) == 1:
+                if after_denial == "changed":
+                    (path / "payload.txt").write_text("changed during publication", encoding="utf-8")
+                elif after_denial == "destination":
+                    target.mkdir()
+                    (target / "foreign.txt").write_text("preserve", encoding="utf-8")
+                error = PermissionError("synthetic Windows directory share lock")
+                error.winerror = 5
+                raise error
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "rename", denied_once)
+    monkeypatch.setattr(source.time, "sleep", lambda seconds: None)
+    if after_denial == "released":
+        with source.acquire(selection, root=tmp_path / "manager") as resolved:
+            assert resolved.commit == first
+            assert (resolved.checkout / "payload.txt").read_text(encoding="utf-8") == "release one"
+        assert len(attempts) == 2
+    else:
+        with pytest.raises(source.SourceAcquisitionError, match="modified|appeared"):
+            with source.acquire(selection, root=tmp_path / "manager"):
+                pytest.fail("changed publication must not become an acquired source")
+        assert len(attempts) == 1
+        if after_denial == "destination":
+            assert (destination[0] / "foreign.txt").read_text(encoding="utf-8") == "preserve"
+    assert not git(repo, "status", "--porcelain")
+
+
 def test_policy_defaults_do_not_inherit_manager_source(tmp_path):
     root = tmp_path / "manager"
     source_config.set_source(repo="https://example.invalid/manager.git", ref="canary", root=root)
