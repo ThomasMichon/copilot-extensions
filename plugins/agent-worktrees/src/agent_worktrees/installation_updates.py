@@ -128,6 +128,7 @@ def inventory():
         "execution_source": str(config.install_dir().resolve()),
         "runtime_sources": {
             "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
+            "prepared_install_source": 1,
             "target_contract": {"schema": TARGET_SCHEMA, "version": TARGET_CONTRACT},
         },
     }

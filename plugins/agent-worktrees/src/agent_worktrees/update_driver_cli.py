@@ -193,7 +193,9 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         if custody is not None:
             with custody:
                 request = driver.status(custody.request_id, root=custody.root)
-                if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
+                if request.state != "running" or request.spec.backend not in {
+                    "manager", "engine", "source-recovery",
+                }:
                     raise driver.StateError("engine does not participate in this update request")
                 with _execution_context(request.spec.context):
                     if (

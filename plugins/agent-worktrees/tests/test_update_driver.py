@@ -103,6 +103,34 @@ def queued(monkeypatch, tmp_path):
     return seen, request
 
 
+def test_fresh_source_recovery_uses_existing_custody_without_requeue(tmp_path, monkeypatch):
+    import update_driver
+
+    calls = []
+
+    class Custody:
+        request_id = "source-request"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def assert_owned(self):
+            calls.append("owned")
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *args, **kw: SimpleNamespace(
+        state="running", spec=SimpleNamespace(backend="source-recovery", context=()),
+    ))
+    monkeypatch.setattr(update_driver, "enqueue", lambda *args, **kw: pytest.fail("no second request"))
+    monkeypatch.setattr(update_cli, "cmd_update", lambda args: calls.append("native-suite") or 17)
+    assert boundary.cmd_update_request(_args(no_manager=True)) == 17
+    assert calls == ["owned", "native-suite"]
+
+
 def test_ordinary_update_queues_before_manager_discovery(queued):
     seen, request = queued
     assert boundary.cmd_update_request(_args(force=True)) == 4

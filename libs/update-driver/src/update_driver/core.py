@@ -496,6 +496,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
 def enqueue(
     spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
     coalesce_running: bool = False,
+    _exclusive_custody: OperationLock | None = None,
 ) -> Request:
     """Commit acceptance; only trusted adapters with pinned targets may share active work."""
     root = _root(root)
@@ -510,10 +511,17 @@ def enqueue(
         raise InvalidRequestError("active coalescing must be an explicit boolean")
     spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
-    _reconcile_lost_owner(root)
+    if _exclusive_custody is None:
+        _reconcile_lost_owner(root)
+    else:
+        _exclusive_custody.assert_owned()
     _assert_foundation_clear(root)
     with _database(root, create=True) as db:
         db.execute("BEGIN IMMEDIATE")
+        if _exclusive_custody is not None and db.execute(
+            "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
+        ).fetchone() is not None:
+            raise StateError("request-local execution requires an idle queue; nothing replayed")
         if _has_fence(db, root):
             raise InterruptedError("installation queue fenced; explicit positive settlement required")
         row = None
@@ -760,6 +768,7 @@ def _execute(transaction: Transaction) -> int:
 
 def drain(
     *, root: Path | None = None, executor: Callable[[Transaction], int] | None = None,
+    _request_id: str | None = None, _custody: OperationLock | None = None,
 ) -> int:
     """Finite worker or supervised debug; always the same kernel/journal authority.
 
@@ -783,7 +792,11 @@ def drain(
         reason = "boot_identity_malformed" if isinstance(error, StateError) else admission_failure
         detail = f"worker admission failed: {reason}:{type(error).__name__}"
         with _database(root, writable=True) as db, db:
-            db.execute("UPDATE requests SET error=? WHERE state='pending'", (detail,))
+            db.execute(
+                "UPDATE requests SET error=? WHERE state='pending'"
+                + (" AND id=?" if _request_id is not None else ""),
+                (detail, _request_id) if _request_id is not None else (detail,),
+            )
         raise StateError(detail) from error
     startup = os.environ.pop("UPDATE_DRIVER_STARTUP", "")
     if re.fullmatch(r"[0-9a-f]{32}", startup):
@@ -798,33 +811,39 @@ def drain(
             pending.rename(root / f".worker-started-{startup}")
         finally:
             pending.unlink(missing_ok=True)
-    lock = OperationLock(root / "execution.lock")
-    while True:
-        try:
-            lock.acquire()
-            break
-        except OperationLockedError:
-            time.sleep(.05)
+    lock = _custody or OperationLock(root / "execution.lock")
+    if _custody is None:
+        while True:
+            try:
+                lock.acquire()
+                break
+            except OperationLockedError:
+                time.sleep(.05)
+    reconcile = _reconcile_foundation if _request_id is None else (
+        lambda root, custody: _assert_foundation_clear(root)
+    )
     try:
-        with _database(root, writable=True) as db:
-            db.execute("BEGIN IMMEDIATE")
-            _upgrade_schema(db, root, lock)
-            db.commit()
-        _reconcile_foundation(root, lock)
+        if _request_id is None:
+            with _database(root, writable=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                _upgrade_schema(db, root, lock)
+                db.commit()
+        reconcile(root, lock)
         with _database(root, create=True) as db:
             with db:
                 db.execute("BEGIN IMMEDIATE")
                 _has_fence(db, root)
-                db.execute(
-                    """UPDATE requests SET state='interrupted',error=?,finished_at=?
-                    WHERE state='running'""",
-                    ("previous owner lost custody; descendant settlement unconfirmed", time.time()),
-                )
+                if _request_id is None:
+                    db.execute(
+                        """UPDATE requests SET state='interrupted',error=?,finished_at=?
+                        WHERE state='running'""",
+                        ("previous owner lost custody; descendant settlement unconfirmed", time.time()),
+                    )
             if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced by unsettled prior transaction")
         while True:
             lock.assert_owned()
-            _reconcile_foundation(root, lock)
+            reconcile(root, lock)
             with _database(root, create=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 if _has_fence(db, root):
@@ -835,6 +854,8 @@ def drain(
                 if row is None:
                     db.commit()
                     return 0
+                if _request_id is not None and row["id"] != _request_id:
+                    raise StateError("request-local execution cannot consume another queued request")
                 request = _request(row, root)
                 reason = automatic_update_refusal(request.spec)
                 if reason is not None:
@@ -845,6 +866,8 @@ def drain(
                     )
                     db.commit()
                     print(f"Update request {request.id}: {reason}", file=sys.stderr)
+                    if _request_id is not None:
+                        return 0
                     continue
                 db.execute(
                     "UPDATE requests SET state='running',started_at=?,boot_id=?,error=NULL WHERE id=?",
@@ -865,7 +888,7 @@ def drain(
                     raise
                 transaction._close()
                 transaction.assert_owned()
-                _reconcile_foundation(root, lock)
+                reconcile(root, lock)
                 if type(code) is not int:
                     raise StateError("executor did not return an integer exit status")
                 if request.log_path.exists():
@@ -895,6 +918,43 @@ def drain(
                 raise
             finally:
                 _active_transaction.reset(scope)
+            if _request_id is not None:
+                return 0
+    finally:
+        if _custody is None:
+            lock.release()
+
+
+def run_explicit(
+    spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
+    executor: Callable[[Transaction], int] | None = None,
+) -> Request:
+    """Run only a newly admitted explicit operation; never drain or repair peers."""
+    root = _root(root)
+    with _database(root, create=True):
+        pass
+    lock = OperationLock(root / "execution.lock")
+    try:
+        lock.acquire()
+    except OperationLockedError as error:
+        raise StateError("request-local execution is busy; no request admitted") from error
+    try:
+        _assert_foundation_clear(root)
+        with _database(root, create=True) as db:
+            if db.execute(
+                "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
+            ).fetchone() is not None or _has_fence(db, root):
+                raise StateError("request-local execution requires an idle, unfenced queue; nothing replayed")
+        request = enqueue(spec, runner=runner, root=root, _exclusive_custody=lock)
+        try:
+            drain(root=root, executor=executor, _request_id=request.id, _custody=lock)
+        except BaseException as error:
+            setattr(error, "request_id", request.id)
+            raise
+        result = status(request.id, root=root)
+        if not isinstance(result, Request):
+            raise StateError("request-local execution returned no request")
+        return result
     finally:
         lock.release()
 

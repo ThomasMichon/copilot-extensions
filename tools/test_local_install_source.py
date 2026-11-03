@@ -828,8 +828,16 @@ def native_source(tmp_path, request):
     if not (isinstance(options, dict) and options.get("standalone", False)):
         (payload / "plugin.json").write_text('{"name":"demo-app","version":"1.0.0"}\n')
     scripts = payload / "scripts"
-    if not standalone:
+    if not standalone or isinstance(options, dict) and options.get("source_install"):
         scripts.mkdir()
+    if isinstance(options, dict) and options.get("source_install"):
+        (payload / "source-install.json").write_text(json.dumps({
+            "schema": "copilot-extensions.native-source-install", "version": 1,
+            "windows": {"script": "scripts/install.ps1", "argument": "-InstallSource"},
+            "posix": {"script": "scripts/install.sh", "argument": "--install-source"},
+        }))
+        (scripts / "install.ps1").write_text("# source entry fixture\n")
+        (scripts / "install.sh").write_text("# source entry fixture\n")
     root = Path(__file__).resolve().parents[1]
     native.source_inputs.engine.freeze_inputs(
         root / "libs" / "agent-procutil", (original if sibling else payload) / "libs",
@@ -1002,6 +1010,16 @@ def test_copied_application_qualifies_after_the_prepared_source_is_removed(nativ
     )
     if os.name == "nt":
         environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+        # A copied launcher keeps fixture cleanup independent of mapped UV
+        # interpreter links held by other test environments.
+        subprocess.run(
+            [sys.executable, "-I", "-m", "venv", "--without-pip", "--copies", str(slot / ".venv")],
+            env=environment, capture_output=True, text=True, timeout=60, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for executable in (slot / ".venv/Scripts").glob("python*.exe"):
+            assert executable.stat().st_nlink == 1
+            executable.chmod(executable.stat().st_mode | 0o200)
     command = (
         [shutil.which("powershell.exe"), "-NoProfile", "-NonInteractive",
          "-File", str(slot / "install.ps1")]
@@ -1018,6 +1036,18 @@ def test_copied_application_qualifies_after_the_prepared_source_is_removed(nativ
     assert (root / "current-version").read_text().strip() == slot.name
     assert not (slot / "payload").exists()
     assert not (slot / "source").exists()
+    cleanup_deadline = time.monotonic() + 60
+    while not source.engine.runtime._rmtree_deferrable(root, label="disposable application fixture"):
+        if time.monotonic() >= cleanup_deadline:
+            image = slot / ".venv" / "Scripts" / "python.exe"
+            facts = image.stat() if image.exists() else None
+            pytest.fail(
+                f"disposable application cleanup remained blocked: "
+                f"attributes={getattr(facts, 'st_file_attributes', None)}, "
+                f"links={getattr(facts, 'st_nlink', None)}; "
+                f"native output: {result.stdout}{result.stderr}"
+            )
+        time.sleep(0.25)
 
 
 @pytest.mark.parametrize("native_source", [{"sibling": True}], indirect=True)

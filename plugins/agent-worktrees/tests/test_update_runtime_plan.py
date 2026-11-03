@@ -496,6 +496,7 @@ def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio, 
     source = SimpleNamespace(
         payload=payload, identity="prepared-source", version="2",
         validate=lambda *args: None,
+        install_source=None, installer_arguments=lambda platform: [],
     )
     monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
     step = update_runtime_plan._select_inputs(
@@ -561,6 +562,7 @@ def test_index_update_selects_real_host_repository(tmp_path, monkeypatch, kind, 
                 **({"source": SimpleNamespace(
                     payload=payload, identity="prepared-source", version="new",
                     validate=lambda *args: None, deployed_version=lambda *args, **kwargs: "old",
+                    install_source=None, installer_arguments=lambda platform: [],
                 )} if prepared else {}))
     assert not step.blocked, step.status
     assert step.project_root == repos["host"]

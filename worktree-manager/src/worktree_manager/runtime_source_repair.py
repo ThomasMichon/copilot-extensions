@@ -20,6 +20,12 @@ def prepare_engine(resolved: ResolvedSource) -> tuple[Path, str]:
         default_root().absolute() / "runtime-sources/prepared",
     )
     payload = Path(record["payload"])
+    qualify_engine(payload)
+    return payload, json.dumps(record["identity"], sort_keys=True)
+
+
+def qualify_engine(payload: Path) -> None:
+    """Negotiate native isolated repair before any other runtime is published."""
     declaration = ast.parse(
         (payload / "scripts/versioned_runtime_source.py").read_text(encoding="utf-8"),
     )
@@ -34,7 +40,62 @@ def prepare_engine(resolved: ResolvedSource) -> tuple[Path, str]:
     installer = payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
     if "AGENT_WORKTREES_TARGETED_UPDATE" not in installer.read_text(encoding="utf-8"):
         raise ValueError("Prepared engine installer does not support runtime-only repair")
-    return payload, json.dumps(record["identity"], sort_keys=True)
+
+
+def fresh_engine_plan(source: Path, prepared):
+    """Use native installation, not incumbent repair, for unattributable footprints."""
+    from dataclasses import replace
+    from agent_worktrees import config, reconcile, update_runtime_plan
+    from agent_worktrees.installation_updates import isolated_engine_step
+    from . import core_install, update_bootstrap
+
+    environment = dict(os.environ)
+    _script, _sdk, helper, _api, primitive = update_bootstrap._policy_sdk(source)
+    _current, profile = primitive._current_environment(
+        environment=environment, os_profile=None, platform=None, wsl_distro=None,
+    )
+    root = core_install.runtime_dir(Path(profile))
+    helper["_ordinary"](root)
+    helper["_ordinary"](root / "deploy-manifest.json")
+    malformed = getattr(primitive, "MalformedDeploymentManifest", json.JSONDecodeError)
+    try:
+        captured = update_bootstrap._legacy_owner_selection(helper, primitive, root)
+        if captured.binding is not None:
+            update_bootstrap._identity(update_bootstrap._Installation(
+                root, captured.payload, captured.binding, _sdk,
+            ))
+    except PermissionError:
+        raise
+    except (FileNotFoundError, malformed, RuntimeError, KeyError):
+        pass
+    else:
+        return None
+    owner = reconcile.core_installed_payload_dir("agent-worktrees")
+    if owner is None:
+        raise ValueError(
+            "Unattributable engine footprint has no registered source; "
+            "its native setup owner must establish that source before recovery"
+        )
+    action = "repair" if root.exists() else "install"
+    if action == "repair":
+        entry = prepared.payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
+        if "repair" not in entry.read_text(encoding="utf-8"):
+            raise ValueError("Selected native engine lacks independent repair support")
+    step = update_runtime_plan.plan_engine(
+        owner, config.detect_platform(), force=True, source=prepared, action=action,
+    )
+    if step.blocked:
+        raise ValueError(f"Native engine installation preflight failed: {step.status}")
+    if step.runtime_root != root:
+        raise ValueError("Native engine installation scope differs from the inspected legacy root")
+    step = isolated_engine_step(step)
+    child = dict(step.environment)
+    defer = os.environ.get("AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION")
+    if defer is None:
+        child.pop("AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION", None)
+    else:
+        child["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] = defer
+    return replace(step, environment=child)
 
 
 def verify_engine(root: Path, pin: str | None) -> None:

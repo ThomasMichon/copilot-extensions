@@ -33,6 +33,7 @@ class _Installation:
     primitive: ModuleType | None = None
     artifact: Path | None = None
     source_pin: str | None = None
+    source_snapshot: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -411,6 +412,11 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
         native.append(
             "-ProvisionMissingRuntime" if os.name == "nt" else "--provision-missing-runtime"
         )
+    if installation.source_snapshot is not None:
+        native += [
+            "-InstallSource" if os.name == "nt" else "--install-source",
+            str(installation.source_snapshot),
+        ]
     base = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     command = [
         base, "-I", "-S", "-B", "-X", "utf8",
@@ -445,18 +451,25 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
 
 def _repair_installation(
     source: Path, *, runtime_source: ResolvedSource | None = None,
+    prepared_source=None,
 ) -> RepairResult:
     """Restore only the attributable installation, using its owning source."""
     environment = dict(os.environ)
     try:
         from .runtime_source_config import configured_source, require_marketplace
 
-        if runtime_source is None:
+        if prepared_source is not None and runtime_source is not None:
+            raise ValueError("Engine repair accepts only one explicit source selection")
+        if prepared_source is not None:
+            if environment.get("COPILOT_EXTENSIONS_CONTEXT"):
+                raise ValueError("Prepared-source repair requires an authorized legacy installation")
+        elif runtime_source is None:
             require_marketplace()
         elif configured_source() != runtime_source.selection:
             raise ValueError("Runtime source policy changed before engine repair")
         refreshed = _refresh_source(
-            source, environment, **({"independent": True} if runtime_source is not None else {}),
+            source, environment,
+            **({"independent": True} if runtime_source is not None or prepared_source is not None else {}),
         )
         expected = refreshed.identity
         if refreshed.context is not None:
@@ -474,6 +487,12 @@ def _repair_installation(
             raise RuntimeError("Engine installation/source identity changed during repair")
         if runtime_source is not None:
             current = replace(current, artifact=artifact, source_pin=pin)
+        if prepared_source is not None:
+            prepared_source.validate("agent-worktrees", current.sdk, environment)
+            current = replace(
+                current, artifact=prepared_source.payload, source_pin=prepared_source.identity,
+                source_snapshot=prepared_source.install_source,
+            )
         rc = _invoke(current, "update", environment)
         if rc:
             return RepairResult(rc)
@@ -483,6 +502,10 @@ def _repair_installation(
             from .runtime_source_repair import verify_engine
 
             verify_engine(current.root, current.source_pin)
+        if prepared_source is not None and prepared_source.deployed_version(
+            current.root, current.sdk,
+        ) != prepared_source.version:
+            raise ValueError("Engine repair did not select its complete native source generation")
         return RepairResult(0, environment)
     except (OSError, ValueError, RuntimeError, ImportError, SyntaxError) as error:
         message = f"Engine repair refused: {error}"

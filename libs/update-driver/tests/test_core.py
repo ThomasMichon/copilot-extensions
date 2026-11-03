@@ -24,6 +24,7 @@ from update_driver import (
     ensure_worker,
     participant,
     runtime_command,
+    run_explicit,
     status,
     wait,
 )
@@ -163,6 +164,71 @@ def test_manager_policy_preserves_unrelated_cell_scope(area, monkeypatch):
     assert "maintenance.automatic is false" in automatic_update_refusal(
         RequestSpec("engine", ("--auto",), context=addressed),
     )
+def test_explicit_foreground_uses_native_custody_and_preserves_exit(area, monkeypatch):
+    from update_driver import core
+
+    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
+    seen = []
+    result = run_explicit(
+        RequestSpec("source-recovery", source="frozen-selection"),
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+        root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 17,
+    )
+    assert result.state == "completed" and result.exit_code == 17
+    assert seen == [result.id]
+
+
+def test_explicit_foreground_never_replays_foreign_pending_work(area, monkeypatch):
+    from update_driver import core
+
+    peer = sample(area, source="peer")
+    before = status(root=area / "state")
+    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
+    with pytest.raises(StateError, match="nothing replayed"):
+        run_explicit(
+            RequestSpec("source-recovery"),
+            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+            root=area / "state", executor=lambda tx: pytest.fail("no peer execution"),
+        )
+    assert status(root=area / "state") == before
+    assert status(peer.id, root=area / "state").state == "pending"
+
+
+def test_explicit_foreground_stops_before_a_later_peer(area):
+    later = []
+
+    def execute(tx):
+        later.append(sample(area, source="later"))
+        return 0
+
+    result = run_explicit(
+        RequestSpec("source-recovery"),
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+        root=area / "state", executor=execute,
+    )
+    assert result.state == "completed"
+    assert len(later) == 1
+    assert status(later[0].id, root=area / "state").state == "pending"
+
+
+def test_explicit_foreground_native_child_borrows_the_same_custody(area):
+    child = (
+        "import sys\nfrom pathlib import Path\n"
+        "from update_driver import borrowed_custody\n"
+        "custody=borrowed_custody(root=Path(sys.argv[1]))\n"
+        "assert custody is not None\n"
+        "with custody:\n"
+        "    custody.assert_owned()\n"
+        "    print('native-source-custody', flush=True)\n"
+        "raise SystemExit(17)\n"
+    )
+    result = run_explicit(
+        RequestSpec("source-recovery", source="frozen-selection"),
+        runner=TrustedRunner((sys.executable, "-I", "-c", child, str(area / "state")), str(area)),
+        root=area / "state",
+    )
+    assert result.state == "completed" and result.exit_code == 17, result.log_path.read_text(encoding="utf-8")
+    assert "native-source-custody" in result.log_path.read_text(encoding="utf-8")
 
 
 def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkeypatch, capsys):

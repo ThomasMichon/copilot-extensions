@@ -781,6 +781,13 @@ that authorization does not certify cleanup or permit displacing a live owner.
 
 ### Local promoted installation inputs
 
+For recovery independent of an installed Manager or dispatcher, the current
+Windows bootstrap also exposes passive-marker-guarded
+`--describe-recovery-source` discovery and `--recover-source <request.json>`.
+See [Fresh bootstrap source recovery](../docs/fresh-source-recovery.md) for
+the exact preview/install request, immutable selection, native new/legacy
+compatibility and partial-outcome contract.
+
 The standalone bootstrap and `scripts/runtime_install.py` advertise the
 read-only `--describe-source-inputs` descriptor. Its `install-source` capability
 accepts `--install-source <absolute-snapshot>` before application arguments;
