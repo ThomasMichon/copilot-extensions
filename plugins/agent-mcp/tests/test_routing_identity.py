@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 
@@ -114,14 +115,90 @@ async def test_routed_entra_never_uses_unqualified_source_cache(identity_backend
         assert result["structuredContent"]["credential"] == "alpha"
 
 
-async def test_identity_switch_during_mint_fails_before_backend_and_cache(identity_backend, tmp_path):
+@pytest.mark.parametrize("scope", ["memory", "none", "shared"])
+async def test_identity_switch_during_mint_fails_before_backend_and_cache(
+    identity_backend, tmp_path, scope,
+):
     state = identity_backend
     state["switch_during_mint"] = True
-    async with OneShotSession(parse_config(entra_definition())) as session:
+    data = entra_definition()
+    data["routing"]["targets"]["alpha"]["auth"]["cache"]["scope"] = scope
+    async with OneShotSession(parse_config(data)) as session:
         with pytest.raises(UpstreamError, match="identity changed"):
             await session.call_tool("read", {"organization": "alpha"})
     assert state["backend"] == []
     assert not list((tmp_path / "token-cache").glob("*.json"))
+
+
+@pytest.mark.parametrize("scope", ["memory", "none", "shared"])
+async def test_fresh_and_cached_headers_keep_only_required_identity_probes(identity_backend, scope):
+    from agent_mcp.auth.injectors import EntraInjector
+
+    spec = parse_config(entra_definition()).routing.targets["alpha"].auth
+    spec.cache.scope = scope
+    spec.identity_context = await resolve_entra_identity(spec, timeout=1)
+    injector = EntraInjector(spec)
+    identity_backend["probes"].clear()
+    assert await injector.headers() == {"Authorization": "alpha"}
+    commands = [args[:2] for args in identity_backend["probes"]]
+    assert commands == [
+        ["account", "show"], ["account", "get-access-token"], ["account", "show"],
+        *([["account", "show"]] if scope == "shared" else []),
+    ]
+
+    # A new shared-cache reader must validate both sides without minting.
+    if scope == "shared":
+        injector = EntraInjector(spec)
+    identity_backend["probes"].clear()
+    assert await injector.headers() == {"Authorization": "alpha"}
+    assert [args[:2] for args in identity_backend["probes"]] == (
+        [["account", "show"], ["account", "get-access-token"], ["account", "show"]]
+        if scope == "none" else [["account", "show"], ["account", "show"]]
+    )
+
+
+@pytest.mark.parametrize("failure", ["mismatch", "unavailable", "cancelled"])
+@pytest.mark.parametrize("scope", ["memory", "shared"])
+@pytest.mark.parametrize("check_index", [1, 2])
+async def test_failed_cached_check_invalidates_before_headers_escape(
+    identity_backend, monkeypatch, tmp_path, failure, scope, check_index,
+):
+    import agent_mcp.auth.identity as identity
+    from agent_mcp.auth.injectors import EntraInjector
+
+    spec = parse_config(entra_definition()).routing.targets["alpha"].auth
+    spec.cache.scope = scope
+    spec.identity_context = await resolve_entra_identity(spec, timeout=1)
+    injector = EntraInjector(spec)
+    assert await injector.headers() == {"Authorization": "alpha"}
+    if scope == "shared":
+        injector = EntraInjector(spec)
+    original_probe = identity.azure_json
+    checks = 0
+
+    async def probe(args, *, timeout):
+        nonlocal checks
+        checks += 1
+        if checks == check_index:
+            if failure == "mismatch":
+                identity_backend["principal"] = "beta"
+            elif failure == "unavailable":
+                raise RoutingError("routing auth identity unavailable: fixture")
+            else:
+                raise asyncio.CancelledError()
+        return await original_probe(args, timeout=timeout)
+
+    monkeypatch.setattr(identity, "azure_json", probe)
+    error = asyncio.CancelledError if failure == "cancelled" else RoutingError
+    with pytest.raises(error):
+        await injector.headers()
+    assert injector._cached is None
+    assert not list((tmp_path / "token-cache").glob("*.json"))
+
+    monkeypatch.setattr(identity, "azure_json", original_probe)
+    identity_backend["principal"] = "alpha"
+    assert await injector.headers() == {"Authorization": "alpha"}
+    assert identity_backend["minted"] == ["alpha", "alpha"]
 
 
 async def test_warm_injector_guard_catches_identity_switch_without_router(identity_backend):

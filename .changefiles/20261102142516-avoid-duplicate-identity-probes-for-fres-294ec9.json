@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid duplicate identity probes for fresh routed Entra memory or uncached tokens; invalidate tokens after failed checks or cancellation.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
