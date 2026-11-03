@@ -591,7 +591,7 @@ def test_queued_source_choice_cannot_change_before_participant_execution(tmp_pat
     original = update_driver_cli._source_key()
     config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
     request = SimpleNamespace(
-        state="running", spec=SimpleNamespace(
+        state="running", spec=update_driver.RequestSpec(
             backend="manager", source=original,
             context=(("WORKTREE_MANAGER_ROOT", str(root)),),
         ),

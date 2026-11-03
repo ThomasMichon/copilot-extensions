@@ -959,16 +959,26 @@ limit and completed normal cleanup with a clean host-state audit. Earlier
 aggregate timeouts and host-state-audit failures remain non-passing evidence;
 the later cohorts do not relabel them.
 
-Whole-packet qualification of the committed extraction remains pending.
+Native Windows whole-packet qualification remains incomplete.
 Two uninstrumented native Windows attempts exhausted the unchanged
 300-second budget at approximately 79% and 91%; a separate per-file timing
 diagnostic also exhausted that budget. All three completed normal Job and
 temporary-environment cleanup. The trace showed cumulative execution cost
 across the existing suite rather than a discovery-reader stall. These are
 non-passing results, not permission to increase the budget, omit nodes or
-claim native Windows whole-packet qualification. The existing required CI
-unit lane can exercise the exact source inventory on its normal runner;
-that result and native consumer evidence remain distinct.
+claim native Windows whole-packet qualification. Required CI run
+[41628266101](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41628266101)
+qualified the reconciled 3,857-node packet in 99.047 seconds and retained
+fresh evidence. This does not relabel the native Windows attempts; packet
+qualification and native consumer evidence remain distinct.
+
+The native acceptance run exposed a stale queued-source test double on both
+platforms: its partial request lacked the retained `killswitch_path` and
+`cwd` fields now read by the participant boundary. The fixture uses the
+existing `update_driver.RequestSpec` instead, preserving the assertion that
+a changed source refuses before participant execution. The focused native
+Windows case passed with normal containment cleanup. The failed native run
+remains failed; the corrected head still owes a new native qualification.
 
 This closes no ordinary-consumer checkbox. Worktrees still needs its actual
 source/provider selection, admitted tooling, planning and current-policy
