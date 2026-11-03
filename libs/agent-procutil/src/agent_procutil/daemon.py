@@ -115,7 +115,8 @@ def spawn_daemon(
     escape every tracked launcher-owned cleanup Job before resume. Ambient
     external Job membership is not a caller-lifetime claim. No broker is
     activated. ``contained_fallback`` explicitly accepts the caller's shorter
-    lifetime after a settled refusal. POSIX uses a new session.
+    lifetime after a settled refusal. POSIX uses a new session; durable Linux
+    launches also leave a systemd caller's cleanup unit through a user scope.
     """
     import agent_procutil as pu
 
@@ -257,9 +258,17 @@ def spawn_daemon(
 
         def create():
             nonlocal creation_attempted, creation_refused
+            launch_command = command
+            if (
+                not pu._is_windows() and breakaway and not pu.contained_test_mode()
+                and child_env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
+            ):
+                from .linux_daemon_scope import scope_command
+
+                launch_command = scope_command(command, receipt.instance_id, child_env)
             creation_attempted, creation_refused = True, False
             try:
-                return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+                return subprocess.Popen(launch_command, **popen_kwargs, **kwargs)  # noqa: S603
             except (OSError, ValueError, TypeError):
                 creation_refused = True
                 raise

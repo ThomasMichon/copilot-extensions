@@ -3917,7 +3917,21 @@
         "tools/promotion_unit_tests/test_write_activity.py::test_activity_requires_strict_bool[progress]",
         "tools/promotion_unit_tests/test_write_activity.py::test_observation_error_retains_original_failure",
         "tools/promotion_unit_tests/test_write_activity.py::test_output_bytes_and_default_quiet_behavior_are_unchanged[False]",
-        "tools/promotion_unit_tests/test_write_activity.py::test_output_bytes_and_default_quiet_behavior_are_unchanged[True]"
+        "tools/promotion_unit_tests/test_write_activity.py::test_output_bytes_and_default_quiet_behavior_are_unchanged[True]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_cleanup_boundary[unified-service]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_cleanup_boundary[legacy-systemd]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_cleanup_boundary[nested-scope]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_cleanup_boundary[user-manager]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_cleanup_boundary[container]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_cleanup_boundary[cpu-only]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_scope_preserves_literal_command_and_child_environment[253-False]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_scope_preserves_literal_command_and_child_environment[254-True]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_scope_preserves_literal_command_and_child_environment[255-True]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_no_native_cleanup_boundary_keeps_plain_posix_launch",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_unknown_native_runner_is_not_inherited_lifetime[malformed]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_unknown_native_runner_is_not_inherited_lifetime[failed-version]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_missing_native_runner_refuses",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_other_platforms_do_not_read_linux_cgroups"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "89bc6b816b365470efaa77c0d15c2c6a546b6c62ed489468a8e8e7b529d14e72",
@@ -4007,7 +4021,10 @@
         "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "0f0d84d29db0fe25c27f478f0b1a85a0e88ac08f63837fa4112aeee1c9af7a64",
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py": "cffa06cd07fd1e6fdf10df1384df356be9ecaa7d8e7bb64a0f1db3095d7e1299",
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
-        "libs/agent-procutil/src/agent_procutil/daemon.py": "9121eb565bafb0f7dbdca0cc926c03bf7adabbb50e9585b380a128c1963507ed",
+        "libs/agent-procutil/src/agent_procutil/daemon.py": "4d08c8639e3cc809499b6969a150a3a0118576c8da7f6fdca99c79f76843b9c5",
+        "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py": "99c284b35e0553ed82baba9a48f1042cf2e3d117e0d21bf20ba24b9cce3a8fc9",
+        "libs/agent-procutil/tests/test_linux_daemon_scope.py": "999b6dc5cfc6e37c1d1f45462f06c2452ded2837e8a81a98152b1b00961312b6",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py": "e646862fcac6294130959e31c53c9fe75aec804d97a239582d6fde0882ab1d79",
         "libs/agent-procutil/src/agent_procutil/daemon_broker.py": "4a8034bfa07af5f56a382f93a45f5082e4d5b0f387f58084420d5019bde8f289",
         "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "59fa2d8f1bf612d020e68b4a9674cfbe3ec8b34b46cb5230aa54f743d9907322",
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",
@@ -4027,7 +4044,7 @@
         "libs/agent-procutil/tests/sdk_desktop_win32.py": "76dfb69362d03495feff56aff4476383c63b5a1a4e343d00b52912f166fe32fa",
         "libs/agent-procutil/tests/sdk_visibility.py": "bd8c4dfcf78a732029828960da6ecb6c35c1b3060bf237fd5322f229384c953e",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
-        "libs/agent-procutil/tests/sdk_visibility_sources.py": "78aed1a6e45e6691445eec633d781896a70f7d32fff7536f51b5da8ae3fb1493",
+        "libs/agent-procutil/tests/sdk_visibility_sources.py": "cde4b7b369989b457382744d0395010a6c770792c94acae72ee5347fa6d05a4b",
         "libs/agent-procutil/tests/test_daemon_lifecycle_deadline.py": "93f856ec9217f2bae8032ba22e57b58ddb2a05d707650c54cf8556175907d69d",
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "a1dfaf794e7eee7792ec287ea329366786de11fda8bf4c3c83de89d482b4def2",
@@ -4701,7 +4718,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/pr_publish.py",
         "tools/bundle_lock.py",
         "tools/artifact_attestation.py",
-        "tools/artifact_release_discovery.py"
+        "tools/artifact_release_discovery.py",
+        "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py"
     ],
     "max_seconds": 300
 }
