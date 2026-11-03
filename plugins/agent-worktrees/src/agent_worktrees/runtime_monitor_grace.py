@@ -133,11 +133,11 @@ def settle_exited(root: Path, predecessor: dict) -> None:
     path.unlink()
 
 
-def retirement_callback(retire, supported_capabilities: set[str]):
-    def cleanup(old):
+def retirement_callback(retire, supported_capabilities: set[str], successor):
+    def cleanup(_old):
         if CAPABILITY in supported_capabilities:
             return {"exit_confirmed": False, "reason": "successor-resident-grace-pending"}
-        return retire(old)
+        return retire(successor())
 
     return cleanup
 

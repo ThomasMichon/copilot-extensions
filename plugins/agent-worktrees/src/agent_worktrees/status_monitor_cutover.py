@@ -855,7 +855,7 @@ def activate_after_update(
         published_successor = None
         if asynchronous_retirement and options.get("retire_failed_predecessor") is not None:
             from .runtime_monitor_grace import retirement_callback
-            options["retire_failed_predecessor"] = retirement_callback(options["retire_failed_predecessor"], successor_capabilities)
+            options["retire_failed_predecessor"] = retirement_callback(options["retire_failed_predecessor"], successor_capabilities, lambda: published_successor)
         def activate_successor(endpoint: routing.Endpoint) -> None:
             nonlocal retirement_complete, published_successor
             if reserved:

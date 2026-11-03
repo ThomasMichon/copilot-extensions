@@ -241,14 +241,17 @@ def test_incoming_health_selects_grace_or_bounded_legacy_cleanup(retirement, mon
         supported_capabilities=captured,
     )
     calls = []
+    published_successor = None
     cleanup = grace.retirement_callback(
-        lambda old: calls.append(old) or {"exit_confirmed": True}, captured,
+        lambda successor: calls.append(successor) or {"exit_confirmed": True},
+        captured, lambda: published_successor,
     )
+    published_successor = r.new
     assert cleanup(r.old) == (
         {"exit_confirmed": False, "reason": "successor-resident-grace-pending"}
         if supported else {"exit_confirmed": True}
     )
-    assert calls == ([] if supported else [r.old])
+    assert calls == ([] if supported else [r.new])
     assert captured == set(capabilities)
 
 

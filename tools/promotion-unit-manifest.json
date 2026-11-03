@@ -4507,7 +4507,7 @@
         "tools/check-install-contract.py": "a435b187bc0faaa9e4beb13fa05694b5d2b7fdb211477bc39fba362d475e28a7",
         "tools/promotion_unit_tests/test_update_receipt_contract.py": "af14589c316669a93b8d20f9f99526a0f155031624a68f6ad5fdcfcbeac0179e",
         "tools/promotion_unit_tests/test_monitor_outcome_contract.py": "aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py": "7bb18b63b3f544a612ec230430e4757cc8f9ecb23acf129300b45ee04790bfef",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py": "fbdb53ebe0b6a75cc6093bb2ff7d19477d1913431b52023512aa65744558f72d",
         "tools/promotion_unit_tests/test_daemon_cwd_contract.py": "a48c87d1835969aa7f40a72a000e6081821028cd6500355a19ced798331e3e25",
         "plugins/agent-codespaces/src/agent_codespaces/owner_startup.py": "b49522cc34a28da9966820fc2590925425e2bdcbb9f793b4a943092928ee4962",
         "plugins/agent-worktrees/src/agent_worktrees/installer_run.py": "0aeb1946faedaf902c55c5153a15bc430f4207262ddd1d7b51ee65265bfa2408",
