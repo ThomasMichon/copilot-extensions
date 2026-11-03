@@ -702,6 +702,56 @@ def test_partial_selector_failure_restores_previous_publication(application, mon
     assert not (slot / "install-success.json").exists()
 
 
+@pytest.mark.parametrize("failure_point", ["after-start", "after-success"])
+def test_real_qualification_finishes_before_install_success(
+    application, monkeypatch, failure_point,
+):
+    root, slot, caller, environment = application
+    environment["UV_PYTHON"] = sys.executable
+    extension = ".cmd" if os.name == "nt" else ".sh"
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stderr
+    spec = importlib.util.spec_from_file_location("_qualification_install", slot / "install.py")
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    load = installer._load
+    success = slot / "install-success.json"
+    trigger = root / "started.json" if failure_point == "after-start" else success
+
+    def observed_load(path, name):
+        module = load(path, name)
+        if name == "_application_engine":
+            verify = module.verify_application_wheels
+
+            def guarded_verify(*args, **kwargs):
+                if trigger.exists():
+                    raise RuntimeError("injected qualification failure " + failure_point)
+                return verify(*args, **kwargs)
+
+            monkeypatch.setattr(module, "verify_application_wheels", guarded_verify)
+        return module
+
+    monkeypatch.setattr(installer, "_load", observed_load)
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(sys, "executable", str(
+        slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
+    ))
+    if failure_point == "after-start":
+        with pytest.raises(installer.ApplicationStartupUncertain) as failed:
+            installer.install(slot, stage=False, global_bin=root / "global")
+        assert str(failed.value.__cause__) == "injected qualification failure after-start"
+        assert not success.exists()
+        assert not (root / "last-known-good").exists()
+    else:
+        assert installer.install(
+            slot, stage=False, global_bin=root / "global",
+        )["state"] == "installed"
+        assert success.is_file()
+        assert (root / "last-known-good").read_text().strip() == slot.name
+    assert (root / "started.json").is_file()
+    assert (root / "current-version").read_text().strip() == slot.name
+
+
 @pytest.mark.parametrize("failure", ["missing-inputs", "source-mismatch", "installed-content"])
 def test_unqualified_application_does_not_publish_or_run_setup(application, failure):
     root, slot, caller, environment = application

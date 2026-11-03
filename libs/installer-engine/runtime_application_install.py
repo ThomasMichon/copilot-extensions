@@ -275,7 +275,6 @@ def _qualified(slot: Path, record: dict):
                 root, slot.name, payload_hash=inputs["payload_hash"], timeout=180,
             ))
         yield runtime, unchanged
-        unchanged()
 
 
 def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
