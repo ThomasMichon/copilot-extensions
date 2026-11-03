@@ -913,134 +913,13 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ### 2026-11-03 - Successor announcement and resident grace source merged
 
-- #10266 merged to Dev as `95f3bc52d172c4938dec738c67b3d8fe1401791f`
-  from exact head `e8894e4f1ddb61b46f5032ca6fd0722eba0e8339`.
-  Copilot review `5760645921` approved that head with no open issues;
-  all six review threads are resolved. Required CI `41734176038` and
-  isolated native run `41734165433` passed. Managed completion used only the
-  repository-authorized additional-CODEOWNER exception, not a findings or
-  CI waiver.
-- The new resident attempts its optional, capability-selected notice before
-  promotion. Old admission does not close merely on receipt; independent
-  ready-successor observation remains its drain trigger. After serving
-  readiness, a separate durable five-minute deadline lets the existing
-  selected resident attempt exact native expiry without blocking installation
-  on predecessor exit. Legacy custody schemas and synchronous paths remain
-  unchanged; unconfirmed cleanup retains process/runtime protection.
-- Incoming asynchronous-retirement support alone does not promise a grace
-  loop. Preparation health must advertise the separate grace capability
-  before failed old cleanup is deferred. A newer controller restoring a
-  retained pre-grace runtime keeps bounded native cleanup, with the published
-  successor passed through the late-bound adapter.
-- Review and native qualification corrected retry-state loss on early exit,
-  a fixture token mismatch, direct canonical settlement before route cleanup,
-  the two-pass exit race, missing incoming grace selection and the fallback
-  adapter's wrong endpoint. The actual mixed-version packet reproduced the
-  adapter failure before its correction; those failed heads remain failed
-  evidence rather than being replaced by later green results.
-- A subsequent review identified the earlier committed-custody/pre-arm exit
-  race. Canonical settlement now compare-releases the exact exited fallback
-  even before the first grace record exists. Failed writes, changing routes
-  and missing active selection retain retry custody; another predecessor's
-  reservation is untouched. Six new direct/resident controls cover these
-  cases without fabricating a marker or sending a signal.
-- Validation tiers: the unchanged, path-gated hosted jobs ran real installer
-  transitions from disposable installed monitors on Linux and Windows,
-  focused custody/grace controls on both, and eight finite Windows native
-  mixed-version/grace cases. The native release controls exercise the common
-  transition seam, not a full retained-mode release end to end. These are
-  fresh-root component and real-subprocess checks, not whole-suite removal,
-  actual Copilot/TTY survival or selected-host rollout.
-- Existing local preparation timeouts, persistent-environment guard failures
-  and the later inadmissible local test-framework attempt remain uncredited.
-  No production deadline, source ceiling, actor restriction or historical
-  acceptance was weakened. All 553 source bindings, the unchanged monitor
-  outcome contract, the exact 1,000-line cutover ceiling and touched-source
-  lint passed before publication. Documentation reconciliation preserved the
-  newer replacement target separately from current resident-owned adoption.
-- Re-read every Plan and Validation item after the actual merge. Closed only
-  the source-component subitem above. Merged-Dev CI `41735507569` passed;
-  the native finalizer verified all source content upstream and settled the
-  source child's parent claim. Normal containing release,
-  the existing serial deployment owner's live gates, exact
-  conversation restoration, both installation cycles, standby/resume/end and
-  final publication remain open. No installed update, repair release,
-  interrupted-request replay or protected-process mutation occurred.
-- Normal promotion `41737809246` subsequently passed and generated #10314
-  merged Main `142a2a3c50f886a052136fa4aae5e10d6a0fb2f5`, admitting Dev
-  `18f110d637a2133ad5dd08610bf3ca789fd89115`. The #10266 Dev merge is an
-  ancestor of that admitted Dev snapshot; generated-Main ancestry was not
-  substituted for containment. Worktrees is 1.24.445-dev1, and its immutable
-  source release is published, non-draft, with 26 assets.
-- All sixteen selected monitor implementation, native fixture, test, workflow
-  and architecture/pattern blobs match the reviewed head exactly. The two
-  shared-doc differences describe independent unit-runner and Bridge/MCP
-  application work; monitor/grace contract text is preserved. This closes only
-  this component's normal containing-release subitem. Selected-host rollout
-  remains with its existing owner; no deployment or replay occurred.
+[Detailed journal](<journal/2026/11.03 successor-grace-qualification.md>).
+Source qualification and containing-release evidence; installed rollout and parent acceptance remain open.
 
 ### 2026-11-02 - Windows caller-cleanup prerequisite qualified
 
-- A finite native Windows control exercised the existing shared
-  kill-on-close Job helper with an ordinary child and an explicitly escaped
-  daemon. After successful caller exit and Job closure, the ordinary child
-  was reaped; the daemon survived and created another finite child after
-  cleanup. All identity-pinned fixture children exited. No production Job
-  policy or contained-test suppression was changed.
-- One separately authorized normal controller update then exited zero.
-  Independent observation after both installer and supervisor cleanup
-  confirmed the same selected controller, attributable route and live owned
-  children, with protected sessions and configuration unchanged. This
-  resolves that caller-lifetime prerequisite, not external service health.
-- External coordinator readiness remains a distinct blocker. Neither a
-  ready controller nor a tunnel process is proof of a usable remote endpoint
-  or successful producer. Private operational evidence stays in the operator's
-  knowledge worktree, not this public effort.
-- The selected-host native installation fence remains unresolved. Current
-  read-only inspection found one interrupted, unreleased request and no active
-  queued requests. Its immutable request metadata is not a session claim.
-  Any explicit repair release must use the existing native owner/exclusion
-  contract and preserve the failed outcome; it cannot fabricate settlement
-  or replay the interrupted command.
-- Fresh preservation also found changed bytes in protected automatic-hold
-  records. Their active values alone do not authorize adopting a new baseline.
-  Selected-host effects remain paused for reconciliation with the existing
-  owner; neither old nor current records were overwritten.
-- The existing owner subsequently accepted the later active-hold records as
-  the operation's strict baseline without changing their bytes. Fresh
-  preservation passed, but the selected installed driver still inhibits an
-  ordinary manual update under that automatic hold. Its real read-only
-  admission predicate reproduced the block with no repair/context override,
-  queue admission or install. Neither explicit repair release nor the new
-  suite attempt was spent. Qualify the governed released-code bootstrap path
-  before resuming; do not toggle the hold or confuse source availability with
-  installed behavior.
-- A later explicit operator countermand cancels update-related policy holds
-  for fleet recovery through the existing serial owner. Retain the prior
-  bytes as audit history, not a veto or instructions to restore them. This
-  cancellation does not clear installation execution custody or authorize
-  replay, unrelated switch changes or parallel installation. The existing
-  owner must report actual target clearance before coordinating resumption.
-- The operator separately requested the manual-update defect be repaired,
-  not hidden by policy clearing. The released guard already distinguishes
-  manual from `--auto`; an exact-function, isolated active-hold regression
-  reproduced the stale installed failure and passed all eight corrected
-  cases. Preserve automatic inhibition, including `--auto --force`.
-  Installation of that correction and actual selected-runtime verification
-  remain required; source proof alone does not close the repair.
-- The later authorized normal update reached a new candidate but rolled back
-  because the predecessor lacked the guarded recovery contract. The selected
-  old driver still reproduced manual inhibition. The operator clarified that
-  incompatible, timed-out or failed predecessor recovery is best-effort
-  cleanup: attempt attributable termination and owned port-reservation release,
-  then keep the new generation authoritative. Only incoming startup failure
-  warrants rollback. This source repair is coordinated with the existing
-  incoming-start-first contribution; no second live attempt or installed patch
-  is inferred from that direction.
-- The parent remains Active. Exact old conversation restoration, both
-  same-process live cycles, full reconstruction, standby/resume/end,
-  launch-consumer parity and final publication/completion are not closed by
-  these prerequisite results.
+[Detailed journal](<journal/2026/11.02 caller-cleanup-prerequisite.md>).
+Caller-lifetime qualification, external readiness limits and existing execution custody remain distinct.
 
 ### 2026-10-28 - Blanket renderer admission removed
 
@@ -1063,42 +942,8 @@ Manager launch qualification remain open.
 
 ### 2026-10-28 - Cache correction released; installed acceptance in progress
 
-- Normal promotion `40769166050` passed. Release #9451 landed as
-  `6da0fa5ffeb0d754fe79ebbe6f4a402a80e2fa87`, admitting Dev `cb53be8e22be`.
-  The admitted source contains #9441, and its canonical builder and Main's
-  builder both match the reviewed SHA-256
-  `6561d901ef08db670ebb1d3df7ef140eb5dcad0f644b9ebd5aec2bc8081853ac`.
-  Stamped targets are Worktrees 1.24.335-dev1 and Manager 0.6.192-dev1.
-- The authorized selected-host ordinary project-scoped update is running
-  after independent preservation/custody preflight. Existing task disablement
-  remains unchanged; no deadline, integrity or consumer guard was bypassed.
-  Bootstrap's non-project source-mapping fallback is separate from the
-  corrected per-request builder identity.
-- The actual installed sixteen-wheel cold batch passed (16 built, zero
-  reused; 168.030 seconds), followed by own-interpreter verification and
-  publication. Installed source-wheel receipts and sampled filesystem
-  hardlinks corroborate that #9340's cache/hardlink flow was exercised.
-  This closes R9's confirmed defect and installed-batch gate, not a live
-  warm-cache-hit claim or all possible deadline contributors.
-- The containing unified update returned exit 1 in Vault reconciliation after the
-  engine stage passed. The native event retained only `installer exited 1`;
-  the existing disabled task plus unconditional service-start/readiness path
-  is a source-grounded explanation, not a recovered exception. Preserve
-  R2/R3, independent disablement and all existing protection obligations.
-  Postflight verified unchanged protected process identities, task intent and
-  maintenance custody. Fresh launch, same-process supported removal,
-  maintenance standby and final lifecycle acceptance remain open.
-- A fresh installed native-startup witness subsequently displayed its exact
-  initial prompt, answered the expected challenge and returned idle. The
-  execution ancestry has no removable-runtime Python waiter or runtime-root
-  startup argument. This is native launch/interactivity evidence, not removal
-  survival or complete consumer parity.
-- Read-only uninstall admission first found a live status-monitor retention
-  lease. Its authenticated existing shutdown boundary settled normally without
-  disturbing the witness. The repeated check then refused an older protected
-  rooted mux consumer. No lock, consumer guard or preservation directive was
-  bypassed. Legacy closure needs reconciliation with the latest operator
-  preservation direction before the live removal cycle can proceed.
+[Detailed journal](<journal/2026/10.28 cache-release-and-installed-acceptance.md>).
+Cache release and installed-batch evidence do not qualify the containing unified update or session-survival gates.
 
 ### 2026-10-28 - Source-wheel deadline diagnosis
 
@@ -2937,30 +2782,8 @@ Added direct per-source Plan, actual global Validation and continuing custody ro
 
 ### 2026-10-29 - Engine-repair driver handoff merged; live gate remains open
 
-- #9562 merged as `1f4336122082aaeb32c2a35236952a9c92b8bcba`, closing
-  #9561's missing scoped-custody export at Manager's engine-repair child
-  boundary. Exact-head Copilot approval, required green checks and ordinary
-  managed Maintainer completion preceded merge; the bounded source worktree
-  was finalized.
-- Both repair publication-mode controls failed on unchanged source. The fixed
-  canonical contained packet passed 36 tests, including a real child joining
-  and consuming the authenticated witness through the shipped Worktrees
-  installer participant. Its isolated probe shim does not prove a full
-  canonical native installation. Lint and the 13-plugin install contract pass.
-- Re-read the parent Plan and Validation Plan. No whole-roundtrip item closes
-  from this internal handoff fix. Same-process program-absence evidence is
-  distinct from supported-uninstaller conformance, complete reconstruction,
-  exact legacy conversation restoration, subsequent cycle, standby and final
-  lifecycle delivery.
-- Next stretch: verify normal containing promotion, then retry the already
-  authorized selected-host canonical update under the unchanged preservation
-  and maintenance conditions. Do not patch installed code, fabricate a driver
-  witness, remove admission guards or reinterpret a nonzero request as success.
-- Normal promotion #9563 subsequently admitted the reviewed Dev snapshot;
-  Main `7e42bbd77a1e100e2c577bb6d804a3b70b9d1d82` contains the exact repair
-  source blob and Manager 0.6.208-dev1. The authorized guarded live retry has
-  completed fresh Manager bootstrap and entered engine repair. It is not yet a
-  successful complete reconstruction or parent acceptance result.
+[Detailed journal](<journal/2026/10.29 engine-repair-handoff.md>).
+Bounded repair and release evidence; whole-suite reconstruction and parent acceptance remain open.
 
 ### 2026-10-29 - Custody handoff passed live; remaining installer broker cleanup
 
