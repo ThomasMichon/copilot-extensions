@@ -242,3 +242,20 @@ one explicit Windows-only skip in private Linux fixtures. Earlier controller
 and queue results remain distinct evidence; native Windows execution,
 independent current-head review/CI, source merge and parent acceptance are not
 implied by this correction.
+
+The next review found that public submission froze a home-relative Manager
+root before expanding `~`. Unlike the borrowed-execution fixture, a real caller
+could therefore select a literal `~/manager` child under its cwd and miss the
+disabled home policy. Submission context, source identity and self-install
+selection now expand the current-user home before freezing the absolute root.
+The regression starts at public update submission, checks actual automatic
+policy admission for absolute/relative/home roots and both policy values, and
+preserves manual exemption without invoking an installer.
+
+The renewed native packet refused before any dependency preparation, collection
+or test host invocation: exact selection deliberately removes ambient pytest
+options, which also removed the wrapper's only per-case JUnit output. No native
+pass or skip is credited. The source runner now offers explicit retained
+per-group JUnit output independent of selection, with a new destination required
+for every attempt. It preserves the same containment, admission and deadlines;
+the refused native packet is not replayed or treated as executed.

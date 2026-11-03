@@ -268,6 +268,35 @@ def test_direct_manager_recheck_keeps_its_invocation_directory(
 
 
 @pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
+def test_submission_context_freezes_the_same_selected_policy(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_form: str,
+) -> None:
+    from worktree_manager import update_driver_cli
+
+    root = policy.home / "manager"
+    root.mkdir()
+    path = root / "config.toml"
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    caller = policy.home / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    roots = {"absolute": str(root), "relative": "../manager", "home": "~/manager"}
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", roots[root_form])
+    context = update_driver_cli.request_context()
+    assert context["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
+    request = spec("--auto", **context)
+    request.cwd = str(caller)
+    assert "maintenance.automatic is false" in policy.owner.automatic_update_refusal(request)
+    request.argv = ()
+    assert policy.owner.automatic_update_refusal(request) is None
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    request.argv = ("--auto",)
+    assert policy.owner.automatic_update_refusal(request) is None
+    assert not list(caller.iterdir())
+    assert update_driver_cli.os.environ["WORKTREE_MANAGER_ROOT"] == roots[root_form]
+
+
+@pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
 def test_borrowed_manager_context_freezes_root_and_restores_worker(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_form: str,
     manager_policy_boundary: None,

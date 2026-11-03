@@ -6909,6 +6909,20 @@ Ordinary unselected runs are unchanged. The hardened
 validated manifest data into the disposable container, strips the selection
 from dependency-only preparation, then executes it with networking removed.
 
+For retained per-case results from the local contained runner, add
+`--junit-dir <new-report-root>` to `run-plugin-tests.py`, including exact-selection
+runs. Each plugin gets a fresh `<new-report-root>/<plugin>/` directory and one
+`group-001.xml` (then `group-002.xml`, etc.) per attempted group. Existing plugin
+report directories are refused before dependency preparation, so a retry must
+name a distinct destination and cannot overwrite earlier evidence. The explicit
+report option survives neutralized `PYTEST_ADDOPTS` and project `addopts` without
+changing selected nodes, isolation, item deadlines or group/resource limits.
+Reports survive owned sandbox cleanup and distinguish failures and declared
+skips; an absent requested report cannot accompany a successful group result.
+Partial reports do not establish group success or cleanup. Reporting is not
+available for dependency-only preparation or listing and does not add a
+devcontainer artifact-export mechanism.
+
 The `dispatch-selection` artifact records exact nodes, changed test files,
 baseline generation, debt, fallback reasons, predicted smoke cost and attributed
 line breadth. Console and step summaries contain bounded metadata rather than

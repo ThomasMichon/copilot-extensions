@@ -133,7 +133,7 @@ def source_identity() -> dict[str, object]:
     from .self_install import default_root, manager_ref, manager_repo
     from .source_config import absolute_local_source
 
-    root = default_root().resolve()
+    root = default_root().expanduser().resolve()
     repo = absolute_local_source(manager_repo(root))
     url = urlsplit(repo) if "://" in repo else None
     if url is not None and (
@@ -159,7 +159,7 @@ def request_context() -> dict[str, str]:
             context[ENGINE_ARGV_ENV] = json.dumps(accepted)
     from .source_config import default_root
 
-    context["WORKTREE_MANAGER_ROOT"] = str(default_root().resolve())
+    context["WORKTREE_MANAGER_ROOT"] = str(default_root().expanduser().resolve())
     return context
 
 
@@ -256,7 +256,7 @@ def self_install_request(operation: Callable[[], int]) -> int:
             return operation()
         argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
         workspace = running_application_slot() or running_payload_dir()
-        root = str(default_root().resolve())
+        root = str(default_root().expanduser().resolve())
         context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
         request = driver.enqueue(
             driver.RequestSpec(

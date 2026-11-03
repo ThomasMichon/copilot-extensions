@@ -271,6 +271,78 @@ def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
     assert "worker" in seen
 
 
+@pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_submission_keeps_selected_policy_for_automatic_and_manual_updates(
+    queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, root_form: str, enabled: bool,
+) -> None:
+    import update_driver
+    from update_driver.core import automatic_update_refusal
+
+    seen, _request = queued
+    caller = tmp_path / "caller"
+    home = tmp_path / "home"
+    caller.mkdir()
+    home.mkdir()
+    root = home / "manager" if root_form == "home" else caller / "manager"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        f"[maintenance]\nautomatic = {str(enabled).lower()}\n", encoding="utf-8",
+    )
+    selected = {"absolute": str(root), "relative": "manager", "home": "~/manager"}
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", selected[root_form])
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent-hold.json"))
+    enqueue = update_driver.enqueue
+
+    def admit(spec: update_driver.RequestSpec, *, runner: update_driver.TrustedRunner):
+        assert dict(spec.context)["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
+        assert spec.cwd == str(caller.resolve())
+        if reason := automatic_update_refusal(spec):
+            raise update_driver.StateError(reason)
+        return enqueue(spec, runner=runner)
+
+    monkeypatch.setattr(update_driver, "enqueue", admit)
+    assert driver.cmd_update_request(["--auto"]) == (6 if enabled else 1)
+    assert ("spec" in seen) is enabled
+    assert driver.cmd_update_request([]) == 6
+    assert seen["spec"].argv == ()
+    assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == selected[root_form]
+    assert not (caller / "~").exists()
+
+
+def test_source_identity_expands_home_before_freezing_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import self_install
+
+    home, caller = tmp_path / "home", tmp_path / "caller"
+    home.mkdir()
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "~/manager")
+    selected = home / "manager"
+    roots = []
+
+    def repo(root: Path) -> str:
+        roots.append(root)
+        return "https://example.invalid/tools.git"
+
+    monkeypatch.setattr(self_install, "manager_repo", repo)
+    monkeypatch.setattr(self_install, "manager_ref", lambda root: "fixed")
+    assert driver.source_identity()["root"] == str(selected.resolve())
+    assert roots == [selected.resolve()]
+    assert driver.request_context()["WORKTREE_MANAGER_ROOT"] == str(selected.resolve())
+    assert not list(home.iterdir())
+    assert not list(caller.iterdir())
+
+
 def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(queued, monkeypatch, tmp_path):
     import update_driver
     from worktree_manager import runtime_identity, self_install

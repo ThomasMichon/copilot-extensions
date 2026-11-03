@@ -92,6 +92,53 @@ def cleanup_runner(monkeypatch, tmp_path):
     return run
 
 
+@pytest.mark.parametrize("emit_report", [False, True])
+def test_junit_reports_are_distinct_per_group_and_required_on_success(
+    cleanup_runner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, emit_report: bool,
+) -> None:
+    reports = tmp_path / "reports"
+    observed = []
+
+    def run_contained(command, **kwargs):
+        report = Path(next(value.split("=", 1)[1] for value in command if value.startswith("--junitxml=")))
+        observed.append(report)
+        assert report.parent == reports / "alpha"
+        assert not report.exists()
+        assert kwargs["limits"].wall_seconds <= 60
+        assert command[command.index("-p") + 1] == runner.PORTFOLIO_PLUGIN
+        assert "--timeout=30" in command
+        if emit_report:
+            report.write_text("<testsuites/>", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+
+    def execute() -> int:
+        return runner.run_plugin(
+            "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+            plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+            junit_dir=reports,
+        )
+
+    if emit_report:
+        assert execute() == 0
+        assert [path.name for path in observed] == ["group-001.xml", "group-002.xml"]
+        assert all(path.is_file() for path in observed)
+    else:
+        with pytest.raises(runner.ContainmentError, match="no requested JUnit report"):
+            execute()
+
+
+@pytest.mark.parametrize("arguments", [
+    ["alpha", "--prepare-only"], ["--all", "--list"],
+])
+def test_junit_reporting_refuses_non_execution_modes(arguments, tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as error:
+        runner.main([*arguments, "--junit-dir", str(tmp_path / "reports")])
+    assert error.value.code == 2
+    assert not list(tmp_path.iterdir())
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows short TEMP alias")
 def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cleanup_runner):
     import ctypes
@@ -2107,7 +2154,7 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
 
 
 @pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
-def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, profile):
+def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, profile, tmp_path):
     class Lease:
         def release(self):
             pass
@@ -2117,7 +2164,7 @@ def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, pro
     observed = []
     monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: observed.append(kw) or 0)
     files = [str(runner._CODESPACES_NATIVE_FILE)]
-    arguments = ["agent-codespaces", "--test-file", files[0]]
+    arguments = ["agent-codespaces", "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
     if profile is not None:
         arguments += ["--test-profile", profile]
     assert runner.main(arguments) == 0
@@ -2129,6 +2176,7 @@ def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, pro
     assert options["test_files"] == tuple(files)
     assert options["kexpr"] is None and options["selection_file"] is None
     assert options["test_profile"] == (profile or "standard")
+    assert options["junit_dir"] == tmp_path / "reports"
     assert (
         options["limits"].max_processes, options["limits"].max_memory_mb,
         options["limits"].max_temp_mb,
