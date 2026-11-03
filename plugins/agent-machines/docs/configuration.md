@@ -109,10 +109,11 @@ still enforces its declared value; another conflicting equal-authority enforce
 package still causes native validation failure. These are independent named
 packages, never filename overlays.
 
-Legacy owner reads use this runtime's existing
-`scripts/versioned_runtime.py:resolve_python` through
-`configuration_context.ready_owner_prefix`, with isolated native Python and
-the peer's native environment. Missing/incomplete slots return no prefix;
+Legacy owner reads use this runtime's deployed
+`bin/resolve-runtime.sh` or `.ps1` through the shared
+[`configuration_context` transport](../../../libs/configuration-layers/README.md#ready-only-owner-transport),
+with isolated native Python and the peer's native environment.
+Missing/incomplete slots return no prefix;
 they never invoke a self-provisioning front door. Namespaced reads retain
 `_peer_launch` receipt and installation-cell checks.
 

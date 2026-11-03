@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
+from configuration_context.runtime import deployed_runtime_python
 from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch, _worktrees
@@ -23,15 +24,15 @@ def _legacy_report(root: Path) -> tuple[dict, Path] | None:
         return None
     if (peer / ".installation-ownership.json").exists():
         raise _peer_launch.ContextRefused("legacy configuration owner has installation-cell ownership")
-    path = own_root / "scripts" / "versioned_runtime.py"
-    if not path.is_file():
-        return None
-    resolver = _peer_launch._load_primitive(path, "_ssh_configuration_runtime")
-    prefix = ready_owner_prefix(peer, "agent_worktrees", resolver=resolver.resolve_python)
-    if not prefix:
-        return None
     environment = _peer_launch.legacy_peer_environment(dict(os.environ))
     environment.pop("AGENT_CONFIGURATION_CONTEXT", None)
+    path = own_root / "bin" / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")
+    prefix = ready_owner_prefix(
+        peer, "agent_worktrees",
+        resolver=lambda selected: deployed_runtime_python(selected, resolver=path, environment=environment),
+    )
+    if not prefix:
+        return None
     report = read_owner_context(
         [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
         environment=environment,

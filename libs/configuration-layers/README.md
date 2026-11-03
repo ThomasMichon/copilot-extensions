@@ -183,6 +183,35 @@ binding/identity adapter; this SDK does not discover one or guess a legacy ID.
 
 ## Vendoring and qualification
 
+### Ready-only owner transport
+
+`configuration_context.ready_owner_prefix` composes a native module invocation
+using a caller-qualified completion resolver. Legacy Machines and SSH supply
+`configuration_context.runtime.deployed_runtime_python`, passing their actual
+installed `bin/resolve-runtime.sh` or `.ps1`, the explicitly admitted peer root,
+and their sanitized peer environment. No undeployed Python helper, PATH binstub,
+runtime build or peer discovery is required.
+
+The transport requires the canonical resolver's declared read-only contract,
+invokes it with logging disabled and a 15-second deadline, and bounds its output.
+Only the resolver chooses completed slots; the transport additionally confines
+its selected interpreter to the supplied root's physical `versions` directory,
+without dereferencing a legitimate POSIX interpreter symlink.
+Absent resolver or no completed runtime remains optional absence; present
+unsupported, failed or malformed resolution is visible failure. The later
+isolated `state-root --configuration --json` read retains report validation and
+fresh repository/cell matching against delivered data. Delivery alone never
+establishes owner authority. Windows uses a noninteractive headless native
+PowerShell child; POSIX sources the exact resolver with native argv.
+
+The focused runtime tests exercise actual deployed POSIX resolver bytes and
+completed/unready slots without log creation. Machines and SSH additionally
+exercise fresh owner-report reads, mismatches, refusal and cell-ownership
+controls. Static/native-command assertions do not constitute Windows execution
+or desktop-visibility qualification.
+
+### Composition packaging
+
 Python uses static setuptools `src` packages with a dependency-free manifest,
 matching the installer's existing editable-source retention policy.
 Node is a standalone ES module using only native `fs`/`path`. Source consumers
