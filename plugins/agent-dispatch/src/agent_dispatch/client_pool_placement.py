@@ -16,7 +16,9 @@ def _positive_integer(value: object) -> bool:
     return type(value) is int and value > 0
 
 
-def _validate_contract(result: object, *, explicit_start: bool = False) -> dict:
+def _validate_contract(
+    result: object, *, explicit_start: bool = False, driver: str = "cli",
+) -> dict:
     if not isinstance(result, dict):
         raise DispatchUpgradeRequired("running coordinator returned an invalid pool placement contract")
     versions = result.get("supported_versions")
@@ -25,13 +27,17 @@ def _validate_contract(result: object, *, explicit_start: bool = False) -> dict:
         result.get("protocol") != POOL_PLACEMENT_PROTOCOL
         or not isinstance(versions, list)
         or not any(type(version) is int and version == POOL_PLACEMENT_VERSION for version in versions)
-        or not isinstance(drivers, list) or "cli" not in drivers
+        or not isinstance(drivers, list) or driver not in drivers
         or result.get("atomic_claim_before_spawn") is not True
         or result.get("affirmative_worker_start") is not True
     ):
         raise DispatchUpgradeRequired(
-            "running coordinator lacks explicit cli pool claim/start support"
+            f"running coordinator lacks explicit {driver} pool claim/start support"
         )
+    if driver == "ordinary-bridge":
+        initial = result.get("ordinary_initial_start_versions")
+        if not isinstance(initial, list) or not any(type(v) is int and v == 1 for v in initial):
+            raise DispatchUpgradeRequired("running coordinator lacks ordinary pool initial-start enforcement")
     if explicit_start:
         versions = result.get("explicit_start_versions")
         if not isinstance(versions, list) or not any(type(version) is int and version == 1 for version in versions):
@@ -119,10 +125,10 @@ class PoolPlacementClientMixin:
             not isinstance(task_id, str) or not task_id.strip()
             or not isinstance(reserved_by, str) or not reserved_by.strip()
             or type(catalog_revision) is not int or catalog_revision < 0
-            or driver != "cli"
+            or driver not in {"cli", "ordinary-bridge"}
         ):
-            raise DispatchError(400, "pool placement requires task, allocator, catalog revision and cli driver")
-        self.pool_placement_contract()
+            raise DispatchError(400, "pool placement requires task, allocator, catalog revision and qualified driver")
+        _validate_contract(self.pool_placement_contract(), driver=driver)
         try:
             result = self._unwrap(self._http.post(
                 "/pool-placements", headers=self._control_headers(),

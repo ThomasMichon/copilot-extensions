@@ -23,6 +23,20 @@ def startup_seed(task: dict, client, *, route: str = "", all_repos: bool = False
     except (DispatchError, TaskError) as exc:
         from .bridge import BridgeCarriedSessionBusy
         raise BridgeCarriedSessionBusy(f"ordinary startup seed reservation read failed: {exc}") from exc
+    from .ordinary_pool_startup import assignment
+    try:
+        placed = assignment(task, reservation)
+        if placed is not None:
+            from .client_pool_placement import _validate_contract
+            from .embody_prompts import pool_worker_prompt
+            _validate_contract(client.pool_placement_contract(), driver="ordinary-bridge")
+            return pool_worker_prompt(
+                task["id"], generation=placed["task_generation"], route=route,
+                repo=None if all_repos else task.get("repo"), all_repos=all_repos,
+            )
+    except (DispatchError, TaskError, ValueError, AttributeError) as exc:
+        from .bridge import BridgeCarriedSessionBusy
+        raise BridgeCarriedSessionBusy(f"ordinary pool startup seed is unqualified: {exc}") from exc
     origin = reservation.get("allocation_reservation_key") or reservation["key"]
     return autopilot_worker_prompt(
         task["id"], worker_id=f"dispatch-{origin}", route=route,
@@ -99,10 +113,16 @@ def prepare(
         first_turn = info.get("turn_count") if origin_kind == "resumed" else 0
     if type(first_turn) is not int or first_turn < 0:
         raise TaskError("ordinary invocation lacks the exact original turn position")
+    from .ordinary_pool_startup import assignment
+    placed = assignment(task, reservation)
+    authority_note = (
+        "Do not acquire another claim; the allocator's current claim and startup fences remain unchanged."
+        if placed is not None else "claim and lease rules remain unchanged."
+    )
     rendered = (
         f"{prompt}\n\nUse `--owner-session-id {actual.native}` "
         "on the task's owner-gated start command. This is the retained native "
-        "conversation identity; claim and lease rules remain unchanged."
+        f"conversation identity; {authority_note}"
     )
     result = {
         "version": 1, "invocation_key": key, "selection": selection,

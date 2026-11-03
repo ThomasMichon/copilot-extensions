@@ -27,7 +27,7 @@ def test_ordinary_assignment_retained_resume_reads_full_identity(assigned, monke
             calls.append("compact-status")
             return subprocess.CompletedProcess(argv, 0, '{"status":"stopped"}', "")
         if argv[:3] == ["bridge", "--json", "resume"]:
-            assert argv == ["bridge", "--json", "resume", "bridge-a", "--strict"]
+            assert argv == ["bridge", "--json", "resume", "bridge-a", "--require-agent-hosting", "--strict"]
             calls.append("resume")
             return subprocess.CompletedProcess(
                 argv, 0, '{"session_id":"bridge-a","status":"idle","verb":"resumed"}', "",

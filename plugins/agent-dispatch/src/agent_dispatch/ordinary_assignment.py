@@ -54,12 +54,18 @@ def current_task(client, task: dict) -> dict:
         current = client.get(task["id"])
     except DispatchError as exc:
         raise BridgeCarriedSessionBusy(f"assigned task cannot be read: {exc}") from exc
+    from .ordinary_pool_startup import assignment
+    try:
+        placed = assignment(task, client.get_reservation(task["spawn_reservation_key"]))
+    except (DispatchError, TaskError) as exc:
+        raise BridgeCarriedSessionBusy(f"assigned reservation cannot be read: {exc}") from exc
     if (
         not isinstance(current, dict) or current.get("id") != task["id"]
         or current.get("generation") != task["generation"]
-        or current.get("status") != "queued"
+        or current.get("status") != ("claimed" if placed is not None else "queued")
         or current.get("owner") is not None
         or current.get("hold_reason") is not None
+        or current.get("awaiting_steer")
     ):
         raise BridgeCarriedSessionBusy("ordinary assignment admission fence changed")
     return current

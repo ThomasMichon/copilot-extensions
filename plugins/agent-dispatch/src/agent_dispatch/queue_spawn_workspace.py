@@ -44,9 +44,11 @@ class SpawnWorkspaceMixin:
                 raise TaskError(
                     f"reservation {key} is {row['state']!r}, not {SpawnState.RESERVING!r}"
                 )
-            from .queue_pool_placement import require_pool_workspace
+            from .queue_pool_placement import pool_assignment, require_pool_workspace
             from .bridge_remote import normalize_host
             task = self._fetch(conn, row["task_id"])
+            if pool_assignment(conn, task.id) is not None and driver != row["driver"]:
+                raise TaskError("pool workspace cannot change its placed startup driver")
             if execution_machine is not None and (
                 not isinstance(execution_machine, str) or not execution_machine.strip()
             ):

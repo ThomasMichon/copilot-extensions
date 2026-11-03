@@ -34,7 +34,7 @@ def supervise_pool_startup(
     if completion is not None:
         return completion
     if (
-        reservation.get("driver") != "cli"
+        reservation.get("driver") not in {"cli", "ordinary-bridge"}
         or task.get("status") != Status.CLAIMED or task.get("owner") is not None
     ):
         return None
@@ -45,6 +45,10 @@ def supervise_pool_startup(
         budget, current, assigned = (
             snapshot["budget"], snapshot["reservation"], snapshot["task"],
         )
+        if current.get("driver") == "ordinary-bridge":
+            log.info("ordinary pool startup retained for %s: automatic retry transport is not qualified",
+                     current["key"])
+            return False
         if (
             current["key"] != reservation["key"]
             or current["startup_revision"] != reservation["startup_revision"]

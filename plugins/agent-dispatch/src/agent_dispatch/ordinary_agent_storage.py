@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from typing import Any
 
 from .ordinary_agent_facts import (
@@ -25,6 +26,8 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         pool_bound = conn.execute(
             "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key=?", (key,),
         ).fetchone() is not None
+        from .queue_pool_placement import pool_assignment
+        assigned = pool_assignment(conn, task.id) if pool_bound else None
         native, native_error = None, None
         try:
             native = reservation_native_identity(conn, row)
@@ -47,6 +50,7 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         "reservation_native_session_id": native,
         "reservation_native_identity_error": native_error,
         "reservation_pool_bound": pool_bound,
+        "reservation_pool_assignment": asdict(assigned) if assigned is not None else None,
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
         "inherited_retirement_reconcilable": reconcile_retirement,
@@ -55,12 +59,21 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
 
 
 def _admission_error(conn: Any, row: Any, task: Any) -> str | None:
+    from .queue_pool_placement import pool_assignment
+    assigned = pool_assignment(conn, task.id)
+    placed = assigned is not None
+    if assigned is not None and (
+        assigned.reservation_key != row["key"] or assigned.task_generation != task.generation
+        or row["driver"] != "ordinary-bridge" or row["startup_revision"] != 1 or row["startup_fenced"]
+    ):
+        return "ordinary pool assignment incarnation or driver changed"
     if (
         row["state"] != SpawnState.RESERVING or row["release_requested"]
         or row["conversation_retired"] and not inherited_retirement(conn, row, task)
         or row["conclusion_state"] == "pending"
         or row["exclusive_key"] and row["exclusive_released"]
-        or task.hold_reason is not None or task.status != Status.QUEUED or task.owner is not None
+        or task.hold_reason is not None or task.awaiting_steer
+        or task.status != (Status.CLAIMED if placed else Status.QUEUED) or task.owner is not None
         or task.source == "ci-repair" or row["exclusive_key"] != task.exclusive_key
     ):
         return "ordinary agent reservation admission fence changed"
@@ -87,6 +100,7 @@ def _admission_error(conn: Any, row: Any, task: Any) -> str | None:
 def _record_agent(
     queue: Any, key: str, *, task_generation: int, agent_info: dict,
     resumed: bool, worktree_record: dict | None, startup_invocation: dict | None = None,
+    execution_machine: str | None = None,
 ) -> SpawnReservation:
     actual = identity(agent_info)
     with queue._connect() as conn:
@@ -99,6 +113,24 @@ def _record_agent(
         require_no_cooling(row)
         if error := _admission_error(conn, row, task):
             raise TaskError(error)
+        from .queue_pool_placement import pool_assignment, require_pool_workspace
+        from .bridge_remote import normalize_host
+        if execution_machine is not None and (
+            not isinstance(execution_machine, str) or not execution_machine.strip()
+            or row["execution_machine"] is not None
+            and normalize_host(row["execution_machine"]) != normalize_host(execution_machine)
+        ):
+            raise TaskError("ordinary startup execution machine cannot change")
+        if pool_assignment(conn, task.id) is not None:
+            from .queue_pool_startup import require_pool_decision
+            require_pool_decision(conn, task, queue._now(None))
+            if startup_invocation is None:
+                raise TaskError("ordinary pool startup requires its immutable initial invocation")
+            if execution_machine is None:
+                raise TaskError("ordinary pool startup requires its retained execution machine")
+            require_pool_workspace(
+                conn, task, actual.worktree, execution_machine, driver=row["driver"],
+            )
         if row["agent_info"]:
             from .ordinary_invocation import historical_intent, same_facts
             persisted = json.loads(row["agent_info"])
@@ -182,11 +214,11 @@ def _record_agent(
         conn.execute(
             "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
             "worktree_ownership=?,driver='ordinary-bridge',allocation_project=?,"
-            "worktree_path=?,conversation_retired=0,updated_at=? WHERE key=?",
+            "worktree_path=?,execution_machine=?,conversation_retired=0,updated_at=? WHERE key=?",
             (
                 actual.worktree, handle, encoded,
                 row["worktree_ownership"] or "targeted",
-                actual.project, actual.path, queue._now(None), key,
+                actual.project, actual.path, row["execution_machine"] or execution_machine, queue._now(None), key,
             ),
         )
         result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
@@ -197,21 +229,25 @@ def _record_agent(
 def record_created_agent(
     queue: Any, key: str, *, task_generation: int, agent_info: dict,
     worktree_record: dict | None = None, startup_invocation: dict | None = None,
+    execution_machine: str | None = None,
 ) -> SpawnReservation:
     validate_created(agent_info)
     return _record_agent(
         queue, key, task_generation=task_generation, agent_info=agent_info,
         resumed=False, worktree_record=worktree_record, startup_invocation=startup_invocation,
+        execution_machine=execution_machine,
     )
 
 
 def record_resumed_agent(
     queue: Any, key: str, *, task_generation: int, session_info: dict,
     worktree_record: dict, startup_invocation: dict | None = None,
+    execution_machine: str | None = None,
 ) -> SpawnReservation:
     validate_resumed(session_info)
     return _record_agent(
         queue, key, task_generation=task_generation,
         agent_info={**session_info, "fact_kind": "resumed"},
         resumed=True, worktree_record=worktree_record, startup_invocation=startup_invocation,
+        execution_machine=execution_machine,
     )
