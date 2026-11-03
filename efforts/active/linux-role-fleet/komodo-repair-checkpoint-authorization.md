@@ -81,8 +81,9 @@ identity, old-proof or baseline-operation fallback.
   owners. Remove redundant same-checkpoint acquisition only through those owners,
   retaining before/after source, runtime, key and credential/material checks.
   Neither a self-supplied snapshot nor a cross-checkpoint cache grants authority.
-  The embedding source and local noneditable checkpoint composition are qualified;
-  actual adopter wall-time and original-attempt acceptance remain below.
+  The embedding owner reports source and local noneditable checkpoint
+  qualification; actual adopter wall-time and original-attempt acceptance
+  remain below.
 - [ ] Publish accurate installed support/operating docs, then obtain normal
   release/acquisition and separately authorized actual adopter qualification.
   Keep #9735 and every broader parent delivery gate open until actually resolved.
@@ -264,6 +265,12 @@ schema-4 standalone bundle passed hosted-workflow attestation and the existing
 artifact owner's complete-source/build-resource validation. The selected
 closure contains Fleet `0.1.72.dev1`, process `0.1.12.dev1` and ZDD
 `0.1.1.dev1`; an older identically versioned library artifact is not substituted.
+
+The embedding-side source integration and five-wheel results below are
+adopter-reported qualification, not an independently reproduced result of this
+repository's CI. The public 16-case installed-SDK compatibility witnesses above
+are separate. This progress record does not close actual-adopter Validation
+Plan items.
 
 The existing embedding's source integration has passed its normal review and
 merge. Its strict opt-in discovers support from the executing SDK before
