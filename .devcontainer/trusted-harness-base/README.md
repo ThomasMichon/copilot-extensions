@@ -229,6 +229,19 @@ adding unrestricted pip/uv commands. Do not copy runtime source over active slot
 
 ## Validation and remaining integration
 
+The complete three-file Python project (builder, installer and contract tests)
+is admitted to strict checking on the declared Linux and Win32 analysis targets:
+
+```text
+python tools/typecheck.py devcontainer --prepare
+python tools/typecheck.py devcontainer
+```
+
+JSON approval, dependency and engine records retain their dynamic boundaries.
+Native capabilities are resolved without changing their platform admission or
+effects. Static Win32 analysis does not qualify a Windows image build; the
+recipe remains Linux amd64 and the host wrapper still requires Python 3.11+.
+
 Offline, without Docker or package installation:
 
 ```text
