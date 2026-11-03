@@ -6,6 +6,7 @@ import threading
 import time
 from copy import deepcopy
 from dataclasses import asdict
+from datetime import datetime
 from types import SimpleNamespace
 
 import core_native_feed_resolution as guard
@@ -65,13 +66,20 @@ def _response():
     return {
         "status": "ok",
         "offered": {URL: {"filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + DIGEST}},
+        "admitted": {URL: {
+            "upload-time": "2020-01-01T00:00:00Z", "requires-python": ">=3.9",
+            "yanked": False, "withdrawn": False,
+        }},
         "served": [URL],
         "projects": {"fixture": "b" * 64},
         "usage": {"requests": 3, "redirects": 0, "metadata_bytes": 100, "wheel_bytes": 100},
     }
 
 
-@pytest.mark.parametrize("change", ["foreign", "unserved", "budget", "digest", "project", "missing-digest"])
+@pytest.mark.parametrize(
+    "change",
+    ["foreign", "unserved", "budget", "digest", "project", "missing-digest", "upload-time", "yanked", "withdrawn"],
+)
 def test_guarded_response_rejects_untrusted_evidence(change):
     response = _response()
     guard._validate_response(response, _limits(), time.monotonic() + 30)
@@ -86,8 +94,12 @@ def test_guarded_response_rejects_untrusted_evidence(change):
         response["offered"][URL]["sha256"] = "sha256:invalid"
     elif change == "project":
         response["projects"] = {}
-    else:
+    elif change == "missing-digest":
         response["offered"][URL]["sha256"] = None
+    elif change == "upload-time":
+        response["admitted"][URL]["upload-time"] = "not-a-timestamp"
+    else:
+        response["admitted"][URL][change] = True
     with pytest.raises(ValueError):
         guard._validate_response(response, _limits(), time.monotonic() + 30)
 
@@ -104,7 +116,7 @@ wheels = [{{ url = "{URL}", hashes = {{ sha256 = "{DIGEST}" }} }}]
 '''.encode()
     selected = [{"name": "fixture", "filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + DIGEST}]
     witness = _response()
-    guard.verify_lock_witness(content, selected, witness, time.monotonic() + 30)
+    assert guard.verify_lock_witness(content, selected, witness, time.monotonic() + 30) == {"fixture": URL}
     changed = deepcopy(witness)
     if change == "unserved":
         changed["served"] = []
@@ -114,6 +126,21 @@ wheels = [{{ url = "{URL}", hashes = {{ sha256 = "{DIGEST}" }} }}]
         changed["offered"][URL]["sha256"] = "sha256:" + "b" * 64
     with pytest.raises(ValueError):
         guard.verify_lock_witness(content, selected, changed, time.monotonic() + 30)
+
+
+@pytest.mark.parametrize(
+    "cutoff,allowed",
+    [("2020-01-01T00:00:00+00:00", True), ("2019-12-31T00:00:00+00:00", False)],
+    ids=["boundary", "too-new"],
+)
+def test_guarded_reapplies_file_admission_at_the_selected_cutoff(cutoff, allowed):
+    selected = [{"name": "fixture", "filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + DIGEST}]
+    args = (selected, {"fixture": URL}, _response(), {"fixture": datetime.fromisoformat(cutoff)})
+    if allowed:
+        guard.verify_guarded_cutoffs(*args, deadline=time.monotonic() + 30)
+    else:
+        with pytest.raises(ValueError, match="seasoning"):
+            guard.verify_guarded_cutoffs(*args, deadline=time.monotonic() + 30)
 
 
 def test_guarded_configuration_removes_native_index_credentials(tmp_path):
@@ -158,9 +185,10 @@ def test_guarded_index_omits_withdrawn_candidates_without_actors():
     index.project_locks, index.projects, index.files, index.offered = {}, {}, {}, {}
     index.filenames, index.candidate_count = set(), 0
     index.secret, index.base = "capability", "http://127.0.0.1:12345/capability"
+    hint = ">=3.9" + ",>=3.9" * 100
     entries = [
         {"filename": f"fixture-{version}-py3-none-any.whl", "url": f"/{version}.whl",
-         "hashes": {"sha256": DIGEST}, "withdrawn": withdrawn}
+         "hashes": {"sha256": DIGEST}, "requires-python": hint, "withdrawn": withdrawn}
         for version, withdrawn in (("1.0", False), ("2.0", True))
     ]
     index._project = lambda _name: (entries, "https://example.invalid/simple/", "https://example.invalid", "b" * 64)
@@ -168,6 +196,8 @@ def test_guarded_index_omits_withdrawn_candidates_without_actors():
     page = json.loads(index.page("fixture"))
 
     assert [item["filename"] for item in page["files"]] == ["fixture-1.0-py3-none-any.whl"]
+    assert page["files"][0]["requires-python"] == hint
+    assert hint not in json.dumps(index.offered)
     assert {item["filename"] for item in index.offered.values()} == {"fixture-1.0-py3-none-any.whl"}
 
 
