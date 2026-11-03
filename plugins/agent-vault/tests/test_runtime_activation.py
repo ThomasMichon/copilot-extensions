@@ -18,6 +18,34 @@ from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX installer argument validation")
+@pytest.mark.parametrize("configuration", [False, True, "malformed"])
+@pytest.mark.parametrize(
+    "arguments,code,message",
+    [(["--not-a-valid-option"], 2, "Unknown option"),
+     (["--install-dir"], 1, "--install-dir requires a directory")],
+)
+def test_native_installer_rejects_arguments_before_activation(
+    tmp_path, configuration, arguments, code, message,
+):
+    home, payload, _runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    (tmp_path / ".agent-vault.json").write_text(
+        "{" if configuration == "malformed" else json.dumps({"enabled": configuration}),
+        encoding="utf-8",
+    )
+    script = payload / "scripts" / "install.sh"
+    shutil.copyfile(PLUGIN / "scripts" / "install.sh", script)
+    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
+    result = subprocess.run(
+        ["bash", str(script), "update", *arguments], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == code, result.stdout + result.stderr
+    assert message in result.stderr
+    assert not (home / ".agent-vault").exists()
+    assert not (home / ".copilot-extensions").exists()
+
+
 @pytest.mark.parametrize("configuration", [None, False, "invalid", "malformed"])
 @pytest.mark.parametrize("entry", ["bootstrap", "readiness", "update"])
 def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path, configuration, entry):

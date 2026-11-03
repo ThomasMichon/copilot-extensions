@@ -166,3 +166,9 @@ remain authoritative for their machine-local custody.
   than inheriting another worker's environment. Both real queued controls pass
   with present and absent projections. Fresh native qualification, required CI
   and review remain required on the published revision.
+- The reconciled revision passed required CI and native Linux/Windows
+  qualification. Review then identified an inactive POSIX installer return
+  before argument validation. The parser now runs before activation and staging,
+  retaining original arguments for staged re-execution. Six native controls
+  cover unknown options and missing values independently of disabled, enabled
+  or malformed configuration; final revision qualification remains open.
