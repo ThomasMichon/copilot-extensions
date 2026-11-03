@@ -70,6 +70,14 @@ records remaining gaps. Every installer/update effort and bug-fix review must
 cite this contract and state which completion/preservation controls it exercises;
 passing legacy refusal tests alone does not establish conformance.
 
+The [installation footprint reference](installation-footprint.md#installer-equivalent-repair)
+maps artifacts and failed/refused installer subtasks to their existing owners.
+Within authorized repair, canonical configuration/launcher/registration and
+stale-state repair is not runtime-code monkey-patching; current installer
+unavailability does not categorically prohibit installer-equivalent restoration.
+Authentic selected inputs, preservation, publication/ownership boundaries and
+actual consumer verification remain required.
+
 The independently maintained wheel-first transition has a
 [per-application support and cutover guide](patterns/fast-application-install-and-cutover.md)
 and a [canonical ideal-flow/app-tracking map](../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md).

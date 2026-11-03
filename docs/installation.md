@@ -132,7 +132,13 @@ For an agent-worktrees-adopted deployment, `agent-worktrees update` is the
 management path for refreshing registered payloads and reconciling runtimes.
 Follow [the unified update contract](../CONTRIBUTING.md#deploying-one-command--repo-update)
 and the selected plugin's owner. For a standalone deployment, use that owner's
-documented maintenance path. Do not edit installed payloads or deployed runtimes.
+documented maintenance path. Do not patch installed payload or runtime code.
+For failed/refused installer subtasks, the
+[footprint and repair reference](installation-footprint.md#installer-equivalent-repair)
+distinguishes authorized canonical artifact/configuration repair from
+monkey-patching, maps failure to the owning subtask, and defines consumer
+verification. It preserves the selected authentic release and operator state;
+it does not authorize factory reset or optional-service activation.
 Source changes land through [contribution](../CONTRIBUTING.md), and a merge to
 `dev` is not a release or local rollout.
 

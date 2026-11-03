@@ -1,0 +1,9 @@
+{
+  "comment": "Document canonical installation footprints and installer-equivalent repair boundaries",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
