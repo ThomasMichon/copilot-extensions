@@ -168,6 +168,19 @@ class GuardedPredecessor:
             return "predecessor-identity-changed"
         return None
 
+    def refuse_restoration(self, _active: dict | None = None) -> str | None:
+        from zdd import process_exit
+
+        try:
+            with process_exit.open_process(
+                self.receiver.pid, self.receiver.process_start_time,
+            ) as reference:
+                if reference.wait(0):
+                    return "predecessor-exited"
+        except (OSError, ValueError, RuntimeError, NotImplementedError):
+            return "predecessor-native-restoration-unavailable"
+        return None
+
     def require_target(self, base_url: str) -> None:
         if base_url != self.route.base_url or self.refuse_old() is not None:
             raise RecoveryUnavailable("predecessor-identity-changed")
@@ -289,6 +302,7 @@ def retire_failed_predecessor(
                 outcome = diagnostics.terminate_pid_if_identity(
                     route.pid, route.process_start_time, exit_timeout=10.0,
                 )
+                outcome.setdefault("exit_confirmed", False)
             except (OSError, ValueError) as exc:
                 outcome = {"exit_confirmed": False, "reason": type(exc).__name__}
     if successor is not None:

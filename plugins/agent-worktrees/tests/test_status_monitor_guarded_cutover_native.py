@@ -259,6 +259,58 @@ def test_native_passive_health_cannot_retire_old_without_serving_promotion(
 
 
 @pytest.mark.parametrize("provider", ["legacy-ready"], indirect=True)
+def test_native_predecessor_exit_at_rollback_fence_cannot_restore_stale_birth(
+    provider, tmp_path, monkeypatch,
+):
+    root, data, old, _ = provider
+    installer_fixture(monkeypatch, provider)
+    publish = routing.publish_active_with_previous_guarded
+    fenced = []
+
+    def publication(*args, **kwargs):
+        if kwargs.get("pid") == old.pid:
+            guard = kwargs["refuse_current"]
+            def refuse(active):
+                (root / "stop").touch()
+                data["process"].wait(timeout=5)
+                fenced.append(data["process"].poll())
+                return guard(active)
+            kwargs["refuse_current"] = refuse
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "publish_active_with_previous_guarded", publication)
+    with native.start_provider(tmp_path / "candidate", "candidate-refuse") as candidate:
+        new_data, new_route = candidate_spawn(monkeypatch, root, candidate)
+        result = control.activate_after_update(health_timeout=2, drain_timeout=2)["result"]
+        assert not result["ok"] and not result["rolled_back"] and fenced
+        assert new_data["process"].poll() is not None and data["process"].poll() is not None
+        assert recovery.active_endpoint(root).pid == new_route.pid
+        assert breadcrumb.read_breadcrumb(root) is not None
+        assert any("native-restoration-unavailable" in step for step in result["steps"])
+
+
+@pytest.mark.parametrize("provider", ["closed-listener"], indirect=True)
+def test_native_closed_listener_old_port_is_excluded_before_successor_spawn(
+    provider, tmp_path, monkeypatch,
+):
+    root, data, old, _ = provider
+    installer_fixture(monkeypatch, provider)
+    native.wait_for(lambda: (root / "listener-closed").exists())
+    assert data["process"].poll() is None and not routing._listening(old.client_host, old.port)
+    with native.start_provider(tmp_path / "candidate", "candidate") as candidate:
+        new_data, new_route = candidate_spawn(monkeypatch, root, candidate)
+        ports = iter([old.port, new_route.port])
+        monkeypatch.setattr(control, "pick_free_port", lambda: next(ports))
+        result = control.activate_after_update(health_timeout=2, drain_timeout=2)["result"]
+        assert result["ok"] and result["new_port"] == new_route.port != old.port
+        assert result["predecessor_cleanup"]["exit_confirmed"] is True
+        assert result["predecessor_cleanup"]["route_released"] is True
+        assert new_data["process"].poll() is None and data["process"].poll() is not None
+        assert recovery.active_endpoint(root).pid == new_route.pid
+        assert "previous" not in routing.read_table(root)
+
+
+@pytest.mark.parametrize("provider", ["legacy-ready"], indirect=True)
 @pytest.mark.parametrize("mode", ["candidate-refuse", "candidate-unready"])
 def test_native_unnegotiated_predecessor_is_not_drained_when_incoming_fails(
     provider, tmp_path, monkeypatch, mode,

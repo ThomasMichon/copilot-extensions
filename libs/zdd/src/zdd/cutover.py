@@ -113,6 +113,7 @@ class CutoverOrchestrator:
         serving_health_check: Callable[[str, int], bool] | None = None,
         retire_failed_predecessor: Callable[[Endpoint], dict[str, Any]] | None = None,
         drain_predecessor: bool = True,
+        refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
@@ -131,6 +132,7 @@ class CutoverOrchestrator:
         self.make_client = make_client
         self.pick_free_port = pick_free_port
         self.refuse_old = refuse_old
+        self.refuse_restoration = refuse_restoration if refuse_restoration is not None else refuse_old
         self.sleep = sleep
         self.clock = clock
         self.routing = routing_mod
@@ -450,11 +452,10 @@ class CutoverOrchestrator:
                 result.steps.append(f"refused: {result.error}")
                 return result
 
-        new_port = self.pick_free_port()
-        result.new_port = new_port
-        if conditional and new_port == conditional.old.port:
-            result.error = "candidate port must differ from predecessor"
-            result.steps.append(f"refused: {result.error}")
+        from .cutover_selection import candidate_port
+
+        new_port = candidate_port(self, old, conditional, result)
+        if new_port is None:
             return result
         # Record custody before drain; preserve started_at across later updates.
         old_dict = (

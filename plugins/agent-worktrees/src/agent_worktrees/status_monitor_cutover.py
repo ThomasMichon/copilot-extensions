@@ -806,6 +806,7 @@ def activate_after_update(
             predecessor_health_check = lambda host, port: predecessor.predecessor_healthy(host, port, make_client)
             options = {
                 "expected_old": predecessor.route, "refuse_old": lambda current: None,
+                "refuse_restoration": predecessor.refuse_restoration,
                 "drain_before_publish": True, "on_published": activate_successor,
                 "drain_predecessor": bool(predecessor.receiver.runtime_generation),
                 "retire_failed_predecessor": lambda endpoint: guarded_recovery.retire_failed_predecessor(

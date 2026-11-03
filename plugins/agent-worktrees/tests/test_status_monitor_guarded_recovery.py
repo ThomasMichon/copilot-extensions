@@ -237,6 +237,7 @@ def test_actual_installer_constructor_binds_guarded_drain_first_contract(owner, 
     def run(orch, **kwargs):
         assert orch.expected_old == owner.retained.route and orch.drain_before_publish
         assert orch.refuse_old(owner.route.to_dict()) is None
+        assert orch.refuse_restoration == owner.retained.refuse_restoration
         client = orch.make_client(owner.route.base_url)
         assert client.token == "retained-fixture-token" and client.guarded_predecessor is owner.retained
         return CutoverResult(ok=True, committed=True)
@@ -590,3 +591,114 @@ def test_failed_recovery_cannot_kill_or_release_changed_route(tmp_path, monkeypa
     monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", lambda *a, **k: pytest.fail("foreign native kill"))
     assert recovery.retire_failed_predecessor(tmp_path, retained, new)["reason"] == "predecessor-route-changed"
     assert routing.read_table(tmp_path) == table
+
+
+@pytest.mark.parametrize("identity", ["live", "reused", "unknown", "exited-retained-birth"])
+def test_restoration_revalidates_native_owner_inside_publication_fence(
+    forward_cutover, monkeypatch, identity,
+):
+    from zdd import process_exit
+
+    orch, events, state, handle = forward_cutover
+    old = orch.expected_old
+    retained = recovery.GuardedPredecessor(
+        old, recovery.ReceiverIdentity(old.pid, old.process_start_time, ""), "fixture",
+    )
+    orch.refuse_restoration = retained.refuse_restoration
+    publishing = [False]
+    publish = routing.publish_active_with_previous_guarded
+    checks = []
+
+    @contextmanager
+    def reference(pid, start):
+        checks.append(publishing[0])
+        assert (pid, start) == (old.pid, old.process_start_time)
+        if identity in {"reused", "unknown"}:
+            raise ProcessLookupError("fixture native identity unavailable")
+        yield SimpleNamespace(wait=lambda timeout: identity == "exited-retained-birth")
+
+    def publish_guarded(*args, **kwargs):
+        if kwargs.get("pid") == old.pid:
+            guard = kwargs["refuse_current"]
+            def fenced(active):
+                publishing[0] = True
+                try:
+                    return guard(active)
+                finally:
+                    publishing[0] = False
+            kwargs["refuse_current"] = fenced
+        return publish(*args, **kwargs)
+
+    def failed_promotion(endpoint):
+        raise RuntimeError("fixture successor failed to serve")
+
+    monkeypatch.setattr(process_exit, "open_process", reference)
+    monkeypatch.setattr(routing, "publish_active_with_previous_guarded", publish_guarded)
+    orch.on_published = failed_promotion
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert not result.ok and handle.terminated
+    assert checks and checks[0] is True
+    assert result.rolled_back is (identity == "live")
+    active = routing.read_table(orch.config_dir)["active"]
+    assert active["pid"] == (old.pid if identity == "live" else handle.pid)
+    assert ("undrain-old" in events) is (identity == "live")
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+def test_best_effort_cutover_boundedly_excludes_predecessor_port(forward_cutover, exhausted):
+    from zdd import breadcrumb
+
+    orch, events, state, handle = forward_cutover
+    ports = [orch.expected_old.port] * 8 if exhausted else [orch.expected_old.port, 61002]
+    calls = []
+    before = routing.routing_table_path(orch.config_dir).read_bytes()
+
+    def pick():
+        calls.append(ports.pop(0))
+        return calls[-1]
+
+    orch.pick_free_port = pick
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert len(calls) == (8 if exhausted else 2)
+    if exhausted:
+        assert not result.ok and events == [] and not handle.terminated
+        assert routing.routing_table_path(orch.config_dir).read_bytes() == before
+        assert breadcrumb.read_breadcrumb(orch.config_dir) is None
+    else:
+        assert result.ok and result.new_port == 61002
+        assert routing.read_table(orch.config_dir)["active"]["pid"] == handle.pid
+
+
+def test_darwin_unavailable_native_termination_keeps_successor_and_reports_custody(
+    forward_cutover, monkeypatch,
+):
+    import signal
+    from zdd import diagnostics
+
+    orch, events, state, handle = forward_cutover
+    old = orch.expected_old
+    retained = recovery.GuardedPredecessor(
+        old, recovery.ReceiverIdentity(old.pid, old.process_start_time, ""), "fixture",
+    )
+    monkeypatch.setattr(diagnostics.platform, "system", lambda: "Darwin")
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
+    monkeypatch.setattr(os, "kill", lambda *a: pytest.fail("unsafe PID-only signal"))
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(recovery.locks, "process_start_time", lambda pid: old.process_start_time)
+    monkeypatch.setattr(
+        diagnostics, "terminate_pid_if_identity",
+        lambda pid, start, **kwargs: diagnostics._terminate_posix_if_identity(pid, start, **kwargs),
+    )
+    orch.retire_failed_predecessor = lambda endpoint: recovery.retire_failed_predecessor(
+        orch.config_dir, retained, recovery.active_endpoint(orch.config_dir),
+    )
+    state.shutdown = "refused"
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed and not result.rolled_back and not handle.terminated
+    assert result.predecessor_cleanup == {
+        "killed": False, "identity_verified": False, "method": "pidfd-unavailable",
+        "exit_confirmed": False, "route_released": True,
+    }
+    assert routing.read_table(orch.config_dir)["active"]["pid"] == handle.pid
+    assert "previous" not in routing.read_table(orch.config_dir)

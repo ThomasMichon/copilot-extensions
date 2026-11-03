@@ -75,6 +75,10 @@ serves. If incoming promotion fails, its native PID/birth and authenticated
 already-serving health permit route restoration without inventing a guarded
 undrain receipt. A negotiated peer retains graceful prepublication drain and
 typed rollback; failed drain only schedules native cleanup after the serving gate.
+Restoration independently captures a native PID/birth-bound exit reference inside
+the routing publication fence; even a readable birth token on an exited process
+cannot qualify. The candidate excludes the outgoing port even when its old
+listener is closed, with at most eight port selections before a safe refusal.
 The new control action binds expected PID/native start/runtime generation and
 exact restored route/port. Under the monitor state lock then existing routing
 lock, the receiver verifies both identities before using its existing undrain
@@ -94,6 +98,15 @@ lifetime is documented in [TESTING.md](../../../TESTING.md).
 Unconfirmed predecessor cleanup is retained in the existing lifecycle history
 with the exact old endpoint and a failed retirement outcome, independently of
 the successful incoming cutover result.
+Windows forced retirement uses a verified process handle; Linux uses the
+canonical pidfd adapter. macOS has birth-verified, non-signaling kqueue exit
+references for guarded rollback, but no canonical identity-bound signal handle
+in this suite. Forced retirement there explicitly returns `pidfd-unavailable`,
+`killed: false` and `exit_confirmed: false`: the matching old fallback route may
+be released while the new monitor serves, but an old OS listener is not proven
+free and its process/runtime custody remains with the existing retirement owner.
+This is a deliberate macOS termination exemption, not general POSIX kill support;
+no PID-only signal fallback is used. Native macOS venue validation is unavailable.
 
 ## Bounded qualification
 

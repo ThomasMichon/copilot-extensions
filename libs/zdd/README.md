@@ -339,6 +339,14 @@ shutdown, rollback can restore the predecessor only while `active` is absent
 and `previous` still exactly identifies that successor. Recheck that condition
 inside the publication fence; an unrelated active or previous owner is not
 authority to restore over it.
+An optional `refuse_restoration` callback independently validates the outgoing
+native owner inside the restoration publication fence and before undrain. It
+defaults to `refuse_old` for existing callers; an adopter that tolerates an old
+process's departure during forward publication must supply the stricter check.
+Best-effort-retirement callers select a port distinct from the observed
+predecessor even if its listener has closed, refusing after eight unsuccessful
+selections without spawning or changing custody. Conditional repair retains its
+single same-port refusal.
 
 #### Conditional owner operation (partial lifecycle support)
 
