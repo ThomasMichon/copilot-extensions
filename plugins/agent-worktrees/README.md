@@ -961,6 +961,13 @@ and later saves. Malformed claim collections/items retain conservative opaque
 placeholders rather than becoming an empty ledger. Neither can qualify for
 restart inspection.
 
+The additive [own-worker Dispatch closeout provider](docs/dispatch-worker-closeout.md)
+can finalize the actual native caller's own allocator-created worktree through
+normal finalization gates. It retains the checkout and live runner, refuses
+paired/shared/follow-up custody, and does not release or requeue a Dispatch
+task. Ordinary worker migration and coordinator-authoritative closeout remain
+separate integration work.
+
 `session-role --restart-survivor <request-json> --json` is a separate, explicit
 read-only observation of the original conversation's current hosting. It uses
 the full frozen restart request, not an ambient session ID. A positive snapshot

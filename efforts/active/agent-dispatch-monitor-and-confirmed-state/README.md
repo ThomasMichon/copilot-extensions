@@ -14,8 +14,12 @@
 
 The [worker-decline preparation slice](journal/2026/11.03-worker-decline-preparation.md)
 retains a native-fenced decision and failed-closeout blocker without releasing
-the allocator's assignment. Own-workspace finalization, atomic routing/requeue
-and ordinary/native decline qualification remain the immediate integration work.
+the allocator's assignment; its source merged in
+[#10298](https://github.com/ThomasMichon/copilot-extensions/pull/10298).
+The [own-worker Worktrees provider slice](journal/2026/11.03-own-worker-closeout.md)
+adds exact local-native admission around normal finalization without task release.
+Its review/merge, coordinator-authoritative closeout observation, atomic
+routing/requeue and ordinary/native decline qualification remain integration work.
 
 **Current consumer-adoption prerequisite (2026-11-03):** the
 [independent resident lifetime slice](journal/2026/11.03-independent-resident-lifetime.md)
@@ -401,6 +405,11 @@ live claim token. No new blanket ACK or executor appointment is created.
       [#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773).
 - [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
+- [x] Land [worker-decline preparation](journal/2026/11.03-worker-decline-preparation.md)
+      in [#10298](https://github.com/ThomasMichon/copilot-extensions/pull/10298),
+      preserving native-fenced pending closeout and capacity. This provider
+      expansion does not finish own-workspace finalization, routing/requeue,
+      ordinary caller migration or native decline qualification.
 - [ ] Implement and qualify the prioritized suspended-recovery and
       finalize-before-submission contracts through existing wake, worker,
       submission/evaluation and Worktrees owners; preserve every unrelated
