@@ -680,6 +680,20 @@ def _serve_at_socket(args: argparse.Namespace, socket_path: str) -> int:
     return 0
 
 
+def _cmd_source_setup(_args: argparse.Namespace) -> int:
+    from .cutover import source_setup
+
+    print(json.dumps(source_setup()))
+    return 0
+
+
+def _cmd_source_start(_args: argparse.Namespace) -> int:
+    from .cutover import source_start
+
+    print(json.dumps(source_start()))
+    return 0
+
+
 def _cmd_cutover(args: argparse.Namespace) -> int:
     """``cutover`` -- zero-downtime replace the resident ``serve`` daemon.
 
@@ -687,6 +701,13 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     docstring for the full design; this is a thin CLI dispatch.
     """
     from . import cutover as _cutover
+    if args.source_intent:
+        print(json.dumps({"wanted": _cutover.source_serving_intent()}))
+        return 0
+    if args.source_startup:
+        result = _cutover.run_source_startup(health_timeout=args.health_timeout)
+        print(json.dumps(result))
+        return 0 if result.get("ok") else 1
     result = _cutover.run_cutover(
         health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
         force=args.force, require_live_daemon=args.require_live,
@@ -880,7 +901,15 @@ def build_parser() -> argparse.ArgumentParser:
                                 "call unconditionally on every activation")
     p_cutover.add_argument("--json", action="store_true",
                            help="print the result as JSON")
+    source_mode = p_cutover.add_mutually_exclusive_group()
+    source_mode.add_argument("--source-intent", action="store_true",
+                             help="observe optional serving before Source activation")
+    source_mode.add_argument("--source-startup", action="store_true",
+                             help="start the selected Source server without controlling its predecessor")
     p_cutover.set_defaults(func=_cmd_cutover)
+
+    sub.add_parser("__source-setup", help=argparse.SUPPRESS).set_defaults(func=_cmd_source_setup)
+    sub.add_parser("__source-start", help=argparse.SUPPRESS).set_defaults(func=_cmd_source_start)
 
     p_mat = sub.add_parser(
         "materialize", help="project an upstream MCP catalog into a CLI stub fleet")

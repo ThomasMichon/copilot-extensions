@@ -12,6 +12,7 @@ import re
 import bridge_http47_evidence as previous
 import bridge_http47_validation as historical
 import bridge_http48_installation as installation
+import bridge_capture_metadata as capture_metadata
 
 CONTRACT = previous.CONTRACT
 REGISTRY = previous.REGISTRY
@@ -310,6 +311,10 @@ def validate(
             raise ValueError(f"{spec.label} publication requires the actual source tree")
         elif not (set(spec.affected) | set(spec.extra_paths)) <= proof.keys():
             raise ValueError(f"{spec.label} historical closure lacks required owners")
+        elif historical_scope:
+            retained = capture_metadata.load(root, captured["commit"])
+            if retained is not None:
+                captured_contract = contract(retained.materialized)
         previous.git_evidence.prefetch_objects(
             identity["blob"] for identity in proof.values()
             if isinstance(identity, dict) and isinstance(identity.get("blob"), str)

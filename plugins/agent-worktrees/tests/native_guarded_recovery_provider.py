@@ -12,6 +12,7 @@ print("fixture: importing monitor control", flush=True)
 from agent_worktrees import locks
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import status_monitor_recovery_contract as recovery
+from agent_worktrees.runtime_monitor_grace import CAPABILITY as GRACE_CAPABILITY
 print("fixture: monitor control imported", flush=True)
 
 
@@ -32,6 +33,11 @@ def serve(root: Path, mode: str):
     published = not candidate
     shutdown_requested = threading.Event()
     token = "isolated-recovery-fixture"
+    capabilities = [] if mode in {"old-provider", "legacy-ready", "candidate-legacy"} else [recovery.CAPABILITY]
+    if candidate and mode != "candidate-legacy":
+        capabilities.append("status-monitor-async-retirement-v1")
+        if mode != "candidate-pre-grace":
+            capabilities.append(GRACE_CAPABILITY)
 
     def reopen():
         nonlocal opened, draining
@@ -51,6 +57,7 @@ def serve(root: Path, mode: str):
         with state_lock:
             if action == "health":
                 health_calls += 1
+                (root / "health-requested").touch()
                 if mode == "health-timeout":
                     wait_for(root / "release")
                 return {
@@ -61,11 +68,7 @@ def serve(root: Path, mode: str):
                     "published": published,
                     "worktrees": {"status": "ready" if published else "unready"},
                     "repositories": {"admitting": published and not draining},
-                    "capabilities": (
-                        [] if mode in {"old-provider", "legacy-ready", "candidate-legacy"}
-                        else [recovery.CAPABILITY, "status-monitor-async-retirement-v1"]
-                        if candidate else [recovery.CAPABILITY]
-                    ),
+                    "capabilities": list(capabilities),
                 }
             if action == "promote":
                 (root / "promote-requested").touch()

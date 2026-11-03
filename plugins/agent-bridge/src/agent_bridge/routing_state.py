@@ -103,6 +103,13 @@ def publish_daemon_route_unless_forwarded(
     def refuse_forward(active: dict | None) -> str | None:
         if active_route_is_forward(active):
             return "active route is a venue-forwarded host bridge"
+        from .source_build import is_source_build_version
+
+        if is_source_build_version(version):
+            from .install_paths import install_dir
+            from .source_start import _check_selection
+
+            _check_selection(install_dir(), version)
         return None
 
     try:

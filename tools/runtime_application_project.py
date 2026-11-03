@@ -15,6 +15,7 @@ _ROOTS = {
     "worktree-manager": ("WORKTREE_MANAGER_ROOT", ".worktree-manager"),
     "agent-worktrees": ("AGENT_WORKTREES_ROOT", ".agent-worktrees"),
     "agent-bridge": ("AGENT_BRIDGE_INSTALL_DIR", ".agent-bridge"),
+    "agent-mcp": ("AGENT_MCP_INSTALL_DIR", ".agent-mcp"),
     "agent-dispatch": ("AGENT_DISPATCH_INSTALL_DIR", ".agent-dispatch"),
     "agent-dispatch-service": ("AGENT_DISPATCH_INSTALL_DIR", ".agent-dispatch"),
     "agent-index-engine": ("AGENT_INDEX_ENGINE_HOME", ".agent-index/engine"),

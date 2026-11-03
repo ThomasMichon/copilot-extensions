@@ -15,14 +15,14 @@ class _AzStub:
 
     name = "az-stub"
 
-    def supports(self, action, fields):
+    def supports(self, action: str, fields: dict[str, str]) -> bool:
         return action == "get-azure-token"
 
-    async def resolve(self, action, fields, *, timeout=30.0):
+    async def resolve(self, action: str, fields: dict[str, str], *, timeout: float = 30.0) -> str:
         return "protocol=https\nhost=storage.azure.com\ntoken=STUBTOKEN\n\n"
 
 
-def test_token_registry_mint_add_validate_discard():
+def test_token_registry_mint_add_validate_discard() -> None:
     reg = TokenRegistry()
     tok = TokenRegistry.mint()
     assert len(tok) >= 32
@@ -35,7 +35,7 @@ def test_token_registry_mint_add_validate_discard():
     assert reg.validate(tok) is False
 
 
-def test_builder_require_token_wires_server():
+def test_builder_require_token_wires_server() -> None:
     reg = TokenRegistry()
     b = RelayBuilder()
     b.add_source(_AzStub())
@@ -45,11 +45,11 @@ def test_builder_require_token_wires_server():
     assert srv.token_validator is not None
 
 
-def test_builder_gate_has_explicit_immutable_inputs_and_keeps_denial_order():
+def test_builder_gate_has_explicit_immutable_inputs_and_keeps_denial_order() -> None:
     from credential_relay.server import ScopeDenied
     from credential_relay.token_gate import RelayTokenGate
 
-    def deny(token, action, fields):
+    def deny(token: str, action: str, fields: dict[str, str]) -> bool:
         if token == "recognized":
             raise ScopeDenied
         return False
@@ -58,14 +58,15 @@ def test_builder_gate_has_explicit_immutable_inputs_and_keeps_denial_order():
     builder.authorize_token(["get-azure-token"], deny)
     builder.authorize_token(["get-azure-token"], lambda token, action, fields: token == "recognized")
     server = builder.build()
-    assert type(server.token_authorizer.__self__) is RelayTokenGate
+    assert server.token_authorizer is not None
+    assert type(getattr(server.token_authorizer, "__self__")) is RelayTokenGate
     assert server.token_authorizer("recognized", "get-azure-token", {})
     assert not server.token_authorizer("unknown", "get-azure-token", {})
     builder._token_authorizers.clear()
     assert server.token_authorizer("recognized", "get-azure-token", {})
 
 
-def test_builder_set_port_zero_yields_dynamic_server():
+def test_builder_set_port_zero_yields_dynamic_server() -> None:
     """set_port(0) -- the dynamic default (codespaces relay_port now 0, dotfiles
     #694) -- builds a server carrying port 0, so start() binds an OS-assigned
     ephemeral port (verified in test_port_reclaim)."""
@@ -93,7 +94,7 @@ async def _roundtrip(srv: CredentialRelayServer, request: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_server_token_gate_allows_valid_denies_invalid():
+async def test_server_token_gate_allows_valid_denies_invalid() -> None:
     reg = TokenRegistry()
     good = TokenRegistry.mint()
     reg.add(good)
@@ -105,6 +106,7 @@ async def test_server_token_gate_allows_valid_denies_invalid():
     )
     await srv.start()
     # asyncio assigns a real port when 0 is requested
+    assert srv._server is not None
     srv.port = srv._server.sockets[0].getsockname()[1]
     try:
         ok = await _roundtrip(
@@ -131,13 +133,13 @@ async def test_server_token_gate_allows_valid_denies_invalid():
 
 
 @pytest.mark.asyncio
-async def test_server_states_scope_denial_explicitly_for_known_token(): 
+async def test_server_states_scope_denial_explicitly_for_known_token() -> None:
     """#4367: a *recognized* token whose specific get-azure-token scope is
     denied gets an explicit, wire-visible response -- not the same silent
     close as an unknown/invalid token (#4367)."""
     from credential_relay.server import ScopeDenied
 
-    def _authorizer(tok, action, fields):
+    def _authorizer(tok: str, action: str, fields: dict[str, str]) -> bool:
         if tok != "good-token":
             return False
         if fields.get("scope") == "https://storage.azure.com/.default":
@@ -151,6 +153,7 @@ async def test_server_states_scope_denial_explicitly_for_known_token():
         token_required_actions=frozenset({"get-azure-token"}),
     )
     await srv.start()
+    assert srv._server is not None
     srv.port = srv._server.sockets[0].getsockname()[1]
     try:
         allowed = await _roundtrip(
@@ -178,7 +181,7 @@ async def test_server_states_scope_denial_explicitly_for_known_token():
 
 
 @pytest.mark.asyncio
-async def test_ungated_action_needs_no_token():
+async def test_ungated_action_needs_no_token() -> None:
     """Open actions (not in token_required_actions) bypass the gate."""
     reg = TokenRegistry()
     srv = CredentialRelayServer(
@@ -190,6 +193,7 @@ async def test_ungated_action_needs_no_token():
     # get-github-token is not gated; with no matching source it just resolves to
     # nothing, but must NOT count as a token rejection.
     await srv.start()
+    assert srv._server is not None
     srv.port = srv._server.sockets[0].getsockname()[1]
     try:
         await _roundtrip(srv, "get-github-token\nhost=github.com\n\n")
@@ -198,7 +202,7 @@ async def test_ungated_action_needs_no_token():
         await srv.stop()
 
 
-def test_stats_has_token_rejections():
+def test_stats_has_token_rejections() -> None:
     assert RelayStats().token_rejections == 0
 
 
@@ -206,7 +210,7 @@ def test_stats_has_token_rejections():
 # Multi-validator + merged Azure allowlist (codespaces + containers share one
 # relay; #44 / option A).
 # ---------------------------------------------------------------------------
-def test_multiple_validators_any_match():
+def test_multiple_validators_any_match() -> None:
     """Two providers gating the same action -> a token from EITHER is accepted."""
     b = RelayBuilder()
     b.add_source(_AzStub())
@@ -214,12 +218,13 @@ def test_multiple_validators_any_match():
     b.require_token(["get-azure-token"], lambda t: t == "beta")
     srv = b.build()
     assert srv.token_required_actions == frozenset({"get-azure-token"})
+    assert srv.token_validator is not None
     assert srv.token_validator("alpha") is True   # first provider's token
     assert srv.token_validator("beta") is True    # second provider's token
     assert srv.token_validator("gamma") is False  # neither
 
 
-def test_allow_azure_resources_builds_single_merged_source():
+def test_allow_azure_resources_builds_single_merged_source() -> None:
     """allow_azure_resources from multiple providers -> one merged az-login."""
     b = RelayBuilder()
     b.allow_azure_resources(["https://storage.azure.com/"])  # containers
@@ -227,10 +232,12 @@ def test_allow_azure_resources_builds_single_merged_source():
     srv = b.build()
     az = [s for s in srv.sources if s.name == "az-login"]
     assert len(az) == 1  # single merged source, not two racing add_source
+    from credential_relay.sources.az_login import AzLoginSource
+    assert isinstance(az[0], AzLoginSource)
     assert az[0]._is_allowed("https://anything.example.com/.default") is True
 
 
-def test_allow_azure_enables_nonempty_builder():
+def test_allow_azure_enables_nonempty_builder() -> None:
     """A builder with only Azure enabled is not 'empty' (relay must start)."""
     b = RelayBuilder()
     assert b.empty is True

@@ -20,7 +20,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .server import CredentialRelayServer, RelayPolicy
+from .server import AccountRelayLifecycle, CredentialRelayServer, RelayPolicy, RelayServerOptions
 from .sources import CredentialSource
 from .http_sources import HttpSourceRegistry
 from .token_gate import RelayTokenGate
@@ -86,7 +86,7 @@ class RelayBuilder:
     azure_resources: set[str] = field(default_factory=set)
     _azure_enabled: bool = False
     http_sources: HttpSourceRegistry = field(default_factory=HttpSourceRegistry)
-    account_relay: object | None = None
+    account_relay: AccountRelayLifecycle | None = None
 
     def add_source(self, source: CredentialSource) -> None:
         """Register a credential source (deduped by ``name``; first wins).
@@ -192,7 +192,7 @@ class RelayBuilder:
             sources.append(InjectedTokenSource(allowed_resources=azure_allowed))
             sources.append(AzLoginSource(allowed_resources=azure_allowed))
         policy = RelayPolicy(allowed_hosts=list(self.allowed_hosts))
-        kwargs: dict = {"sources": sources, "policy": policy}
+        kwargs: RelayServerOptions = {"sources": sources, "policy": policy}
         if self.account_relay is not None:
             kwargs["account_relay"] = self.account_relay
         if self.port is not None:

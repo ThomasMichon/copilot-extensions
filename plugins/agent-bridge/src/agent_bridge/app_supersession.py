@@ -5,12 +5,104 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import FastAPI
 
 log = logging.getLogger("agent-bridge")
+_SOURCE_RETIRE_DRAIN = "source-self-retire"
+
+
+def release_own_host_claims(manager) -> list[str]:
+    """Release only this frontend generation's claims as its transport exits."""
+    index = getattr(manager, "_host_index", None)
+    generation = getattr(manager, "_generation_id", None)
+    if index is None or not generation:
+        return []
+    try:
+        return index.release_all(generation)
+    except Exception:
+        log.warning("Own Session Host claim release failed during shutdown", exc_info=True)
+        return []
+
+
+def _source_successor_ready(endpoint) -> bool:
+    from .install_paths import install_dir
+    from .source_start import _check_selection, _core, _healthy_selected
+
+    _check_selection(install_dir(), endpoint.version)
+    return _healthy_selected(
+        _core(), endpoint.version, pid=endpoint.pid, port=endpoint.port,
+    )
+
+
+async def source_self_retire_ready(app, generation: int, *, ready_successor=None) -> bool | None:
+    """Use the outgoing owner's ordinary host-preserving drain for Source handoff."""
+    from .config import config_dir
+    from .source_build import is_source_build_version
+    from zdd import routing
+
+    manager = app.state.session_manager
+
+    def release_drain():
+        owned = getattr(app.state, "source_retire_drain", None)
+        if owned is None:
+            return
+        current = manager.drain_status()
+        if owned == (current["source"], current["since"]):
+            manager.set_draining(False, source="source-self-retire-aborted")
+        app.state.source_retire_drain = None
+
+    table = await asyncio.to_thread(routing.read_table, config_dir())
+    raw = table.get("active") if isinstance(table, dict) else None
+    successor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+    if (
+        successor is None or successor.pid == os.getpid()
+        or successor.generation <= generation or not is_source_build_version(successor.version)
+    ):
+        release_drain()
+        return None
+    observe = ready_successor or _source_successor_ready
+    try:
+        if not await asyncio.to_thread(observe, successor):
+            release_drain()
+            return False
+        current = manager.drain_status()
+        owned = getattr(app.state, "source_retire_drain", None)
+        if current["draining"] and owned != (current["source"], current["since"]):
+            return False
+        from .app import _governance_backoff
+
+        if await _governance_backoff(
+            getattr(app.state, "loop_governance", None),
+            "pre-mutation:self-retire", loop_name="Source self-retire handoff",
+        ):
+            return False
+        if not current["draining"]:
+            manager.set_draining(
+                True, source=_SOURCE_RETIRE_DRAIN,
+                reason="handoff to a ready selected Source frontend",
+            )
+            current = manager.drain_status()
+            app.state.source_retire_drain = (current["source"], current["since"])
+        result = await manager.drain(
+            timeout=0, force=False, source=_SOURCE_RETIRE_DRAIN,
+            reason="handoff to a ready selected Source frontend",
+        )
+        current = manager.drain_status()
+        if app.state.source_retire_drain != (current["source"], current["since"]):
+            app.state.source_retire_drain = None
+            return False
+        if not await asyncio.to_thread(observe, successor):
+            release_drain()
+            return False
+        return result.get("drained") is True
+    except Exception:
+        release_drain()
+        log.warning("Source self-retirement handoff deferred", exc_info=True)
+        return False
 
 
 async def retire_previous_daemon(
@@ -27,6 +119,7 @@ async def retire_previous_daemon(
     drain_poll: float,
     owns_generation: Callable[[Any, Any], bool],
     same_daemon: Callable[[Any, Any], bool],
+    self_retire_only: bool = False,
 ) -> None:
     """Retire a predecessor with native exit evidence before owned cold recovery."""
     from zdd import process_exit
@@ -53,6 +146,32 @@ async def retire_previous_daemon(
             log.warning("Predecessor native identity could not be pinned; retirement refused", exc_info=True)
             return
     try:
+        if self_retire_only:
+            if reference is None:
+                log.warning("Predecessor native exit is unavailable; cold recovery remains fenced")
+                return
+            from .config import config_dir
+            from .app_lifecycle import settled_thread_call
+            from zdd import routing
+
+            while not getattr(app.state, "shutting_down", False):
+                table = await asyncio.to_thread(routing.read_table, config_dir())
+                raw = table.get("active") if isinstance(table, dict) else None
+                active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                if not owns_generation(active, successor):
+                    return
+                try:
+                    exited = await settled_thread_call(reference.wait, 1.0)
+                except (OSError, ValueError, NotImplementedError):
+                    log.warning("Predecessor native exit is unavailable; cold recovery remains fenced", exc_info=True)
+                    return
+                if exited:
+                    await recover_owned_cold(
+                        app, successor, initial_recovery_task=initial_recovery_task,
+                        predecessor_exited=True,
+                    )
+                    return
+            return
         if reference is not None and reference.wait(0):
             await recover_owned_cold(
                 app, successor, initial_recovery_task=initial_recovery_task,

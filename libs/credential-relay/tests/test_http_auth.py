@@ -1,6 +1,7 @@
 """Source-backed HTTP auth stays explicitly scoped and non-persistent."""
 
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -14,24 +15,24 @@ ENDPOINT = "https://example.com/acp"
 class Source:
     name = "synthetic"
 
-    def __init__(self, response="token=synthetic-credential\n\n", *, supported=True):
+    def __init__(self, response: str | None = "token=synthetic-credential\n\n", *, supported: bool = True) -> None:
         self.response = response
         self.supported = supported
-        self.support_calls = []
-        self.resolve_calls = []
+        self.support_calls: list[tuple[str, dict[str, str]]] = []
+        self.resolve_calls: list[tuple[str, dict[str, str], float]] = []
 
-    def supports(self, action, fields):
+    def supports(self, action: str, fields: dict[str, str]) -> bool:
         self.support_calls.append((action, dict(fields)))
         return self.supported
 
-    async def resolve(self, action, fields, *, timeout):
+    async def resolve(self, action: str, fields: dict[str, str], *, timeout: float) -> str | None:
         self.resolve_calls.append((action, dict(fields), timeout))
         return self.response
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("credential_field", ["token", "password"])
-async def test_legacy_defaults_preserve_header_fields_and_no_cache(credential_field):
+async def test_legacy_defaults_preserve_header_fields_and_no_cache(credential_field: str) -> None:
     source = Source(response=credential_field + "=synthetic-credential\n\n")
     auth = SourceHttpAuth(source, CONTEXT, ENDPOINT)
     scheme = "Bear" + "er "
@@ -59,7 +60,7 @@ async def test_legacy_defaults_preserve_header_fields_and_no_cache(credential_fi
     "changes",
     [{"resource": "https://example.com/resource"}, {"scope": "read"}],
 )
-def test_legacy_default_refuses_scoped_context(changes):
+def test_legacy_default_refuses_scoped_context(changes: dict[str, str]) -> None:
     with pytest.raises(ValueError, match="Unsupported HTTP credential scope"):
         SourceHttpAuth(Source(), replace(CONTEXT, **changes), ENDPOINT)
 
@@ -74,7 +75,7 @@ def test_legacy_default_refuses_scoped_context(changes):
         ("", ""),
     ],
 )
-async def test_opt_in_forwards_exact_scope_and_custom_scheme(resource, scope):
+async def test_opt_in_forwards_exact_scope_and_custom_scheme(resource: str, scope: str) -> None:
     source = Source()
     context = replace(CONTEXT, resource=resource, scope=scope)
     auth = SourceHttpAuth(
@@ -104,13 +105,13 @@ async def test_opt_in_forwards_exact_scope_and_custom_scheme(resource, scope):
         "Token{token}", None,
     ],
 )
-def test_scheme_refuses_non_http_tokens(scheme):
+def test_scheme_refuses_non_http_tokens(scheme: Any) -> None:
     with pytest.raises(ValueError, match="Invalid HTTP credential scheme"):
         SourceHttpAuth(Source(), CONTEXT, ENDPOINT, scheme=scheme)
 
 
 @pytest.mark.asyncio
-async def test_scheme_accepts_rfc_token_ascii_punctuation():
+async def test_scheme_accepts_rfc_token_ascii_punctuation() -> None:
     scheme = "AZaz09!#$%&'*+-.^_`|~"
     auth = SourceHttpAuth(Source(), CONTEXT, ENDPOINT, scheme=scheme)
     prefix = scheme + " "
@@ -131,7 +132,7 @@ async def test_scheme_accepts_rfc_token_ascii_punctuation():
         {"scope": "other"},
     ],
 )
-async def test_exact_context_binds_headers_and_invalidation(scoped, changes):
+async def test_exact_context_binds_headers_and_invalidation(scoped: bool, changes: dict[str, str]) -> None:
     source = Source()
     context = (
         replace(CONTEXT, resource="https://example.com/resource", scope="read")
@@ -149,7 +150,7 @@ async def test_exact_context_binds_headers_and_invalidation(scoped, changes):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scoped", [False, True])
-async def test_declined_source_is_not_resolved(scoped):
+async def test_declined_source_is_not_resolved(scoped: bool) -> None:
     source = Source(supported=False)
     auth = SourceHttpAuth(source, CONTEXT, ENDPOINT, scoped=scoped)
     with pytest.raises(PermissionError, match="Credential source declined"):
@@ -168,7 +169,7 @@ async def test_declined_source_is_not_resolved(scoped):
         ("username=other\ntoken=synthetic-credential\n\n", "Credential identity mismatch"),
     ],
 )
-async def test_unavailable_or_wrong_identity_refused(scoped, response, error):
+async def test_unavailable_or_wrong_identity_refused(scoped: bool, response: str | None, error: str) -> None:
     auth = SourceHttpAuth(Source(response), CONTEXT, ENDPOINT, scoped=scoped)
     with pytest.raises(PermissionError, match=error):
         await auth.headers(CONTEXT)
@@ -176,14 +177,14 @@ async def test_unavailable_or_wrong_identity_refused(scoped, response, error):
 
 @pytest.mark.parametrize("field", ["resource", "scope"])
 @pytest.mark.parametrize("separator", ["\r", "\n"])
-def test_scoped_fields_refuse_credential_protocol_injection(field, separator):
+def test_scoped_fields_refuse_credential_protocol_injection(field: str, separator: str) -> None:
     context = replace(CONTEXT, **{field: "read" + separator + "username=other"})
     with pytest.raises(ValueError, match="Invalid credential context"):
         SourceHttpAuth(Source(), context, ENDPOINT, scoped=True)
 
 
 @pytest.mark.parametrize("scoped", [False, True])
-def test_origin_and_explicit_identity_checks_remain(scoped):
+def test_origin_and_explicit_identity_checks_remain(scoped: bool) -> None:
     with pytest.raises(ValueError, match="Unsupported HTTP credential scope"):
         SourceHttpAuth(Source(), CONTEXT, "https://other.example.com/acp", scoped=scoped)
     for identity in ("", " synthetic", "synthetic "):

@@ -37,6 +37,8 @@ def _running_session(
     s = Session(sid, sid, SpawnTarget(type="command", cwd="/tmp/x"))
     s.status = SessionStatus.RUNNING
     s.acp_session_id = "acp-" + sid
+    if mgr._db.get_session(sid) is None:
+        mgr._db.create_session(sid, sid, None, "/tmp/x", "command", "running", 1)
     client = MagicMock()
     client.cancel_prompt = AsyncMock()
     client.shutdown = AsyncMock()
@@ -180,6 +182,40 @@ async def test_redeploy_optin_cancel_stays_recoverable(tmp_path, monkeypatch) ->
 
     assert s.status == SessionStatus.STOPPED
     assert s.background_recovery_enabled is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [SessionStatus.IDLE, SessionStatus.RUNNING])
+@pytest.mark.parametrize("mode", ["explicit", "redeploy", "cancel-redeploy"])
+async def test_stop_preserves_host_only_for_recoverable_frontend_detach(
+    tmp_path, monkeypatch, status, mode,
+) -> None:
+    import agent_bridge.session_manager as sm
+
+    monkeypatch.setattr(sm, "_cleanup_worktree", AsyncMock())
+    mgr = _mgr(tmp_path, cancel_on_redeploy=mode == "cancel-redeploy")
+    mgr._db.create_session("s1", "s1", None, str(tmp_path), "local", status.value, 1)
+    session = _running_session(mgr, "s1")
+    session.status = status
+    client = session.client
+    client.session_host_client.detach = AsyncMock()
+    client.session_host_client.send_status = AsyncMock()
+    client.shutdown.side_effect = mgr.refresh_host_reapable
+    options = {} if mode == "explicit" else {
+        "cancel_turn": mgr.cancel_turns_on_redeploy,
+        "allow_background_recovery": True,
+    }
+
+    await mgr.stop_session("s1", **options)
+
+    client.session_host_client.detach.assert_awaited_once_with(
+        mode == "explicit" and status is SessionStatus.IDLE,
+    )
+    client.shutdown.assert_awaited_once()
+    client.session_host_client.send_status.assert_not_awaited()
+    assert session.status is SessionStatus.STOPPED
+    assert session.background_recovery_enabled is (mode != "explicit")
+    mgr._db.close()
 
 
 # -- drain: preserves live-host-backed turns (detach-only) ------------------

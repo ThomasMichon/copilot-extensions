@@ -8,8 +8,24 @@ on:
       - ".github/workflows/legacy-monitor-native-acceptance.yml"
       - "plugins/agent-worktrees/scripts/runtime_install.py"
       - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_identity.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_grace.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_retirements.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_preparation.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_completion.py"
       - "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/status_monitor_handover.py"
       - "plugins/agent-worktrees/tests/test_python_runtime_install.py"
+      - "plugins/agent-worktrees/tests/test_runtime_monitor_grace.py"
+      - "plugins/agent-worktrees/tests/test_runtime_monitor_grace_native.py"
+      - "plugins/agent-worktrees/tests/test_runtime_monitor_retirements.py"
+      - "plugins/agent-worktrees/tests/test_runtime_monitor_preparation.py"
+      - "plugins/agent-worktrees/tests/test_runtime_monitor_completion.py"
+      - "plugins/agent-worktrees/tests/test_runtime_monitor_legacy.py"
+      - "plugins/agent-worktrees/tests/test_status_monitor_handover.py"
+      - "plugins/agent-worktrees/tests/test_status_monitor_guarded_cutover_native.py"
+      - "plugins/agent-worktrees/tests/test_status_monitor_guarded_recovery_native.py"
+      - "plugins/agent-worktrees/tests/native_guarded_recovery_provider.py"
 
 permissions:
   contents: read
@@ -38,6 +54,28 @@ jobs:
           -k "real_installer_returns_before_resident_owned_monitor_drain and not absent and not stale"
           --allow-explicit-tiers
           --test-timeout 900 --timeout 900 --plugin-timeout 900
+      - name: Qualify preserved retirement custody and successor grace controls
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_runtime_monitor_retirements.py
+          --test-file tests/test_runtime_monitor_preparation.py
+          --test-file tests/test_runtime_monitor_legacy.py
+          --test-file tests/test_runtime_monitor_grace.py
+          --test-file tests/test_runtime_monitor_completion.py
+          --test-file tests/test_status_monitor_handover.py
+          --allow-explicit-tiers
+          --test-timeout 30 --timeout 180 --plugin-timeout 600
+      - name: Qualify finite Windows native grace and asynchronous installer transport
+        if: runner.os == 'Windows'
+        env:
+          AGENT_WORKTREES_NATIVE_RECOVERY: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_runtime_monitor_grace_native.py
+          --test-file tests/test_status_monitor_guarded_cutover_native.py
+          -k "actual_native_grace_preserves_old_until_expiry_and_keeps_successor or native_async_installer_falls_forward_only_after_successor_serves"
+          --allow-explicit-tiers
+          --test-timeout 30 --timeout 180 --plugin-timeout 600
 
   legacy-monitor-windows:
     name: Legacy monitor (Windows)

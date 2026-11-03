@@ -5,6 +5,7 @@ import io
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
 
@@ -48,10 +49,31 @@ from test_session_observation_transport import (
 )
 from test_owner_membership import (
     test_adopted_writable_connection_preserves_membership_commits
-    as test_adopted_writable_connection_preserves_membership_commits,
+    as _adopted_writable_connection_preserves_membership_commits,
+)
+from test_owner_membership_budget import (
+    test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep
+    as test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep,
+    test_unknown_owner_large_history_has_actual_private_vm_cutoff
+    as test_unknown_owner_large_history_has_actual_private_vm_cutoff,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def _membership_transcript_clock(monkeypatch):
+    from agent_bridge import owner_membership_read as reader
+
+    # Transcript assertions use a virtual reader clock, not a host scheduling guarantee.
+    # Separate probes exercise deadline expiry and actual SQLite VM exhaustion.
+    budget_type = reader.ReadBudget
+    monkeypatch.setattr(reader, "time", SimpleNamespace(monotonic=lambda: 0.0))
+    monkeypatch.setattr(reader, "ReadBudget", lambda: budget_type(started=0.0))
+
+
+def test_adopted_writable_connection_preserves_membership_commits(tmp_path, monkeypatch):
+    _membership_transcript_clock(monkeypatch)
+    _adopted_writable_connection_preserves_membership_commits(tmp_path)
 
 
 def test_http51_capture_actual_observations(
@@ -370,6 +392,7 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
     from agent_bridge.owner_membership import CAPABILITY
     from agent_bridge.session_observation_contract import decode
 
+    _membership_transcript_clock(monkeypatch)
     assert client_factory.__module__ == core.__name__ and client_factory.__name__ == "_get_client"
     spec = vector["requests"]["owner_membership"]
     private = "fixture-protected-token"
@@ -391,7 +414,10 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
     def body(**changes):
         response = api.get(path, params={**query, **changes})
         assert response.status_code == 200
-        return decode(response.content.split(b"data: ", 1)[1].strip())
+        frame = decode(response.content.split(b"data: ", 1)[1].strip())
+        if changes.get("owner_ref", spec["owner_ref"]) == spec["owner_ref"]:
+            assert "position" in frame, json.dumps(frame, sort_keys=True)
+        return frame
 
     snapshot = body()
     observed = {"capability": api.get("/health").json()["capabilities"][CAPABILITY]}

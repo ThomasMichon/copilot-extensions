@@ -23,20 +23,20 @@ from credential_relay.sources.git_credential import (
 # ---------------------------------------------------------------------------
 class TestRelayPolicy:
 
-    def test_default_policy_allows_known_actions(self):
+    def test_default_policy_allows_known_actions(self) -> None:
         policy = RelayPolicy()
         assert policy.check("get", {"host": "github.com"}) is None
         assert policy.check("store", {"host": "github.com"}) is None
         assert policy.check("erase", {"host": "github.com"}) is None
         assert policy.check("get-github-token", {}) is None
 
-    def test_unknown_action_rejected(self):
+    def test_unknown_action_rejected(self) -> None:
         policy = RelayPolicy()
         result = policy.check("exec-arbitrary", {"host": "evil.com"})
         assert result is not None
         assert "not in allowed list" in result
 
-    def test_host_allowlist_blocks_unlisted(self):
+    def test_host_allowlist_blocks_unlisted(self) -> None:
         policy = RelayPolicy(allowed_hosts=["github.com", "*.github.com"])
         assert policy.check("get", {"host": "github.com"}) is None
         assert policy.check("get", {"host": "api.github.com"}) is None
@@ -44,11 +44,11 @@ class TestRelayPolicy:
         assert result is not None
         assert "not in allowed list" in result
 
-    def test_empty_host_allowlist_allows_all(self):
+    def test_empty_host_allowlist_allows_all(self) -> None:
         policy = RelayPolicy(allowed_hosts=[])
         assert policy.check("get", {"host": "anything.example.com"}) is None
 
-    def test_hostless_token_actions_skip_host_allowlist(self):
+    def test_hostless_token_actions_skip_host_allowlist(self) -> None:
         """get-azure-token/get-github-token carry no host -> not host-gated."""
         policy = RelayPolicy(allowed_hosts=["dev.azure.com"])
         # A host-scoped action with a non-matching host is still rejected...
@@ -57,14 +57,14 @@ class TestRelayPolicy:
         assert policy.check("get-azure-token", {"scope": "https://storage.azure.com/.default"}) is None
         assert policy.check("get-github-token", {}) is None
 
-    def test_host_glob_patterns(self):
+    def test_host_glob_patterns(self) -> None:
         policy = RelayPolicy(allowed_hosts=["*.visualstudio.com", "dev.azure.com"])
         assert policy.check("get", {"host": "myorg.visualstudio.com"}) is None
         assert policy.check("get", {"host": "dev.azure.com"}) is None
         result = policy.check("get", {"host": "github.com"})
         assert result is not None
 
-    def test_restricted_actions(self):
+    def test_restricted_actions(self) -> None:
         policy = RelayPolicy(allowed_actions=frozenset({"get", "store"}))
         assert policy.check("get", {}) is None
         assert policy.check("store", {}) is None
@@ -77,24 +77,24 @@ class TestRelayPolicy:
 # ---------------------------------------------------------------------------
 class TestRequestParsing:
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.server = CredentialRelayServer(sources=[])
 
-    def test_action_on_first_line(self):
+    def test_action_on_first_line(self) -> None:
         action, fields = self.server._parse_request(
             "get\nprotocol=https\nhost=github.com"
         )
         assert action == "get"
         assert fields == {"protocol": "https", "host": "github.com"}
 
-    def test_no_action_defaults_to_get(self):
+    def test_no_action_defaults_to_get(self) -> None:
         action, fields = self.server._parse_request(
             "protocol=https\nhost=github.com"
         )
         assert action == "get"
         assert fields == {"protocol": "https", "host": "github.com"}
 
-    def test_store_with_credentials(self):
+    def test_store_with_credentials(self) -> None:
         action, fields = self.server._parse_request(
             "store\nprotocol=https\nhost=github.com\nusername=user\npassword=tok123"
         )
@@ -102,29 +102,29 @@ class TestRequestParsing:
         assert fields["username"] == "user"
         assert fields["password"] == "tok123"
 
-    def test_erase_action(self):
+    def test_erase_action(self) -> None:
         action, fields = self.server._parse_request("erase\nprotocol=https\nhost=github.com")
         assert action == "erase"
 
-    def test_get_github_token_action(self):
+    def test_get_github_token_action(self) -> None:
         action, fields = self.server._parse_request("get-github-token\nhost=github.com")
         assert action == "get-github-token"
         assert fields["host"] == "github.com"
 
-    def test_empty_lines_ignored(self):
+    def test_empty_lines_ignored(self) -> None:
         action, fields = self.server._parse_request(
             "get\n\nprotocol=https\n\nhost=github.com\n"
         )
         assert fields == {"protocol": "https", "host": "github.com"}
 
-    def test_value_with_equals(self):
+    def test_value_with_equals(self) -> None:
         """Values containing = should be preserved."""
         action, fields = self.server._parse_request(
             "protocol=https\nhost=github.com\npassword=tok=123=abc"
         )
         assert fields["password"] == "tok=123=abc"
 
-    def test_empty_request(self):
+    def test_empty_request(self) -> None:
         action, fields = self.server._parse_request("")
         assert action == "get"
         assert fields == {}
@@ -136,7 +136,7 @@ class TestRequestParsing:
 class TestPingAction:
 
     @pytest.mark.asyncio
-    async def test_ping_returns_pong_without_policy_token_or_sources(self):
+    async def test_ping_returns_pong_without_policy_token_or_sources(self) -> None:
         source = MagicMock(spec=CredentialSource)
         source.name = "source"
         source.supports.return_value = True
@@ -164,7 +164,7 @@ class TestPingAction:
         token_validator.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_capabilities_advertise_username_keyed_git_cache(self):
+    async def test_capabilities_advertise_username_keyed_git_cache(self) -> None:
         source = MagicMock(spec=CredentialSource)
         source.name = "source"
         server = CredentialRelayServer(
@@ -193,7 +193,7 @@ class TestPingAction:
 class TestSourceRouting:
 
     @pytest.mark.asyncio
-    async def test_first_matching_source_wins(self):
+    async def test_first_matching_source_wins(self) -> None:
         source_a = MagicMock(spec=CredentialSource)
         source_a.name = "a"
         source_a.supports.return_value = False
@@ -211,7 +211,7 @@ class TestSourceRouting:
         source_b.supports.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_no_matching_source_returns_none(self):
+    async def test_no_matching_source_returns_none(self) -> None:
         source = MagicMock(spec=CredentialSource)
         source.name = "a"
         source.supports.return_value = False
@@ -221,7 +221,7 @@ class TestSourceRouting:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_source_exception_falls_through(self):
+    async def test_source_exception_falls_through(self) -> None:
         """If a source raises, routing continues to next source."""
         bad_source = MagicMock(spec=CredentialSource)
         bad_source.name = "bad"
@@ -238,7 +238,7 @@ class TestSourceRouting:
         assert result == "ok\n\n"
 
     @pytest.mark.asyncio
-    async def test_source_returns_none_falls_through(self):
+    async def test_source_returns_none_falls_through(self) -> None:
         """If a source returns None, routing continues."""
         source_a = MagicMock(spec=CredentialSource)
         source_a.name = "a"
@@ -260,7 +260,7 @@ class TestSourceRouting:
 # ---------------------------------------------------------------------------
 class TestGitCredentialSource:
 
-    def test_supports_standard_actions(self):
+    def test_supports_standard_actions(self) -> None:
         source = GitCredentialSource()
         assert source.supports("get", {})
         assert source.supports("store", {})
@@ -270,10 +270,10 @@ class TestGitCredentialSource:
         assert source.supports("reject", {})
         assert not source.supports("get-github-token", {})
 
-    def test_name(self):
+    def test_name(self) -> None:
         assert GitCredentialSource().name == "git-credential"
 
-    def test_field_filtering(self):
+    def test_field_filtering(self) -> None:
         source = GitCredentialSource()
         fields = {
             "protocol": "https",
@@ -289,7 +289,7 @@ class TestGitCredentialSource:
         assert "capability" not in filtered
         assert "wwwauth" not in filtered
 
-    def test_cache_key(self):
+    def test_cache_key(self) -> None:
         source = GitCredentialSource()
         key = source._cache_key({
             "protocol": "https",
@@ -299,7 +299,7 @@ class TestGitCredentialSource:
         assert key == ("https", "github.com", "user")
 
     @pytest.mark.asyncio
-    async def test_bound_github_username_is_injected_before_gcm(self):
+    async def test_bound_github_username_is_injected_before_gcm(self) -> None:
         source = GitCredentialSource(github_username="bound-user")
 
         mock_proc = MagicMock()
@@ -326,7 +326,7 @@ class TestGitCredentialSource:
         assert result is not None and "password=token123" in result
 
     @pytest.mark.asyncio
-    async def test_existing_github_username_is_preserved(self):
+    async def test_existing_github_username_is_preserved(self) -> None:
         source = GitCredentialSource(github_username="bound-user")
 
         mock_proc = MagicMock()
@@ -353,7 +353,7 @@ class TestGitCredentialSource:
         assert "username=bound-user" not in sent
 
     @pytest.mark.asyncio
-    async def test_no_profile_username_leaves_github_request_unchanged(self):
+    async def test_no_profile_username_leaves_github_request_unchanged(self) -> None:
         source = GitCredentialSource()
 
         mock_proc = MagicMock()
@@ -374,7 +374,7 @@ class TestGitCredentialSource:
         assert "username=" not in sent
 
     @pytest.mark.asyncio
-    async def test_resolve_fill_calls_git(self):
+    async def test_resolve_fill_calls_git(self) -> None:
         """Fill action should call git credential fill."""
         source = GitCredentialSource()
 
@@ -403,7 +403,7 @@ class TestGitCredentialSource:
         assert call_args[:3] == ("git", "credential", "fill")
 
     @pytest.mark.asyncio
-    async def test_resolve_fill_uses_noninteractive_env(self):
+    async def test_resolve_fill_uses_noninteractive_env(self) -> None:
         """Fill must run git with interactive prompts disabled (fail-fast)."""
         source = GitCredentialSource()
 
@@ -430,7 +430,7 @@ class TestGitCredentialSource:
         assert "PATH" in env or "Path" in env
 
     @pytest.mark.asyncio
-    async def test_resolve_caches_successful_fill(self):
+    async def test_resolve_caches_successful_fill(self) -> None:
         """Successful fill should be cached."""
         source = GitCredentialSource(cache_ttl=60.0)
 
@@ -453,6 +453,7 @@ class TestGitCredentialSource:
             result1 = await source.resolve("get", {
                 "protocol": "https", "host": "github.com",
             })
+            assert result1 is not None
             assert "cached-tok" in result1
 
             # Second call should use cache
@@ -465,13 +466,13 @@ class TestGitCredentialSource:
         assert mock_exec.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_store_invalidates_cache(self):
+    async def test_store_invalidates_cache(self) -> None:
         """Store action should invalidate cached credentials."""
         source = GitCredentialSource(cache_ttl=300.0)
 
         call_count = 0
 
-        async def make_proc(*args, **kwargs):
+        async def make_proc(*args: object, **kwargs: object) -> MagicMock:
             nonlocal call_count
             call_count += 1
             proc = MagicMock()
@@ -514,17 +515,18 @@ class TestGitCredentialSource:
             result = await source.resolve("get", {
                 "protocol": "https", "host": "github.com",
             })
+            assert result is not None
             assert "new-tok" in result
 
     @pytest.mark.asyncio
-    async def test_resolve_timeout(self):
+    async def test_resolve_timeout(self) -> None:
         """Timeout should return None, not raise."""
         source = GitCredentialSource()
 
         mock_proc = MagicMock()
         mock_proc.returncode = 0
 
-        async def slow_communicate(input=None):
+        async def slow_communicate(input: bytes | None = None) -> tuple[bytes, bytes]:
             await asyncio.sleep(100)
             return (b"", b"")
 
@@ -543,7 +545,7 @@ class TestGitCredentialSource:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_resolve_git_not_found(self):
+    async def test_resolve_git_not_found(self) -> None:
         """FileNotFoundError should return None."""
         source = GitCredentialSource()
 
@@ -564,7 +566,7 @@ class TestGitCredentialSource:
 # ---------------------------------------------------------------------------
 class TestGhAuthSource:
 
-    def test_supports_only_github_token(self):
+    def test_supports_only_github_token(self) -> None:
         source = GhAuthSource(account="user")
         assert source.supports("get-github-token", {})
         assert not source.supports("get", {"protocol": "https", "host": "github.com"})
@@ -572,11 +574,11 @@ class TestGhAuthSource:
         assert not source.supports("get", {"protocol": "https", "host": "example.com"})
         assert not source.supports("store", {})
 
-    def test_name(self):
+    def test_name(self) -> None:
         assert GhAuthSource().name == "gh-auth"
 
     @pytest.mark.asyncio
-    async def test_resolve_returns_key_value(self):
+    async def test_resolve_returns_key_value(self) -> None:
         """Response should be in key=value format."""
         source = GhAuthSource(account="user")
 
@@ -603,7 +605,7 @@ class TestGhAuthSource:
         assert "host=github.com" in result
 
     @pytest.mark.asyncio
-    async def test_resolve_git_get_is_declined_even_with_username(self):
+    async def test_resolve_git_get_is_declined_even_with_username(self) -> None:
         source = GhAuthSource(account="bound-user")
 
         with patch(
@@ -622,7 +624,7 @@ class TestGhAuthSource:
         mock_exec.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_resolve_git_get_without_username_returns_none(self):
+    async def test_resolve_git_get_without_username_returns_none(self) -> None:
         source = GhAuthSource()
 
         with patch(
@@ -638,7 +640,7 @@ class TestGhAuthSource:
         mock_exec.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_github_token_without_account_uses_plain_gh_auth_token(self):
+    async def test_get_github_token_without_account_uses_plain_gh_auth_token(self) -> None:
         source = GhAuthSource()
         mock_proc = MagicMock()
         mock_proc.returncode = 0
@@ -658,7 +660,7 @@ class TestGhAuthSource:
         assert mock_exec.call_args[0] == ("gh", "auth", "token")
 
     @pytest.mark.asyncio
-    async def test_get_github_token_without_account_pins_an_explicit_host(self):
+    async def test_get_github_token_without_account_pins_an_explicit_host(self) -> None:
         source = GhAuthSource()
         mock_proc = MagicMock()
         mock_proc.returncode = 0
@@ -677,7 +679,7 @@ class TestGhAuthSource:
         )
 
     @pytest.mark.asyncio
-    async def test_git_get_does_not_route_to_gh_auth(self):
+    async def test_git_get_does_not_route_to_gh_auth(self) -> None:
         git_source = MagicMock(spec=CredentialSource)
         git_source.name = "git-credential"
         git_source.supports.return_value = True
@@ -699,7 +701,7 @@ class TestGhAuthSource:
         mock_exec.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_resolve_gh_not_found(self):
+    async def test_resolve_gh_not_found(self) -> None:
         """Missing gh CLI should return None."""
         source = GhAuthSource()
 
@@ -713,7 +715,7 @@ class TestGhAuthSource:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_resolve_gh_failure(self):
+    async def test_resolve_gh_failure(self) -> None:
         """Non-zero exit should return None."""
         source = GhAuthSource()
 
@@ -739,7 +741,7 @@ class TestGhAuthSource:
 class TestServerIntegration:
 
     @pytest.mark.asyncio
-    async def test_server_start_stop(self):
+    async def test_server_start_stop(self) -> None:
         """Server should start and stop cleanly."""
         server = CredentialRelayServer(port=0, sources=[])
         await server.start()
@@ -748,7 +750,7 @@ class TestServerIntegration:
         assert not server.running
 
     @pytest.mark.asyncio
-    async def test_server_handles_request(self):
+    async def test_server_handles_request(self) -> None:
         """Server should route a request to a source and return the response."""
         source = MagicMock(spec=CredentialSource)
         source.name = "test"
@@ -760,6 +762,7 @@ class TestServerIntegration:
         server = CredentialRelayServer(port=0, sources=[source])
         await server.start()
 
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
 
         try:
@@ -789,7 +792,7 @@ class TestServerIntegration:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_server_policy_rejection(self):
+    async def test_server_policy_rejection(self) -> None:
         """Requests to disallowed hosts should be rejected (no response)."""
         source = MagicMock(spec=CredentialSource)
         source.name = "test"
@@ -800,6 +803,7 @@ class TestServerIntegration:
         server = CredentialRelayServer(port=0, sources=[source], policy=policy)
         await server.start()
 
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
 
         try:
@@ -823,7 +827,7 @@ class TestServerIntegration:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_server_stats_tracking(self):
+    async def test_server_stats_tracking(self) -> None:
         """Server should track request statistics."""
         source = MagicMock(spec=CredentialSource)
         source.name = "test"
@@ -833,6 +837,7 @@ class TestServerIntegration:
         server = CredentialRelayServer(port=0, sources=[source])
         await server.start()
 
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
 
         try:
@@ -860,8 +865,9 @@ class TestServerIntegration:
 # ---------------------------------------------------------------------------
 # Fail-fast Tests
 # ---------------------------------------------------------------------------
-async def _exchange(server, request: bytes, *, timeout: float = 2.0) -> bytes:
+async def _exchange(server: CredentialRelayServer, request: bytes, *, timeout: float = 2.0) -> bytes:
     """Send a request to a running server and read the full response."""
+    assert server._server is not None
     port = server._server.sockets[0].getsockname()[1]
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     writer.write(request)
@@ -888,7 +894,7 @@ class TestFailFast:
     """Unresolved git `get` requests must return quit=1, never hang."""
 
     @pytest.mark.asyncio
-    async def test_get_with_no_source_returns_quit(self):
+    async def test_get_with_no_source_returns_quit(self) -> None:
         """No source -> quit=1 so git aborts instead of prompting."""
         server = CredentialRelayServer(port=0, sources=[])
         await server.start()
@@ -902,7 +908,7 @@ class TestFailFast:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_get_with_unresolving_source_returns_quit(self):
+    async def test_get_with_unresolving_source_returns_quit(self) -> None:
         """Source returns None -> quit=1."""
         source = MagicMock(spec=CredentialSource)
         source.name = "test"
@@ -921,7 +927,7 @@ class TestFailFast:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_policy_rejection_returns_quit_for_get(self):
+    async def test_policy_rejection_returns_quit_for_get(self) -> None:
         """A policy-rejected git `get` host still gets quit=1 (fail-fast)."""
         source = MagicMock(spec=CredentialSource)
         source.name = "test"
@@ -941,7 +947,7 @@ class TestFailFast:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_get_access_token_failure_no_quit(self):
+    async def test_get_access_token_failure_no_quit(self) -> None:
         """get-access-token (non-git) must NOT emit quit=1 (callers exit non-zero)."""
         server = CredentialRelayServer(port=0, sources=[], ado_host="x.visualstudio.com")
         await server.start()
@@ -953,7 +959,7 @@ class TestFailFast:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_resolved_get_does_not_emit_quit(self):
+    async def test_resolved_get_does_not_emit_quit(self) -> None:
         """A successfully resolved get returns the credential, no quit sentinel."""
         source = MagicMock(spec=CredentialSource)
         source.name = "test"
@@ -973,26 +979,26 @@ class TestFailFast:
 
 
 
-def test_git_credential_kills_a_helper_that_times_out(monkeypatch):
+def test_git_credential_kills_a_helper_that_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     from credential_relay.sources import git_credential as gc
 
-    killed = []
+    killed: list[bool] = []
 
     class HungProc:
         returncode = None
 
-        async def communicate(self, input=None):
+        async def communicate(self, input: bytes | None = None) -> None:
             await asyncio.sleep(30)
 
-        def kill(self):
+        def kill(self) -> None:
             killed.append(True)
 
-    async def fake_exec(*_a, **_k):
+    async def fake_exec(*_a: object, **_k: object) -> HungProc:
         return HungProc()
 
-    monkeypatch.setattr(gc.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     src = gc.GitCredentialSource()
     out = asyncio.run(src._run_directly("fill", "protocol=https\nhost=github.com\n", timeout=0.1))
     assert out is None and killed == [True]

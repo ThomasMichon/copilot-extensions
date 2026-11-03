@@ -106,7 +106,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
     from . import resident_push, status_monitor_cutover, status_monitor_runtime, status_updater_cli
-    from .status_monitor_handover import MonitorHandover
+    from .status_monitor_handover import ACTION as HANDOFF_ACTION, CAPABILITY as HANDOFF_CAPABILITY, MonitorHandover
     from .runtime_monitor_completion import recover as complete_publication
     from . import runtime_monitor_preparation as preparation
     from .runtime_monitor_identity import publish_lock
@@ -619,7 +619,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             health["predecessorRetirement"] = retirements.health()
             health["drain"] = _drain_observations()
             health["capabilities"].append(preparation.CAPABILITY)
+            health["capabilities"].append(HANDOFF_CAPABILITY)
             return health
+        if action == HANDOFF_ACTION:
+            with state_lock:
+                return handover.accept(status_monitor_cutover.routing_dir(), os.getpid(), payload)
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
         if action in {"agenda-read", "agenda-publish"}:
@@ -643,6 +647,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 repositories_runtime.close_admission("superseded")
             return repositories_runtime.read(payload)
         if action == "promote":
+            handover.announce(status_monitor_cutover.routing_dir(), os.getpid())
             trace = DrainTrace(
                 status_monitor_cutover.routing_dir(), role="daemon",
                 port=control_server.port, action=action, observe=_drain_observations,
@@ -672,6 +677,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         if not _publish_lock():
                             _enter_drain_only_state()
                             return {"adopted": False, "error": "monitor discovery publication refused"}
+            from . import runtime_monitor_grace
+
+            runtime_monitor_grace.arm(
+                status_monitor_runtime._aw_runtime_home(),
+                ready=lambda: guarded_recovery.serving_ready(_handle_control("health", {})),
+            )
             trace.emit("complete", "ok")
             wake_event.set()
             return {"adopted": True}

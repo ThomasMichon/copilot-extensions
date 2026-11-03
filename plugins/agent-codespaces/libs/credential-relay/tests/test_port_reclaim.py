@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+from typing import cast
 
 from credential_relay.server import (
     CredentialRelayServer,
@@ -20,7 +21,7 @@ from credential_relay.server import (
 def _free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
+    port = cast(tuple[str, int], s.getsockname())[1]
     s.close()
     return port
 
@@ -36,7 +37,7 @@ _HOLDER_SRC = (
 )
 
 
-def _spawn_holder(port: int) -> subprocess.Popen:
+def _spawn_holder(port: int) -> subprocess.Popen[str]:
     proc = subprocess.Popen(
         [sys.executable, "-c", _HOLDER_SRC.format(port=port)],
         stdout=subprocess.PIPE,
@@ -50,18 +51,18 @@ def _spawn_holder(port: int) -> subprocess.Popen:
 
 
 class TestAddrInUse:
-    def test_eaddrinuse_detected(self):
+    def test_eaddrinuse_detected(self) -> None:
         assert _addr_in_use(OSError(errno.EADDRINUSE, "in use")) is True
 
-    def test_wsa_eaddrinuse_detected(self):
+    def test_wsa_eaddrinuse_detected(self) -> None:
         assert _addr_in_use(OSError(10048, "in use")) is True
 
-    def test_other_errno_not_detected(self):
+    def test_other_errno_not_detected(self) -> None:
         assert _addr_in_use(OSError(errno.EACCES, "denied")) is False
 
 
 class TestPidOnPort:
-    def test_finds_current_process_listener(self):
+    def test_finds_current_process_listener(self) -> None:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("127.0.0.1", 0))
         s.listen(5)
@@ -71,13 +72,13 @@ class TestPidOnPort:
         finally:
             s.close()
 
-    def test_free_port_has_no_listener(self):
+    def test_free_port_has_no_listener(self) -> None:
         port = _free_port()
         assert _pid_on_port(port) is None
 
 
 class TestReclaim:
-    def test_reclaim_evicts_holder(self):
+    def test_reclaim_evicts_holder(self) -> None:
         port = _free_port()
         holder = _spawn_holder(port)
         try:
@@ -92,7 +93,7 @@ class TestReclaim:
             holder.kill()
             holder.wait(timeout=5)
 
-    def test_reclaim_refuses_current_process(self):
+    def test_reclaim_refuses_current_process(self) -> None:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("127.0.0.1", 0))
         s.listen(5)
@@ -103,7 +104,7 @@ class TestReclaim:
         finally:
             s.close()
 
-    def test_start_reclaims_stale_port(self):
+    def test_start_reclaims_stale_port(self) -> None:
         port = _free_port()
         holder = _spawn_holder(port)
         try:
@@ -121,7 +122,7 @@ class TestReclaim:
             holder.kill()
             holder.wait(timeout=5)
 
-    def test_start_binds_ephemeral_when_port_held_by_live_occupant(self):
+    def test_start_binds_ephemeral_when_port_held_by_live_occupant(self) -> None:
         # Hold the preferred port in THIS process so _reclaim_port refuses to
         # evict it (never self-evicts). start() must fall back to an OS-assigned
         # ephemeral port and record it on self.port, rather than raising (#540).
@@ -145,7 +146,7 @@ class TestReclaim:
         finally:
             s.close()
 
-    def test_start_with_port_zero_binds_and_reads_back_ephemeral(self):
+    def test_start_with_port_zero_binds_and_reads_back_ephemeral(self) -> None:
         # The dynamic default (dotfiles #694): port 0 -> the OS assigns an
         # ephemeral port and start() reads the actually-bound port back into
         # self.port so relay_state can publish the real port to consumers.

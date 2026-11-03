@@ -20,12 +20,13 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Any
 
 from ..server import ACCESS_DENIED_RESPONSE
 
 log = logging.getLogger("credential-relay.az-login")
 
-_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_SUBPROCESS_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0
 
 # Safety margin: expire cached tokens 5 minutes early
 _EXPIRY_SAFETY_MARGIN = 300
@@ -235,7 +236,7 @@ class AzLoginSource:
 
         return response_text
 
-    def _compute_cache_expiry(self, token_data: dict) -> float:
+    def _compute_cache_expiry(self, token_data: dict[str, Any]) -> float:
         """Compute cache expiry from Azure CLI token response."""
         if self._cache_ttl_override is not None:
             return time.time() + self._cache_ttl_override
@@ -273,7 +274,7 @@ class AzLoginSource:
         scope: str = "",
         tenant: str = "",
         timeout: float = 30.0,
-    ) -> tuple[dict, str] | None:
+    ) -> tuple[dict[str, Any], str] | None:
         """Run ``az account get-access-token`` and return (parsed_json, response_text).
 
         Prefers ``--scope`` when a scope is given (the official

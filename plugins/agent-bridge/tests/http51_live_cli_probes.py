@@ -21,7 +21,7 @@ from test_live_exact_rollback import prior_owners
 def observe_replay_controls() -> dict:
     """Exercise the actual extension's model-free rejected replay controls."""
     result = subprocess.run(
-        ["node", "--test",
+        ["node", "--test", "--test-reporter=tap",
          "--test-name-pattern=replay retains|rejected legacy replay|consumed.*replay|ACK failure",
          str(Path(__file__).with_name("delivery.test.mjs")),
          str(Path(__file__).with_name("plugin-readiness.test.mjs"))],

@@ -54,3 +54,26 @@ host=github.com\n
 ```
 
 Response is git-credential-protocol `key=value` text terminated by a blank line.
+
+## Type checking and compatibility
+
+All 22 canonical Python source/test files are checked strictly on the Linux
+and Windows analysis targets:
+
+```text
+python tools/typecheck.py lib-credential-relay --prepare
+python tools/typecheck.py lib-credential-relay
+```
+
+The library remains dependency-free at runtime and supports Python 3.10 and
+newer. Its four consumers (`agent-bridge`, `agent-codespaces`,
+`agent-containers`, and `agent-mcp`) resolve editable canonical sources on Dev;
+the release materializer owns their self-contained copies. Canonical admission
+does not admit those consumers or qualify their fresh installation.
+
+The account listener's lifecycle and publication record, builder keyword
+options, source callbacks, and test fixtures have explicit contracts. Account
+policy and Azure CLI JSON values remain dynamic at their existing validation
+boundaries; annotations do not validate provider data, alter scope decisions,
+or change credential expiry. OS-selected stdlib locking APIs retain their
+actual signatures on both analysis targets, without requiring platform stubs.
