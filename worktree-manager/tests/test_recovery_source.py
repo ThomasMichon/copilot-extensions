@@ -440,16 +440,19 @@ def test_advertised_prepared_flow_failure_never_falls_back_to_legacy(tmp_path, m
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows source-acquisition sharing errors")
 @pytest.mark.parametrize("transient", [False, True])
-def test_native_acquisition_rename_retries_only_transient_windows_locks(tmp_path, monkeypatch, transient):
+def test_native_acquisition_rename_retries_only_transient_windows_locks(
+    tmp_path, monkeypatch, upstream, transient,
+):
     from worktree_manager import runtime_source
+    from worktree_manager.runtime_source_config import RuntimeSource
 
-    staging, checkout = tmp_path / "staging", tmp_path / "checkout"
-    staging.mkdir()
-    (staging / "selected").write_text("unchanged", encoding="utf-8")
+    repository, _older, current = upstream
     rename = Path.rename
     calls = []
 
     def blocked(path, destination):
+        if not path.parent.name.startswith(".acquire-"):
+            return rename(path, destination)
         calls.append(path)
         if len(calls) == 1:
             error = PermissionError("fixture sharing error") if transient else OSError("fixture invalid parameter")
@@ -459,14 +462,20 @@ def test_native_acquisition_rename_retries_only_transient_windows_locks(tmp_path
 
     monkeypatch.setattr(Path, "rename", blocked)
     if transient:
-        runtime_source._rename_checkout(staging, checkout, deadline=time.monotonic() + 30)
+        with runtime_source.acquire(
+            RuntimeSource("main", str(repository)), root=tmp_path / "manager",
+            deadline=time.monotonic() + 30,
+        ) as selected:
+            assert selected.commit == current
         assert len(calls) == 2
-        assert (checkout / "selected").read_text() == "unchanged"
     else:
         with pytest.raises(OSError):
-            runtime_source._rename_checkout(staging, checkout, deadline=time.monotonic() + 30)
+            with runtime_source.acquire(
+                RuntimeSource("main", str(repository)), root=tmp_path / "manager",
+                deadline=time.monotonic() + 30,
+            ):
+                pytest.fail("unclassified rename failure reached consumption")
         assert len(calls) == 1
-        assert staging.is_dir() and not checkout.exists()
 
 
 def test_native_admission_binds_one_selection_without_peer_queue_work(tmp_path, monkeypatch):
