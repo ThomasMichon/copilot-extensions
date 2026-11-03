@@ -588,6 +588,8 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         health_route.HOSTING_CAPABILITY: health_route.HOSTING_CAPABILITY_VERSION,
         bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY:
             bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+        bridge_protocol.NATIVE_SEND_NO_RESUME_CAPABILITY:
+            bridge_protocol.NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
         health_route.LIVE_KEYED_RECEIPT_CAPABILITY: 1,
         health_route.LIVE_EXACT_NOTIFY_CAPABILITY: 1,
         health_route.OBSERVATIONS: 1,
