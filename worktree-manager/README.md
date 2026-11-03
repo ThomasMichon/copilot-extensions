@@ -346,11 +346,33 @@ it stops before package discovery/acquisition instead of triggering an install.
 The selected interpreter hosts canonical Manager runtime installation; this mode
 does not migrate existing runtimes or change their lifecycle owner. UV/Git
 provisioning, repository arguments and Manager source/update configuration retain
-their existing owners. Without the option, the existing UV-based bootstrap is
-unchanged. Repeated mode flags and repair combinations refuse before acquisition.
+their existing owners. Without the option, Python acquisition remains UV-based.
+Repeated mode flags and repair combinations refuse before acquisition.
 The Bash counterpart explicitly refuses this Windows-specific mode before
 effects; it does not silently substitute a distribution package route.
 This optional mode alone is not a full adopter readiness or attended-auth claim.
+
+Every Windows bootstrap puts its selected Python directory first on the
+bootstrap process PATH before invoking Manager and nested installers. Both
+bootstrap and the installed update command reconcile PATH after a successful
+waited manual update, even when Manager is already current. They qualify the
+running interpreter's physical Python 3.11+ base, place its directory first on
+the user PATH, read the setting back and notify Windows of the change.
+Neither publishes a private runtime's venv as the public prerequisite,
+removes an older Python, or rewrites machine PATH. Existing parent terminals
+cannot inherit a child's environment changes and must be restarted; machine
+PATH precedence remains administrator-owned. Automatic, detached, targeted or
+inspection/recovery commands, failed updates and contained tests do not persist
+this preference. Only byte-identical duplicate entries are removed; other case,
+Unicode and separator aliases are preserved. Verified desired PATH is notified
+even when no write is needed, allowing a failed notification to be retried.
+Concurrent publishers share the bounded Manager configuration-writer lock
+through registry read, modification and verification, preserving each other's
+entries. This does not serialize unrelated tools that write user PATH directly.
+A physical Python directory containing `%` is refused
+before writing an expandable user PATH, rather than publishing a different
+directory after Windows variable expansion; literal registry strings retain
+their original type.
 
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine

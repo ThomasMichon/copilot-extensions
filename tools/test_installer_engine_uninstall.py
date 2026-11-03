@@ -173,6 +173,8 @@ def test_legacy_adapter_controller_requires_exact_script_and_root(
     "wrong-action", "wrong-root", "wrong-product", "wrong-project", "wrong-helper", "changed-source", "duplicate-flag",
     "unforwarded-option", "witness-mismatch", "reused-native", "unknown-birth",
     "ancestor-module", "additional-module", "without-custody",
+    "cache-installed", "cache-unsealed", "cache-extended",
+    "cache-foreign", "cache-invalid-generation", "cache-other-flag", "cache-extra-flag",
 ))
 def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
@@ -303,6 +305,20 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
         (64206, [sys.executable, "-I", str(runner_source), str(Custody.root), request.id, witness, str(procutil)]),
         (64207, driver(original, "")), (64208, powershell(original)),
     ]
+    if mutation.startswith("cache-"):
+        shim = next(argv for pid, argv in actors if pid == 64206)
+        scope = "unsealed-" + "a" * 32 if mutation == "cache-unsealed" else "installed-" + "b" * 64
+        cache = Custody.root / "cache" / "python" / scope
+        if mutation == "cache-foreign":
+            cache = home / "foreign" / scope
+        elif mutation == "cache-invalid-generation":
+            cache = cache.with_name("arbitrary")
+        prefix = ("\\\\?\\" if mutation == "cache-extended" else "") + str(cache)
+        shim[2:2] = ["-X", "pycache_prefix=" + prefix]
+        if mutation == "cache-other-flag":
+            shim[3] = "dev"
+        elif mutation == "cache-extra-flag":
+            shim.insert(4, "-B")
     if mutation.startswith("positional-"):
         outer = actors[-1][1]
         outer.remove("-Action")
@@ -369,7 +385,10 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     lease = SimpleNamespace(arguments=Lease.arguments) if mutation == "forged-lease" else Lease()
     kwargs = {} if mutation == "without-custody" else {"controller_custody": custody, "lifecycle_lease": lease}
     profile = MODULE.Profile((), (), (), (), "agent_worktrees")
-    if mutation in {"none", "minimal", "self-stage", "sparse-census", "remove-runtime", "positional-original"}:
+    if mutation in {
+        "none", "minimal", "self-stage", "sparse-census", "remove-runtime", "positional-original",
+        "cache-installed", "cache-unsealed", "cache-extended",
+    }:
         MODULE.refuse_consumers(payload, "agent-worktrees", root, shell, profile, **kwargs)
         assert native_proofs and checks.count("driver") == 2 and checks.count("lease") == 2
     else:

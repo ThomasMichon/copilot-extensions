@@ -291,7 +291,7 @@ jobs:
         if-no-files-found: error
         retention-days: 7
   pr-gate:
-    name: PR gate (required check)
+    name: ${{ github.event_name == 'pull_request' && 'PR gate (required check)' || 'Non-PR CI summary' }}
     if: always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
     needs:
     - checks

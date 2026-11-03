@@ -23,7 +23,7 @@ def _functions() -> str:
     names = (
         "Write-BootstrapProgress", "Resolve-BootstrapExecutable", "Get-RegisteredBootstrapPython",
         "Initialize-BootstrapSignatureVerification", "Find-PhysicalBootstrapPython",
-        "Test-BootstrapInteractive", "Find-SystemBootstrapPython",
+        "Test-BootstrapInteractive", "Find-SystemBootstrapPython", "Add-BootstrapPythonPath",
     )
     functions = []
     for name in names:
