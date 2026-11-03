@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from collections.abc import Callable, Sequence
@@ -53,6 +54,10 @@ def inspect_toolchain(
     return tuple(failures)
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def _driver_failures(name, fleet, command_finder) -> list[str]:
     """A driver fleet needs a registered driver that answers the protocol,
     and OpenSSH only when its members use the trusted SSH transport."""
@@ -68,6 +73,9 @@ def _driver_failures(name, fleet, command_finder) -> list[str]:
         driver.list_members(timeout=DISCOVERY_TIMEOUT)
     except RuntimeError as exc:
         return [f"fleet {name!r}: {exc}"]
+    if capabilities.ssh_transport and _is_windows():
+        # ssh_transport refuses a driver ProxyCommand on Windows hosts.
+        return [f"fleet {name!r}: driver ssh_transport is not supported on Windows hosts"]
     if capabilities.ssh_transport and command_finder("ssh") is None:
         return [f"OpenSSH is required by fleet {name!r} (driver ssh_transport)"]
     return []

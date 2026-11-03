@@ -211,7 +211,7 @@ process.
 | Capability | Effect |
 |---|---|
 | `owns_relay` | The driver guarantees the in-container credential-relay env contract (`LC_GIT_CREDENTIAL_RELAY`, `LC_GIT_CREDENTIAL_RELAY_HOST`, `LC_GIT_CREDENTIAL_RELAY_TOKEN`) itself. agent-containers deploys no relay shims and sets none of those variables, and the resolver publishes `relay_remote_port: null` so agent-bridge adds no reverse forward. |
-| `ssh_transport` | Members run `sshd` and `exec-stream` may run `/usr/sbin/sshd -i` as `root`. The trusted OpenSSH transport (and with it the agent-containers relay reverse forward, the `copilot` verb and agent-bridge Session Host) rides on `exec-stream` as its `ProxyCommand`. POSIX hosts only. |
+| `ssh_transport` | Members run `sshd` and `exec-stream` may run `/usr/sbin/sshd -i` as `root`. The trusted OpenSSH transport (and with it the agent-containers relay reverse forward, the `copilot` verb and agent-bridge Session Host) rides on `exec-stream` as its `ProxyCommand`. POSIX hosts only: installer readiness refuses an `ssh_transport` driver fleet on a Windows host, while direct-exec drivers are accepted there. |
 
 Unknown capability keys are ignored. Without `ssh_transport`, ACP dispatch uses
 direct streaming exec (`venue.transport: driver-exec`) and Session Host /
@@ -276,7 +276,10 @@ no other fleet is listed to describe it.
 
 Routing is reconciled against the configuration and each successful listing,
 not accumulated for the life of a process. Every inventory and targeted lookup reconciles
-first, including when a reload leaves no driver fleet at all. When a configuration reload removes
+first, including when a reload leaves no driver fleet at all. A fleet's driver
+registration is resolved on every inventory: when its manifest is replaced or
+removed, routes through the previous executable are retired and it is never
+invoked again. When a configuration reload removes
 a driver fleet or assigns it another driver, the retired driver's routes for
 that fleet are dropped on the next enumeration, so its names neither reach the
 old driver nor become ambiguous with the replacement. A member name the driver
@@ -292,10 +295,14 @@ preparation and cleanup all carry the validated instance id, so a member
 recreated after validation is refused by its driver rather than receiving the
 launch or its credentials.
 Session Host preparation records the member's runtime identity
-(`execution_runtime`: `docker` or `driver:<driver>/<fleet>`), which agent-bridge
-hands back to state and cleanup as `--expected-runtime`. If that exact runtime
-no longer owns the member -- for example its fleet was removed or re-driven --
-cleanup is refused and state reports the prepared member missing. A driver
+(`execution_runtime`: `docker`, or `driver:<driver>/<fleet>@<registration>`
+where the registration digest covers the driver's resolved command and
+source), which agent-bridge hands back to state and cleanup as
+`--expected-runtime`. If that exact runtime no longer owns the member -- its
+fleet was removed or re-driven, or its driver registration was replaced, even
+when the new runtime reports the same name and id -- cleanup is refused and
+state reports the prepared member missing. A driver member's prepared instance
+is never acted on without that recorded identity. A driver
 member is addressed by its fleet-qualified handle; a bare instance id is used
 only when no driver claims it, so cleanup never reaches a different runtime's
 member that shares the id.

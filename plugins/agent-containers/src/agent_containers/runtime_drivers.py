@@ -27,6 +27,8 @@ them, which every dispatch path performs before it executes anything.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -377,11 +379,21 @@ def driver_for_fleet(
     from .external_driver import ExternalDriver, find_driver
 
     key = (fleet_name, fleet.driver)
+    retire = (lambda handle, c: c[0] == fleet.driver and c[1] == fleet_name)  # noqa: E731
+    try:
+        spec = find_driver(fleet.driver)  # the current registration, every time
+    except RuntimeError:
+        with _lock:
+            _drivers.pop(key, None)
+        _forget(retire)  # a removed registration routes nothing
+        raise
     with _lock:
         cached = _drivers.get(key)
-        if cached is not None and getattr(cached, "fleet", None) == fleet:
+    if cached is not None and getattr(cached, "spec", None) == spec:
+        if getattr(cached, "fleet", None) == fleet:
             return cached
-    spec = find_driver(fleet.driver)
+    elif cached is not None:
+        _forget(retire)  # replaced registration: never call the old executable
     driver = ExternalDriver(spec, fleet_name, fleet)
     with _lock:
         _drivers[key] = driver
@@ -928,11 +940,21 @@ class RetiredIncarnation(RuntimeError):
 
 
 def runtime_identity(name: str) -> str:
-    """``docker`` or ``driver:<driver>/<fleet>``: the runtime that owns ``name``."""
+    """``docker`` or ``driver:<driver>/<fleet>@<registration>``: who owns ``name``.
+
+    The registration digest covers the driver's resolved command and source,
+    so a fleet re-pointed at another driver -- or a driver whose registration
+    was replaced -- is a different runtime even for the same name and id.
+    """
     route = owner_of(name)
     if route is None:
         return "docker"
-    return f"driver:{route.driver.name}/{getattr(route.driver, 'fleet_name', None)}"
+    spec = getattr(route.driver, "spec", None)
+    registration = json.dumps(
+        [spec.name, list(spec.command), spec.source] if spec else route.driver.name,
+    )
+    digest = hashlib.sha256(registration.encode("utf-8")).hexdigest()[:16]
+    return f"driver:{route.driver.name}/{getattr(route.driver, 'fleet_name', None)}@{digest}"
 
 
 def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> str:
@@ -946,6 +968,11 @@ def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> 
     happens to share the instance id.
     """
     route = owner_of(name)
+    if route is not None and runtime is None:
+        raise RetiredIncarnation(
+            f"'{name}' is a runtime-driver member; acting on a prepared instance "
+            "requires the runtime identity recorded when it was prepared"
+        )
     if runtime is not None and runtime_identity(name) != runtime:
         raise RetiredIncarnation(
             f"'{name}' was prepared in runtime '{runtime}', which no longer owns "

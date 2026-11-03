@@ -521,8 +521,10 @@ def test_standalone_session_host_state_discovers_driver_members(
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     member_id = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
+    runtime = runtime_drivers.runtime_identity("example-1")  # in prepare's state_command
     runtime_drivers.clear_bindings()  # a fresh CLI process
-    assert cli.main(["session-host-state", "example-1", "--expected-instance", member_id]) == 0
+    assert cli.main(["session-host-state", "example-1", "--expected-instance", member_id,
+                     "--expected-runtime", runtime]) == 0
     state = json.loads(capsys.readouterr().out)
     assert (state["state"], state["container_id"]) == ("running", member_id)
 
@@ -1428,7 +1430,7 @@ def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member
     assert members["slow-1"].container_id == shared  # independent runtimes, same id
     # What session-host-prepare records for A and the bridge hands back to cleanup.
     runtime = runtime_drivers.runtime_identity("example-1")
-    assert runtime == "driver:example-driver/example"
+    assert runtime.startswith("driver:example-driver/example@")
     assert runtime_drivers.prepared_handle("example-1", shared, runtime) == f"example-1.{shared}"
 
     # Only A's fleet is removed (A itself stays alive); a fresh process.
@@ -1452,3 +1454,102 @@ def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member
     assert json.loads(capsys.readouterr().out)["state"] == "missing"
     # Inventory reads aside, nothing is inspected, executed or copied on B.
     assert [c["verb"] for c in other_calls()[before:] if c["verb"] != "list"] == []
+
+
+def _register(fake, name, *extra):
+    (fake.drivers / f"{name}.json").write_text(json.dumps({
+        "schema_version": 1, "name": name, "command": [sys.executable, str(FAKE), *extra],
+    }))
+
+
+def _calls(root):
+    path = root / "state.json"
+    return json.loads(path.read_text())["calls"] if path.exists() else []
+
+
+@pytest.mark.parametrize("retained_runtime", [True, False])
+def test_session_host_cleanup_refuses_a_fleet_redriven_to_a_same_name_same_id_member(
+    fake, no_docker, tmp_path, monkeypatch, capsys, retained_runtime,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    [prepared] = lifecycle.list_containers(config)
+    runtime = runtime_drivers.runtime_identity("example-1")  # recorded by prepare
+
+    # The same fleet now uses an independent driver B that reports the same
+    # member name with the same instance id.
+    other_root = tmp_path / "other-runtime"
+    _register(fake, "other-driver", "--root", str(other_root))
+    redriven = _write_config(tmp_path, monkeypatch, driver="other-driver")
+    fleet.reconcile_up(redriven, "example")
+    [replacement] = lifecycle.list_containers(redriven)
+    assert (replacement.name, replacement.container_id) == ("example-1", prepared.container_id)
+    assert runtime_drivers.runtime_identity("example-1") != runtime
+    runtime_drivers.clear_bindings()  # cleanup runs in a fresh process
+
+    before = len(_calls(other_root))
+    expected = ["--expected-runtime", runtime] if retained_runtime else []
+    assert cli.main(["session-host-cleanup", "example-1", "--expected-instance",
+                     prepared.container_id, "--expected-user", "vscode", *expected,
+                     "--remote-env", "/home/vscode/.agent-containers/launch/env"]) != 0
+    err = capsys.readouterr().err
+    assert ("no longer owns it" if retained_runtime else "requires the runtime identity") in err
+    assert cli.main(["session-host-state", "example-1", "--expected-instance",
+                     prepared.container_id, *expected]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "missing"
+    # Inventory reads aside, no cleanup operation reaches B.
+    assert [c["verb"] for c in _calls(other_root)[before:] if c["verb"] != "list"] == []
+
+
+@pytest.mark.parametrize("ssh_capable, refused", [(True, True), (False, False)])
+def test_windows_readiness_refuses_driver_ssh_but_accepts_direct_exec(
+    fake, monkeypatch, ssh_capable, refused,
+):
+    from agent_containers import installer_readiness
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": ssh_capable}))
+    monkeypatch.setattr(installer_readiness, "_is_windows", lambda: True)
+    failures = installer_readiness.inspect_toolchain(
+        driver_config(), command_finder=lambda name: f"C:/tools/{name}.exe",  # OpenSSH present
+    )
+    assert any("not supported on Windows hosts" in f for f in failures) is refused
+    assert not any("OpenSSH" in f for f in failures)
+    if not refused:
+        assert failures == ()
+
+
+def test_replaced_driver_registration_is_never_invoked_again(
+    fake, no_docker, tmp_path, monkeypatch,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    lifecycle.list_containers(config)
+    old_calls = len(fake.state()["calls"])
+
+    replacement_root = tmp_path / "replacement-runtime"
+    _register(fake, "example-driver", "--root", str(replacement_root))
+    lifecycle.list_containers(config)  # same process, same config, no clear_bindings()
+    assert _calls(replacement_root)  # the current registration answered
+    route = runtime_drivers.owner_of("example-1")
+    assert route is None or "--root" in route.driver.spec.command
+    with pytest.raises(RuntimeError, match="docker CLI not found"):
+        lifecycle.inspect_container("example-1")  # unreported by the new runtime: not routed
+    assert len(fake.state()["calls"]) == old_calls  # the old executable is retired
+
+
+def test_removed_driver_registration_retires_its_routes(
+    fake, no_docker, tmp_path, monkeypatch,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    [member] = lifecycle.list_containers(config)
+    old_calls = len(fake.state()["calls"])
+
+    (fake.drivers / "example-driver.json").unlink()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    lifecycle.list_containers(config)  # the driver fleet fails; nothing else breaks
+    for handle in ("example-1", member.container_id, runtime_drivers.route_handle(member)):
+        assert runtime_drivers.owner_of(handle) is None
+        with pytest.raises(RuntimeError, match="docker CLI not found"):
+            lifecycle.inspect_container(handle)  # Docker path only, never the old driver
+    assert len(fake.state()["calls"]) == old_calls
