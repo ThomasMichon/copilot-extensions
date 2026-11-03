@@ -249,7 +249,9 @@ def _build_from_snapshot(
                         result = build_profile_delivery(
                             profile.record(), transport, wheel_result["sha256"],
                             materials, material_paths, candidate, max_bytes=max_bytes,
-                            max_files=256, max_snapshot_bytes=8 * max_bytes, deadline=deadline,
+                            # The delivery reader also uses this limit for members inside each wheel.
+                            max_files=limits.max_members, max_snapshot_bytes=8 * max_bytes,
+                            deadline=deadline,
                         )
                         retained.verify()
                     if acquired is not None:

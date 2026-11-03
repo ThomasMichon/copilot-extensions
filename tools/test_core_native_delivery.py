@@ -131,9 +131,30 @@ def test_core_projection_refuses_active_local_wheel_without_registry_substitutio
 
 
 @pytest.fixture
-def delivery(tmp_path, monkeypatch):
+def delivery(tmp_path, monkeypatch, request):
     import core_native_delivery as producer
 
+    if getattr(request, "param", None) == "many-members":
+        import test_core_python_artifacts as core_tests
+
+        original_fixture, original_wheel = core_tests._fixture, core_tests._wheel_bytes
+
+        def fixture(root):
+            source = original_fixture(root)
+            package = root / "plugins" / "agent-sample" / "src" / "agent_sample"
+            for index in range(260):
+                (package / f"part_{index}.py").write_bytes(b"VALUE = 1\n")
+            return source
+
+        def wheel_bytes(name, version, **options):
+            if name == "agent_sample":
+                options["members"].update({
+                    f"agent_sample/part_{index}.py": b"VALUE = 1\n" for index in range(260)
+                })
+            return original_wheel(name, version, **options)
+
+        monkeypatch.setattr(core_tests, "_fixture", fixture)
+        monkeypatch.setattr(core_tests, "_wheel_bytes", wheel_bytes)
     wheels, manifest, _ = _build(tmp_path, monkeypatch)
     calls = []
     lock = tmp_path / "selected-pylock.toml"
@@ -182,6 +203,19 @@ def test_core_delivery_composes_existing_profile_and_transport_owners(delivery):
         assert profile["component"] == "composition-core"
         assert archive.read("wheels.zip")
     assert result["profile_sha256"].startswith("sha256:")
+
+
+@pytest.mark.parametrize("delivery", ["many-members"], indirect=True)
+def test_core_delivery_accepts_wheels_with_more_members_than_material_limit(delivery):
+    producer, arguments, _calls = delivery
+    result = producer._build_from_snapshot(**arguments)
+    assert result["approval"] == "unattested"
+    with (
+        zipfile.ZipFile(arguments["destination"]) as archive,
+        zipfile.ZipFile(io.BytesIO(archive.read("wheels.zip"))) as bundle,
+        zipfile.ZipFile(io.BytesIO(bundle.read("wheels/agent_sample-1.0-py3-none-any.whl"))) as wheel,
+    ):
+        assert len(wheel.infolist()) > 256
 
 
 def test_core_delivery_binds_first_party_exclusions_to_feed(delivery, monkeypatch):
@@ -629,6 +663,17 @@ def test_core_delivery_rejects_bad_material_before_feed(delivery):
     producer, arguments, calls = delivery
     _selected_material(arguments, "../notice")
     with pytest.raises(ValueError):
+        producer._build_from_snapshot(**arguments)
+    assert not calls and not arguments["destination"].exists()
+
+
+def test_core_delivery_keeps_material_count_bounded(delivery):
+    producer, arguments, calls = delivery
+    path = _selected_material(arguments)
+    selected = next(iter(arguments["materials"].values()))
+    arguments["materials"] = {f"notice-{index}.txt": selected for index in range(254)}
+    arguments["material_paths"] = {name: path for name in arguments["materials"]}
+    with pytest.raises(ValueError, match="material count"):
         producer._build_from_snapshot(**arguments)
     assert not calls and not arguments["destination"].exists()
 
