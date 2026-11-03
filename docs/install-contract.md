@@ -4128,7 +4128,9 @@ pool. Each selected local wheel URL must name the actual retained file and
 digest; those local URLs
 are not included in the output. The selection is only a closed-pool candidate:
 an incomplete pool can hide feed candidates, and it cannot prove upload age or
-approval. The result reports `selection: offline-wheel-pool`.
+approval. The result reports `selection: offline-wheel-pool`. Resolution
+failures report a bounded, redacted diagnostic; timeouts do not expose the
+command or captured output.
 
 Neither mode allows UV to resolve online: native UV redirects are not
 constrained by the wheel acquisition owner's origin allowlist. Both modes

@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_core_native_delivery import (
@@ -87,3 +89,40 @@ def test_offline_pool_accepts_deep_windows_input_paths(tmp_path, monkeypatch, tl
         assert result["selection"] == "offline-wheel-pool"
     finally:
         shutil.rmtree(native)
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_offline_pool_failure_is_useful_bounded_and_private(tmp_path, monkeypatch, timeout):
+    import core_native_delivery as producer
+
+    directory = tmp_path / "pool" / "wheels"
+    directory.mkdir(parents=True)
+    wheel = directory / "fixture-1.0-py3-none-any.whl"
+    wheel.write_bytes(b"held")
+    pool = SimpleNamespace(paths={wheel.name: wheel}, verify=lambda: None)
+    secret = "private-example-value"
+    stderr = (
+        "No solution: fixture>=2 conflicts with fixture<2\n"
+        + "https://private.example.invalid/simple?token=" + secret + "\n"
+        + r"C:\Users\private owner\hidden.whl" + "\n"
+        + "/home/private owner/hidden.whl\n"
+        + "credential=" + secret + "\n" + "more details " * 200
+    )
+
+    def fail(*_args, **_kwargs):
+        if timeout:
+            raise producer.ChildTimeoutExpired(["private-command"], 1, stderr=stderr)
+        raise subprocess.CalledProcessError(1, ["private-command"], stderr=stderr)
+
+    monkeypatch.setattr(producer, "run_owned", fail)
+    transaction = SimpleNamespace(argv=("fixture-uv",), cwd=tmp_path, environment={"FEED_TOKEN": secret})
+    with pytest.raises(producer.ProfileError) as failure:
+        producer._compile_offline_pool(transaction, pool, deadline=time.monotonic() + 60)
+    message = str(failure.value)
+    if timeout:
+        assert "timed out" in message
+    else:
+        assert "fixture>=2" in message
+    assert secret not in message and "private.example.invalid" not in message
+    assert "private owner" not in message and "private-command" not in message
+    assert len(message) < 600 and failure.value.__suppress_context__

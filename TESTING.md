@@ -3335,7 +3335,7 @@ malformed pool refusal, retained local file identity, first-party exclusions
 and an unapproved redirect that must not be contacted.
 `tools/test_core_native_pool_index.py` injects an unlisted wheel during the
 real offline resolver call and verifies it cannot change the selection; it
-also checks deep Windows pool inputs.
+also checks deep Windows pool inputs and bounded, private failure diagnostics.
 The fixture excludes inherited Git selectors, and Linux projection refuses
 the active Manager wheel mapping rather than silently changing its origin.
 The fixture feed and source do not qualify a production feed, release or

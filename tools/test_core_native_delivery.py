@@ -609,13 +609,14 @@ def test_core_offline_pool_does_not_resolve_missing_wheels_from_feed(
     deadline = time.monotonic() + 120
     target = _offline_target(producer, deadline)
     destination = tmp_path / "rejected.zip"
-    with pytest.raises(ProfileError, match="offline wheel-pool selection failed"):
+    with pytest.raises(ProfileError, match="offline wheel-pool selection failed") as failure:
         producer._build_from_snapshot(
             tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
             json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
             materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
             native_lock=None, offline_wheel_pool=pool_manifest,
         )
+    assert "fixture" in str(failure.value)
     assert not destination.exists()
     assert not state["requests"]
 

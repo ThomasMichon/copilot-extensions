@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -154,16 +156,30 @@ def _compile_offline_pool(transaction, pool, *, deadline: float) -> None:
         {"index": {"sha256": "sha256:" + hashlib.sha256(content).hexdigest(), "size": len(content)}},
         deadline,
     ):
+        procutil = _producer_procutil()
         try:
             run_owned(
                 command, cwd=transaction.cwd, env=transaction.environment,
                 timeout=max(0.001, deadline - time.monotonic()), deadline=deadline,
-                procutil=_producer_procutil(), construction_fd=None,
+                procutil=procutil, construction_fd=None,
             )
         except ChildTimeoutExpired:
             raise ProfileError("offline wheel-pool selection timed out") from None
         except subprocess.CalledProcessError as error:
-            raise ProfileError(f"offline wheel-pool selection failed (exit {error.returncode})") from None
+            stderr = error.stderr
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            diagnostics = importlib.import_module(procutil.__name__ + ".diagnostics")
+            detail = diagnostics.safe_diagnostic_text(
+                stderr if isinstance(stderr, str) else "", 65536, transaction.environment,
+            )
+            detail = re.sub(r"(?i)\b(?:https?|file)://\S+", "[location]", detail)
+            detail = re.sub(r"""(?<!\w)(?:[A-Za-z]:[\\/]|\\\\|/(?!/))[^"'<>]*""", "[location]", detail)
+            detail = detail[:400] + ("..." if len(detail) > 400 else "")
+            raise ProfileError(
+                f"offline wheel-pool selection failed (exit {error.returncode}): "
+                + (detail or "no diagnostic returned"),
+            ) from None
         except ChildLaunchError:
             raise ProfileError("offline wheel-pool selection could not start") from None
         _check_deadline(deadline)
