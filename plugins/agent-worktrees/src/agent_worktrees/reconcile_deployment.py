@@ -167,6 +167,20 @@ def execution_diagnostic(
     if update.get("phase") != "runtime":
         return None
     plugin = str(update.get("service", ""))
+    from .activation_preservation import PluginStateError
+    from plugin_activation import activation_preservation_pending
+
+    try:
+        if activation_preservation_pending():
+            return {
+                "service": plugin, "phase": "runtime", "reason": "payload-custody-pending",
+                "message": "Payload acquisition custody must recover before runtime deployment.",
+            }
+    except (OSError, PluginStateError) as error:
+        return {
+            "service": plugin, "phase": "runtime", "reason": "payload-custody-unavailable",
+            "message": str(error),
+        }
     try:
         if staged:
             if plugin != reconcile.SELF_PLUGIN:

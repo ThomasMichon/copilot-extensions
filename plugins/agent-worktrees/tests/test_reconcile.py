@@ -2830,6 +2830,48 @@ def test_payload_caller_support_refusal_is_a_status_not_an_uncaught_error(env, m
     assert json.loads((home / "settings.json").read_text())["enabledPlugins"][identity] is False
 
 
+@pytest.mark.parametrize("windows", [False, True])
+def test_unsettled_payload_fences_dependent_runtime_and_later_runtime_only(env, monkeypatch, windows):
+    from agent_worktrees import installer_run, update_acquisition
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "install")
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", windows)
+    payload = {
+        "service": "optional-plugin", "phase": "payload", "reason": "payload-missing",
+        "argv": ["copilot", "plugin", "install", identity],
+    }
+    runtime = {
+        "service": "optional-plugin", "phase": "runtime", "reason": "runtime-drift",
+        "argv": ["fixture-runtime", "update"],
+    }
+    monkeypatch.setattr(
+        reconcile, "build_plan",
+        lambda *args, **kwargs: {"action": "reconcile", "updates": [payload, runtime]},
+    )
+    calls = []
+
+    def unsettled(argv, **kwargs):
+        calls.append(argv)
+        assert argv[1] == "plugin"
+        env.install_payload("optional-plugin", "2.0.0", scope="universal")
+        raise installer_run.InstallerCleanupError("fixture acquisition still writing")
+
+    monkeypatch.setattr(installer_run, "run_installer", unsettled)
+    result = reconcile.apply_plan(env.repo, include_payload_refresh=True)
+    assert len(calls) == 1
+    blocked = [row for row in result["executed"] if row["argv"][0] == "fixture-runtime"]
+    assert len(blocked) == 2
+    assert all(row["diagnostic"]["reason"] == "payload-custody-pending" for row in blocked)
+    assert (home / "activation-preservation" / "transaction.json").is_file()
+    monkeypatch.setattr(
+        reconcile, "build_plan",
+        lambda *args, **kwargs: {"action": "reconcile", "updates": [runtime]},
+    )
+    later = reconcile.apply_plan(env.repo, passes=1)
+    assert later["executed"][0]["diagnostic"]["reason"] == "payload-custody-pending"
+    assert len(calls) == 1
+
+
 @pytest.mark.guard
 def test_launch_adapters_apply_planned_runtime_environment():
     # Environment application belongs to the checked Python executor, not a

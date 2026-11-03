@@ -224,6 +224,15 @@ class ActivationCustody:
             preservation._finish()
 
 
+def activation_preservation_pending(home: Path | None = None) -> bool:
+    """Read the existing custody fence without acquiring a lock or restoring state."""
+    home = (home or state.copilot_home()).resolve()
+    area = home / "activation-preservation"
+    if not _plain(area, directory=True):
+        return False
+    return _read(area / "transaction.json", home) is not None
+
+
 @contextmanager
 def activation_custody(home: Path | None = None) -> Iterator[ActivationCustody]:
     """Recover witnessed restoration before any participating acquisition."""
