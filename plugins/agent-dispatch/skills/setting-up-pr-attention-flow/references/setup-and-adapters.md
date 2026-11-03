@@ -135,8 +135,11 @@ Use this bounded read-only resolution pass before filling the charter:
    surfaces and `customizing-copilot:reviewing-customizations` for declared
    plugin sources and instruction-source selection. For a projected source,
    follow that owner's `resolve-source` procedure from the loaded skill base,
-   including authenticated local versus reviewed fallback selection; a file's
-   existence alone does not establish authority or complete delivery.
+   using enabled declarations and safe paths to select the applicable managed
+   copy before the offline reviewed fallback. This does not authenticate
+   instruction content. Read the full selected body unless it is already
+   directly visible in context; selection/copying alone does not prove model
+   admission or authorize effects.
 
 Record in the existing setup contract each role's selected owner/adapter,
 source location and revision/provenance where available, applicable scope,
