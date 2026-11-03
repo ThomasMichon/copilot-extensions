@@ -110,6 +110,17 @@ lane or receiving an ACK transfers none of those resources.
 
 ## 5. Review, post, reconcile and follow up
 
+By default the independent reviewer owns each qualifying round end-to-end:
+analysis, supported addressed bot-thread reconciliation, **direct task/owner-bound
+verdict publication** and authoritative readback. Bind actual scope, author
+independence and the retained handle once through the existing assignment owner
+before authorized writes; do not require a coordinator's per-round approval or
+release handshake. The reviewer asynchronously returns its actual posted,
+verified receipt or real blocker. The coordinator is never the normal verdict
+relay/editor: it independently audits forge authority **after publication** and
+retains census, follow-ups and authorized normal merge stewardship. Direct posting
+grants no author-fix, merge, consent or resource-custody authority.
+
 Apply the coordination reference's separate analysis, publication and readback
 gates. Fresh complete candidate/review/thread/check reads are evidence, not
 atomicity. **Supported server write fences or atomic provider preconditions**
