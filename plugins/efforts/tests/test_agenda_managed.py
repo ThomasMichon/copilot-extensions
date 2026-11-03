@@ -6,6 +6,7 @@ from copy import deepcopy
 import importlib
 import json
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import time
@@ -212,6 +213,61 @@ print(json.dumps({"accepted":accepted,"result":result}))
             path.touch(exist_ok=True)
         for process in children:
             process.communicate(timeout=25)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory-rebinding fixture")
+@pytest.mark.parametrize("when", ["before-open", "after-open"])
+def test_directory_rebinding_refuses_before_foreign_database_or_journal_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, when: str,
+) -> None:
+    home, foreign, retained = (tmp_path / name for name in ("selected", "foreign", "retained"))
+    home.mkdir()
+    foreign.mkdir()
+    request = initialization()
+    STORE.mutate(home, request, initial_store_id=STORE_ID)
+    seed = r'''
+import os,sqlite3,sys
+from pathlib import Path
+path=Path(sys.argv[1])
+db=sqlite3.connect(path,isolation_level=None)
+db.execute("CREATE TABLE sentinel(value TEXT)")
+db.executemany("INSERT INTO sentinel VALUES (?)", [("retained"*20000,)]*4)
+db.execute("PRAGMA cache_size=1")
+db.execute("BEGIN IMMEDIATE")
+db.execute("UPDATE sentinel SET value=?",("uncommitted"*20000,))
+assert Path(str(path)+"-journal").exists()
+os._exit(0)
+'''
+    seeded = subprocess.run(
+        [sys.executable, "-B", "-c", seed, str(foreign / STORE.DATABASE)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    assert seeded.returncode == 0, seeded.stderr
+
+    def contents(root: Path) -> dict[str, bytes]:
+        return {path.name: path.read_bytes() for path in root.iterdir()}
+
+    selected_bytes, foreign_bytes = contents(home), contents(foreign)
+    native = sqlite3.connect
+
+    def rebind() -> None:
+        home.rename(retained)
+        foreign.rename(home)
+
+    def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        if when == "before-open":
+            rebind()
+        db = native(*args, **kwargs)
+        if when == "after-open":
+            rebind()
+        return db
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    with pytest.raises(MANAGED.AgendaError, match="state home changed during open"):
+        STORE.mutate(home, request, initial_store_id=STORE_ID)
+    assert contents(retained) == selected_bytes
+    assert contents(home) == foreign_bytes
 
 
 @pytest.mark.parametrize("fault", ["store", "scope", "authority"])
