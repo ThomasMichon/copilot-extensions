@@ -49,16 +49,12 @@ permissions:
   contents: read
 
 jobs:
-  coverage-selection:
+  coverage-selection-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'
-    name: Coverage auditability selection (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: Coverage auditability selection (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 12
-    steps:
+    steps: &coverage-selection-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -93,6 +89,12 @@ jobs:
           print(result.stdout, end="", flush=True)
           print(result.stderr, end="", file=sys.stderr, flush=True)
           result.check_returncode()
+  coverage-selection-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'
+    name: Coverage auditability selection (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps: *coverage-selection-steps
   codespaces-installer-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
     name: CodeSpaces canonical and materialized installers (Linux)
