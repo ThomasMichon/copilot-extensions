@@ -51,15 +51,20 @@ def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> di
     payload = Path(record["payload"])
     identity = record["identity"]
     if (
-        not payload.is_absolute() or payload.parent != output / name
+        not payload.is_absolute() or not output.is_absolute() or ".." in payload.parts
         or identity.get("plugin") != name
         or not isinstance(identity.get("package_version"), str)
         or identity.get("source_commit") != resolved.commit
         or identity.get("source_tree") != resolved.tree
     ):
         raise ValueError(f"Runtime source preparer returned a different selection for {name}")
-    source = _runtime_installer().runtime_source
-    observed = source.read_source_identity(payload, identity.get("package_version"), plugin=name)
+    installer = _runtime_installer()
+    native = installer.engine._native_retained_path
+    if Path(native(payload.parent)) != Path(native(output / name)):
+        raise ValueError(f"Runtime source preparer returned a different selection for {name}")
+    observed = installer.runtime_source.read_source_identity(
+        Path(native(payload)), identity.get("package_version"), plugin=name,
+    )
     if observed is None or observed.document() != identity or payload.name != observed.runtime_version:
         raise ValueError(f"Runtime source preparer returned conflicting bytes for {name}")
     return {

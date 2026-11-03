@@ -17,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import time
+from typing import BinaryIO
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -78,7 +79,10 @@ def _rename_prepared(payload: Path, destination: Path, *, deadline: float | None
             time.sleep(min(_remaining(deadline), _AV_RETRY_BACKOFF * (attempt + 1)))
 
 
-def _git(source: Path, *arguments: str, deadline: float | None = None) -> str:
+def _git(
+    source: Path, *arguments: str, deadline: float | None = None,
+    output: BinaryIO | None = None,
+) -> str:
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
@@ -86,17 +90,28 @@ def _git(source: Path, *arguments: str, deadline: float | None = None) -> str:
     environment["GIT_CONFIG_GLOBAL"] = os.devnull
     environment["GIT_OPTIONAL_LOCKS"] = "0"
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    streams = {"capture_output": True} if output is None else {
+        "stdout": output, "stderr": subprocess.PIPE,
+    }
     result = subprocess.run(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-C", str(source), *arguments],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        **streams, text=True, encoding="utf-8", errors="replace",
         timeout=_remaining(deadline), env=environment, check=False, creationflags=creationflags,
     )
     _remaining(deadline)
     if result.returncode:
         detail = result.stderr.strip() or f"exit {result.returncode}"
         raise SourcePreparationError(f"Source Git probe failed: {detail}")
-    return result.stdout.strip()
+    return result.stdout.strip() if result.stdout is not None else ""
+
+
+def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None = None) -> None:
+    with archive.open("xb") as output:
+        _git(
+            source, "-c", "tar.umask=0022", "-c", "core.eol=lf",
+            "archive", "--format=tar", commit, deadline=deadline, output=output,
+        )
 
 
 def _admit(source: Path, commit: str, branch: str, *, deadline: float | None = None) -> tuple[str, str]:
@@ -212,15 +227,17 @@ def prepare(
     ):
         raise SourcePreparationError("Source preparation output must be outside the checkout")
     head, tree = _admit(source, commit, branch, deadline=deadline)
+    if os.name == "nt":
+        # Prefix the existing volume root before creating a long missing path.
+        output = Path(os.path._getfinalpathname(output.anchor)).joinpath(*output.parts[1:])
     output.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        output = Path(os.path._getfinalpathname(output))
     prefix = f".prepare-{plugin}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-"
     with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
         work = Path(temporary)
         archive = work / "source.tar"
-        git_command(
-            source, "-c", "tar.umask=0022", "archive", "--format=tar",
-            "--output", str(archive), commit,
-        )
+        _archive(source, commit, archive, deadline=deadline)
         snapshot = work / "source"
         snapshot.mkdir()
         _extract_archive(archive, snapshot, deadline=deadline)

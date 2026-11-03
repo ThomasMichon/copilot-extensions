@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve portable source archive and Windows path handling",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -4489,7 +4489,12 @@ can continue using their existing source installers.
 
 `tools/local_install_source.py` freezes one full Git commit, materializes its
 declared resources and builds associated first-party wheels without consuming
-changefiles or changing package versions. Its default selects Manager only.
+changefiles or changing package versions. Archive text conversion uses LF
+unless repository attributes explicitly select another EOL; Windows snapshot
+inputs use native filesystem paths. On Windows, construction uses a compact
+disposable copy of the selected build inputs and a toolchain; the copy must
+match the retained inputs, which are checked again before the record is
+published. Its default selects Manager only.
 Repeated `--project` options select a bounded set, such as
 `--project standalone:worktree-manager --project agent-worktrees`; `--suite`
 is a separate, explicit portfolio-wide choice. A first-party-only snapshot is
