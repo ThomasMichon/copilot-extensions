@@ -12,6 +12,7 @@ from agent_codespaces import __main__ as cli
 async def test_selection_is_prepared_once_for_the_execution_checkout(monkeypatch):
     prepare = AsyncMock(return_value=["/prepared/local", "/prepared/remote"])
     monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_plugins", prepare)
+    monkeypatch.setattr(cli, "_lookup_codespace_repo", lambda _name: "example/project")
     config = SimpleNamespace(resolved_workspace_folder_for=lambda repo: "/workspaces/project")
     manager = object()
     directories = await cli._register_codespace_plugins(
@@ -22,12 +23,13 @@ async def test_selection_is_prepared_once_for_the_execution_checkout(monkeypatch
     prepare.assert_awaited_once_with(
         manager, "synthetic", "example/project", config, "/workspaces/project",
         ["related@synthetic"], worktree_id="selected-worktree", repo_roots=(),
-        prelude="", relay_port=None,
+        prelude="", relay_port=None, live_attachment=False, hosting_required=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_required_preparation_failure_is_not_best_effort(monkeypatch):
+    monkeypatch.setattr(cli, "_lookup_codespace_repo", lambda _name: "example/project")
     monkeypatch.setattr(
         "agent_codespaces.plugin_preparation.prepare_plugins",
         AsyncMock(side_effect=RuntimeError("required payload unavailable")),

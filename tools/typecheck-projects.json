@@ -211,7 +211,7 @@
         "libs/plugin-resolve"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-process-telemetry",

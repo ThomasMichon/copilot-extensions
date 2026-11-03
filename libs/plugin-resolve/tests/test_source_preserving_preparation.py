@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,8 +15,10 @@ from plugin_resolve.registration import atomic_json
 from plugin_resolve.settings import read_repo_settings
 from test_plugin_preparation import init_checkout, local_plan
 
+GitOrigin = tuple[Path, str, str]
 
-def git(root, *args):
+
+def git(root: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(root), "-c", "user.name=Synthetic", "-c",
          "user.email=synthetic@example.invalid", *args],
@@ -25,7 +28,7 @@ def git(root, *args):
 
 
 @pytest.fixture
-def git_origin(tmp_path):
+def git_origin(tmp_path: Path) -> GitOrigin:
     root = tmp_path / "origin"
     init_checkout(root)
     for folder, marker in (("catalog-a", "first"), ("catalog-b", "other-location")):
@@ -54,8 +57,8 @@ def git_origin(tmp_path):
     ("HEAD", "catalog-b", "other-location"), ("sha", "catalog-a", "first"),
 ])
 def test_original_git_definition_drives_acquisition_before_install(
-    tmp_path, git_origin, mode, selection, folder, marker,
-):
+    tmp_path: Path, git_origin: tuple[Path, str, str], mode: str, selection: str, folder: str, marker: str,
+) -> None:
     root, first, _second = git_origin
     target = tmp_path / "target"
     init_checkout(target)
@@ -83,13 +86,13 @@ def test_original_git_definition_drives_acquisition_before_install(
     assert prepare(request, environment=environment, copilot_command=command) == first_result
 
 
-def test_owned_git_definition_changes_and_old_directory_projection_migrate(tmp_path, git_origin):
+def test_owned_git_definition_changes_and_old_directory_projection_migrate(tmp_path: Path, git_origin: tuple[Path, str, str]) -> None:
     root, _first, _second = git_origin
     target = tmp_path / "target"
     init_checkout(target)
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "structured_git_installer.py"))
     definition = {"source": {"source": "git", "url": root.as_uri(), "ref": "first", "path": "catalog-a"}}
-    def request():
+    def request() -> dict[str, Any]:
         return {"repo": str(target), **build_plan(
             [{"source": "helper@git-fixture"}], [], marketplaces={"git-fixture": definition},
         )}
@@ -115,7 +118,7 @@ def test_owned_git_definition_changes_and_old_directory_projection_migrate(tmp_p
     assert read_repo_settings(target).marketplaces["git-fixture"] == definition
 
 
-def absolute_controller(controller, anchor):
+def absolute_controller(controller: Path, anchor: Path) -> None:
     local_plan(controller)
     path = controller / ".github" / "copilot" / "settings.json"
     settings = json.loads(path.read_text())
@@ -124,7 +127,7 @@ def absolute_controller(controller, anchor):
 
 
 @pytest.mark.parametrize("mode", ["reference", "copy"])
-def test_target_owned_absolute_anchor_rebinds_to_real_worktree_without_copy(tmp_path, mode):
+def test_target_owned_absolute_anchor_rebinds_to_real_worktree_without_copy(tmp_path: Path, mode: str) -> None:
     anchor, callee, controller = tmp_path / "anchor", tmp_path / "callee", tmp_path / "controller"
     local_plan(anchor)
     init_checkout(anchor)
@@ -145,7 +148,7 @@ def test_target_owned_absolute_anchor_rebinds_to_real_worktree_without_copy(tmp_
     assert not list(callee.rglob("snapshots"))
 
 
-def test_authored_relative_and_unrelated_wip_roots_are_not_relocated(tmp_path):
+def test_authored_relative_and_unrelated_wip_roots_are_not_relocated(tmp_path: Path) -> None:
     source, target, controller = tmp_path / "source", tmp_path / "target", tmp_path / "controller"
     local_plan(source)
     init_checkout(source)
@@ -171,7 +174,7 @@ def test_authored_relative_and_unrelated_wip_roots_are_not_relocated(tmp_path):
     assert "target_relative" not in plan["plugins"][0]
 
 
-def test_provider_bound_target_relative_does_not_read_host_path_on_receiver(tmp_path):
+def test_provider_bound_target_relative_does_not_read_host_path_on_receiver(tmp_path: Path) -> None:
     source, target, controller = tmp_path / "source", tmp_path / "target", tmp_path / "controller"
     local_plan(source)
     init_checkout(source)
@@ -190,7 +193,7 @@ def test_provider_bound_target_relative_does_not_read_host_path_on_receiver(tmp_
         prepare({"repo": str(target), **bad})
 
 
-def test_global_inventory_leading_jsonc_header_uses_existing_bounded_reading_contract(tmp_path):
+def test_global_inventory_leading_jsonc_header_uses_existing_bounded_reading_contract(tmp_path: Path) -> None:
     target, home, original = tmp_path / "target", tmp_path / "home", tmp_path / "original"
     init_checkout(target)
     local_plan(original)
@@ -207,7 +210,7 @@ def test_global_inventory_leading_jsonc_header_uses_existing_bounded_reading_con
 
 
 @pytest.mark.parametrize("mode", ["reference", "copy"])
-def test_native_git_namespace_and_controller_local_source_are_both_preserved(tmp_path, mode):
+def test_native_git_namespace_and_controller_local_source_are_both_preserved(tmp_path: Path, mode: str) -> None:
     controller, target = tmp_path / "controller", tmp_path / "target"
     local_plan(controller)
     init_checkout(target)
@@ -236,7 +239,7 @@ def test_native_git_namespace_and_controller_local_source_are_both_preserved(tmp
 
 
 @pytest.mark.parametrize("bad", ["escape", "wrong-kind", "not-authored-absolute", "nested", "linked"])
-def test_target_relative_rejects_unproven_or_confused_paths(tmp_path, bad):
+def test_target_relative_rejects_unproven_or_confused_paths(tmp_path: Path, bad: str) -> None:
     source, target, controller = tmp_path / "source", tmp_path / "target", tmp_path / "controller"
     local_plan(source)
     init_checkout(source)
@@ -269,7 +272,7 @@ def test_target_relative_rejects_unproven_or_confused_paths(tmp_path, bad):
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_target_native_operator_origin_overrides_target_relative_rebinding(tmp_path):
+def test_target_native_operator_origin_overrides_target_relative_rebinding(tmp_path: Path) -> None:
     source, target, controller, operator = (
         tmp_path / "source", tmp_path / "target", tmp_path / "controller", tmp_path / "operator"
     )
