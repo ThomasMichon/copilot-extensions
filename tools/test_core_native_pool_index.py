@@ -92,7 +92,8 @@ def test_offline_pool_accepts_deep_windows_input_paths(tmp_path, monkeypatch, tl
 
 
 @pytest.mark.parametrize("timeout", [False, True])
-def test_offline_pool_failure_is_useful_bounded_and_private(tmp_path, monkeypatch, timeout):
+@pytest.mark.parametrize("location", ["url", "windows", "posix"])
+def test_offline_pool_failure_is_useful_bounded_and_private(tmp_path, monkeypatch, timeout, location):
     import core_native_delivery as producer
 
     directory = tmp_path / "pool" / "wheels"
@@ -101,11 +102,14 @@ def test_offline_pool_failure_is_useful_bounded_and_private(tmp_path, monkeypatc
     wheel.write_bytes(b"held")
     pool = SimpleNamespace(paths={wheel.name: wheel}, verify=lambda: None)
     secret = "private-example-value"
+    location_text = {
+        "url": "https://private.example.invalid/path private-tail",
+        "windows": r"C:\Users\private owner\hidden>private-tail",
+        "posix": "/home/private owner/hidden>private-tail",
+    }[location]
     stderr = (
         "No solution: fixture>=2 conflicts with fixture<2\n"
-        + "https://private.example.invalid/simple?token=" + secret + "\n"
-        + r"C:\Users\private owner\hidden.whl" + "\n"
-        + "/home/private owner/hidden.whl\n"
+        + location_text + "\n"
         + "credential=" + secret + "\n" + "more details " * 200
     )
 
@@ -124,5 +128,5 @@ def test_offline_pool_failure_is_useful_bounded_and_private(tmp_path, monkeypatc
     else:
         assert "fixture>=2" in message
     assert secret not in message and "private.example.invalid" not in message
-    assert "private owner" not in message and "private-command" not in message
+    assert "private owner" not in message and "private-tail" not in message and "private-command" not in message
     assert len(message) < 600 and failure.value.__suppress_context__

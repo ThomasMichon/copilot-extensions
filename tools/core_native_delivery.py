@@ -173,8 +173,8 @@ def _compile_offline_pool(transaction, pool, *, deadline: float) -> None:
             detail = diagnostics.safe_diagnostic_text(
                 stderr if isinstance(stderr, str) else "", 65536, transaction.environment,
             )
-            detail = re.sub(r"(?i)\b(?:https?|file)://\S+", "[location]", detail)
-            detail = re.sub(r"""(?<!\w)(?:[A-Za-z]:[\\/]|\\\\|/(?!/))[^"'<>]*""", "[location]", detail)
+            detail = re.sub(r"(?i)\b(?:https?|file)://.*", "[location]", detail)
+            detail = re.sub(r"(?<!\w)(?:[A-Za-z]:[\\/]|\\\\|/(?!/)).*", "[location]", detail)
             detail = detail[:400] + ("..." if len(detail) > 400 else "")
             raise ProfileError(
                 f"offline wheel-pool selection failed (exit {error.returncode}): "
