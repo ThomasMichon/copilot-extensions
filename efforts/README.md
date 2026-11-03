@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Copilot CLI Live Controls](active/copilot-cli-live-controls/README.md) | Draft; native live configuration and explicit cached-version controls | #10149; preserves native updater, active sessions and isolated execution controls |
 | [Vault Configuration Activation](active/vault-configuration-activation/README.md) | Active; proposal reviewed, source gate and disposable qualification underway | #2350 Vault adopter only; no runtime rollout |
 | [Precomputed Hook Guard Map](active/precomputed-hook-guard-map/README.md) | Done; source released and installed Windows consumer accepted | #10031 startup/cutover and #10032 native UNC/non-Windows qualification remain open; bounded Git identity, missing-map fail-open, no hook-triggered topology acquisition |
 | [Python Static Type Safety](active/python-static-type-safety/README.md) | Active; source/candidate gates established, incremental strict admission | #9807; [coverage tracker](active/python-static-type-safety/coverage.md) records library/plugin/service/tool lockdowns; existing owners retained, no runtime rollout |
