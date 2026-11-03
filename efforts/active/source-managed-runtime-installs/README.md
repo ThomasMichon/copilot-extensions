@@ -418,7 +418,7 @@ disposable scope while preserving config and durable data.
 
 ## Plan
 
-- [ ] Qualify and release source-bound HTTPS feed/artifact redirects without
+- [x] Qualify and release source-bound HTTPS feed/artifact redirects without
   mandatory CDN-origin enumeration, preserving explicit destination restrictions,
   exact file hashes, feed policy, credentials and bounded acquisition custody.
   The shared acquisition slice is coordinated on #7028 with #4876; it does not
@@ -1383,8 +1383,22 @@ onto one branch.
 - The first stage fixture incorrectly compared a declared development version
   with its normalized installed spelling. That failed attempt remains separate;
   the corrected run compares equivalent package versions, not arbitrary strings.
-  Review, Main release and downstream requalification remain pending. No
-  installed host runtime or production configuration was changed.
+- #10269 merged after current-head approval with no findings and required CI.
+  Promotion #10279 released the fix to Main
+  `c5921f14082c41a48923dc1d2b2ee4bf0d6c74fa`; the canonical acquisition,
+  native-feed and profile helper blobs match the reviewed source fix.
+- The unchanged complete Linux unit packet passed 3,940 cases within its
+  original bounds. The full Windows packet reached its outer time limit;
+  that lane is not qualified and its limit was not increased.
+- A new fresh-container run executed an immutable export of that actual Main
+  commit with the retained first-party inputs. Both complete profiles and
+  relocated native stage entries passed again, with unchanged locks, matching
+  installed package versions, absent Copilot inventory and no activation.
+  Exact-instance cleanup and unchanged watched host state were verified.
+- The bounded redirect acquisition item is complete. Full installation,
+  serving/adopter transition, remaining applications and the parent campaign's
+  other Plan and Validation items remain open under their existing owners.
+  No installed host runtime or production configuration was changed.
 
 ### 2026-11-03 - Automatic-update controls qualified and merged
 
