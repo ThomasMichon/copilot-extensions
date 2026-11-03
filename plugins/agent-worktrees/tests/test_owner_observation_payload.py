@@ -24,10 +24,15 @@ INVOCATIONS = [
     ["worktrees", "--project", "project", "worktree-observation-history"],
     ["worktree", "--project=project", "worktree-observations"],
     ["-p", "project", "worktree", "worktree-observation-history"],
+    ["worktree-data-read", "--capabilities"],
+    ["--project", "project", "worktree-data-read", "--worktree", "exact-id"],
+    ["worktrees", "--project=project", "worktree-data-read", "--worktree", "exact-id"],
 ]
 ORDINARY = [
     ["init", "--project", "worktree-observations"],
     ["--project", "worktree-observation-history", "init"],
+    ["--project", "worktree-data-read", "init"],
+    ["worktree-data-allocate", "--worktree", "exact-id"],
 ]
 INVOCATIONS += [["agent-worktrees", *argv] for argv in INVOCATIONS]
 ORDINARY += [["agent-worktrees", *argv] for argv in ORDINARY]

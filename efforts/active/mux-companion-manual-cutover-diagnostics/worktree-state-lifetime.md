@@ -4,9 +4,9 @@ Canonical parent: [complete effort](README.md).
 Sidecar dependency: [S2 and its validation](sidecar-live-timeline.md).
 Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktree-data/README.md).
 
-**Status: design proposal for review; no storage or archival implementation
-admission is claimed.** Existing native receipt and Bridge membership source
-units remain independent authorized work.
+**Status: design reviewed in #10199; storage and archival implementation remain
+open.** That source merge delivers no managed placement, data move, export,
+collection, cleanup or rollout.
 
 ## Request - verbatim
 
@@ -139,8 +139,10 @@ not consequences of a reviewed design.
 
 ## Plan
 
-- [ ] D0. Review this amendment and standing intent through the normal PR flow
+- [x] D0. Review this amendment and standing intent through the normal PR flow
   before any allocator, discovery, export or cleanup integration executes.
+  #10199 merged as `a9645aa98b9a4217274cc61aa36a073806413a34`; D1-D5 and
+  the complete Validation Plan remain unchecked.
 - [ ] D1. Extend the existing worktree owner with admitted data allocation,
   bounded persistent descriptors and passive exact-identity discovery. Cover
   fresh managed homes and read-only unsupported/unknown behavior; no live move.

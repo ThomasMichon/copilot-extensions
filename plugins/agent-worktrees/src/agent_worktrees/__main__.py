@@ -5108,10 +5108,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
-    from . import agenda_cli, owner_observation_cli, record_cli
+    from . import agenda_cli, owner_observation_cli, record_cli, worktree_data_cli
 
     agenda_cli.add_parsers(sub)
     owner_observation_cli.add_parsers(sub)
+    worktree_data_cli.add_parsers(sub)
     resolve_cli.add_parsers(sub)
     from . import launch_attempt_inspection
     launch_attempt_inspection.add_parsers(sub)
@@ -5313,6 +5314,8 @@ def _current_session_ids() -> set[str]:
 # fleet, reconcile, delegates, hook -- each of those is fixed to do its own
 # lazy `from . import <module>` at its own call site instead).
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'worktree-data-read': ('worktree_data_cli', 'cmd_worktree_data'),
+    'worktree-data-allocate': ('worktree_data_cli', 'cmd_worktree_data'),
     'worktree-observations': ('owner_observation_cli', 'cmd_observations'),
     'worktree-observation-history': ('owner_observation_cli', 'cmd_observations'),
     'agenda-publish': ('agenda_cli', 'cmd_agenda'),
@@ -6016,7 +6019,15 @@ def _load_full_command_surface() -> None:
     from . import update_launch_cli
 
     from .session_observations_cli import cmd_session_attention, cmd_session_observations
+    from . import agenda_cli, owner_observation_cli, worktree_data_cli
     COMMAND_MAP = {
+        "worktree-data-read": worktree_data_cli.cmd_worktree_data,
+        "worktree-data-allocate": worktree_data_cli.cmd_worktree_data,
+        "worktree-observations": owner_observation_cli.cmd_observations,
+        "worktree-observation-history": owner_observation_cli.cmd_observations,
+        "agenda-publish": agenda_cli.cmd_agenda,
+        "agenda-read": agenda_cli.cmd_agenda,
+        "agenda-feed": agenda_cli.cmd_agenda,
         "launch-attempts": cmd_launch_attempts,
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
@@ -6394,12 +6405,9 @@ def main(argv: list[str] | None = None) -> int:
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
     if not has_project and not _is_no_project_invocation(args_list):
-        if args_list[0] in {"worktree-observations", "worktree-observation-history"}:
-            from .owner_observation_cli import project_unavailable
-
-            return project_unavailable(args_list, "no registered invocation project")
-        if args_list[0] in {"agenda-read", "agenda-publish", "agenda-feed"}:
-            return front_door_cli.agenda_project_unavailable(args_list, "no registered invocation project")
+        unavailable = front_door_cli.unavailable_project_response(args_list, "no registered invocation project")
+        if unavailable is not None:
+            return unavailable
         if args_list[0] == "record":
             return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])

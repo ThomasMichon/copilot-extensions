@@ -30,7 +30,7 @@ for _aw_arg in "$@"; do
             [[ "$_aw_worktrees_alias" == 0 ]] || break
             _aw_worktrees_alias=1
             ;;
-        worktree-observations|worktree-observation-history)
+        worktree-observations|worktree-observation-history|worktree-data-read)
             _aw_passive_observation=1
             break
             ;;

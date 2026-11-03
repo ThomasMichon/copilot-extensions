@@ -42,7 +42,22 @@ def agenda_project_unavailable(argv, message: str) -> int:
     return project_unavailable(argv, message)
 
 
+def unavailable_project_response(argv: list[str], message: str) -> int | None:
+    """Keep each bounded owner command's own error envelope on missing context."""
+    if argv and argv[0] in {
+        "worktree-data-read", "worktree-data-allocate",
+        "worktree-observations", "worktree-observation-history",
+        "agenda-read", "agenda-publish", "agenda-feed",
+    }:
+        return project_resolution_failure(argv, RuntimeError(message))
+    return None
+
+
 def project_resolution_failure(argv, error: Exception) -> int:
+    if argv and argv[0] in {"worktree-data-read", "worktree-data-allocate"}:
+        from .worktree_data_cli import project_unavailable
+
+        return project_unavailable(argv, str(error))
     if argv and argv[0] in {"agenda-read", "agenda-publish", "agenda-feed"}:
         return agenda_project_unavailable(argv, str(error))
     if argv and argv[0] in {"worktree-observations", "worktree-observation-history"}:
