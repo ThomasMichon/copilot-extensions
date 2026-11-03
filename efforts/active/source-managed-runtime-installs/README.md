@@ -20,8 +20,10 @@ and all current selections updated. Outgoing central-daemon retirement and
 obsolete central schedules are independent, with at most one optional finite
 async fallback after a longer grace. Preserve sessions/keepers and user state;
 recheck then-current generation and role at cleanup. This supersedes conflicting
-legacy acceptance language below, not historical evidence or existing source
-ownership. No installed adoption is claimed by this plan amendment.
+legacy acceptance language below and in the linked transition/execution/app
+plans, not historical evidence or existing source ownership. Bounded manual
+continuation applies within the addressed installation; foreign scope remains
+protected. No installed adoption is claimed by this plan amendment.
 
 **Contributor entry:** the [fast-install and cutover guide](../../../docs/patterns/fast-application-install-and-cutover.md)
 defines each app's required boundaries and qualification. The
