@@ -988,13 +988,14 @@ def test_refresh_does_not_overwrite_synchronous_admission_diagnostic():
 def test_native_reload_key_repaints_scoped_footer_and_navigation(monkeypatch):
     from test_picker_tui import _wait_for_initial_setup
 
+    tick = PickerScreen._tick
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
-    state = {"value": "ready"}
+    state = {"pending": False}
     calls = []
 
     def refresh(scope):
         calls.append(scope)
-        state["value"] = "loading"
+        state["pending"] = True
 
     async def run():
         app = PickerApp(_fixture_source(), live=False)
@@ -1010,25 +1011,41 @@ def test_native_reload_key_repaints_scoped_footer_and_navigation(monkeypatch):
             screen._machine_key_map = lambda: {}
             screen._pivot_runtime = lambda _reg: SimpleNamespace(
                 ensure_many=lambda scopes: None,
-                get=lambda scope: (state["value"], [{"id": "a", "title": "Example"}], ""),
+                get=lambda scope: ("ready", [{"id": "a", "title": "Example"}], ""),
                 refresh_read=refresh,
+                read_pending=lambda scope: state["pending"],
             )
             screen.sel = ("T", 0)
             screen._sync_focus_to_sel()
             screen.refresh()
             await pilot.pause()
-            await pilot.press("r")
             footer = screen.query_one("#nf-footer")
+            render = footer.render
+            painted = []
+
+            def paint():
+                result = render()
+                painted.append(result.plain)
+                return result
+
+            monkeypatch.setattr(footer, "render", paint)
+            await pilot.press("r")
             assert calls
-            assert "reading declared scope(s)" in footer.render().plain
-            state["value"] = "ready"
-            screen.refresh()
+            assert "reading declared scope(s)" in painted[-1]
+            state["pending"] = False
+            screen._busy_label = None
+            screen.update_state = "idle"
+            screen._nav_dirty = False
+            screen._poll_update_state = lambda: None
+            screen.frame = 4
+            painted.clear()
+            tick(screen)
             await pilot.pause()
-            assert "read settled" in footer.render().plain
-            assert "Enter: actions for Fixture tasks row" in footer.render().plain
+            assert painted and "read settled" in painted[-1]
+            assert "Enter: actions for Fixture tasks row" in painted[-1]
             await pilot.press("ctrl+shift+left")
             assert screen._kind() == "worktrees"
-            assert "Fixture tasks:" not in footer.render().plain
+            assert "Fixture tasks:" not in painted[-1]
 
     asyncio.run(run())
 

@@ -600,6 +600,14 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         rather than silently skipping segments for an un-audited cause.
         """
         seg_ids = self._CAUSE_SEGMENTS.get(cause, self._ALL_NF_SEGMENTS)
+        # A replacement read can settle without changing rows or the global busy state.
+        if getattr(self, "_registered_refresh_note", None) is not None:
+            from .registered_scopes import refresh_footer
+
+            status = refresh_footer(self, self.debug)
+            if cause == "pulse" and status != getattr(self, "_registered_footer_status", None):
+                seg_ids = (*seg_ids, "nf-footer")
+            self._registered_footer_status = status
         for seg_id in seg_ids:
             try:
                 w = self.query_one(f"#{seg_id}")
