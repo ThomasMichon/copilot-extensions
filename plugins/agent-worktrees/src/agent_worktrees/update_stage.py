@@ -77,12 +77,12 @@ _LOCK_MUTEX = threading.Lock()
 _LOCK_PROTOCOL = "kernel-lease-v1"
 
 
-def status_path() -> Path:
-    return cfg.install_dir() / _STATUS_NAME
+def status_path(root: Path | None = None) -> Path:
+    return (root or cfg.install_dir()) / _STATUS_NAME
 
 
-def lock_path() -> Path:
-    return cfg.install_dir() / _LOCK_NAME
+def lock_path(root: Path | None = None) -> Path:
+    return (root or cfg.install_dir()) / _LOCK_NAME
 
 
 def _pid_alive(pid: int) -> bool:
@@ -471,9 +471,72 @@ def read_status(status: Path | None = None) -> dict:
     """Read the last stage status (empty dict if missing/unreadable)."""
     status = status or status_path()
     try:
-        return json.loads(status.read_text(encoding="utf-8"))
+        result = json.loads(status.read_text(encoding="utf-8"))
+        return result if isinstance(result, dict) else {}
     except Exception:
         return {}
+
+
+def acknowledge_applied(
+    prior: dict, plugin_dir: Path, runtime_root: Path, applied_fingerprint: str,
+    *, status: Path | None = None, lock: Path | None = None,
+) -> None:
+    """Reconcile only the consumed acquisition, under its existing writer lease."""
+    from . import reconcile
+
+    if (
+        not prior.get("stage_done") or not prior.get("plugin_changed")
+        or prior.get("skipped") or prior.get("runtime_apply_blocked")
+        or prior.get("acquisition_ok") is False
+        or prior.get("plugin_dir") != str(plugin_dir)
+        or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.install_dir())) != str(runtime_root)
+    ):
+        return
+    status, lock = status or status_path(runtime_root), lock or lock_path(runtime_root)
+    if not acquire_lock(lock):
+        return
+    try:
+        if read_status(status) != prior or fingerprint(plugin_dir) != applied_fingerprint:
+            return
+        payload_version = reconcile.payload_version(plugin_dir)
+        deployed_version = reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root)
+        if not payload_version or payload_version != deployed_version:
+            return
+        result = {
+            **prior, "plugin_changed": False, "venv_drift": False,
+            "payload_version": payload_version, "deployed_version": deployed_version,
+            "fingerprint": applied_fingerprint, "applied_ts": time.time(),
+        }
+        result.pop("plugin_changed_reason", None)
+        result.pop("prelaunch", None)
+        _write_status(status, result)
+    finally:
+        release_lock(lock)
+
+
+def _obsolete_available(st: dict) -> bool:
+    """Reject historical version evidence without acquiring or hashing payloads."""
+    from . import reconcile
+
+    if not st.get("payload_version") or not st.get("deployed_version"):
+        return False
+    try:
+        plugin_dir, _layout = discover_plugin_dir()
+        if plugin_dir is None or st.get("plugin_dir") != str(plugin_dir):
+            return False
+        _environment, root = reconcile.runtime_installer_environment(
+            "agent-worktrees", plugin_dir, base={},
+        )
+        if (st["runtime_root"] if "runtime_root" in st else str(cfg.install_dir())) != str(root):
+            return False
+        payload = reconcile.payload_version(plugin_dir)
+        deployed = reconcile.runtime_deployed_version("agent-worktrees", root=root)
+        return bool(
+            payload and payload == deployed
+            and (st["payload_version"] != payload or st["deployed_version"] != deployed)
+        )
+    except (OSError, ValueError):
+        return False
 
 
 def indicator_state(
@@ -502,6 +565,8 @@ def indicator_state(
     if not st or not st.get("stage_done"):
         return "idle"
     if st.get("skipped"):
+        return "idle"
+    if st.get("plugin_changed") and _obsolete_available(st):
         return "idle"
     return "available" if st.get("plugin_changed") else "current"
 

@@ -345,6 +345,36 @@ def test_staged_executor_reconstructs_argv_and_environment(tmp_path, monkeypatch
     assert json.loads(capsys.readouterr().out)["executed"][0]["returncode"] == 7
 
 
+@pytest.mark.parametrize("outcome", ["success", "failed", "blocked", "newer-stage"])
+def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys, outcome):
+    path, installer, status = _stage(tmp_path, monkeypatch)
+    root = launch.Path(status["runtime_root"])
+    root.mkdir()
+    (installer.parent.parent / "plugin.json").write_text('{"name":"agent-worktrees","version":"2"}')
+    monkeypatch.setattr(launch.update_stage, "lock_path", lambda *a: tmp_path / "lock")
+    monkeypatch.setattr(launch, "execution_diagnostic", lambda *a, **k: (
+        {"reason": "policy", "message": "blocked"} if outcome == "blocked" else None
+    ))
+
+    def install(*args, **kwargs):
+        if outcome == "failed":
+            return 7
+        (root / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+        if outcome == "newer-stage":
+            path.write_text(json.dumps({**status, "ts": 2}))
+        return 0
+
+    monkeypatch.setattr(launch.reconcile, "_run_plan_step", install)
+    digest = launch._staged_snapshot(path)[1]
+    assert launch._execute(_args(phase="staged", status=str(path), snapshot=digest)) == (
+        1 if outcome in {"failed", "blocked"} else 0
+    )
+    assert launch.update_stage.indicator_state(status=path) == (
+        "current" if outcome == "success" else "available"
+    )
+    capsys.readouterr()
+
+
 @pytest.mark.parametrize("denied", [False, True])
 def test_bootstrap_replans_and_retains_independent_services(tmp_path, monkeypatch, capsys, denied):
     updates = [

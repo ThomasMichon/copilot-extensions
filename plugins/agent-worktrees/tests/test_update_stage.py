@@ -900,3 +900,127 @@ def test_indicator_locked_skip_without_a_live_owner_is_idle(tmp_path: Path):
     status.write_text(json.dumps({"stage_done": True, "skipped": "locked",
                                   "plugin_changed": False}), encoding="utf-8")
     assert us.indicator_state(status=status, lock=tmp_path / "none.lock") == "idle"
+
+
+@pytest.fixture
+def applied_stage(tmp_path, monkeypatch):
+    from agent_worktrees import reconcile
+
+    payload, root = tmp_path / "payload", tmp_path / "runtime"
+    payload.mkdir()
+    root.mkdir()
+    (payload / "plugin.json").write_text(json.dumps({"name": "agent-worktrees", "version": "2"}))
+    (payload / "pyproject.toml").write_text('[project]\nversion = "2"\n')
+    (root / "deploy-manifest.json").write_text(json.dumps({"source": {"version": "2"}}))
+    status, lock = tmp_path / "status.json", tmp_path / "lock"
+    prior = dict(
+        stage_done=True, plugin_changed=True, venv_drift=True, ts=1,
+        payload_version="1.1", deployed_version="1",
+        plugin_dir=str(payload), runtime_root=str(root), fingerprint="old",
+    )
+    us._write_status(status, prior)
+    monkeypatch.setattr(us, "discover_plugin_dir", lambda: (payload, "marketplace"))
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a, **k: ({}, root))
+    monkeypatch.setattr(us, "lock_path", lambda *a: lock)
+    monkeypatch.setattr(us, "status_path", lambda *a: status)
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    return payload, root, status, lock, prior
+
+
+def test_applied_stage_publishes_current_without_another_acquisition(applied_stage, monkeypatch):
+    payload, root, status, lock, prior = applied_stage
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: pytest.fail("unexpected acquisition"))
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: pytest.fail("caller root must not replace selected root"))
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    result = us.read_status(status)
+    assert result["plugin_changed"] is False
+    assert result["venv_drift"] is False
+    assert result["payload_version"] == result["deployed_version"] == "2"
+    assert result["applied_ts"] > prior["ts"]
+    assert us.indicator_state(status=status, lock=lock) == "current"
+
+
+@pytest.mark.parametrize("change", ["newer-stage", "newer-payload", "live-stage", "blocked", "failed", "drift"])
+def test_acknowledgement_preserves_unconsumed_or_failed_evidence(applied_stage, change):
+    payload, root, status, lock, prior = applied_stage
+    before_fingerprint = us.fingerprint(payload)
+    if change == "newer-stage":
+        us._write_status(status, {**prior, "ts": 2, "fingerprint": "newer"})
+    elif change == "newer-payload":
+        (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"3"}')
+    elif change == "live-stage":
+        assert us.acquire_lock(lock)
+    elif change in {"blocked", "failed"}:
+        prior.update({"runtime_apply_blocked": "policy"} if change == "blocked" else {"acquisition_ok": False})
+        us._write_status(status, prior)
+    else:
+        (root / "deploy-manifest.json").write_text('{"source":{"version":"1"}}')
+    original = status.read_bytes()
+    try:
+        us.acknowledge_applied(prior, payload, root, before_fingerprint)
+        assert status.read_bytes() == original
+    finally:
+        if change == "live-stage":
+            us.release_lock(lock)
+
+
+def test_legacy_obsolete_indicator_is_read_only_and_preserves_pending_changes(applied_stage, monkeypatch):
+    payload, root, status, lock, prior = applied_stage
+    monkeypatch.setattr(us, "fingerprint", lambda p: pytest.fail("render must not hash source"))
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: pytest.fail("render must not acquire"))
+    before = status.read_bytes()
+    assert us.indicator_state() == "idle"
+    assert status.read_bytes() == before
+    us._write_status(status, {**prior, "payload_version": "2", "deployed_version": "2"})
+    assert us.indicator_state() == "available"  # Same-version source changes are still pending.
+    (root / "deploy-manifest.json").write_text('{"source":{"version":"1"}}')
+    assert us.indicator_state() == "available"
+    assert us.acquire_lock(lock)
+    try:
+        assert us.indicator_state() == "checking"
+        monkeypatch.setenv("WORKTREE_NO_UPDATE", "1")
+        assert us.indicator_state() == "paused"
+    finally:
+        us.release_lock(lock)
+
+
+def test_legacy_status_without_runtime_root_uses_only_the_default_installation(applied_stage, monkeypatch):
+    payload, root, status, lock, prior = applied_stage
+    prior.pop("runtime_root")
+    us._write_status(status, prior)
+    assert us.indicator_state() == "idle"
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root / "other-installation")
+    assert us.indicator_state() == "available"
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.read_status() == prior
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.indicator_state() == "current"
+
+
+def test_native_standalone_manager_reads_acknowledged_engine_status(applied_stage):
+    payload, root, status, lock, prior = applied_stage
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    manager_source = Path(__file__).resolve().parents[3] / "worktree-manager" / "src"
+    engine_program = (
+        f"import sys; sys.path[:]={sys.path!r}; "
+        "from pathlib import Path; from agent_worktrees import config; "
+        f"config.install_dir=lambda:Path({str(root)!r}); "
+        "from agent_worktrees.__main__ import main; raise SystemExit(main())"
+    )
+    manager_program = (
+        f"import sys; sys.path[:]=[{str(manager_source)!r}, *{sys.path!r}]; "
+        "from worktree_manager import engine_client; "
+        "from worktree_manager.production_picker import context, update_stage; "
+        f"engine_client.set_engine_command({[sys.executable, '-I', '-c', engine_program]!r}); "
+        "context.project=lambda: 'example'; print(update_stage.indicator_state())"
+    )
+    # Use the actual standalone consumer, JSON subprocess and engine CLI parser.
+    (root / "updater-status.json").write_bytes(status.read_bytes())
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", manager_program], cwd=root,
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "current"

@@ -1966,6 +1966,17 @@ unknown deployed version (no `deploy-manifest.json`) always re-deploys, so a
 stale runtime is never left behind. Pass `--force` to re-deploy every runtime
 unconditionally.
 
+Successful comprehensive and staged engine application reconciles the consumed
+`updater-status.json` record under the staging writer's existing lease. Publication
+requires the same saved record, unchanged applied payload fingerprint and matching
+payload/deployed versions; a concurrent stage or unsuccessful apply is not cleared.
+Prepared-source application does not acknowledge an unrelated marketplace stage.
+The standalone Picker also rejects historical availability when its recorded
+version pair no longer describes the now-equal local payload/deployment pair.
+That read-only fallback reports `idle`, not successful-update proof, and performs
+neither acquisition nor source hashing. Same-version pending changes, actual
+runtime drift, paused updates and live-checker precedence remain intact.
+
 ### Version-cutover reap and live-launcher protection
 
 For the installer handover's exact admission, lock, busy-oracle and rollback
