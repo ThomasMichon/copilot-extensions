@@ -345,7 +345,9 @@ def test_staged_executor_reconstructs_argv_and_environment(tmp_path, monkeypatch
     assert json.loads(capsys.readouterr().out)["executed"][0]["returncode"] == 7
 
 
-@pytest.mark.parametrize("outcome", ["success", "failed", "blocked", "newer-stage"])
+@pytest.mark.parametrize("outcome", [
+    "success", "failed", "blocked", "newer-stage", "status-write-failed", "status-lock-failed",
+])
 def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys, outcome):
     path, installer, status = _stage(tmp_path, monkeypatch)
     root = launch.Path(status["runtime_root"])
@@ -355,6 +357,16 @@ def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys,
     monkeypatch.setattr(launch, "execution_diagnostic", lambda *a, **k: (
         {"reason": "policy", "message": "blocked"} if outcome == "blocked" else None
     ))
+    publish = launch.update_stage._write_status
+
+    def write(target, data):
+        if outcome == "status-write-failed" and target == path:
+            raise OSError("status publication denied")
+        if outcome == "status-lock-failed" and target == tmp_path / "lock":
+            raise ValueError("lock metadata unavailable")
+        publish(target, data)
+
+    monkeypatch.setattr(launch.update_stage, "_write_status", write)
 
     def install(*args, **kwargs):
         if outcome == "failed":
@@ -372,7 +384,14 @@ def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys,
     assert launch.update_stage.indicator_state(status=path) == (
         "current" if outcome == "success" else "available"
     )
-    capsys.readouterr()
+    captured = capsys.readouterr()
+    if outcome.startswith("status-"):
+        assert "Update status acknowledgement unavailable:" in captured.err
+        assert json.loads(captured.out)["executed"][0]["ok"] is True
+        assert launch.update_stage.read_status(path) == status
+        monkeypatch.setattr(launch.update_stage, "_write_status", publish)
+        assert launch.update_stage.acquire_lock()
+        launch.update_stage.release_lock()
 
 
 @pytest.mark.parametrize("denied", [False, True])

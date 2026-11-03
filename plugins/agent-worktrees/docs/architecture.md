@@ -1984,9 +1984,10 @@ of the caller's selected cell; successful acknowledgement records that root.
 The staging status/lease pair is captured separately from the deployment target:
 an ordinary launch can stage in legacy state while applying to a namespaced cell.
 Both application paths retain that original writer lease rather than deriving
-its location from the target root. If staging state cannot be resolved, an
-explicit acknowledgement warning preserves it without blocking the independently
-validated runtime update.
+its location from the target root. If staging state cannot be resolved, or acknowledgement encounters a filesystem
+or metadata error, an explicit warning preserves the independent runtime result.
+The existing atomic writer and lease-release rules remain strict; no failed
+acknowledgement is reported as successful or retried automatically.
 
 ### Version-cutover reap and live-launcher protection
 

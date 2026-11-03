@@ -494,35 +494,38 @@ def acknowledge_applied(
     """Reconcile only the consumed acquisition, under its existing writer lease."""
     from . import reconcile
 
-    if (
-        not prior.get("stage_done") or not prior.get("plugin_changed")
-        or prior.get("skipped") or prior.get("runtime_apply_blocked")
-        or prior.get("acquisition_ok") is False
-        or prior.get("plugin_dir") != str(plugin_dir)
-        or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.legacy_install_dir())) != str(runtime_root)
-    ):
-        return
-    status, lock = status or status_path(), lock or lock_path()
-    if not acquire_lock(lock):
-        return
     try:
-        if read_status(status) != prior or fingerprint(plugin_dir) != applied_fingerprint:
+        if (
+            not prior.get("stage_done") or not prior.get("plugin_changed")
+            or prior.get("skipped") or prior.get("runtime_apply_blocked")
+            or prior.get("acquisition_ok") is False
+            or prior.get("plugin_dir") != str(plugin_dir)
+            or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.legacy_install_dir())) != str(runtime_root)
+        ):
             return
-        payload_version = reconcile.payload_version(plugin_dir)
-        deployed_version = reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root)
-        if not payload_version or payload_version != deployed_version:
+        status, lock = status or status_path(), lock or lock_path()
+        if not acquire_lock(lock):
             return
-        result = {
-            **prior, "plugin_changed": False, "venv_drift": False,
-            "payload_version": payload_version, "deployed_version": deployed_version,
-            "runtime_root": str(runtime_root),
-            "fingerprint": applied_fingerprint, "applied_ts": time.time(),
-        }
-        result.pop("plugin_changed_reason", None)
-        result.pop("prelaunch", None)
-        _write_status(status, result)
-    finally:
-        release_lock(lock)
+        try:
+            if read_status(status) != prior or fingerprint(plugin_dir) != applied_fingerprint:
+                return
+            payload_version = reconcile.payload_version(plugin_dir)
+            deployed_version = reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root)
+            if not payload_version or payload_version != deployed_version:
+                return
+            result = {
+                **prior, "plugin_changed": False, "venv_drift": False,
+                "payload_version": payload_version, "deployed_version": deployed_version,
+                "runtime_root": str(runtime_root),
+                "fingerprint": applied_fingerprint, "applied_ts": time.time(),
+            }
+            result.pop("plugin_changed_reason", None)
+            result.pop("prelaunch", None)
+            _write_status(status, result)
+        finally:
+            release_lock(lock)
+    except (OSError, ValueError) as error:
+        print(f"Update status acknowledgement unavailable: {error}", file=sys.stderr)
 
 
 def _obsolete_available(st: dict) -> bool:
