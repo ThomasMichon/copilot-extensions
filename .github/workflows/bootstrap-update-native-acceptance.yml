@@ -19,18 +19,14 @@ permissions:
   contents: read
 
 jobs:
-  bootstrap-update:
-    name: Whole bootstrap update (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  bootstrap-update-linux:
+    name: Whole bootstrap update (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    env:
+    env: &bootstrap-update-env
       UV_PYTHON: "3.12"
       QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-    steps:
+    steps: &bootstrap-update-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -48,3 +44,10 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers
+
+  bootstrap-update-windows:
+    name: Whole bootstrap update (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: *bootstrap-update-steps
