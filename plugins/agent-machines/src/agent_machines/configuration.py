@@ -6,6 +6,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+from agent_procutil.owned_process import run_caller_owned
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
 from configuration_context.runtime import deployed_runtime_python
 from configuration_layers import ConfigurationError, compose
@@ -29,7 +30,9 @@ def _legacy_report(root: Path) -> dict | None:
     path = own_root / "bin" / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")
     prefix = ready_owner_prefix(
         peer, "agent_worktrees",
-        resolver=lambda selected: deployed_runtime_python(selected, resolver=path, environment=environment),
+        resolver=lambda selected: deployed_runtime_python(
+            selected, resolver=path, environment=environment, runner=run_caller_owned,
+        ),
     )
     if not prefix:
         return None

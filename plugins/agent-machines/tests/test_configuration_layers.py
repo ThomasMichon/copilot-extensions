@@ -262,6 +262,49 @@ def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, 
     assert not (own / "scripts").exists()
 
 
+def test_legacy_resolver_timeout_retires_its_actual_descendant(tmp_path, monkeypatch):
+    import shlex
+    import subprocess
+    import sys
+    from pathlib import Path
+    from agent_procutil.owned_process import run_caller_owned
+
+    if sys.platform != "linux":
+        pytest.skip("Linux process-state witness; native Windows cleanup remains separately qualified")
+    home = tmp_path / "home"
+    own = home / ".agent-machines"
+    (own / "bin").mkdir(parents=True)
+    (home / ".agent-worktrees").mkdir()
+    child_record = tmp_path / "resolver-child.pid"
+    (own / "bin/resolve-runtime.sh").write_text(
+        "# Trace contract: normal/read-only/ready-v1\n"
+        f"/bin/sleep 60 &\nprintf '%s' \"$!\" > {shlex.quote(str(child_record))}\nwait\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
+        monkeypatch.delenv(key, raising=False)
+
+    def short_owned(argv, **kwargs):
+        assert kwargs["timeout"] == 15
+        return run_caller_owned(argv, **{**kwargs, "timeout": 0.5})
+
+    monkeypatch.setattr(configuration, "run_caller_owned", short_owned)
+    with pytest.raises(ConfigurationError, match="read failed") as failure:
+        configuration._legacy_report(tmp_path)
+    cause = failure.value
+    while cause.__cause__ is not None:
+        cause = cause.__cause__
+    assert isinstance(cause, subprocess.TimeoutExpired)
+    pid = int(child_record.read_text())
+    state_file = Path("/proc") / str(pid) / "stat"
+    if state_file.exists():
+        state = state_file.read_text().rsplit(")", 1)[1].split()[0]
+        assert state in {"Z", "X"}, f"resolver descendant {pid} survived timeout"
+    assert not (home / ".agent-worktrees/logs").exists()
+
+
 @pytest.mark.parametrize("implicit", [False, True])
 @pytest.mark.parametrize("matching_cell", [False, True])
 def test_real_collector_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):

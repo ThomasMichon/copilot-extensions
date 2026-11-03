@@ -6,17 +6,25 @@ import os
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol
 
 from configuration_layers import ConfigurationError
-
-from . import _ProcessOptions
 
 READ_ONLY_CONTRACT = b"# Trace contract: normal/read-only/ready-v1"
 MAX_RESOLVER_BYTES = 64 * 1024
 
 
+class RuntimeRunner(Protocol):
+    """Caller-supplied finite process-tree owner; no uncontained fallback."""
+
+    def __call__(
+        self, argv: list[str], *, env: dict[str, str], timeout: float,
+        max_stdout_bytes: int, max_stderr_bytes: int, binary: bool,
+    ) -> subprocess.CompletedProcess[bytes]: ...
+
+
 def deployed_runtime_python(
-    runtime_root: Path, *, resolver: Path, environment: Mapping[str, str],
+    runtime_root: Path, *, resolver: Path, environment: Mapping[str, str], runner: RuntimeRunner,
 ) -> Path | None:
     """Ask the explicit canonical shell resolver for a completed interpreter.
 
@@ -60,13 +68,11 @@ def deployed_runtime_python(
             '. "$1" || exit $?; printf %s "${AGENT_RT_PY:-}"',
             "configuration-runtime", str(resolver),
         ]
-    options: _ProcessOptions = (
-        {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
-    )
     try:
-        result = subprocess.run(
-            command, env=rebound, stdin=subprocess.DEVNULL,
-            capture_output=True, timeout=15, check=False, **options,
+        result = runner(
+            command, env=rebound, timeout=15,
+            max_stdout_bytes=MAX_RESOLVER_BYTES, max_stderr_bytes=MAX_RESOLVER_BYTES,
+            binary=True,
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ConfigurationError("configuration runtime resolver read failed") from error

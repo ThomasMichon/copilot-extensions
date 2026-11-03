@@ -193,7 +193,12 @@ and their sanitized peer environment. No undeployed Python helper, PATH binstub,
 runtime build or peer discovery is required.
 
 The transport requires the canonical resolver's declared read-only contract,
-invokes it with logging disabled and a 15-second deadline, and bounds its output.
+invokes it with logging disabled and a 15-second deadline, and bounds both output
+streams. Its required caller-supplied `RuntimeRunner` owns the whole transient
+process tree; there is no `subprocess.run` fallback. Machines and SSH pass their
+existing `agent_procutil.owned_process.run_caller_owned`, with binary capture,
+64-KiB stream limits and confirmed descendant cleanup on completion or failure.
+The configuration library itself remains dependency-free.
 Only the resolver chooses completed slots; the transport additionally confines
 its selected interpreter to the supplied root's physical `versions` directory,
 without dereferencing a legitimate POSIX interpreter symlink.
@@ -207,8 +212,9 @@ PowerShell child; POSIX sources the exact resolver with native argv.
 The focused runtime tests exercise actual deployed POSIX resolver bytes and
 completed/unready slots without log creation. Machines and SSH additionally
 exercise fresh owner-report reads, mismatches, refusal and cell-ownership
-controls. Static/native-command assertions do not constitute Windows execution
-or desktop-visibility qualification.
+controls. A real Linux timeout control confirms that a resolver's child is no
+longer live when qualification fails. Static/native-command assertions do not
+constitute Windows execution or desktop-visibility qualification.
 
 ### Composition packaging
 

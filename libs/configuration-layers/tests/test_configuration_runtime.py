@@ -40,7 +40,8 @@ def test_actual_deployed_resolver_is_completion_gated_and_read_only(tmp_path: Pa
             '{"version": "1.2.3", "completed_at": "2026-01-01", "pid": 0}', encoding="utf-8",
         )
     before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
-    assert runtime.deployed_runtime_python(root, resolver=resolver, environment={}) == (
+    runner = cast(runtime.RuntimeRunner, pytest.importorskip("agent_procutil.owned_process").run_caller_owned)
+    assert runtime.deployed_runtime_python(root, resolver=resolver, environment={}, runner=runner) == (
         python if complete else None
     )
     assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
@@ -48,16 +49,20 @@ def test_actual_deployed_resolver_is_completion_gated_and_read_only(tmp_path: Pa
 
 
 def test_absent_resolver_never_starts_anything(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("no resolver"))
-    assert runtime.deployed_runtime_python(tmp_path, resolver=tmp_path / "absent", environment={}) is None
+    assert runtime.deployed_runtime_python(
+        tmp_path, resolver=tmp_path / "absent", environment={},
+        runner=lambda *args, **kwargs: pytest.fail("no resolver"),
+    ) is None
 
 
 def test_undeclared_read_only_resolver_fails_before_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resolver = tmp_path / "resolver"
     resolver.write_text("echo unsafe", encoding="utf-8")
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("undeclared contract"))
     with pytest.raises(ConfigurationError, match="read-only contract"):
-        runtime.deployed_runtime_python(tmp_path, resolver=resolver, environment={})
+        runtime.deployed_runtime_python(
+            tmp_path, resolver=resolver, environment={},
+            runner=lambda *args, **kwargs: pytest.fail("undeclared contract"),
+        )
 
 
 @pytest.mark.parametrize(
@@ -68,9 +73,11 @@ def test_resolver_output_is_bounded_and_stays_in_qualified_slots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: bytes,
 ) -> None:
     root, resolver = deploy(tmp_path)
-    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, output, b""))
     with pytest.raises(ConfigurationError):
-        runtime.deployed_runtime_python(root, resolver=resolver, environment={"SystemRoot": str(tmp_path)})
+        runtime.deployed_runtime_python(
+            root, resolver=resolver, environment={"SystemRoot": str(tmp_path)},
+            runner=lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, output, b""),
+        )
 
 
 @pytest.mark.parametrize("failure", ["refusal", "timeout", "missing-host"])
@@ -86,9 +93,10 @@ def test_real_resolver_failure_is_not_optional_absence(
             raise FileNotFoundError("host unavailable")
         return subprocess.CompletedProcess(argv, 1, b"", b"refused")
 
-    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(ConfigurationError):
-        runtime.deployed_runtime_python(root, resolver=resolver, environment={"SystemRoot": str(tmp_path)})
+        runtime.deployed_runtime_python(
+            root, resolver=resolver, environment={"SystemRoot": str(tmp_path)}, runner=run,
+        )
 
 
 @pytest.mark.parametrize("windows", [False, True])
@@ -98,26 +106,26 @@ def test_native_command_has_explicit_read_only_routing(
 ) -> None:
     root, resolver = deploy(tmp_path)
     monkeypatch.setattr(runtime, "os", SimpleNamespace(name="nt" if windows else "posix"))
-    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     calls: list[tuple[list[str], dict[str, object]]] = []
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    monkeypatch.setattr(subprocess, "run", run)
     assert runtime.deployed_runtime_python(
         root, resolver=resolver, environment={system_root_key: str(tmp_path), "AGENT_RT_ROOT": "foreign"},
+        runner=run,
     ) is None
     argv, options = calls[0]
     assert options["timeout"] == 15
-    assert options["stdin"] == subprocess.DEVNULL
+    assert options["binary"] is True
+    assert options["max_stdout_bytes"] == 65536
+    assert options["max_stderr_bytes"] == 65536
     environment = cast(Mapping[str, str], options["env"])
     assert environment["AGENT_RT_ROOT"] == str(root)
     assert environment["AGENT_RT_RESOLVE_TRACE_MODE"] == "read-only"
     if windows:
         assert argv[0] == str(tmp_path / "System32/WindowsPowerShell/v1.0/powershell.exe")
-        assert options["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW")
         assert "-NonInteractive" in argv
         assert "-TraceMode read-only" in argv[-1]
         assert str(resolver) not in argv[-1]
