@@ -1282,7 +1282,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert monitor_exit.result(timeout=5) != 0
                     hook_thread.join(timeout=15)
                     assert not hook_thread.is_alive() and "error" in hook_result
-                    assert "bounded legacy takeover" in log.read_text(encoding="utf-8")
+                    assert "bounded legacy takeover" not in log.read_text(encoding="utf-8")
                     new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
                     assert new_lock["pid"] == successor.pid
                     health = ControlClient(successor.base_url, token=token.read_text().strip()).health()
@@ -1654,7 +1654,10 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
 def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_truthful(
     driver, tmp_path, monkeypatch, activation_fails, serving_slot,
 ):
-    from agent_worktrees import config as cfg, runtime_monitor_identity as monitor, status_monitor_cutover as cutover
+    from agent_worktrees import (
+        config as cfg, runtime_monitor_identity as monitor,
+        runtime_monitor_retirements as retirements, status_monitor_cutover as cutover,
+    )
 
     from types import SimpleNamespace
     from zdd import process_exit, routing
@@ -1692,17 +1695,17 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
     def unsupported(_root):
         raise monitor.AsyncRetirementUnsupported("legacy fixture", predecessor)
     def retire(requested, expected, *, guard):
-        assert requested == root and expected == predecessor
-        assert guard is not None and driver.runtime.current_version(root) == "1.0.0"
-        events.append("retired")
-        return {"pid": 202, "exit_confirmed": True, "forced": True}
+        pytest.fail("predecessor retired before successor startup")
     def activate(**kwargs):
-        assert events == ["retired"]
+        assert events == ["reserve"]
         assert driver.runtime.current_version(root) == "2.0.0"
-        assert kwargs["monitor_was_live"] is False
-        assert kwargs["retired_predecessor"] == predecessor[:2]
+        assert kwargs["monitor_was_live"] is True
+        assert "retired_predecessor" not in kwargs
         assert kwargs["asynchronous_retirement"] is True
-        assert kwargs["retirement_predecessor"] is None
+        assert kwargs["retirement_predecessor"] == {
+            "pid": predecessor[0], "start": predecessor[1], "slot": serving_slot,
+            "release_claim": claim,
+        }
         assert kwargs["cutover_guard"] is guard
         events.append("activation")
         return transition(**kwargs)
@@ -1727,7 +1730,7 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
     monkeypatch.setattr(cutover.locks, "read_lock", lambda path: {
         "pid": predecessor[0], "start_time": predecessor[1],
     })
-    monkeypatch.setattr(process_exit, "observe_original_exit", lambda *args: args == predecessor[:2])
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda *args: False)
     monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *a, **k: None)
     monkeypatch.setattr(routing, "read_active_endpoint", lambda *a, **k: routing.Endpoint(
         "127.0.0.1", 61001, predecessor[0], process_start_time=predecessor[1],
@@ -1741,6 +1744,9 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
         "activation" in events and not activation_fails
     ))
     monkeypatch.setattr(monitor, "retire_legacy", retire)
+    monkeypatch.setattr(monitor, "async_predecessor", lambda root, previous, **kwargs: (previous, {}))
+    monkeypatch.setattr(retirements, "reserve", lambda *a, **k: events.append("reserve") or True)
+    monkeypatch.setattr(retirements, "cancel", lambda *a, **k: events.append("cancel") or True)
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda directory: guard)
     monkeypatch.setattr(cutover, "activate_after_update", activate)
@@ -1754,6 +1760,6 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
         assert driver.runtime.current_version(root) == "1.0.0"
     else:
         result = driver.settle_candidate(root, "2.0.0", **kwargs)
-        assert result["runtime_version"] == "2.0.0" and result["retirement_pending"] is False
-        assert result["dev_claim_release_pending"] is False
-    assert events == ["retired", "activation", "released"]
+        assert result["runtime_version"] == "2.0.0" and result["retirement_pending"] is True
+        assert result["dev_claim_release_pending"] is (claim is not None)
+    assert events[:3] == ["reserve", "activation", "reserve"] and events[-1] == "released"

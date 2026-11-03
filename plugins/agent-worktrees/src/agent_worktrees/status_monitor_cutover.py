@@ -547,11 +547,9 @@ def _predecessor_health_check(host: str, port: int) -> bool:
 
 
 def _is_status_monitor_cmdline(cmdline: str) -> bool:
-    tokens = cmdline.split()
-    for index in range(len(tokens) - 2):
-        if tokens[index] == "-m" and tokens[index + 1] == "agent_worktrees":
-            return tokens[index + 2] == "status-monitor"
-    return False
+    from .runtime_monitor_identity import is_monitor_commandline
+
+    return is_monitor_commandline(cmdline)
 
 
 def _iter_status_monitor_pids() -> set[int]:
@@ -899,9 +897,8 @@ def activate_after_update(
             if not result.committed and not result.publication_uncertain:
                 retirements.cancel(smr._aw_runtime_home(), retirement_predecessor)
         if asynchronous_retirement:
-            result.retirement_pending = bool(
-                reserved and (result.committed or result.publication_uncertain) and not retirement_complete
-            )
+            published = result.committed or result.publication_uncertain
+            result.retirement_pending = bool(reserved and published and not retirement_complete)
         summary["action"] = "cutover"
         summary["result"] = result.to_dict()
     finally:

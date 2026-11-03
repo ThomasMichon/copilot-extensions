@@ -423,14 +423,17 @@ Ordinary updates and repair/force-install publish and start the incoming
 generation independently of the old version's existence, health or cooperation.
 Construction does not require uninstalling, deleting or unregistering the old
 runtime first. Current binstubs and applicable task registrations select the new
-generation. Prefer incoming startup followed by outgoing self-retirement where
-supported; brief overlap is expected. Graceful cutover is an optimization, not
-an update admission requirement. An incompatible, unavailable or non-settling
-predecessor follows bounded cold takeover through the existing lifecycle owner.
-That owner may force-terminate the exact identity-verified predecessor when
-necessary, including before incoming readiness when exclusive resources cannot
-safely overlap. Old-contract cooperation and an extra force/repair flag are not
-prerequisites.
+generation. The incoming owner starts first and attempts handoff with the outgoing
+owner. The predecessor recognizes both that announcement and its independently
+observable staleness. Once the new owner is ready and authoritative, the new
+installation declares completion without waiting for predecessor retirement.
+The predecessor then closes admission and attempts to drain. The new owner's
+existing lifecycle authority gives that drain a bounded grace period, then
+force-terminates only the exact identity-verified predecessor if it remains.
+Brief overlap is expected, without duplicate exclusive work ownership.
+Missing handoff support or failed drain does not veto the new installation or
+require another force/repair flag; interrupted work and unconfirmed cleanup
+remain explicit.
 The replacement owner releases only the outgoing owner's endpoint reservations.
 Predecessor cleanup failure never rolls back a healthy new generation;
 rollback is reserved for failure of the incoming generation itself to start.

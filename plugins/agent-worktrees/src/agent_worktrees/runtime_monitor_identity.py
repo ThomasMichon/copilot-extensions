@@ -19,6 +19,14 @@ class AsyncRetirementUnsupported(ValueError):
         self.identity = identity
 
 
+def is_monitor_commandline(cmdline: str) -> bool:
+    tokens = cmdline.split()
+    for index in range(len(tokens) - 2):
+        if tokens[index] == "-m" and tokens[index + 1] == "agent_worktrees":
+            return tokens[index + 2] == "status-monitor"
+    return False
+
+
 def _runtime_slot(root: Path, prefix: str | Path) -> Path:
     path = Path(prefix).resolve(strict=True)
     if path.name == ".venv" and path.parent.parent == (root / "versions").resolve():
