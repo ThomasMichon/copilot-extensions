@@ -61,6 +61,9 @@ def finish(root, record, endpoint, *, promote, ready) -> bool:
         raise ValueError("Asynchronous publication promotion remains pending")
     if not ready():
         return False
+    from . import runtime_monitor_grace
+
+    runtime_monitor_grace.arm(root, ready=ready)
     table = routing.read_table(directory, strict=True)
     raw = table.get("active") if isinstance(table, dict) else None
     if not isinstance(raw, dict) or routing.Endpoint.from_dict(raw) != endpoint:

@@ -5322,11 +5322,36 @@ guarded preparation recovery and a valid receiver generation. A compatible
 outgoing peer advertises those contracts and retires independently. Missing
 outgoing metadata, a legacy generation or a control timeout does not veto
 installation: native PID/birth and unchanged route custody still identify the
-predecessor. Only after the successor serves, the existing cutover owner
-attempts bounded identity-bound termination and releases that exact previous
-endpoint reservation. Failed cleanup remains explicit while the new generation
+predecessor. Before promotion, the new resident attempts one bounded
+`successor-handoff` notice carrying the exact old and selected successor endpoints.
+It uses the existing health seam to require the running peer's
+`status-monitor-successor-handoff-v1` capability; missing or malformed support
+skips only this optional notice. Health lookup and notice share five seconds,
+and a lost reply is not replayed under the same successor identity.
+The receiver checks both native identities and current routing; observation is
+not readiness, drain permission or an installation prerequisite. Independent
+ready-successor observation remains the old resident's drain trigger.
+Deferring failed outgoing cleanup requires the incoming preparation health's
+`status-monitor-retirement-grace-v1` capability. A newer controller restoring
+a retained pre-grace successor instead keeps the existing bounded native cleanup
+after verified successor publication; asynchronous retirement support alone
+does not promise a resident grace loop.
+Only after the successor serves, it arms a durable five-minute grace interval.
+The deadline is subordinate to the original committed retirement record and
+stored separately so legacy residents still read their existing custody schema.
+The installer returns without performing or waiting for grace-expiry cleanup.
+The existing selected resident reconciles expiry under the same cutover and
+route authority, checks its own serving readiness and the exact predecessor
+birth again, then attempts native termination and releases only that matching
+previous endpoint reservation. Failed cleanup remains explicit while the new generation
 stays authoritative; canonical runtime references and dev claims remain with
-the existing resident retirement reconciler until positive native exit.
+the existing retirement reconciler until positive native exit and matching
+grace-route cleanup. That canonical settlement gate applies to direct installer
+callers as well as the resident loop, including exit between reconciliation passes.
+If the predecessor exits before the first grace record is armed, the same gate
+compare-releases its exact fallback under the observed active selection before
+settling custody. A missing active selection or failed route cleanup retains
+custody for retry; no grace record or force permission is fabricated.
 An unrouted, identity-unknown or changed owner remains an explicit refusal.
 This fallback does not weaken the incoming runtime's preparation contract.
 The existing explicit cold-retirement helper retains its held cutover guard,
@@ -5435,8 +5460,11 @@ release its cold-start lease from native exit evidence only for a strictly
 newer retained generation. Accepted work and execution references stay held.
 Only positive native exit releases references, even when the old birth token
 remains readable. Outgoing retirement latches actual successor readiness and
-settles all accepted work without grace-forced exit, even if the successor later
-dies. Before that latch, cached reads remain admitted through the published
+attempts settlement of accepted work, even if the successor later dies. The
+selected successor's separate five-minute grace may force native exit before
+settlement completes; consumers retain interrupted/unknown outcomes rather than
+claiming a clean drain. A dead or unready successor cannot exercise this force
+authority. Before the readiness latch, cached reads remain admitted through the published
 predecessor while every new write is independently fenced by current route
 ownership. Losing writer authority during agenda roster refresh is a handoff,
 not a producer failure: cached rows, sequence and any earlier producer error

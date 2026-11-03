@@ -1,0 +1,9 @@
+{
+  "comment": "Add successor-originated monitor handoff and resident-owned bounded retirement grace without delaying installation or changing legacy custody records.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
