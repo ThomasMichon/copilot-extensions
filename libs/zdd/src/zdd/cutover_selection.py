@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .conditional import ConditionalCutover
+    from .conditional import PreparedCutover
     from .cutover import CutoverOrchestrator
     from .cutover_result import CutoverResult
     from .routing import Endpoint
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 def candidate_port(
     owner: CutoverOrchestrator, old: Endpoint | None,
-    conditional: ConditionalCutover | None, result: CutoverResult,
+    conditional: PreparedCutover | None, result: CutoverResult,
 ) -> int | None:
     port = owner.pick_free_port()
     if conditional and port == conditional.old.port:
