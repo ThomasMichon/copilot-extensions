@@ -69,6 +69,46 @@ def tree_bytes(root):
             for path in root.rglob("*") if path.is_file()}
 
 
+@pytest.mark.parametrize("failed_sink", [False, True])
+def test_inventory_progress_follows_verified_entries_before_sealing(tmp_path, monkeypatch, failed_sink):
+    slot = tmp_path / "versions" / "1.2.3"
+    payload = slot / "payload"
+    (payload / "references").mkdir(parents=True)
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.2.3"\n',
+        encoding="utf-8",
+    )
+    shutil.copyfile(SOURCE / "references" / "uninstall-contract.json",
+                    payload / "references" / "uninstall-contract.json")
+    checked, completed = [], []
+    original = removal._state
+
+    def inspect(path):
+        state = original(path)
+        checked.append(path)
+        return state
+
+    def progress():
+        completed.append(checked[-1])
+        assert not (slot / removal.INVENTORY).exists()
+        if failed_sink:
+            raise OSError("inventory progress failed")
+
+    monkeypatch.setattr(removal, "_state", inspect)
+    options = dict(frontdoors={}, provider={}, on_progress=progress)
+    if failed_sink:
+        with pytest.raises(OSError, match="inventory progress failed"):
+            removal.seal_inventory(slot, **options)
+        assert not (slot / removal.INVENTORY).exists()
+    else:
+        removal.seal_inventory(slot, **options)
+        assert completed == checked[1:]
+        record = json.loads((slot / removal.INVENTORY).read_text(encoding="utf-8"))
+        assert len(completed) == len(record["entries"])
+        assert record["entries"] == removal._tree(slot)
+    assert not (slot / removal.runtime.COMPLETE_MARKER).exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows legacy path-length behavior")
 def test_inventory_inspects_long_wheel_assets_without_system_long_paths(tmp_path, monkeypatch):
     slot = tmp_path / "versions" / ("source-" + "a" * 130)

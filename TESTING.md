@@ -5537,6 +5537,14 @@ their owning unit suites.
 
 Manager's cold canonical-adopter acceptance has an explicit native lane:
 
+The focused `tests/native/test_manager_runtime_install.py -k
+preparation_completed_units` packet separately connects the real Manager copy
+and inventory producers to the existing native installer child observer.
+Completed units keep productive work alive beyond the unchanged quiet
+allowance; silent work still expires, and failed diagnostic delivery cannot
+publish a completed payload. Source bytes remain unchanged. These are isolated
+producer/consumer controls, not a full bootstrap, live cutover or rollout.
+
 ```text
 python tools/run-manager-runtime-acceptance.py --root .validation
 ```

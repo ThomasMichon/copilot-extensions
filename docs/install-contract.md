@@ -2144,7 +2144,11 @@ force-cleared lock is introduced.
 Present targets refuse preview and apply when reliable process enumeration is
 unavailable (currently outside Windows and Linux `/proc`).
 
-Preview/absence do not provision or create lock files. Apply requires a base
+Preview/absence do not provision or create lock files. On Windows, a missing
+target is reported by a read-only observation after declaration, path and caller
+validation, before constructing the execution driver. A present target still
+requires queued execution ownership; absence never authorizes direct removal.
+Apply requires a base
 interpreter and installer outside the target, withdraws only owned artifacts,
 preserves durable/unknown state and reports partial failure as incomplete.
 It never retires application/mux processes or restores selectors into a partly
@@ -2276,6 +2280,14 @@ so a root exit cannot leave a pipe-holding descendant writing a late slot.
 Receipt validation and watchdog exit `124` still determine the actual outcome.
 This does not change a native self-stage parent's separate watchdog policy or
 legacy non-receipt subprocess adapters.
+
+Manager's installed preparation reports completed payload-copy and verified
+inventory entries on stderr through that same child observer. Each completed
+unit flushes a small progress byte, with periodic count summaries; a timer
+does not manufacture activity while a copy, read or hash is stalled.
+Failed diagnostic delivery aborts preparation without sealing or publishing
+the candidate. Inventory/path checks, atomic payload replacement, quiet
+allowances and independently absolute wheel deadlines are unchanged.
 
 The read-only Windows consumer census refreshes an incomplete current-user
 candidate at most once by PID and checks that its creation identity is unchanged.

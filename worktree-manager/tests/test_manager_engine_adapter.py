@@ -60,6 +60,34 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["expected_source_identity"] == {}
 
 
+def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(tmp_path, monkeypatch, capsys):
+    import worktree_manager
+    from worktree_manager import runtime_candidate
+
+    adapter = si._runtime_installer()
+    payload, root, _uv = _source(tmp_path)
+    manager = Path(__file__).resolve().parents[1]
+    (payload / "references").mkdir()
+    for name in ("uninstall-contract.json", "control-plane-provider.json"):
+        shutil.copyfile(manager / "references" / name, payload / "references" / name)
+    slot = root / "versions" / "1.2.3-dev1"
+    slot.mkdir(parents=True)
+    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(slot))
+    monkeypatch.setattr(
+        worktree_manager, "__file__", str(slot / "Lib" / "site-packages" / "worktree_manager" / "__init__.py"),
+    )
+    monkeypatch.setattr(si, "_runtime_installer", lambda: adapter)
+    runtime_candidate.prepare_runtime_candidate({"frozen_plugin": str(payload)})
+    output = capsys.readouterr()
+    assert not output.out
+    assert "phase=payload-copy completed-units=1" in output.err
+    assert "phase=inventory completed-units=1" in output.err
+    assert (slot / "payload" / ".install-complete").is_file()
+    assert (slot / ".manager-artifacts.json").is_file()
+    assert not (root / "current-version").exists()
+    assert not (slot / adapter.runtime.COMPLETE_MARKER).exists()
+
+
 def test_explicit_interpreter_is_forwarded_instead_of_reselected(tmp_path, monkeypatch):
     adapter = si._runtime_installer()
     payload, root, uv = _source(tmp_path)

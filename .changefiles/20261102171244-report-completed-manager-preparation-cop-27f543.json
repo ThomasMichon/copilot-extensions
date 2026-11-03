@@ -1,0 +1,9 @@
+{
+  "comment": "Report completed Manager preparation copies and inventory checks to inactivity supervision; observe absent removal targets before driver provisioning",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

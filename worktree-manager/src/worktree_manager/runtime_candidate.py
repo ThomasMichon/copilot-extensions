@@ -4,8 +4,28 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from importlib.metadata import distribution
 from pathlib import Path
+
+
+def _completed_progress(phase: str) -> Callable[[], None]:
+    units = 0
+
+    def completed() -> None:
+        nonlocal units
+        units += 1
+        if units == 1 or units % 128 == 0:
+            if units > 1:
+                print(file=sys.stderr)
+            print(
+                f"Manager preparation progress: phase={phase} completed-units={units}",
+                file=sys.stderr, flush=True,
+            )
+        else:
+            print(".", end="", file=sys.stderr, flush=True)
+
+    return completed
 
 
 def prepare_runtime_candidate(data: dict) -> None:
@@ -22,6 +42,7 @@ def prepare_runtime_candidate(data: dict) -> None:
         _copy_payload(
             source, slot / "payload",
             mark_complete=not (source / "runtime-source.json").exists(),
+            on_progress=_completed_progress("payload-copy"),
         )
     from .self_install import _expected_binstub_contents, _expected_control_plane_provider_manifest
     from .self_install import _runtime_installer
@@ -34,6 +55,7 @@ def prepare_runtime_candidate(data: dict) -> None:
             application_slot=slot if (slot / "application.json").is_file() else None,
         ),
         provider=_expected_control_plane_provider_manifest(root=slot.parent.parent),
+        on_progress=_completed_progress("inventory"),
     )
 
 
