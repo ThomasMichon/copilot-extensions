@@ -358,6 +358,12 @@ retains the operator's wording.
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #10266 release through normal promotion #10314:
+    Main `142a2a3c50f886a052136fa4aae5e10d6a0fb2f5`, admitted Dev
+    `18f110d637a2133ad5dd08610bf3ca789fd89115`, Worktrees 1.24.445-dev1.
+    Sixteen selected implementation/test/doc/workflow blobs match the reviewed
+    source; two shared-doc deltas are unrelated to the monitor contract.
+    Installed acceptance and the broader replacement target remain separate.
   - [x] Verify the containing #10148 release through normal promotion #10219:
     Main `50e353788ca085fd6ba3b97371c9be9ce1bd2301`, admitted Dev
     `8edcdf8b0dc9e30ea1f1488e8a0f77104564a9d6`, Worktrees 1.24.433-dev1
@@ -960,6 +966,18 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   conversation restoration, both installation cycles, standby/resume/end and
   final publication remain open. No installed update, repair release,
   interrupted-request replay or protected-process mutation occurred.
+- Normal promotion `41737809246` subsequently passed and generated #10314
+  merged Main `142a2a3c50f886a052136fa4aae5e10d6a0fb2f5`, admitting Dev
+  `18f110d637a2133ad5dd08610bf3ca789fd89115`. The #10266 Dev merge is an
+  ancestor of that admitted Dev snapshot; generated-Main ancestry was not
+  substituted for containment. Worktrees is 1.24.445-dev1, and its immutable
+  source release is published, non-draft, with 26 assets.
+- All sixteen selected monitor implementation, native fixture, test, workflow
+  and architecture/pattern blobs match the reviewed head exactly. The two
+  shared-doc differences describe independent unit-runner and Bridge/MCP
+  application work; monitor/grace contract text is preserved. This closes only
+  this component's normal containing-release subitem. Selected-host rollout
+  remains with its existing owner; no deployment or replay occurred.
 
 ### 2026-11-02 - Windows caller-cleanup prerequisite qualified
 
