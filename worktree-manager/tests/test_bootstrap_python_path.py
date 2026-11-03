@@ -6,6 +6,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -30,7 +31,13 @@ def test_update_python_path_prefers_the_physical_base_and_preserves_other_entrie
         pytest.skip(f"{host} unavailable")
     unrelated = str(tmp_path / "other tools")
     preferred = str(Path(sys._base_executable).resolve().parent)
-    inherited = f"{unrelated};{preferred.upper()}\\;{unrelated}\\secondary"
+    inherited = f"{unrelated};;{preferred.upper()}\\;{preferred};{unrelated}\\secondary"
+    helper = re.search(
+        r"^function Add-BootstrapPythonPath\b.*?^}",
+        (SOURCE.parent / "bootstrap.ps1").read_text(encoding="utf-8"),
+        re.M | re.S,
+    )
+    assert helper is not None
     program = (
         "import json,os,sys;"
         f"sys.path.insert(0,{str(SOURCE)!r});"
@@ -40,7 +47,10 @@ def test_update_python_path_prefers_the_physical_base_and_preserves_other_entrie
     )
     script = (
         "$ErrorActionPreference='Stop';\n"
-        f"$env:PATH={_literal(inherited)};\n"
+        + helper[0] + "\n"
+        f"if ((Add-BootstrapPythonPath '' {_literal(preferred)}) -cne {_literal(preferred)}) "
+        "{ throw 'An initially empty PATH gained an empty component' };\n"
+        f"$env:PATH=Add-BootstrapPythonPath {_literal(inherited)} {_literal(preferred)};\n"
         f"$details=(& {_literal(sys.executable)} -I -S -B -c {_literal(program)}) | ConvertFrom-Json;\n"
         "if ($LASTEXITCODE -ne 0) { throw 'Python completion failed' };\n"
         "$python=$details.python;$env:PATH=$details.path;\n"
@@ -60,5 +70,5 @@ def test_update_python_path_prefers_the_physical_base_and_preserves_other_entrie
     assert Path(details["python"]).samefile(sys._base_executable)
     assert Path(details["selected"]).samefile(sys._base_executable)
     assert details["path"].split(";") == [
-        preferred, unrelated, preferred.upper() + "\\", unrelated + "\\secondary",
+        preferred, unrelated, "", preferred.upper() + "\\", unrelated + "\\secondary",
     ]

@@ -193,8 +193,7 @@ function Find-SystemBootstrapPython {
         }
     }
     $directory = [IO.Path]::GetDirectoryName($python)
-    $remaining = @($env:PATH -split ';' | Where-Object { $_ -and $_ -ine $directory })
-    $env:PATH = (@($directory) + $remaining) -join ';'
+    $env:PATH = Add-BootstrapPythonPath $env:PATH $directory
     return $python
 }
 
@@ -202,7 +201,12 @@ function Add-BootstrapPythonPath([string]$Path, [string]$Directory) {
     if (-not [IO.Path]::IsPathRooted($Directory) -or $Directory -match '[;\x00-\x1f]') {
         throw 'Bootstrap Python directory cannot be represented safely on PATH.'
     }
-    $remaining = @($Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ine $Directory.TrimEnd('\') })
+    $remaining = @()
+    if ($Path) {
+        $remaining = @($Path -split ';' | Where-Object {
+            -not [string]::Equals($_, $Directory, [StringComparison]::Ordinal)
+        })
+    }
     return (@($Directory) + $remaining) -join ';'
 }
 
