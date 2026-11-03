@@ -168,6 +168,14 @@ python tools/run-plugin-tests.py ai-attribution
 ruff check --select F,E9 plugins/ai-attribution/tests
 ```
 
+Both Python helpers and the complete physical Python test portfolio are checked
+with strict MyPy on the declared Linux and Windows targets:
+`python tools/typecheck.py ai-attribution`. Prepare the checker explicitly with
+`--prepare` when needed. Validated profile/signature data has structured types;
+the resolver's heterogeneous intermediate slot data remains an explicit dynamic
+boundary. This check does not qualify embedded shell Python or change disclosure
+policy, native hook behavior or the helpers' Python 3.9+ runtime support.
+
 Contributions follow this repository's PR-required flow in
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md), including synchronized plugin and
 marketplace version changes. File defects and enhancement requests in the

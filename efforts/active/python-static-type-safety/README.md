@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Venue Copilot (#10166); its canonical source/test typing artifact is integrated and both analysis targets, native Linux, consumer contracts and exact-source units are qualified. Review, required CI and merge gates remain. Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** AI Attribution (#10171); the five-file Python helper/test artifact is integrated and strict targets, native Windows/Linux, minimum helper runtime and exact-source units are qualified. Review, required CI and merge remain. Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The #10166 slice owner's canonical Venue Copilot source/test artifact is integrated from its managed child. The lead retains integration, native Linux, consumer/copy, shared admission/coverage manifests, global documentation, the effort, publication and full completion judgment.
+- **Delegates:** The completed Venue Copilot source child is finalized. The #10171 source artifact is integrated from its managed child. The lead retains integration, native Linux, consumer/copy, shared admission/coverage manifests, global documentation, the effort, publication and full completion judgment.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -158,6 +158,7 @@ rewrite.
 - [x] Strictly admit all canonical Machine Transport source/test modules with its declared YAML checker environment (#10107).
 - [x] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
 - [x] Strictly admit all canonical Plugin Resolve source/test/installer-fixture modules (#10141).
+- [x] Strictly admit all canonical Venue Copilot source/test modules (#10166).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -170,6 +171,7 @@ rewrite.
 
 ### Phase 5 - Tests, tools and bootstrap
 
+- [ ] Strictly admit AI Attribution's complete five-file Python helper/test portfolio (#10171), preserving shell emission and signature/disclosure behavior.
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
 - [ ] Admit tests in bounded package/fixture-family PRs, typing fixtures, doubles and monkeypatch interfaces without weakening assertions.
 - [ ] Admit installer/bootstrap, hooks, payload-only Python, `.devcontainer`, effort-hosted executable helpers and every remaining inventory path.
@@ -2161,3 +2163,74 @@ composition prerequisites, and review/validation rules.
   inventory. All three consumer cohorts pass again with the same counts after
   dependency synchronization. The additional file is independently pending;
   the tracker's previous merged snapshot is not retroactively changed.
+
+### 2026-11-02 - Venue Copilot merged; both metrics refreshed
+
+- #10170 merged as `d7b1490dce01f3163a3146a057a13f149206a0eb`
+  after Copilot approval on exact head
+  `f42bd167d9dfa05b4eb51157d2d8d1b1625a2133`, zero open review threads and
+  green required
+  [CI run 41580528367](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41580528367)
+  and
+  [lockdown run 41580528248](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41580528248).
+  #10166 is closed; #9807 remains open. Managed campaign synchronization and
+  completed-child synchronization/finalization passed; no useful artifact was
+  discarded and no runtime rollout occurred.
+- The current merged inventory/tracker records **30 / 68 strict projects
+  (44.1%)** and **262 / 7,665 physical Python files (3.4%)**. Thirty-eight
+  projects remain pending, with no basic scopes. New independently pending
+  Procutil, Bridge, Worktrees, Efforts and Manager files are included in their
+  rows and area totals. Passing consumer tests does not admit their projects.
+- #10171 owns the next complete AI Attribution Python helper/test slice:
+  five physical files and 141 initial Linux strict diagnostics. No matching
+  open typing issue or PR exists. Disclosure/signature precedence, shell
+  invocation and every existing policy assertion must remain unchanged;
+  fragment/embedded-Python qualification remains an independent campaign gate.
+- Versioned Runtime's 510-diagnostic, 22-file baseline is retained for later
+  component-sized preparation PRs, not a single rewrite. Payload Invocation
+  remains pending behind contributor PR #10002 rather than being superseded.
+  This Plan and Validation Plan remain active; completing one library is not
+  completion of the all-Python campaign.
+
+### 2026-11-02 - AI Attribution helper and native qualification prepared
+
+- #10171's complete five-file Python helper/test artifact is integrated. The
+  normal local checker passes all five files strictly on both declared targets,
+  and all 31 provisionally activated projects pass both targets against the
+  7,665-file inventory. The initial Linux strict delta was 141 diagnostics.
+  The merged-only tracker remains at 30 projects and 262 files until review,
+  required CI and merge admit this scope.
+- Validated profiles, rules, input probes and resolved signatures have structured
+  types. The heterogeneous slot-selection intermediate remains an explicit
+  dynamic boundary; identity casts and equivalent literal-key bindings preserve
+  behavior. Parent review and independent AST comparison retain all 169 function
+  names, 380 assertions and 30 parametrizations. Disclosure/signature precedence,
+  malformed-input refusal, output bytes, native flags and policy remain unchanged.
+- Native Windows contained validation passes 187 tests with 13 skips in its
+  default run, then five explicit-tier tests with two skips. Combined coverage is
+  192 passing cases and eight platform/tool skips, not a single 192-test run.
+  Tier selection enables the original native CLI, cache and profile-budget
+  controls without admitting effects into the release packet. Both runs retain
+  the 300-second contained wall limit.
+- Fresh native Python 3.10.21 Linux validation in the hardened, read-only,
+  network-disconnected container enables the original explicit-tier controls:
+  193 tests pass, with six PowerShell-only skips. The Python 3.9.25 helper smoke
+  imports both helpers, validates/resolves/decorates a profile and verifies
+  invalid-session refusal without creating a state directory. This preserves
+  the documented minimum helper runtime. Exact owned container and volume
+  cleanup is verified.
+- Ruff `F,E9`, install-contract, documentation consistency and changefile
+  coverage pass. The changefile names the payload-only plugin; no version or
+  dependency declaration is changed. Missing worker-side `pytest-timeout`
+  preparation used the canonical seasoned adapter rather than weakening its
+  contained test deadline.
+- The current original packet retains 3,811 nodes, 520 input hashes, 213 coverage
+  targets and its 300-second deadline. This slice changes no packet-bound
+  input or eligibility; exact-source execution passes all 3,811 nodes in
+  280.063 seconds with no observed effects and one coverage recording.
+  Independent packet verification confirms outcomes and source/manifest/coverage
+  byte bindings. Scoped module-size conformity also passes.
+  Embedded shell Python remains an independently open qualification gate.
+  Native helper/CLI/hook tests are the simple integration lane; clean-room
+  installation and live external venue operation are not applicable to this
+  annotation-only change, which installs or deploys no service.

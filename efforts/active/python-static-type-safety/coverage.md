@@ -8,18 +8,19 @@ not a second checker configuration.
 ## Snapshot and counting rules
 
 Snapshot: **2026-11-02**, merged Dev policy
-`c0efcffd3e1e66f73ca6b8a82473d0b3071d98ed`, reconciled with
+`d7b1490dce01f3163a3146a057a13f149206a0eb`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
-- **29 / 68 checker projects (42.6%)** have merged strict admission.
-- **250 / 7,644 physical Python files (3.3%)** belong to those strict scopes.
-- **39 projects remain pending; none are basic.**
-- All 7,644 tracked physical Python paths are classified. Classification,
+- **30 / 68 checker projects (44.1%)** have merged strict admission.
+- **262 / 7,665 physical Python files (3.4%)** belong to those strict scopes.
+- **38 projects remain pending; none are basic.**
+- All 7,665 tracked physical Python paths are classified. Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
-- Plugin Resolve's 23 files are included after #10165 merged with exact-head
-  approval and required CI. Venue Copilot's #10166 source slice is reserved,
-  but its qualification and admission gates remain open.
+- Venue Copilot's 12 files are included after #10170 merged with exact-head
+  approval, required CI, native qualification and all three consumer contracts.
+  Newly added files in independently pending projects are reflected in their
+  rows rather than being credited by this library admission.
 
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
@@ -29,11 +30,11 @@ owned files; the manifest remains authoritative for their exact boundaries.
 
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
-| Shared libraries | 37 | 28 | 712 | 246 |
-| Plugins | 20 | 0 | 5,370 | 0 |
-| Services and managers | 7 | 0 | 916 | 0 |
+| Shared libraries | 37 | 29 | 713 | 258 |
+| Plugins | 20 | 0 | 5,384 | 0 |
+| Services and managers | 7 | 0 | 922 | 0 |
 | Tools and support | 4 | 1 | 646 | 4 |
-| **Total** | **68** | **29** | **7,644** | **250** |
+| **Total** | **68** | **30** | **7,665** | **262** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -47,7 +48,7 @@ Admission decisions and validation details are retained in the
 
 | Project | Python files | Merged gate | Admission record or remaining work |
 |---------|-------------:|-------------|------------------------------------|
-| `lib-agent-procutil` | 133 | Pending | Production, native API and fixture cohorts; preserve existing SDK owners |
+| `lib-agent-procutil` | 134 | Pending | Production, native API and fixture cohorts; preserve existing SDK owners |
 | `lib-bootstrap-killswitch` | 3 | **Locked** | #9964 |
 | `lib-config-migrate` | 6 | **Locked** | #9924; declared YAML/stub environment |
 | `lib-configuration-layers` | 6 | **Locked** | #10021; deployed-resolution follow-up #10132 |
@@ -78,7 +79,7 @@ Admission decisions and validation details are retained in the
 | `lib-ssh-manager` | 52 | Pending | Transport/native boundaries and complete fixtures |
 | `lib-update-driver` | 99 | Pending | Driver, installer/bootstrap and test cohorts |
 | `lib-update-telemetry` | 8 | **Locked** | #10043; owning consumer tests remain separately pending |
-| `lib-venue-copilot` | 12 | Pending | #10166: canonical source/test slice reserved; complete venue/runtime qualification and admission remain |
+| `lib-venue-copilot` | 12 | **Locked** | #10166 / merged #10170; both targets, native Windows/Linux and three consumer contracts |
 | `lib-versioned-runtime` | 22 | Pending | Runtime, construction/retention and fixture cohorts |
 | `lib-work-coalescing-singleton` | 8 | **Locked** | #10039 |
 | `lib-worktree-identity` | 1 | **Locked** | Foundation source admission; canonical journal |
@@ -98,7 +99,7 @@ cross-cutting qualification gate below.
 
 | Project | Python files | Merged gate | Remaining work |
 |---------|-------------:|-------------|----------------|
-| `agent-bridge` | 860 | Pending | Component-sized source, native boundary, fixture and copy cohorts |
+| `agent-bridge` | 866 | Pending | Component-sized source, native boundary, fixture and copy cohorts |
 | `agent-codespaces` | 278 | Pending | Runtime, venue/install helpers, fixtures and copies |
 | `agent-conduct-guidance` | 36 | Pending | Scripts, tests and owned copies |
 | `agent-containers` | 194 | Pending | Runtime, providers/install helpers, fixtures and copies |
@@ -110,13 +111,13 @@ cross-cutting qualification gate below.
 | `agent-pull-requests` | 209 | Pending | Provider/runtime contracts, scripts, fixtures and copies |
 | `agent-ssh` | 157 | Pending | Transport/configuration, native helpers, fixtures and copies |
 | `agent-vault` | 166 | Pending | Secret/runtime boundaries, native fixtures and copies |
-| `agent-worktrees` | 1,399 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
+| `agent-worktrees` | 1,403 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
 | `ai-attribution` | 5 | Pending | Complete helper/test admission |
 | `budget-guidance` | 86 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
 | `context-handoff` | 6 | Pending | Complete Python helper/test admission |
 | `copilot-extensions-harness` | 17 | Pending | Complete Python helper/test admission |
 | `customizing-copilot` | 95 | Pending | Authoring/review/projection scripts, fixtures and shipped copies |
-| `efforts` | 24 | Pending | Policy/capture/lifecycle helpers and tests |
+| `efforts` | 28 | Pending | Policy/capture/lifecycle helpers and tests |
 | `harness-knowledge` | 9 | Pending | Binding/overlay helpers and tests |
 
 ## Services and managers
@@ -129,7 +130,7 @@ cross-cutting qualification gate below.
 | `service-index` | 27 | Pending | Service/backend/storage boundaries and tests |
 | `service-pr` | 9 | Pending | Provider/service boundaries and tests |
 | `service-ssh` | 26 | Pending | Transport/service/native boundaries and tests |
-| `worktree-manager` | 602 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
+| `worktree-manager` | 608 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
 
 ## Tools and support
 
