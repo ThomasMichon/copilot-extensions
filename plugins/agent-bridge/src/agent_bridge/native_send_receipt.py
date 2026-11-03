@@ -112,7 +112,7 @@ def observe(
         result = read(
             "POST",
             f"/api/v1/sessions/{quote(session_id, safe='')}/turns/native-bound/send/receipt",
-            request.model_dump(mode="json"),
+            request.model_dump(mode="json", exclude=set() if no_resume else {"no_resume"}),
         )
     except BridgeClientError as exc:
         code = exc.detail.get("code") if isinstance(exc.detail, dict) else None

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import workspace_creation_cli
-from .client_protocol_floor import connection_refused, protocol_floored_request
+from .client_protocol_floor import connection_refused, hold_protocol_floor as _hold_protocol_floor
 
 _connection_refused = connection_refused
 
@@ -68,21 +68,6 @@ def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
         )
         sys.exit(2)
     return None
-
-
-def _hold_protocol_floor(client: Any, floor: int) -> None:
-    """Keep ``--min-daemon-protocol`` true for every request attempt.
-
-    The preflight checks only the daemon it first reached; an older daemon can
-    restart at the same URL (or a connection failure can move the client to a
-    replacement) before a later request. So each attempt -- the first and every
-    retry, which this takes over from the client (bounded by its own outage
-    grace) -- first probes the daemon that will receive it, and one below the
-    floor gets a 426, never the request. An unanswered probe is retried, never
-    skipped. The probe-to-request window left is milliseconds; closing it fully
-    needs the daemon itself to refuse, which an older daemon can't do.
-    """
-    client._request = protocol_floored_request(client, floor)
 
 
 def _companion_seed_prompt(prompt: str | None) -> str | None:
