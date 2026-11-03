@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,9 +22,32 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def test_suite_child_resolves_caller_directory_after_bootstrap_staging(tmp_path, monkeypatch):
+    from worktree_manager import engine_client
+
+    caller = tmp_path / "caller"
+    staging = tmp_path / "staging"
+    caller.mkdir()
+    staging.mkdir()
+    monkeypatch.chdir(staging)
+    environment = {**os.environ, "AGENT_WORKTREES_UPDATE_CONTEXT": str(caller)}
+    command = [
+        sys.executable, "-I", "-B", "-c",
+        "import pathlib,sys; assert pathlib.Path.cwd()==pathlib.Path(sys.argv[1]); "
+        "assert sys.argv[2:]==['update','--no-manager']; raise SystemExit(23)",
+        str(caller),
+    ]
+    assert engine_client.run_engine_passthrough(
+        None, ["update", "--no-manager"], engine_command=command,
+        environment=environment, headless=True, timeout=15,
+    ) == 23
+    assert Path.cwd() == staging
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows native driver admission")
-def test_unowned_internal_repair_refuses_before_construction(repair_case):
+def test_unowned_internal_repair_refuses_before_construction(repair_case, monkeypatch):
     case = repair_case
+    monkeypatch.setattr("update_driver.participant_environment", lambda: {})
     (case.runtime / "bin").mkdir()
     assert case.update.repair_engine(case.source) != 0
     assert not case.effect.exists()
@@ -116,8 +140,9 @@ def test_successful_automatic_repair_keeps_cell_for_real_suite_resolution(
     ])) == 5
     assert len(calls) == 1
     command, options = calls[0]
-    assert command == [
-        str(selected[0]), *agent_plugin_runtime.python_cache_args(selected[0].parents[3]),
+    assert command[:2] == [str(selected[0]), "-X"]
+    assert command[2].startswith("pycache_prefix=")
+    assert command[3:] == [
         "-m", "agent_worktrees",
         "--project", "sample", "update", "--no-manager", "--force",
     ]
@@ -169,11 +194,10 @@ def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
     assert case.run_manager_request(
         lambda: manager._cmd_update(["--repair-engine", str(case.source)]),
     ) == 0
-    assert calls[0][0] == [
-        str(selected[0]), *engine_client.agent_plugin_runtime.python_cache_args(
-            selected[0].parents[3],
-        ), "-m", "agent_worktrees", "update", "--no-manager",
-    ]
+    command = calls[0][0]
+    assert command[:2] == [str(selected[0]), "-X"]
+    assert command[2].startswith("pycache_prefix=")
+    assert command[3:] == ["-m", "agent_worktrees", "update", "--no-manager"]
     assert "COPILOT_EXTENSIONS_CONTEXT" not in calls[0][1]["env"]
     assert not case.effect.exists()
 

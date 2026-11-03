@@ -617,6 +617,16 @@ def validate_registration(kind: str, spec: dict) -> None:
     if not isinstance(spec, dict):
         raise RegistrationError("registration 'spec' must be a JSON object")
 
+    if "pool_definition" in spec:
+        from .pool_instances import PoolDefinitionError, PoolInstanceDefinition
+
+        if kind != RegistrationKind.SUPERVISED_LANE:
+            raise RegistrationError("only supervised worker lanes accept 'pool_definition'")
+        try:
+            PoolInstanceDefinition.from_dict(spec["pool_definition"])
+        except PoolDefinitionError as exc:
+            raise RegistrationError(str(exc)) from exc
+
     if kind == RegistrationKind.SUPERVISED_LANE:
         if "restricted_worker" in spec:
             from .restricted_spawn import validate_lane

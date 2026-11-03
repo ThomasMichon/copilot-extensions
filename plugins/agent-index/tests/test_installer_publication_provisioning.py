@@ -21,7 +21,8 @@ def stage_index_policy_sources(repository: Path, *, materialized: bool) -> Path:
     payload = repository / "plugins/agent-index"
     for relative in (
         "plugin.json", "pyproject.toml",
-        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py", "scripts/installer_retained_content.py",
+        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py",
+        "scripts/installer_dependency_arguments.py", "scripts/installer_retained_content.py",
     ):
         destination = payload / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +78,10 @@ def engine_construction_fixture(tmp_path):
     """Keep acquisition fixtures attached to the canonical construction protocol."""
     for source in (REPO / "libs/versioned-runtime").glob("versioned_runtime*.py"):
         shutil.copy2(source, tmp_path / source.name)
-    for name in ("installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py"):
+    for name in (
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_dependency_arguments.py", "installer_retained_content.py",
+    ):
         shutil.copy2(PLUGIN / "scripts" / name, tmp_path / name)
     return f"""
 function Get-BootstrapPython {{ '{sys._base_executable}' }}
@@ -379,4 +383,8 @@ if (@(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count) {{ thr
         target = call.split("--python ", 1)[1].split(" ", 1)[0]
         assert any(f"--python {target}" in probe for probe in settings_calls)
     assert all(call == "--version" or "--show-settings" in call for call in uv_calls)
-    assert "dependency-seasoning: UV seasoning configuration probe failed" in result.stdout
+    refusal = (
+        "Native Windows UV lookup failed" if os.name == "nt"
+        else "UV seasoning configuration probe failed"
+    )
+    assert f"dependency-seasoning: {refusal}" in result.stdout

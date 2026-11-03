@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from collections.abc import Callable
+from typing import NoReturn
 
 import pytest
 
@@ -17,11 +19,11 @@ from machine_transport.transport import (
 )
 
 
-def _loader(entries):
+def _loader(entries: dict[str, MachineEntry]) -> Callable[[], dict[str, MachineEntry]]:
     return lambda: entries
 
 
-def test_logical_profile_transport_never_selects_another_platform():
+def test_logical_profile_transport_never_selects_another_platform() -> None:
     entries = normalize_machine_entries(parse_machines_yaml({"machines": {
         "desktop": {"ssh": {"environments": [
             {"name": "wsl", "alias": "guest-route"},
@@ -41,7 +43,7 @@ def test_logical_profile_transport_never_selects_another_platform():
     ).local
 
 
-def test_explicit_logical_transport_refuses_multiple_profiles():
+def test_explicit_logical_transport_refuses_multiple_profiles() -> None:
     entry = MachineEntry(
         "guest", "Guest", execution_platform="wsl",
         ssh_environments=[SSHEnvironment("wsl", "one"), SSHEnvironment("wsl", "two")],
@@ -56,7 +58,7 @@ def test_explicit_logical_transport_refuses_multiple_profiles():
     ("Linux", "6.6", "Example", "linux"),
     ("Linux", "6.6", "", "linux"),
 ])
-def test_local_platform_detection_is_owner_only(monkeypatch, system, release, distro, expected):
+def test_local_platform_detection_is_owner_only(monkeypatch: pytest.MonkeyPatch, system: str, release: str, distro: str, expected: str) -> None:
     monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
     monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release), raising=False)
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
@@ -68,23 +70,23 @@ def test_local_platform_detection_is_owner_only(monkeypatch, system, release, di
 
 
 class TestDefaultShellForEnvName:
-    def test_uses_configured_shell_when_set(self):
+    def test_uses_configured_shell_when_set(self) -> None:
         assert default_shell_for_env_name("windows", "pwsh-preview") == "pwsh-preview"
 
-    def test_defaults_windows_to_pwsh(self):
+    def test_defaults_windows_to_pwsh(self) -> None:
         assert default_shell_for_env_name("windows", "") == "pwsh"
 
-    def test_defaults_other_envs_to_bash(self):
+    def test_defaults_other_envs_to_bash(self) -> None:
         assert default_shell_for_env_name("linux", "") == "bash"
         assert default_shell_for_env_name("wsl", "") == "bash"
 
 
 class TestResolveSshTarget:
-    def test_no_ssh_environments_falls_back_to_key(self):
+    def test_no_ssh_environments_falls_back_to_key(self) -> None:
         entry = MachineEntry(key="borealis", display_name="Borealis")
         assert resolve_ssh_target(entry) == ("borealis", "")
 
-    def test_defaults_shell_from_environment_name(self):
+    def test_defaults_shell_from_environment_name(self) -> None:
         posix_entry = MachineEntry(
             key="borealis", display_name="Borealis", environment="Ubuntu",
             ssh_environments=[SSHEnvironment(name="linux", alias="borealis")],
@@ -97,7 +99,7 @@ class TestResolveSshTarget:
         )
         assert resolve_ssh_target(windows_entry) == ("atlas-core", "pwsh")
 
-    def test_prefers_windows_environment_when_entry_is_windows(self):
+    def test_prefers_windows_environment_when_entry_is_windows(self) -> None:
         entry = MachineEntry(
             key="atlas-core", display_name="Atlas", environment="Windows 11",
             ssh_environments=[
@@ -107,7 +109,7 @@ class TestResolveSshTarget:
         )
         assert resolve_ssh_target(entry) == ("atlas-core", "pwsh")
 
-    def test_prefers_first_posix_environment_in_declaration_order(self):
+    def test_prefers_first_posix_environment_in_declaration_order(self) -> None:
         """The loop matches ``name in ("linux", "wsl")`` and returns the
         FIRST one found in declaration order -- it does not itself prefer
         linux over wsl or vice versa."""
@@ -120,14 +122,14 @@ class TestResolveSshTarget:
         )
         assert resolve_ssh_target(entry) == ("borealis-wsl", "bash")
 
-    def test_falls_back_to_first_environment_when_no_preference_matches(self):
+    def test_falls_back_to_first_environment_when_no_preference_matches(self) -> None:
         entry = MachineEntry(
             key="box-a", display_name="A", environment="",
             ssh_environments=[SSHEnvironment(name="exotic", alias="box-a-exotic")],
         )
         assert resolve_ssh_target(entry) == ("box-a-exotic", "bash")
 
-    def test_honors_explicit_shell_override(self):
+    def test_honors_explicit_shell_override(self) -> None:
         entry = MachineEntry(
             key="box-a", display_name="A", environment="Windows 11",
             ssh_environments=[
@@ -138,35 +140,35 @@ class TestResolveSshTarget:
 
 
 class TestWrapRemoteCommand:
-    def test_wraps_posix_shells(self):
+    def test_wraps_posix_shells(self) -> None:
         assert wrap_remote_command("bash", "example-command") == "bash -lc example-command"
         assert wrap_remote_command("sh", "example-command") == "sh -lc example-command"
         assert wrap_remote_command("zsh", "example-command") == "zsh -lc example-command"
 
-    def test_quotes_the_inner_command(self):
+    def test_quotes_the_inner_command(self) -> None:
         wrapped = wrap_remote_command("bash", "example-command list --json")
         assert wrapped == "bash -lc 'example-command list --json'"
 
-    def test_never_wraps_pwsh_or_unrecognized_shell(self):
+    def test_never_wraps_pwsh_or_unrecognized_shell(self) -> None:
         assert wrap_remote_command("pwsh", "example-command") == "example-command"
         assert wrap_remote_command("", "example-command") == "example-command"
         assert wrap_remote_command("cmd", "example-command") == "example-command"
 
 
 class TestGetMachineTransport:
-    def test_local_machine_returns_local_plan(self):
+    def test_local_machine_returns_local_plan(self) -> None:
         plan = get_machine_transport(
             "aurora-cloud2", config_machine="aurora-cloud2", load_entries=_loader({}),
         )
         assert plan == TransportPlan(local=True, resolved=True, machine_key="aurora-cloud2")
 
-    def test_local_plan_wrap_is_a_no_op(self):
+    def test_local_plan_wrap_is_a_no_op(self) -> None:
         plan = get_machine_transport(
             "aurora-cloud2", config_machine="aurora-cloud2", load_entries=_loader({}),
         )
         assert plan.wrap("agent-worktrees --version") == "agent-worktrees --version"
 
-    def test_remote_machine_resolves_ssh_alias_and_shell(self):
+    def test_remote_machine_resolves_ssh_alias_and_shell(self) -> None:
         entries = {
             "borealis": MachineEntry(
                 key="borealis", display_name="Borealis", environment="Ubuntu",
@@ -182,7 +184,7 @@ class TestGetMachineTransport:
         assert plan.ssh_alias == "borealis"
         assert plan.shell == "bash"
 
-    def test_remote_plan_wrap_applies_posix_login_shell(self):
+    def test_remote_plan_wrap_applies_posix_login_shell(self) -> None:
         entries = {
             "borealis": MachineEntry(
                 key="borealis", display_name="Borealis", environment="Ubuntu",
@@ -194,7 +196,7 @@ class TestGetMachineTransport:
         )
         assert plan.wrap("example-command") == "bash -lc example-command"
 
-    def test_remote_windows_plan_wrap_passes_through_untouched(self):
+    def test_remote_windows_plan_wrap_passes_through_untouched(self) -> None:
         entries = {
             "atlas-core": MachineEntry(
                 key="atlas-core", display_name="Atlas", environment="Windows 11",
@@ -206,13 +208,13 @@ class TestGetMachineTransport:
         )
         assert plan.wrap("example-command") == "example-command"
 
-    def test_unknown_machine_is_unresolved(self):
+    def test_unknown_machine_is_unresolved(self) -> None:
         plan = get_machine_transport(
             "nonexistent-box", config_machine="aurora-cloud2", load_entries=_loader({}),
         )
         assert plan == TransportPlan(local=False, resolved=False)
 
-    def test_alias_less_remote_environment_resolves_without_an_ssh_alias(self):
+    def test_alias_less_remote_environment_resolves_without_an_ssh_alias(self) -> None:
         entries = {
             "box-a": MachineEntry(
                 key="box-a", display_name="A", environment="Windows 11",
@@ -226,7 +228,7 @@ class TestGetMachineTransport:
         assert plan.local is False
         assert plan.ssh_alias is None  # caller must check before dispatching
 
-    def test_remote_entry_with_no_ssh_environments_exposes_neither_alias_nor_shell(self):
+    def test_remote_entry_with_no_ssh_environments_exposes_neither_alias_nor_shell(self) -> None:
         """``resolve_ssh_target``'s own "no SSH environments at all"
         fallback returns ``(entry.key, "")`` -- ``entry.key`` is a
         placeholder identity, never a real SSH alias. A caller that checks
@@ -244,8 +246,8 @@ class TestGetMachineTransport:
         assert plan.ssh_alias is None
         assert plan.shell is None
 
-    def test_registry_load_failure_degrades_to_unresolved(self):
-        def _boom():
+    def test_registry_load_failure_degrades_to_unresolved(self) -> None:
+        def _boom() -> NoReturn:
             raise FileNotFoundError("no registry")
 
         plan = get_machine_transport(
@@ -253,11 +255,11 @@ class TestGetMachineTransport:
         )
         assert plan == TransportPlan(local=False, resolved=False)
 
-    def test_direct_match_never_calls_load_entries(self):
+    def test_direct_match_never_calls_load_entries(self) -> None:
         """The fast, common path (``name`` spelled exactly like
         ``config_machine``) must stay registry-free, matching
         ``is_local_machine``'s own degrade-safe ordering."""
-        def _boom():
+        def _boom() -> NoReturn:
             raise AssertionError("load_entries must not be called")
 
         plan = get_machine_transport(
@@ -265,7 +267,7 @@ class TestGetMachineTransport:
         )
         assert plan == TransportPlan(local=True, resolved=True, machine_key="aurora-cloud2")
 
-    def test_load_entries_is_called_at_most_once_per_resolution(self):
+    def test_load_entries_is_called_at_most_once_per_resolution(self) -> None:
         """Regression: a naive implementation called ``load_entries`` once
         inside the identity check and again for the entry/alias resolution
         -- two separate snapshots that could disagree (e.g. a live registry
@@ -273,7 +275,7 @@ class TestGetMachineTransport:
         resolution must observe the exact same single snapshot."""
         calls = []
 
-        def _counting_loader():
+        def _counting_loader() -> dict[str, MachineEntry]:
             calls.append(1)
             return {
                 "box-a": MachineEntry(
@@ -291,7 +293,7 @@ class TestGetMachineTransport:
         assert plan.local is True
         assert len(calls) == 1
 
-    def test_registry_backed_local_match_uses_the_resolved_entry_key(self):
+    def test_registry_backed_local_match_uses_the_resolved_entry_key(self) -> None:
         """A caller passing the registry ALIAS while ``config_machine`` is
         the KEY (or vice versa) must report the matched entry's own
         canonical ``key`` as ``machine_key`` -- not the raw, possibly
@@ -305,14 +307,14 @@ class TestGetMachineTransport:
         assert plan.local is True
         assert plan.machine_key == "box-a"
 
-    def test_cached_load_failure_is_observed_consistently_and_only_once(self):
+    def test_cached_load_failure_is_observed_consistently_and_only_once(self) -> None:
         """A registry load failure must also be cached -- not re-attempted a
         second time for the entry-resolution step -- and both the identity
         check and the entry lookup must observe the same "unavailable"
         outcome."""
         calls = []
 
-        def _boom():
+        def _boom() -> NoReturn:
             calls.append(1)
             raise ValueError("malformed machines.yaml")
 

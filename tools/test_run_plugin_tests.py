@@ -802,6 +802,8 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
         "test_manager_engine_source.py", "test_launch_retention_native.py",
         "test_manager_source_update.py", "test_launch_history_sweep_native.py",
         "test_launch_history_cli_native.py", "test_manager_source_install.py",
+        "test_pane_boundary_posix.py", "test_pane_boundary_native.py",
+        "test_manager_suite_replacement.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
@@ -1485,6 +1487,7 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
 
 
 def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, tmp_path):
+    driver = str(runner.REPO / "libs" / "update-driver")
     monkeypatch.setattr(runner, "REPO", tmp_path)
     assert runner._plugin_dir("worktree-manager") == tmp_path / "worktree-manager"
     assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
@@ -1493,7 +1496,9 @@ def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, 
     assert runner._plugin_dir("repository-policy") == tmp_path / "libs" / "repository-policy"
     assert runner._plugin_dir("agent-procutil") == tmp_path / "libs" / "agent-procutil"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["repository-policy"] == ("pyyaml>=6.0.3",)
-    assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
+    assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == (
+        "pyyaml>=6.0.3", "-e", driver,
+    )
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)
 
 

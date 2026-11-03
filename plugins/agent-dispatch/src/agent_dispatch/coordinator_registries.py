@@ -128,6 +128,13 @@ def register_registry_routes(
 
     # -- supervisor registrations --------------------------------------------
 
+    @app.post("/registrations/pool-definition")
+    def register_pool_registration(request: Request, body: RegistrationBody) -> dict:
+        """Version-1 lossless direct definition; old providers have no write route."""
+        if body.kind != RegistrationKind.SUPERVISED_LANE or "pool_definition" not in body.spec:
+            raise HTTPException(status_code=400, detail="a supervised lane pool definition is required")
+        return register_registration(request, body)
+
     @app.post("/registrations")
     def register_registration(request: Request, body: RegistrationBody) -> dict:
         """Register (or upsert) a supervision unit; return its handle. 400 on a

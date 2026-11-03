@@ -96,7 +96,9 @@ def publish(owner, record, entries, digest, batch_id, expected_cursor, delivery_
                 ) from error
             raise
         try:
-            return owner.snapshot(selected)[0]
+            result = owner.snapshot(selected)[0]
+            owner._authority()
+            return result
         except (OSError, sqlite3.Error) as error:
             # The update and intent resolution already committed; this is a read error.
             raise intents.reply_failed(error, admitted=token is not None) from error

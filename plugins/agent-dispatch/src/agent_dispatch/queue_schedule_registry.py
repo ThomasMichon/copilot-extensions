@@ -187,6 +187,17 @@ class ScheduleRegistrationMixin:
             validate_registration(kind, spec)
         except RegistrationError as exc:
             raise TaskError(str(exc)) from exc
+        if "pool_definition" in spec:
+            from .pool_instances import PoolDefinitionError, PoolInstanceDefinition
+
+            if not reg_id:
+                raise TaskError("a direct pool definition requires an explicit registration id")
+            try:
+                PoolInstanceDefinition.from_registration({
+                    "id": rid, "kind": kind, "spec": spec, "machine": machine, "env": env,
+                })
+            except PoolDefinitionError as exc:
+                raise TaskError(str(exc)) from exc
         ts = self._now(now)
         try:
             spec_json = json.dumps(spec)

@@ -1,6 +1,7 @@
 """Ownership admission precedes native runtime writes and activation."""
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -26,12 +27,13 @@ def _lifecycle(fixture: dict):
     return _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
 
 
-def test_lifecycle_loads_single_file_procutil(tmp_path: Path) -> None:
-    helper = tmp_path / "libs/agent-procutil/src/agent_procutil/__init__.py"
-    helper.parent.mkdir(parents=True)
-    shutil.copyfile(ROOT / "libs/agent-procutil/src/agent_procutil/__init__.py", helper)
+def test_lifecycle_loads_retained_procutil_package(tmp_path: Path) -> None:
+    helper = tmp_path / "libs/agent-procutil/src/agent_procutil"
+    shutil.copytree(ROOT / "libs/agent-procutil/src/agent_procutil", helper)
     lifecycle = _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
     procutil = lifecycle._procutil(tmp_path)
+    accounting = importlib.import_module(f"{procutil.__name__}._windows_job_types")
+    assert Path(accounting.__file__).parent == helper
     with pytest.raises(procutil.SyncProcessLaunchError) as raised:
         procutil.spawn_sync_in_kill_on_close_job([str(tmp_path / "missing-executable")])
     assert isinstance(raised.value, FileNotFoundError)
@@ -79,9 +81,8 @@ def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict, bud
 def test_command_binding_deadline_stops_tree_before_releasing_admission(
     binding_fixture: dict, parent_exits: bool,
 ) -> None:
-    helper = binding_fixture["payload"] / "libs/agent-procutil/src/agent_procutil/__init__.py"
-    helper.parent.mkdir(parents=True)
-    shutil.copyfile(ROOT / "libs/agent-procutil/src/agent_procutil/__init__.py", helper)
+    helper = binding_fixture["payload"] / "libs/agent-procutil/src/agent_procutil"
+    shutil.copytree(ROOT / "libs/agent-procutil/src/agent_procutil", helper)
     lifecycle = binding_fixture["binding"]._load_lifecycle()
     marker = binding_fixture["home"] / "child.json"
     worker = (
@@ -982,15 +983,15 @@ def test_refusal_snapshot_excludes_bytecode_but_retains_product_bytes(
 
 def _real_installer(fixture: dict, shell: str, location: str) -> tuple[Path, dict[str, str]]:
     _prepare_catalog(fixture)
-    _materialize_native_payload(fixture)
     payload = fixture["payload"]
     suffix = "sh" if shell == "bash" else "ps1"
-    installer = payload / f"scripts/install.{suffix}"
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
+    execution_payload = payload
     if location == "local-copy":
-        copied_payload = fixture["home"] / "local-payload"
-        shutil.copytree(payload, copied_payload)
-        installer = copied_payload / f"scripts/install.{suffix}"
+        execution_payload = fixture["home"] / "local-payload"
+        shutil.copytree(payload, execution_payload)
+    _materialize_native_payload({**fixture, "payload": execution_payload})
+    installer = execution_payload / f"scripts/install.{suffix}"
     environment = {
         **_catalog_environment(fixture),
         "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",

@@ -1,11 +1,18 @@
 """Opt-in legacy parser policies must not alter existing consumers."""
 
 import pytest
+from typing import TypedDict
 
 from machine_transport import AmbiguousMachineError, MachineEntry, find_machine_entry, parse_machines_yaml
 
 
-def test_raw_parser_defaults_and_bridge_policy_are_independent():
+class ParserPolicy(TypedDict, total=False):
+    default_ssh_shell: str
+    default_ssh_alias_to_key: bool
+    keep_unnamed_environments: bool
+
+
+def test_raw_parser_defaults_and_bridge_policy_are_independent() -> None:
     raw = {"machines": {"box": {"ssh": {"environments": [
         {}, {"name": "linux", "port": 2200, "user": "dev"},
         {"name": "wsl", "alias": "", "shell": ""},
@@ -28,7 +35,7 @@ def test_raw_parser_defaults_and_bridge_policy_are_independent():
         parse_machines_yaml({"machines": []})
 
 
-def test_strict_matching_is_opt_in_and_exact_keys_keep_precedence():
+def test_strict_matching_is_opt_in_and_exact_keys_keep_precedence() -> None:
     first = MachineEntry("first", "First", alias="same")
     second = MachineEntry("second", "Second", alias="SAME")
     entries = {"first": first, "second": second}
@@ -45,7 +52,7 @@ def test_strict_matching_is_opt_in_and_exact_keys_keep_precedence():
     {"default_ssh_alias_to_key": True},
     {"keep_unnamed_environments": True},
 ])
-def test_missing_value_policies_preserve_unrelated_normalization(policy):
+def test_missing_value_policies_preserve_unrelated_normalization(policy: ParserPolicy) -> None:
     raw = {"machines": {"box": {"ssh": {"environments": [
         {"name": " linux ", "alias": " host ", "shell": " zsh "},
         {"name": 123, "alias": 456, "shell": 789},

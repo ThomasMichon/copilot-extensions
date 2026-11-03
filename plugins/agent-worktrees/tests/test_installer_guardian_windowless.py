@@ -8,6 +8,7 @@ the procutil desktop observer; no daemon escape/survival contract is involved.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
@@ -84,8 +85,8 @@ try:
     s = importlib.util.spec_from_file_location("guardian", spec["guardian"])
     guardian = importlib.util.module_from_spec(s)
     s.loader.exec_module(guardian)
-    pu = guardian._load_resource("parent_procutil", spec["procutil"])
-    runtime = guardian._load_resource("parent_runtime", spec["runtime"])
+    pu = _load("parent_procutil", spec["procutil"])
+    runtime = _load("parent_runtime", spec["runtime"])
     runtime_root = root / "runtime"
     runtime_root.mkdir()
     slot = runtime.slot(runtime_root, "probe")
@@ -140,6 +141,13 @@ def _load(name: str, path: Path):
     return module
 
 
+def _parent_source():
+    return (
+        "from __future__ import annotations\n"
+        + inspect.getsource(_load) + textwrap.dedent(_PARENT)
+    )
+
+
 @pytest.mark.parametrize("failure", ["timeout", "cancel"])
 def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp_path, failure):
     repo = Path(__file__).resolve().parents[3]
@@ -158,11 +166,11 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
         repo / "libs" / "installer-engine" / "installer_engine_process.py",
     )
     runtime_path = repo / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("windowless_guardian_runtime", runtime_path)
+    runtime = _load("windowless_guardian_runtime", runtime_path)
     child = tmp_path / "console-child.py"
     child.write_text(textwrap.dedent(_CHILD), encoding="utf-8")
     parent = tmp_path / "windowless-parent.py"
-    parent.write_text(textwrap.dedent(_PARENT), encoding="utf-8")
+    parent.write_text(_parent_source(), encoding="utf-8")
     spec = {
         "root": str(tmp_path),
         "guardian": guardian.__file__,

@@ -123,6 +123,37 @@ def test_dev_claim_is_released_only_after_the_original_resident_exits(retained):
     assert not retirements.pending_slot(root, "dev")
 
 
+@pytest.mark.parametrize("restored", ["current", "dev-" + "b" * 64])
+def test_hashed_dev_release_retains_exact_claim_until_native_exit(retained, restored):
+    root, runtime, identities, alive = retained
+    generation = "dev-" + "a" * 64
+    owner = "generation-owner"
+    runtime.claim_dev(root, owner, previous_version=restored)
+    for version in (generation, restored):
+        if not (root / "versions" / version).exists():
+            (root / "versions" / version).mkdir()
+            runtime.mark_complete(root, version, payload_hash=version, dev_owner=owner)
+    runtime.activate(root, generation, link_free=True, dev_owner=owner)
+    claim = runtime.read_dev_claim(root, strict=True)
+    retirements.reserve(
+        root, {"pid": 101, "start": "1001", "slot": generation, "release_claim": claim},
+        runtime=runtime, committed=True,
+    )
+    runtime.activate(root, restored, link_free=True, dev_owner=owner)
+    selected_claim = runtime.read_dev_claim(root, strict=True)
+    assert retirements.pending_claim(root, selected_claim)
+    assert retirements.reconcile(root, runtime=runtime)
+    assert runtime.read_dev_claim(root, strict=True) == selected_claim
+    assert runtime._leases.read_runtime_references(root)
+    identities.pop(101)
+    alive.remove(101)
+    assert not retirements.reconcile(root, runtime=runtime)
+    assert runtime.read_dev_claim(root, strict=True) is None
+    assert runtime.current_version(root) == restored
+    assert not runtime._leases.read_runtime_references(root)
+    assert not retirements.pending_slot(root, generation)
+
+
 @pytest.mark.parametrize("same_owner", [False, True])
 def test_changed_dev_claim_is_not_silently_released(retained, same_owner):
     root, runtime, identities, alive = retained

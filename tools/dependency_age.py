@@ -496,7 +496,32 @@ def python_release_eligible(files: object, now: datetime) -> bool:
     )
 
 
-def check_python(req: Requirement, metadata: dict, now: datetime) -> None:
+def _reviewed_prerelease_pin(
+    declaration: Declaration, req: Requirement, declarations: list[Declaration], root: Path,
+) -> Version | None:
+    if (
+        declaration.path.relative_to(root).as_posix() != "tools/typecheck-otlp-requirements.txt"
+        or declaration.section != "requirements"
+        or canonicalize_name(req.name) != "opentelemetry-semantic-conventions"
+        or str(req.specifier) != "==0.66b1" or req.extras or req.marker is not None
+    ):
+        return None
+    for candidate in declarations:
+        if candidate.path != declaration.path or candidate.section != "requirements":
+            continue
+        parent = Requirement(candidate.requirement)
+        if (
+            canonicalize_name(parent.name) == "opentelemetry-sdk"
+            and str(parent.specifier) == "==1.45.1" and not parent.extras
+            and parent.marker is None
+        ):
+            return Version("0.66b1")
+    return None
+
+
+def check_python(
+    req: Requirement, metadata: dict, now: datetime, *, reviewed_pin: Version | None = None,
+) -> None:
     """Check literal floors/pins plus satisfiability using standard PEP 440."""
     releases = metadata.get("releases")
     if not isinstance(releases, dict):
@@ -507,7 +532,9 @@ def check_python(req: Requirement, metadata: dict, now: datetime) -> None:
             version = Version(raw)
         except InvalidVersion:
             continue
-        if not (version.is_prerelease or version.is_devrelease or version.local):
+        if version == reviewed_pin or not (
+            version.is_prerelease or version.is_devrelease or version.local
+        ):
             versions.setdefault(version, []).extend(files if isinstance(files, list) else [{}])
     for spec in req.specifier:
         if spec.operator in {">=", ">", "~=", "==", "==="}:
@@ -691,7 +718,10 @@ def audit(root: Path, *, fetch=fetch_release_metadata, now: datetime | None = No
             if isinstance(cache[url], DeclarationError):
                 raise cache[url]
             if declaration.ecosystem == "python":
-                check_python(req, cache[url], now)
+                check_python(
+                    req, cache[url], now,
+                    reviewed_pin=_reviewed_prerelease_pin(declaration, req, declarations, root),
+                )
             else:
                 check_npm(spec, cache[url], now, semver)
         except (ValueError, TypeError) as exc:

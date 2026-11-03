@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .diagnostic_logs import DiagnosticLog, location
+from .diagnostic_logs import CustodyFactory, DiagnosticLog, Event, TimestampDecoder, location, utc_now
 
 
-def milliseconds_timestamp(event: dict) -> datetime:
+def milliseconds_timestamp(event: Event) -> datetime:
     value = event["ts"]
     if type(value) not in (int, float):
         raise ValueError("retained producer ts must be epoch milliseconds")
@@ -20,9 +21,11 @@ def milliseconds_timestamp(event: dict) -> datetime:
 class RetainedSpool:
     """Callable sink in a separate, owner-preprovisioned ``retained`` directory."""
 
-    def __init__(self, directory: Path, component: str, *, service: str, custody,
-                 timestamp_decoder=milliseconds_timestamp, clock=None):
-        options = {"clock": clock} if clock is not None else {}
+    def __init__(
+        self, directory: Path, component: str, *, service: str, custody: CustodyFactory,
+        timestamp_decoder: TimestampDecoder = milliseconds_timestamp,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.store = DiagnosticLog(
             component, Path(directory).expanduser() / "retained",
             service=service, custody=custody, create_parent=False,
@@ -31,10 +34,10 @@ class RetainedSpool:
             encoder=lambda event: (
                 json.dumps(event, separators=(",", ":"), default=str) + "\n"
             ).encode("utf-8"),
-            **options,
+            clock=clock if clock is not None else utc_now,
         )
 
-    def __call__(self, event: dict) -> None:
+    def __call__(self, event: Event) -> None:
         try:
             record = dict(event)
             record.setdefault("ts", int(time.time() * 1000))
@@ -45,5 +48,5 @@ class RetainedSpool:
     def maintain(self, *, force: bool = False) -> None:
         self.store.maintain(force=force)
 
-    def inventory(self) -> dict:
+    def inventory(self) -> dict[str, object]:
         return location(self.store.directory, self.store.component, self.store.service)

@@ -163,7 +163,7 @@ def main() -> int:
             sources={name: development[name] for name in set(origins.values())},
             candidate_sources={name: candidate[name] for name in origins}, origins=origins,
         )
-        raw["development_projection"] = project_coverage(raw, mapping)
+        project_coverage(raw, mapping)
         raw["development_mapping"] = mapping
         coverage_path.write_text(
             json.dumps(raw, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8",

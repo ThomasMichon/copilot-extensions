@@ -8,8 +8,8 @@ The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resource
 Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
-Context, Installer Readiness, Lazy CLI Dispatch,
-Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
+Context, Installer Readiness, Lazy CLI Dispatch, Machine Transport,
+Peer Launch, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
 Instance Lease, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
 source/test projects.
@@ -39,7 +39,11 @@ python tools/typecheck.py lib-fleet-index-adapter lib-fleet-vault-adapter
 python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-installer-readiness
 python tools/typecheck.py lib-lazy-cli-dispatch
+python tools/typecheck.py lib-machine-transport --prepare
+python tools/typecheck.py lib-machine-transport
 python tools/typecheck.py lib-peer-launch
+python tools/typecheck.py lib-process-telemetry --prepare
+python tools/typecheck.py lib-process-telemetry
 python tools/typecheck.py lib-repository-policy
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
@@ -125,6 +129,26 @@ descriptor-close fixtures retain narrow deliberate casts. Kernel-lock ownership,
 process identity, fork handling and release behavior are unchanged. The shipped
 Customizing Copilot copy is synchronized, but copies and consumer projects remain
 independently pending until their complete scopes are qualified.
+
+Process Telemetry checks all seventeen canonical source/test files strictly on
+both declared targets. Its separate `tools/typecheck-otlp-requirements.txt` flat
+hash lock retains the base checker pins and adds the library's declared optional
+OTLP SDK/protobuf dependencies under the same seven-day seasoning policy.
+The base package remains dependency-free; SDK imports remain optional at runtime.
+Callable, custody and exporter protocols expose concrete collaborator contracts,
+while validated JSON events retain explicit dynamic values. Native append/sync,
+fail-open callbacks, no-SDK refusal and diagnostic-only delivery semantics remain
+unchanged. Bridge, Dispatch and Worktree Manager remain independently pending
+consumer projects.
+
+Machine Transport checks all nineteen canonical source/test files strictly on
+both declared targets using the existing YAML checker lock. Branch-local names
+distinguish legacy repository declarations and execution-space selections;
+registry tuples and optional observed hostnames retain explicit types. Positive
+test helpers require a selected entry before attribute access, while absent and
+refusal cases still exercise the original APIs. Parsing, alias precedence,
+transport defaults and platform detection are unchanged. Its five release
+consumers remain independently pending checker projects.
 
 Dropin Registry uses the base checker environment and checks all six canonical
 source/test files strictly on both declared targets. Its native FIFO test skips

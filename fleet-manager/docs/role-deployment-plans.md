@@ -116,6 +116,13 @@ Compose contents or claim Core accepted it. Existing artifact/configuration
 owners and the selected manager adapter still supply the actual deployment.
 The explicit module CLI registers only this bundled provider.
 
+An application may separately opt into the
+[single-role workload SDK](komodo-workload.md) through
+`KomodoRoleProvider.execution_binding`. That execution owner authenticates
+current Server/Stack custody and exact content-bound admission before fixed
+Core APIs. This is explicit code composition, not a projection flag or an
+activation path in the planner.
+
 ## Bootstrap is a requirement, not a fabricated receipt
 
 Each selected manager retains its explicit `bootstrap_ref` and target, with
@@ -170,7 +177,9 @@ blocked valid proposal, and 1 means invalid input or unavailable file evidence.
 Library diagnostics omit supplied values; standard argparse syntax diagnostics
 may include arguments. Never put credentials in CLI arguments or input files.
 
-Actual installed Core/Gateway control, artifact construction/activation,
-provider credentials, manager mutation, runtime readiness and production
-adoption remain open. This compiler closes a configuration/pluggability seam,
-not those lifecycle or parent-effort gates.
+The separate workload SDK supplies bounded Core API execution and authenticated
+readback, not installer or production qualification. Actual installed
+Core/Gateway integration, artifact construction/transfer, credential-owner
+composition, runtime qualification and production adoption remain open.
+This compiler closes a configuration/pluggability seam, not those lifecycle
+or parent-effort gates.

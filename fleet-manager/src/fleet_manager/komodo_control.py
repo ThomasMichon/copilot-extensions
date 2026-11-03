@@ -86,3 +86,43 @@ def gateway_binding(owner: KomodoOwner, slot: ServiceSlot, *,
             owner.admission.discard(permit)
 
     return LocalHandlerBinding(slot, handle)
+
+
+def workload_binding(owner, slot: ServiceSlot, *,
+                     role: str, installation: str) -> LocalHandlerBinding:
+    """Opt-in role-provider consumer; original Gateway caller reaches exact admission."""
+    from .gateway_local_handler import LocalHandlerBinding, settled
+    from .gateway_service_handler import ServiceResponse
+    from .komodo_workload import KomodoWorkloadOwner
+
+    if type(owner) is not KomodoWorkloadOwner:
+        raise PlanError("Komodo workload execution contract is unavailable")
+    identifier(role, "Komodo workload caller role")
+    identifier(installation, "Komodo workload caller installation")
+
+    async def handle(local: LocalServiceRequest) -> ServiceResponse:
+        request = local.request
+        if request.method != "POST" or request.target != "/converge":
+            return ServiceResponse(404)
+        try:
+            intent = OperationIntent(request.body)
+            if intent.to_dict()["command"] != "manager.converge":
+                raise PlanError("unsupported Komodo workload operation")
+        except PlanError:
+            return ServiceResponse(400)
+        try:
+            permit = local.authorize_operation(
+                intent, owner.admission, authority=owner.authority, role=role, installation=installation)
+        except AdmissionError as error:
+            return ServiceResponse(403, (("content-type", "application/json"),),
+                                   canonical({"error": error.code}))
+        try:
+            receipt = await settled(lambda: owner.converge(intent, permit))
+            return ServiceResponse(200, (("content-type", "application/json"),), receipt.encoded)
+        except (PlanError, AdmissionError):
+            return ServiceResponse(409, (("content-type", "application/json"),),
+                                   canonical({"error": "komodo-workload-refused-or-unfinished"}))
+        finally:
+            owner.admission.discard(permit)
+
+    return LocalHandlerBinding(slot, handle)

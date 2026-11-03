@@ -320,7 +320,7 @@ def test_stale_snapshot_or_explicit_no_assignment_preserves_correct_boundary(q, 
 
 @pytest.mark.parametrize("status,owner_id,driver", [
     ("suspended", None, "cli"), ("started", "worker", "cli"),
-    ("claimed", "worker", "cli"), ("claimed", None, "ordinary-bridge"),
+    ("claimed", "worker", "cli"),
     ("claimed", None, "restricted-bridge"), ("queued", None, "cli"),
 ])
 def test_non_startup_paths_do_not_require_new_provider(status, owner_id, driver):
@@ -332,6 +332,20 @@ def test_non_startup_paths_do_not_require_new_provider(status, owner_id, driver)
     assert startup.supervise_pool_startup(
         owner, {"driver": driver}, {"status": status, "owner": owner_id},
     ) is None
+
+
+def test_unowned_ordinary_claim_requires_explicit_no_pool_observation():
+    from types import SimpleNamespace
+
+    observations = []
+    def snapshot(task_id):
+        observations.append(task_id)
+        return None
+    owner = SimpleNamespace(client=SimpleNamespace(pool_startup_snapshot=snapshot))
+    assert startup.supervise_pool_startup(
+        owner, {"driver": "ordinary-bridge"}, {"id": "task", "status": "claimed", "owner": None},
+    ) is None
+    assert observations == ["task"]
 
 
 def test_exact_notification_uses_existing_transport_without_new_work(monkeypatch):

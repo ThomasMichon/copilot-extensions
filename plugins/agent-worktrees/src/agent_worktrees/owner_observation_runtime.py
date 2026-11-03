@@ -100,6 +100,7 @@ class OwnerObservationRuntime:
         self.history, self.wake, self.now, self.heartbeat = history, wake, now, heartbeat
         self._operations = threading.RLock()
         self._condition = threading.Condition()
+        self._epoch = object()
         self._closed: str | None = "unready"
         self._terminated = False
         self._subscribers: dict[object, dict[str, Any]] = {}
@@ -110,6 +111,11 @@ class OwnerObservationRuntime:
         with self._operations:
             if self._terminated:
                 raise c.ObservationError("owner observation runtime is closed", "closed")
+            with self._condition:
+                self._epoch = object()
+                for subscriber in self._subscribers.values():
+                    subscriber["closed"] = "superseded"
+                self._condition.notify_all()
             initialized = False
             reason = "unavailable"
             try:
@@ -142,22 +148,27 @@ class OwnerObservationRuntime:
             self.close_admission("closed")
             self.history.close()
 
-    def _admit(self) -> None:
+    def _admit(self, epoch: object | None = None) -> None:
         with self._condition:
+            if epoch is not None and epoch is not self._epoch:
+                raise c.ObservationError("owner observation admission changed", "superseded")
             if self._closed is not None:
                 raise c.ObservationError("owner observation admission is closed", self._closed)
 
-    def _request(self, selected: c.Selection) -> None:
+    def _request(self, selected: c.Selection, epoch: object | None = None) -> None:
         with self._condition:
-            self._admit()
+            self._admit(epoch)
             previous = self._demand.get(selected.project)
             if previous is None or previous < self.now() - DEMAND_SECONDS:
                 self._unready.discard(selected.project)
             self._demand[selected.project] = self.now()
 
-    def _missing(self, selected: c.Selection) -> None:
+    def _missing(self, selected: c.Selection, epoch: object) -> None:
         with self._condition:
-            if self._closed is None and selected.project not in self._unready:
+            if (
+                epoch is self._epoch and self._closed is None
+                and selected.project not in self._unready
+            ):
                 self._unready.add(selected.project)
                 if self.wake is not None:
                     self.wake()
@@ -310,26 +321,30 @@ class OwnerObservationRuntime:
 
     def read(self, payload: dict) -> dict:
         selected = None
+        epoch = object()
         try:
             selected, values = c.request(payload)
             with self._operations:
-                self._request(selected)
+                epoch = self._epoch
+                self._request(selected, epoch)
                 return self.history.snapshot(selected, values["after_cursor"])[0]
         except c.ObservationError as error:
             if error.code == "unready" and selected is not None:
-                self._missing(selected)
+                self._missing(selected, epoch)
             if error.code == "superseded":
-                self.close_admission("superseded")
+                self._retire_request(epoch)
             return c.error(error.code, str(error))
         except (OSError, sqlite3.Error) as error:
             return c.error("unavailable", str(error))
 
     def history_page(self, payload: dict) -> dict:
         selected = None
+        epoch = object()
         try:
             selected, values = c.request(payload, history=True)
             with self._operations:
-                self._request(selected)
+                epoch = self._epoch
+                self._request(selected, epoch)
                 return self.history.page(
                     selected,
                     values["source_generation"],
@@ -338,12 +353,17 @@ class OwnerObservationRuntime:
                 )
         except c.ObservationError as error:
             if error.code == "unready" and selected is not None:
-                self._missing(selected)
+                self._missing(selected, epoch)
             if error.code == "superseded":
-                self.close_admission("superseded")
+                self._retire_request(epoch)
             return c.error(error.code, str(error))
         except (OSError, sqlite3.Error) as error:
             return c.error("unavailable", str(error))
+
+    def _retire_request(self, epoch: object) -> None:
+        with self._operations:
+            if epoch is self._epoch:
+                self.close_admission("superseded")
 
     @staticmethod
     def _notice(previous: dict, kind: str, reason: str | None = None) -> dict:
@@ -373,6 +393,7 @@ class OwnerObservationRuntime:
         key = object()
         with self._condition:
             reason = self._closed
+            epoch = self._epoch
             if reason is None and len(self._subscribers) >= MAX_SUBSCRIBERS:
                 reason = "subscriber-limit"
             if reason is None:
@@ -395,7 +416,7 @@ class OwnerObservationRuntime:
                     )
                     return
                 with self._operations:
-                    self._request(selected)
+                    self._request(selected, epoch)
                     if previous is None:
                         result, gap = self.history.snapshot(selected, values["after_cursor"])
                     else:
@@ -450,9 +471,9 @@ class OwnerObservationRuntime:
                     yield self._notice(previous, "heartbeat")
         except c.ObservationError as error:
             if error.code == "unready":
-                self._missing(selected)
+                self._missing(selected, epoch)
             if error.code == "superseded":
-                self.close_admission("superseded")
+                self._retire_request(epoch)
             yield (
                 c.error(error.code, str(error))
                 if previous is None

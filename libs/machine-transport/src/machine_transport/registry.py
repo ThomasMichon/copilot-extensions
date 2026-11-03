@@ -304,11 +304,11 @@ def machine_identity_names(
     include_metadata: bool = True, observed_hostname: str | None = None,
 ) -> tuple[str, ...]:
     """Selection names; metadata exclusion leaves only keys, aliases and profiles."""
-    values = (entry.key,)
+    values: tuple[str, ...] = (entry.key,)
     if include_metadata and not getattr(entry, "execution_platform", ""):
         hostname = entry.hostname
         literal = observed_hostname is not None and hostname.strip().casefold() == observed_hostname.casefold()
-        if literal:
+        if literal and observed_hostname is not None:
             hostname = hostname.strip()
             if (
                 entry.key.strip().casefold() != observed_hostname.casefold()
@@ -525,7 +525,7 @@ def _find_machine_entry(
             return entry_physical_host(entry)
 
         physical = physical_host(selected) if selected else ""
-        physical_names = [
+        physical_names: list[str] = [
             physical_host(entry)
             for entry in entries.values()
             if name.casefold() in {
@@ -572,7 +572,7 @@ def _find_machine_entry(
             return legacy_candidates[0]
         if len(physical_matches) > 1:
             raise AmbiguousMachineError(f"Machine {name!r} has ambiguous physical associations")
-        if (selected and getattr(selected, "execution_platform", "")) or physical_matches:
+        if (selected and bool(getattr(selected, "execution_platform", ""))) or physical_matches:
             raise MissingExecutionSpaceError(
                 f"machine {name!r} has no {execution_platform} logical entry",
                 physical_host=physical or min(physical_names, default=""),
@@ -693,13 +693,13 @@ def resolve_machine_selection(
                 isinstance(env.alias, str) and raw.casefold() == env.alias.casefold()
                 for env in getattr(direct, "ssh_environments", ())
             )
-            physical = raw.casefold() == entry_physical_host(direct).casefold()
+            physical_match = raw.casefold() == entry_physical_host(direct).casefold()
             historical_host = (
                 getattr(direct, "legacy_key", "") == direct.key
                 and declared == "windows" and wanted == "wsl"
             )
             if profile_only or not (
-                historical_host or (allow_physical_context and physical)
+                historical_host or (allow_physical_context and physical_match)
             ):
                 raise ValueError(f"registered machine {raw!r} conflicts with the requested environment")
         target = MachineEnvironment(entry_physical_host(direct), wanted or implied)

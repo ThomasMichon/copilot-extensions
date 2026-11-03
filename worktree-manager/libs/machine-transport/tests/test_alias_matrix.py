@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 from dataclasses import replace
+from collections.abc import Mapping
+from typing import Protocol, cast
 
 import pytest
 
@@ -12,6 +14,23 @@ from machine_transport import (
     is_observed_local_name,
     machine_identity_names,
 )
+
+
+class _SelectionWithEntry(Protocol):
+    @property
+    def entry(self) -> MachineEntry: ...
+
+
+def _required_selection(
+    entries: Mapping[str, MachineEntry], name: str, environment: str | None = None, *,
+    allow_physical_context: bool = False,
+) -> _SelectionWithEntry:
+    selection = resolve_machine_selection(
+        entries, name, environment, allow_physical_context=allow_physical_context,
+    )
+    if selection.entry is None:
+        pytest.fail(f"Expected a selected machine for {name!r}")
+    return cast(_SelectionWithEntry, selection)
 
 
 def test_explicit_identity_names_exclude_legacy_physical_metadata() -> None:
@@ -32,7 +51,7 @@ def test_explicit_identity_names_exclude_legacy_physical_metadata() -> None:
 
 @pytest.mark.parametrize("actual", ["windows", "wsl"])
 @pytest.mark.parametrize("standalone", [False, True])
-def test_observed_hostname_without_metadata_is_a_contextual_local_fallback(actual, standalone):
+def test_observed_hostname_without_metadata_is_a_contextual_local_fallback(actual: str, standalone: bool) -> None:
     registry = {} if standalone else {
         key: replace(entry, hostname="") for key, entry in entries(True).items()
     }
@@ -61,7 +80,7 @@ def test_observed_hostname_without_metadata_is_a_contextual_local_fallback(actua
             )
 
 
-def entries(explicit: bool):
+def entries(explicit: bool) -> dict[str, MachineEntry]:
     registry = normalize_machine_entries(parse_machines_yaml({"machines": {
         "Example-Host": {
             "hostname": "Generated-Host", "alias": "Legacy-Alias",
@@ -81,7 +100,7 @@ def entries(explicit: bool):
 @pytest.mark.parametrize("actual", ["windows", "wsl"])
 @pytest.mark.parametrize("name", ["example-host", "EXAMPLE-HOST"])
 @pytest.mark.parametrize("automatic", [False, True])
-def test_overlapping_legacy_key_and_profile_keep_historical_host_selection(actual, name, automatic):
+def test_overlapping_legacy_key_and_profile_keep_historical_host_selection(actual: str, name: str, automatic: bool) -> None:
     registry = normalize_machine_entries(parse_machines_yaml({"machines": {
         "example-host": {"ssh": {"environments": [
             {"name": "windows", "alias": name},
@@ -89,11 +108,13 @@ def test_overlapping_legacy_key_and_profile_keep_historical_host_selection(actua
         ]}},
     }}))
     selected = resolve_machine_selection(registry, name, actual, allow_physical_context=automatic)
+    if selected.entry is None:
+        pytest.fail(f"Expected a selected machine for {name!r}")
     assert selected.entry.key == ("example-host-wsl" if actual == "wsl" else "example-host")
 
 
 @pytest.mark.parametrize("automatic", [False, True])
-def test_overlapping_scoped_key_retains_manual_authority_and_automatic_physical_context(automatic):
+def test_overlapping_scoped_key_retains_manual_authority_and_automatic_physical_context(automatic: bool) -> None:
     native = MachineEntry(
         key="example-host", display_name="Native", execution_platform="windows",
         physical_host="example-host", ssh_environments=[SSHEnvironment("windows", "example-host")],
@@ -119,7 +140,7 @@ def test_overlapping_scoped_key_retains_manual_authority_and_automatic_physical_
 
 
 @pytest.mark.parametrize("automatic", [False, True])
-def test_profile_only_match_cannot_borrow_the_overlapping_key_exception(automatic):
+def test_profile_only_match_cannot_borrow_the_overlapping_key_exception(automatic: bool) -> None:
     registry = normalize_machine_entries(parse_machines_yaml({"machines": {
         "example-host": {"ssh": {"environments": [
             {"name": "windows", "alias": "native-login"},
@@ -143,9 +164,11 @@ CELLS = [
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["projected", "explicit"])
 @pytest.mark.parametrize("platform,base,form,alias", CELLS)
-def test_contextual_alias_mapping_grid(explicit, platform, base, form, alias):
+def test_contextual_alias_mapping_grid(explicit: bool, platform: str, base: str, form: str, alias: str) -> None:
     registry = entries(explicit)
     selected = resolve_machine_selection(registry, alias, platform)
+    if selected.entry is None:
+        pytest.fail(f"Expected a selected machine for {alias!r}")
     expected = "Example-Host-wsl" if platform == "wsl" else "Example-Host"
     assert selected.entry.key == expected
     assert selected.target.environment == platform
@@ -154,7 +177,8 @@ def test_contextual_alias_mapping_grid(explicit, platform, base, form, alias):
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
-def test_unqualified_physical_metadata_requires_context(platform):
+def test_unqualified_physical_metadata_requires_context(platform: str) -> None:
+    resolve_machine_selection = _required_selection
     registry = entries(True)
     with pytest.raises(ValueError, match="does not select an execution space"):
         resolve_machine_selection(registry, "Generated-Host")
@@ -165,14 +189,14 @@ def test_unqualified_physical_metadata_requires_context(platform):
     ("Example-Host-win", "WSL"), ("Example-Host (Windows)", "wsl"),
     ("Example-Host-wsl", "Win"), ("Example-Host (WSL)", "Windows"),
 ])
-def test_inline_and_supplied_context_conflicts_reject(form, environment):
+def test_inline_and_supplied_context_conflicts_reject(form: str, environment: str) -> None:
     with pytest.raises(ValueError, match="conflicts"):
         split_machine_environment(form, environment)
     with pytest.raises(ValueError, match="conflicts"):
         resolve_machine_selection({}, form, environment)
 
 
-def test_exact_registered_key_and_profile_precede_format_inference():
+def test_exact_registered_key_and_profile_precede_format_inference() -> None:
     opaque = MachineEntry(
         key="Example-Host-wsl", display_name="Opaque native", execution_platform="windows",
         ssh_environments=[SSHEnvironment("windows", "Profile (WSL)")],
@@ -187,7 +211,8 @@ def test_exact_registered_key_and_profile_precede_format_inference():
             resolve_machine_selection(registry, alias, "WSL")
 
 
-def test_native_profile_is_not_a_global_guest_alias():
+def test_native_profile_is_not_a_global_guest_alias() -> None:
+    resolve_machine_selection = _required_selection
     registry = entries(True)
     assert resolve_machine_selection(registry, "native-profile").entry.execution_platform == "windows"
     with pytest.raises(ValueError, match="conflicts"):
@@ -198,7 +223,7 @@ def test_native_profile_is_not_a_global_guest_alias():
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_guest_key_cannot_borrow_native_context_even_with_legacy_projection(explicit):
+def test_guest_key_cannot_borrow_native_context_even_with_legacy_projection(explicit: bool) -> None:
     registry = entries(explicit)
     with pytest.raises(ValueError, match="conflicts"):
         resolve_machine_selection(registry, "Example-Host-wsl", "Windows", allow_physical_context=True)
@@ -207,13 +232,13 @@ def test_guest_key_cannot_borrow_native_context_even_with_legacy_projection(expl
 @pytest.mark.parametrize("label,platform", [
     (" Example-Host ( wSl ) ", "wsl"), ("Example-Host( WiNdOwS )", "windows"),
 ])
-def test_parenthesized_label_whitespace_is_owned_by_the_format_parser(label, platform):
+def test_parenthesized_label_whitespace_is_owned_by_the_format_parser(label: str, platform: str) -> None:
     selected = resolve_machine_selection(entries(True), label)
     assert selected.target.environment == platform
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
-def test_historical_registry_keys_are_selected_not_renamed(platform):
+def test_historical_registry_keys_are_selected_not_renamed(platform: str) -> None:
     for key in legacy_alias_forms("Example-Host", platform):
         entry = MachineEntry(key=key, display_name=key, hostname="Generated-Host")
         for alias in legacy_alias_forms("Example-Host", platform):
@@ -223,7 +248,7 @@ def test_historical_registry_keys_are_selected_not_renamed(platform):
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
-def test_standalone_form_aliases_still_require_the_same_execution_context(monkeypatch, platform):
+def test_standalone_form_aliases_still_require_the_same_execution_context(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
     monkeypatch.setattr("machine_transport.identity.local_execution_platform", lambda: platform)
     configured = "Example-Host-wsl" if platform == "wsl" else "Example-Host"
     for alias in legacy_alias_forms("Example-Host", platform):

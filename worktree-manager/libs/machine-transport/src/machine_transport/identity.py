@@ -138,13 +138,13 @@ def is_local_machine(
             environment="wsl" if guest else local_execution_platform(), real_hostname=real_hostname,
         ):
             return True
-        target = resolve_machine_selection(entries, name).target
+        target_environment = resolve_machine_selection(entries, name).target
         current = resolve_machine_selection(
             entries, config_machine, "wsl" if guest else local_execution_platform(),
         ).target
         return (
-            bool(target.environment) and target.environment == current.environment
-            and target.machine.casefold() == current.machine.casefold()
+            bool(target_environment.environment) and target_environment.environment == current.environment
+            and target_environment.machine.casefold() == current.machine.casefold()
         )
     target = find_machine_entry(entries, name)
     if target is None:

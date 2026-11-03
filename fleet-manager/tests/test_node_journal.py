@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
+from pathlib import Path
 import sqlite3
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import sys
 import pytest
 
 from fleet_manager.ledger import OperationLedger
+from fleet_manager import node_journal
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent, TargetReceipt
 from fleet_manager.planning import PlanError
@@ -253,6 +255,7 @@ def test_queries_see_committed_snapshot_without_writer_reservation(tmp_path):
 
 PROCESS_PREFIX = """
 import json,os,sys
+sys.path.insert(0,sys.argv[3])
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent
 s=NodeJournal(sys.argv[1],authority='fleet-1',installation='node-install-1',target='node-1')
@@ -267,10 +270,48 @@ def effect(c):
 def run_process(path, request, body):
     return subprocess.run(
         [sys.executable, "-I", "-c", PROCESS_PREFIX + body, str(path),
-         json.dumps(request.to_dict())],
+         json.dumps(request.to_dict()), str(Path(node_journal.__file__).resolve().parents[1])],
         capture_output=True, text=True, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+
+
+def test_original_external_evidence_is_bounded_immutable_and_retained_across_restart(tmp_path):
+    store = journal(tmp_path / "node.db")
+    request = intent(command="manager.converge", parameters={"deployment": "a" * 64})
+    store.accept_named_external(request, resource="resource-a")
+    store.retain_external_evidence(request, name="selection", evidence={"revision": "original"})
+    assert store.begin_external(request)
+    store.retain_external_evidence(request, name="deployment", evidence={"id": "backend-original"})
+    assert journal(store.path).external_evidence(request) == {
+        "selection": {"revision": "original"}, "deployment": {"id": "backend-original"}}
+    store.retain_external_evidence(request, name="deployment", evidence={"id": "backend-original"})
+    with pytest.raises(PlanError, match="changed"):
+        store.retain_external_evidence(request, name="deployment", evidence={"id": "different"})
+    with pytest.raises(PlanError, match="bound"):
+        store.retain_external_evidence(request, name="large", evidence={"bytes": "x" * 65536})
+    for index in range(14):
+        store.retain_external_evidence(request, name=f"fact-{index}", evidence={"number": index})
+    with pytest.raises(PlanError, match="record bound"):
+        store.retain_external_evidence(request, name="overflow", evidence={})
+    store.reconcile(request, outcome(request))
+    with pytest.raises(PlanError, match="immutable"):
+        store.retain_external_evidence(request, name="new", evidence={})
+    assert len(store.external_evidence(request)) == 16
+
+
+def test_generation_four_journal_migrates_without_changing_original_receipts(tmp_path):
+    store = journal(tmp_path / "node.db")
+    request = intent()
+    accepted = store.accept(request)
+    with closing(sqlite3.connect(store.path)) as connection:
+        connection.execute("DROP TABLE external_evidence")
+        connection.execute("PRAGMA user_version=4")
+        connection.commit()
+    migrated = journal(store.path)
+    assert migrated.inspect(request) == accepted
+    with closing(sqlite3.connect(store.path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
 
 
 def test_real_process_lost_reply_replays_original_effect_without_reexecution(tmp_path):

@@ -6,8 +6,8 @@ import math
 
 
 def summarize(
-    samples: list[dict], *, expected: int, budget_ns: int | None = None,
-) -> dict:
+    samples: list[dict[str, object]], *, expected: int, budget_ns: int | None = None,
+) -> dict[str, object]:
     """Summarize one homogeneous stage/workload supplied by the measurement owner.
 
     Nearest-rank quantiles retain their sample count; fewer than 100 successful

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
-import os
+import os as _os
 import stat
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterator
+from typing import Any, Iterator, Protocol, cast
 
 import pytest
 
@@ -17,6 +18,17 @@ from process_telemetry import append, diagnostic_logs as logs
 
 NOW = datetime(2026, 10, 26, tzinfo=timezone.utc)
 EVENT = {"ts": NOW.isoformat(), "operation_id": "synthetic", "stage": "before_effect"}
+Syscalls = list[tuple[Any, ...]]
+Writer = tuple[logs.DiagnosticLog, list[str | tuple[str, dict[str, Any]]]]
+
+
+class _SyntheticFlags(Protocol):
+    O_APPEND: int
+    O_NOFOLLOW: int
+    O_NONBLOCK: int
+
+
+os = cast(_SyntheticFlags, _os)
 
 
 def _synthetic_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -27,11 +39,13 @@ def _synthetic_flags(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def syscalls(monkeypatch: pytest.MonkeyPatch) -> list:
-    calls = []
+def syscalls(monkeypatch: pytest.MonkeyPatch) -> Syscalls:
+    calls: Syscalls = []
     monkeypatch.setattr(append, "strict_write_capability", lambda: "synthetic-sync")
     _synthetic_flags(monkeypatch)
-    def opened(path, flags, mode=0o777, *, dir_fd=None) -> int:
+    def opened(
+        path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+    ) -> int:
         calls.append(("open", path, flags, mode, dir_fd))
         return 10 if dir_fd is None else 11
 
@@ -39,15 +53,17 @@ def syscalls(monkeypatch: pytest.MonkeyPatch) -> list:
     monkeypatch.setattr(append.os, "fstat", lambda fd: SimpleNamespace(
         st_mode=stat.S_IFREG, st_nlink=1,
     ))
-    monkeypatch.setattr(append.os, "write", lambda fd, data: (
-        calls.append(("write", fd, data)) or len(data)
-    ))
+    def written(fd: int, data: bytes) -> int:
+        calls.append(("write", fd, data))
+        return len(data)
+
+    monkeypatch.setattr(append.os, "write", written)
     monkeypatch.setattr(append.os, "fsync", lambda fd: calls.append(("sync", fd)), raising=False)
     monkeypatch.setattr(append.os, "close", lambda fd: calls.append(("close", fd)))
     return calls
 
 
-def test_strict_append_orders_single_write_file_sync_and_directory_sync(syscalls: list) -> None:
+def test_strict_append_orders_single_write_file_sync_and_directory_sync(syscalls: Syscalls) -> None:
     append.append_bytes_strict("/synthetic/existing/event.jsonl", b"{}\n")
     assert [call[0] for call in syscalls] == [
         "open", "open", "write", "sync", "close", "sync", "close",
@@ -60,7 +76,7 @@ def test_strict_append_orders_single_write_file_sync_and_directory_sync(syscalls
 
 
 def test_synthetic_protocol_supplies_all_missing_native_flags(
-    syscalls: list, monkeypatch: pytest.MonkeyPatch,
+    syscalls: Syscalls, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"):
         monkeypatch.delattr(append.os, name)
@@ -71,12 +87,14 @@ def test_synthetic_protocol_supplies_all_missing_native_flags(
 
 @pytest.mark.parametrize("boundary", ["file_open", "short", "write", "file_sync", "directory_sync"])
 def test_strict_append_failure_propagates_without_retry(
-    syscalls: list, monkeypatch: pytest.MonkeyPatch, boundary: str,
+    syscalls: Syscalls, monkeypatch: pytest.MonkeyPatch, boundary: str,
 ) -> None:
     if boundary == "file_open":
         opened = append.os.open
 
-        def fail_open(path, flags, mode=0o777, *, dir_fd=None) -> int:
+        def fail_open(
+            path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+        ) -> int:
             if dir_fd is not None:
                 raise OSError("synthetic open failure")
             return opened(path, flags, mode, dir_fd=dir_fd)
@@ -107,7 +125,7 @@ def test_strict_append_failure_propagates_without_retry(
 
 @pytest.mark.parametrize("failed_fd", [10, 11])
 def test_strict_close_failure_refuses_after_releasing_other_descriptor(
-    syscalls: list, monkeypatch: pytest.MonkeyPatch, failed_fd: int,
+    syscalls: Syscalls, monkeypatch: pytest.MonkeyPatch, failed_fd: int,
 ) -> None:
     def fail_close(fd: int) -> None:
         syscalls.append(("close", fd))
@@ -122,7 +140,7 @@ def test_strict_close_failure_refuses_after_releasing_other_descriptor(
 
 @pytest.mark.parametrize("mode,links", [(stat.S_IFIFO, 1), (stat.S_IFREG, 2)])
 def test_strict_append_refuses_nonordinary_or_linked_files(
-    syscalls: list, monkeypatch: pytest.MonkeyPatch, mode: int, links: int,
+    syscalls: Syscalls, monkeypatch: pytest.MonkeyPatch, mode: int, links: int,
 ) -> None:
     monkeypatch.setattr(append.os, "fstat", lambda fd: SimpleNamespace(
         st_mode=mode, st_nlink=links,
@@ -133,13 +151,13 @@ def test_strict_append_refuses_nonordinary_or_linked_files(
 
 
 @pytest.mark.parametrize("data", [b"", b"x" * 65537, "not-bytes"])
-def test_strict_append_bounds_before_open(syscalls: list, data: bytes) -> None:
+def test_strict_append_bounds_before_open(syscalls: Syscalls, data: bytes | str) -> None:
     with pytest.raises(ValueError):
-        append.append_bytes_strict("/synthetic/existing/event.jsonl", data)
+        append.append_bytes_strict("/synthetic/existing/event.jsonl", cast(bytes, data))
     assert not syscalls
 
 
-def test_strict_append_exact_encoded_limit(syscalls: list) -> None:
+def test_strict_append_exact_encoded_limit(syscalls: Syscalls) -> None:
     append.append_bytes_strict("/synthetic/existing/event.jsonl", b"x" * 65536)
     assert len(next(call[2] for call in syscalls if call[0] == "write")) == 65536
 
@@ -166,11 +184,11 @@ def test_unsupported_append_does_not_open(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture
-def writer(tmp_path, monkeypatch: pytest.MonkeyPatch) -> tuple[logs.DiagnosticLog, list]:
-    calls = []
+def writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Writer:
+    calls: list[str | tuple[str, dict[str, Any]]] = []
 
     @contextmanager
-    def custody(path) -> Iterator[None]:
+    def custody(path: Path) -> Iterator[None]:
         calls.append("acquire")
         try:
             yield
@@ -189,7 +207,7 @@ def writer(tmp_path, monkeypatch: pytest.MonkeyPatch) -> tuple[logs.DiagnosticLo
     return result, calls
 
 
-def test_caller_effect_occurs_only_after_sync_and_custody_release(writer: tuple) -> None:
+def test_caller_effect_occurs_only_after_sync_and_custody_release(writer: Writer) -> None:
     store, calls = writer
     store.write_event_strict(EVENT)
     calls.append("backend")
@@ -198,11 +216,11 @@ def test_caller_effect_occurs_only_after_sync_and_custody_release(writer: tuple)
 
 @pytest.mark.parametrize("boundary", ["custody", "rollover", "append"])
 def test_strict_failure_prevents_caller_effect_and_reports_degradation(
-    writer: tuple, monkeypatch: pytest.MonkeyPatch, capsys, boundary: str,
+    writer: Writer, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], boundary: str,
 ) -> None:
     store, calls = writer
 
-    def fail(*args) -> None:
+    def fail(*args: object) -> None:
         raise OSError("synthetic storage failure")
 
     if boundary == "custody":
@@ -222,7 +240,7 @@ def test_strict_failure_prevents_caller_effect_and_reports_degradation(
                                    "carriage_return", "invalid_utf8", "nan", "changed", "array", "absent_directory",
                                    "unsupported"])
 def test_strict_refusal_happens_before_custody(
-    writer: tuple, monkeypatch: pytest.MonkeyPatch, invalid: str,
+    writer: Writer, monkeypatch: pytest.MonkeyPatch, invalid: str,
 ) -> None:
     store, calls = writer
     event = dict(EVENT)
@@ -251,14 +269,14 @@ def test_strict_refusal_happens_before_custody(
 
 
 def test_cutoff_equality_is_written_and_ordinary_failure_stays_fail_open(
-    writer: tuple, monkeypatch: pytest.MonkeyPatch,
+    writer: Writer, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store, calls = writer
     event = dict(EVENT, ts=(NOW - timedelta(days=30)).isoformat())
     store.write_event_strict(event)
     assert ("strict_append", event) in calls
 
-    def fail(*args) -> None:
+    def fail(*args: object) -> None:
         raise OSError("synthetic ordinary failure")
 
     monkeypatch.setattr(logs, "append_bytes", fail)
@@ -267,7 +285,7 @@ def test_cutoff_equality_is_written_and_ordinary_failure_stays_fail_open(
     assert calls[-1] == "ordinary_backend" and store.last_error == "OSError"
 
 
-def test_strict_custody_never_creates_directory(writer: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_strict_custody_never_creates_directory(writer: Writer, monkeypatch: pytest.MonkeyPatch) -> None:
     store, _ = writer
     monkeypatch.setattr(type(store.directory), "mkdir", lambda *args, **kwargs: (
         pytest.fail("strict write attempted automatic directory creation")
@@ -275,7 +293,7 @@ def test_strict_custody_never_creates_directory(writer: tuple, monkeypatch: pyte
     store.write_event_strict(EVENT)
 
 
-def test_strict_json_exact_byte_limit_and_multibyte_oversize(writer: tuple) -> None:
+def test_strict_json_exact_byte_limit_and_multibyte_oversize(writer: Writer) -> None:
     store, calls = writer
     event = dict(EVENT, text="")
     overhead = len(store.encoder(event))
@@ -290,7 +308,7 @@ def test_strict_json_exact_byte_limit_and_multibyte_oversize(writer: tuple) -> N
     assert not calls
 
 
-def test_ordinary_expired_record_still_skips_without_strict_io(writer: tuple) -> None:
+def test_ordinary_expired_record_still_skips_without_strict_io(writer: Writer) -> None:
     store, calls = writer
     store.write_event(dict(EVENT, ts=(NOW - timedelta(days=31)).isoformat()))
     assert not calls and store.last_error is None
@@ -302,7 +320,7 @@ def test_ordinary_expired_record_still_skips_without_strict_io(writer: tuple) ->
     ({"nested": [-1.0]}, '{"nested":[-1e400]}'),
 ])
 def test_strict_numeric_overflow_refuses_before_custody(
-    writer: tuple, value: object, encoded: str,
+    writer: Writer, value: object, encoded: str,
 ) -> None:
     store, calls = writer
     event = dict(EVENT, value=value)
@@ -321,7 +339,7 @@ def test_strict_numeric_overflow_refuses_before_custody(
     ((1, 2), [1, 2]),
 ])
 def test_strict_type_substitution_refuses_at_every_depth(
-    writer: tuple, value: object, replacement: object,
+    writer: Writer, value: object, replacement: object,
 ) -> None:
     store, calls = writer
     event = dict(EVENT, value=value)
@@ -337,7 +355,7 @@ def test_strict_type_substitution_refuses_at_every_depth(
     '"value":1,"value":1', '"value":{"nested":1,"nested":1}',
 ])
 def test_strict_duplicate_fields_are_not_ambiguous_preservation(
-    writer: tuple, fragment: str,
+    writer: Writer, fragment: str,
 ) -> None:
     store, calls = writer
     event = dict(EVENT, value=1 if "nested" not in fragment else {"nested": 1})
@@ -347,7 +365,7 @@ def test_strict_duplicate_fields_are_not_ambiguous_preservation(
     assert not calls
 
 
-def test_strict_nested_finite_json_fields_preserve_types(writer: tuple) -> None:
+def test_strict_nested_finite_json_fields_preserve_types(writer: Writer) -> None:
     store, calls = writer
     event = dict(EVENT, value=[None, False, 0, 1.0, "\u00e9", {"items": [True, -2.5]}])
     store.write_event_strict(event)
@@ -356,13 +374,13 @@ def test_strict_nested_finite_json_fields_preserve_types(writer: tuple) -> None:
 
 @pytest.mark.parametrize("change", ["remove_operation", "expire_timestamp", "nested_field", "nested_list"])
 def test_strict_encoder_mutation_cannot_change_validation_baseline(
-    writer: tuple, change: str,
+    writer: Writer, change: str,
 ) -> None:
     store, calls = writer
     event = dict(EVENT, nested={"operation_id": "nested", "items": [{"attempt": 1}]})
     baseline = copy.deepcopy(event)
 
-    def mutating_encoder(record: dict) -> bytes:
+    def mutating_encoder(record: dict[str, Any]) -> bytes:
         assert record is not event and record["nested"] is not event["nested"]
         if change == "remove_operation":
             record.pop("operation_id")
@@ -381,12 +399,12 @@ def test_strict_encoder_mutation_cannot_change_validation_baseline(
     assert not calls and event == baseline
 
 
-def test_strict_decoder_also_receives_an_independent_snapshot(writer: tuple) -> None:
+def test_strict_decoder_also_receives_an_independent_snapshot(writer: Writer) -> None:
     store, calls = writer
     event = dict(EVENT, nested={"operation_id": "nested"})
     baseline = copy.deepcopy(event)
 
-    def mutating_decoder(record: dict) -> datetime:
+    def mutating_decoder(record: dict[str, Any]) -> datetime:
         result = datetime.fromisoformat(record["ts"])
         record.pop("operation_id")
         record["nested"].clear()
@@ -399,7 +417,7 @@ def test_strict_decoder_also_receives_an_independent_snapshot(writer: tuple) -> 
 
 @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan"),
                                    {"nested": [float("inf")]}])
-def test_nonfinite_input_refuses_before_encoder(writer: tuple, value: object) -> None:
+def test_nonfinite_input_refuses_before_encoder(writer: Writer, value: object) -> None:
     store, calls = writer
     store.encoder = lambda event: pytest.fail("encoded nonfinite input")
     with pytest.raises(ValueError, match="finite primitive JSON fields"):
@@ -407,11 +425,11 @@ def test_nonfinite_input_refuses_before_encoder(writer: tuple, value: object) ->
     assert not calls
 
 
-def test_unsupported_input_never_invokes_a_custom_deepcopy_hook(writer: tuple) -> None:
+def test_unsupported_input_never_invokes_a_custom_deepcopy_hook(writer: Writer) -> None:
     store, calls = writer
 
     class Unsupported:
-        def __deepcopy__(self, memo: dict) -> object:
+        def __deepcopy__(self, memo: dict[int, object]) -> object:
             pytest.fail("invoked an unsupported object hook")
 
     with pytest.raises(ValueError, match="primitive JSON fields"):

@@ -115,6 +115,8 @@ def initialize(owner, record, expected_source_generation):
         except (OSError, sqlite3.Error) as error:
             raise intents.fail(owner, record, token, error) from error
         try:
-            return owner.snapshot(selected)[0]
+            result = owner.snapshot(selected)[0]
+            owner._authority()
+            return result
         except (OSError, sqlite3.Error) as error:
             raise intents.reply_failed(error) from error

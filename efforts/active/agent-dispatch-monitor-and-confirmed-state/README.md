@@ -277,12 +277,29 @@ live claim token. No new blanket ACK or executor appointment is created.
       in [#10090](https://github.com/ThomasMichon/copilot-extensions/pull/10090),
       including actual serve-command configuration and bounded worker custody.
 - [ ] Complete ordinary publication/caller integration before activating it.
-      Cross-endpoint same-queue continuity, complete direct rows, obsolete-scope
-      withdrawal, ordinary allocator/initial prompts and mixed-driver adoption
+      Explicit-definition adoption for remaining legacy direct rows,
+      ordinary allocator/initial prompts and mixed-driver adoption
       remain required; the default-off source seam is not that completion gate.
-      The [queue-bound continuation source](journal/2026/11.02-queue-bound-publication.md)
-      connects the existing sender and transaction owners; review/merge and the
-      broader integration gate remain distinct.
+- [ ] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
+      under its actual `ordinary-bridge` driver, allocator claim and execution
+      host. Initial delivery must not reacquire an evaluation lease; automatic
+      allocator-instance selection, ordinary retry/decline and native
+      qualification remain separate integration gates.
+- [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
+      without erasing publication history, task assignments or accountable
+      capacity. Source regressions cover current readiness and remove/re-add;
+      merged in [#10116](https://github.com/ThomasMichon/copilot-extensions/pull/10116).
+      Ordinary activation and installed/native qualification remain separate.
+- [x] Land explicit [lossless direct worker definitions](journal/2026/11.02-direct-pool-definitions.md)
+      through the registration API/spec/store and effective-source owner.
+      Preserve full policy, reversible precedence and supported rollback;
+      merged in [#10111](https://github.com/ThomasMichon/copilot-extensions/pull/10111).
+      This source slice does not activate ordinary allocation or migrate legacy rows.
+- [x] Land actual [queue-bound publisher continuation](journal/2026/11.02-queue-bound-publication.md)
+      in [#10099](https://github.com/ThomasMichon/copilot-extensions/pull/10099),
+      including pre-collection fresh identity admission, original request/child
+      custody and transactional write/replay fences. This is bounded source
+      acceptance, not ordinary integration or installed/native qualification.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
@@ -1081,6 +1098,9 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+The [November 2 direct-definition receipt](journal/2026/11.02-direct-pool-definitions.md)
+records lossless direct registration/source integration and its retained gates.
 
 The [November 2 startup-source receipt](journal/2026/11.02-bounded-startup-source.md)
 records #9976's actual merge, bounded source evidence and the next integration gate.

@@ -21,16 +21,17 @@
 
 ## The problem
 
-**Ordinary update and repair follow the incoming-start-first contract** in the
+**Ordinary update and repair prefer incoming-start-first cutover** in the
 [installer vision](../../visions/installer/README.md): publish and start the
 selected generation independently of the incumbent, then let the displaced
-owner observe supersession and retire itself. Neither a working old IPC
-contract nor installer-driven stop, uninstall, deletion or unregistration is a
-replacement prerequisite. The cold-termination and legacy-recovery mechanisms
-below remain separate, explicitly authorized recovery operations, not a fallback
-that ordinary update or repair may silently invoke. Existing adopters still
-converge component by component; historical automatic-cutover adoption alone
-does not prove this newer lifecycle.
+owner observe supersession and retire itself. A working old IPC contract is
+not a replacement prerequisite. An authorized update includes the bounded cold
+fallback below when the predecessor cannot cooperate or settle; it does not
+require another force/repair flag solely for missing graceful support. Report
+the selected path and any interruption rather than silently claiming seamless
+cutover. Broad historical cleanup remains a separate explicit operation.
+Existing adopters converge component by component; historical automatic-cutover
+adoption alone does not prove cold takeover or this newer lifecycle.
 
 A **Runtime service** plugin (see the plugin-shapes table) runs a long-lived
 local daemon that holds **in-flight, non-resumable work**: agent-bridge hosts a
@@ -104,10 +105,13 @@ preserves the possibly admitted successor and reports failure, never passive
 disposal or rollback. The elected resident reconciles durable predecessor
 records and canonical runtime references, retaining its own demand and displaced
 code until positive native exit. This is not a new daemon or delayed reaper.
-The outgoing runtime must also support readiness-gated retirement without
-grace-forced exit of accepted work. An incapable or unrouted live predecessor
-refuses installation before selector mutation; skipping a forced restart cannot
-make its older self-exit behavior safe. The owner reserves canonical execution
+This asynchronous path requires an outgoing runtime that supports
+readiness-gated retirement without grace-forced exit of accepted work. An
+incapable predecessor must instead use bounded cold takeover; it cannot veto
+the update merely by lacking that capability. An unrouted live process needs
+independent owner/identity attribution before any termination, never a guessed
+PID. These are target requirements, not proof that this adopter already
+implements the legacy fallback. The owner reserves canonical execution
 protection before persisting retirement intent, cancels exact custody only after proven precommit
 rollback, and keeps a pending dev claim through duplicate release attempts.
 Prepared intent cannot execute a retirement grant. Commitment enables native-exit
@@ -556,16 +560,20 @@ agent-bridge needs.
    > trigger, has soaked enough to be trusted end to end), demote that
    > plugin's verb back to an installer-internal seam per this invariant --
    > don't treat its present existence as the target state.
-2. **Start independently before retirement.** Ordinary update and repair start
-   the incoming generation beside the incumbent, publish its selected route,
-   and leave old-owner retirement to that owner. An absent, broken or
-   incompatible incumbent never becomes a prerequisite or a stop-and-swap
-   fallback. Brief process overlap is expected; exclusive work remains fenced.
-3. **Outgoing drain is best effort and bounded.** The displaced owner closes
-   admissions and retires its own scope after observing the selected successor.
-   Explicit stop/uninstall or separately authorized stuck-owner recovery may use
-   identity-bound termination; normal update and repair do not. Interrupted
-   non-resumable work requires durable recovery and honest outcome reporting.
+2. **Construct independently; prefer start-first retirement.** Ordinary update
+   and repair build the incoming generation without incumbent cooperation. On
+   the compatible path, start it beside the incumbent, confirm promotion and
+   let the outgoing owner retire. Incompatible, unavailable or non-settling
+   predecessors instead permit bounded cold takeover by the same authorized
+   replacement owner, including retirement before incoming readiness when
+   exclusivity requires it. Missing graceful support needs no extra repair flag;
+   exclusive work remains fenced on either path.
+3. **Outgoing drain is best effort and bounded.** Prefer the displaced owner's
+   admission closure, checkpoint and self-retirement after successor readiness.
+   If that contract is unsupported, unavailable or does not settle, authorized
+   normal update and repair may use identity-bound termination within the
+   bounded cold-takeover contract. Interrupted non-resumable work requires
+   durable recovery and honest outcome reporting, never a false graceful claim.
 4. **Do not strand recovery.** On the compatible path after the commit point, if the old endpoint is
    unreachable, **commit-forward** to the healthy new one (never roll back into a
    dead daemon). An aborted pre-commit cutover **rolls back** (old stays live).
@@ -587,9 +595,9 @@ agent-bridge needs.
 8. **Cross-version isolation and identity-bound replacement.** Never pin a
    child into another generation's immutable slot or mutate its runtime files.
    Compatible discovered control-plane handoff may supplement replacement, but
-   never precedes independent incoming startup as a mandatory gate. For a
-   separately authorized recovery operation, the authorized newcomer
-   or lifecycle owner may terminate the exact displaced daemon and its owned
+   never gates independent incoming construction. For authorized replacement,
+   including normal update or repair, the newcomer or lifecycle owner may use
+   bounded cold takeover to terminate the exact displaced daemon and its owned
    scope through shared native identity/custody primitives; this is not limited
    to pre-protocol legacy residents or numerically older versions. A raw PID,
    process name, stale route or version comparison is never sufficient. Confirm

@@ -328,7 +328,8 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
     assert contract.status_code == 200, contract.text
     assert contract.json() == {
         "protocol": "pool_placement/v1", "supported_versions": [1],
-        "supported_drivers": ["cli"],
+        "supported_drivers": ["cli", "ordinary-bridge"],
+        "ordinary_initial_start_versions": [1],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
@@ -549,11 +550,11 @@ def test_drain_waits_for_an_admitted_placement_transaction(q, monkeypatch):
     assert app.state.drain_gate.claims == 0
 
 
-@pytest.mark.parametrize("driver", [None, "", "ordinary-bridge", "restricted-bridge", "unknown"])
+@pytest.mark.parametrize("driver", [None, "", "restricted-bridge", "unknown"])
 def test_unqualified_drivers_cannot_create_pool_claims(q, driver):
     revision = publish(q, pool())
     t = task(q)
-    with pytest.raises(TaskError, match="qualified cli"):
+    with pytest.raises(TaskError, match="qualified startup"):
         q.reserve_spawn(t.id, reserved_by="allocator", driver=driver, pool_catalog_revision=revision)
     client = TestClient(create_app(q, token=None, control_token="control", enable_mcp=False,
                                   verification_interval=0))

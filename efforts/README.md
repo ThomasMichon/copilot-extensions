@@ -8,9 +8,9 @@ that pattern to this repository.
 
 ## Active effort index
 
-
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Vault Configuration Activation](active/vault-configuration-activation/README.md) | Draft; bounded configuration gate proposal before implementation | #2350 Vault adopter only; no runtime rollout |
 | [Precomputed Hook Guard Map](active/precomputed-hook-guard-map/README.md) | Done; source released and installed Windows consumer accepted | #10031 startup/cutover and #10032 native UNC/non-Windows qualification remain open; bounded Git identity, missing-map fail-open, no hook-triggered topology acquisition |
 | [Python Static Type Safety](active/python-static-type-safety/README.md) | Active; source/candidate gates and canonical view qualified, larger canonical-project preparation | #9807/#9971; 13 strict / 55 pending projects, bounded Installation Context preparation before complete-project admission; existing owners retained, no runtime rollout |
 | [Model-Guided Skill Selection](active/model-guided-skill-selection/README.md) | Active; native SDK witnesses and model preflight recorded, guided comparison and implementation pending | #9809; existing customization, SDK and model-policy owners; no parallel catalog or shared rollout |
@@ -51,6 +51,7 @@ that pattern to this repository.
 | [Venue Plugin Staging and Registration Parity](active/venue-plugin-staging-parity/README.md) | Active; source-preserving local CLI/ACP and owned startup gate merged; SSH/privileged, live-container and release acceptance open | #5286, #5072; sub-effort of #954 |
 | [Source-Managed Runtime Installs](active/source-managed-runtime-installs/README.md) | Active; Manager/Worktrees bounded fast path released; shared app contract, ideal sequence and per-app contribution matrix; remaining core and whole-flow acceptance open | #7028; #9990/#10024 initial pair; #3905, #7029, #7030; #9688 construction evidence; future plugin-source switch #7031 |
 | [PR Lifecycle Conformance](active/pr-lifecycle-conformance/README.md) | Active; Phase 1 evidence and contract proposed, adapter implementation and acceptance open | #7051; existing #2357 lifecycle ownership retained |
+| [Third-Party Release Lock Inputs](active/release-lock-inputs/README.md) | Active; deterministic candidate inputs, review/CI open | #6937; approval/selection/admission remain with #4876/#6234/#6707 |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Blocked; proposal merged, containing primary repairs and attested hosted publication still required | #6639; #6535/#6632 owners retained |
 | [Continuous Worktree Reclamation](active/continuous-worktree-reclamation/README.md) | Draft; vision and implementation/performance plan only, execution separately authorized | #6620; preserves #1488/#1918/#3114, #6060 and #6471 |

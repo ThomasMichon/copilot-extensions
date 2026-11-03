@@ -119,6 +119,11 @@ empty default user. Explicit user strings are preserved. A malformed configurati
 object, non-string user (including null) or malformed sequence still refuses.
 Image identity, official digest and selected-platform checks remain unchanged.
 
+Compose 2 distribution revision suffixes may contain `~`, such as
+`2.40.3+ds1-0ubuntu1~24.04.1`; these remain Compose 2, not a different
+toolchain major. The native version read preserves its ordinary environment
+scrubbing and selects no replacement binary or plugin.
+
 Compose 5 retains the Compose Specification and the fixed `up --no-build
 --pull never --wait --wait-timeout` interface used here. Stable 5.x is accepted
 alongside the existing 2.x contract; other majors and 5.x prereleases refuse.

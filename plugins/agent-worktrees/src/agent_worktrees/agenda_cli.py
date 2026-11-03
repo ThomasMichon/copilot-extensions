@@ -135,47 +135,14 @@ class Receiver:
 
 
 def relay(client, request, generation) -> int:
+    from .control_jsonl import Codec, relay as relay_jsonl
+
     receiver = Receiver(request, generation)
-    encoded = (
-        contract.encode(
-            {
-                "version": 1,
-                "token": client.token,
-                "action": "agenda-feed",
-                "payload": request,
-            }
-        ).encode("utf-8")
-        + b"\n"
+    return relay_jsonl(
+        client, "agenda-feed", request,
+        Codec(contract.FRAME_BYTES, contract.encode, contract.decode, "agenda feed"),
+        receiver, _emit, connect=socket.create_connection, clock=time.monotonic,
     )
-    with socket.create_connection((client.host, client.port), timeout=client.timeout) as sock:
-        sock.sendall(encoded)
-        pending = bytearray()
-        deadline = time.monotonic() + client.timeout
-        while not receiver.closed:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise contract.AgendaError("agenda feed deadline expired", "unavailable")
-            sock.settimeout(remaining)
-            chunk = sock.recv(contract.FRAME_BYTES)
-            if not chunk:
-                raise contract.AgendaError(
-                    "agenda feed disconnected without terminal frame", "disconnected"
-                )
-            pending.extend(chunk)
-            while b"\n" in pending:
-                line, _, rest = pending.partition(b"\n")
-                pending = bytearray(rest)
-                frame = contract.decode(line)
-                receiver.receive(frame)
-                _emit(frame)
-                deadline = time.monotonic() + 5.0
-                if receiver.closed:
-                    return 1 if frame["type"] == "error" else 0
-            if len(pending) >= contract.FRAME_BYTES:
-                raise contract.AgendaError(
-                    "agenda feed frame exceeds byte bound", "invalid-response"
-                )
-    return 0
 
 
 def cmd_agenda(args) -> int:

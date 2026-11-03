@@ -34,7 +34,7 @@ class TraceContext:
     span_id: str
     sampled: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not re.fullmatch("[0-9a-f]{32}", self.trace_id)
             or not int(self.trace_id, 16)

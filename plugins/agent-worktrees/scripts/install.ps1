@@ -3081,10 +3081,8 @@ function Deploy-PythonRuntime {
             '--root', $InstallDir, '--plugin', $runtimeInputs,
             '--payload', $originPayload, '--uv', $uvPath, '--base-python', $base,
             '--result', $resultPath, '--expected-source-identity', $sourcePin) + $modeArgs
-        $nativeError = ''
-        $detail = Invoke-Hidden -FilePath $base -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+        $detail = Invoke-Hidden -FilePath $base -ArgList $arguments -StreamErrorOutput
         if ($detail) { Write-Host $detail }
-        if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -eq 2) { exit 2 }
         if ($LASTEXITCODE -ne 0) { throw "Python runtime lifecycle failed (exit $LASTEXITCODE)." }
         $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json

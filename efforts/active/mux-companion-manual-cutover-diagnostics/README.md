@@ -528,6 +528,52 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - First S2 observation receiver source qualification
+
+- Attached the optional observation index to the existing elected roster owner
+  and SQLite path, with separate running-receiver capability/readiness metadata.
+  Added strict selected read, retained-history and held-feed control actions plus
+  passive CLI handlers; no new listener, fleet poller or host-start fallback.
+- Facts and history remain explicitly sampled/partial. Stable facts do not turn
+  timestamps or heartbeats into milestones. Native claim/binding/disposition
+  capture, rich agenda history and Manager/Bridge adapters remain open.
+- Point/history/feed requests require exact stored worktree identity. New
+  regressions reproduced accidental adoption of a unique legacy roster suffix;
+  the receiver now rejects that alias before materialization while preserving
+  existing roster suffix behavior and valid exact matches.
+- Qualified source packets passed: 331 joined owner/provider/CLI/retirement
+  cases, an overlapping 74-case exact-identity follow-up, 258 existing
+  roster/producer/client/feed/agenda cases, 10 explicit-tier POSIX dispatcher
+  cases and four fresh CLI processes with unchanged private-home contents.
+  PowerShell was unavailable for ten dispatcher cases; no Windows qualification
+  is claimed. Malformed boolean versions remain distinct from unsupported
+  integer versions.
+- The CLI shares bounded raw JSONL transport with the existing agenda relay.
+  Authentication, generation/selection/cursor checks and producer/request/feed
+  retirement accounting remain explicit; optional index errors do not gate
+  ordinary roster or canonical operations.
+- This is source awaiting publication/review, not an installed receiver or
+  whole-S2 completion. No canonical-save hook, capture spool, Agenda storage
+  move, archive, cleanup change, native action or rollout was performed.
+
+### 2026-11-02 - Advisory recovery guidance merged; first S2 receiver slice
+
+- #10066 received current-head Copilot approval with no open findings, passed
+  required CI and merged as `8b16ba2152f86f96ceaa960783c056b872e5edf7`.
+  Re-read this full root and both linked documents after pulling the same
+  retained source workspace forward.
+- The efforts vision, agenda skill and managed reference now state judgment-led
+  recovery from unavailable, stale or rewound planning state. Freshness clues
+  do not become rigid expiry or execution gates; strict data-write validation
+  and independent permissions, constraints and canonical completion remain.
+- First S2 source work attaches selected owner-roster observations to the elected
+  resident and strict read/history/feed transport. These are qualified observed
+  changes with partial coverage, not fabricated claim/binding/disposition events.
+  Native mutation receipts and cross-process capture remain later open S2 work.
+- No new canonical-save hook, capture spool, agenda-home migration, logger
+  archival, cleanup policy or installed rollout is implied by this slice.
+  S2-S5 and every original manual/head/native/Relay acceptance remain open.
+
 ### 2026-11-02 - Sidecar foundation merged; owner integration next
 
 - #9979 merged as `74d9254007c1b06c0f058e20bc6a8cad05f3a8ad` through the

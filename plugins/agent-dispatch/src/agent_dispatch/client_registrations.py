@@ -49,8 +49,21 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             "machine": machine,
             "env": env,
         }
+        endpoint = "/registrations"
+        if "pool_definition" in spec:
+            health = self.health()
+            contract = health.get("pool_catalog_transport") if isinstance(health, dict) else None
+            versions = contract.get("registration_definition_versions") if isinstance(contract, dict) else None
+            if (
+                not isinstance(contract, dict)
+                or contract.get("protocol") != "pool_catalog_transport/v1"
+                or not isinstance(versions, list)
+                or not any(type(version) is int and version == 1 for version in versions)
+            ):
+                raise DispatchUpgradeRequired("running coordinator lacks lossless direct pool definitions")
+            endpoint = "/registrations/pool-definition"
         headers = self._control_headers() if kind == "evaluator" else None
-        return self._unwrap(self._http.post("/registrations", json=body, headers=headers))
+        return self._unwrap(self._http.post(endpoint, json=body, headers=headers))
 
     def list_registrations(
         self,

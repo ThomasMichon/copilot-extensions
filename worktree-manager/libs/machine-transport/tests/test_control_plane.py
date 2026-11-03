@@ -7,7 +7,7 @@ import pytest
 from machine_transport import ControlPlaneError, load_control_plane, parse_control_plane
 
 
-def test_pair_preserves_roles_and_legacy_launch_projection():
+def test_pair_preserves_roles_and_legacy_launch_projection() -> None:
     raw = {
         "control_plane": {
             "project": "example-harness",
@@ -32,7 +32,7 @@ def test_pair_preserves_roles_and_legacy_launch_projection():
     "declaration",
     ["example-control", " example-control ", {"project": "example-control"}],
 )
-def test_legacy_declaration_does_not_invent_a_knowledge_repository(declaration):
+def test_legacy_declaration_does_not_invent_a_knowledge_repository(declaration: object) -> None:
     result = parse_control_plane({"control_plane": declaration})
     assert result is not None
     assert result.harness == "example-control"
@@ -42,7 +42,7 @@ def test_legacy_declaration_does_not_invent_a_knowledge_repository(declaration):
     assert result.legacy_compatible
 
 
-def test_pair_without_legacy_projection_is_not_reported_old_daemon_compatible():
+def test_pair_without_legacy_projection_is_not_reported_old_daemon_compatible() -> None:
     result = parse_control_plane(
         {"control_plane": {"harness": "example-harness", "knowledge": "example-knowledge"}}
     )
@@ -53,7 +53,7 @@ def test_pair_without_legacy_projection_is_not_reported_old_daemon_compatible():
 
 
 @pytest.mark.parametrize("declaration", [None, "", " ", {}])
-def test_absent_declaration_stays_absent(declaration):
+def test_absent_declaration_stays_absent(declaration: object) -> None:
     assert parse_control_plane({"control_plane": declaration}) is None
 
 
@@ -84,12 +84,12 @@ def test_absent_declaration_stays_absent(declaration):
         {"harness": "example-harness", "knowledge": "example-knowledge", "unknown": True},
     ],
 )
-def test_invalid_roles_refuse_without_coercion_or_fallback(declaration):
+def test_invalid_roles_refuse_without_coercion_or_fallback(declaration: object) -> None:
     with pytest.raises(ControlPlaneError):
         parse_control_plane({"control_plane": declaration})
 
 
-def test_real_yaml_consumer_retains_pair_and_old_daemon_scalar(tmp_path: Path):
+def test_real_yaml_consumer_retains_pair_and_old_daemon_scalar(tmp_path: Path) -> None:
     source = tmp_path / "machines.yaml"
     source.write_text(
         "control_plane:\n"
@@ -107,13 +107,13 @@ def test_real_yaml_consumer_retains_pair_and_old_daemon_scalar(tmp_path: Path):
 
 
 @pytest.mark.parametrize("text", ["", "[]", "false", "control_plane: ["])
-def test_bad_yaml_or_root_is_explicit(tmp_path: Path, text: str):
+def test_bad_yaml_or_root_is_explicit(tmp_path: Path, text: str) -> None:
     source = tmp_path / "machines.yaml"
     source.write_text(text, encoding="utf-8")
     with pytest.raises(ControlPlaneError):
         load_control_plane(source)
 
 
-def test_missing_source_is_not_a_successful_absent_relationship(tmp_path: Path):
+def test_missing_source_is_not_a_successful_absent_relationship(tmp_path: Path) -> None:
     with pytest.raises(ControlPlaneError, match="cannot read"):
         load_control_plane(tmp_path / "missing.yaml")

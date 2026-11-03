@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Any, cast
 
 from . import SinkSlot
-from .measurement import begin
+from .measurement import Measurement, begin
 from .otlp import LocalOtlpSink
 
 
@@ -15,10 +16,10 @@ def main() -> int:
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--timeout", type=float, default=2.0)
     args = parser.parse_args()
-    records = []
+    records: list[dict[str, Any]] = []
     slot = SinkSlot()
     slot.set(records.append)
-    measurement = begin(slot, "telemetry-canary", "ipc")
+    measurement = cast(Measurement, begin(slot, "telemetry-canary", "ipc"))
     measurement.finish(spawn_count=0)
     try:
         sink = LocalOtlpSink(args.endpoint, timeout=args.timeout)

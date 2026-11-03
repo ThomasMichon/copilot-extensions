@@ -1564,10 +1564,19 @@ def test_pr_reconciliation_never_persists_foreign_fresh_record(
 
 @pytest.mark.parametrize("owner_locked", [False, True])
 def test_reciprocal_claim_rejects_foreign_record_behind_current_space_reference(
-    owner_locked, tmp_path, scoped_config, monkeypatch, capfd,
-):
-    from agent_worktrees import worktree_creation
+    owner_locked: bool, tmp_path: Path, scoped_config: cfg.Config,
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
+    from agent_worktrees import creation_diagnostics, worktree_creation
 
+    failures: list[tuple[str, BaseException]] = []
+    record_failure = creation_diagnostics.record_failure
+
+    def capture_failure(code: str, error: BaseException, **details: object) -> None:
+        failures.append((code, error))
+        record_failure(code, error, **details)
+
+    monkeypatch.setattr(creation_diagnostics, "record_failure", capture_failure)
     monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path)
     path = tmp_path / "worktrees"
     path.mkdir()
@@ -1581,7 +1590,12 @@ def test_reciprocal_claim_rejects_foreign_record_behind_current_space_reference(
         owner_locked=owner_locked,
     )
     assert record.yaml_path.read_bytes() == before
-    assert "execution platform" in capfd.readouterr().err
+    assert "owner-claim journaling failed (non-fatal)." in capfd.readouterr().err
+    assert len(failures) == 1
+    code, error = failures[0]
+    assert code == "owner_claim_persistence"
+    assert isinstance(error, execution_spaces.ExecutionSpaceError)
+    assert "execution platform" in str(error)
 
 
 def test_run_claim_journal_rejects_foreign_fresh_owner(tmp_path, scoped_config, monkeypatch):

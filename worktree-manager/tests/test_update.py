@@ -356,6 +356,64 @@ def test_passthrough_absent_engine_hints_install(monkeypatch):
     assert ei.value.install_hint is True
 
 
+@pytest.mark.parametrize("scoped", [False, True])
+def test_update_passthrough_preserves_captured_caller_directory(monkeypatch, tmp_path, scoped):
+    caller = tmp_path / "caller"
+    staging = tmp_path / "staging"
+    caller.mkdir()
+    staging.mkdir()
+    monkeypatch.chdir(staging)
+    environment = {"AGENT_WORKTREES_UPDATE_CONTEXT": str(caller)}
+    if not scoped:
+        monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(caller))
+    seen = {}
+
+    def execute(command, **options):
+        seen.update(options)
+        return subprocess.CompletedProcess(command, 23)
+
+    monkeypatch.setattr(ec.subprocess, "run", execute)
+    assert ec.run_engine_passthrough(
+        None, ["update", "--no-manager"], engine_command=["synthetic-engine"],
+        **({"environment": environment} if scoped else {}),
+    ) == 23
+    assert seen["cwd"] == str(caller)
+    assert Path.cwd() == staging
+
+
+@pytest.mark.parametrize("context", ["", "relative", "missing", "file"])
+def test_update_passthrough_refuses_invalid_captured_directory(monkeypatch, tmp_path, context):
+    path = tmp_path / context
+    if context == "file":
+        path.write_text("not a directory")
+    value = context if context in {"", "relative"} else str(path)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid update context reached the engine")
+
+    monkeypatch.setattr(ec.subprocess, "run", forbidden)
+    with pytest.raises(ec.EngineError, match="existing absolute directory"):
+        ec.run_engine_passthrough(
+            None, ["update"], engine_command=["synthetic-engine"],
+            environment={"AGENT_WORKTREES_UPDATE_CONTEXT": value},
+        )
+
+
+def test_non_update_passthrough_does_not_apply_update_directory(monkeypatch):
+    seen = {}
+
+    def execute(command, **options):
+        seen.update(options)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(ec.subprocess, "run", execute)
+    assert ec.run_engine_passthrough(
+        None, ["list"], engine_command=["synthetic-engine"],
+        environment={"AGENT_WORKTREES_UPDATE_CONTEXT": "not-an-update-directory"},
+    ) == 0
+    assert seen.get("cwd") is None
+
+
 # ── self_update (best-effort, git-fetch + version-install) ────────────────────
 
 def test_self_update_without_git_non_github_skips(monkeypatch, tmp_path):
@@ -370,7 +428,9 @@ def test_self_update_without_git_non_github_skips(monkeypatch, tmp_path):
 
 def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
     """Without git but a GitHub source, self_update fetches the codeload tarball."""
+    from _manager_constructor_fixture import apply_constructor_fixture
     from worktree_manager import source_config as sc
+    apply_constructor_fixture(monkeypatch)
     monkeypatch.setattr(self_install.shutil, "which", lambda name: None)
     monkeypatch.setattr(self_install, "local_bin", lambda: tmp_path / "localbin")
     # Isolate the control-plane provider registry (matches
@@ -420,7 +480,7 @@ def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
     )
     res = self_install.self_update(root=tmp_path, dry_run=False)
     assert seen["url"] == "https://codeload.github.com/acme/widgets/tar.gz/main"
-    assert res.action == "updated"
+    assert res.action == "updated", res.reason
     assert res.version == "9.9.9"
     assert res.cutover == {"action": "cutover", "result": {"ok": True}}
 

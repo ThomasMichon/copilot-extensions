@@ -464,7 +464,7 @@ def test_v2_cli_writes_canonical_receipt_and_explicit_producer_outputs(unit_case
     assert fields["qualification_digest"] == qualification.receipt_digest(value)
 
 
-def _candidate_packet(case):
+def _candidate_packet(case, *, include_projection=True):
     from promotion_candidate_units import derive_manifest
     from promotion_development_map import build_mapping, project_coverage
 
@@ -487,7 +487,8 @@ def _candidate_packet(case):
     raw = case["coverage"]
     raw["files"][target]["executed_lines"] = [1, 2]
     raw["files"][target]["contexts"] = {"1": [""], "2": [NODE + "|call"]}
-    raw["development_projection"] = project_coverage(raw, mapping)
+    if include_projection:
+        raw["development_projection"] = project_coverage(raw, mapping)
     raw["development_mapping"] = mapping
     directory = case["args"]["unit_packet_dir"]
     digest = hashlib.sha256(_write_json(directory / "coverage.json", raw)).hexdigest()
@@ -500,8 +501,11 @@ def _candidate_packet(case):
     return mapping
 
 
-def test_v3_qualifies_stamped_bytes_and_verified_projection_without_retesting(unit_case):
-    _candidate_packet(unit_case)
+@pytest.mark.parametrize("include_projection", [True, False], ids=["legacy", "derived"])
+def test_v3_qualifies_stamped_bytes_and_verified_projection_without_retesting(unit_case, include_projection):
+    from promotion_development_map import project_coverage
+
+    mapping = _candidate_packet(unit_case, include_projection=include_projection)
     value = qualification.qualify_units(
         **unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE,
     )
@@ -510,10 +514,37 @@ def test_v3_qualifies_stamped_bytes_and_verified_projection_without_retesting(un
         unit_case, value, expected_profile=qualification.CANDIDATE_UNIT_PROFILE,
     ) == qualification.receipt_digest(value)
     assert unit_case["downloads"] == [789, 789]
-    projected = unit_case["coverage"]["development_projection"]
+    raw = {key: value for key, value in unit_case["coverage"].items()
+           if key not in ("development_mapping", "development_projection")}
+    projected = project_coverage(raw, mapping)
+    if include_projection:
+        assert projected == unit_case["coverage"]["development_projection"]
+    else:
+        assert "development_projection" not in unit_case["coverage"]
     assert set(unit_case["coverage"]["development_mapping"]["files"]) == set(unit_case["coverage"]["files"])
     assert projected["copies"]["tools/unit_feature.py"]["unmapped"]["1"]["reason"] == "changed-version-statement"
     assert projected["coverage"]["tools/unit_feature.py"] == {"2": [NODE + "|call"]}
+
+
+@pytest.mark.parametrize("change", ["missing-map", "forged-map", "unknown-context"])
+def test_v3_derived_projection_still_requires_verified_mapping_and_raw_hits(unit_case, change):
+    _candidate_packet(unit_case, include_projection=False)
+    coverage = unit_case["coverage"]
+    if change == "missing-map":
+        del coverage["development_mapping"]
+    elif change == "forged-map":
+        coverage["development_mapping"]["files"]["tools/unit_feature.py"]["lines"]["1"] = 1
+    else:
+        coverage["files"]["tools/unit_feature.py"]["contexts"]["2"] = ["unadmitted|call"]
+    directory = unit_case["args"]["unit_packet_dir"]
+    unit_case["proof"]["coverage_sha256"] = hashlib.sha256(
+        _write_json(directory / "coverage.json", coverage),
+    ).hexdigest()
+    _write_json(directory / "unit-proof.json", unit_case["proof"])
+    unit_case["reseal"]()
+    with pytest.raises((ValueError, VerificationError)):
+        qualification.qualify_units(**unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE)
+    assert not unit_case["downloads"]
 
 
 @pytest.mark.parametrize("change", ["candidate-mutation", "dev-mutation", "forged-map", "forged-projection", "wrong-tree"])

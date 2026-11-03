@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from collections.abc import Mapping
+from typing import Protocol, cast
+
+from machine_transport import registry
 
 from machine_transport import (
     MachineEntry,
@@ -10,6 +14,20 @@ from machine_transport import (
 )
 
 pytestmark = pytest.mark.contract("machine-transport.local-context.binding")
+
+
+class _SelectionWithEntry(Protocol):
+    @property
+    def entry(self) -> MachineEntry: ...
+
+
+def _required_selection(
+    entries: Mapping[str, MachineEntry], name: str, environment: str,
+) -> _SelectionWithEntry:
+    selection = registry.resolve_machine_selection(entries, name, environment)
+    if selection.entry is None:
+        pytest.fail(f"Expected a selected machine for {name!r}")
+    return cast(_SelectionWithEntry, selection)
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
@@ -184,6 +202,7 @@ def test_configured_guest_does_not_require_optional_guest_entry(unrelated: bool)
 def test_configured_legacy_native_binding_selects_its_actual_guest(
     guest_key: str, scoped_neighbor: bool,
 ) -> None:
+    resolve_machine_selection = _required_selection
     entries = {
         key: MachineEntry(key, "", hostname="raw-host")
         for key in ("friendly", guest_key)
