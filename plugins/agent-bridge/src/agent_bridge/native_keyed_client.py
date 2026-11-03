@@ -19,6 +19,8 @@ from .client import BridgeClientError
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--no-resume", action="store_true",
+                        help="Keyed ordinary native send only: refuse a stopped native under its turn lock")
     parser.add_argument("--live-exact-notify", action="store_true",
                         help="Notify only the exact live CLI native; never follow aliases or admit work")
     parser.add_argument("--live-receipt-only", action="store_true",
@@ -41,7 +43,7 @@ def validate_options(args: argparse.Namespace) -> None:
         ))
         or any(getattr(args, field, False) for field in (
             "force", "plugin_context_stdin", "steer", "interrupt", "queue",
-            "notify", "status_check", "wait_reply", "full_history", "new",
+            "notify", "status_check", "wait_reply", "full_history", "new", "no_resume",
         ))
         or getattr(args, "kind", None) not in (None, "prompt")
         or getattr(args, "delivery", None) not in (None, "steer")
@@ -76,7 +78,7 @@ def send(args: argparse.Namespace, client: BridgeClient) -> None:
                           error="keyed native invocation flags differ from its immutable request")
     floor = max(KEYED_NATIVE_PROMPT_PROTOCOL_VERSION,
                 getattr(args, "min_daemon_protocol", None) or 0)
-    client._request = protocol_floored_request(client, floor)
+    client._request = protocol_floored_request(client, floor)  # type: ignore[method-assign]
     suffix = "/receipt" if args.receipt_only else ""
     try:
         result = client._request(

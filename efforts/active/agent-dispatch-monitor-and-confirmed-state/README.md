@@ -11,6 +11,14 @@
 
 ## Guiding Intent
 
+**Operational milestone (2026-11-02):** the
+[ordinary usability plan](usability-validation.md) records earned source
+progress, the ordered remaining lifecycle/integration work and the actual
+running acceptance matrix. Use authorized source-backed live or whole-stack
+container validation for fast feedback; a source PR/release wait is not itself
+an operational test. This does not waive review, resource ownership or effect
+authorization, and does not declare the parent complete.
+
 **Continuing direction (2026-10-30):** the
 [assignment/startup amendment](assignment-startup-amendment.md) distinguishes
 pool-owned placement before embodiment from worker acceptance, and adds bounded
@@ -219,6 +227,11 @@ live claim token. No new blanket ACK or executor appointment is created.
 
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 
+- [ ] Meet the [ordinary usable-again acceptance](usability-validation.md),
+      including actual registration-to-native execution, decline/closeout,
+      suspended recovery, finalize-before-submission and a complete workload's
+      same-native continuation. Keep source, simulation and local running
+      results separate; no merged sub-slice alone closes this milestone.
 - [x] Land the #9709 vision/current-versus-target architecture and
       [repair amendment](assignment-startup-amendment.md) through normal review,
       without behavioral changes. Merged in

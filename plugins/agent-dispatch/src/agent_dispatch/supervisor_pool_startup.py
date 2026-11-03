@@ -187,6 +187,11 @@ def supervise_pool_startup(
         )
         if ordinary:
             from .pool_startup_acp import deliver
+            from .pool_startup_retry_contract import ordinary_prompt
+            message += "\n\n" + ordinary_prompt({
+                "task_id": task["id"], "generation": budget["generation"],
+                "native_id": native, "worktree": worktree,
+            }, current)
             kind, _ = deliver({
                 **driver, "native_id": native, "machine": machine,
                 "idempotency_key": key, "prompt": message,

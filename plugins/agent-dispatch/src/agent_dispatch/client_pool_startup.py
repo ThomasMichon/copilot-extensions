@@ -196,7 +196,7 @@ class PoolStartupClientMixin(PoolStartupRetryClientMixin):
                 **driver,
             }
             if not isinstance(invocation, dict) or invocation != retry_invocation(
-                expected, reservation["startup_revision"],
+                expected, reservation["startup_revision"], reservation=reservation,
             ):
                 raise _unknown("retained retry invocation binding changed")
         return result

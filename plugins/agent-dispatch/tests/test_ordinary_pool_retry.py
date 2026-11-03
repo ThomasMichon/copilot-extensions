@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agent_dispatch import bridge, bridge_command_delivery as transport, pool_startup_acp as acp
+from agent_dispatch import bridge, bridge_command_delivery as transport, ordinary_bridge, pool_startup_acp as acp
 from agent_dispatch.client import DispatchError, DispatchUpgradeRequired
 from agent_dispatch.queue import SpawnState, Status, TaskQueue
 from agent_dispatch.supervisor import Supervisor
@@ -57,7 +57,9 @@ def test_real_ordinary_retry_preserves_distinct_ids_and_resets_only_on_acceptanc
     assert pending["invocation"]["bridge_session_id"] == "bridge-a"
     assert pending["invocation"]["native_id"] == "native-a"
     assert pending["invocation"]["driver"] == "ordinary-bridge"
-    assert "Do not run claim --evaluation" in pending["invocation"]["prompt"]
+    assert "agent-dispatch --shared start" in pending["invocation"]["prompt"]
+    assert "charter show" in pending["invocation"]["prompt"]
+    assert "--evaluation" not in pending["invocation"]["prompt"]
     assert TaskQueue(o.q.db_path).pool_startup(o.task["id"]).retry_invocation == pending["invocation"]
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 2
     complete(o, key)
@@ -69,6 +71,34 @@ def test_real_ordinary_retry_preserves_distinct_ids_and_resets_only_on_acceptanc
                             owner_session_id="native-a", expected_generation=1)
     assert o.q.get(o.task["id"]).status == Status.STARTED
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 0
+
+
+def test_refused_first_prompt_retry_contains_original_queue_routing_and_charters(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    o = ordinary
+    run = ordinary_bridge.subprocess.run
+
+    def refuse_first(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if argv[2] == "send":
+            return subprocess.CompletedProcess(argv, 69, "original prompt not admitted", "")
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", refuse_first)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="send exited"):
+        launch(o)
+    key = o.placed["reservation"]["key"]
+    o.q.record_spawn(key, session_handle="local-body:bridge-a", worktree="worktree-a")
+    o.q.record_pool_startup_outcome(
+        key, task_id=o.task["id"], generation=1, startup_revision=1, native_id="native-a",
+        outcome_kind="startup_rejected", detail="original send refused before admission",
+    )
+    pending = o.client.retry_pool_startup(o.task["id"], key, **arguments())
+    prompt = pending["invocation"]["prompt"]
+    assert prompt.endswith(o.q.get_reservation(key).agent_info["startup_invocation"]["prompt"])
+    assert "agent-dispatch --shared charter show" in prompt
+    assert f"agent-dispatch --shared start {o.task['id']} --pool-generation 1" in prompt
+    assert "`agent-dispatch start" not in prompt and "--evaluation" not in prompt
 
 
 @pytest.mark.parametrize("field,value", [
@@ -146,12 +176,14 @@ def worker(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simple
                 "session_id": "bridge-a", "acp_session_id": state["native"],
                 "durable_session_id": state["native"], "worktree_id": state["worktree"],
                 "project": "example", "target_dir": str(o.q.get_reservation(key).agent_info["connection"]["target_dir"]),
-                "mode": "acp", "read_only": False, "at_rest": False, "status": "idle", "liveness": None,
+                "mode": "acp", "read_only": False, "at_rest": True,
+                "status": "idle", "liveness": None,
             }
             return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
         assert args.command == "send" and args.target == "bridge-a" and args.expected_native_session_id == "native-a"
         assert args.idempotency_key and args.caller == f"agent-dispatch:{args.idempotency_key}"
         assert args.prompt_file == "-" and args.no_wait
+        assert args.no_resume
         assert not args.live_exact and not args.queue and not args.force
         assert args.native_invocation_file is None and args.expected_session_id is None
         if args.receipt_only:

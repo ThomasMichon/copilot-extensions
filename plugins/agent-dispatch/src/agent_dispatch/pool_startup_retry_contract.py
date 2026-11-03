@@ -33,9 +33,30 @@ def session_handle(binding: dict) -> str:
     return binding["native_id"]
 
 
-def retry_invocation(binding: dict, revision: int) -> dict:
+def ordinary_prompt(binding: dict, reservation: dict | None) -> str:
+    """A refused first send cannot supply routing or charters to a later retry."""
+    from .ordinary_invocation import historical_intent
+    from .queue_records import TaskError
+
+    info = reservation.get("agent_info") if isinstance(reservation, dict) else None
+    if not isinstance(info, dict):
+        raise TaskError("ordinary retry requires its retained initial startup intent")
+    original = historical_intent(info.get("startup_invocation"))
+    intent = original["binding"]
+    if (
+        intent.get("task_id") != binding["task_id"]
+        or intent.get("admission_generation") != binding["generation"]
+        or intent.get("worktree_id") != binding["worktree"]
+        or original.get("expected_native_session_id") != binding["native_id"]
+        or not isinstance(original.get("prompt"), str) or not original["prompt"].strip()
+    ):
+        raise TaskError("ordinary retry initial startup intent changed")
+    return original["prompt"]
+
+
+def retry_invocation(binding: dict, revision: int, *, reservation: dict | None = None) -> dict:
     """Describe one work-bearing send without queueing or replacing its native."""
-    return {
+    result = {
         **binding, "startup_revision": revision,
         "idempotency_key": (
             f"pool-startup:{binding['reservation_key']}:{binding['generation']}:{revision}:retry"
@@ -52,3 +73,12 @@ def retry_invocation(binding: dict, revision: int) -> dict:
             "under the existing task contract. Prompt delivery is not acceptance."
         ),
     }
+    if binding.get("driver") == "ordinary-bridge":
+        result["prompt"] = (
+            f"Retry the allocator's current assignment {binding['task_id']} in this same native "
+            f"and worktree only if it remains unowned CLAIMED at generation {binding['generation']}. "
+            "Do not acquire another claim or replace this conversation. "
+            "The original self-contained assignment instructions follow; prompt delivery is not acceptance.\n\n"
+            + ordinary_prompt(binding, reservation)
+        )
+    return result

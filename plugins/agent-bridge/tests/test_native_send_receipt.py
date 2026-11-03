@@ -37,6 +37,7 @@ def test_running_health_route_advertises_receipt_capability(monkeypatch):
     assert response.status_code == 200
     assert response.json()["protocol_version"] >= 51
     assert response.json()["capabilities"]["native_send_receipt"] == 1
+    assert response.json()["capabilities"]["native_send_no_resume"] == 1
 
 
 def _app(manager):

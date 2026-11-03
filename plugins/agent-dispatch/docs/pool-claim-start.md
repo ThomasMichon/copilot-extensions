@@ -363,6 +363,13 @@ refusal counts as `startup_rejected`, not a worker decline, while malformed,
 unsupported and lost responses retain an unknown effect. ACP decision prods can
 start a turn on the same idle native, but cannot queue, force, resume, replace
 or accept work. A lost due-slot reply does not authorize that prod.
+Both observation and send include `--no-resume`, negotiated through the running
+Bridge's `native_send_no_resume: 1` capability; the receiver enforces stopped-
+native refusal under its turn lock, not through a client status-check race.
+Idle `at_rest=true` is a valid reachable projection, not evidence of a stopped
+process. Retry and decision prompts carry the retained original startup seed,
+including actual coordinator routing and charter-loading instructions, because
+a refused first send may never have delivered that seed.
 
 The original caller reports `startup_succeeded`, `startup_failed`,
 `startup_rejected` or `startup_unknown` through exact completion. Success closes

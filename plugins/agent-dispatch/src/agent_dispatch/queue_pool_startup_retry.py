@@ -57,10 +57,8 @@ def prepare_mutation(
         or row["cooling_token"] is not None
     ):
         raise TaskError("pool retry incarnation, caller or retained native changed")
-    expected_driver = driver_binding(
-        {**dict(row), "agent_info": json.loads(row["agent_info"]) if row["agent_info"] else None},
-        binding["native_id"],
-    )
+    retained = {**dict(row), "agent_info": json.loads(row["agent_info"]) if row["agent_info"] else None}
+    expected_driver = driver_binding(retained, binding["native_id"])
     if any(binding.get(name) != value for name, value in expected_driver.items()):
         raise TaskError("pool retry ordinary Bridge binding changed")
     base = {name: binding[name] for name in expected_fields - {"action"}}
@@ -85,7 +83,7 @@ def prepare_mutation(
             conn, task, f"{assignment['machine']}/{row['worktree']}",
             binding["native_id"], binding["generation"],
         )
-        invocation = retry_invocation(base, row["startup_revision"] + 1)
+        invocation = retry_invocation(base, row["startup_revision"] + 1, reservation=retained)
         conn.execute(
             "UPDATE task_pool_assignments SET retry_invocation=? WHERE reservation_key=?",
             (json.dumps(invocation, sort_keys=True), row["key"]),
@@ -98,7 +96,7 @@ def prepare_mutation(
         ) or completion is not (None if outcome == "startup_unknown" else True):
             raise TaskError("pool retry completion requires the original classified caller return")
         retained_invocation = json.loads(assignment["retry_invocation"]) if assignment["retry_invocation"] else None
-        if retained_invocation != retry_invocation(base, row["startup_revision"]):
+        if retained_invocation != retry_invocation(base, row["startup_revision"], reservation=retained):
             raise TaskError("pool retry completion does not own this invocation")
         current = task.generation == binding["generation"] and (
             task.status == Status.CLAIMED and task.owner is None

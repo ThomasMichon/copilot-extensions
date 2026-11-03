@@ -58,15 +58,20 @@ class PoolStartupRetryClientMixin:
         )
         expected_binding = {"task_id": task_id, **body, "action": action}
         revision = startup_revision + int(action == "retry")
+        reservation = result.get("reservation") if isinstance(result, dict) else None
+        from .queue_records import TaskError
+        try:
+            invocation = retry_invocation(base, revision, reservation=reservation)
+        except TaskError as exc:
+            raise DispatchError(502, "pool retry outcome is unknown: initial intent changed") from exc
         if not isinstance(result, dict) or (
             not isinstance(result.get("binding"), dict)
             or result["binding"] != expected_binding
             or any(type(result["binding"].get(name)) is not type(value)
                    for name, value in expected_binding.items())
-            or result.get("invocation") != retry_invocation(base, revision)
+            or result.get("invocation") != invocation
         ):
             raise DispatchError(502, "pool retry outcome is unknown: response invocation changed")
-        reservation = result.get("reservation")
         expected_complete = action == "complete" and outcome_kind != "startup_unknown"
         if not isinstance(reservation, dict) or (
             any(reservation.get(name) != value for name, value in {

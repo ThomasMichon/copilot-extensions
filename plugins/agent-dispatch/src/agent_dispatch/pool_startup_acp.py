@@ -42,9 +42,9 @@ def reachable(reservation: dict, native: str) -> bool:
         and value.get("worktree_id") == actual.worktree
         and value.get("project") == actual.project and value.get("target_dir") == actual.path
         and value.get("mode") == "acp" and value.get("read_only") is False
-        and value.get("at_rest") is False and value.get("status") in {"idle", "running"}
+        and type(value.get("at_rest")) is bool and value.get("status") in {"idle", "running"}
         and value.get("liveness") in {None, "active"}
-        and (value["status"] == "idle" or value["liveness"] == "active")
+        and (value["status"] == "idle" or value.get("liveness") == "active")
     )
 
 
@@ -56,7 +56,7 @@ def deliver(invocation: dict, *, observe_only: bool) -> tuple[str, str]:
     arguments = [
         "--json", "send", session, "--expected-native-session-id", native,
         "--idempotency-key", key, "--caller", f"agent-dispatch:{key}",
-        "--prompt-file", "-", "--no-wait",
+        "--prompt-file", "-", "--no-wait", "--no-resume",
     ]
 
     def receipt(value: dict | None) -> bool:

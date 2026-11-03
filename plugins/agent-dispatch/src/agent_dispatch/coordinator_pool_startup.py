@@ -165,6 +165,7 @@ def register(
         invocation = retry_invocation(
             {name: value for name, value in binding.items() if name not in {"action", "outcome_kind", "detail"}},
             body.startup_revision + int(action == "retry"),
+            reservation=asdict(result),
         )
         bus.publish({"type": f"spawn.startup_{action}", "reservation_key": body.reservation_key})
         return _envelope({"binding": binding, "reservation": asdict(result), "invocation": invocation})

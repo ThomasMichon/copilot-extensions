@@ -16,6 +16,7 @@ from .protocol import (
     NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION,
     NATIVE_SEND_RECEIPT_CAPABILITY,
     NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+    NATIVE_SEND_NO_RESUME_CAPABILITY, NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
 )
 from .send_outcome import SendRefused
 from .startup_observation import StartupObservationError
@@ -34,11 +35,16 @@ def send(args: argparse.Namespace) -> None:
     validate_options(args)
     client = core._get_client(ensure=False)
     configure_client(client, args)
+    prompt = _resolve_prompt(args, required=True)
+    if prompt is None:
+        raise SendRefused("refused_invalid", reason="invalid_native_receipt_request",
+                          retryable=False, target=args.target, error="receipt observation requires a prompt")
     result = observe(
-        client, args.target, _resolve_prompt(args, required=True),
+        client, args.target, prompt,
         expected_native_session_id=args.expected_native_session_id,
         idempotency_key=args.idempotency_key, caller_id=core._caller_id_for(args),
         min_protocol=getattr(args, "min_daemon_protocol", None) or 0,
+        no_resume=getattr(args, "no_resume", False),
     )
     emit({**result, "outcome": "accepted"})
 
@@ -73,11 +79,13 @@ def observe(
     client: BridgeClient, session_id: str, prompt: str, *,
     expected_native_session_id: str, idempotency_key: str, caller_id: str | None,
     min_protocol: int = 0,
+    no_resume: bool = False,
 ) -> dict[str, Any]:
     try:
         request = NativeSendPrompt(
             prompt=prompt, expected_native_session_id=expected_native_session_id,
             invocation_key=idempotency_key, caller_id=caller_id,
+            no_resume=no_resume,
         )
     except ValueError as exc:
         raise SendRefused(
@@ -86,7 +94,11 @@ def observe(
         ) from exc
     read = protocol_floored_request(
         client, max(NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION, min_protocol),
-        capabilities={NATIVE_SEND_RECEIPT_CAPABILITY: NATIVE_SEND_RECEIPT_CAPABILITY_VERSION},
+        capabilities={
+            NATIVE_SEND_RECEIPT_CAPABILITY: NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+            **({NATIVE_SEND_NO_RESUME_CAPABILITY: NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION}
+               if no_resume else {}),
+        },
     )
     started = time.monotonic()
 
