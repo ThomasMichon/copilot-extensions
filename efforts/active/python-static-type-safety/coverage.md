@@ -7,20 +7,20 @@ not a second checker configuration.
 
 ## Snapshot and counting rules
 
-Snapshot: **2026-11-02**, merged Dev policy
-`02fedf0688003fcab6a5bc4ae24bd85ada936880`, reconciled with
+Snapshot: **2026-11-03**, merged Dev policy
+`a821288054999248812454320a578228ff14b19d`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
-- **31 / 68 checker projects (45.6%)** have merged strict admission.
-- **267 / 7,666 physical Python files (3.5%)** belong to those strict scopes.
-- **37 projects remain pending; none are basic.**
-- All 7,666 tracked physical Python paths are classified. Classification,
+- **33 / 68 checker projects (48.5%)** have merged strict admission.
+- **279 / 7,670 physical Python files (3.6%)** belong to those strict scopes.
+- **35 projects remain pending; none are basic.**
+- All 7,670 tracked physical Python paths are classified. Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
-- AI Attribution's five files are included after #10176 merged with exact-head
-  approval, required CI, native qualification and minimum-helper-runtime proof.
-  Newly added files in independently pending projects are reflected in their
-  rows rather than being credited by this library admission.
+- Context Handoff's six files and Dispatch service's six files are included
+  after #10192 and #10189 merged with their reviewed exact-head qualification
+  and required CI. The new Dispatch-plugin and repository-tool files remain
+  pending under their own rows rather than being credited by these admissions.
 
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
@@ -31,10 +31,10 @@ owned files; the manifest remains authoritative for their exact boundaries.
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
 | Shared libraries | 37 | 29 | 713 | 258 |
-| Plugins | 20 | 1 | 5,385 | 5 |
-| Services and managers | 7 | 0 | 922 | 0 |
-| Tools and support | 4 | 1 | 646 | 4 |
-| **Total** | **68** | **31** | **7,666** | **267** |
+| Plugins | 20 | 2 | 5,387 | 11 |
+| Services and managers | 7 | 1 | 922 | 6 |
+| Tools and support | 4 | 1 | 648 | 4 |
+| **Total** | **68** | **33** | **7,670** | **279** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -103,7 +103,7 @@ cross-cutting qualification gate below.
 | `agent-codespaces` | 278 | Pending | Runtime, venue/install helpers, fixtures and copies |
 | `agent-conduct-guidance` | 36 | Pending | Scripts, tests and owned copies |
 | `agent-containers` | 194 | Pending | Runtime, providers/install helpers, fixtures and copies |
-| `agent-dispatch` | 807 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
+| `agent-dispatch` | 809 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
 | `agent-index` | 397 | Pending | Client/server, scripts, fixtures and copies |
 | `agent-logger` | 239 | Pending | Runtime, native installer fixtures and copies |
 | `agent-machines` | 169 | Pending | Configuration/requirement engine, scripts, fixtures and copies |
@@ -114,7 +114,7 @@ cross-cutting qualification gate below.
 | `agent-worktrees` | 1,404 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
 | `ai-attribution` | 5 | **Locked** | #10171 / merged #10176; both targets, native policy/hook controls and Python 3.9 helper compatibility |
 | `budget-guidance` | 86 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
-| `context-handoff` | 6 | Pending | Complete Python helper/test admission |
+| `context-handoff` | 6 | **Locked** | #10179 / merged #10192; both targets, native Python/Node controls and Python 3.10 helper qualification |
 | `copilot-extensions-harness` | 17 | Pending | Complete Python helper/test admission |
 | `customizing-copilot` | 95 | Pending | Authoring/review/projection scripts, fixtures and shipped copies |
 | `efforts` | 28 | Pending | Policy/capture/lifecycle helpers and tests |
@@ -126,7 +126,7 @@ cross-cutting qualification gate below.
 |---------|-------------:|-------------|----------------|
 | `fleet-manager` | 217 | Pending | Model/control/runtime subsystems, native boundaries and tests |
 | `service-chat` | 29 | Pending | Service/storage/admission boundaries and tests |
-| `service-dispatch` | 6 | Pending | Complete service and test admission |
+| `service-dispatch` | 6 | **Locked** | #10184 / merged #10189; both targets, complete unchanged source and native fixture qualification |
 | `service-index` | 27 | Pending | Service/backend/storage boundaries and tests |
 | `service-pr` | 9 | Pending | Provider/service boundaries and tests |
 | `service-ssh` | 26 | Pending | Transport/service/native boundaries and tests |
@@ -139,7 +139,7 @@ cross-cutting qualification gate below.
 | `checker` | 4 | **Locked** | #9831/#9853; typed front door, source views, cache paths and checker tests |
 | `devcontainer` | 3 | Pending | Build/verification helpers |
 | `effort-helpers` | 5 | Pending | Every tracked effort-hosted executable helper |
-| `repository-tools` | 634 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
+| `repository-tools` | 636 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
 
 ## Cross-cutting lockdown
 

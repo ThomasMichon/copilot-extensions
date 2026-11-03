@@ -5,15 +5,24 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "binding-knowledge" / "scripts"
+NativeCall = tuple[list[str], dict[str, object]]
+PairFixture = tuple[
+    Path, Path, Path, Path, dict[str, Any], dict[str, Any], list[NativeCall],
+]
 
 
-def _load(name: str):
+def _load(name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {name} from {SCRIPTS}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -25,7 +34,7 @@ cp = _load("control_plane_binding")
 
 
 @pytest.fixture
-def pair(tmp_path, monkeypatch):
+def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PairFixture:
     harness = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
     harness.mkdir()
@@ -39,14 +48,14 @@ def pair(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     home = tmp_path / "home"
-    roles = {
+    roles: dict[str, Any] = {
         "harness": "harness",
         "knowledge": "knowledge",
         "legacy_project": "harness",
         "paired": True,
         "legacy_compatible": True,
     }
-    registry = {
+    registry: dict[str, Any] = {
         "repos": [
             {
                 "name": name,
@@ -61,9 +70,9 @@ def pair(tmp_path, monkeypatch):
             )
         ]
     }
-    calls = []
+    calls: list[NativeCall] = []
 
-    def native(_command, args, **kwargs):
+    def native(_command: str, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
         if args[:2] == ["knowledge", "control-plane"]:
             value = {
@@ -109,12 +118,13 @@ def pair(tmp_path, monkeypatch):
     return home, harness, knowledge, topology, roles, registry, calls
 
 
-def _resolve(pair, **kwargs):
+def _resolve(pair: PairFixture, **kwargs: object) -> dict[str, Any]:
     home, _harness, _knowledge, topology, *_ = pair
-    return cp.resolve_binding(bk, str(topology), "native-owner", home=home, **kwargs)
+    resolved: dict[str, Any] = cp.resolve_binding(bk, str(topology), "native-owner", home=home, **kwargs)
+    return resolved
 
 
-def test_fresh_pair_uses_normal_writer_without_prior_local_config(pair):
+def test_fresh_pair_uses_normal_writer_without_prior_local_config(pair: PairFixture) -> None:
     home, harness, knowledge, topology, _roles, registry, calls = pair
     before = topology.read_bytes(), json.dumps(registry, sort_keys=True)
     selected = _resolve(pair)
@@ -141,7 +151,7 @@ def test_fresh_pair_uses_normal_writer_without_prior_local_config(pair):
     assert list(knowledge.iterdir()) == [topology]
 
 
-def test_preflight_shares_one_inventory_but_writer_reads_registration_again(pair):
+def test_preflight_shares_one_inventory_but_writer_reads_registration_again(pair: PairFixture) -> None:
     home, harness, knowledge, _topology, _roles, _registry, calls = pair
     selected = _resolve(pair)
     assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 1
@@ -157,7 +167,9 @@ def test_preflight_shares_one_inventory_but_writer_reads_registration_again(pair
 
 @pytest.mark.parametrize("change", ["removed", "repointed"])
 @pytest.mark.parametrize("existing", [False, True])
-def test_changed_registration_after_preflight_never_writes_binding(pair, change, existing):
+def test_changed_registration_after_preflight_never_writes_binding(
+    pair: PairFixture, change: str, existing: bool,
+) -> None:
     home, harness, knowledge, topology, _roles, registry, _calls = pair
     config = home / ".harness" / "config.yaml"
     if existing:
@@ -188,7 +200,7 @@ def test_changed_registration_after_preflight_never_writes_binding(pair, change,
     assert topology.read_bytes() == topology_before
 
 
-def test_matching_binding_preserves_existing_config_bytes_and_timestamp(pair):
+def test_matching_binding_preserves_existing_config_bytes_and_timestamp(pair: PairFixture) -> None:
     home, harness, knowledge, *_ = pair
     config = home / ".harness" / "config.yaml"
     config.parent.mkdir(parents=True)
@@ -212,7 +224,7 @@ def test_matching_binding_preserves_existing_config_bytes_and_timestamp(pair):
     assert (config.read_bytes(), config.stat().st_mtime_ns) == before
 
 
-def test_binding_changed_after_preflight_is_not_silently_repointed(pair):
+def test_binding_changed_after_preflight_is_not_silently_repointed(pair: PairFixture) -> None:
     home, harness, knowledge, *_ = pair
     _resolve(pair)
     config = home / ".harness" / "config.yaml"
@@ -234,7 +246,9 @@ def test_binding_changed_after_preflight_is_not_silently_repointed(pair):
 
 
 @pytest.mark.parametrize("binding", ["other-knowledge", "knowledge\nknowledge_repo: other"])
-def test_conflicting_or_duplicate_binding_refuses_before_any_registry_write(pair, binding):
+def test_conflicting_or_duplicate_binding_refuses_before_any_registry_write(
+    pair: PairFixture, binding: str,
+) -> None:
     home, *_ = pair
     config = home / ".harness" / "config.yaml"
     config.parent.mkdir(parents=True)
@@ -247,16 +261,16 @@ def test_conflicting_or_duplicate_binding_refuses_before_any_registry_write(pair
 
 
 def test_native_configuration_namespace_is_used_without_touching_legacy_binding(
-    pair, monkeypatch
-):
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     home, harness, knowledge, *_ = pair
     legacy = home / ".harness" / "config.yaml"
     legacy.parent.mkdir(parents=True)
     legacy.write_text("knowledge_repo: other-legacy-companion\n", encoding="utf-8")
     root = home / "installation-cell" / "projects" / "harness"
-    original = bk._run_agent_worktrees
+    original: Callable[..., subprocess.CompletedProcess[str]] = bk._run_agent_worktrees
 
-    def native(command, args, **kwargs):
+    def native(command: str, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["-p", "harness", "config-root", "--json"]:
             return subprocess.CompletedProcess(
                 args, 0,
@@ -299,10 +313,12 @@ def test_native_configuration_namespace_is_used_without_touching_legacy_binding(
     assert "knowledge_repo: knowledge" in (root / "config.yaml").read_text()
 
 
-def test_explicit_test_home_cannot_redirect_native_owner_into_another_home(pair, monkeypatch):
-    original = bk._run_agent_worktrees
+def test_explicit_test_home_cannot_redirect_native_owner_into_another_home(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original: Callable[..., subprocess.CompletedProcess[str]] = bk._run_agent_worktrees
 
-    def native(command, args, **kwargs):
+    def native(command: str, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["-p", "harness", "config-root", "--json"]:
             return subprocess.CompletedProcess(
                 args, 0,
@@ -323,28 +339,32 @@ def test_explicit_test_home_cannot_redirect_native_owner_into_another_home(pair,
     "overrides",
     [{"harness": "other"}, {"knowledge": "other"}, {"knowledge_path": "/unregistered"}],
 )
-def test_explicit_override_cannot_change_declared_roles_or_registered_paths(pair, overrides):
+def test_explicit_override_cannot_change_declared_roles_or_registered_paths(
+    pair: PairFixture, overrides: dict[str, str],
+) -> None:
     with pytest.raises(RuntimeError, match="conflict"):
         _resolve(pair, **overrides)
     assert not pair[0].exists()
 
 
-def test_unregistered_companion_is_not_fallback_discovery(pair):
+def test_unregistered_companion_is_not_fallback_discovery(pair: PairFixture) -> None:
     pair[-2]["repos"].pop()
     with pytest.raises(RuntimeError, match="exact canonical registration"):
         _resolve(pair)
     assert not pair[0].exists()
 
 
-def test_knowledge_repository_cannot_be_the_executable_harness(pair):
+def test_knowledge_repository_cannot_be_the_executable_harness(pair: PairFixture) -> None:
     pair[-2]["repos"][0]["class"] = "knowledge"
     with pytest.raises(RuntimeError, match="declared lifecycle"):
         _resolve(pair)
     assert not pair[0].exists()
 
 
-def test_old_native_without_tuple_reader_is_explicitly_unsupported(pair, monkeypatch):
-    def unsupported(_command, args, **_kwargs):
+def test_old_native_without_tuple_reader_is_explicitly_unsupported(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unsupported(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 2, "", "unrecognized control-plane command")
 
     monkeypatch.setattr(bk, "_run_agent_worktrees", unsupported)
@@ -353,7 +373,7 @@ def test_old_native_without_tuple_reader_is_explicitly_unsupported(pair, monkeyp
     assert not pair[0].exists()
 
 
-def test_pair_without_explicit_companion_does_not_become_a_binding(pair):
+def test_pair_without_explicit_companion_does_not_become_a_binding(pair: PairFixture) -> None:
     pair[4]["paired"] = False
     pair[4]["knowledge"] = None
     with pytest.raises(RuntimeError, match="explicit repository pair"):
@@ -362,13 +382,15 @@ def test_pair_without_explicit_companion_does_not_become_a_binding(pair):
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
-def test_native_platform_drives_pair_paths_and_normal_inspection(pair, monkeypatch, platform):
+def test_native_platform_drives_pair_paths_and_normal_inspection(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
     home, harness, knowledge, *_ = pair
-    original = bk._run_agent_worktrees
+    original: Callable[..., subprocess.CompletedProcess[str]] = bk._run_agent_worktrees
     for entry, path in zip(pair[-2]["repos"], (harness, knowledge)):
         entry["paths"] = {platform: str(path)}
 
-    def native(command, args, **kwargs):
+    def native(command: str, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         result = original(command, args, **kwargs)
         if args[:2] == ["knowledge", "control-plane"]:
             value = json.loads(result.stdout)
@@ -390,18 +412,18 @@ def test_native_platform_drives_pair_paths_and_normal_inspection(pair, monkeypat
 
 
 @pytest.mark.parametrize("unset", ["null", "Null", "NULL", "~", ""])
-def test_unquoted_null_binding_is_unconfigured_not_a_repository_name(unset):
+def test_unquoted_null_binding_is_unconfigured_not_a_repository_name(unset: str) -> None:
     assert not bk._check_existing_binding(f"knowledge_repo: {unset}\n", "knowledge")
 
 
-def test_quoted_null_repository_name_is_not_treated_as_unconfigured():
+def test_quoted_null_repository_name_is_not_treated_as_unconfigured() -> None:
     assert bk._check_existing_binding('knowledge_repo: "null"\n', "null")
     with pytest.raises(RuntimeError, match="conflicts"):
         bk._check_existing_binding('knowledge_repo: "null"\n', "knowledge")
 
 
 @pytest.mark.parametrize("name", ["true", "NO", "on", "123", "2026-10-18"])
-def test_typed_nonstring_binding_cannot_masquerade_as_a_matching_name(name):
+def test_typed_nonstring_binding_cannot_masquerade_as_a_matching_name(name: str) -> None:
     with pytest.raises(RuntimeError, match="YAML string"):
         bk._check_existing_binding(f"knowledge_repo: {name}\n", name)
     assert bk._check_existing_binding(f'knowledge_repo: "{name}"\n', name)
@@ -417,10 +439,12 @@ def test_typed_nonstring_binding_cannot_masquerade_as_a_matching_name(name):
         {"error": "reader failed"},
     ],
 )
-def test_effective_conflict_or_malformed_binding_refuses_before_write(pair, monkeypatch, value):
-    original = bk._run_agent_worktrees
+def test_effective_conflict_or_malformed_binding_refuses_before_write(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch, value: dict[str, Any],
+) -> None:
+    original: Callable[..., subprocess.CompletedProcess[str]] = bk._run_agent_worktrees
 
-    def native(command, args, **kwargs):
+    def native(command: str, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["-p", "harness", "state-root", "--json"]:
             effective = {"source": "knowledge_repo", "requires_external": True, **value}
             return subprocess.CompletedProcess(args, 3, json.dumps(effective), "")
@@ -433,14 +457,14 @@ def test_effective_conflict_or_malformed_binding_refuses_before_write(pair, monk
 
 
 @pytest.mark.parametrize("bare", [False, True, "worktree-config"])
-def test_control_plane_git_root_accepts_normal_and_bare_anchors(tmp_path, bare):
+def test_control_plane_git_root_accepts_normal_and_bare_anchors(tmp_path: Path, bare: bool | str) -> None:
     root = tmp_path / "anchor"
     command = ["git", "init", "--quiet"]
     if bare is True:
         command.append("--bare")
     result = subprocess.run(
         [*command, str(root)], capture_output=True, text=True,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     if bare == "worktree-config":
@@ -451,7 +475,7 @@ def test_control_plane_git_root_accepts_normal_and_bare_anchors(tmp_path, bare):
         ):
             result = subprocess.run(
                 ["git", "-C", str(root), *args], capture_output=True, text=True,
-                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+                creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
             )
             assert result.returncode == 0, result.stderr
     cp.validate_checkout(str(root))
@@ -462,13 +486,13 @@ def test_control_plane_git_root_accepts_normal_and_bare_anchors(tmp_path, bare):
             cp.validate_checkout(str(nested))
 
 
-def test_control_plane_git_root_rejects_stale_non_git_directory(tmp_path):
+def test_control_plane_git_root_rejects_stale_non_git_directory(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="not a Git repository"):
         cp.validate_checkout(str(tmp_path))
 
 
 @pytest.mark.parametrize("name", ["123-knowledge", "123knowledge", "001-project", "1e3"])
-def test_matching_plain_digit_prefixed_yaml_strings_are_preserved(name):
+def test_matching_plain_digit_prefixed_yaml_strings_are_preserved(name: str) -> None:
     assert bk._check_existing_binding(f"knowledge_repo: {name}\n", name)
 
 
@@ -481,7 +505,9 @@ def test_matching_plain_digit_prefixed_yaml_strings_are_preserved(name):
         "'knowledge_repo': knowledge\n",
     ],
 )
-def test_unsupported_native_yaml_shapes_refuse_without_changing_configuration(pair, text):
+def test_unsupported_native_yaml_shapes_refuse_without_changing_configuration(
+    pair: PairFixture, text: str,
+) -> None:
     home = pair[0]
     config = home / ".harness" / "config.yaml"
     config.parent.mkdir(parents=True)
@@ -494,21 +520,21 @@ def test_unsupported_native_yaml_shapes_refuse_without_changing_configuration(pa
     assert (config.read_bytes(), config.stat().st_mtime_ns) == before
 
 
-def test_differently_named_registrations_cannot_share_a_physical_checkout(pair):
+def test_differently_named_registrations_cannot_share_a_physical_checkout(pair: PairFixture) -> None:
     pair[-2]["repos"][1]["paths"] = dict(pair[-2]["repos"][0]["paths"])
     with pytest.raises(RuntimeError, match="same physical checkout"):
         _resolve(pair)
     assert not pair[0].exists()
 
 
-def _symlink(link, target, *, directory=False):
+def _symlink(link: Path, target: Path, *, directory: bool = False) -> None:
     try:
         link.symlink_to(target, target_is_directory=directory)
     except OSError as exc:
         pytest.skip(f"native symlink creation unavailable: {exc}")
 
 
-def test_symlinked_topology_uses_the_same_native_resolved_source(pair):
+def test_symlinked_topology_uses_the_same_native_resolved_source(pair: PairFixture) -> None:
     link = pair[3].parent / "selected.yaml"
     _symlink(link, pair[3])
     selected = cp.resolve_binding(bk, str(link), "native-owner", home=pair[0])
@@ -516,7 +542,9 @@ def test_symlinked_topology_uses_the_same_native_resolved_source(pair):
     assert not pair[0].exists()
 
 
-def test_symlinked_registration_retains_its_canonical_spelling(pair, monkeypatch):
+def test_symlinked_registration_retains_its_canonical_spelling(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     link = pair[2].parent / "registered-knowledge"
     _symlink(link, pair[2], directory=True)
     pair[-2]["repos"][1]["paths"] = {bk._current_platform_key(): str(link)}
@@ -530,24 +558,26 @@ def test_symlinked_registration_retains_its_canonical_spelling(pair, monkeypatch
 
 @pytest.mark.parametrize("layout", ["bare", "dot-git-bare"])
 @pytest.mark.parametrize("matches", [False, True])
-def test_bare_registration_checks_actual_origin_before_binding(tmp_path, monkeypatch, layout, matches):
+def test_bare_registration_checks_actual_origin_before_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str, matches: bool,
+) -> None:
     root = tmp_path / "anchor"
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
     init = ["git", "init", "--quiet"]
     if layout == "bare":
         init.append("--bare")
-    result = subprocess.run([*init, str(root)], capture_output=True, text=True, **kwargs)
+    result = subprocess.run([*init, str(root)], capture_output=True, text=True, creationflags=creationflags)
     assert result.returncode == 0, result.stderr
     git = ["git", "--git-dir", str(root)] if layout == "bare" else ["git", "-C", str(root)]
     if layout == "dot-git-bare":
         result = subprocess.run(
-            [*git, "config", "core.bare", "true"], capture_output=True, text=True, **kwargs,
+            [*git, "config", "core.bare", "true"], capture_output=True, text=True, creationflags=creationflags,
         )
         assert result.returncode == 0, result.stderr
     registered = "file:///expected"
     actual = registered if matches else "file:///different"
     result = subprocess.run(
-        [*git, "remote", "add", "origin", actual], capture_output=True, text=True, **kwargs,
+        [*git, "remote", "add", "origin", actual], capture_output=True, text=True, creationflags=creationflags,
     )
     assert result.returncode == 0, result.stderr
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
@@ -576,7 +606,7 @@ def test_bare_registration_checks_actual_origin_before_binding(tmp_path, monkeyp
         "knowledge_repo: |-\n  knowledge\n",
     ],
 )
-def test_multiline_binding_is_preserved_without_partial_replacement(tmp_path, text):
+def test_multiline_binding_is_preserved_without_partial_replacement(tmp_path: Path, text: str) -> None:
     config = tmp_path / "config.yaml"
     config.write_text("repo_name: harness\n" + text, encoding="utf-8")
     before = config.read_bytes(), config.stat().st_mtime_ns
@@ -588,8 +618,8 @@ def test_multiline_binding_is_preserved_without_partial_replacement(tmp_path, te
 
 @pytest.mark.parametrize("existing_binding", [False, True])
 def test_unrelated_indentless_sequence_is_supported_for_matching_and_first_touch(
-    tmp_path, existing_binding
-):
+    tmp_path: Path, existing_binding: bool
+) -> None:
     config = tmp_path / "config.yaml"
     existing = "repo_name: harness\ncopilot_profiles:\n- name: cloud\n  model: example\n"
     if existing_binding:
@@ -603,11 +633,13 @@ def test_unrelated_indentless_sequence_is_supported_for_matching_and_first_touch
         assert config.read_text() == "knowledge_repo: knowledge\n" + existing
 
 
-def test_git_identity_and_branch_probes_ignore_inherited_repository_context(tmp_path, monkeypatch):
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+def test_git_identity_and_branch_probes_ignore_inherited_repository_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
 
-    def git(*args):
-        result = subprocess.run(["git", *args], capture_output=True, text=True, **kwargs)
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(["git", *args], capture_output=True, text=True, creationflags=creationflags)
         assert result.returncode == 0, result.stderr
         return result
 

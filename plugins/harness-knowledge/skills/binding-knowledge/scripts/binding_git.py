@@ -38,7 +38,7 @@ def run(path: str, *args: str, timeout: float = 5) -> subprocess.CompletedProces
         return subprocess.run(
             [*command(path), *args], capture_output=True, text=True, timeout=timeout,
             env=repository_env(),
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError("registered control-plane Git root could not be checked") from exc
