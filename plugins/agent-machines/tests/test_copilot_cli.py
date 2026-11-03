@@ -358,6 +358,40 @@ def test_native_fallback_or_changed_cache_refuses_before_launch(
     assert json.loads(capsys.readouterr().out)["effects"] == "none"
 
 
+@pytest.mark.parametrize("phase", ["initial", "after_probe"])
+def test_ready_architecture_cannot_mask_another_existing_invalid_candidate(
+    native: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, phase: str,
+) -> None:
+    architectures = [tmp_path / "win32-x64", tmp_path / "win32-arm64"]
+    for directory in architectures:
+        directory.mkdir()
+        cached(directory)
+    monkeypatch.setattr(control, "_cache_directories", lambda: architectures)
+    rejected = architectures[0] / "1.0.100-1" / "index.js"
+    original = control._ordinary
+    damaged = phase == "initial"
+    monkeypatch.setattr(
+        control, "_ordinary",
+        lambda path: not (damaged and path == rejected) and original(path),
+    )
+
+    def probe(*args: Any, **kwargs: Any) -> str:
+        nonlocal damaged
+        assert phase == "after_probe", "initial rejection must precede the native probe"
+        damaged = True
+        return "GitHub Copilot CLI 1.0.100-1."
+
+    monkeypatch.setattr(control, "_native", probe)
+    monkeypatch.setattr(
+        control, "_attended_launch",
+        lambda *args: pytest.fail("another architecture must not mask a rejected candidate"),
+    )
+    assert cli.main(["copilot-cli", "launch", "1.0.100-1", "--apply", "--json"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert not result["ok"] and "win32-x64" in result["error"]
+
+
 def test_override_cleanup_deletes_even_empty_values_and_retains_concurrent_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

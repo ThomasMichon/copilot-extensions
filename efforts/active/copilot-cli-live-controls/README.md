@@ -167,3 +167,6 @@ global version pin. Deliberate cached-version launch is explicit per invocation.
   structured caller-owned runtime/UTF-8 error handling; all 39 focused control
   cases passed. POSIX retains exec. Refreshed only the implementation-only
   transport fingerprint and rationale; wire captures and provenance are unchanged.
+- Addressed mixed-architecture cache admission at both launch checks: a ready
+  candidate cannot mask another existing rejected candidate. All 41 control
+  regressions passed, including changes introduced after the native probe.

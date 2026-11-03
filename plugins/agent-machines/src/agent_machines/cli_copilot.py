@@ -303,14 +303,27 @@ def _attended_launch(command: list[str], environment: dict[str, str]) -> NoRetur
     os.execvpe(command[0], command, environment)
 
 
-def _launch(args: argparse.Namespace) -> dict[str, Any]:
-    candidates = [_cached_version(directory, args.version) for directory in _cache_directories()]
-    if not any(version.ready for version in candidates):
-        reason = "; ".join(version.reason for version in candidates) or "no matching native cache"
+def _launch_cache(version: str) -> list[CachedVersion]:
+    candidates = [_cached_version(directory, version) for directory in _cache_directories()]
+    rejected = [
+        item for item in candidates if not item.ready and os.path.lexists(item.path)
+    ]
+    if rejected:
         raise CopilotControlError(
-            f"Cannot launch cached version {args.version}: {reason}. "
+            "Cannot choose safely between native cache candidates: "
+            + "; ".join(f"{item.platform}: {item.reason}" for item in rejected)
+        )
+    if not any(item.ready for item in candidates):
+        reason = "; ".join(item.reason for item in candidates) or "no matching native cache"
+        raise CopilotControlError(
+            f"Cannot launch cached version {version}: {reason}. "
             "Use native /downgrade <version> to acquire an uncached version."
         )
+    return candidates
+
+
+def _launch(args: argparse.Namespace) -> dict[str, Any]:
+    candidates = _launch_cache(args.version)
     forwarded = args.arguments
     if any(value == "--prefer-version" or value.startswith("--prefer-version=") for value in forwarded):
         raise CopilotControlError("Do not override the explicitly selected version in forwarded args.")
@@ -335,10 +348,7 @@ def _launch(args: argparse.Namespace) -> dict[str, Any]:
             raise CopilotControlError(
                 "The native version probe did not select the requested package; no session launched."
             )
-        if not any(
-            _cached_version(directory, args.version).ready for directory in _cache_directories()
-        ):
-            raise CopilotControlError("The selected native cache changed before launch.")
+        _launch_cache(args.version)
         _attended_launch(command, environment)
     return result
 

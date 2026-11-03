@@ -100,6 +100,12 @@ is removed for that invocation. No persistent pin, binary replacement, cache
 deletion or new process supervisor is introduced. Native admission remains the
 final authority if cache state changes concurrently.
 
+An existing rejected candidate for that version blocks launch even when another
+architecture is ready. This conservative ambiguity refusal is repeated after the
+native probe; a healthy package must not mask a linked or incomplete package that
+the selected executable could use. Missing versions in other architecture caches
+do not establish an invalid existing candidate.
+
 For an uncached exact version, use native `/downgrade <version>` interactively;
 despite its name, it is the native exact-version acquisition/restart operation.
 Do not silently substitute another version or download/repackage it here.
