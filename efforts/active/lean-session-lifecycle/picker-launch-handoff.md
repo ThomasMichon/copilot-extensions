@@ -637,3 +637,46 @@ reviewed admission revision is implemented and qualified.
   evidence; no service port or existing session is used by the fixture.
   Exact-head review/CI, release, authorized adoption and live watchdog recovery
   remain open. Neither the mini-task nor its inherited parent is complete.
+
+### 2026-11-03 - Watchdog source repair merged; adoption still open
+
+- #10142 merged at `cfb0a34c174e6d66bee7e01645924e1c5aee2619` after
+  an actual exact-head approval, no unresolved review threads and green
+  required CI. No native admission or CI gate was bypassed.
+- Re-read this mini-effort and its parent after merge. The remaining work is
+  release and authorized installed recovery, exhaustive transient-query
+  measurements and live shared-daemon singleton evidence; Phase 2's bounded
+  pending-work retries remain open independently.
+- #10100's context correction is now released in #10134, with both changed
+  production-module blobs verified against the promoted snapshot. This is
+  release availability, not adoption. The earlier oversized coverage evidence
+  failure was fixed separately by #10129; do not duplicate that owner's work
+  or misreport a successful retry as the original failed run passing.
+
+### 2026-11-03 - Released repair; independent adoption progress blockers
+
+- #10142 is released in #10145, with both changed production blobs matched
+  to the promoted snapshot. The ordinary update still cannot select the new
+  Manager: its installed candidate preparation reaches the existing allowance
+  while copying/verifying inventory. #10126 already owns that producer
+  correction; the reproduction was added there rather than opening a
+  competing implementation or increasing its deadline.
+- The separately scoped Bridge update also failed before payload publication.
+  Its native CLI staging directory was still creating files at the timeout
+  boundary, with roughly half the incumbent payload's file count copied.
+  #10159 records this distinct external-producer progress gap. Partial staging,
+  confirmed child cleanup and a released source fix do not establish adoption.
+- A read-only native marketplace command completes despite the same adjacent
+  OAuth-login diagnostic seen in the failed child. That diagnostic is not
+  established as the copy timeout's cause; no credentials, authentication
+  policy, timeout, installed code or coordination marker was changed.
+- The selected installed Manager `0.6.252-dev1` independently answers the
+  effect-free terminal capability query through the actual registered front
+  door. Its response pins the selected isolated module command and root;
+  the existing finite owner returns zero with no stderr. This qualifies only
+  selected-runtime admission, not a real attachment, exhaustive transient
+  inventory, shared-daemon singleton or successful whole-suite update.
+- Keep the authorized rollout and live qualification open behind these
+  tracked blockers. The parent's bounded pending-work/retry slice remains an
+  independent authorized avenue; no existing session needs to be terminated
+  or migrated to pursue it.

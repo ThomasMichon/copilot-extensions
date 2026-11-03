@@ -93,6 +93,48 @@ def test_update_custody_never_captures_a_new_activation_snapshot(
     assert not journal(tmp_path).exists()
 
 
+def test_read_only_fence_requires_no_lock_or_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plugin_activation import activation_preservation_pending
+
+    initialize(tmp_path)
+    assert activation_preservation_pending(tmp_path) is False
+    with preserve_activation_durably(IDENTITY, tmp_path) as transaction:
+        monkeypatch.setattr(
+            preservation, "OperationLock",
+            lambda *args, **kwargs: pytest.fail("read-only fence acquired a lock"),
+        )
+        assert activation_preservation_pending(tmp_path) is True
+        transaction.confirm_not_launched()
+        assert activation_preservation_pending(tmp_path) is True
+    assert activation_preservation_pending(tmp_path) is False
+
+
+def test_read_only_fence_clears_only_after_witnessed_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plugin_activation import activation_preservation_pending
+
+    initialize(tmp_path)
+    restore = state.restore
+
+    def blocked_restore(*args: object) -> NoReturn:
+        raise OSError("fixture restoration unavailable")
+
+    monkeypatch.setattr(state, "restore", blocked_restore)
+    with pytest.raises(OSError, match="restoration unavailable"):
+        with preserve_activation_durably(IDENTITY, tmp_path) as transaction:
+            install(tmp_path)
+            transaction.confirm_posix_quiescent()
+    assert activation_preservation_pending(tmp_path) is True
+    monkeypatch.setattr(state, "restore", restore)
+    with activation_custody(tmp_path):
+        assert activation_preservation_pending(tmp_path) is False
+        assert_restored(tmp_path)
+    assert activation_preservation_pending(tmp_path) is False
+
+
 def test_unproven_command_retains_original_and_blocks_any_identity(tmp_path: Path) -> None:
     initialize(tmp_path)
     with pytest.raises(PluginStateError, match="settlement is unproven"):

@@ -159,9 +159,19 @@ def test_windows_budget_reserves_the_cleanup_grace(monkeypatch, tmp_path, elapse
     assert status.startswith("OK") is (len(expected) == 2)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="unsupported strict POSIX lane")
-def test_posix_cannot_claim_confirmed_tree_exit(tmp_path):
-    with pytest.raises(ValueError, match="requires a Windows Job"):
+@pytest.mark.skipif(os.name == "nt", reason="POSIX observation prerequisite")
+def test_posix_strict_execution_requires_native_observation(tmp_path, monkeypatch):
+    from agent_procutil import owned_process
+
+    def unsupported():
+        raise RuntimeError("native observation unavailable")
+
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", unsupported)
+    monkeypatch.setattr(
+        owned_process, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: pytest.fail("unavailable observation launched a target"),
+    )
+    with pytest.raises(RuntimeError, match="native observation unavailable"):
         installer_run.run_installer(
             ["fixture"], cwd=tmp_path, env={}, deadline_s=1, require_tree_exit=True,
         )

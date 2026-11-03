@@ -78,7 +78,9 @@ def _read(path: Path, home: Path) -> dict[str, Any] | None:
         )
         or (
             record["phase"] == "quiescent"
-            and record["witness"] not in ("windows-job-empty", "not-launched")
+            and record["witness"] not in (
+                "windows-job-empty", "posix-owned-group-empty", "not-launched",
+            )
         )
     ):
         raise state.PluginStateError(f"activation transaction is invalid or foreign: {path}")
@@ -154,7 +156,7 @@ def _restore(
 
 
 class ActivationPreservation:
-    """A process owner may attest empty-Job cleanup or refusal before execution."""
+    """A process owner may attest positive native scope settlement or pre-launch refusal."""
 
     def __init__(
         self, lock: OperationLock, path: Path, home: Path, record: dict[str, Any],
@@ -179,6 +181,10 @@ class ActivationPreservation:
     def confirm_not_launched(self) -> None:
         """Call only when the process owner proves refusal before child execution."""
         self._confirm("not-launched")
+
+    def confirm_posix_quiescent(self) -> None:
+        """Call only after the owned POSIX group, unreaped root and output workers settle."""
+        self._confirm("posix-owned-group-empty")
 
     def _finish(self) -> None:
         _restore(self._lock, self._path, self._home, self._record)
@@ -216,6 +222,15 @@ class ActivationCustody:
             raise
         else:
             preservation._finish()
+
+
+def activation_preservation_pending(home: Path | None = None) -> bool:
+    """Read the existing custody fence without acquiring a lock or restoring state."""
+    home = (home or state.copilot_home()).resolve()
+    area = home / "activation-preservation"
+    if not _plain(area, directory=True):
+        return False
+    return _read(area / "transaction.json", home) is not None
 
 
 @contextmanager

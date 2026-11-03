@@ -22,7 +22,7 @@ class OutputRelayCleanupError(RuntimeError):
 
 
 class ByteRelay:
-    def __init__(self, descriptor: int) -> None:
+    def __init__(self, descriptor: int, *, deadline: float | None = None) -> None:
         from . import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
         self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=64)
@@ -65,7 +65,7 @@ class ByteRelay:
             self._reader.start()
             self._writer.start()
         except BaseException:
-            self.abort(10)
+            self.abort(10 if deadline is None else max(0, deadline - time.monotonic()))
             raise
 
     def _write(self) -> None:

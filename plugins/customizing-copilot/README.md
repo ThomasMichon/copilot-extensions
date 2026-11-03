@@ -85,6 +85,9 @@ Provides:
   synthetic fixtures in an owned isolated runtime, with native descriptor/model
   preflight, request-size comparisons and lifecycle evidence, plus import-inert
   specialist, declared-source reading and catalog-bound decision contracts.
+  An opt-in callable factory binds those contracts to the requesting session's
+  catalog, bounded context and live source policy; its host supplies the
+  qualified owned runner and explicit profile.
   Separate selector/evaluator hosts require explicit invocation and profiles;
   they do not
   register a selector, qualify a model or change main-agent preferences.

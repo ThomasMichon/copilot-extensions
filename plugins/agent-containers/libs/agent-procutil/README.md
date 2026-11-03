@@ -416,6 +416,27 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+`run_owned()` additionally supports confirmed POSIX group settlement with
+`on_settled`, `cwd` and `env`. Its additive `output_fds` seam reuses the ordinary
+cancellable raw-byte relays; `inactivity_timeout` renews only on output/progress.
+The existing absolute `timeout` and optional aggregate `budget` never renew.
+Aggregate settlement also bounds relay aborts, fallback draining and worker
+joins with one fixed deadline; steady sink progress cannot extend it.
+`timeout=None` is permitted only with an inactivity deadline. The streaming
+seam requires an exclusive POSIX group and no input; Windows callers retain
+their existing strict Job executor. The original default arguments and behavior
+remain unchanged.
+An inherited group cannot publish its enclosing owner's settlement callback.
+
+The root is observed without reaping, then the native group is retired and
+positively confirmed before root reap and output-worker settlement. Only then
+does the callback run, including confirmed-cleanup timeout/cancellation paths.
+Unconfirmed cleanup retains exact process/output resources on
+`OwnedCleanupError` and withholds notification. This in-process owner does not
+add caller-death supervision: a dead caller is not settlement evidence.
+Descendants must remain in the inherited POSIX group; deliberate group/session
+escape is outside this contract, not a claimed whole-tree guarantee.
+
 ### Aggregate execution and settlement budget
 
 `agent_procutil.owned_budget.OwnedExecutionBudget` is an optional additive

@@ -440,10 +440,19 @@ def test_invalid_argv_refuses_before_spawn(monkeypatch, argv):
         run_caller_owned(argv, timeout=1, max_stdout_bytes=10, max_stderr_bytes=10)
 
 
-def test_existing_run_owned_signature_remains_unchanged():
-    assert list(inspect.signature(run_owned).parameters) == [
+def test_existing_run_owned_signature_retains_original_parameters():
+    assert list(inspect.signature(run_owned).parameters)[:5] == [
         "argv", "timeout", "input_text", "capture", "inherit_process_group",
     ]
+
+
+def test_inherited_group_cannot_claim_settlement(monkeypatch):
+    monkeypatch.setattr(
+        ownership, "_run_owned",
+        lambda *args, **kwargs: pytest.fail("invalid settlement entered native execution"),
+    )
+    with pytest.raises(ValueError, match="enclosing owner"):
+        run_owned(["fixture"], timeout=1, inherit_process_group=True, on_settled=lambda: None)
 
 
 @native_execution
