@@ -7313,14 +7313,14 @@ missing/stale receipts and busy/deadline outcomes cannot become success.
 It also exercises the legacy monitor result adapter with a fake transition,
 including failed, refused and busy outcomes and the previous-live flag.
 The native installer wrappers and actual service cutover remain separate tests.
-The daemon census also checks direct current-directory expressions with
-identifiable imports at classified resident `spawn_daemon` sites; it does not
-trace nested expression scopes or dynamic arguments, or prove that other
-computed directories are durable.
+The admitted daemon-cwd units exercise the Codespaces owner launch with a fake
+child, checking a durable working directory and runtime-root log. They do not
+cover other launchers or a live daemon.
 
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
 python tools/check-install-contract.py         # runtime-plugin install contract — zero violations
+python -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
 python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
 python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests

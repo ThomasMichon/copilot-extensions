@@ -87,13 +87,9 @@ corresponding native attributed launch/startup boundary. Flags-only
 home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
 of discarding it.
-The daemon census rejects direct `os.getcwd()` and `Path.cwd()` expressions
-with identifiable, unshadowed imports at classified resident `spawn_daemon`
-sites.
-It does not trace variables, nested expression scopes or dynamic keyword
-arguments, or prove that other directories are durable. A genuine exception needs a reasoned
-`# daemon-spawn: allow <why>` comment on or immediately above the call or
-`cwd` argument.
+Promotion units exercise the Codespaces owner launch with a fake child and
+check its working directory and log location. This is one launch boundary,
+not a census-wide or live-daemon proof.
 
 ### Preferred path: normal creation and explicit Job ownership
 
