@@ -1,0 +1,9 @@
+{
+  "comment": "Give durable Linux residents independent native scopes without escaping contained tests",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

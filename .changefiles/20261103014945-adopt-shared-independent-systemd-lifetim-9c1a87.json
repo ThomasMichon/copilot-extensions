@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt shared independent systemd lifetime for durable resident launches",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
