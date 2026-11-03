@@ -13,6 +13,8 @@ import secrets
 import time
 from pathlib import Path
 from contextlib import contextmanager
+from collections.abc import Iterator
+from typing import Any, Protocol, TypedDict, cast
 
 from .sources.gh_auth import GhAuthSource
 
@@ -20,8 +22,29 @@ ACTION = "get-account-token"
 REQUEST_FIELDS = frozenset({"source", "account", "recipient", "host", "action"})
 
 
+class _WindowsLocking(Protocol):
+    LK_NBLCK: int
+    LK_UNLCK: int
+
+    def locking(self, descriptor: int, mode: int, count: int, /) -> None: ...
+
+
+class _PosixLocking(Protocol):
+    LOCK_EX: int
+    LOCK_NB: int
+    LOCK_UN: int
+
+    def flock(self, descriptor: int, operation: int, /) -> None: ...
+
+
+class _Publication(TypedDict):
+    port: int
+    pid: int
+    generation: str
+
+
 @contextmanager
-def publication_guard(policy_path):
+def publication_guard(policy_path: str | os.PathLike[str]) -> Iterator[None]:
     """One OS-owned cross-process guard; never unlink the lock's identity."""
     filename = Path(policy_path).with_name("account-relay-publication.lock")
     descriptor = os.open(filename, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -32,10 +55,13 @@ def publication_guard(policy_path):
         os.lseek(descriptor, 0, os.SEEK_SET)
         try:
             if os.name == "nt":
-                import msvcrt
+                import msvcrt as _msvcrt
+                # Describe the OS-selected stdlib ABI on both analysis targets.
+                msvcrt = cast(_WindowsLocking, _msvcrt)
                 msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
             else:
-                import fcntl
+                import fcntl as _fcntl
+                fcntl = cast(_PosixLocking, _fcntl)
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             raise RuntimeError("account-relay-publication-busy") from None
@@ -46,17 +72,19 @@ def publication_guard(policy_path):
             if locked:
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 if os.name == "nt":
-                    import msvcrt
+                    import msvcrt as _msvcrt
+                    msvcrt = cast(_WindowsLocking, _msvcrt)
                     msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
                 else:
-                    import fcntl
+                    import fcntl as _fcntl
+                    fcntl = cast(_PosixLocking, _fcntl)
                     fcntl.flock(descriptor, fcntl.LOCK_UN)
         finally:
             os.close(descriptor)
 
 
-def _pairs(pairs):
-    result = {}
+def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("duplicate policy field")
@@ -75,7 +103,7 @@ def read_reference(path: str, limit: int = 65536) -> bytes:
     return value
 
 
-def _text(value):
+def _text(value: object) -> str:
     if (
         not isinstance(value, str) or not value or len(value) > 2048
         or any(ord(char) < 33 or ord(char) == 127 for char in value)
@@ -87,18 +115,18 @@ def _text(value):
 class AccountRelay:
     """Source custodian; a path or source label alone is never authorization."""
 
-    def __init__(self, policy_path: str):
+    def __init__(self, policy_path: str) -> None:
         self.policy_path = str(Path(policy_path))
         if not Path(self.policy_path).is_absolute():
             raise ValueError("absolute policy reference required")
-        self._server = None
-        self._closing_server = None
-        self._publication = None
-        self._tasks = set()
+        self._server: asyncio.Server | None = None
+        self._closing_server: asyncio.Server | None = None
+        self._publication: _Publication | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
         self._active = False
         self._withdraw_pending = False
 
-    async def prepare(self):
+    async def prepare(self) -> None:
         """Reserve an account-only listener without admitting or publishing it."""
         if self._server is not None or self._closing_server is not None:
             raise RuntimeError("account relay already running")
@@ -106,7 +134,7 @@ class AccountRelay:
         port = self._server.sockets[0].getsockname()[1]
         self._publication = {"port": port, "pid": os.getpid(), "generation": secrets.token_hex(16)}
 
-    def activate(self):
+    def activate(self) -> None:
         """Open admission only after the embedding's current ownership grant."""
         if self._server is None or self._active:
             raise RuntimeError("account relay not prepared")
@@ -122,7 +150,7 @@ class AccountRelay:
         finally:
             stage.unlink(missing_ok=True)
 
-    async def start(self):
+    async def start(self) -> None:
         await self.prepare()
         try:
             self.activate()
@@ -130,7 +158,7 @@ class AccountRelay:
             await self.stop()
             raise
 
-    def close(self):
+    def close(self) -> None:
         """Withdraw admission/discovery and cancel before waiting on transports."""
         self._active = False
         if self._server is not None:
@@ -154,7 +182,7 @@ class AccountRelay:
         self._publication = None
         self._withdraw_pending = False
 
-    async def stop(self):
+    async def stop(self) -> None:
         self.close()
         tasks = tuple(self._tasks)
         if tasks:
@@ -169,8 +197,8 @@ class AccountRelay:
         if self._withdraw_pending:
             raise RuntimeError("account-relay-withdrawal-unconfirmed")
 
-    async def _handle(self, reader, writer):
-        task = asyncio.current_task()
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = cast(asyncio.Task[None], asyncio.current_task())
         self._tasks.add(task)
         try:
             if not self._active:

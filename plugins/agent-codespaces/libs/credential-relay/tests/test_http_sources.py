@@ -6,9 +6,19 @@ from credential_relay import RelayBuilder
 from credential_relay.http_sources import HttpSourceRegistry
 
 
-def test_registry_keeps_provider_identity_and_scope_capability():
+class _Source:
+    name = "registration-only"
+
+    def supports(self, action: str, fields: dict[str, str]) -> bool:
+        pytest.fail("Registration must not acquire credentials")
+
+    async def resolve(self, action: str, fields: dict[str, str], *, timeout: float = 30.0) -> str | None:
+        pytest.fail("Registration must not acquire credentials")
+
+
+def test_registry_keeps_provider_identity_and_scope_capability() -> None:
     registry = HttpSourceRegistry()
-    source = object()
+    source = _Source()
     registry.register("example@example/grant", source, scoped=True)
     assert registry.get("example@example/grant").source is source
     assert registry.get("example@example/grant").scoped
@@ -16,16 +26,16 @@ def test_registry_keeps_provider_identity_and_scope_capability():
         registry.get("missing@example/grant")
 
 
-def test_duplicate_reference_refuses_without_disabling_other_sources():
+def test_duplicate_reference_refuses_without_disabling_other_sources() -> None:
     builder = RelayBuilder()
-    builder.add_http_source("example@example/grant", object())
-    builder.add_http_source("example@example/grant", object())
-    builder.add_http_source("other@example/grant", object())
+    builder.add_http_source("example@example/grant", _Source())
+    builder.add_http_source("example@example/grant", _Source())
+    builder.add_http_source("other@example/grant", _Source())
     with pytest.raises(PermissionError, match="ambiguous"):
         builder.http_sources.get("example@example/grant")
     assert builder.http_sources.get("other@example/grant")
     merged = HttpSourceRegistry()
-    merged.register("example@example/grant", object())
+    merged.register("example@example/grant", _Source())
     merged.include(builder.http_sources)
     with pytest.raises(PermissionError, match="ambiguous"):
         merged.get("example@example/grant")
@@ -36,6 +46,6 @@ def test_duplicate_reference_refuses_without_disabling_other_sources():
     "unqualified", "", "provider/grant", "../source", "name@example/source/path",
     "name@example/a\nb", "name@example/", "name @example/grant",
 ])
-def test_source_reference_must_be_provider_qualified(reference):
+def test_source_reference_must_be_provider_qualified(reference: str) -> None:
     with pytest.raises(ValueError):
-        HttpSourceRegistry().register(reference, object())
+        HttpSourceRegistry().register(reference, _Source())

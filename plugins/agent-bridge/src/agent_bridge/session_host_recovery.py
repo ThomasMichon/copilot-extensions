@@ -117,6 +117,7 @@ class _SessionHostRecoveryMixin:
         """
         if self._host_index is None:
             return 0
+        self._rehydrate(merge=True)
         # Reload from the latest on-disk state before scanning (PR #4543
         # review): this process's own in-memory snapshot can predate a
         # concurrent writer's registration -- most importantly the other
@@ -156,6 +157,9 @@ class _SessionHostRecoveryMixin:
         for rec in self._live_host_records():
             from .cold_outages import latest
 
+            # Recovery/earlier attachments await; the predecessor can persist
+            # another session or its ACP identity while this scan is in flight.
+            self._rehydrate(merge=True, session_id=rec.session_id)
             stored = self._db.get_session(rec.session_id)
             if stored is not None and stored.get("runtime_custody_json") is not None:
                 log.info("Skipping unenrolled acquisition Host reattach for %s", rec.session_id)
@@ -165,6 +169,8 @@ class _SessionHostRecoveryMixin:
                 # recovery owner, including registered replacement hosts.
                 continue
             session = self._sessions.get(rec.session_id)
+            if session is not None and session.client is not None and session.client.is_running:
+                continue
             if (
                 session is not None
                 and session.status in {SessionStatus.ENDED, SessionStatus.FAILED}
@@ -229,6 +235,12 @@ class _SessionHostRecoveryMixin:
                 continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
+                if session is not None and self._session_metadata_in_use(session):
+                    log.info(
+                        "Deferring orphan decision for %s: session metadata is in use",
+                        rec.session_id,
+                    )
+                    continue
                 # A live host with no adoptable session -- ended out from under
                 # it (its row was deleted) or a pre-#1786 orphan. Reap it rather
                 # than leak the host + child forever.

@@ -15,7 +15,7 @@ import sys
 
 log = logging.getLogger("agent-codespaces.relay.gh-auth")
 
-_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_SUBPROCESS_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0
 _DEFAULT_GITHUB_HOSTS = frozenset({"github.com"})
 
 

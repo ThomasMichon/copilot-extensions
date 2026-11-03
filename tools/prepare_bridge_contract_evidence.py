@@ -33,9 +33,9 @@ def _run(root: Path, *arguments: str, timeout: int = 10) -> subprocess.Completed
 
 
 def prepare(root: Path, remote: str) -> str:
-    """Fetch missing object data from the CI-selected repository, never a packet URL.
+    """Prepare exact metadata locally or from the CI-selected repository.
 
-    The validator remains read-only and still proves the complete captured tree.
+    The validator remains read-only and verifies the frozen source closure.
     This preparation neither changes the worktree nor refreshes capture evidence.
     """
     parsed = urlsplit(remote)
@@ -57,6 +57,9 @@ def prepare(root: Path, remote: str) -> str:
     require_local_object_reads()
     for commit in commits:
         if _run(root, "cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
+            from bridge_capture_metadata import load
+            if load(root, commit) is not None:
+                continue
             result = _run(
                 root, "fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
                 "--no-auto-maintenance", "--no-write-fetch-head",
@@ -68,7 +71,7 @@ def prepare(root: Path, remote: str) -> str:
                 raise RuntimeError("capture checkpoint is still unavailable after preparation")
 
         def read(relative: str) -> bytes:
-            result = _run(root, "show", f"{commit}:{relative}")
+            result = _run(root, "cat-file", "blob", f"{commit}:{relative}")
             if result.returncode:
                 raise ValueError(f"captured contract metadata is unavailable: {relative}")
             return result.stdout.encode("utf-8")
@@ -79,14 +82,23 @@ def prepare(root: Path, remote: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--remote", required=True, help="CI-selected HTTPS repository URL")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--remote", help="CI-selected HTTPS repository URL")
+    mode.add_argument("--retain-metadata", metavar="COMMIT",
+                      help="Preserve exact local capture registry and its Git object proof")
     arguments = parser.parse_args()
     try:
-        commit = prepare(Path(__file__).resolve().parents[1], arguments.remote)
+        root = Path(__file__).resolve().parents[1]
+        if arguments.retain_metadata:
+            from bridge_capture_metadata import retain
+            snapshot = retain(root, arguments.retain_metadata)
+            print(f"Retained {len(snapshot.inputs)} exact capture metadata input(s)")
+            return 0
+        commit = prepare(root, arguments.remote)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"prepare-bridge-contract-evidence: FAILED: {error}", file=sys.stderr)
         return 1
-    print(f"Captured Bridge source checkpoints ready: HTTP-47/48/49/50/51 (primary {commit})")
+    print(f"Captured Bridge evidence metadata ready: HTTP-47/48/49/50/51 (primary {commit})")
     return 0
 
 

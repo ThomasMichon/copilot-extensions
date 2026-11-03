@@ -186,11 +186,16 @@ final predecessor exit or indefinite old-lease release.
 **Current implementation, not target qualification:**
 Current Worktrees asynchronous installation already separates ready successor
 publication from predecessor drain/exit and retains canonical retirement custody
-with the selected resident. The incompatible-predecessor fallback uses bounded
-native cleanup after successor serving readiness. The complete successor-originated
-handoff announcement, removal of incumbent-admission/queue fences and the optional
-finite central-only fallback remain realization work. Existing resident-owned
-retirement custody is an adoption detail, not the required target mechanism.
+with the selected resident. Before promotion, the new resident attempts a bounded
+`successor-handoff` notice to its exact predecessor; receipt does not close old
+admission. After serving readiness, it persists a five-minute retirement deadline
+separately from the legacy custody record. Its existing reconciliation loop
+attempts native forced retirement after expiry, under current cutover/route
+authority, without making installation wait for old exit. Unconfirmed cleanup
+retains runtime and process custody. Removal of incumbent-admission/queue fences
+and the optional finite central-only fallback remain realization work.
+Resident-owned retirement custody and grace are adoption details, not required
+target mechanisms.
 Current compatibility paths and native cleanup tests do not qualify the whole
 contract. The [install contract](install-contract.md#authoritative-replacement-and-completion)
 records this distinction; other services adopt independently. Real source/build,

@@ -1279,14 +1279,46 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 demand_stop.set()
                 demand_thread.join(timeout=5)
                 if legacy_protocol:
+                    from agent_worktrees import runtime_monitor_grace as grace
+                    from agent_worktrees import runtime_monitor_retirements as retirements
+
+                    assert monitor.poll() is None, "installer bypassed the resident-owned grace"
+                    assert hook_thread.is_alive(), "predecessor request ended before grace expiry"
+                    grace_path = grace._path(root, {"pid": old_pid, "start": identities[old_pid]})
+                    grace_record = _wait_for(
+                        lambda: grace._read(grace_path),
+                        message="ready successor never armed its retirement grace",
+                    )
+                    assert 0 <= time.time() - grace_record["ready_at"] < grace.GRACE_SECONDS
+                    assert grace_record["old"]["pid"] == old_pid
+                    assert grace_record["successor"] == successor.to_dict()
+                    def old_slot_retained():
+                        return old.name in {
+                            version
+                            for versions in driver.runtime._leases.read_runtime_references(root).values()
+                            for version in versions
+                        }
+
+                    assert old_slot_retained()
+                    grace_record["ready_at"] = time.time() - grace.GRACE_SECONDS - 1
+                    retirements._write_record(grace_path, grace_record)
+                    assert ControlClient(
+                        successor.base_url, token=token.read_text().strip(),
+                    ).promote()["adopted"] is True
                     assert monitor_exit.result(timeout=5) != 0
                     hook_thread.join(timeout=15)
                     assert not hook_thread.is_alive() and "error" in hook_result
                     assert "bounded legacy takeover" not in log.read_text(encoding="utf-8")
+                    _wait_for(
+                        lambda: not old_slot_retained(),
+                        message="resident did not settle the exited predecessor's runtime custody",
+                    )
                     new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
                     assert new_lock["pid"] == successor.pid
                     health = ControlClient(successor.base_url, token=token.read_text().strip()).health()
                     assert health["published"] is True and health["status"] == "ready"
+                    assert routing.read_active_endpoint(route_root) == successor
+                    assert "previous" not in routing.read_table(route_root)
                     return
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors

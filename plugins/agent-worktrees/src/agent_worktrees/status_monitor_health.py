@@ -13,6 +13,7 @@ from zdd import breadcrumb, diagnostics
 
 from .runtime_identity import PROCESS_GENERATION, PROCESS_VERSION
 from .runtime_monitor_retirements import CAPABILITY
+from .runtime_monitor_grace import CAPABILITY as GRACE_CAPABILITY
 
 
 class HealthSurface(Protocol):
@@ -49,6 +50,7 @@ def check_successor(
     host: str, port: int, client_factory: Callable[[str], HealthSurface], *,
     require_async_retirement: bool = False,
     expected_identity: tuple[int, str] | None = None,
+    supported_capabilities: set[str] | None = None,
 ) -> bool:
     try:
         status = client_factory(f"http://{host}:{port}").health()
@@ -76,6 +78,10 @@ def check_successor(
                 })
             except ValueError as error:
                 raise CutoverError("Incoming monitor preparation recovery identity is unavailable") from error
+        if supported_capabilities is not None:
+            supported_capabilities.clear()
+            if isinstance(capabilities, list):
+                supported_capabilities.update(value for value in capabilities if isinstance(value, str))
         roster = status.get("worktrees")
         if not isinstance(roster, dict):
             return True
@@ -88,7 +94,7 @@ def check_successor(
         return False
 
 
-def prepared_check(handle, directory, client_factory):
+def prepared_check(handle, directory, client_factory, *, supported_capabilities=None):
     pid = getattr(handle, "pid", None)
     start = getattr(handle, "process_start_time", None) or (
         diagnostics.process_start_time(pid) if type(pid) is int and pid > 0 else None
@@ -111,6 +117,7 @@ def prepared_check(handle, directory, client_factory):
         handle.process_start_time = start
         return check_successor(
             host, port, client_factory, require_async_retirement=True, expected_identity=(pid, start),
+            supported_capabilities=supported_capabilities,
         )
 
     return check
@@ -129,7 +136,7 @@ def response(
     roster["capabilities"] = [
         *roster["capabilities"], *receipt["capabilities"],
         *repository["capabilities"], *allocation["capabilities"],
-        CAPABILITY,
+        CAPABILITY, GRACE_CAPABILITY,
     ]
     if shutdown:
         roster["worktrees"]["status"] = "shutdown"

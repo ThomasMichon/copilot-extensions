@@ -5,6 +5,7 @@ import time
 import os
 import subprocess
 from pathlib import Path
+from typing import Any, TypedDict
 
 import pytest
 
@@ -15,8 +16,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "plugins" / "agent-
 from agent_index.source_account_relay import acquire
 
 
+Configured = tuple[Path, dict[str, Any], dict[str, str], Path]
+
+
+class _RunOptions(TypedDict):
+    env: dict[str, str]
+    capture_output: bool
+    timeout: int
+    creationflags: int
+
+
 @pytest.fixture
-def configured(tmp_path):
+def configured(tmp_path: Path) -> Configured:
     directory = tmp_path / "account credentials"
     directory.mkdir()
     capability = directory / "worker capability"
@@ -27,7 +38,7 @@ def configured(tmp_path):
     }
     grant = dict(fields, provider="selected", capability_file=str(capability),
                  expires_at=time.time() + 3600)
-    policy = {
+    policy: dict[str, Any] = {
         "schema": "credential-relay.account-policy", "version": 1,
         "providers": {"selected": {"kind": "gh-auth", "account": "account-a",
                                    "host": "github.com"}},
@@ -39,7 +50,7 @@ def configured(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_legacy_admission_is_closed_while_account_shutdown_is_pending(configured, monkeypatch):
+async def test_legacy_admission_is_closed_while_account_shutdown_is_pending(configured: Configured, monkeypatch: pytest.MonkeyPatch) -> None:
     from credential_relay.server import CredentialRelayServer
 
     account = AccountRelay(str(configured[0]))
@@ -49,7 +60,7 @@ async def test_legacy_admission_is_closed_while_account_shutdown_is_pending(conf
     close_account = account.stop
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def blocked_stop():
+    async def blocked_stop() -> None:
         entered.set()
         await release.wait()
         await close_account()
@@ -60,7 +71,7 @@ async def test_legacy_admission_is_closed_while_account_shutdown_is_pending(conf
         await asyncio.wait_for(entered.wait(), 2)
         try:
             _, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 2)
-        except OSError:
+        except (OSError, asyncio.TimeoutError):
             pass
         else:
             writer.close()
@@ -76,7 +87,7 @@ async def test_legacy_admission_is_closed_while_account_shutdown_is_pending(conf
 @pytest.mark.parametrize("failure", [
     RuntimeError("account-relay-withdrawal-unconfirmed"), TimeoutError(),
 ])
-async def test_account_shutdown_failure_still_closes_legacy_admission(configured, monkeypatch, failure):
+async def test_account_shutdown_failure_still_closes_legacy_admission(configured: Configured, monkeypatch: pytest.MonkeyPatch, failure: Exception) -> None:
     from credential_relay.server import CredentialRelayServer
 
     account = AccountRelay(str(configured[0]))
@@ -85,7 +96,7 @@ async def test_account_shutdown_failure_still_closes_legacy_admission(configured
     port = relay.port
     close_account = account.stop
 
-    async def failing_stop():
+    async def failing_stop() -> None:
         raise failure
 
     monkeypatch.setattr(account, "stop", failing_stop)
@@ -93,18 +104,18 @@ async def test_account_shutdown_failure_still_closes_legacy_admission(configured
         with pytest.raises(type(failure)):
             await relay.stop()
         assert relay._server is None
-        with pytest.raises(OSError):
+        with pytest.raises((OSError, asyncio.TimeoutError)):
             await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 2)
     finally:
         await close_account()
 
 
 @pytest.mark.asyncio
-async def test_real_consumer_renewal_denial_expiry_disconnect(configured, monkeypatch, tmp_path):
+async def test_real_consumer_renewal_denial_expiry_disconnect(configured: Configured, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     filename, policy, fields, capability = configured
-    calls = []
+    calls: list[tuple[str | None, str, dict[str, str]]] = []
 
-    async def resolve(self, action, request, *, timeout):
+    async def resolve(self: GhAuthSource, action: str, request: dict[str, str], *, timeout: float) -> str:
         calls.append((self._account, action, request))
         return (
             f"protocol=https\nhost=github.com\nusername={self._account}\n"
@@ -114,19 +125,22 @@ async def test_real_consumer_renewal_denial_expiry_disconnect(configured, monkey
     monkeypatch.setattr(GhAuthSource, "resolve", resolve)
     relay = AccountRelay(str(filename))
     await relay.start()
+    assert relay._publication is not None
     port = relay._publication["port"]
     worker = tmp_path / "worker.json"
     binding = dict(fields, capability_file=str(capability))
-    config = {
+    config: dict[str, Any] = {
         "schema": "credential-relay.account-worker", "version": 1,
         "transport": {"host": "127.0.0.1", "port": port}, "bindings": [binding],
     }
     worker.write_text(json.dumps(config))
 
-    async def consume():
-        return await asyncio.to_thread(
+    async def consume() -> str:
+        value: object = await asyncio.to_thread(
             acquire, worker, source=fields["source"], account=fields["account"], timeout=2,
         )
+        assert isinstance(value, str)
+        return value
 
     try:
         assert await consume() == "isolated-credential-1"
@@ -187,10 +201,10 @@ async def test_real_consumer_renewal_denial_expiry_disconnect(configured, monkey
 
 
 @pytest.mark.asyncio
-async def test_policy_rotation_fences_inflight_credential(configured, monkeypatch):
+async def test_policy_rotation_fences_inflight_credential(configured: Configured, monkeypatch: pytest.MonkeyPatch) -> None:
     filename, policy, fields, capability = configured
 
-    async def resolve(*args, **kwargs):
+    async def resolve(*args: object, **kwargs: object) -> str:
         policy["grants"] = []
         filename.write_text(json.dumps(policy))
         return "token=must-not-be-delivered\n\n"
@@ -200,12 +214,12 @@ async def test_policy_rotation_fences_inflight_credential(configured, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_stop_cancels_inflight_without_delivery(configured, monkeypatch):
+async def test_stop_cancels_inflight_without_delivery(configured: Configured, monkeypatch: pytest.MonkeyPatch) -> None:
     filename, _, fields, capability = configured
     entered = asyncio.Event()
     cancelled = asyncio.Event()
 
-    async def resolve(*args, **kwargs):
+    async def resolve(*args: object, **kwargs: object) -> None:
         entered.set()
         try:
             await asyncio.Future()
@@ -215,6 +229,7 @@ async def test_stop_cancels_inflight_without_delivery(configured, monkeypatch):
     monkeypatch.setattr(GhAuthSource, "resolve", resolve)
     relay = AccountRelay(str(filename))
     await relay.start()
+    assert relay._publication is not None
     reader, writer = await asyncio.open_connection("127.0.0.1", relay._publication["port"])
     wire = dict(fields, auth=capability.read_text())
     writer.write(("get-account-token\n" + "\n".join(f"{k}={v}" for k, v in wire.items())
@@ -222,9 +237,10 @@ async def test_stop_cancels_inflight_without_delivery(configured, monkeypatch):
     await writer.drain()
     await asyncio.wait_for(entered.wait(), 2)
     server = relay._server
+    assert server is not None
     original_wait = server.wait_closed
 
-    async def wait_after_cancellation():
+    async def wait_after_cancellation() -> None:
         assert cancelled.is_set()
         await original_wait()
 
@@ -237,9 +253,9 @@ async def test_stop_cancels_inflight_without_delivery(configured, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_policy_and_wrong_capability_deny(configured, monkeypatch):
+async def test_ambiguous_policy_and_wrong_capability_deny(configured: Configured, monkeypatch: pytest.MonkeyPatch) -> None:
     filename, policy, fields, _ = configured
-    calls = []
+    calls: list[int] = []
     monkeypatch.setattr(GhAuthSource, "resolve", lambda *a, **k: calls.append(1))
     relay = AccountRelay(str(filename))
     assert await relay.resolve(fields, "not-the-capability") is None
@@ -250,8 +266,8 @@ async def test_ambiguous_policy_and_wrong_capability_deny(configured, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_account_provider_ignores_ambient_tokens_without_global_switch(monkeypatch):
-    calls = []
+async def test_account_provider_ignores_ambient_tokens_without_global_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[tuple[object, ...], dict[str, Any]]] = []
     for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
         monkeypatch.setenv(name, "wrong-ambient-value")
     monkeypatch.setenv("GH_HOST", "wrong.example")
@@ -259,10 +275,10 @@ async def test_account_provider_ignores_ambient_tokens_without_global_switch(mon
     class Process:
         returncode = 0
 
-        async def communicate(self):
+        async def communicate(self) -> tuple[bytes, bytes]:
             return b"isolated-account-result", b""
 
-    async def spawn(*argv, **kwargs):
+    async def spawn(*argv: object, **kwargs: Any) -> Process:
         calls.append((argv, kwargs))
         return Process()
 
@@ -270,6 +286,7 @@ async def test_account_provider_ignores_ambient_tokens_without_global_switch(mon
     result = await GhAuthSource(account="account-a").resolve(
         "get-github-token", {"host": "github.com"},
     )
+    assert result is not None
     assert "username=account-a" in result
     argv, kwargs = calls[0]
     assert argv == ("gh", "auth", "token", "--hostname", "github.com", "--user", "account-a")
@@ -280,13 +297,13 @@ async def test_account_provider_ignores_ambient_tokens_without_global_switch(mon
 
 
 @pytest.mark.asyncio
-async def test_legacy_listener_never_dispatches_account_mode(configured, monkeypatch):
+async def test_legacy_listener_never_dispatches_account_mode(configured: Configured, monkeypatch: pytest.MonkeyPatch) -> None:
     from credential_relay.server import CredentialRelayServer
 
     filename, _, fields, capability = configured
     account = AccountRelay(str(filename))
 
-    async def forbidden(*args, **kwargs):
+    async def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("legacy listener dispatched an untracked account acquisition")
 
     monkeypatch.setattr(account, "resolve", forbidden)
@@ -307,7 +324,7 @@ async def test_legacy_listener_never_dispatches_account_mode(configured, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_publication_and_conditional_withdrawal_share_one_guard(configured, monkeypatch):
+async def test_publication_and_conditional_withdrawal_share_one_guard(configured: Configured, monkeypatch: pytest.MonkeyPatch) -> None:
     filename, _, _, _ = configured
     old = AccountRelay(str(filename))
     successor = AccountRelay(str(filename))
@@ -315,9 +332,9 @@ async def test_publication_and_conditional_withdrawal_share_one_guard(configured
     await successor.prepare()
     publication = filename.with_name("account-relay-port.json")
     original_read = Path.read_text
-    interleaved = []
+    interleaved: list[bool] = []
 
-    def attempt_publication_between_read_and_unlink(path, *args, **kwargs):
+    def attempt_publication_between_read_and_unlink(path: Path, *args: Any, **kwargs: Any) -> str:
         value = original_read(path, *args, **kwargs)
         if path == publication and not interleaved:
             interleaved.append(True)
@@ -338,7 +355,7 @@ async def test_publication_and_conditional_withdrawal_share_one_guard(configured
         await successor.stop()
 
 
-def test_publication_guard_excludes_an_independent_process(configured):
+def test_publication_guard_excludes_an_independent_process(configured: Configured) -> None:
     filename, _, _, _ = configured
     environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
     command = [
@@ -347,7 +364,7 @@ def test_publication_guard_excludes_an_independent_process(configured):
         "guard=publication_guard(sys.argv[1]); guard.__enter__(); guard.__exit__(None,None,None)",
         str(filename),
     ]
-    kwargs = {
+    kwargs: _RunOptions = {
         "env": environment, "capture_output": True, "timeout": 10,
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
     }

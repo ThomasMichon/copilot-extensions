@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import time
+import pytest
 
 from credential_relay.sources.injected_token import (
     DEFAULT_ENV_VAR,
@@ -20,25 +21,25 @@ from credential_relay.sources.injected_token import (
 ADO = "499b84ac-1321-427f-aa17-267ca6975798"
 
 
-def _resolve(src: InjectedTokenSource, action: str, fields: dict) -> str | None:
+def _resolve(src: InjectedTokenSource, action: str, fields: dict[str, str]) -> str | None:
     return asyncio.run(src.resolve(action, fields))
 
 
-def test_supports_only_get_azure_token():
+def test_supports_only_get_azure_token() -> None:
     src = InjectedTokenSource(allowed_resources=["*"])
     assert src.supports("get-azure-token", {}) is True
     assert src.supports("get-github-token", {}) is False
     assert src.supports("get", {"host": "github.com"}) is False
 
 
-def test_passthrough_when_env_unset(monkeypatch):
+def test_passthrough_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inert without the env var: returns None so routing falls to az-login."""
     monkeypatch.delenv(DEFAULT_ENV_VAR, raising=False)
     src = InjectedTokenSource(allowed_resources=["*"])
     assert _resolve(src, "get-azure-token", {"scope": ADO}) is None
 
 
-def test_serves_injected_token_when_env_set(monkeypatch):
+def test_serves_injected_token_when_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DEFAULT_ENV_VAR, "injected-bearer-xyz")
     src = InjectedTokenSource(allowed_resources=[ADO])
     out = _resolve(src, "get-azure-token", {"scope": ADO})
@@ -48,7 +49,7 @@ def test_serves_injected_token_when_env_set(monkeypatch):
     assert out.endswith("\n\n")
 
 
-def test_enforces_resource_allowlist(monkeypatch):
+def test_enforces_resource_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DEFAULT_ENV_VAR, "injected-bearer-xyz")
     src = InjectedTokenSource(allowed_resources=[ADO])
     # A resource off the allowlist is denied even with a token present.
@@ -63,27 +64,27 @@ def test_enforces_resource_allowlist(monkeypatch):
     ) is not None
 
 
-def test_allowlist_matches_resource_and_scope_forms(monkeypatch):
+def test_allowlist_matches_resource_and_scope_forms(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DEFAULT_ENV_VAR, "tok")
     # Allowlist entry as a bare resource GUID matches a "/.default" scope request.
     src = InjectedTokenSource(allowed_resources=[ADO])
     assert _resolve(src, "get-azure-token", {"scope": f"{ADO}/.default"}) is not None
 
 
-def test_missing_target_is_none(monkeypatch):
+def test_missing_target_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DEFAULT_ENV_VAR, "tok")
     src = InjectedTokenSource(allowed_resources=["*"])
     assert _resolve(src, "get-azure-token", {}) is None
 
 
-def test_custom_env_var(monkeypatch):
+def test_custom_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(DEFAULT_ENV_VAR, raising=False)
     monkeypatch.setenv("MY_ADO_BEARER", "tok")
     src = InjectedTokenSource(allowed_resources=["*"], env_var="MY_ADO_BEARER")
     assert _resolve(src, "get-azure-token", {"scope": ADO}) is not None
 
 
-def test_includes_expires_on_from_jwt(monkeypatch):
+def test_includes_expires_on_from_jwt(monkeypatch: pytest.MonkeyPatch) -> None:
     exp = int(time.time()) + 3600
     payload = (
         base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode())
@@ -97,7 +98,7 @@ def test_includes_expires_on_from_jwt(monkeypatch):
     assert f"expires_on={exp}" in out
 
 
-def test_non_jwt_token_omits_expires_on(monkeypatch):
+def test_non_jwt_token_omits_expires_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DEFAULT_ENV_VAR, "not-a-jwt")
     src = InjectedTokenSource(allowed_resources=["*"])
     out = _resolve(src, "get-azure-token", {"scope": ADO})
@@ -105,7 +106,7 @@ def test_non_jwt_token_omits_expires_on(monkeypatch):
     assert "expires_on=" not in out
 
 
-def test_build_wires_injected_before_az_login():
+def test_build_wires_injected_before_az_login() -> None:
     """RelayBuilder.build() places the injected shim AHEAD of az-login so a set
     env var wins, while az-login remains the real fallback."""
     from credential_relay import RelayBuilder
@@ -119,7 +120,7 @@ def test_build_wires_injected_before_az_login():
     assert names.index("injected-azure-token") < names.index("az-login")
 
 
-def test_build_omits_injected_when_azure_disabled():
+def test_build_omits_injected_when_azure_disabled() -> None:
     """No azure minting requested -> neither azure source is added."""
     from credential_relay import RelayBuilder
 

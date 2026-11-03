@@ -25,6 +25,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Protocol, TypedDict
 
 from .sources import CredentialSource
 
@@ -222,6 +223,23 @@ class RelayStats:
     last_request_time: float | None = None
 
 
+class AccountRelayLifecycle(Protocol):
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+
+class RelayServerOptions(TypedDict, total=False):
+    sources: list[CredentialSource]
+    policy: RelayPolicy
+    account_relay: AccountRelayLifecycle
+    port: int
+    ado_host: str
+    token_authorizer: Callable[[str, str, dict[str, str]], bool]
+    token_validator: Callable[[str], bool]
+    token_required_actions: frozenset[str]
+
+
 class CredentialRelayServer:
     """Async TCP server for git-credential-protocol relay.
 
@@ -255,7 +273,7 @@ class CredentialRelayServer:
         token_validator: Callable[[str], bool] | None = None,
         token_authorizer: Callable[[str, str, dict[str, str]], bool] | None = None,
         token_required_actions: frozenset[str] | None = None,
-        account_relay=None,
+        account_relay: AccountRelayLifecycle | None = None,
     ) -> None:
         self.port = port
         self.sources = sources or []
@@ -516,7 +534,7 @@ class CredentialRelayServer:
         self,
         action: str,
         writer: asyncio.StreamWriter,
-        addr,
+        addr: object,
         reason: str,
     ) -> None:
         """Send a ``quit=1`` fail-fast response for unresolved git get requests.

@@ -34,7 +34,14 @@ keeps an admitted request blocked, then invokes the real retained-slot installer
 It requires forced native predecessor exit, interrupted request reporting and an
 authenticated ready published successor, without invoking generic stale-runtime
 cleanup. It uses disposable roots and real UV construction, not installed-host
-rollout or a package-version simulation. The actor-free
+rollout or a package-version simulation.
+The installer must first return while the legacy predecessor and its admitted
+request remain alive, with the ready successor's durable five-minute grace
+record. The fixture then expires only that private record and wakes the real
+resident through its existing promotion seam; the resident, not the installer,
+performs native retirement. This tests consumer wiring without waiting five
+minutes or changing the production grace interval.
+The actor-free
 `tests/test_runtime_monitor_legacy.py` and focused installer controls separately
 cover owner/route/birth changes, absent cutover custody, unconfirmed exit and
 failed candidate activation. Required unit-only CI does not gain a native matrix.
@@ -43,8 +50,27 @@ force-legacy support remains explicitly unavailable rather than PID-only signali
 The separate `Legacy monitor native acceptance` workflow selects only the
 live compatible and `legacy-protocol` cases on Linux and Windows. It runs on
 demand and is path-gated on its workflow, owning lifecycle source and native
-fixture changes on PR branches. This is a focused smoke lane, not an expansion
-of required unit-only CI. Existing serving-slot retention selectors remain unchanged.
+fixture changes on PR branches. Both jobs also run the focused
+retirement/preparation/legacy custody and grace/handover/completion controls.
+These include early predecessor exit and retryable fallback-route release;
+custody remains until guarded route cleanup settles.
+Direct cleanup after route-release failure and exit between resident passes
+exercise the same canonical gate. Reconcile-before-arm controls cover direct
+and resident cleanup, failed writes, route races, missing active selection and
+an unrelated fallback without fabricating a grace record or sending a signal.
+Incoming preparation-health controls
+distinguish grace support from asynchronous retirement alone.
+Windows additionally runs the eight finite Job/native-identity grace and
+asynchronous-installer cases; Linux native expiry is exercised by the real
+installer case above, not inferred from skipped Windows controls. The finite
+native grace controls assert authenticated health-handler entry before crediting
+old-peer timeout. The native transition cases include a newer controller and
+pre-grace successor, as used when restoring a retained release, with bounded
+native predecessor cleanup and settlement instead of unsupported deferral. All packets
+retain their 180-second subsuite, 600-second aggregate and existing item bounds.
+The real-installer packet and twenty-minute job bounds are unchanged.
+This is a focused smoke lane, not an expansion of required unit-only CI.
+Existing serving-slot retention selectors remain unchanged.
 
 Dispatch's actor-free `test_dispatch_runtime_resolution.py` promotion packet
 checks flat/nested physical slot selection, unchanged fallback tiers, BOM

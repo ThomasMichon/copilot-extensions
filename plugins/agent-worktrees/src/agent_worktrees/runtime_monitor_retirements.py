@@ -434,6 +434,9 @@ def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = 
                     _retain(root, record, runtime if runtime is not None else _runtime())
                 pending = _demand(record, exited) or pending
                 continue
+            from . import runtime_monitor_grace
+
+            runtime_monitor_grace.settle_exited(root, record)
             if record["slot"] is not None:
                 helper = runtime if runtime is not None else _runtime()
                 claim = record["release_claim"] if record["state"] == "retiring" else None
@@ -637,6 +640,9 @@ class ResidentRetirements:
     def refresh(self, *, cleanup: bool = True) -> None:
         try:
             if cleanup:
+                from . import runtime_monitor_grace
+
+                runtime_monitor_grace.reconcile(self.root)
                 cancel_abandoned_preparations(self.root)
             pending = reconcile(self.root, cleanup=cleanup)
         except (OSError, ValueError, RuntimeError, ImportError) as error:

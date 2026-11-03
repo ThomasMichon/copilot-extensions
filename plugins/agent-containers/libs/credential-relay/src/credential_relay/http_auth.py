@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Mapping, Protocol
 from urllib.parse import urlsplit
 
-from .sources import CredentialSource
+from .sources import CredentialSource as CredentialSource
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,16 @@ class HttpAuthInjector(Protocol):
     async def headers(self, context: HttpAuthContext) -> Mapping[str, str]: ...
 
     async def invalidate(self, context: HttpAuthContext) -> None: ...
+
+
+class HttpAuthSource(Protocol):
+    """Only the source operations this adapter invokes, with an explicit deadline."""
+
+    def supports(self, action: str, fields: dict[str, str]) -> bool: ...
+
+    async def resolve(
+        self, action: str, fields: dict[str, str], *, timeout: float,
+    ) -> str | None: ...
 
 
 def format_token_header(header: str, template: str, token: str) -> dict[str, str]:
@@ -45,7 +55,7 @@ class SourceHttpAuth:
     """
 
     def __init__(
-        self, source: CredentialSource, context: HttpAuthContext, endpoint: str,
+        self, source: HttpAuthSource, context: HttpAuthContext, endpoint: str,
         *, timeout: float = 15.0, scheme: str = "Bearer", scoped: bool = False,
     ) -> None:
         if not isinstance(scheme, str) or not re.fullmatch(

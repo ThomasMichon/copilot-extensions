@@ -719,20 +719,18 @@ class _SessionPromptMixin:
         host can self-reap it if the front is later lost (#51). No-op for a
         non-host-backed session; best-effort so it never disturbs a turn."""
         hc = self._session_host_client(session)
-        if hc is None:
+        if hc is None or session._lifecycle_lock.locked():
             return
         with contextlib.suppress(Exception):
             await hc.send_status(self._host_reapable(session))
 
-    async def _detach_host(self, session: Session) -> None:
-        """Signal a GRACEFUL detach (+ current reapable state) to the session
-        host before teardown, so an idle host reaps promptly instead of after
-        the unexpected-grace window (#51). No-op / best-effort."""
+    async def _detach_host(self, session: Session, *, preserve_host: bool = False) -> None:
+        """Detach without reaping a Host retained for frontend recovery."""
         hc = self._session_host_client(session)
         if hc is None:
             return
         with contextlib.suppress(Exception):
-            await hc.detach(self._host_reapable(session))
+            await hc.detach(False if preserve_host else self._host_reapable(session))
 
     async def refresh_host_reapable(self) -> None:
         """Reconcile every host-backed session's reapable state to its host.

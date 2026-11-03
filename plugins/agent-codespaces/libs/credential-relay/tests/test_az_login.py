@@ -40,7 +40,7 @@ def _make_az_response(
     return json.dumps(data)
 
 
-def _mock_process(stdout: str = "", stderr: str = "", returncode: int = 0):
+def _mock_process(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
     """Create a mock async subprocess."""
     proc = MagicMock()
     proc.returncode = returncode
@@ -55,15 +55,15 @@ def _mock_process(stdout: str = "", stderr: str = "", returncode: int = 0):
 # ---------------------------------------------------------------------------
 class TestAzLoginSourceBasic:
 
-    def test_name(self):
+    def test_name(self) -> None:
         source = AzLoginSource()
         assert source.name == "az-login"
 
-    def test_supports_get_azure_token(self):
+    def test_supports_get_azure_token(self) -> None:
         source = AzLoginSource()
         assert source.supports("get-azure-token", {}) is True
 
-    def test_does_not_support_other_actions(self):
+    def test_does_not_support_other_actions(self) -> None:
         source = AzLoginSource()
         assert source.supports("get", {}) is False
         assert source.supports("get-github-token", {}) is False
@@ -71,13 +71,13 @@ class TestAzLoginSourceBasic:
         assert source.supports("fill", {}) is False
 
     @pytest.mark.asyncio
-    async def test_missing_resource_returns_none(self):
+    async def test_missing_resource_returns_none(self) -> None:
         source = AzLoginSource(allowed_resources=["https://management.azure.com/"])
         result = await source.resolve("get-azure-token", {})
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_empty_resource_returns_none(self):
+    async def test_empty_resource_returns_none(self) -> None:
         source = AzLoginSource(allowed_resources=["https://management.azure.com/"])
         result = await source.resolve("get-azure-token", {"resource": ""})
         assert result is None
@@ -89,7 +89,7 @@ class TestAzLoginSourceBasic:
 class TestAzLoginResourceAllowlist:
 
     @pytest.mark.asyncio
-    async def test_disallowed_resource_denied(self):
+    async def test_disallowed_resource_denied(self) -> None:
         """#4367: a denial is an explicit, wire-visible response -- not a
         bare ``None`` a caller can't distinguish from an unreachable relay
         or an internal error."""
@@ -105,7 +105,7 @@ class TestAzLoginResourceAllowlist:
         assert "management.azure.com" not in result
 
     @pytest.mark.asyncio
-    async def test_no_allowed_resources_denies_all(self):
+    async def test_no_allowed_resources_denies_all(self) -> None:
         source = AzLoginSource(allowed_resources=[])
         result = await source.resolve(
             "get-azure-token",
@@ -115,7 +115,7 @@ class TestAzLoginResourceAllowlist:
         assert "error=access_denied" in result
 
     @pytest.mark.asyncio
-    async def test_normalized_form_allowed(self):
+    async def test_normalized_form_allowed(self) -> None:
         """Allowlist normalizes trailing slash + /.default (same resource).
 
         ``https://management.azure.com`` / ``.../`` / ``.../.default`` are the
@@ -131,7 +131,7 @@ class TestAzLoginResourceAllowlist:
         assert source._is_allowed("https://management.azure.com/.default") is True
 
     @pytest.mark.asyncio
-    async def test_different_resource_denied(self):
+    async def test_different_resource_denied(self) -> None:
         """A genuinely different resource is still denied (no glob/prefix)."""
         source = AzLoginSource(
             allowed_resources=["https://management.azure.com/"]
@@ -145,7 +145,7 @@ class TestAzLoginResourceAllowlist:
         assert "error=access_denied" in result
 
     @pytest.mark.asyncio
-    async def test_wildcard_allows_any_scope(self):
+    async def test_wildcard_allows_any_scope(self) -> None:
         """``*`` permits any scope (the codespace any-AAD-scope policy)."""
         source = AzLoginSource(allowed_resources=["*"])
         assert source._is_allowed("https://storage.azure.com/.default") is True
@@ -158,7 +158,7 @@ class TestAzLoginResourceAllowlist:
 class TestAzLoginResolution:
 
     @pytest.mark.asyncio
-    async def test_successful_token_resolution(self):
+    async def test_successful_token_resolution(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -182,7 +182,7 @@ class TestAzLoginResolution:
         assert result.endswith("\n\n")
 
     @pytest.mark.asyncio
-    async def test_resolution_with_tenant_field(self):
+    async def test_resolution_with_tenant_field(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -202,7 +202,7 @@ class TestAzLoginResolution:
         assert "specific-tenant" in args
 
     @pytest.mark.asyncio
-    async def test_scope_field_uses_az_scope(self):
+    async def test_scope_field_uses_az_scope(self) -> None:
         """A ``scope`` field (official azure-auth-helper contract) -> az --scope."""
         scope = "https://storage.azure.com/.default"
         source = AzLoginSource(allowed_resources=["*"])
@@ -225,7 +225,7 @@ class TestAzLoginResolution:
 class TestAzLoginErrors:
 
     @pytest.mark.asyncio
-    async def test_az_cli_not_found(self):
+    async def test_az_cli_not_found(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -241,7 +241,7 @@ class TestAzLoginErrors:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_az_cli_failure(self):
+    async def test_az_cli_failure(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -259,11 +259,11 @@ class TestAzLoginErrors:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_az_cli_timeout(self):
+    async def test_az_cli_timeout(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
-        async def slow_communicate():
+        async def slow_communicate() -> tuple[bytes, bytes]:
             await asyncio.sleep(999)
             return (b"", b"")
 
@@ -280,7 +280,7 @@ class TestAzLoginErrors:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_invalid_json_response(self):
+    async def test_invalid_json_response(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -295,7 +295,7 @@ class TestAzLoginErrors:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_empty_access_token(self):
+    async def test_empty_access_token(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -316,7 +316,7 @@ class TestAzLoginErrors:
 class TestAzLoginCaching:
 
     @pytest.mark.asyncio
-    async def test_successful_response_is_cached(self):
+    async def test_successful_response_is_cached(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -339,7 +339,7 @@ class TestAzLoginCaching:
         assert result1 == result2
 
     @pytest.mark.asyncio
-    async def test_different_resources_have_separate_cache(self):
+    async def test_different_resources_have_separate_cache(self) -> None:
         resources = [
             "https://management.azure.com/",
             "https://graph.microsoft.com/",
@@ -351,7 +351,7 @@ class TestAzLoginCaching:
 
         call_count = 0
 
-        async def mock_exec(*args, **kwargs):
+        async def mock_exec(*args: object, **kwargs: object) -> MagicMock:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -368,12 +368,14 @@ class TestAzLoginCaching:
                 {"resource": resources[1]},
             )
 
+        assert r1 is not None
+        assert r2 is not None
         assert "mgmt-token" in r1
         assert "graph-token" in r2
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_different_tenants_have_separate_cache(self):
+    async def test_different_tenants_have_separate_cache(self) -> None:
         resource = "https://management.azure.com/"
         source = AzLoginSource(allowed_resources=[resource])
 
@@ -382,7 +384,7 @@ class TestAzLoginCaching:
 
         call_count = 0
 
-        async def mock_exec(*args, **kwargs):
+        async def mock_exec(*args: object, **kwargs: object) -> MagicMock:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -399,12 +401,14 @@ class TestAzLoginCaching:
                 {"resource": resource, "tenant": "t2"},
             )
 
+        assert r1 is not None
+        assert r2 is not None
         assert "tenant1-token" in r1
         assert "tenant2-token" in r2
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_expired_token_not_served_from_cache(self):
+    async def test_expired_token_not_served_from_cache(self) -> None:
         resource = "https://management.azure.com/"
         # Use a very short TTL override so the cache expires quickly
         source = AzLoginSource(
@@ -433,6 +437,7 @@ class TestAzLoginCaching:
             )
 
         assert mock_exec.call_count == 2
+        assert r2 is not None
         assert "token-v2" in r2
 
 
@@ -441,19 +446,19 @@ class TestAzLoginCaching:
 # ---------------------------------------------------------------------------
 class TestAzLoginExpiryParsing:
 
-    def test_epoch_integer_expiry(self):
+    def test_epoch_integer_expiry(self) -> None:
         source = AzLoginSource()
         future = int(time.time()) + 7200
         result = source._compute_cache_expiry({"expires_on": future})
         assert abs(result - (future - _EXPIRY_SAFETY_MARGIN)) < 2
 
-    def test_epoch_string_expiry(self):
+    def test_epoch_string_expiry(self) -> None:
         source = AzLoginSource()
         future = int(time.time()) + 7200
         result = source._compute_cache_expiry({"expiresOn": str(future)})
         assert abs(result - (future - _EXPIRY_SAFETY_MARGIN)) < 2
 
-    def test_iso_datetime_expiry(self):
+    def test_iso_datetime_expiry(self) -> None:
         source = AzLoginSource()
         result = source._compute_cache_expiry(
             {"expiresOn": "2099-01-15 12:00:00.000000"}
@@ -461,20 +466,20 @@ class TestAzLoginExpiryParsing:
         # Should be far in the future minus safety margin
         assert result > time.time()
 
-    def test_missing_expiry_uses_fallback(self):
+    def test_missing_expiry_uses_fallback(self) -> None:
         source = AzLoginSource()
         result = source._compute_cache_expiry({})
         # Fallback is ~55 minutes from now (3600 - 300)
         expected = time.time() + 3600 - _EXPIRY_SAFETY_MARGIN
         assert abs(result - expected) < 5
 
-    def test_unparseable_expiry_uses_fallback(self):
+    def test_unparseable_expiry_uses_fallback(self) -> None:
         source = AzLoginSource()
         result = source._compute_cache_expiry({"expiresOn": "not-a-date"})
         expected = time.time() + 3600 - _EXPIRY_SAFETY_MARGIN
         assert abs(result - expected) < 5
 
-    def test_ttl_override(self):
+    def test_ttl_override(self) -> None:
         source = AzLoginSource(cache_ttl_override=60.0)
         result = source._compute_cache_expiry(
             {"expires_on": int(time.time()) + 99999}
@@ -491,39 +496,39 @@ class TestToScope:
 
     ADO = "499b84ac-1321-427f-aa17-267ca6975798"
 
-    def test_bare_guid_gets_default(self):
+    def test_bare_guid_gets_default(self) -> None:
         assert _to_scope(self.ADO) == f"{self.ADO}/.default"
 
-    def test_resource_uri_no_path_gets_default(self):
+    def test_resource_uri_no_path_gets_default(self) -> None:
         assert _to_scope("https://storage.azure.com") == (
             "https://storage.azure.com/.default"
         )
 
-    def test_resource_uri_trailing_slash_gets_default(self):
+    def test_resource_uri_trailing_slash_gets_default(self) -> None:
         assert _to_scope("https://storage.azure.com/") == (
             "https://storage.azure.com/.default"
         )
 
-    def test_api_uri_resource_gets_default(self):
+    def test_api_uri_resource_gets_default(self) -> None:
         assert _to_scope(f"api://{self.ADO}") == f"api://{self.ADO}/.default"
 
-    def test_already_default_scope_unchanged(self):
+    def test_already_default_scope_unchanged(self) -> None:
         s = "https://storage.azure.com/.default"
         assert _to_scope(s) == s
 
-    def test_specific_scope_path_unchanged(self):
+    def test_specific_scope_path_unchanged(self) -> None:
         s = "https://storage.azure.com/user_impersonation"
         assert _to_scope(s) == s
 
-    def test_guid_default_scope_unchanged(self):
+    def test_guid_default_scope_unchanged(self) -> None:
         s = f"{self.ADO}/.default"
         assert _to_scope(s) == s
 
-    def test_empty_unchanged(self):
+    def test_empty_unchanged(self) -> None:
         assert _to_scope("") == ""
 
     @pytest.mark.asyncio
-    async def test_bare_guid_scope_calls_az_with_default(self):
+    async def test_bare_guid_scope_calls_az_with_default(self) -> None:
         """The #77 regression: a bare ADO GUID scope -> ``az --scope <guid>/.default``."""
         source = AzLoginSource(allowed_resources=["*"])
         proc = _mock_process(stdout=_make_az_response(token="ado-bearer"))
@@ -542,7 +547,7 @@ class TestToScope:
         assert result is not None and "token=ado-bearer" in result
 
     @pytest.mark.asyncio
-    async def test_not_logged_in_error_returns_none(self):
+    async def test_not_logged_in_error_returns_none(self) -> None:
         """The 'please explicitly log in' az failure resolves to None (loud log)."""
         source = AzLoginSource(allowed_resources=["*"])
         proc = _mock_process(
