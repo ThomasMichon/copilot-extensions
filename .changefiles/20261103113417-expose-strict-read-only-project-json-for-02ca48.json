@@ -1,0 +1,9 @@
+{
+  "comment": "Expose strict read-only project JSON for safe setup ownership checks",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

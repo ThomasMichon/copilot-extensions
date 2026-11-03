@@ -245,6 +245,19 @@ def _print_plugins_status(model: Model) -> None:
 
 
 def _cmd_projects(rest: list[str]) -> int:
+    if "--json" in rest:
+        from dataclasses import asdict
+
+        if rest != ["--json"]:
+            print("usage: worktree-manager projects --json", file=sys.stderr)
+            return 2
+        try:
+            projects = build_projects(strict_rosters=True)
+            print(json.dumps({"version": 1, "projects": [asdict(p) for p in projects]}))
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            print(json.dumps({"version": 1, "state": "unavailable", "error": str(error)}))
+            return 1
+        return 0
     projects = build_projects()
     if rest and not rest[0].startswith("-"):
         name = rest[0]
@@ -1537,7 +1550,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
         print("  plugins --reconcile    coverage of the discovered membership by the catalog")
         print("  plugins --status       known plugins vs. what is enabled user-global")
-        print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
+        print("  projects [<name>]|--json  registered projects; strict JSON inspection is read-only")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
         print("  launch-attempts [ID] [--json] [--include-input] [--sweep-project NAME --source-machine ID]")

@@ -102,6 +102,7 @@ def _read_yaml(p: Path, *, strict: bool = False, required_key: str | None = None
             raise ValueError(f"Configuration must be a mapping: {p}")
         if strict and required_key is not None and (
             not isinstance(data, dict) or required_key not in data
+            or not isinstance(data[required_key], dict)
         ):
             raise ValueError(f"Registry requires an explicit {required_key} mapping: {p}")
         return data if isinstance(data, dict) else {}
@@ -659,6 +660,11 @@ def build_projects(
     )}
     out: list[ProjectInfo] = []
     for name, entry in (reg.get("projects") or {}).items():
+        if strict_rosters and (
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name)
+            or not isinstance(entry, dict)
+        ):
+            raise ValueError("Project registry entries require valid names and mappings")
         entry = entry or {}
         project_dir = (input_roots.project_dir(name) if input_roots
                        else (home_dir or home()) / f".{name}")

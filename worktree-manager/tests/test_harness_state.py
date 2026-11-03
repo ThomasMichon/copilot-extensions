@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from worktree_manager.harness_state import (
     build_projects,
     build_repos,
@@ -324,6 +326,78 @@ def test_missing_files_degrade_gracefully(tmp_path: Path):
 def test_projects_command(capsys):
     assert main(["projects"]) == 0
     assert "Projects" in capsys.readouterr().out
+
+
+def test_projects_json_uses_strict_existing_model_without_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = _make_home(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    before = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    assert main(["projects", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["version"] == 1
+    assert [p["name"] for p in result["projects"]] == ["dotfiles"]
+    project = result["projects"][0]
+    assert project["anchor"] == str(home / "src/dotfiles")
+    assert project["expose_agent"] is True and project["knowledge_repo"] == "my-knowledge"
+    assert project["roster"][0]["key"] == "book2"
+    assert {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("filename", ["projects.yaml", "repos.yaml"])
+@pytest.mark.parametrize("content", ["broken: [", "{}", "duplicate", "list", "null"])
+def test_projects_json_never_turns_invalid_registry_into_empty_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    filename: str, content: str,
+) -> None:
+    home = _make_home(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    key = filename.removesuffix(".yaml")
+    content = {
+        "duplicate": f"{key}: {{}}\n{key}: {{}}",
+        "list": f"{key}: []",
+        "null": f"{key}: null",
+    }.get(content, content)
+    (home / ".agent-worktrees" / filename).write_text(content, encoding="utf-8")
+    assert main(["projects", "--json"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "unavailable" and "projects" not in result
+
+
+@pytest.mark.parametrize("entry", ["dotfiles: null", "dotfiles: []", "../foreign: {}"])
+def test_projects_json_refuses_invalid_project_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    entry: str,
+) -> None:
+    home = _make_home(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (home / ".agent-worktrees/projects.yaml").write_text(f"projects:\n  {entry}\n", encoding="utf-8")
+    assert main(["projects", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["state"] == "unavailable"
+
+
+def test_projects_json_absent_profile_remains_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / "absent"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    assert main(["projects", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"version": 1, "projects": []}
+    assert not home.exists()
+
+
+def test_projects_json_rejects_extra_arguments_before_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import worktree_manager.__main__ as manager
+
+    monkeypatch.setattr(manager, "build_projects", lambda **_: pytest.fail("invalid inspection"))
+    assert main(["projects", "--json", "unexpected"]) == 2
 
 
 def test_repos_command(capsys):
