@@ -188,6 +188,96 @@ def test_install_transaction_pre_start_failure_preserves_concurrent_winner(
     assert not (fixture.slot / "install-success.json").exists()
 
 
+@pytest.mark.parametrize("phase", ["publication", "launcher"])
+def test_failed_update_recovers_before_another_installer_can_commit(
+    install_transaction, monkeypatch, phase,
+):
+    fixture = install_transaction
+    lock = engine.runtime._publication_lease
+    publish = fixture.publication.publish_selectors
+    write = runtime_application_install._write
+    won = []
+    winner = fixture.slot.name if phase == "publication" else "3.0"
+    commands = global_binstubs(
+        fixture.record["name"], fixture.record["root_environment"],
+        fixture.record["default_directory"], root=fixture.root,
+    )
+
+    @contextmanager
+    def competing_update(root):
+        try:
+            with lock(root):
+                yield
+        finally:
+            if not won:
+                won.append(True)
+                with lock(root):
+                    for name, content in commands.items():
+                        (fixture.global_bin / name).write_bytes(content.encode("utf-8"))
+                    publish(root, winner, None, lambda home, version: (
+                        home / "last-known-good"
+                    ).write_bytes((version + "\n").encode("utf-8")))
+
+    def failed_publication(*args):
+        publish(*args)
+        raise RuntimeError("publication refused")
+
+    def failed_launcher(path, content):
+        if path.name.endswith(".ps1"):
+            raise RuntimeError("launcher refused")
+        write(path, content)
+
+    monkeypatch.setattr(engine.runtime, "_publication_lease", competing_update)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    if phase == "publication":
+        monkeypatch.setattr(fixture.publication, "publish_selectors", failed_publication)
+    else:
+        monkeypatch.setattr(runtime_application_install, "_write", failed_launcher)
+    with pytest.raises(RuntimeError, match=phase + " refused"):
+        runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert won
+    assert (fixture.root / "current-version").read_text().strip() == winner
+    assert (fixture.root / "last-known-good").read_text().strip() == winner
+    assert all((fixture.global_bin / name).read_bytes() == text.encode("utf-8")
+               for name, text in commands.items())
+
+
+def test_install_without_start_commits_one_update_after_unlocked_verification(
+    install_transaction, monkeypatch,
+):
+    fixture = install_transaction
+    fixture.record["start"] = []
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    checks = []
+    updates = []
+    lock = engine.runtime._publication_lease
+
+    def unchanged():
+        checks.append(True)
+        with lock(fixture.root, timeout=0):
+            pass
+
+    @contextmanager
+    def update(root):
+        updates.append(True)
+        with lock(root):
+            yield
+
+    @contextmanager
+    def qualified(*_, **_kwargs):
+        yield engine.runtime, unchanged
+
+    monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
+    monkeypatch.setattr(engine.runtime, "_publication_lease", update)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert checks and len(updates) == 1
+    assert (fixture.root / "current-version").read_bytes() == b"2.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
+    assert (fixture.global_bin / "fixture-app.cmd").is_file()
+    assert (fixture.slot / "install-success.json").is_file()
+
+
 def test_install_transaction_cancelled_start_retains_selection(
     install_transaction, monkeypatch, capsys,
 ):
