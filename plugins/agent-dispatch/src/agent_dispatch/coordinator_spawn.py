@@ -28,6 +28,13 @@ class ReserveSpawnBody(BaseModel):
     allocation_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
 
 
+class PoolInstanceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    registration_id: str = Field(min_length=1, strict=True)
+    machine: str = Field(min_length=1, strict=True)
+    env: str = Field(min_length=1, strict=True)
+
+
 class PoolPlacementBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -36,6 +43,8 @@ class PoolPlacementBody(BaseModel):
     reserved_by: str = Field(min_length=1)
     catalog_revision: int = Field(ge=0, strict=True)
     driver: Literal["cli", "ordinary-bridge"] = "cli"
+    expected_instance: PoolInstanceBody | None = None
+    startup_timeout: FiniteFloat = Field(default=600, gt=0)
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -261,6 +270,11 @@ def register_spawn_routes(
                 placement = queue.place_pool_task(
                     body.task_id, reserved_by=body.reserved_by, driver=body.driver,
                     catalog_revision=body.catalog_revision,
+                    expected_instance=(
+                        (body.expected_instance.registration_id, body.expected_instance.machine, body.expected_instance.env)
+                        if body.expected_instance is not None else None
+                    ),
+                    startup_timeout=body.startup_timeout,
                 )
             except WorkerAdmissionInhibited as exc:
                 raise HTTPException(409, detail=exc.detail()) from exc
@@ -700,11 +714,24 @@ def register_spawn_routes(
         conclusion_state: str | None = None,
         native_release_pending: bool | None = None,
         pool_accountable: bool = False,
+        pool_registration_id: str | None = None,
+        pool_machine: str | None = None,
+        pool_env: str | None = None,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
         limit: int = 200,
     ) -> list[dict]:
+        instance = None
+        if any(value is not None for value in (pool_registration_id, pool_machine, pool_env)):
+            from .pool_instances import PoolDefinitionError, pool_instance_identity
+            try:
+                instance = pool_instance_identity({
+                    "registration_id": pool_registration_id, "machine": pool_machine, "env": pool_env,
+                })
+            except PoolDefinitionError as exc:
+                raise HTTPException(422, detail=str(exc)) from exc
+            response.headers["X-Dispatch-Pool-Instance"] = "pool-instance/v1"
         states = (
             [s.strip() for s in state.split(",") if s.strip()] if state else None
         )
@@ -727,6 +754,7 @@ def register_spawn_routes(
                 conclusion_state=conclusion_state,
                 native_release_pending=native_release_pending,
                 pool_accountable=pool_accountable,
+                pool_instance=instance,
                 resume_requested=resume_requested,
                 task_status=task_statuses,
                 latest_only=latest_only,

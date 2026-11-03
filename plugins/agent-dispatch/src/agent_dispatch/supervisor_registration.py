@@ -498,10 +498,14 @@ def build_command(
         return materialize(name, payload)
 
     if kind == RegistrationKind.SUPERVISED_LANE:
+        scope = []
+        if reg.get("machine") and reg.get("env"):
+            scope = ["--registration-machine", str(reg["machine"]), "--registration-env", str(reg["env"])]
         return base + [
             "supervise",
             "--supervisor-id",
             str(reg["id"]),
+            *scope,
             *_lane_flags(spec),
         ]
 

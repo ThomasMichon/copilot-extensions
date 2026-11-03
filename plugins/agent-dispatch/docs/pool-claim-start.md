@@ -3,8 +3,8 @@
 The explicit version-1 pool placement provider atomically binds an assignment,
 occupies capacity and moves a task from `QUEUED` to `CLAIMED` before any workspace
 or native process exists. The normal supervisor still uses its legacy
-reservation/worker-claim path where no cohort has been projected; these explicit
-operations do **not** migrate it. Once a cohort is projected, the queue fences
+reservation/worker-claim path where no cohort has been projected. The managed
+ordinary caller has a separate default-off opt-in described below. Once a cohort is projected, the queue fences
 fresh legacy spawning as described below.
 See the [lifecycle architecture](spawn-supervisor.md#assignment-lifecycle-current-versus-target)
 and [complete catalog owner](pool-publication.md) for those separate boundaries.
@@ -74,6 +74,62 @@ back to the legacy reservation API. A malformed successful reply reports
 HTTP-style `502` with an explicitly unknown outcome; a committed claim remains
 retained at its provider.
 
+## Managed ordinary allocator (opt-in)
+
+`AGENT_DISPATCH_POOL_ALLOCATION` is default **off**, independent of
+`AGENT_DISPATCH_POOL_PUBLICATION`. Enabling source publication or retaining a
+projected cohort does not enable automatic allocation. Both remain disabled
+unless explicitly configured; source coverage is not installed qualification.
+The existing master passes its actual registration ID, machine and environment
+to its same-runtime lane child. The strict parser retains this instance scope
+instead of substituting the child's ambient environment; a different or unknown
+execution host refuses before launch.
+
+The managed caller first reads the ordinary data-authorized
+`/health.pool_cohort` version-1 revision observation. A positively unprojected
+queue needs no control-token catalog read and retains legacy supervision.
+Configured or unknown state never authorizes that fallback. A cohort projected
+after an unprojected cycle's observation is refused by the transactional legacy
+fence; the caller cannot upgrade to pool placement midway through that cycle.
+
+For configured state, the caller reads the existing complete catalog and negotiates
+`instance_bound_placement_versions: [1]` against the running placement owner.
+It supplies `expected_instance` (`registration_id`, `machine`, `env`) and its
+configured positive finite `startup_timeout` to `POST /pool-placements`.
+These optional fields preserve existing explicit callers' request shape and
+600-second default. An old strict provider refuses the new body; missing live
+support refuses before POST, with no legacy reservation fallback.
+
+The provider still selects globally across the complete priority-ordered set,
+including actual routing and accountable capacity. The expected instance is
+**not** a candidate filter: if another instance wins, the transaction refuses
+before inserting a reservation or claim, with visible waiting. A matching
+registration name on another machine or environment does not own the result.
+Replay also checks the instance, never granting fresh launch permission.
+Before preparing the ordinary first prompt, the caller reads back the original
+assignment and actual post-claim task generation. Lost, stale or conflicting
+read-back retains the claim without native creation.
+
+`instance_scoped_reservation_versions: [1]` advertises the adjacent query
+contract. `GET /spawn-reservations` accepts all three of `pool_registration_id`,
+`pool_machine`, `pool_env` and returns
+`X-Dispatch-Pool-Instance: pool-instance/v1`. Filtering uses immutable reservation
+bindings before `limit`; it excludes foreign bound instances while preserving
+unbound legacy rows and their existing lifecycle checks. Current-task matching
+does not mistake an older historical own reservation for current ownership.
+Missing query support blocks instance-scoped reconciliation rather than silently
+using an unfiltered response. An allocation-disabled configured lane retains its
+instance-scoped reconciliation, but cannot create new claims.
+
+The transaction, not label-wide supervisor counts or legacy failed-spawn
+dead-letter counters, owns configured ordinary capacity and retry admission.
+Separately admitted CI-repair retains its legacy budget and launch path.
+Configured CLI, script and restricted backends are not relabeled as ordinary:
+they refuse this caller until their own consumers are qualified. Unprojected
+queues keep legacy admission. Ordinary ACP retries, decision/decline and CLI
+initial prompts are still separate gates, so this opt-in is not a claim that
+the complete lifecycle is ready for rollout.
+
 ## Affirmative worker caller
 
 A worker that has read its allocator-claimed task and independently decided to
@@ -100,8 +156,8 @@ execution machine before creating or resuming an agent. The existing reservation
 admission read exposes deadline ineligibility; storage rechecks the deadline
 transactionally so an expiry during creation cannot deliver a first prompt.
 It does not choose another pool or forward a local create to a
-different host. Ordinary automatic selection remains disabled until its
-registration/instance ownership and startup retry consumers are integrated.
+different host. The managed allocator opt-in remains disabled by default;
+ordinary startup retry consumers are not yet integrated.
 
 `ordinary_invocation.startup_seed` selects a distinct allocator-claimed worker
 prompt for this assignment. It retains coordinator routing, the charter and
@@ -133,7 +189,7 @@ continues to advertise only `cli`, because its current retry transport is the
 live-CLI inbox operation, not ordinary Bridge's ACP native-turn operation.
 Existing supervision retains an ordinary allocator claim rather than passing
 it to legacy gone-worker recovery or claiming that CLI retry qualified it.
-Automatic ordinary retry, decline/closeout, allocator-instance integration,
+Automatic ordinary retry, decline/closeout, comprehensive allocator integration,
 publication activation and installed/native qualification remain open gates.
 
 ## Worker acceptance transport

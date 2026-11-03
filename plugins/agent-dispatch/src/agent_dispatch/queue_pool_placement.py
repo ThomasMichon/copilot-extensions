@@ -48,6 +48,8 @@ def pool_placement_contract() -> dict[str, object]:
         "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
+        "instance_bound_placement_versions": [1],
+        "instance_scoped_reservation_versions": [1],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
@@ -71,6 +73,44 @@ class PoolPlacement:
     reservation: SpawnReservation
     reserved: bool
     assignment: PoolAssignment
+
+
+def require_selected_instance(
+    identity: tuple[str, str, str] | None, selected: PoolAssignment | PoolInstanceDefinition,
+) -> None:
+    """Check the global winner without changing selection or committing its claim."""
+    actual = selected.registration_id, selected.machine, selected.env
+    if identity is not None and identity != actual:
+        raise TaskError("globally selected pool instance belongs to another launch owner; waiting")
+
+
+def validate_pool_request(
+    revision: int | None, reserved_by: str | None, suspended: bool,
+    driver: str | None, timeout: float, instance: tuple[str, str, str] | None,
+) -> None:
+    if instance is not None:
+        from .pool_instances import PoolDefinitionError, pool_instance_identity
+        if not isinstance(instance, tuple) or len(instance) != 3:
+            raise TaskError("pool placement requires an exact launch instance")
+        try:
+            pool_instance_identity(dict(zip(("registration_id", "machine", "env"), instance)))
+        except PoolDefinitionError as exc:
+            raise TaskError(str(exc)) from exc
+        if revision is None:
+            raise TaskError("instance-bound placement requires the pool placement operation")
+        if instance[0] != reserved_by:
+            raise TaskError("instance-bound placement requires its actual registration allocator")
+    if revision is None:
+        return
+    from .queue_pool_startup import validate_startup_timeout
+    validate_startup_timeout(timeout)
+    if (
+        type(revision) is not int or revision < 0
+        or not isinstance(reserved_by, str) or not reserved_by.strip() or suspended
+    ):
+        raise TaskError("pool placement requires a catalog revision and explicit allocator")
+    if driver not in {"cli", "ordinary-bridge"}:
+        raise TaskError("pool placement requires a qualified startup driver")
 
 
 _INTRINSIC_DIMS = frozenset({"machine", "repo", "env", "pool", "worktree"})
