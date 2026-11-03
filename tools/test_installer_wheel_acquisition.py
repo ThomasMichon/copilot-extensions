@@ -150,8 +150,11 @@ def acquire(state, **changes):
     return acquisition.acquire_wheel_inputs(expected, **(arguments | changes))
 
 
-def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds):
-    state = feeds()
+@pytest.mark.parametrize("certificate", [
+    CERTIFICATE, CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"),
+])
+def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds, certificate):
+    state = feeds(certificate=certificate)
     metadata = project(state)
     with acquire(state) as result:
         paths = tuple(result.snapshot.paths.values())
