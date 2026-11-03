@@ -273,7 +273,10 @@ def _stage(tmp_path, monkeypatch):
     installer.write_text("fixture")
     root = tmp_path / "runtime"
     path = tmp_path / "stage.json"
-    status = dict(stage_done=True, plugin_changed=True, plugin_dir=str(payload), runtime_root=str(root))
+    status = dict(
+        stage_done=True, plugin_changed=True, plugin_dir=str(payload), runtime_root=str(root),
+        stage_status=str(path), stage_lock=str(tmp_path / "lock"),
+    )
     path.write_text(json.dumps(status))
     monkeypatch.setattr(launch.update_stage, "discover_plugin_dir", lambda: (payload, "marketplace"))
     monkeypatch.setattr(launch.update_stage, "fingerprint", lambda p: installer.read_text())

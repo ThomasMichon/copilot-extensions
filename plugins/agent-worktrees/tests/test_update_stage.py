@@ -1016,6 +1016,46 @@ def test_malformed_version_metadata_preserves_availability_and_status(applied_st
     assert status.read_bytes() == original
 
 
+@pytest.mark.parametrize("has_valid", [False, True])
+def test_direct_discovery_skips_non_object_manifests_without_crashing_indicator(
+    tmp_path, monkeypatch, has_valid,
+):
+    home, root = tmp_path / "home", tmp_path / "runtime"
+    direct = home / ".copilot" / "installed-plugins" / "_direct"
+    invalid, valid = direct / "a-invalid", direct / "z-engine"
+    invalid.mkdir(parents=True)
+    (invalid / "plugin.json").write_text('[{"name":"agent-worktrees"}]')
+    if has_valid:
+        valid.mkdir()
+        (valid / "plugin.json").write_text('{"name":"agent-worktrees","version":"2"}')
+    root.mkdir()
+    (root / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    us._write_status(us.status_path(), dict(
+        stage_done=True, plugin_changed=True, payload_version="1.1", deployed_version="1",
+        plugin_dir=str(valid if has_valid else invalid), runtime_root=str(root),
+    ))
+    original = us.status_path().read_bytes()
+    assert us.discover_plugin_dir() == ((valid, "direct") if has_valid else (None, ""))
+    assert us.indicator_state() == ("idle" if has_valid else "available")
+    assert us.status_path().read_bytes() == original
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+def test_custom_status_without_matching_writer_paths_is_not_acknowledged(tmp_path, monkeypatch, capsys, recorded):
+    root, custom = tmp_path / "runtime", tmp_path / "export.json"
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    prior = dict(stage_done=True, plugin_changed=True)
+    if recorded:
+        prior.update(stage_status=str(tmp_path / "original.json"), stage_lock=str(root / "updater.lock"))
+    us._write_status(custom, prior)
+    original = custom.read_bytes()
+    assert us.application_status(custom) == ({}, None, None)
+    assert "Update status acknowledgement unavailable:" in capsys.readouterr().err
+    assert custom.read_bytes() == original
+
+
 def test_namespaced_apply_retains_the_original_staging_lease(tmp_path, monkeypatch):
     from agent_worktrees import __main__ as core, reconcile
 
@@ -1032,20 +1072,23 @@ def test_namespaced_apply_retains_the_original_staging_lease(tmp_path, monkeypat
     monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
     prior = us.stage()
     assert prior["plugin_changed"] and prior["runtime_root"] == str(cell)
-    original = us.status_path().read_bytes()
+    original_status, original_lock = us.status_path(), us.lock_path()
+    original = original_status.read_bytes()
     (cell / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
-    assert us.acquire_lock()
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: cell)
+    assert us.acquire_lock(original_lock)
     try:
+        assert us.indicator_state(status=original_status) == "checking"
         us.acknowledge_applied(
-            prior, payload, cell, us.fingerprint(payload), status=us.status_path(),
+            prior, payload, cell, us.fingerprint(payload), status=original_status,
         )
-        assert us.status_path().read_bytes() == original
-        assert us.lock_path().is_file()
+        assert original_status.read_bytes() == original
+        assert original_lock.is_file()
         assert not (cell / "updater.lock.guard").exists()
     finally:
-        us.release_lock()
+        us.release_lock(original_lock)
     us.acknowledge_applied(prior, payload, cell, us.fingerprint(payload))
-    assert us.read_status()["plugin_changed"] is False
+    assert us.read_status(original_status)["plugin_changed"] is False
 
 
 def test_legacy_status_without_runtime_root_uses_only_the_default_installation(applied_stage, monkeypatch):

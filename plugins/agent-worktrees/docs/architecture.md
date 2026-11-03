@@ -1983,6 +1983,12 @@ Rootless records belong only to the legacy installation directory, independently
 of the caller's selected cell; successful acknowledgement records that root.
 The staging status/lease pair is captured separately from the deployment target:
 an ordinary launch can stage in legacy state while applying to a namespaced cell.
+New records retain both writer paths, so staged application and read-only
+live-checker indication preserve that lease even when the caller later selects
+another context. The recorded status
+path must still match; a copied record or legacy custom status with no recorded
+lease remains unchanged with an explicit warning. Legacy default records still
+use their existing default writer pair.
 Both application paths retain that original writer lease rather than deriving
 its location from the target root. If staging state cannot be resolved, or acknowledgement encounters a filesystem
 or metadata error, an explicit warning preserves the independent runtime result.

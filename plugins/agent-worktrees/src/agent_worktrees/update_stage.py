@@ -188,7 +188,7 @@ def discover_plugin_dir(home: Path | None = None) -> tuple[Path | None, str]:
                     pj = json.loads(manifest.read_text(encoding="utf-8"))
                 except Exception:
                     continue
-                if pj.get("name") == "agent-worktrees":
+                if isinstance(pj, dict) and pj.get("name") == "agent-worktrees":
                     return child, "direct"
     return None, ""
 
@@ -351,6 +351,7 @@ def stage(
         return result
 
     try:
+        result.update(stage_status=str(status.resolve()), stage_lock=str(lock.resolve()))
         prior = read_status(status)
         _write_status(status, result)
         plugin_dir, layout = discover_plugin_dir(home)
@@ -477,11 +478,27 @@ def read_status(status: Path | None = None) -> dict:
         return {}
 
 
+def _status_lock(prior: dict, path: Path) -> Path:
+    if "stage_status" in prior or "stage_lock" in prior:
+        owner_status, owner_lock = prior.get("stage_status"), prior.get("stage_lock")
+        if (
+            not isinstance(owner_status, str) or not Path(owner_status).is_absolute()
+            or not isinstance(owner_lock, str) or not Path(owner_lock).is_absolute()
+            or Path(owner_status).resolve() != path.resolve()
+        ):
+            raise ValueError("Staging writer paths are invalid or no longer match the record")
+        return Path(owner_lock)
+    if path.resolve() != status_path().resolve():
+        raise ValueError("Legacy custom staging status has no recorded writer lease")
+    return lock_path()
+
+
 def application_status(status: Path | None = None) -> tuple[dict, Path | None, Path | None]:
     """Keep staging's original state/lease pair separate from its deployment target."""
     try:
-        path, lock = status or status_path(), lock_path()
-        return read_status(path), path, lock
+        path = status or status_path()
+        prior = read_status(path)
+        return prior, path, _status_lock(prior, path)
     except (OSError, ValueError) as error:
         print(f"Update status acknowledgement unavailable: {error}", file=sys.stderr)
         return {}, None, None
@@ -503,7 +520,14 @@ def acknowledge_applied(
             or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.legacy_install_dir())) != str(runtime_root)
         ):
             return
-        status, lock = status or status_path(), lock or lock_path()
+        if lock is None:
+            if status is None and isinstance(prior.get("stage_status"), str):
+                status = Path(prior["stage_status"])
+            _observed, status, lock = application_status(status)
+            if lock is None:
+                return
+        else:
+            status = status or status_path()
         if not acquire_lock(lock):
             return
         try:
@@ -563,17 +587,23 @@ def indicator_state(
       "checking"  -- a background stage has live owner metadata;
       "available" -- the stage finished and the marketplace payload changed
                      (an update is staged, ready to apply on launch/refresh);
-      "current"   -- the stage finished and nothing changed (up to date);
-      "idle"      -- no stage has run / it was skipped (no plugin dir, etc.).
+      "current"   -- the stage has no remaining update (unchanged or applied);
+      "idle"      -- no usable stage result, including obsolete availability.
 
-    Read-only and cheap (two small files); safe to poll on the render tick.
+    Local metadata only; no acquisition, subprocess or source-tree hashing.
     """
     if os.environ.get("WORKTREE_NO_UPDATE") == "1":
         return "paused"
 
-    if locks.lock_is_live(locks.read_lock(lock or lock_path())):
-        return "checking"
+    status = status or status_path()
     st = read_status(status)
+    if lock is None:
+        try:
+            lock = _status_lock(st, status)
+        except (OSError, ValueError):
+            lock = lock_path()
+    if locks.lock_is_live(locks.read_lock(lock)):
+        return "checking"
     if not st or not st.get("stage_done"):
         return "idle"
     if st.get("skipped"):
