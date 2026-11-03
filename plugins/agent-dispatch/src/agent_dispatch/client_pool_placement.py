@@ -129,7 +129,10 @@ class PoolPlacementClientMixin:
             or driver not in {"cli", "ordinary-bridge"}
         ):
             raise DispatchError(400, "pool placement requires task, allocator, catalog revision and qualified driver")
-        contract = _validate_contract(self.pool_placement_contract(), driver=driver)
+        contract = _validate_contract(
+            self.pool_placement_contract(), driver=driver,
+            explicit_start=driver == "cli" and expected_instance is not None,
+        )
         extra: dict[str, object] = {}
         if expected_instance is not None or startup_timeout is not None:
             versions = contract.get("instance_bound_placement_versions")

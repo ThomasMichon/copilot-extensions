@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from concurrent.futures import ThreadPoolExecutor
+import json
+import subprocess
 from threading import Barrier
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_dispatch import __main__ as cli, identity
+from agent_dispatch import __main__ as cli, embody, identity, session_acquisition, spawn_factories
 from agent_dispatch.client import DispatchError, DispatchUpgradeRequired
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.ordinary_bridge import reserve_for_backend
@@ -542,3 +544,186 @@ def test_preparation_readback_loss_retains_claim_without_legacy_fallback(q, api,
     assert q.get(requested.id).status == Status.CLAIMED
     assert len(q.list_reservations(task_id=requested.id)) == 1
     assert sum(request.method == "POST" and request.url.path == "/pool-placements" for request in requests) == 1
+
+
+def test_cli_pool_claim_reaches_actual_acquisition_seed_and_affirmative_start(q, api, monkeypatch):
+    publish(q, pool())
+    requested = task(q)
+    calls = []
+    monkeypatch.setattr(embody, "prepare_reusable_worktree", lambda task, reservation, **kw: (
+        calls.append(("workspace", task, kw)) or {
+            "worktree": "worktree", "path": "/workspace/example", "project": "example",
+            "ownership": "created",
+        }
+    ))
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+
+    def transport(argv, **kwargs):
+        payload = json.loads(kwargs["input"])
+        calls.append(("acquire", payload))
+        assert q.get(requested.id).status == Status.CLAIMED
+        assert q.get_reservation(payload["reservation_key"]).worktree == "worktree"
+        assert payload["task_generation"] == 1 and payload["mode"] == "cli"
+        assert "claim --task" not in payload["prompt"] and "--evaluation" not in payload["prompt"]
+        assert f"start {requested.id} --pool-generation 1" in payload["prompt"]
+        assert "agent-dispatch --shared" in payload["prompt"]
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            **{name: payload[name] for name in (
+                "mode", "task_id", "task_generation", "worktree_id", "delivery_id",
+            )},
+            "session_id": "native-cli", "native_session_id": "native-cli",
+        }), "")
+
+    monkeypatch.setattr(session_acquisition.subprocess, "run", transport)
+    factory = spawn_factories.make_embody_spawn(route=" --shared")
+    with controls.connected(api, []) as client:
+        placed = reserve_for_backend(
+            client, asdict(requested), "worker", ordinary=False, pool_driver=factory.pool_placement_driver,
+            instance=("worker", "host-a", "linux"),
+        )
+        owner = Supervisor(
+            client, spawn_fn=factory, machine="host-a", supervisor_id="worker",
+            pool_instance=("worker", "host-a", "linux"),
+        )
+        prepared = owner._prepare_spawn_task(asdict(requested), placed["reservation"])
+        assert calls[0][2]["driver"] == "cli" and prepared["generation"] == 1
+        ok, handle = factory(prepared)
+        assert ok and handle["session"] == "native-cli"
+        assert q.get(requested.id).status == Status.CLAIMED
+        client.record_spawn(placed["reservation"]["key"], session_handle=handle["session"], worktree=handle["worktree"])
+        accepted = client.start_pool_task(
+            requested.id, "host-a/worktree", owner_session_id="native-cli", expected_generation=1,
+        )
+        assert accepted["status"] == Status.STARTED
+    assert [call[0] for call in calls] == ["workspace", "acquire"]
+
+
+def test_mixed_driver_selection_never_infers_cli_from_workspace_interface(q, api):
+    def script(task):
+        pytest.fail("unqualified script must not spawn")
+
+    script.allocation_interface = "cli"
+    routed = spawn_factories.make_label_routed_spawn(
+        spawn_factories.make_headless_spawn(),
+        overrides={"interactive": spawn_factories.make_embody_spawn(), "script": script},
+    )
+    publish(q, pool(capacity=3))
+    with controls.connected(api, []) as client:
+        owner = Supervisor(client, spawn_fn=routed)
+        for label, driver in (("interactive", "cli"), ("ordinary", "ordinary-bridge"), ("script", None)):
+            requested = task(q, labels=[label])
+            ordinary = routed.ordinary_bridge_for(asdict(requested))
+            selected = owner._spawn_attribute(asdict(requested), "pool_placement_driver", "") or None
+            if driver is None:
+                with pytest.raises(DispatchUpgradeRequired):
+                    reserve_for_backend(
+                        client, asdict(requested), "worker", ordinary=ordinary, pool_driver=selected,
+                        instance=("worker", "host-a", "linux"),
+                    )
+                assert q.get(requested.id).status == Status.QUEUED
+            else:
+                placed = reserve_for_backend(
+                    client, asdict(requested), "worker", ordinary=ordinary, pool_driver=selected,
+                    instance=("worker", "host-a", "linux"),
+                )
+                assert placed["reservation"]["driver"] == driver
+
+
+def test_actual_cycle_uses_selected_cli_placement_driver(q, api, monkeypatch):
+    publish(q, pool())
+    requested = task(q)
+    calls = []
+    with controls.connected(api, []) as client:
+        owner = cycle_owner(client, monkeypatch, calls)
+
+        def spawn(prepared):
+            calls.append(prepared)
+            assert prepared["status"] == Status.CLAIMED and prepared["generation"] == 1
+            assert "--pool-generation 1" in startup_seed(prepared, client, driver="cli")
+            return False, {"retained": True, "error": "contained CLI launch boundary"}
+
+        spawn.pool_placement_driver = "cli"
+        owner.spawn_fn = spawn
+        assert owner.poll_once(now=100) == []
+        assert len(calls) == 1
+        assert q.list_reservations(task_id=requested.id)[0].driver == "cli"
+
+
+def test_cli_seed_refuses_provider_rollback_before_acquisition(q, api, monkeypatch):
+    publish(q, pool())
+    requested = task(q)
+    rolled_back = False
+
+    def rewrite(request, response):
+        if rolled_back and request.url.path == "/pool-placements/contract":
+            body = response.json()
+            body["explicit_start_versions"] = []
+            return httpx.Response(200, json=body)
+        return response
+
+    monkeypatch.setattr(session_acquisition, "acquire", lambda *a, **kw: pytest.fail("native effect"))
+    with controls.connected(api, [], rewrite=rewrite) as client:
+        placed = reserve_for_backend(
+            client, asdict(requested), "worker", ordinary=False, pool_driver="cli",
+            instance=("worker", "host-a", "linux"),
+        )
+        rolled_back = True
+        factory = spawn_factories.make_embody_spawn()
+        ok, result = factory({
+            **asdict(q.get(requested.id)), "_spawn_client": client,
+            "spawn_reservation_key": placed["reservation"]["key"],
+        })
+        assert not ok and result["deferred"] is True
+    assert q.get(requested.id).status == Status.CLAIMED
+    assert len(q.list_reservations(task_id=requested.id)) == 1
+
+
+@pytest.mark.parametrize("versions", [None, [], [True], [2]])
+def test_managed_cli_requires_live_explicit_start_support_before_placement(q, api, versions):
+    publish(q, pool())
+    requested = task(q)
+    requests = []
+
+    def rewrite(request, response):
+        if request.url.path == "/pool-placements/contract":
+            body = response.json()
+            body["explicit_start_versions"] = versions
+            return httpx.Response(200, json=body)
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        with pytest.raises(DispatchUpgradeRequired, match="start enforcement"):
+            reserve_for_backend(
+                client, asdict(requested), "worker", ordinary=False, pool_driver="cli",
+                instance=("worker", "host-a", "linux"),
+            )
+    assert all(request.method == "GET" for request in requests)
+    assert q.get(requested.id).status == Status.QUEUED
+
+
+@pytest.mark.parametrize("change", ["hold", "generation", "driver", "missing-instance"])
+def test_cli_preparation_fence_blocks_workspace_and_native_creation(q, api, monkeypatch, change):
+    publish(q, pool())
+    requested = task(q)
+    monkeypatch.setattr(embody, "prepare_reusable_worktree", lambda *a, **kw: pytest.fail("workspace effect"))
+    with controls.connected(api, []) as client:
+        placed = reserve_for_backend(
+            client, asdict(requested), "worker", ordinary=False, pool_driver="cli",
+            instance=("worker", "host-a", "linux"),
+        )
+        if change == "hold":
+            q.set_hold(requested.id, reason="operator hold", actor="operator")
+        elif change != "missing-instance":
+            with q._connect() as conn:
+                conn.execute(
+                    "UPDATE tasks SET generation=generation+1 WHERE id=?" if change == "generation"
+                    else "UPDATE spawn_reservations SET driver='ordinary-bridge' WHERE task_id=?",
+                    (requested.id,),
+                )
+        owner = Supervisor(
+            client, spawn_fn=spawn_factories.make_embody_spawn(), machine="host-a", supervisor_id="worker",
+            pool_instance=None if change == "missing-instance" else ("worker", "host-a", "linux"),
+        )
+        with pytest.raises(SpawnPreparationRetained):
+            owner._prepare_spawn_task(asdict(requested), placed["reservation"])
+    assert len(q.list_reservations(task_id=requested.id)) == 1

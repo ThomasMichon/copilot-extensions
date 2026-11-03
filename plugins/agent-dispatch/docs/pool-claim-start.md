@@ -124,11 +124,23 @@ instance-scoped reconciliation, but cannot create new claims.
 The transaction, not label-wide supervisor counts or legacy failed-spawn
 dead-letter counters, owns configured ordinary capacity and retry admission.
 Separately admitted CI-repair retains its legacy budget and launch path.
-Configured CLI, script and restricted backends are not relabeled as ordinary:
-they refuse this caller until their own consumers are qualified. Unprojected
-queues keep legacy admission. Ordinary ACP retries, decision/decline and CLI
-initial prompts are still separate gates, so this opt-in is not a claim that
-the complete lifecycle is ready for rollout.
+Managed CLI backends use their explicit `cli` placement driver, including
+per-label CLI overrides in mixed lanes. The caller negotiates explicit start
+support before placing a CLI claim, refreshes the actual claimed generation,
+and records the workspace with that driver before Bridge acquisition. Its
+first prompt evaluates the existing assignment and uses `start
+--pool-generation`; it never asks for a second evaluation claim. Bridge
+acquisition supplies the actual native identity for that start command.
+Provider rollback or lost/conflicting read-back retains the claim without a
+legacy fallback or replacement launch. Unbound explicit placement keeps its
+previous provider compatibility; these stricter requirements govern
+instance-bound CLI placement and its first seed.
+
+Script and restricted backends are not inferred to be qualified CLI workers
+from their workspace interface and remain refused by this caller. Unprojected
+queues keep legacy admission. Decline/closeout, complete configured-definition
+adoption and installed qualification remain separate gates, so this opt-in is
+not a claim that the complete lifecycle is ready for rollout.
 
 ## Affirmative worker caller
 
@@ -387,15 +399,16 @@ cooldown already established by those independent transitions and keeps a
 `RELEASING` reservation's capacity and release intent. Conflicting completion
 and unrelated caller identities refuse.
 
-Complete mixed-driver/worker-prompt migration and installed qualification still
-gate the complete policy. These consumers do not activate allocation/publication.
+Complete configured-definition adoption and installed qualification still gate
+the complete policy. These consumers do not activate allocation/publication.
 
 ## Integration boundary
 
 The descriptor still reports `automatic_lane_migration: false` and
 `startup_retry_policy_complete: false`. Source support for ordinary ACP retries,
-decision clocks, nudges and exhaustion does not qualify decline/closeout,
-complete CLI and mixed-driver prompt migration, or installed activation.
+decision clocks, nudges and exhaustion, or managed CLI/mixed-lane initial
+prompts, does not qualify decline/closeout, complete configured-definition
+adoption or installed activation.
 Neither these callers nor their source tests
 authorize installed activation, free unresolved effects or qualify the full
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).

@@ -102,6 +102,7 @@ def launch_scope(args: argparse.Namespace) -> tuple[str, str] | None:
 def reserve(
     client: DispatchClient, task: dict, supervisor_id: str, *,
     instance: tuple[str, str, str], ordinary: bool, restricted: bool, startup_timeout: float,
+    driver: str | None = None,
 ) -> dict | None:
     """A different global winner waits without being claimed by this caller."""
     catalog = configured_catalog(client)
@@ -113,11 +114,12 @@ def reserve(
         or catalog.get("configured_metadata_ready") is not True
     ):
         raise DispatchError(409, "managed pool allocation is waiting for the complete current catalog")
-    if not ordinary or restricted:
-        raise DispatchUpgradeRequired("managed pool allocation requires the qualified ordinary Bridge backend")
+    driver = "ordinary-bridge" if ordinary else driver
+    if restricted or driver not in {"cli", "ordinary-bridge"} or not ordinary and driver != "cli":
+        raise DispatchUpgradeRequired("managed pool allocation requires a qualified ordinary Bridge or CLI backend")
     placed = client.place_pool_task(
         task["id"], reserved_by=supervisor_id, catalog_revision=revision,
-        driver="ordinary-bridge", expected_instance=instance, startup_timeout=startup_timeout,
+        driver=driver, expected_instance=instance, startup_timeout=startup_timeout,
     )
     return {
         **placed, "reservation": {
@@ -130,8 +132,12 @@ def reserve(
 def prepare_task(
     client: DispatchClient, task: dict, reservation: dict, *,
     instance: tuple[str, str, str] | None, supervisor_id: str,
+    driver: str = "ordinary-bridge",
 ) -> dict:
     """Refresh the allocator's generation before preparing any ordinary effects."""
+    if reservation.get("reservation_pool_bound") is True and instance is None:
+        from .spawn_factories import SpawnPreparationRetained
+        raise SpawnPreparationRetained("allocator preparation requires its exact launch instance")
     if instance is not None:
         from .spawn_factories import SpawnPreparationRetained
 
@@ -157,7 +163,7 @@ def prepare_task(
                     or current.get("owner_session_id") is not None or current.get("hold_reason")
                     or current.get("awaiting_steer")
                     or observed.get("reserved_by") != supervisor_id
-                    or observed.get("driver") != "ordinary-bridge"
+                    or observed.get("driver") != driver
                     or observed.get("state") != "reserving"
                     or observed.get("release_requested") or observed.get("startup_fenced")
                 ):
