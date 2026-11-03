@@ -15,19 +15,11 @@ permissions:
   contents: read
 
 jobs:
-  legacy-monitor:
-    name: Legacy monitor (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
+  legacy-monitor-linux:
+    name: Legacy monitor (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: Linux
-          - os: windows-latest
-            platform: Windows
-    steps:
+    steps: &legacy-monitor-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -46,3 +38,9 @@ jobs:
           -k "real_installer_returns_before_resident_owned_monitor_drain and not absent and not stale"
           --allow-explicit-tiers
           --test-timeout 900 --timeout 900 --plugin-timeout 900
+
+  legacy-monitor-windows:
+    name: Legacy monitor (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps: *legacy-monitor-steps
