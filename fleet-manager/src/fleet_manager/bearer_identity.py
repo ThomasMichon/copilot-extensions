@@ -43,6 +43,7 @@ class BearerIdentity:
 class ClaimRequirement:
     claim: str
     values: tuple[str, ...] = field(repr=False)
+    shape: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,8 @@ class BearerIdentityVerifier:
                 or not _claim(principal_claim)
                 or type(required_claims) is not tuple or len(required_claims) > MAX_CLAIMS
                 or any(type(item) is not ClaimRequirement or not _claim(item.claim)
+                       or (item.shape is not None and (
+                           type(item.shape) is not str or item.shape not in ("scalar", "list")))
                        or not _values(item.values) for item in required_claims)
                 or len({item.claim for item in required_claims}) != len(required_claims)
                 or type(mappings) is not tuple or len(mappings) > MAX_MAPPINGS
@@ -211,6 +214,9 @@ class BearerIdentityVerifier:
             raise IdentityError("invalid-credential")
         for item in self._required:
             actual = claims.get(item.claim)
+            if ((item.shape == "scalar" and type(actual) is not str)
+                    or (item.shape == "list" and type(actual) is not list)):
+                raise IdentityError("required-claim-denied")
             if isinstance(actual, str):
                 values = (actual,)
             elif isinstance(actual, list):
