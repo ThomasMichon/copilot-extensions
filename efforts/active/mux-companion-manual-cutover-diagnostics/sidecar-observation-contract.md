@@ -7,8 +7,9 @@ This is the reviewed cross-owner design target. The first worktree-observation
 source implementation is documented in the
 [owning provider contract](../../../plugins/agent-worktrees/docs/worktree-observations.md);
 the rich agenda owner reader and known-session Bridge surfaces also have source
-implementations from #10131. Membership, qualified pre-window measurement and
-the remaining consumer joins below retain their proposed/unqualified status.
+implementations from #10131. #10199 delivers the qualified resident native
+intake and Bridge membership provider. Qualified pre-window measurement and
+the remaining consumer joins retain their proposed/unqualified status.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
@@ -40,8 +41,9 @@ preflight subprocess for every history page or update.
 
 Names below identify the v1 source expansion. Installed support is negotiated,
 not inferred from this plan. Worktree, rich agenda and known-session Bridge
-providers have source delivery; membership and definitive measurement support
-are not inferred from that receipt.
+providers have source delivery; #10199 additionally supplies membership with
+HTTP introduction generation 52 and named contract version 1. Definitive
+measurement support is not inferred from either receipt.
 
 | Owner | Capability | Read boundary |
 | --- | --- | --- |

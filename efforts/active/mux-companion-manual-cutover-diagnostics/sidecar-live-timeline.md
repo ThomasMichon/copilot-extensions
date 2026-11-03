@@ -20,6 +20,12 @@ adapter, rich agenda owner reader, safe process-local committed-save capture
 and known-session Bridge provider. The [merge readback](journal/2026/11.02-sidecar-owner-consumers.md)
 records their exact source tiers and continuing gaps; it does not close S2-S5.
 
+#10199 merged as `a9645aa98b9a4217274cc61aa36a073806413a34`, delivering
+qualified resident mutation intake, compact native evidence in Manager,
+bounded Bridge membership and the reviewed data-lifetime design.
+The [source readback](journal/2026/11.03-sidecar-native-membership.md) retains
+the separate consumer, archival, measurement, native and original parent gates.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -271,6 +277,9 @@ publication and installed support retain their separate qualification.
   Isolate optional post-save callback failures so a completed canonical save is
   not reported as failed and remaining notifications still run. Capture under
   record/pair locks is bounded only; publication/RPC happens after release.
+  #10199 delivers qualified resident-executed saves and native index intake;
+  direct fallback, pre-intake death and unsupported/legacy writers retain
+  partial or unknown coverage rather than universal mutation capture.
 - [x] Deliver bounded immutable process-local committed-save evidence and
   lock-safe optional notification delivery. #10131 supplies this primitive;
   resident/native index intake and cross-process delivery remain in the
@@ -305,8 +314,10 @@ publication and installed support retain their separate qualification.
 - [ ] Integrate known-session observation/history with independent observer
   audiences and the existing local/remote/represented boundaries.
   The owner provider is delivered; Manager consumption remains open.
-- [ ] Add owner-qualified membership snapshot/deltas and retirement semantics,
+- [x] Add owner-qualified membership snapshot/deltas and retirement semantics,
   retaining relationship/custody authority and remote unknowns.
+  #10199 delivers the HTTP-52 provider and passive owning CLI. This is source
+  delivery, not Manager membership consumption or installed adoption.
 - [ ] Expose actual pending/cleared input and permission evidence without answer
   or control authority.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
