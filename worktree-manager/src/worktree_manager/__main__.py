@@ -1523,62 +1523,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"worktree-manager {__version__}")
         return 0
     if args and args[0] in ("--help", "-h"):
-        print("usage: worktree-manager [--version] [--help] <command>")
-        print()
-        print("The standalone copilot-extensions harness control plane (installer, configurator & worktree launcher).")
-        print()
-        print("commands:")
-        print("  (no args)              inspect installation state and show relevant next steps")
-        print("  --project NAME         launch NAME's interactive Picker (binstub seam)")
-        print("  doctor [--json] [--apply-daemon-health]")
-        print("                         report prerequisites + the agent-worktrees core")
-        print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
-        print("    [--repository HTTPS_URL] [--repository-target ABSOLUTE_PATH]")
-        print("    [--repository-commit FULL_COMMIT_ID] [--trust-repository-setup]")
-        print("  register HTTPS_URL [--apply]  same setup flow with a required repository URL")
-        print("                         accepts setup's target, commit, trust and context options")
-        print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
-        print("  source                 show the self-update source (git repo + ref/branch)")
-        print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")
-        print("  source reset [--repo] [--ref]            clear the source override(s)")
-        print("  update [--wait|--detach|--supervised-debug]  submit and observe a durable suite update")
-        print("  update --request-status ID [--json]        read a durable request without installing")
-        print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
-        print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
-        print("  runtime-source show|set|reset|resolve  independent runtime source policy/acquisition; no install")
-        print("  plugins                list the plugins the installer knows about")
-        print("  plugins <name>         show one plugin's prereqs / config / steps")
-        print("  plugins --prereqs      the de-duplicated union of all prerequisites")
-        print("  plugins --reconcile    coverage of the discovered membership by the catalog")
-        print("  plugins --status       known plugins vs. what is enabled user-global")
-        print("  projects [<name>]|--json  registered projects; strict JSON inspection is read-only")
-        print("  repos [<name>]         every known repo + its config-state indicators")
-        print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
-        print("  launch-attempts [ID] [--json] [--include-input] [--sweep-project NAME --source-machine ID]")
-        print("                         read local intent/receipts or explicit configured SSH metadata; never retry")
-        print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
-        print("                         preview the Windows Terminal fragment a project would emit")
-        print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
-        print("  refresh-profiles <project> [--machine K]  reconcile profiles/shortcuts (JSON)")
-        print("  contracts [--project NAME] [--json]")
-        print("                         validate plugin-contributed pivots/actions/cards/config")
-        print("  picker [<project>]     launch the production Picker (Textual)")
-        print("  picker mock [<project>] [--local] [--json]")
-        print("                         production UX with simulated mutations")
-        print("  picker review <project> [--candidate LABEL] [--capture F]")
-        print("                         read-only candidate with real local owner data")
-        print("  picker screenshot [<project>] [--format svg|text|ansi] [--out F]")
-        print("                         capture the production Picker headlessly")
-        print("  picker [screenshot] --demo|--preview [<project>]")
-        print("                         same, against deterministic mock data (no live")
-        print("                         engine/session state required); real Picker,")
-        print("                         real project identity, faked worktree/pivot data")
-        print("                         (in the Picker: l launch/resume · n new)")
-        print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
-        print("  companion-pane --action show|return [--cwd PATH]  same-window Companion navigation")
-        print("  mux-daemon <run|ensure|register|remove|show|status|recovery-evidence>  (managed mux)")
-        print()
-        print("A bare invocation reads current installation state without changing it.")
+        from .cli_help import print_help
+
+        print_help()
         return 0
     if args and args[0] == "plugins":
         return _cmd_plugins(args[1:])
@@ -1611,6 +1558,9 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "daemons":
         from .daemons_cli import cmd_daemons
         return cmd_daemons(args[1:])
+    if args and args[0] == "cleanup":
+        from .cleanup_cli import main as historical_cleanup
+        return historical_cleanup(args[1:])
     if args and args[0] == "doctor":
         from . import doctor_cli
 

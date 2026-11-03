@@ -3676,7 +3676,12 @@ required PR CI and promotion remain limited to five minutes; their packet
 consumers reject the native profile. Portable native-packet inspection requires
 an explicit `verify_packet(..., allow_windows_native=True)` opt-in.
 
-The command requires the existing `pytest`, `coverage>=7.7`, `packaging` and
+The exact-node packet uses pytest 9.1.1 in both PR and promotion CI so an
+unreviewed framework release cannot silently change admitted collection IDs.
+Upgrade that framework only with collection/packet qualification; never relax
+the inventory check to accept whichever nodes a new version happens to collect.
+
+The command requires the supported `pytest==9.1.1`, `coverage>=7.7`, `packaging` and
 `PyYAML` test dependencies, matching the source CI/promotion jobs.
 On Windows, pytest's existing Colorama console adapter is initialized before
 unit observation starts. Unit-side native-loader attempts remain rejected;

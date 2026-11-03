@@ -1,0 +1,113 @@
+name: Historical cleanup native acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["pr/**"]
+    paths:
+      - ".github/workflows/historical-cleanup-native-acceptance.yml"
+      - "plugins/agent-worktrees/src/agent_worktrees/historical_daemons*.py"
+      - "plugins/agent-worktrees/tests/*historical_daemon*.py"
+      - "plugins/agent-index/scripts/historical*"
+      - "plugins/agent-index/scripts/index-transaction.ps1"
+      - "libs/installation-context/_installation_context_legacy_retirement.py"
+      - "worktree-manager/src/worktree_manager/historical*.py"
+      - "worktree-manager/src/worktree_manager/native_path_retirement.py"
+      - "worktree-manager/src/worktree_manager/cleanup_cli.py"
+      - "worktree-manager/src/worktree_manager/self_install.py"
+      - "worktree-manager/tests/test_historical*.py"
+      - "worktree-manager/tests/test_native_path_retirement.py"
+      - "worktree-manager/tests/native/test_historical_index_registration_native.py"
+
+permissions:
+  contents: read
+
+jobs:
+  monitor-linux:
+    name: Historical monitor (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prove selected legacy drain and original native exit
+        env:
+          AGENT_WORKTREES_NATIVE_RECOVERY: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_historical_daemons.py
+          --test-file tests/test_historical_daemons_native.py
+          --test-file tests/test_lazy_dispatch.py
+          --allow-explicit-tiers
+          --test-timeout 120 --timeout 900 --plugin-timeout 900
+
+  monitor-windows:
+    name: Historical monitor (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prove selected legacy drain and original native exit
+        env:
+          AGENT_WORKTREES_NATIVE_RECOVERY: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_historical_daemons.py
+          --test-file tests/test_historical_daemons_native.py
+          --test-file tests/test_lazy_dispatch.py
+          --allow-explicit-tiers
+          --test-timeout 120 --timeout 900 --plugin-timeout 900
+
+  registrations:
+    name: Historical registrations (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Qualify native files and selected component adapters
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_historical_commands.py
+          --test-file tests/test_historical_runtimes.py
+          --test-file tests/test_historical_registrations.py
+          --test-file tests/test_historical_providers.py
+          --test-file tests/test_native_path_retirement.py
+          --test-file tests/test_cleanup_cli.py
+          --allow-explicit-tiers
+          --test-timeout 120 --timeout 900 --plugin-timeout 900
+      - name: Prove actual exported task XML, current-user custody and selected unregister
+        env:
+          AGENT_INDEX_NATIVE_HISTORICAL: "1"
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_historical_index_registration_native.py
+          --allow-explicit-tiers
+          --test-timeout 300 --timeout 600 --plugin-timeout 900

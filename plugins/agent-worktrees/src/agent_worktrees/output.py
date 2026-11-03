@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
@@ -227,3 +228,12 @@ def info(msg: str) -> None:
     if _human(msg):
         return
     print(f"  {msg}")
+
+
+def _emit_register_session_result(args: argparse.Namespace, result: dict) -> None:
+    text = json.dumps(result, separators=(",", ":"))
+    holder = getattr(args, "result_holder", None)
+    if isinstance(holder, list):
+        holder.append(text)
+    else:
+        print(text)

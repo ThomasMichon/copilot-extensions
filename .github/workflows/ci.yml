@@ -275,7 +275,7 @@ jobs:
         version: 0.12.6
     - name: Install seasoned unit tooling
       if: steps.impact.outputs.run == 'true'
-      run: python tools/seasoned_uv.py --uv uv -- --system pytest "coverage>=7.7" packaging pyyaml
+      run: python tools/seasoned_uv.py --uv uv -- --system "pytest==9.1.1" "coverage>=7.7" packaging pyyaml
     - name: Qualify exact-input PR units
       id: units
       if: steps.impact.outputs.run == 'true'

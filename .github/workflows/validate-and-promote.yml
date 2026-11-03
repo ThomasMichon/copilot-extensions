@@ -329,7 +329,7 @@ jobs:
         with:
           version: 0.12.6
       - name: Install seasoned unit tooling
-        run: python tools/seasoned_uv.py --uv uv -- --system pytest "coverage>=7.7" packaging pyyaml
+        run: python tools/seasoned_uv.py --uv uv -- --system "pytest==9.1.1" "coverage>=7.7" packaging pyyaml
       - name: Retain source version and library policy admission
         run: |
           python tools/check-version-consistency.py

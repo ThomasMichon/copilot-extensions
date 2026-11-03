@@ -12,6 +12,18 @@ source connectors, LanceDB-backed stores, a warm embedding-engine split, query
 surfaces, and a read-only retrieval surface that every agent calls directly
 through the `agent-index` CLI.
 
+Optional historical Windows-task cleanup composes through
+`worktree-manager cleanup inspect --component agent-index`.
+It requires an explicit current cell selection and an adopted, retained-inert
+legacy root; matching `agent-index` or `agent-index-engine` names is never enough.
+The Index-owned adapter uses the existing installer transaction mutex, validates
+the task's current-user security owner, archived action/principal/XML and idle
+state, and rechecks the full native registration before deleting it. Running,
+queued, edited, foreign or currently desired registrations are preserved; this
+path never stops tasks or becomes an update prerequisite. Other registration
+platforms/families remain explicitly unsupported. See the
+[historical cleanup contract](../../docs/patterns/historical-installation-cleanup.md).
+
 ## What ships today
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,
