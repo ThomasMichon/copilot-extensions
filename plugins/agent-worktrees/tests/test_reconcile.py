@@ -2872,6 +2872,58 @@ def test_unsettled_payload_fences_dependent_runtime_and_later_runtime_only(env, 
     assert len(calls) == 1
 
 
+def test_runtime_deployment_resumes_after_witnessed_payload_recovery(env, monkeypatch):
+    from agent_worktrees import installer_run, reconcile_deployment
+    from plugin_activation import activation_custody, preserve_activation_durably, state
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "update")
+    restore = state.restore
+
+    def unavailable(*args):
+        raise OSError("fixture restore blocked")
+
+    monkeypatch.setattr(state, "restore", unavailable)
+    with pytest.raises(OSError, match="restore blocked"):
+        with preserve_activation_durably(identity, home) as transaction:
+            settings = json.loads((home / "settings.json").read_text())
+            settings["enabledPlugins"][identity] = True
+            settings["nativeSetting"] = "retained"
+            (home / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+            transaction.confirm_posix_quiescent()
+    runtime = {
+        "service": "optional-plugin", "phase": "runtime", "reason": "runtime-drift",
+        "argv": ["fixture-runtime", "update"],
+    }
+    monkeypatch.setattr(
+        reconcile, "build_plan",
+        lambda *args, **kwargs: {"action": "reconcile", "updates": [runtime]},
+    )
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *args: ({}, env.home / "runtime"),
+    )
+    monkeypatch.setattr(reconcile_deployment, "publication_diagnostic", lambda *args, **kwargs: None)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return installer_run.InstallerRun("OK", 0, None, False, 0)
+
+    monkeypatch.setattr(installer_run, "run_installer", run)
+    blocked = reconcile.apply_plan(env.repo, passes=1)
+    assert blocked["executed"][0]["diagnostic"]["reason"] == "payload-custody-pending"
+    assert calls == []
+    monkeypatch.setattr(state, "restore", restore)
+    with activation_custody(home):
+        pass
+    resumed = reconcile.apply_plan(env.repo, passes=1)
+    assert resumed["executed"][0]["ok"] is True
+    assert calls == [["fixture-runtime", "update"]]
+    settings = json.loads((home / "settings.json").read_text())
+    assert settings["enabledPlugins"][identity] is False
+    assert settings["nativeSetting"] == "retained"
+
+
 @pytest.mark.guard
 def test_launch_adapters_apply_planned_runtime_environment():
     # Environment application belongs to the checked Python executor, not a

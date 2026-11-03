@@ -86,6 +86,10 @@ positive witness permits interrupted restoration; root exit, drained pipes or
 parent death alone do not. Refreshed inventory and unrelated settings survive
 recovery. Ordinary reconciliation remains runtime-only and pull-free.
 
+Dependent runtime steps also reject retained payload custody, including a later
+runtime-only pass. This fence check is read-only and adds no ordinary-launch
+lock or payload pull; existing acquisition custody owns restoration and recovery.
+
 For explicit source acquisition and repository-owned check/apply/final-check,
 use [`repos setup`](docs/repository-setup.md). It is plan-only by default,
 requires consent before repository code runs, and preserves editing/agent

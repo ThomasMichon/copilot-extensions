@@ -50,6 +50,12 @@ Unknown cleanup retains the original transaction and fences later participating
 installs and updates, including a reconciliation second pass. Old readers
 reject an unfamiliar witness rather than silently accepting weaker evidence.
 
+`activation_preservation_pending()` is a read-only fence projection for dependent
+runtime consumers. It takes no lock and performs no restoration. A retained
+transaction, including one awaiting witnessed restoration, blocks deployment
+until the existing acquisition custody owner completes recovery. Invalid or
+unreadable custody remains an explicit refusal.
+
 A persisted quiescent transaction can finish restoration after process death,
 including interruption between settings and inventory writes. Recovery uses
 the original snapshot, re-reads current state, verifies both activation
