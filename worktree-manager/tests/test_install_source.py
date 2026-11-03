@@ -150,8 +150,18 @@ def test_current_bootstrap_uses_its_driver_to_install_a_legacy_source(snapshot, 
     assert not (selected.payload / "scripts").exists()
 
 
-def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(snapshot, monkeypatch):
+@pytest.mark.parametrize("failure", [None, "source", "context"])
+def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
+    snapshot, monkeypatch, failure,
+):
     installer = self_install._runtime_installer()
+    from worktree_manager import update_driver_cli
+
+    current_source = ["admitted-source"]
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: current_source[0])
+    caller = snapshot / "caller"
+    caller.mkdir()
+    monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(caller))
     selected = inputs.select(snapshot)
     root = snapshot / "installed"
     slot = root / "versions" / selected.identity.runtime_version
@@ -169,6 +179,10 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
         assert options["_local_packages"] == ("copilot-extensions-worktree-manager",)
         assert options["_application"] == app
         assert options["_transactional_activation"] is True
+        if failure == "source":
+            current_source[0] = "changed-source"
+        elif failure == "context":
+            caller.rmdir()
         options["_before_publish"]()
         options["_after_activate"](slot)
         return SimpleNamespace(action="installed", slot=str(slot))
@@ -177,8 +191,17 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
     args = SimpleNamespace(
         payload=selected.payload, root=root, install_source=snapshot,
         skip_instance_reconcile=True, repair_update=False, recover_adopted=None,
-        source_digest=None,
+        source_digest=None, admitted_source="admitted-source",
     )
+    if failure:
+        error = RuntimeError if failure == "source" else ValueError
+        with pytest.raises(error):
+            installer._install_payload(
+                args, wheel_inputs=wheels, local_packages=("copilot-extensions-worktree-manager",),
+                application=app,
+            )
+        assert activated == []
+        return
     assert installer._install_payload(
         args, wheel_inputs=wheels, local_packages=("copilot-extensions-worktree-manager",),
         application=app,

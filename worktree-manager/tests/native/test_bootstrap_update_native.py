@@ -61,6 +61,18 @@ if __name__ == "__main__" and "--update-participant" not in sys.argv and "update
     (root / f"caller-{os.getpid()}.json").write_text(json.dumps({
         "pid": os.getpid(), "birth": birth_identity(os.getpid()),
     }), encoding="utf-8")
+    if "--auth-report" in sys.argv:
+        from worktree_manager import engine_client
+
+        def report(project, arguments, **options):
+            assert arguments[:2] == ["update", "--no-manager"]
+            assert "--auth-report" in arguments and "--json" in arguments
+            with (root / "effects.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"phase": "auth-report"}) + "\\n")
+            print(json.dumps({"reports": []}))
+            return 0
+
+        engine_client.run_engine_passthrough = report
 '''
 
 SUITE = '''
@@ -85,7 +97,7 @@ sys.path[:0] = [
 from update_driver import participant_environment
 from single_instance_lease.operation import OperationLock, OperationLockedError
 
-if "--auth-report" in sys.argv or sys.argv[3] != "update":
+if sys.argv[3] != "update":
     assert not participant_environment()
     with runtime_install._installation_custody() as custody:
         assert custody is None
@@ -287,6 +299,8 @@ def bootstrap(tmp_path):
         log = tmp_path / f"caller-{len(callers)}.log"
         stream = log.open("wb")
         streams.append(stream)
+        output = log.with_suffix(".out").open("wb")
+        streams.append(output)
         invocation = [*command, command_name, *arguments]
         if install_source is not None or direct:
             invocation = [
@@ -300,7 +314,7 @@ def bootstrap(tmp_path):
             launch_environment[TIMEOUT_ENV] = acquisition_budget
         process = subprocess.Popen(
             invocation, cwd=tmp_path, env=launch_environment,
-            stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, stdout=output, stderr=stream,
             **agent_procutil.no_window_kwargs(),
         )
         callers.append(process)
@@ -316,6 +330,7 @@ def bootstrap(tmp_path):
         (root / "release-suite").touch()
         for log in sorted(tmp_path.glob("caller-*.log")):
             print(f"{log.name}:\n{log.read_text(encoding='utf-8')}", file=sys.stderr)
+            print(log.with_suffix(".out").read_text(encoding="utf-8"), file=sys.stderr)
         if driver.exists():
             for record in core.status(root=driver):
                 print(f"{record.id}: {record.state} {record.error}", file=sys.stderr)
@@ -339,7 +354,9 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     root, source, driver, start, effects = bootstrap
     first, first_log = start("--project", "sample")
     # Durable admission finishes acquisition/retention; observe the next owned stage separately.
-    _eventually(lambda: core.status(root=driver), processes=(first,))
+    _eventually(
+        lambda: "Update request " in first_log.read_text(encoding="utf-8"), processes=(first,),
+    )
     _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()),
         processes=(first,),
@@ -463,14 +480,41 @@ def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_
     assert not (old / "scripts").exists()
 
 
-def test_native_auth_report_closes_owned_bootstrap_without_forwarding_witness(bootstrap):
-    root, _source, driver, start, effects = bootstrap
-    caller, log = start("--auth-report")
+def test_native_auth_report_preserves_json_stdout_without_installation(bootstrap):
+    _root, _source, driver, start, effects = bootstrap
+    caller, log = start("--auth-report", "--json")
     assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
-    request, = core.status(root=driver)
-    assert request.state == "completed" and request.exit_code == 0
-    assert [row["phase"] for row in effects()] == ["manager", "inspection"]
-    assert effects()[1]["witness"] is False
+    assert json.loads(log.with_suffix(".out").read_text(encoding="utf-8")) == {"reports": []}
+    assert core.status(root=driver) == () and not driver.exists()
+    assert effects() == [{"phase": "auth-report"}]
+
+
+def test_native_request_controls_preserve_fences_and_run_explicit_recovery(bootstrap):
+    root, _source, driver, start, effects = bootstrap
+    old = core.enqueue(
+        core.RequestSpec("interrupted-fixture"),
+        runner=core.TrustedRunner((sys.executable,), str(root)), root=driver,
+    )
+
+    def interrupt(transaction):
+        raise RuntimeError("original fixture interruption")
+
+    with pytest.raises(RuntimeError, match="original fixture interruption"):
+        core.drain(root=driver, executor=interrupt)
+    before = core.status(old.id, root=driver)
+    caller, log = start("--recovery-status", "--json")
+    assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
+    assert json.loads(log.with_suffix(".out").read_text(encoding="utf-8"))["refused"]
+    assert core.status(old.id, root=driver) == before
+    caller, log = start("--recover-for-repair", "--json")
+    assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
+    result = json.loads(log.with_suffix(".out").read_text(encoding="utf-8"))
+    assert result["replayed"] is False and result["released"][0]["request_id"] == old.id
+    failed, = core.status(root=driver)
+    assert failed.state == "interrupted" and failed.error == before.error
+    assert failed.recovery_authority == "operator_repair"
+    assert failed.released_at is not None and failed.settled_at is None
+    assert effects() == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="source-only POSIX non-update entry")

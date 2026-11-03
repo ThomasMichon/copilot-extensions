@@ -387,15 +387,16 @@ def _installation_child_options() -> dict[str, object]:
 
 
 def _execution_driver(payload: Path):
-    # Resolve the declared closure in both source and materialized payloads.
+    # Source controls need application locals as well as the required execution libraries.
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
+    roots = engine._package_roots(payload)
     packages = {
-        engine._package_name(package): package for package in engine._package_roots(payload)
+        engine._package_name(package): package for package in roots
         if engine._package_name(package) in required
     }
     if packages.keys() != required:
         raise RuntimeError("Manager bootstrap requires its complete execution-driver source closure")
-    sys.path[:0] = [str(packages[name] / "src") for name in sorted(required)]
+    sys.path[:0] = [str(package / "src") for package in roots]
     from update_driver import core
 
     return core
@@ -458,6 +459,16 @@ def adopt_broker(root: Path, slot: Path) -> None:
 
 def _source_digest(payload: Path) -> str:
     return runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
+
+
+def _validate_update_request(args) -> None:
+    expected = getattr(args, "admitted_source", None)
+    if expected is not None:
+        from worktree_manager.update_driver_cli import _source_key, _update_context_directory
+
+        if _source_key() != expected:
+            raise RuntimeError("Manager source changed after submission; submit a new request")
+        _update_context_directory(os.environ)
 
 
 def _bootstrap_hold_path() -> str:
@@ -643,6 +654,7 @@ def _install(args) -> Path | int:
 
 
 def _install_payload(args, *, wheel_inputs=None, local_packages=None, application=None) -> Path | int:
+    _validate_update_request(args)
     reconcile = not args.skip_instance_reconcile
     if args.repair_update:
         from update_entry import validate_manager_ownership
@@ -656,6 +668,7 @@ def _install_payload(args, *, wheel_inputs=None, local_packages=None, applicatio
             raise RuntimeError("Manager installation source changed during construction")
         if args.repair_update:
             validate_manager_ownership(args.root, args.payload, expected=prior_commands)
+        _validate_update_request(args)
 
     # Only bootstrap installer modules are read from source. Application execution
     # happens below under the constructed interpreter and retention bootstrap.
@@ -870,7 +883,16 @@ def main(argv: list[str] | None = None) -> int:
     sys.path.insert(0, str(SCRIPTS.parent / "src"))
     if not args.install_only:
         args.skip_instance_reconcile = bool(command and command[:1] not in (["update"], ["self-install"]))
+    driver = _execution_driver(SCRIPTS.parent)
     if command[:1] == ["update"]:
+        from bootstrap_update import _request_control
+        from worktree_manager.update_driver_cli import cmd_update_request, parse_options
+
+        options, forwarded = parse_options(command[1:])
+        if _request_control(options, forwarded):
+            if args.update_participant:
+                parser.error("Request inspection/recovery cannot be an installation participant")
+            return cmd_update_request(command[1:])
         from worktree_manager.runtime_source_config import configured_source, require_marketplace
 
         try:
@@ -886,7 +908,6 @@ def main(argv: list[str] | None = None) -> int:
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return 3
-    driver = _execution_driver(SCRIPTS.parent)
     if os.name == "nt" or command[:1] == ["update"]:
         with _installation_custody() as custody:
             if custody is None:
@@ -906,6 +927,8 @@ def main(argv: list[str] | None = None) -> int:
                         request.spec.context, killswitch_path=request.spec.killswitch_path,
                         cwd=request.spec.cwd,
                     ):
+                        args.admitted_source = request.spec.source
+                        _validate_update_request(args)
                         refusal = _automatic_bootstrap_refusal(args)
                         if refusal is not None:
                             print(refusal, file=sys.stderr)

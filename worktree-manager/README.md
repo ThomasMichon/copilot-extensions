@@ -425,8 +425,12 @@ The ordinary caller starts the existing finite worker and waits for that whole
 result; losing the observer does not discard accepted work. `--detach` reports
 acceptance, not completion, and `--supervised-debug` drains the same queue inline.
 No new daemon, mutation lock or foreground fallback is introduced.
+Request status, recovery and authentication inspection instead use the current
+CLI outside installation submission. Read-only queries never authorize implicit
+fence repair; explicit recovery does not enqueue a new job that would hold its
+own recovery lock. Structured results remain on stdout, separate from diagnostics.
 POSIX dispatch also waits when it owns a completion scope but deliberately
-forwards no witness, such as authentication inspection. An unowned non-update
+forwards no witness. An unowned non-update
 launch retains process replacement. Source-only entries resolve their current
 controller's declared driver dependencies before either platform branch.
 
@@ -441,6 +445,9 @@ pending work.
 Prepared installation sources remain data for the retained current bootstrap
 controller, so an older selected payload need not implement new internal flags.
 Automatic policy is rechecked against the saved request before construction.
+A caller-relative hold-file override is expanded before queue identity is
+created, and saved source configuration is checked before construction and
+immediately before publication.
 A manual update may use the existing explicit repair authorization to release
 an interrupted queue fence once; the prior failed outcome stays recorded, and
 that authorization does not certify cleanup or permit displacing a live owner.
