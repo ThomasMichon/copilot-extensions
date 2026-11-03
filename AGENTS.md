@@ -13,6 +13,13 @@ in the existing `.agent-worktrees/config.yaml`; see
 `plugins/agent-worktrees/docs/repository-agent-policy.md` for enforcement and
 state-preserving reconciliation.
 
+Contributor and review entrypoints are also available as thin repository skills
+under `.github/skills/`. If a plugin-qualified skill below is unavailable, use
+the same unqualified repository skill. Read its linked canonical in-plugin
+`SKILL.md` in full, using that canonical directory for scripts and references.
+These adapters do not install plugins, enable hooks, or change the source-only
+agent-hosting policy.
+
 > **This file is the map, not the manual.** It orients you and links out to the
 > homes that hold the substance -- read the waypoint you need instead of crawling
 > the tree, which is how a large repo stays navigable. It deliberately uses
