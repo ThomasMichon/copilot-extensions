@@ -183,6 +183,103 @@ binding/identity adapter; this SDK does not discover one or guess a legacy ID.
 
 ## Vendoring and qualification
 
+### Ready-only owner transport
+
+`configuration_context.ready_owner_prefix` composes a native module invocation
+using a caller-qualified completion resolver. Legacy Machines and SSH supply
+`configuration_context.runtime.deployed_runtime_python`, passing their actual
+installed `bin/resolve-runtime.sh` or `.ps1`, the explicitly admitted peer root,
+and their sanitized peer environment. No undeployed Python helper, PATH binstub,
+runtime build or peer discovery is required.
+
+The transport requires the canonical resolver's declared read-only contract,
+invokes it with logging disabled and a 15-second deadline, and bounds both output
+streams. Its required caller-supplied `RuntimeRunner` owns the whole transient
+process tree; there is no `subprocess.run` fallback. Machines and SSH pass their
+existing `agent_procutil.owned_process.run_caller_owned`, with binary capture,
+64-KiB stream limits and confirmed descendant cleanup on completion or failure.
+The configuration library itself remains dependency-free.
+Only the resolver chooses completed slots; the transport additionally confines
+its selected interpreter to the supplied root's physical `versions` directory,
+without dereferencing a legitimate POSIX interpreter symlink.
+Absent resolver or no completed runtime remains optional absence; present
+unsupported, failed or malformed resolution is visible failure. The later
+isolated `state-root --configuration --json` read retains report validation and
+fresh repository/cell matching against delivered data. Delivery alone never
+establishes owner authority. Windows uses a noninteractive headless native
+PowerShell child; POSIX sources the exact resolver with native argv.
+
+The focused runtime tests exercise actual deployed POSIX resolver bytes and
+completed/unready slots without log creation. Machines and SSH additionally
+exercise fresh owner-report reads, mismatches, refusal and cell-ownership
+controls. A real Linux timeout control confirms that a resolver's child is no
+longer live when qualification fails. Static/native-command assertions do not
+constitute Windows execution or desktop-visibility qualification.
+
+#### Opt-in native Windows validation flow
+
+This flow requires an isolated native Windows test venue with the source
+packages available, an explicitly authorized desktop observer, and a finite
+test-process owner. Do not substitute static analysis or a POSIX PowerShell
+host, run against installed plugin homes, or perform desktop observation in a
+venue that forbids it. Keep this outside required actor-free CI.
+
+1. Allocate one private fixture directory and retain its cleanup owner. Beneath
+   it create `home`, `repository`, and `home/.agent-machines/bin` (repeat the
+   consumer controls with `.agent-ssh/bin`). Copy the source consumer's exact
+   `scripts/resolve-runtime.ps1` to its fixture `bin`; do not manufacture
+   `scripts/versioned_runtime.py`. Use a fixture-scoped `Path.home()` override
+   for the Python consumer, clear installation-cell context, and set its
+   `AGENT_RT_ROOT` to that fixture consumer.
+2. Create the peer using
+   `python -m venv --without-pip <fixture>/home/.agent-worktrees/versions/1.2.3`.
+   In that venv's `Lib/site-packages`, create a synthetic `agent_worktrees`
+   package whose `__main__.py` accepts exactly
+   `state-root --configuration --json` and prints a fixed report:
+   `{"schema":"agent-worktrees.configuration","version":1,"context":...}`.
+   The context contains nonempty fixture-only `repository_id`,
+   `execution_machine`, `installation_cell`, `binding: "unbound"`, and the
+   absolute fixture repository as `base_root`. No real registry, credentials,
+   binding, settings writer or plugin installation is needed.
+3. Write the peer's `current-version` as `1.2.3`. Before creating a completion
+   marker, call the actual consumer's `owner_report(repository)` without a
+   delivered projection: expect `None` and no owner-module execution.
+   Snapshot fixture paths and bytes before and after each read; no logs,
+   selectors, completion records or other resolver writes may appear.
+4. Create `versions/1.2.3/.install-complete.json` using ordinary `json.dumps` of
+   `{"version": "1.2.3", "completed_at": "2026-01-01", "pid": 0}`.
+   Pass `dict(os.environ)` so Windows supplies uppercase `SYSTEMROOT`.
+   Set `AGENT_CONFIGURATION_CONTEXT` to the matching synthetic report and call
+   `owner_report(repository)` twice through the actual consumer. Expect the
+   fresh report (plus the consumer root for SSH), not optional absence. Have
+   the synthetic module reject inherited configuration projection, caller
+   runtime routing, `PYTHONPATH`, or credential variables. Change only the
+   delivered repository ID, then its cell ID: each must fail qualification.
+   A peer `.installation-ownership.json` must also refuse the legacy path.
+5. Execute both reads from a windowless, caller-contained Python parent.
+   The authorized observer records visible console windows and foreground
+   transitions across both invocations, including child/descendant lifetimes;
+   expect zero new visible windows or focus changes. Capture results without
+   using a visible terminal as the parent. Apply the existing native process
+   and observer procedure in
+   [Windows background process launches](../../docs/patterns/windows-background-process-launch.md),
+   rather than adding a second observer or weakening its admission checks.
+6. In a separate fixture copy only, replace the resolver body after its
+   read-only contract declaration with a child-spawn-and-wait fixture.
+   Retain that child's native identity/handle. Pass the real
+   `run_caller_owned` through a test wrapper that shortens the supplied
+   timeout, preserving binary capture and both stream limits. Expect a visible
+   `ConfigurationError` with timeout in its cause chain, and confirm the same
+   child and its owning scope have exited before releasing handles or fixture
+   custody. Test successful completion too; parent exit alone is not cleanup.
+7. Record source identity, actual Windows/Python/PowerShell versions, completed
+   assertions, skips/refusals, both read durations and confirmed cleanup.
+   Missing observer admission or unconfirmed cleanup is **not qualified**.
+   Remove only the fixture paths authorized by their owner; do not touch live
+   settings, runtimes, services or unrelated processes.
+
+### Composition packaging
+
 Python uses static setuptools `src` packages with a dependency-free manifest,
 matching the installer's existing editable-source retention policy.
 Node is a standalone ES module using only native `fs`/`path`. Source consumers

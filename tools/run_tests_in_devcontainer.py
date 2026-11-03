@@ -29,6 +29,8 @@ resolved SHA; ``--reinstall`` applied to the prep pass then stripped from
 the real pass) and two exceptions: ``--allow-host-state`` is rejected, and
 an over-ceiling resource-limit override is rejected. ``--admission-wait``
 is validated before any work begins and passed to the inner environment lease.
+``--test-file`` and ``--test-profile`` apply only to the offline test pass,
+not the dependency-preparation pass.
 """
 
 from __future__ import annotations
@@ -351,7 +353,7 @@ _VALUE_CONSUMING_FLAGS = frozenset({
     "--base", "-k", "--admission-wait", "--timeout", "--subsuite-timeout",
     "--plugin-timeout", "--test-timeout", "--max-files-per-sub-suite",
     "--max-processes", "--max-memory-mb", "--max-temp-mb", "--exclude",
-    "--test-file", "--selection-file",
+    "--test-file", "--selection-file", "--test-profile",
 })
 
 # Every bare (`store_true`) flag -- kept in sync alongside

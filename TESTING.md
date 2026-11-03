@@ -3929,6 +3929,64 @@ wheel's exact bytes. The full development extra remains broader than the
 dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
 
+## Optional busy-host Codespaces functional qualification
+
+The manual `Installation context full` workflow's `codespaces-installer`
+portfolio runs this complete packet on hosted Linux and Windows: materializer
+and runner integration controls, snapshot-copy/support contracts, the full
+canonical installer module, normal committed-HEAD materialization, and the full
+materialized installer module. Windows retains all six disjoint installer
+partitions. It records exact source identity, profile, outcomes and cleanup
+inside one 7200-second functional envelope; required PR CI is unchanged.
+
+For sustained host contention, explicitly select the test-only
+`busy-host-functional` profile on the existing isolated runner:
+
+```bash
+python tools/run-plugin-tests.py agent-codespaces \
+  --test-profile busy-host-functional \
+  --test-file tests/test_installer_engine_adoption.py
+python tools/run-plugin-tests.py agent-codespaces \
+  --test-profile busy-host-functional \
+  --test-file tests/test_snapshot_copy_contract.py \
+  --test-file tests/test_installer_test_support.py
+```
+
+The devcontainer wrapper accepts the same profile and file selectors. It strips
+both only from dependency preparation and preserves both for the offline test
+pass; preparation still runs without importing tests.
+
+The first command is run against both canonical and normally materialized
+source for complete installer qualification. Keep the combined sequence,
+including materializer integration, preparation and cleanup, within a finite
+7200-second caller-owned containment envelope. The profile is opt-in and logged:
+the adoption and copy modules' default item hang guards are 300 seconds instead of 60;
+their 45-second native subprocess hang guards become 135 seconds; group and plugin
+aggregate guards become 900 and 2700 seconds instead of 300 and 900.
+The runner's unmarked-item default remains 30 seconds. All other fixture
+deadlines remain unchanged.
+Existing explicit 180-second item markers remain 180 seconds in both profiles;
+300 seconds is the module default, not a blanket override. Explicit native-call
+limits also remain unchanged.
+The default item guard includes fixture setup and multiple separately bounded native
+calls, so it is larger than the individual native-call guard.
+
+This profile accepts only the three named test files, without keyword/portfolio
+filters, host-state opt-ins or limit overrides. It preserves the complete
+selected inventory, assertions, admission/refusal and immutable-input checks,
+six Windows partitions, and 128-process/4096-MiB-memory/2048-MiB-temp caps.
+No repository hash or load probe is a prerequisite. The runner passes a
+test-only profile value to these fixtures and clears inherited profile state
+for ordinary runs. Functional runs also clear inherited `PYTEST_ADDOPTS`, so
+ambient collection-only or keyword options cannot silently replace execution.
+
+A profile PASS is **functional evidence only**. It is not a PASS under the
+original wall-time budgets, a performance or baseline qualification, or a
+replacement for required CI. Record the profile, source commit, actual selected
+outcomes/skips, elapsed times and cleanup result; retain failed standard-budget
+runs separately. Default CI, production deadlines, unrelated test suites and
+actual performance assertions are unchanged.
+
 `tools/promotion_unit_tests/test_client_guardian_resources.py` exercises the real
 client-to-guardian caller boundary with process/native-import value doubles and the actual
 stdin bootstrap. It replaces each admitted executable member after snapshot,
@@ -5998,8 +6056,77 @@ python tools/run-plugin-tests.py agent-dispatch \
   --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
 ```
 
-Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
-than repeatedly importing file groups that contain no selected tests.
+Filtered (`-k`) and guard-only selections normally run as one contained
+sub-suite rather than repeatedly importing unrelated file groups.
+
+On Windows, the normal runner automatically partitions
+`agent-codespaces/tests/test_installer_engine_adoption.py` within its existing
+file-group plan: healthy admission and retry/fatal admission/orchestration run
+separately for each editable mode, with the non-boolean admission-spy negative
+controls in the editable failure group; standalone
+snapshot/development-generation lifecycle; and an exhaustive complement for
+everything else, including newly collected tests. The selectors are disjoint;
+other files retain their original groups and are not recollected for each
+partition. This also applies to `--test-file` and intersects every partition
+with a caller's `-k`; `--guards` remains an additional marker restriction.
+Non-Windows and unrelated suites retain their existing grouping.
+Exact-node selection manifests retain their existing collection plan and
+fail-closed missing-node admission rather than adding a keyword restriction.
+The Windows standalone snapshot fixture supplies a real pipless stdlib venv
+interpreter on its isolated PATH: a batch-only `py` shim cannot satisfy the
+installer's windowless native bootstrap invocation.
+
+This is automated partitioning, not a manual-selector or timeout exception.
+Each group retains the default 300-second ceiling, remaining plugin time
+still caps every group within the default 900-second aggregate, and the
+30-second runner request, existing pytest markers and 45-second native fixture
+subprocess deadlines are unchanged. An unexpectedly empty unfiltered partition
+fails. Filtered empty groups throughout an automatically partitioned plan may
+be traversed, including other files preceding the installer partitions, but
+cannot turn an entirely empty explicit-file selection into success; only the
+existing non-explicit guard-only empty-suite convention remains a skip.
+
+Within these automatic Codespaces partitions, pytest assertion exit `1` is sticky:
+later partitions still execute, but later passes cannot turn the plugin result
+green (#6917). Ordinary unpartitioned groups retain their fail-fast behavior.
+
+The native snapshot-copy contract is additionally exercised by
+`agent-codespaces/tests/test_snapshot_copy_contract.py` in canonical-source and
+real-materialized layouts. It compares fresh-destination copies with native
+`Copy-Item`, including complete binary/empty/hidden/read-only contents and
+root-reparse behavior; deterministic copy failures and linked canonical-input
+symbolic-link refusals must remain non-successful. Windows junction non-refusal
+is characterized rather than silently changed into a new policy. An unavailable
+actual symbolic-link capability blocks that required check; a junction, mock,
+privilege change or skip is not a substitute. Isolated no-op, omitted-entry, truncated
+content and wrong-destination mutations must fail the content oracle.
+The existing installer module retains its original node inventory while its
+real stamp fixture also compares complete library contents and a nested payload
+probe. No cache/metadata inputs are discarded to meet the native deadline.
+The shared PowerShell copy helper stays canonical on `dev`; normal release
+materialization, not checked-in per-plugin engine copies, supplies shipped bytes.
+Focused copy-contract results do not replace the complete automatic installer
+run or increase its existing native/item/group/aggregate limits.
+Ordinary absolute materialization paths use fresh no-follow metadata checks
+within their resolved root rather than resolving every ancestor again for each
+asset. Relative paths, parent traversal and reparse aliases retain the original
+resolved walk. Snapshot manifests accumulate relative keys during traversal but
+still read fresh metadata and hash complete file contents on every call; no
+content or identity is cached across calls, no input is discarded, and fixture
+time remains charged to the existing budgets.
+Interrupt/internal/usage failures, unfiltered empty collection, containment
+exceptions, resource failures and aggregate timeouts still abort immediately
+with their original status. The runner's multi-plugin policy is unchanged.
+
+`tools/test_run_plugin_tests.py` checks normal `run_plugin` command planning,
+real pytest collection inventory and exact-once coverage, explicit/filter
+selection behavior, failure propagation, and unchanged resource/aggregate
+limits. Run the owned native contract through the same automated plan without
+manual selectors:
+
+```powershell
+python tools\run-plugin-tests.py agent-codespaces --test-file tests\test_installer_engine_adoption.py
+```
 Use repeatable `--test-file <path-relative-to-tests>` with one plugin to avoid
 collecting unrelated modules before applying `-k`. Unknown, escaping and
 non-file selections fail before environment preparation. The Windows

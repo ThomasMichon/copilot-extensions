@@ -174,15 +174,16 @@ def test_independent_cells_keep_default_provenance_and_recompute_native_plan(tmp
 
 
 def test_native_unready_legacy_owner_never_bootstraps(tmp_path, monkeypatch):
+    import os
     import shutil
     from pathlib import Path
-    import configuration_context
 
     home = tmp_path / "home"
-    scripts = home / ".agent-machines" / "scripts"
+    scripts = home / ".agent-machines" / "bin"
     scripts.mkdir(parents=True)
-    for source in (Path(configuration.__file__).parents[2] / "scripts").glob("versioned_runtime*.py"):
-        shutil.copy2(source, scripts / source.name)
+    suffix = "ps1" if os.name == "nt" else "sh"
+    resolver = Path(configuration.__file__).parents[2] / "scripts" / f"resolve-runtime.{suffix}"
+    shutil.copy2(resolver, scripts / resolver.name)
     peer = home / ".agent-worktrees"
     fake_python = peer / "versions" / "1.0.0" / "Scripts" / "python.exe"
     fake_python.parent.mkdir(parents=True)
@@ -192,13 +193,116 @@ def test_native_unready_legacy_owner_never_bootstraps(tmp_path, monkeypatch):
     for name in ("AGENT_RT_ROOT", "COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
         monkeypatch.delenv(name, raising=False)
 
-    def no_process(*args, **kwargs):
-        pytest.fail("an interpreter-shaped unready slot must not launch or provision")
-
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
     assert configuration.prepare_defaults([], "logical-worker") == []
-    assert (scripts / "versioned_runtime.py").is_file()
+    assert not (home / ".agent-machines" / "scripts").exists()
+    assert not (peer / "logs").exists()
     assert configuration._legacy_report(Path.cwd()) is None
+
+
+@pytest.mark.parametrize("outcome", ["matching", "repository-mismatch", "cell-mismatch", "refused", "cell-owned"])
+def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, monkeypatch, outcome):
+    import os
+    import shlex
+    import shutil
+    import sys
+    from pathlib import Path
+
+    if os.name == "nt":
+        pytest.skip("real POSIX installed-layout actor; Windows transport has its own contract test")
+    home = tmp_path / "home"
+    own = home / ".agent-machines"
+    peer = home / ".agent-worktrees"
+    (own / "bin").mkdir(parents=True)
+    shutil.copyfile(
+        Path(configuration.__file__).parents[2] / "scripts/resolve-runtime.sh",
+        own / "bin/resolve-runtime.sh",
+    )
+    python = peer / "versions/1.2.3/bin/python"
+    python.parent.mkdir(parents=True)
+    (peer / "current-version").write_text("1.2.3")
+    (python.parent.parent / ".install-complete.json").write_text(
+        '{"version": "1.2.3", "completed_at": "2026-01-01", "pid": 0}',
+    )
+    report = {"schema": "agent-worktrees.configuration", "version": 1, "context": {
+        "repository_id": "selected-repository", "execution_machine": "worker",
+        "installation_cell": "selected-cell", "binding": "unbound", "base_root": str(tmp_path),
+    }}
+    fresh = copy.deepcopy(report)
+    if outcome == "repository-mismatch":
+        fresh["context"]["repository_id"] = "foreign-repository"
+    if outcome == "cell-mismatch":
+        fresh["context"]["installation_cell"] = "foreign-cell"
+    actor = tmp_path / "owner.py"
+    actor.write_text(
+        "import json, os, sys\n"
+        "assert sys.argv[1:] == ['-I', '-X', 'utf8', '-m', 'agent_worktrees', "
+        "'state-root', '--configuration', '--json']\n"
+        "assert not any(key in os.environ for key in "
+        "['AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'PYTHONPATH', 'GITHUB_TOKEN'])\n"
+        f"sys.exit(3) if {outcome == 'refused'!r} else None\n"
+        f"print(json.dumps({fresh!r}))\n",
+    )
+    python.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -I {shlex.quote(str(actor))} \"$@\"\n")
+    python.chmod(0o700)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "synthetic-must-not-reach-peer")
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    if outcome == "cell-owned":
+        (peer / ".installation-ownership.json").write_text("{}")
+        with pytest.raises(configuration._peer_launch.ContextRefused, match="installation-cell ownership"):
+            configuration.owner_report(tmp_path)
+    elif outcome == "matching":
+        assert configuration.owner_report(tmp_path) == fresh
+    else:
+        with pytest.raises(ConfigurationError, match="refused|matching qualified owner"):
+            configuration.owner_report(tmp_path)
+    assert not (peer / "logs").exists()
+    assert not (own / "scripts").exists()
+
+
+def test_legacy_resolver_timeout_retires_its_actual_descendant(tmp_path, monkeypatch):
+    import shlex
+    import subprocess
+    import sys
+    from pathlib import Path
+    from agent_procutil.owned_process import run_caller_owned
+
+    if sys.platform != "linux":
+        pytest.skip("Linux process-state witness; native Windows cleanup remains separately qualified")
+    home = tmp_path / "home"
+    own = home / ".agent-machines"
+    (own / "bin").mkdir(parents=True)
+    (home / ".agent-worktrees").mkdir()
+    child_record = tmp_path / "resolver-child.pid"
+    (own / "bin/resolve-runtime.sh").write_text(
+        "# Trace contract: normal/read-only/ready-v1\n"
+        f"/bin/sleep 60 &\nprintf '%s' \"$!\" > {shlex.quote(str(child_record))}\nwait\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
+        monkeypatch.delenv(key, raising=False)
+
+    def short_owned(argv, **kwargs):
+        assert kwargs["timeout"] == 15
+        return run_caller_owned(argv, **{**kwargs, "timeout": 0.5})
+
+    monkeypatch.setattr(configuration, "run_caller_owned", short_owned)
+    with pytest.raises(ConfigurationError, match="read failed") as failure:
+        configuration._legacy_report(tmp_path)
+    cause = failure.value
+    while cause.__cause__ is not None:
+        cause = cause.__cause__
+    assert isinstance(cause, subprocess.TimeoutExpired)
+    pid = int(child_record.read_text())
+    state_file = Path("/proc") / str(pid) / "stat"
+    if state_file.exists():
+        state = state_file.read_text().rsplit(")", 1)[1].split()[0]
+        assert state in {"Z", "X"}, f"resolver descendant {pid} survived timeout"
+    assert not (home / ".agent-worktrees/logs").exists()
 
 
 @pytest.mark.parametrize("implicit", [False, True])

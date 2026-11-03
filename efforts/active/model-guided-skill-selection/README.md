@@ -171,7 +171,7 @@ cached or unavailable quota evidence.
   execute, approve, recursively select itself or bypass invocation restrictions.
 - [ ] Parent model/configuration/history/custody remain unchanged except the
   deliberate tool call/result and documented native fork bookkeeping.
-- [ ] Disabled entries, aliases, pathless providers, invalid references, stale
+- [x] Disabled entries, aliases, pathless providers, invalid references, stale
   data, malformed output, ambiguity and no-match have focused negative controls.
 - [ ] Cancellation and extension lifecycle tests prove owned settlement and
   rejection of late output without affecting unrelated tasks or the foreground.
@@ -521,3 +521,65 @@ owned-session alternative or name the SDK dependency before adopting it.
   judged comparison using the requesting catalog and admitted source policy.
   No production preference, candidate promotion or shared rollout is implied;
   this effort remains Active and its remaining gates stay open.
+
+### 2026-11-02 - Canonical preflight and HTTP witness merged
+
+- PR #10063 merged after current-head Copilot approval, no open review findings
+  and successful required checks. The final managed-rebase head passed the same
+  bounded regression packet; the source worktree was reconciled onto `dev`.
+- Reread this Plan and Validation Plan. Closed only the focused deterministic
+  negative-control validation item: disabled/alias/pathless/stale/unsafe-source
+  and malformed/ambiguous/no-match controls now exist and pass in the shared
+  packet. This does not close native integration or qualitative model evidence.
+- The next slice is the minimum owned-SDK selector host using a frozen
+  requesting catalog, admitted declared-source reads and compact validated
+  results. Keep explicit model/effort/tier and the observed HTTP-only boundary.
+  Then run the preregistered independent comparison with full accounting.
+- This effort stays Active. The merged source is not a shared rollout or a
+  production preference, and no paid candidate/evaluator result is claimed.
+
+### 2026-11-02 - Owned selector and independent comparison reached native execution
+
+- Prepared an import-inert owned SDK selector host using a caller-supplied
+  frozen native catalog, admitted source roots and explicit profile. It
+  verifies actual assembled role/tool/model input, resolved effort/tier, unique
+  usage accounting, source freshness and owned settlement. It does not attach
+  interception to the requesting runtime or select a production model.
+- Native source integration exposed tool-permission and large-output gaps.
+  A read receipt alone could conceal replacement of the actual source with an
+  inaccessible file pointer. The host now retains its byte/read bounds,
+  disables spilling only in the owned session and verifies full source
+  content in subsequent tool-result input. Model-free native negative and
+  positive witnesses distinguish omitted from delivered source content.
+- A contained adopter comparison exercised native event-boundary forks,
+  automatic bounded history and explicit equivalent briefs with an independent
+  matched evaluator. Correct owner selection did not erase missing supporting
+  guides/templates or invalid native-name attempts. Quality and complete-cost
+  qualification remain open; the source contract needs purpose-based guide
+  completeness and stronger exact-name affordances before main preference.
+- This source slice is still under development and not yet reviewed or
+  published. The effort stays Active; no production strategy, promotion,
+  shared rollout or complete-system savings is claimed.
+
+### 2026-11-02 - Exact native names and purpose-based guide coverage refined
+
+- The canonical read schema now enumerates native names rather than leaving
+  arbitrary spelling to the model. The actual assembled request verifies that
+  enum as well as role, profile and tool identity before forwarding. Command
+  and plugin metadata remain descriptive, not alternative identifiers.
+- The leaf now checks supporting guidance against execution, planning or
+  review purpose, including conditional required reading and authoring
+  templates. Necessary undeclared or inaccessible local conventions remain
+  explicit uncertainty; no broader reader or catalog authority was added.
+- A targeted independently judged follow-up found the previously missed
+  references/templates in every tested arm, with no invalid-name attempts or
+  inferred authority. Missing repository-local context remains disclosed, not
+  a complete-coverage pass. The small sample and unallocated authoring cost
+  still do not select a production model, input strategy or preference.
+- Resource acquisitions now settle before cleanup instead of racing deadlines.
+  Independent source review found a separate multi-read witness flag defect;
+  corrected it and added a two-read body/guide control. The failed native dry
+  witness remains evidence rather than being overwritten with a success.
+- The focused bounded Windows packet passes with verified process cleanup.
+  Source publication/release, broader qualification, main preference and the
+  parent completion gate remain open.
