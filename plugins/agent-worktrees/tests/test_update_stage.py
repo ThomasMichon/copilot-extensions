@@ -965,9 +965,16 @@ def test_acknowledgement_preserves_unconsumed_or_failed_evidence(applied_stage, 
 
 
 def test_legacy_obsolete_indicator_is_read_only_and_preserves_pending_changes(applied_stage, monkeypatch):
+    from agent_worktrees import reconcile
+
     payload, root, status, lock, prior = applied_stage
     monkeypatch.setattr(us, "fingerprint", lambda p: pytest.fail("render must not hash source"))
     monkeypatch.setattr(us, "_run_copilot_update", lambda: pytest.fail("render must not acquire"))
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *a, **k: pytest.fail("render must not resolve an installation through a child probe"),
+    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("render must not spawn"))
     before = status.read_bytes()
     assert us.indicator_state() == "idle"
     assert status.read_bytes() == before
@@ -982,6 +989,16 @@ def test_legacy_obsolete_indicator_is_read_only_and_preserves_pending_changes(ap
         assert us.indicator_state() == "paused"
     finally:
         us.release_lock(lock)
+
+
+def test_same_version_successor_remains_available_after_previous_source_activates(applied_stage):
+    payload, root, status, lock, prior = applied_stage
+    prior.update(payload_version="2", deployed_version="1", fingerprint="source-a")
+    successor = {**prior, "ts": 2, "fingerprint": "source-b"}
+    us._write_status(status, successor)
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.read_status() == successor
+    assert us.indicator_state() == "available"
 
 
 def test_legacy_status_without_runtime_root_uses_only_the_default_installation(applied_stage, monkeypatch):

@@ -1972,10 +1972,13 @@ requires the same saved record, unchanged applied payload fingerprint and matchi
 payload/deployed versions; a concurrent stage or unsuccessful apply is not cleared.
 Prepared-source application does not acknowledge an unrelated marketplace stage.
 The standalone Picker also rejects historical availability when its recorded
-version pair no longer describes the now-equal local payload/deployment pair.
+payload version differs from the now-equal local payload/deployment versions.
 That read-only fallback reports `idle`, not successful-update proof, and performs
-neither acquisition nor source hashing. Same-version pending changes, actual
-runtime drift, paused updates and live-checker precedence remain intact.
+neither acquisition, installation probes nor source hashing. It uses the engine's
+already-selected installation root. A matching payload version remains ambiguous:
+a newer same-version acquisition may still be pending even after the deployed
+version advances. Same-version pending changes, actual runtime drift, paused
+updates and live-checker precedence remain intact.
 
 ### Version-cutover reap and live-launcher protection
 

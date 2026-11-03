@@ -524,16 +524,14 @@ def _obsolete_available(st: dict) -> bool:
         plugin_dir, _layout = discover_plugin_dir()
         if plugin_dir is None or st.get("plugin_dir") != str(plugin_dir):
             return False
-        _environment, root = reconcile.runtime_installer_environment(
-            "agent-worktrees", plugin_dir, base={},
-        )
+        root = cfg.install_dir()
         if (st["runtime_root"] if "runtime_root" in st else str(cfg.install_dir())) != str(root):
             return False
         payload = reconcile.payload_version(plugin_dir)
         deployed = reconcile.runtime_deployed_version("agent-worktrees", root=root)
         return bool(
             payload and payload == deployed
-            and (st["payload_version"] != payload or st["deployed_version"] != deployed)
+            and st["payload_version"] != payload
         )
     except (OSError, ValueError):
         return False
