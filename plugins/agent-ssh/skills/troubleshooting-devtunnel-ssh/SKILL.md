@@ -113,8 +113,8 @@ Then retry `ssh dt-<host>` (dtssh restarts the connect).
 ```powershell
 Get-Process dtssh                                      # host process present
 Test-NetConnection -ComputerName localhost -Port 2222  # loopback sshd listening (TCP only — see banner check above)
-# confirm the logon launcher: the agent-ssh-dtssh-host scheduled task (or, where policy refused it, the Startup-folder shortcut)
-Get-ScheduledTask -TaskName agent-ssh-dtssh-host
+# confirm the logon launcher: this user's agent-ssh-dtssh-host-<SID> scheduled task (or, where policy refused it, the Startup-folder shortcut)
+Get-ScheduledTask -TaskName "agent-ssh-dtssh-host-$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)"
 ```
 
 Prefer `install-host.ps1 status` for the full in-box check; the raw commands

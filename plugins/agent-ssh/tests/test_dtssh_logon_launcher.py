@@ -56,27 +56,43 @@ function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries, 
 """
 
 
-def _register(tmp_path: Path, register: str) -> list[str]:
-    return _pwsh(
+def _task_name_line() -> str:
+    text = SCRIPT.read_text(encoding="utf-8-sig")
+    return next(line for line in text.splitlines() if line.startswith("$LogonTaskName = "))
+
+
+def _register_script(tmp_path: Path, register: str) -> str:
+    return (
         "$ErrorActionPreference = 'Stop'\n"
         f"$InstallDir = '{tmp_path}'\n"
-        "$LogonTaskName = 'agent-ssh-dtssh-host'\n"
+        + _task_name_line() + "\n"
         + RECORDING_CMDLETS + register + "\n"
-        + _function("Register-LogonTask")
+        + _function("Register-LogonTask") + "\n" + _function("Get-LogonTask")
         + "\nWrite-Host \"me:$([Security.Principal.WindowsIdentity]::GetCurrent().Name)\""
+        + "\nWrite-Host \"sid:$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)\""
         + "\nWrite-Host \"result:$(Register-LogonTask -Execute 'conhost.exe' -Argument '--headless pwsh x' 3>&1)\"\n"
     )
+
+
+def _register(tmp_path: Path, register: str) -> list[str]:
+    return _pwsh(_register_script(tmp_path, register))
+
+
+def _value(out: list[str], key: str) -> str:
+    return next(line for line in out if line.startswith(key + ":")).removeprefix(key + ":")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
 def test_the_logon_task_is_scoped_to_the_current_user(tmp_path):
     out = _register(tmp_path, """
+function Get-ScheduledTask { param($TaskName, $ErrorAction) }
 function Register-ScheduledTask { param($TaskName, $Action, $Trigger, $Principal, $Settings, $Description,
     [switch]$Force, $ErrorAction)
     Write-Host "task:$TaskName"; Write-Host $Action; Write-Host $Trigger; Write-Host $Principal; Write-Host $Settings }
 """)
-    me = next(line for line in out if line.startswith("me:")).removeprefix("me:")
-    assert "task:agent-ssh-dtssh-host" in out
+    me, sid = _value(out, "me"), _value(out, "sid")
+    # Task names are machine-wide: the SID keeps another account from replacing or removing it.
+    assert f"task:agent-ssh-dtssh-host-{sid}" in out
     assert f"action:conhost.exe|--headless pwsh x|{tmp_path}" in out
     # An any-user logon trigger needs elevation; one naming this user does not.
     assert f"trigger:logon=True|user={me}" in out
@@ -85,15 +101,56 @@ function Register-ScheduledTask { param($TaskName, $Action, $Trigger, $Principal
     assert out[-1] == "result:True"
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_refused_logon_task_reports_the_startup_fallback(tmp_path):
-    out = _register(tmp_path, """
+REFUSED = """
 function Register-ScheduledTask { param($TaskName, $Action, $Trigger, $Principal, $Settings, $Description,
     [switch]$Force, $ErrorAction)
     throw 'Access is denied.' }
-""")
+"""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_a_refused_logon_task_reports_the_startup_fallback(tmp_path):
+    out = _register(tmp_path, REFUSED + "function Get-ScheduledTask { param($TaskName, $ErrorAction) }\n")
     assert "Access is denied." in out[-1] and "Startup-folder shortcut" in out[-1]
     assert out[-1].endswith(" False")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_a_refused_update_retires_the_old_task_before_the_fallback(tmp_path):
+    """An existing task would still fire beside the shortcut with stale arguments."""
+    out = _register(tmp_path, REFUSED + """
+function Get-ScheduledTask { param($TaskName, $ErrorAction) [pscustomobject]@{ TaskName = $TaskName } }
+function Unregister-ScheduledTask { param($TaskName, [switch]$Confirm, $ErrorAction) Write-Host "unregister:$TaskName" }
+""")
+    assert f"unregister:agent-ssh-dtssh-host-{_value(out, 'sid')}" in out
+    assert out[-1].endswith(" False")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_an_old_task_that_cannot_be_retired_is_a_conflict(tmp_path):
+    proc = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", _register_script(tmp_path, REFUSED + """
+function Get-ScheduledTask { param($TaskName, $ErrorAction) [pscustomobject]@{ TaskName = $TaskName } }
+function Unregister-ScheduledTask { param($TaskName, [switch]$Confirm, $ErrorAction) throw 'still denied' }
+""")],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert proc.returncode != 0
+    assert "or remove it (still denied)" in proc.stderr
+    assert "result:" not in proc.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the ScheduledTasks module is Windows-only")
+def test_status_and_uninstall_survive_without_the_scheduled_task_cmdlets(tmp_path):
+    out = _pwsh(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$PSModuleAutoLoadingPreference = 'None'\n"
+        "Remove-Module ScheduledTasks -ErrorAction SilentlyContinue\n"
+        "$LogonTaskName = 'agent-ssh-dtssh-host-S-1-5-21-0'\n"
+        + _function("Get-LogonTask") + "\n" + _function("Unregister-LogonTask")
+        + "\n\"task:$($null -eq (Get-LogonTask))\"\nUnregister-LogonTask\n'unregistered'\n"
+    )
+    assert out == ["task:True", "unregistered"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Startup-folder shortcuts are a Windows Shell feature")

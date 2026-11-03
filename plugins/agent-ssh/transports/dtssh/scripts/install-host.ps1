@@ -58,7 +58,9 @@ $LauncherSrc = Join-Path $PSScriptRoot 'dtssh-host-launcher.ps1'
 $LauncherDst = Join-Path $InstallDir 'dtssh-host-launcher.ps1'
 $CompanionConfigPath = Join-Path $InstallDir 'dispatch-companion.json'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'agent-ssh-dtssh-host.lnk'
-$LogonTaskName = 'agent-ssh-dtssh-host'
+# Task names are machine-wide even when trigger and principal name one user: the SID keeps
+# each account's launcher its own (another account can neither replace nor remove it).
+$LogonTaskName = "agent-ssh-dtssh-host-$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)"
 $HostStateDir = Join-Path $env:LOCALAPPDATA 'dtssh\host'
 
 function Resolve-DurableHostIdentityRoot {
@@ -699,12 +701,24 @@ function Register-LogonTask {
         Register-ScheduledTask @task -Force -ErrorAction Stop | Out-Null
         return $true
     } catch {
-        Write-Warning "Could not register the logon task '$LogonTaskName' ($($_.Exception.Message.Trim())); using the Startup-folder shortcut, which can start late on a busy logon."
+        $reason = $_.Exception.Message.Trim()
+        # A task this install registered before would still fire at logon beside the
+        # shortcut, with whatever alias, port and tunnel it was given then.
+        if (Get-LogonTask) {
+            try {
+                Unregister-ScheduledTask -TaskName $LogonTaskName -Confirm:$false -ErrorAction Stop
+            } catch {
+                throw "Could not update the logon task '$LogonTaskName' ($reason) or remove it ($($_.Exception.Message.Trim())); remove it, then rerun."
+            }
+        }
+        Write-Warning "Could not register the logon task '$LogonTaskName' ($reason); using the Startup-folder shortcut, which can start late on a busy logon."
         return $false
     }
 }
 
 function Get-LogonTask {
+    # Where the ScheduledTasks module is unavailable, a Startup-only install stays manageable.
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
     Get-ScheduledTask -TaskName $LogonTaskName -ErrorAction SilentlyContinue
 }
 
