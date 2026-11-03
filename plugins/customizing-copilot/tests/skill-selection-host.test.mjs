@@ -1,0 +1,283 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { selectionAgent, selectionSnapshot, selectionReadParameters } from "../scripts/skill-selection-contract.mjs";
+import { runOwnedSelection, selectionRequestHandler, selectionUsage, readContentDelivered } from "../scripts/skill-selection-host.mjs";
+import { validateEvaluation, runSelectionEvaluation } from "../scripts/skill-selection-evaluation.mjs";
+
+const profile = { model: "fixture-candidate", reasoningEffort: "medium", contextTier: "long_context" };
+const snapshot = selectionSnapshot([
+    { name: "fixture-skill", commandName: "owner:fixture-skill", pluginName: "owner",
+        description: "Fixture guidance.", enabled: true, source: "provider" },
+]);
+const result = { version: 1, catalogDigest: snapshot.digest, status: "no-match", recommendations: [], uncertainties: [] };
+const request = { intent: "Compute seven times six.", purpose: "execution",
+    context: { messages: [], truncated: false, omitted: 0 } };
+const body = (extra = {}) => ({ model: profile.model, reasoning: { effort: profile.reasoningEffort },
+    instructions: selectionAgent(profile).prompt, input: [],
+    tools: [{ type: "function", name: "skill_selection_read", parameters: selectionReadParameters(snapshot) }], ...extra });
+const event = (extra = {}) => ({ type: "assistant.usage", id: "event-one", data: {
+    model: profile.model, reasoningEffort: profile.reasoningEffort, inputTokens: 50, outputTokens: 20,
+    accounting: { sourceSessionId: "owned-session", usageId: "usage-one", sequence: 1 }, ...extra,
+} });
+
+test("source delivery must be actual tool content, not a read receipt, user quote or spill pointer", () => {
+    const content = '# Guide\nA quoted "value" and a backslash: \\.\n'.repeat(800);
+    assert.equal(readContentDelivered({ input: [{ type: "function_call_output",
+        output: JSON.stringify({ status: "available", content }) }] }, content), true);
+    assert.equal(readContentDelivered({ messages: [{ role: "tool", content }] }, content), true);
+    assert.equal(readContentDelivered({ input: [{ type: "function_call_output",
+        output: `<tool_result>${JSON.stringify({ content })}</tool_result>` }] }, content), true);
+    assert.equal(readContentDelivered({ input: [{ role: "user", content }] }, content), false);
+    assert.equal(readContentDelivered({ input: [{ type: "function_call_output",
+        output: "Output saved to a file; use a filesystem tool to read it." }] }, content), false);
+    assert.equal(readContentDelivered({ input: [{ type: "function_call_output",
+        output: JSON.stringify({ contentDigest: "receipt-only" }) }] }, content), false);
+});
+test("usage deduplicates replay without inventing a price and rejects contradictory accounting", () => {
+    const usage = selectionUsage();
+    usage.add(event()); usage.add({ ...event(), id: "replayed-event" });
+    assert.equal(usage.summary().uniqueCalls, 1);
+    assert.equal(usage.summary().cost.value, null);
+    assert.throws(() => usage.add(event({ outputTokens: 21 })), /contradictory/);
+    const billed = selectionUsage();
+    billed.add(event({ copilotUsage: { totalNanoAiu: 100 } }));
+    billed.add({ ...event({ copilotUsage: { totalNanoAiu: 200 },
+        accounting: { sourceSessionId: "owned-session", usageId: "usage-two", sequence: 2 } }), id: "event-two" });
+    assert.deepEqual(billed.summary().cost, { unit: "nano-AIU", value: 300 });
+});
+
+test("independent evaluation must cover each retained report once with bounded explicit grades", () => {
+    const row = { id: "case-arm", requiredRecall: 1, precision: 1, abstentionCorrect: true,
+        guideProvenanceCorrect: true, sourceCoverage: "complete", forbiddenFailures: [], notes: "Grounded." };
+    const value = { summary: "Small sample; total price remains unavailable.", cases: [row] };
+    assert.deepEqual(validateEvaluation(value, ["case-arm"]), value);
+    for (const invalid of [{ ...value, cases: [] }, { ...value, cases: [row, row] },
+        { ...value, cases: [{ ...row, id: "invented" }] },
+        { ...value, cases: [{ ...row, requiredRecall: 2 }] },
+        { ...value, cases: [{ ...row, forbiddenFailures: [""] }] }]) {
+        assert.throws(() => validateEvaluation(invalid, ["case-arm"]), /invalid/);
+    }
+});
+
+test("owned request guard checks effective profile and tools without consuming the forwarded body", async () => {
+    const forwarded = [], requests = [];
+    class Base {
+        async sendRequest(value) { forwarded.push(await value.json()); return Response.json({}); }
+    }
+    const context = { sessionId: "owned-session", signal: new AbortController().signal };
+    const handler = selectionRequestHandler(Base, {
+        owned: new Set(["owned-session"]), profile, requests, maxRequests: 8,
+        readParameters: selectionReadParameters(snapshot),
+    });
+    const make = value => new Request("https://example.invalid/responses", { method: "POST", body: JSON.stringify(value) });
+    await handler.sendRequest(make(body()), context);
+    assert.deepEqual(forwarded, [body()]);
+    assert.equal(requests[0].forwarded, true);
+    assert.equal(requests[0].assembledBytes > 0, true);
+    for (const invalid of [{ model: "wrong" }, { reasoning: { effort: "high" } },
+        { tools: [{ type: "function", name: "shell" }] }, { instructions: "not canonical" },
+        { tools: [{ type: "function", name: "skill_selection_read", parameters: {
+            ...selectionReadParameters(snapshot), properties: { skill: { type: "string", enum: ["owner:fixture-skill"] } },
+        } }] }]) {
+        await assert.rejects(handler.sendRequest(make(body(invalid)), context), /differs/);
+    }
+    await assert.rejects(handler.sendRequest(make(body()), { ...context, sessionId: "foreign" }), /unowned/);
+    await assert.rejects(handler.openWebSocket(context), /HTTP/);
+    assert.equal(forwarded.length, 1);
+    const denied = selectionRequestHandler(Base, { owned: new Set(["owned-session"]), profile, requests: [], live: false });
+    await assert.rejects(denied.sendRequest(make(body()), context), /live dispatch is disabled/);
+    assert.equal(forwarded.length, 1);
+});
+
+function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = false,
+    stopError = false, hang = false, signal, toolFailure = false, forkMismatch = false,
+    acquisition } = {}) {
+    const observed = { stops: 0, aborts: 0, sends: 0, forwards: 0 };
+    const histories = new Map();
+    let serial = 0;
+    class Base { async sendRequest(value) { observed.forwards++; await value.json(); return Response.json({}); } }
+    class Client {
+        constructor(options) {
+            this.options = options;
+            this.rpc = { sessions: { fork: async ({ sessionId, toEventId }) => {
+                const history = histories.get(sessionId);
+                const prefix = history.slice(0, history.findIndex(event => event.id === toEventId));
+                const id = `fork-${++serial}`;
+                histories.set(id, forkMismatch ? [] : structuredClone(prefix));
+                return { sessionId: id };
+            } } };
+        }
+        async start() { await acquisition?.("start"); }
+        async resumeSession(id, config) { return this.createSession(config, id); }
+        async createSession(config, id = `owned-${++serial}`) {
+            await acquisition?.("create");
+            observed.config = config;
+            const handlers = new Set();
+            if (!histories.has(id)) histories.set(id, []);
+            const history = histories.get(id);
+            return {
+                sessionId: id,
+                rpc: { model: { getCurrent: async () => ({
+                    modelId: configMismatch ? "fallback" : profile.model,
+                    reasoningEffort: profile.reasoningEffort, contextTier: profile.contextTier,
+                }) }, agent: { getCurrent: async () => ({ agent: { name: config.agent } }) },
+                tools: { execute: async ({ arguments: args }) => config.tools[0].handler(args, { sessionId: id }) },
+                eventLog: { read: async () => ({ events: history, cursor: "tail", cursorStatus: "ok", hasMore: false }) } },
+                on(callback) { handlers.add(callback); return () => handlers.delete(callback); },
+                async sendAndWait({ prompt }) {
+                    observed.sends++;
+                    if (hang) {
+                        signal.abort();
+                        return new Promise(() => {});
+                    }
+                    await thisClient.options.requestHandler.sendRequest(
+                        new Request("https://example.invalid/responses", { method: "POST", body: JSON.stringify(body({
+                            input: [{ role: "user", content: prompt }],
+                        })) }),
+                        { sessionId: id, signal: new AbortController().signal });
+                    history.push({ id: `user-${++serial}`, type: "user.message", data: { content: prompt } },
+                        { id: `assistant-${++serial}`, type: "assistant.message", data: { content: "fixture reply" } });
+                    if (toolFailure) await config.tools[0].handler({ skill: "fixture-skill" }, {
+                        sessionId: "foreign", agentId: undefined,
+                    });
+                    const used = event(usageMismatch ? { model: "fallback" } : {});
+                    handlers.forEach(callback => { callback(used); callback({ ...used, id: "replay" }); });
+                    return { data: { content: malformed ? "{}" : JSON.stringify(result) } };
+                },
+                async abort() { observed.aborts++; },
+            };
+        }
+        async stop() { observed.stops++; return stopError ? [new Error("owned stop failed")] : []; }
+    }
+    let thisClient;
+    return { sdk: { CopilotRequestHandler: Base, RuntimeConnection: { forStdio: value => value },
+        CopilotClient: class extends Client { constructor(options) { super(options); thisClient = this; } } }, observed };
+}
+
+async function fixture(t, changes = {}) {
+    const parent = await mkdtemp(join(tmpdir(), "selector-host-test-"));
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    const fake = fakeSdk(changes);
+    const report = await runOwnedSelection({
+        ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+        profile, snapshot, trustedRoots: [parent], request, signal: changes.signal?.signal, timeoutMs: 2000,
+        ...(changes.strategy ? { strategy: changes.strategy, scenarioHistory: [
+            "Superseded intent and irrelevant padding. ".repeat(400), "Current intent: compute seven times six.",
+        ] } : {}),
+    });
+    return { report, observed: fake.observed };
+}
+
+test("owned selector validates its result and records unique usage through graceful stop", async t => {
+    const { report, observed } = await fixture(t);
+    assert.equal(report.status, "completed");
+    assert.deepEqual(report.result, result);
+    assert.equal(report.usage.uniqueCalls, 1);
+    assert.equal(report.usage.cost.value, null);
+    assert.equal(observed.stops, 1);
+    assert.equal(observed.aborts, 0);
+    assert.deepEqual(observed.config.availableTools, ["skill_selection_read"]);
+    assert.equal(observed.config.enableConfigDiscovery, false);
+    assert.deepEqual(observed.config.capi, { enableWebSocketResponses: false });
+    assert.equal(observed.config.enableSkills, false);
+    assert.equal(observed.config.tools[0].skipPermission, true);
+    assert.deepEqual(observed.config.tools[0].parameters.properties.skill.enum, ["fixture-skill"]);
+});
+
+test("multiple direct read witnesses never masquerade as conversational tool output", async t => {
+    const parent = await mkdtemp(join(tmpdir(), "selector-read-witness-"));
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    const path = join(parent, "SKILL.md");
+    await writeFile(path, "[Guide](guide.md)");
+    await writeFile(join(parent, "guide.md"), "Necessary declared guidance.");
+    const snapshot = selectionSnapshot([
+        { name: "fixture-skill", description: "Fixture guidance.", enabled: true, source: "provider", path },
+    ]);
+    const fake = fakeSdk();
+    const report = await runOwnedSelection({
+        ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+        profile, snapshot, trustedRoots: [parent], request, live: false,
+        readWitness: [{ skill: "fixture-skill" }, { skill: "fixture-skill", reference: "guide.md" }],
+    });
+    assert.equal(report.status, "model-free-witness");
+    assert.equal(report.nativeReadWitness.reads, 2);
+    assert.equal(report.receipts.length, 2);
+    assert.deepEqual(report.sourceDelivery, []);
+    assert.equal(fake.observed.forwards, 0);
+    assert.equal(report.cleanup.runtimeStopped, true);
+});
+
+test("configuration mismatch prevents dispatch; malformed, mismatched and unsettled results never succeed", async t => {
+    for (const changes of [{ configMismatch: true }, { usageMismatch: true },
+        { malformed: true }, { stopError: true }, { toolFailure: true }]) {
+        const { report, observed } = await fixture(t, changes);
+        assert.equal(report.status, "unavailable");
+        assert.equal(report.result, null);
+        assert.equal(observed.stops, 1);
+        if (changes.configMismatch) assert.equal(observed.sends, 0);
+    }
+});
+
+test("cancellation rejects late output, aborts only owned work and still stops its runtime", async t => {
+    const signal = new AbortController();
+    const { report, observed } = await fixture(t, { hang: true, signal });
+    assert.equal(report.status, "unavailable");
+    assert.match(report.error, /cancelled/);
+    assert.equal(report.result, null);
+    assert.equal(observed.aborts, 1);
+    assert.equal(observed.stops, 1);
+});
+
+test("cancelled acquisitions settle before selector or evaluator cleanup can claim a stopped runtime", async t => {
+    for (const host of ["selector", "evaluator"]) for (const phase of ["start", "create"]) {
+        const parent = await mkdtemp(join(tmpdir(), "selector-acquisition-test-"));
+        t.after(() => rm(parent, { recursive: true, force: true }));
+        const signal = new AbortController();
+        let release, acquired;
+        const gate = new Promise(resolve => { release = resolve; });
+        const entered = new Promise(resolve => { acquired = resolve; });
+        const fake = fakeSdk({ acquisition: async operation => {
+            if (operation === phase) { acquired(); await gate; }
+        } });
+        const options = { ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+            profile, snapshot, trustedRoots: [parent], request, signal: signal.signal, timeoutMs: 1,
+            evidence: { reports: [{ id: "fixture" }] } };
+        let settled = false;
+        const running = (host === "selector" ? runOwnedSelection : runSelectionEvaluation)(options)
+            .then(report => { settled = true; return report; });
+        await entered;
+        signal.abort();
+        await new Promise(resolve => setTimeout(resolve, 10));
+        assert.equal(settled, false);
+        assert.equal(fake.observed.stops, 0);
+        release();
+        const report = await running;
+        assert.equal(report.status, "unavailable");
+        assert.equal(report.cleanup.runtimeStopped, true);
+        assert.equal(fake.observed.stops, 1);
+        assert.equal(fake.observed.forwards, 0);
+    }
+});
+
+test("matched strategies seed only synthetic traffic and preserve fork/omission evidence", async t => {
+    for (const strategy of ["boundaryFork", "boundedHistory", "explicitBrief"]) {
+        const { report, observed } = await fixture(t, { strategy });
+        assert.equal(report.status, "completed");
+        assert.equal(report.source.modelRequestsForwarded, 0);
+        assert.equal(report.source.seedRequests, 3);
+        assert.equal(observed.forwards, 1);
+        assert.equal(report.usage.uniqueCalls, 1);
+        if (strategy === "boundaryFork") assert.equal(report.source.inheritedPrefixMatched, true);
+        if (strategy === "boundedHistory") {
+            assert.equal(report.source.acquisition.truncated, true);
+            assert(report.source.acquisition.omitted > 0);
+        }
+    }
+    const { report, observed } = await fixture(t, { strategy: "boundaryFork", forkMismatch: true });
+    assert.equal(report.status, "unavailable");
+    assert.match(report.error, /frozen scenario prefix/);
+    assert.equal(observed.forwards, 0);
+});

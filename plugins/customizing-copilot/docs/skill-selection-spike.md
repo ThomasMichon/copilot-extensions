@@ -1,9 +1,11 @@
-# Model-free skill-selection SDK spike
+# Skill-selection SDK spike and owned hosts
 
-This is an **opt-in transport witness**, not a selector, registered extension,
-model-quality evaluation or production routing profile. It uses public SDK
-APIs in a separate, caller-owned runtime and synthetic inputs only. Importing
-`scripts/skill-selection-spike.mjs` does not connect or infer.
+The model-free spike is an **opt-in transport witness**, not a registered
+extension, model-quality evaluation or production routing profile. It uses
+public SDK APIs in a separate, caller-owned runtime and synthetic inputs only.
+The separate [owned selector and evaluator hosts](#owned-selector-and-independent-evaluator)
+can forward inference only when explicitly invoked. Importing any of these
+modules does not connect or infer.
 
 The import-inert `scripts/skill-selection-native.mjs` also provides a read-only
 joined-host preflight. It checks the canonical specialist's native ID, authored
@@ -204,9 +206,15 @@ of a comparable arm.
 `selectionSnapshot()` preserves unique native identifiers, aliases, invocation
 metadata and argument hints. `selectionPrompt()` carries the current intent,
 purpose, frozen catalog digest and attributed context, including omissions.
+`selectionReadParameters()` enumerates exact native `name` values for the
+source-read tool; command and plugin metadata are not substitute identifiers.
 The specialist cannot execute recommendations or replace mandatory procedures.
 Its JSON result distinguishes selected, no-match, ambiguity and insufficient
 context. Acquisition failure remains a tool/runtime failure, not no-match.
+Owner selection alone is not guide completeness: the canonical prompt requires
+applicable purpose-specific prerequisites, design/authoring templates or review
+criteria. Required local material outside the declared read boundary remains
+an explicit gap, not permission to crawl or invent a source.
 
 `selectionReader()` accepts source roots from the host's existing canonical
 source and filesystem-access policy, never the model or a guessed skill path.
@@ -243,3 +251,55 @@ before returning the decision; source changes during inspection or validation
 fail explicitly. The integrating host must separately recheck its current
 native catalog and actual owned-task configuration/settlement. File digests
 prove observed byte consistency, not authority or model quality.
+
+## Owned selector and independent evaluator
+
+`scripts/skill-selection-host.mjs` exports `runOwnedSelection()`. The caller
+supplies the SDK, a fresh absolute root, an absolute owned runtime executable,
+an explicit model/effort/context-tier profile, the requesting native snapshot,
+trusted source roots and current intent/purpose/attributed context. These are
+host policy inputs, not model-selected paths or privileges. There is no
+registered production tool or default candidate model.
+
+The host starts an empty, isolated SDK runtime with file hooks, config/skill
+discovery, remote sessions and extension loading disabled. Its canonical leaf
+has only the bounded source-read function; that function alone skips interactive
+permission prompting, and all other permission requests are denied. Owned
+session output spilling is disabled: a source receipt or an inaccessible
+large-output file pointer cannot substitute for the complete tool-result
+content. Subsequent assembled requests verify exact role content, model,
+read-only tools and the native-name enum before forwarding.
+
+The default `isolated` strategy uses the supplied context. For comparison,
+`boundaryFork`, `boundedHistory` and `explicitBrief` accept bounded synthetic
+scenario history and prepare matched owned sessions. Forks use the public
+owned client's event-boundary API and verify the inherited prefix; they do not
+establish access to a real foreground fork from an ordinary joined extension.
+History truncation/omissions remain explicit. `live: false` refuses inference
+forwarding; optional direct `readWitness` entries first initialize native
+tools with a synthetic turn and remain separate from conversational delivery.
+
+Before and after inference the host verifies resolved configuration, actual
+usage identities/profile and source freshness. Usage replay is deduplicated;
+contradictory accounting fails rather than inventing a cost. Reports retain
+request sizes, acquisition/startup/preparation/total elapsed time, source
+failures, delivery evidence and owned cleanup. Charges use reported nano-AIU;
+missing authoritative cost stays unavailable. Caller briefing/authoring cost
+is not measured by this host and must not silently become zero.
+
+`scripts/skill-selection-evaluation.mjs` exports `runSelectionEvaluation()`.
+It requires a separately bound explicit evaluator profile and retained unique
+report IDs with preregistered cases and actual source grounding. The independent
+agent has no tools. The host checks assembled prompt/profile/tool absence,
+resolved configuration, usage, complete ID coverage and owned settlement.
+Judgment remains distinct from candidate completion, transport evidence,
+source coverage and model promotion.
+
+Both hosts await resource acquisitions and runtime stop before reporting
+settlement; they do not race startup/session/fork acquisition against a timeout
+that could leave late resources unowned. The caller must provide finite
+process-level containment for acquisitions and cleanup. Ordinary decision/RPC
+deadlines do not replace that containment. Cancellation and failed cleanup
+cannot produce a successful result; unrelated foreground sessions are never
+aborted or drained. The existing opt-in Node packet covers these controls
+without SDK inference or authentication.

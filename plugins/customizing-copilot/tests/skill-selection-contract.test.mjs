@@ -7,7 +7,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { selectionSnapshot, selectionAgent, selectionPrompt, selectionReader,
-    validateSelection } from "../scripts/skill-selection-contract.mjs";
+    selectionReadParameters, validateSelection } from "../scripts/skill-selection-contract.mjs";
+
+test("read parameters use native names even when command and plugin metadata suggest another spelling", () => {
+    const snapshot = selectionSnapshot([
+        { name: "unqualified", commandName: "owner:unqualified", pluginName: "owner",
+            description: "Native bare name", enabled: true, source: "plugin" },
+        { name: "owner:qualified", commandName: "qualified", pluginName: "owner",
+            description: "Native qualified name", enabled: true, source: "plugin" },
+    ]);
+    const schema = selectionReadParameters(snapshot);
+    assert.deepEqual(schema.properties.skill.enum, ["unqualified", "owner:qualified"]);
+    assert.equal(schema.additionalProperties, false);
+    schema.properties.skill.enum.push("invented");
+    assert.deepEqual(selectionReadParameters(snapshot).properties.skill.enum, ["unqualified", "owner:qualified"]);
+});
 
 test("selection preserves exact native aliases and rejects disabled, invented and stale recommendations", () => {
     const skill = { name: "plugin:vision", commandName: "vision", description: "Author intent",
