@@ -116,10 +116,6 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
             throw usageError ?? new Error("cancelled or mismatched independent evaluation");
         }
         if (!report.requests.length) throw new Error("independent evaluator request evidence missing");
-        const calls = usage.summary().calls;
-        if (!calls.length || calls.some(call => call.model !== profile.model || call.reasoningEffort !== profile.reasoningEffort)) {
-            throw new Error("actual independent evaluator usage profile unavailable or mismatched");
-        }
         report.result = validateEvaluation(JSON.parse(response?.data?.content), evidence.reports.map(item => item.id));
         report.status = "completed";
     } catch (error) { report.error = safeError(error); }
@@ -136,9 +132,12 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
         }
         unsubscribe?.();
         report.usage = usage.summary();
+        const usageMismatch = report.status === "completed" && (!report.usage.calls.length
+            || report.usage.calls.some(call => call.model !== profile.model || call.reasoningEffort !== profile.reasoningEffort));
+        if (usageMismatch) report.error = "actual independent evaluator usage profile unavailable or mismatched";
         report.elapsedMs = Math.round(performance.now() - started);
         if (signal?.aborted) report.error ??= "independent evaluation cancelled during settlement";
-        if (usageError || report.cleanup.errors.length || signal?.aborted) {
+        if (usageError || usageMismatch || report.cleanup.errors.length || signal?.aborted) {
             report.status = "unavailable"; report.result = null;
             if (usageError) report.error = safeError(usageError);
         }

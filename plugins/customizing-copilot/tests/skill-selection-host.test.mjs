@@ -105,9 +105,9 @@ test("owned request guard checks effective profile and tools without consuming t
 
 function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = false,
     stopError = false, hang = false, signal, toolFailure = false, forkMismatch = false,
-    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal } = {}) {
+    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal, lateUsage } = {}) {
     const observed = { stops: 0, aborts: 0, sends: 0, forwards: 0 };
-    const histories = new Map();
+    const histories = new Map(), subscriptions = new Set();
     let serial = 0;
     class Base { async sendRequest(value) { observed.forwards++; await value.json(); return Response.json({}); } }
     class Client {
@@ -137,7 +137,10 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
                 }) }, agent: { getCurrent: async () => ({ agent: { name: config.agent } }) },
                 tools: { execute: async ({ arguments: args }) => config.tools[0].handler(args, { sessionId: id }) },
                 eventLog: { read: async () => ({ events: history, cursor: "tail", cursorStatus: "ok", hasMore: false }) } },
-                on(callback) { handlers.add(callback); return () => handlers.delete(callback); },
+                on(callback) {
+                    handlers.add(callback); subscriptions.add(callback);
+                    return () => { handlers.delete(callback); subscriptions.delete(callback); };
+                },
                 async sendAndWait({ prompt }) {
                     observed.sends++;
                     if (hang) {
@@ -178,6 +181,9 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
         async stop() {
             observed.stops++;
             await stopGate?.();
+            if (lateUsage) subscriptions.forEach(callback => callback(event({
+                accounting: { sourceSessionId: "owned-session", usageId: "late-usage", sequence: 2 }, ...lateUsage,
+            })));
             return stopError ? [new Error("owned stop failed")] : [];
         }
     }
@@ -361,6 +367,26 @@ test("valid-looking replies and usage without an inspected request cannot pass e
         assert.equal(report.status, "unavailable");
         assert.match(report.error, /request evidence missing/);
         assert.equal(report.result, null);
+    }
+});
+
+test("final profile checks include distinct accounting events received during shutdown", async t => {
+    for (const host of ["selector", "evaluator"]) for (const lateUsage of [{}, { model: "fallback" }, { reasoningEffort: "high" }]) {
+        const parent = await mkdtemp(join(tmpdir(), "selector-late-accounting-"));
+        t.after(() => rm(parent, { recursive: true, force: true }));
+        const fake = fakeSdk({ lateUsage });
+        const report = await (host === "selector" ? runOwnedSelection : runSelectionEvaluation)({
+            ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+            profile, snapshot, trustedRoots: [parent], request, evidence: { reports: [{ id: "fixture" }] },
+        });
+        const mismatched = Object.keys(lateUsage).length > 0;
+        assert.equal(report.usage.uniqueCalls, 2);
+        assert.equal(report.cleanup.runtimeStopped, true);
+        assert.equal(report.status, mismatched ? "unavailable" : "completed");
+        if (mismatched) {
+            assert.equal(report.result, null);
+            assert.match(report.error, /usage .*mismatched/);
+        } else assert(report.result);
     }
 });
 

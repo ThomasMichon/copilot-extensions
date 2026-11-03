@@ -298,11 +298,6 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
             throw new Error("source acquisition failure cannot become a successful no-match decision");
         }
         if (usageError) throw usageError;
-        const measured = usage.summary();
-        if (!measured.calls.length || measured.calls.some(call =>
-            call.model !== profile.model || call.reasoningEffort !== profile.reasoningEffort)) {
-            throw new Error("actual selector usage configuration unavailable or mismatched");
-        }
         report.result = result;
         report.status = "completed";
     } catch (error) {
@@ -330,6 +325,9 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
         unsubscribe?.();
         if (usageError) report.error = safeError(usageError);
         report.usage = usage.summary();
+        const usageMismatch = report.status === "completed" && (!report.usage.calls.length
+            || report.usage.calls.some(call => call.model !== profile.model || call.reasoningEffort !== profile.reasoningEffort));
+        if (usageMismatch) report.error = "actual selector usage configuration unavailable or mismatched";
         report.receipts = reader.receipts();
         report.sourceDelivery = [...readOutputs.keys()].map(contentDigest => ({
             contentDigest, deliveredInline: delivered.has(contentDigest),
@@ -337,7 +335,7 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
         report.liveInferenceDispatched = requests.some(item => item.forwarded);
         report.elapsedMs = Math.round(performance.now() - started);
         if (signal?.aborted) report.error ??= "selector decision cancelled during settlement";
-        if (report.cleanup.errors.length || usageError || signal?.aborted) {
+        if (report.cleanup.errors.length || usageError || usageMismatch || signal?.aborted) {
             report.status = "unavailable";
             report.result = null;
         }
