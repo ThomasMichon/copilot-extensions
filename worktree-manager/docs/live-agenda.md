@@ -200,7 +200,10 @@ and timestamps. Historical caller sessions remain reported actors, not the
 selected head or authenticated execution authority. Completeness stays partial
 and scoped to accepted planning operations. Large raw results retain a bounded,
 explicit omission reference rather than silently becoming complete display
-data. Backward pages do not consume the live publication boundary.
+data. Display admission checks structural as well as encoded-byte limits; an
+owner-valid result outside those display limits becomes an explicit bounded
+omission, not a malformed-source error. Backward pages do not consume the live
+publication boundary.
 
 Each notification starts a bounded latest page. At most four owner pages bridge
 a coalesced live jump; an unbridgeable boundary refuses visibly instead of
@@ -224,6 +227,14 @@ updates do not rebind an unchanged source token or clear its pending backward
 request. Each history read captures its minimum admitted revision before
 starting, so a concurrent live advance cannot falsely turn that older atomic
 page into a rewound-store error or move the independent live boundary.
+An Agenda head-change notice invalidates every bound selected-head source even
+before the first Agenda token exists. An explicit refresh selecting a different
+canonical head supersedes the retired viewer scope without depending on optional
+Worktree observations; a same-head retry cannot clear that head fence.
+Retired history results and errors cannot downgrade a recovered source. A
+display-failure epoch distinguishes a renewed request for the same cursor;
+renewed viewport demand waits for the old owned child to settle before starting
+one fresh page read.
 
 `tests/test_companion_agenda_rich.py` joins actual allocation/discovery commands,
 efforts reader processes and Textual presentation. Its separate whole-chain

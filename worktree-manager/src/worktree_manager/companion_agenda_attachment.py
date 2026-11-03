@@ -14,10 +14,11 @@ from . import engine_client as ec
 from .companion_agenda_codec import AgendaCodec
 from .companion_agenda_commands import AgendaCommands
 from .companion_timeline_contract import (
-    Availability, Completeness, LiveDelta, Provider, SourceToken,
+    Availability, Completeness, LiveDelta, Provider, SourcePosition, SourceToken,
     TimelineContractError, TimelineGap, TimelineSnapshot,
 )
 from .companion_timeline_controller import TimelineCleanupError, TimelineSourceError
+from .companion_timeline_model import TimelineWindow
 from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
 from .companion_worktree_codec import OwnerReadError
 from .companion_worktree_source import owned, settled
@@ -94,6 +95,7 @@ class AgendaTimelineAttachment:
     ) -> None:
         self.panel, self.cwd, self.status = panel, cwd, status
         self.selection: Selection | None = None
+        self._last_selection: Selection | None = None
         self.project_root: str | None = None
         self.reader: AgendaReader | None = None
         self.token: SourceToken | None = None
@@ -101,6 +103,7 @@ class AgendaTimelineAttachment:
         self._changed = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._page: asyncio.Task[None] | None = None
+        self._history_epoch = 0
         self._lock = asyncio.Lock()
         self._epoch = 0
         self._version = 0
@@ -126,7 +129,7 @@ class AgendaTimelineAttachment:
             (frame.get("project"), frame.get("worktree_id"), frame.get("session_id")) == self.selection
             and frame.get("availability") == "head-changed"
         ):
-            for token in self._tokens():
+            for token in self._tokens(all_providers=True):
                 self.panel.apply_snapshot(TimelineSnapshot(
                     token, None, Availability.HEAD_CHANGED, Completeness.PARTIAL,
                 ))
@@ -140,6 +143,7 @@ class AgendaTimelineAttachment:
 
     def _failure(self, message: str) -> None:
         if self._renderable() and (self.selection is None or self._head_current()):
+            self._history_epoch += 1
             self.status("Rich Agenda: " + message)
             for token in self._tokens():
                 self.panel.source_error(token, message)
@@ -162,10 +166,10 @@ class AgendaTimelineAttachment:
             self.status("Rich Agenda: head changed; Refresh required")
         return not invalidated
 
-    def _tokens(self) -> tuple[SourceToken, ...]:
+    def _tokens(self, *, all_providers: bool = False) -> tuple[SourceToken, ...]:
         return tuple(
             state.token for state in self.panel.window.sources.values()
-            if state.token.identity.provider is Provider.AGENDA
+            if (all_providers or state.token.identity.provider is Provider.AGENDA)
             and (state.token.identity.project, state.token.identity.worktree_id,
                  state.token.identity.head_session_id) == self.selection
         )
@@ -214,6 +218,14 @@ class AgendaTimelineAttachment:
             if not isinstance(project_root, str) or not Path(project_root).is_absolute():
                 self._failure("selected worktree root is unavailable")
                 return
+            if self._last_selection is not None and selection != self._last_selection and self._renderable():
+                if not any(
+                    (state.token.identity.project, state.token.identity.worktree_id,
+                     state.token.identity.head_session_id) == selection
+                    for state in self.panel.window.sources.values()
+                ):
+                    self.panel.replace_window(TimelineWindow())
+            self._last_selection = selection
             self.project_root = project_root
             self._stop = asyncio.Event()
             self.publication(frame, error)
@@ -329,12 +341,13 @@ class AgendaTimelineAttachment:
 
         async def read() -> None:
             reader, token, stop = self.reader, message.token, self._stop
+            epoch = self._history_epoch
             cancelled = Event()
             try:
-                frame = await owned(lambda: reader.history(cancelled, message.before.cursor), stop, cancelled)
-                if stop.is_set() or self.token != token or not self._renderable():
+                if not self._history_current(token, message.before, stop, epoch):
                     return
-                if not self._head_current():
+                frame = await owned(lambda: reader.history(cancelled, message.before.cursor), stop, cancelled)
+                if not self._history_current(token, message.before, stop, epoch):
                     return
                 value = reader.codec.page(frame, token, message.before)
                 result = self.panel.apply_gap(value) if isinstance(value, TimelineGap) else self.panel.prepend_page(value)
@@ -352,10 +365,37 @@ class AgendaTimelineAttachment:
                 self._changed.set()
                 raise self._cleanup_failure
             except (TimelineSourceError, TimelineContractError, OSError, ValueError) as error:
-                if not stop.is_set():
+                if self._history_current(token, message.before, stop, epoch):
                     self._failure(str(error))
 
         self._page = asyncio.create_task(read(), name="sidecar-agenda-page")
+        self._page.add_done_callback(self._history_finished)
+
+    def _history_finished(self, task: asyncio.Task[None]) -> None:
+        if (
+            task is not self._page or task.cancelled() or task.exception() is not None
+            or self.token is None or self._stop.is_set() or not self._renderable()
+        ):
+            return
+        state = self.panel.window.sources.get(self.token.identity.source_key)
+        if state is not None and state.requested_before is not None:
+            # A recovered viewport may reissue demand while its retired child settles.
+            if self._history_current(state.token, state.requested_before, self._stop, self._history_epoch):
+                self.history(SubwayTimeline.HistoryRequested(state.token, state.requested_before))
+
+    def _history_current(
+        self, token: SourceToken, before: SourcePosition, stop: asyncio.Event, epoch: int,
+    ) -> bool:
+        if (
+            stop.is_set() or self.token != token or epoch != self._history_epoch
+            or not self._renderable() or not self._head_current()
+        ):
+            return False
+        state = self.panel.window.sources.get(token.identity.source_key)
+        return (
+            state is not None and state.token == token
+            and state.before == before and state.requested_before == before
+        )
 
     async def close(self) -> None:
         self.begin_close()

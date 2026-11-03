@@ -126,11 +126,11 @@ def managed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return {
             "type": "snapshot", "ok": True, "contract_version": 2,
             "generation": "a" * 32, "sequence": body["revision"],
-            "project": "example", "worktree_id": "selected", "session_id": "head-a",
+            "project": "example", "worktree_id": "selected", "session_id": body["source"]["session"],
             "availability": "observed", "observation": body,
         }
 
-    def update() -> dict:
+    def update(*, session: str = "head-a") -> dict:
         state = store.read(agenda_home)
         revision = state["revision"]
         cursor = state["documents"]["cursor"]
@@ -146,7 +146,7 @@ def managed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 "evidence": [{"criterion": "await fixture input", "kind": "measured",
                               "ref": f"fixture-{revision}", "inputs": "isolated fixture"}],
             },
-        }, session="head-a")
+        }, session=session)
         return publication()
 
     return {

@@ -15,7 +15,7 @@ import pytest
 from worktree_manager.companion_agenda_codec import AgendaCodec, CAPABILITY
 from worktree_manager.companion_timeline_contract import (
     ActorKind, Completeness, Durability, EvidenceKind, Provider, Qualification,
-    TimelineContractError, TimelineGap,
+    TimelineContractError, TimelineGap, canonical_payload,
 )
 from worktree_manager.companion_worktree_codec import OwnerReadError, encoded
 
@@ -29,26 +29,31 @@ def raw(value: dict) -> bytes:
 
 
 @pytest.fixture
-def owner(tmp_path, monkeypatch):
+def owner(tmp_path, monkeypatch, request):
     scripts = Path(__file__).resolve().parents[2] / "plugins/efforts/skills/driving-effort-agendas/scripts"
     monkeypatch.syspath_prepend(str(scripts))
     history = importlib.import_module("agenda_history")
     wire = importlib.import_module("agenda_history_contract")
     store = importlib.import_module("agenda_store")
+    compact = hasattr(request, "param")
+    selected_worktree = "w" if compact else WORKTREE
+    operation_session = None if compact else HISTORICAL
     board = {
         "version": 2, "source": {"kind": "task", "ref": "sample-task"}, "revision": 1,
         "items": {"one": {
-            "source_ref": "sample/one", "scope_ref": "sample-scope", "action": "Inspect evidence",
+            "source_ref": "sample/one", "scope_ref": "sample-scope",
+            "action": "a" if compact else "Inspect evidence",
             "exit": ["Evidence reported"], "on": {"done": "advance", "blocked": "wait"},
             "relevant_subjects": ["sample"],
         }}, "order": ["one"],
     }
-    request = {
+    init_request = {
         "schema": "efforts.agenda-request", "version": 2, "mode": "context-qualified",
-        "expected_revision": 0, "operation_id": "initial-operation", "change": {
-            "operation": "init", "worktree": WORKTREE, "board": board,
+        "expected_revision": 0, "operation_id": "i" if compact else "initial-operation", "change": {
+            "operation": "init", "worktree": selected_worktree, "board": board,
             "baseline_context": {"facts": [{
-                "kind": "input", "subject": "sample", "value": "initial", "evidence_ref": "sample-input",
+                "kind": "input", "subject": "sample", "value": getattr(request, "param", "initial"),
+                "evidence_ref": "e" if compact else "sample-input",
             }]},
             "resource_caps": {
                 "max_depth": 4, "max_pending_items": 32, "max_deferred_frames": 4,
@@ -56,7 +61,7 @@ def owner(tmp_path, monkeypatch):
             },
         },
     }
-    store.mutate(tmp_path, request, session=HISTORICAL)
+    store.mutate(tmp_path, init_request, session=operation_session)
 
     def wait(detail="Await externally reported evidence"):
         state = store.read(tmp_path)
@@ -65,7 +70,7 @@ def owner(tmp_path, monkeypatch):
         item_id = cursor["frame_state"][frame_id]["pending"][0]
         revision = state["revision"]
         return store.mutate(tmp_path, {
-            **request, "expected_revision": revision, "operation_id": f"accepted-{revision}",
+            **init_request, "expected_revision": revision, "operation_id": f"accepted-{revision}",
             "change": {
                 "operation": "wait", "frame_id": frame_id, "item_id": item_id,
                 "reason_kind": "external", "reason_ref": "sample-event", "next_action": detail,
@@ -74,13 +79,13 @@ def owner(tmp_path, monkeypatch):
                     "ref": "sample-proof", "inputs": "sample revision",
                 }],
             },
-        }, session=HISTORICAL)[0]
+        }, session=operation_session)[0]
 
-    selected = history.reader_info(tmp_path, WORKTREE)
-    codec = AgendaCodec("sample-project", WORKTREE, SESSION, selected["source"]["store_id"])
+    selected = history.reader_info(tmp_path, selected_worktree)
+    codec = AgendaCodec("sample-project", selected_worktree, SESSION, selected["source"]["store_id"])
 
     def page(**kwargs):
-        return history.history_page(tmp_path, WORKTREE, codec.store_id, **kwargs)
+        return history.history_page(tmp_path, selected_worktree, codec.store_id, **kwargs)
 
     return codec, selected, page, wait, wire, history, tmp_path
 
@@ -162,6 +167,54 @@ def test_detail_over_display_bound_has_truthful_manager_omission(owner):
     assert detail["owner_omission"] is None
     assert len(event.data_json.encode()) <= 4096
     assert "omitted from display" in event.details
+
+
+def nested_value(depth):
+    value = {"leaf": [0, 1.25, True, False, None, "literal\n\ttext"]}
+    for _ in range(depth):
+        value = {"child": value}
+    return value
+
+
+@pytest.mark.parametrize(("owner", "display_limit"), [
+    pytest.param([0] * 128, None, id="bounded-array"),
+    pytest.param([0] * 129, "array bound", id="oversized-array"),
+    pytest.param(nested_value(2), None, id="bounded-nesting-and-json-values"),
+    pytest.param(nested_value(17), "nesting bound", id="deep-owner-value"),
+], indirect=["owner"])
+def test_actual_owner_structural_display_limits_preserve_valid_source_and_stable_evidence(
+    owner, display_limit,
+):
+    codec, _, page, wait, *_ = owner
+    token = codec.token(0)
+    frame = codec.decode(raw(page()))
+    item = frame["entries"][0]
+    assert item["result"] is not None and item["omission"] is None
+    candidate = encoded(item)
+    assert len(candidate.encode()) <= 4096
+    event = codec.events(frame, token)[0]
+    assert canonical_payload(event.data_json) == event.data_json
+    if display_limit is None:
+        assert json.loads(event.data_json) == item
+        assert "Detail omitted" not in event.details
+    else:
+        with pytest.raises(TimelineContractError, match=display_limit):
+            canonical_payload(candidate)
+        detail = json.loads(event.data_json)
+        assert detail["schema"] == "worktree-manager.agenda-detail-omission"
+        assert display_limit in detail["display_limit"]
+        assert detail["sha256"] == sha256(candidate.encode()).hexdigest()
+        assert detail["encoded_bytes"] == len(candidate.encode())
+        assert detail["event_id"] == item["event_id"] and detail["cursor"] == item["cursor"]
+        assert detail["owner_omission"] is None
+        assert "Timeline payload limits" in event.details
+    wait()
+    later = codec.events(codec.decode(raw(page())), token)[0]
+    assert later.content() == event.content()
+    malformed = deepcopy(frame)
+    malformed["entries"][0]["result"]["persisted"] = False
+    with pytest.raises(TimelineContractError, match="persisted operation identity"):
+        codec.events(malformed, token)
 
 
 def test_actual_owner_omission_retains_original_payload_integrity_and_reference(owner):

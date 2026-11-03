@@ -19,6 +19,8 @@ from worktree_manager.companion_timeline_contract import (
     SourceToken, TimelineSnapshot,
 )
 from worktree_manager.companion_timeline_widget import SubwayTimeline
+from worktree_manager.companion_worktree_codec import OwnerReadError
+from _companion_timeline_fixtures import event
 from test_companion_agenda_live import until
 from test_companion_agenda_rich import current_managed_data, managed as managed
 
@@ -42,13 +44,14 @@ def publish(app, frame, error=None) -> None:
     app._receive_agenda(app._data, app._agenda_generation, app._agenda_cancel, frame, error)
 
 
-def seed_worktree(panel) -> TimelineSnapshot:
+def seed_worktree(panel, *, populated: bool = False) -> TimelineSnapshot:
     token = SourceToken(SourceIdentity(
         Provider.WORKTREES, "fixture-worktree", "example", "selected", "head-a", "fixture-generation",
     ), 0)
     snapshot = TimelineSnapshot(
         token, SourcePosition(token.identity.source_key, token.identity.generation, "fixture-position"),
         Availability.OBSERVED, Completeness.PARTIAL,
+        events=(event(token, 0),) if populated else (),
     )
     assert panel.bind_source(token).applied
     assert panel.apply_snapshot(snapshot).applied
@@ -118,6 +121,147 @@ def test_worktree_head_change_fences_inflight_rich_results_without_agenda_callba
                 assert not app._timeline_panel.window.events
             finally:
                 release.set()
+
+    asyncio.run(check())
+
+
+def test_agenda_head_change_before_first_token_clears_displayed_worktree_rows(managed, monkeypatch) -> None:
+    configure(managed, monkeypatch)
+    captured, release = Event(), Event()
+    original = AgendaReader.latest
+
+    def delayed(self, *args):
+        pages = original(self, *args)
+        captured.set()
+        assert release.wait(5)
+        return pages
+
+    monkeypatch.setattr(AgendaReader, "latest", delayed)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                seed_worktree(app._timeline_panel, populated=True)
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                await until(pilot, captured.is_set)
+                assert app._rich_agenda_attachment.token is None
+                assert app._timeline_panel.window.events
+                publish(app, {**managed["publication"](), "availability": "head-changed", "observation": None})
+                assert not app._timeline_panel.window.events
+                assert all(
+                    state.availability is Availability.HEAD_CHANGED
+                    for state in app._timeline_panel.window.sources.values()
+                )
+                release.set()
+                await until(pilot, lambda: app._rich_agenda_attachment._task.done())
+                assert not app._timeline_panel.window.events
+            finally:
+                release.set()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("outcome", ["page", "error"])
+def test_retired_backward_request_cannot_downgrade_a_recovered_live_source(managed, monkeypatch, outcome) -> None:
+    configure(managed, monkeypatch)
+    for _ in range(35):
+        managed["update"]()
+    captured, release = Event(), Event()
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                attachment = app._rich_agenda_attachment
+                await until(pilot, lambda: attachment.token is not None)
+                reader, token = attachment.reader, attachment.token
+                original = reader.commands.read
+                history_revisions = []
+
+                def delayed(cancelled, *, history=False, before=None):
+                    frame = original(cancelled, history=history, before=before)
+                    if before is not None:
+                        history_revisions.append(reader.codec.revision(frame["cursor"]))
+                        if len(history_revisions) == 1:
+                            captured.set()
+                            assert release.wait(5)
+                            if outcome == "error":
+                                raise OwnerReadError("source-unavailable", "retired history read")
+                    return frame
+
+                monkeypatch.setattr(reader.commands, "read", delayed)
+                window = app._timeline_panel.window
+                before = window.sources[token.identity.source_key].before
+                assert before is not None and window.request_history(token, before).applied
+                attachment.history(SubwayTimeline.HistoryRequested(token, before))
+                await until(pilot, captured.is_set)
+                publish(app, None, "fixture transient disconnect")
+                state = window.sources[token.identity.source_key]
+                assert state.availability is Availability.UNAVAILABLE and state.requested_before is None
+                publish(app, managed["update"]())
+                await until(pilot, lambda: window.sources[token.identity.source_key].availability is Availability.OBSERVED)
+                state = window.sources[token.identity.source_key]
+                live = state.position
+                assert attachment.token == token
+                state_before = state.requested_before
+                release.set()
+                await until(pilot, lambda: attachment._page.done() and window.sources[token.identity.source_key].requested_before is None)
+                assert window.sources[token.identity.source_key].availability is Availability.OBSERVED
+                assert window.sources[token.identity.source_key].position == live
+                if state_before is not None:
+                    assert len(history_revisions) == 2 and history_revisions[1] > history_revisions[0]
+            finally:
+                release.set()
+
+    asyncio.run(check())
+
+
+def test_explicit_new_head_refresh_supersedes_agenda_only_retired_evidence(managed, monkeypatch) -> None:
+    configure(managed, monkeypatch)
+    selected = {"head": "head-a"}
+
+    def data(*args, **kwargs):
+        current = current_managed_data(managed)
+        current.sessions = [{"id": selected["head"], "is_head": True}]
+        return current
+
+    monkeypatch.setattr(companion, "_load_current_worktree", data)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app._agenda_cancel = Event()
+            publish(app, managed["publication"]())
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            attachment = app._rich_agenda_attachment
+            await until(pilot, lambda: attachment.token is not None)
+            publish(app, {**managed["publication"](), "availability": "head-changed", "observation": None})
+            assert not app._timeline_panel.window.events
+            selected["head"] = "head-b"
+            next_publication = managed["update"](session="head-b")
+            app.action_refresh()
+            await until(pilot, lambda: not app._loading and app._data.sessions[0]["id"] == "head-b")
+            await until(pilot, lambda: attachment.selection == ("example", "selected", "head-b"))
+            app._agenda_cancel = Event()
+            publish(app, next_publication)
+            await until(pilot, lambda: attachment.token is not None and attachment.token.identity.head_session_id == "head-b")
+            assert all(
+                row.source.head_session_id == "head-b" for row in app._timeline_panel.window.events
+            )
+            assert len(app._timeline_panel.window.events) == 2
+            assert not any(
+                state.token.identity.provider is Provider.WORKTREES
+                for state in app._timeline_panel.window.sources.values()
+            )
 
     asyncio.run(check())
 

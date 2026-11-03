@@ -12,9 +12,9 @@ from typing import Any
 
 from .companion_timeline_contract import (
     ActorKind, Availability, Completeness, Durability, EvidenceKind, HistoryPage,
-    MAX_BODY_BYTES, MAX_FIELD_BYTES, MAX_FRAME_BYTES, Provider, Qualification,
+    MAX_BODY_BYTES, MAX_FRAME_BYTES, Provider, Qualification,
     SourceIdentity, SourcePosition, SourceToken, TimelineActor, TimelineContractError,
-    TimelineEvent, TimelineGap, TimelineKind, TimelineSnapshot, identifier,
+    TimelineEvent, TimelineGap, TimelineKind, TimelineSnapshot, canonical_payload, identifier,
 )
 from .companion_worktree_codec import OwnerReadError, encoded, object_fields, stamp
 
@@ -317,20 +317,26 @@ class AgendaCodec:
         self.decode(encoded(frame).encode())
 
     @staticmethod
-    def _detail(item: dict[str, Any]) -> str:
+    def _detail(item: dict[str, Any]) -> tuple[str, bool]:
         raw = encoded(item).encode()
-        if len(raw) <= MAX_FIELD_BYTES:
-            return raw.decode()
+        try:
+            detail = canonical_payload(raw.decode())
+        except TimelineContractError as error:
+            display_limit = str(error)
+        else:
+            assert detail is not None
+            return detail, False
         summary = {
             "schema": "worktree-manager.agenda-detail-omission", "version": 1,
             "display_only": True, "encoded_bytes": len(raw), "sha256": sha256(raw).hexdigest(),
             "event_id": item["event_id"], "cursor": item["cursor"],
-            "owner_omission": item["omission"],
-            "message": "Accepted-operation detail omitted from display; no payload retrieval is asserted.",
+            "owner_omission": item["omission"], "display_limit": display_limit,
+            "message": "Accepted-operation detail omitted from display because it exceeds Timeline "
+                       "payload limits; no payload retrieval is asserted.",
         }
-        _require(len(encoded(summary).encode()) <= MAX_FIELD_BYTES,
-                 "agenda omission evidence exceeds its display bound")
-        return encoded(summary)
+        detail = canonical_payload(encoded(summary))
+        assert detail is not None
+        return detail, True
 
     def events(self, frame: dict[str, Any], token: SourceToken) -> tuple[TimelineEvent, ...]:
         """Project immutable accepted operations, retaining historical caller qualification."""
@@ -341,8 +347,7 @@ class AgendaCodec:
             actor = item["actor"]
             asserted = actor["qualification"] == "caller-asserted"
             identity = actor["session"] or actor["actor"]
-            detail = self._detail(item)
-            omitted = len(encoded(item).encode()) > MAX_FIELD_BYTES
+            detail, omitted = self._detail(item)
             events.append(TimelineEvent(
                 token.identity, self.position(item["cursor"]), item["event_id"],
                 TimelineActor(identity, ActorKind.SESSION if actor["session"] else ActorKind.UNKNOWN,
@@ -353,7 +358,8 @@ class AgendaCodec:
                 occurred_at=stamp(item["committed_at"]), durability=Durability.COMMITTED,
                 details=("Caller metadata is reported, not authoritative. Rich record bodies, transition "
                          "and delivery are display-only; accepted operations do not prove physical actions."
-                         + (" Detail omitted from display; integrity evidence retained." if omitted else "")
+                         + (" Detail omitted from display due to Timeline payload limits; "
+                            "integrity evidence retained." if omitted else "")
                          + (" Owner omitted the original payload; see its integrity/reference evidence."
                             if item["omission"] is not None else "")),
                 data_json=detail,
