@@ -4002,6 +4002,15 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
+The `plugin-activation` target runs the shared activation transaction suite.
+Its `tests/test_preservation_processes.py` packet interrupts real transaction
+holders before/after witness publication and during restoration. Worktrees'
+`tests/test_update_install_preservation.py` separately covers native acquisition
+integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/test_owned_streaming.py
+--allow-explicit-tiers` covers POSIX FD progress, absolute deadlines, cancellation
+and unverified cleanup. These explicit native packets do not expand required
+unit-only CI, and skips are not native platform qualification.
+
 Agent MCP's focused home-binding lane is:
 
 ```text

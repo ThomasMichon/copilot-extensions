@@ -1,9 +1,75 @@
-"""Installation-owned publication admission for plugin reconciliation."""
+"""Installation-owned admission and bounded execution for plugin reconciliation."""
 
 from __future__ import annotations
 
+import os
+import subprocess
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
+
+
+def run_plan_step(
+    argv: Sequence[str], update: dict[str, Any], log: Callable[[str], None],
+    *, output_fd: int | None = None,
+) -> int:
+    """Run one plan step under its installer deadline, killing its tree on expiry."""
+    from . import reconcile
+    from .installer_run import run_installer
+    from .update_runtime import _installer_timeout
+
+    env = os.environ.copy()
+    for key in update.get("unset_environment", reconcile._RUNTIME_ENV_UNSET):
+        env.pop(str(key), None)
+    for key, value in update.get("environment", {}).items():
+        env[str(key)] = str(value)
+    service = str(update.get("service", "plugin"))
+    try:
+        deadline = _installer_timeout(
+            service, env, reconcile.core_installed_payload_dir(service),
+        )
+    except (OSError, ValueError) as error:
+        log(f"    {error}")
+        return 1
+    stream = (
+        {"output_fd": output_fd} if output_fd is not None
+        else {"log": lambda line: log(f"    {line}")}
+    )
+    if (
+        update.get("phase") == "payload" and len(argv) == 4
+        and argv[1] == "plugin" and argv[2] in ("install", "update")
+    ):
+        from . import update_acquisition
+
+        def acquire(command, *, cwd, env, timeout, on_settled=None):
+            settlement = {"on_settled": on_settled} if on_settled is not None else {}
+            run = run_installer(
+                command, cwd=cwd, env=env, deadline_s=timeout,
+                require_tree_exit=True, **stream, **settlement,
+            )
+            if run.rc is None:
+                log(f"    {run.status}")
+                if run.status.startswith("timed out"):
+                    timeout_error = (
+                        update_acquisition._QuiescentPayloadTimeout
+                        if update_acquisition._WINDOWS else subprocess.TimeoutExpired
+                    )
+                    raise timeout_error(command, timeout)
+            return subprocess.CompletedProcess(
+                command, run.rc if run.rc is not None else 1,
+            )
+
+        try:
+            return update_acquisition._run_install(
+                list(argv), argv[3], cwd=None, env=env, timeout=deadline, runner=acquire,
+            ).returncode
+        except subprocess.TimeoutExpired:
+            return 124
+    run = run_installer(argv, cwd=None, env=env, deadline_s=deadline, **stream)
+    if run.rc is None:
+        log(f"    {run.status}")
+        return 124 if run.status.startswith("timed out") else 1
+    return run.rc
 
 
 def _matching_path(value: Any, expected: Path | None) -> bool:

@@ -241,19 +241,21 @@ def test_real_install_restoration_never_replays_the_command(
     assert json.loads(settings.read_text())["enabledPlugins"][identity] is (not recover)
 
 
-def test_retry_timeout_uses_remaining_total_budget(acquisition, monkeypatch):
+@pytest.mark.parametrize("elapsed,expected", [(235.5, [120, .5]), (239.5, [120])])
+def test_retry_timeout_uses_remaining_total_budget(acquisition, monkeypatch, elapsed, expected):
     calls, responses = acquisition
-    clock = iter([0.0, 0.0, 239.5])
+    clock = iter([0.0, 0.0, elapsed])
     monkeypatch.setattr(update_acquisition, "monotonic", lambda: next(clock))
     timeouts = []
     def run(argv, **kwargs):
         timeouts.append(kwargs["timeout"])
         return subprocess.CompletedProcess(argv, 1 if len(timeouts) == 1 else 0, "", "ECONNRESET")
     monkeypatch.setattr(subprocess, "run", run)
-    assert update_acquisition.acquire(
+    status = update_acquisition.acquire(
         "agent-worktrees", "copilot-extensions", "copilot", engine=True,
-    ) == "OK"
-    assert timeouts == [120, 0.5]
+    )
+    assert (status == "OK") is (len(expected) == 2)
+    assert timeouts == expected
 
 
 def test_real_failed_target_retry_never_reacquires_successful_peer(tmp_path, monkeypatch):

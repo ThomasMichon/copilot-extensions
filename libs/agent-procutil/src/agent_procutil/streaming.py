@@ -165,11 +165,11 @@ class SyncProcessOutput:
                 self._output[name].extend(chunk)
         return True
 
-    def _abort_relays(self) -> None:
+    def _abort_relays(self, *, deadline: float | None = None) -> None:
         failure = None
         for relay in self._relays.values():
             try:
-                relay.abort(10)
+                relay.abort(10 if deadline is None else max(0, deadline - time.monotonic()))
             except BaseException as error:
                 if failure is None:
                     failure = error
@@ -183,6 +183,8 @@ class SyncProcessOutput:
         on_wait: Callable[[], None] | None = None, wait_for_eof: bool = True,
         inactivity_start: float | None = None,
         startup_timeout: float | None = None,
+        exit_observer: Callable[[], bool] | None = None,
+        cleanup_deadline: float | None = None,
     ) -> None:
         """Renew from bytes; optional startup grace ends at the first output."""
         try:
@@ -215,7 +217,11 @@ class SyncProcessOutput:
                         relay.check()
                 if on_wait is not None:
                     on_wait()
-                if self.process.poll() is not None and (
+                exited = (
+                    exit_observer() if exit_observer is not None
+                    else self.process.poll() is not None
+                )
+                if exited and (
                     not wait_for_eof or len(self._done) == len(self._streams)
                 ):
                     if not wait_for_eof or self._relay_failed:
@@ -254,7 +260,9 @@ class SyncProcessOutput:
         except BaseException as error:
             self._relay_failed = True
             try:
-                self._abort_relays()
+                self._abort_relays(**(
+                    {"deadline": cleanup_deadline} if cleanup_deadline is not None else {}
+                ))
             except BaseException as cleanup_error:
                 cleanup_error.add_note(f"relay cleanup failed after {type(error).__name__}: {error}")
                 raise cleanup_error from error
@@ -271,28 +279,36 @@ class SyncProcessOutput:
         return tuple(values)
 
     def finish(
-        self, timeout: float, *, stop_at_idle: bool = False,
+        self, timeout: float, *, stop_at_idle: bool = False, deadline: float | None = None,
     ) -> tuple[str | bytes | None, str | bytes | None]:
         if stop_at_idle:
             if os.name == "nt":
                 raise ValueError("idle pipe retirement requires POSIX selectable pipes")
             self._stop_at_idle.set()
         failure = None
-        deadline = time.monotonic() + timeout
+        absolute = deadline
+        deadline = min(time.monotonic() + timeout, absolute) if absolute is not None else time.monotonic() + timeout
         try:
             if timeout > 0:
-                self.wait(timeout, inactivity_start=time.monotonic())
-                deadline = time.monotonic() + timeout
+                self.wait(
+                    timeout, inactivity_start=time.monotonic(),
+                    **({"deadline": absolute, "cleanup_deadline": absolute} if absolute is not None else {}),
+                )
+                deadline = min(time.monotonic() + timeout, absolute) if absolute is not None else time.monotonic() + timeout
             else:
-                self.wait(None, deadline=deadline)
+                self.wait(None, deadline=deadline, **(
+                    {"cleanup_deadline": absolute} if absolute is not None else {}
+                ))
         except BaseException as error:
             failure = error
             # The caller has retired the producer. Finish its bounded reader
             # queue even when the sink failed or its delivery deadline expired.
-            self.wait(None, deadline=time.monotonic() + 10)
-            deadline = time.monotonic() + 10
+            deadline = min(time.monotonic() + 10, absolute) if absolute is not None else time.monotonic() + 10
+            self.wait(None, deadline=deadline, **(
+                {"cleanup_deadline": absolute} if absolute is not None else {}
+            ))
         if self._relay_failed:
-            self._abort_relays()
+            self._abort_relays(**({"deadline": absolute} if absolute is not None else {}))
         for reader in self._readers:
             reader.join(max(0, deadline - time.monotonic()))
             if reader.is_alive():
@@ -305,6 +321,8 @@ class SyncProcessOutput:
             raise self._input_errors.pop(0)
         for stream in self._streams.values():
             stream.close()
+        if absolute is not None and time.monotonic() > absolute:
+            raise TimeoutError("captured output settlement exceeded its absolute deadline")
         self._finished = True
         if failure is not None:
             raise failure

@@ -41,6 +41,15 @@ Windows Job cleanup plus root reap/drain, or `confirm_not_launched()` for a
 proven pre-execution refusal. Neither a root exit nor a dead parent provides
 that proof. This API does not run commands or choose process policy.
 
+The POSIX owned-process adapter instead calls `confirm_posix_quiescent()` only
+after its unreaped group has been retired and positively confirmed, the root
+reaped and output workers settled. This persists the distinct
+`posix-owned-group-empty` witness, never a Windows Job witness. Descendants must
+remain in that owned group; deliberate group/session escape is not covered.
+Unknown cleanup retains the original transaction and fences later participating
+installs and updates, including a reconciliation second pass. Old readers
+reject an unfamiliar witness rather than silently accepting weaker evidence.
+
 A persisted quiescent transaction can finish restoration after process death,
 including interruption between settings and inventory writes. Recovery uses
 the original snapshot, re-reads current state, verifies both activation

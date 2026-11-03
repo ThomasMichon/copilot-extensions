@@ -12,8 +12,9 @@ import sys
 import threading
 import time
 from typing import Callable, Protocol
+from collections.abc import Mapping
 
-from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import SyncProcessLaunchError, no_window_kwargs, spawn_sync_in_kill_on_close_job
 from agent_procutil.owned_budget import OwnedExecutionBudget
 
 
@@ -429,7 +430,7 @@ def _communicate_windows_bounded(
 
 
 def _run_owned(
-    argv: list[str], *, timeout: float, input_text: str | None = None,
+    argv: list[str], *, timeout: float | None, input_text: str | None = None,
     capture: bool = True, inherit_process_group: bool = False,
     capture_limits: tuple[int, int] | None = None, pass_fds: tuple[int, ...] = (),
     confirm_posix_group: bool = False,
@@ -440,10 +441,24 @@ def _run_owned(
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
     borrow_parent_scope: bool = False,
+    inactivity_timeout: float | None = None,
+    output_fds: Mapping[str, int] | None = None,
 ) -> subprocess.CompletedProcess:
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+    streaming = inactivity_timeout is not None or output_fds is not None
+    if timeout is None and not streaming or timeout is not None and (
+        type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0
+    ):
         raise ValueError("native child timeout must be finite and positive")
     windows = os.name == "nt"
+    if streaming and (windows or input_text is not None or inherit_process_group):
+        raise ValueError("streaming owned execution requires an exclusive POSIX group without input")
+    if inactivity_timeout is not None and (
+        type(inactivity_timeout) not in (int, float)
+        or not math.isfinite(inactivity_timeout) or inactivity_timeout <= 0
+    ):
+        raise ValueError("native child inactivity timeout must be finite and positive")
+    if timeout is None and inactivity_timeout is None:
+        raise ValueError("streaming execution requires an absolute or inactivity deadline")
     if type(inherit_process_group) is not bool:
         raise ValueError("inherit_process_group must be a boolean")
     if type(binary) is not bool or binary and capture_limits is None:
@@ -451,6 +466,8 @@ def _run_owned(
     if type(allow_daemon_breakaway) is not bool:
         raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
+        if on_settled is not None or confirm_posix_group:
+            raise ValueError("inherited process-group settlement belongs to its enclosing owner")
         if borrow_parent_scope:
             parent = os.getppid()
             if os.name == "nt" or os.getpgrp() != parent or os.getsid(0) != parent:
@@ -459,15 +476,20 @@ def _run_owned(
             require_contained_worker()
     if not windows:
         _require_posix_execution_support()
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout if timeout is not None else None
     if budget is not None:
         if not isinstance(budget, OwnedExecutionBudget):
             raise TypeError("budget must be an OwnedExecutionBudget")
-        deadline = min(deadline, budget.execution_deadline)
+        deadline = (
+            min(deadline, budget.execution_deadline) if deadline is not None
+            else budget.execution_deadline
+        )
         if deadline <= time.monotonic():
             raise _PreparationTimeout(argv, timeout)
     bounded_windows = windows and capture_limits is not None
-    if on_settled is not None and not (bounded_windows or confirm_posix_group):
+    if on_settled is not None and not (
+        bounded_windows or not windows and confirm_posix_group
+    ):
         raise ValueError("settlement notification requires whole-scope native confirmation")
     spawn = spawn_sync_in_kill_on_close_job
     if bounded_windows:
@@ -477,9 +499,9 @@ def _run_owned(
         process, job = spawn(
             argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
             stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
-            **({"text": False, "bufsize": 0} if bounded_windows else {
+            stdout=subprocess.PIPE if capture or streaming else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture or streaming else subprocess.DEVNULL,
+            **({"text": False, "bufsize": 0} if bounded_windows or streaming else {
                 "text": True, "encoding": "utf-8", "errors": "strict",
             }),
             **no_window_kwargs(),
@@ -493,8 +515,21 @@ def _run_owned(
     except subprocess.TimeoutExpired as error:
         raise subprocess.TimeoutExpired(argv, timeout) from error
     retained = False
+    stream_capture = None
     try:
-        if bounded_windows:
+        if streaming:
+            from agent_procutil.streaming import SyncProcessOutput
+
+            stream_capture = SyncProcessOutput(
+                process, output_fds=output_fds, capture=capture,
+            )
+            stream_capture.wait(
+                inactivity_timeout, deadline=deadline, wait_for_eof=False,
+                exit_observer=lambda: _observe_unreaped(process) is not None,
+                cleanup_deadline=budget.deadline if budget else None,
+            )
+            stdout, stderr = None, None
+        elif bounded_windows:
             stdout, stderr = _communicate_windows_bounded(
                 process, job, input_text=input_text, deadline=deadline,
                 argv=argv, timeout=timeout, capture_limits=capture_limits,
@@ -512,8 +547,10 @@ def _run_owned(
                 binary=binary,
                 **({"capture_timeout": True} if budget is not None else {}),
             )
-    except OwnedCleanupError:
+    except OwnedCleanupError as error:
         retained = True
+        if stream_capture is not None:
+            error.cleanup_resources = (*error.cleanup_resources, ("output", stream_capture))
         raise
     finally:
         try:
@@ -534,7 +571,11 @@ def _run_owned(
                         process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                     except BaseException as error:
                         retained = True
-                        raise OwnedCleanupError(process) from error
+                        raise OwnedCleanupError(
+                            process, cleanup_resources=(
+                                (("output", stream_capture),) if stream_capture is not None else ()
+                            ),
+                        ) from error
                 else:
                     try:
                         _retire_posix_group(process, inherit_process_group=inherit_process_group)
@@ -544,6 +585,21 @@ def _run_owned(
                         raise OwnedCleanupError(process) from error
         finally:
             if not retained:
+                if streaming and stream_capture is None:
+                    retained = True
+                    raise OwnedCleanupError(process) from sys.exc_info()[1]
+                if stream_capture is not None:
+                    try:
+                        stream_capture.finish(
+                            budget.cleanup_timeout() if budget else 2.0,
+                            deadline=budget.deadline if budget else time.monotonic() + 2.0,
+                        )
+                        stdout, stderr = stream_capture.output() if capture else (None, None)
+                    except BaseException as error:
+                        retained = True
+                        raise OwnedCleanupError(
+                            process, cleanup_resources=(("output", stream_capture),),
+                        ) from error
                 for stream in (process.stdin, process.stdout, process.stderr):
                     if stream is not None:
                         stream.close()
@@ -551,12 +607,22 @@ def _run_owned(
                     process.close()
                 if on_settled is not None:
                     on_settled()
+    if streaming and capture and not binary:
+        stdout, stderr = (
+            data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            if data is not None else None for data in (stdout, stderr)
+        )
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def run_owned(
-    argv: list[str], *, timeout: float, input_text: str | None = None,
+    argv: list[str], *, timeout: float | None, input_text: str | None = None,
     capture: bool = True, inherit_process_group: bool = False,
+    cwd: str | os.PathLike | None = None, env: dict[str, str] | None = None,
+    on_settled: Callable[[], None] | None = None,
+    inactivity_timeout: float | None = None,
+    output_fds: Mapping[str, int] | None = None,
+    budget: OwnedExecutionBudget | None = None,
 ) -> subprocess.CompletedProcess:
     """Own a finite root, or borrow its verified scope without detaching nested work.
 
@@ -564,9 +630,29 @@ def run_owned(
     outer owner may sweep the inherited group, including descendants, before
     reporting whole-scope completion. Callers retain exclusive Popen custody.
     """
+    if on_settled is not None and not callable(on_settled):
+        raise TypeError("settlement notification must be callable")
+    if inherit_process_group and on_settled is not None:
+        raise ValueError("inherited process-group settlement belongs to its enclosing owner")
+    if os.name != "nt" and (
+        on_settled is not None or inactivity_timeout is not None or output_fds is not None
+    ):
+        try:
+            require_caller_owned_support()
+        except (OSError, RuntimeError) as error:
+            cause = (
+                error if isinstance(error, OSError) and error.errno is not None
+                else OSError(errno.ENOTSUP, str(error))
+            )
+            raise SyncProcessLaunchError(cause) from error
     return _run_owned(
         argv, timeout=timeout, input_text=input_text, capture=capture,
         inherit_process_group=inherit_process_group,
+        cwd=cwd, env=env, on_settled=on_settled,
+        confirm_posix_group=on_settled is not None or (
+            inactivity_timeout is not None or output_fds is not None
+        ),
+        inactivity_timeout=inactivity_timeout, output_fds=output_fds, budget=budget,
     )
 
 

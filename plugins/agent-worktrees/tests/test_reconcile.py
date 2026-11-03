@@ -34,6 +34,11 @@ def _stage_installation_context(destination: Path) -> None:
             target = destination / source.name
             if not target.is_file():
                 shutil.copyfile(source, target)
+    archive = (
+        REPO / "plugins" / "agent-worktrees" / "scripts" / "installation-context"
+        / "daemon_instance_runtime.pyz"
+    )
+    shutil.copyfile(archive, destination / archive.name)
 
 
 @pytest.mark.parametrize("pointer_exists", [False, True])
@@ -2522,6 +2527,285 @@ def test_apply_plan_strips_caller_payload_environment(monkeypatch, tmp_path):
     assert "PYTHONPATH" not in captured["env"]
     assert captured["env"]["COPILOT_EXTENSIONS_CONTEXT"] == "/target/install.json"
     assert captured["env"]["RECONCILE_KEEP"] == "present"
+
+
+def _payload_activation_state(env, monkeypatch, before, verb):
+    identity = f"optional-plugin@{MKT}"
+    env.write_settings({identity: True})
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: env.home))
+    monkeypatch.setattr(reconcile, "resolve_copilot", lambda: "fixture-copilot")
+    home = env.home / ".copilot"
+    home.mkdir(exist_ok=True)
+    settings = {"unrelated": {"keep": True}, "enabledPlugins": {"other@m": False}}
+    if before is not None:
+        settings["enabledPlugins"][identity] = before
+    (home / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    (home / "config.json").write_text(
+        json.dumps({"installedPlugins": [], "trustedFolders": ["fixture"]}),
+        encoding="utf-8",
+    )
+    if verb == "update":
+        env.install_payload("optional-plugin", "1.0.0", installer="")
+    return home, identity
+
+
+@pytest.mark.parametrize(("before", "outcome"), [
+    (None, "success"), (False, "success"), (True, "success"),
+    (False, "failure"), (False, "timeout"),
+])
+@pytest.mark.parametrize("verb", ["install", "update"])
+@pytest.mark.parametrize("windows", [False, True])
+def test_apply_plan_payload_preserves_activation(
+    env, monkeypatch, before, verb, windows, outcome,
+):
+    from agent_worktrees import installer_run, update_acquisition
+
+    home, identity = _payload_activation_state(env, monkeypatch, before, verb)
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", windows)
+    calls = []
+
+    def native_acquisition(argv, **kwargs):
+        calls.append(argv)
+        assert argv == ["fixture-copilot", "plugin", verb, identity]
+        assert kwargs["require_tree_exit"] is True
+        assert kwargs["deadline_s"] > 0
+        if verb == "update":
+            assert kwargs["output_fd"] == 42
+            assert "log" not in kwargs
+        else:
+            kwargs["log"]("fixture output")
+        settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+        settings["enabledPlugins"][identity] = True
+        settings["nativeSetting"] = "retained"
+        (home / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        (home / "config.json").write_text(json.dumps({
+            "trustedFolders": ["fixture", "native"],
+            "installedPlugins": [{
+                "name": "optional-plugin", "marketplace": MKT,
+                "enabled": True, "version": "2.0.0", "cache_path": "retained-cache",
+            }],
+        }), encoding="utf-8")
+        payload = reconcile.core_installed_payload_dir("optional-plugin")
+        if payload is None:
+            env.install_payload("optional-plugin", "2.0.0", installer="")
+        else:
+            (payload / "plugin.json").write_text(json.dumps({
+                "name": "optional-plugin", "version": "2.0.0",
+            }), encoding="utf-8")
+        if not windows:
+            kwargs["on_settled"]()
+        return installer_run.InstallerRun(
+            "timed out (fixture)" if outcome == "timeout" else "fixture result",
+            None if outcome == "timeout" else 7 if outcome == "failure" else 0,
+            None, False, 0,
+        )
+
+    monkeypatch.setattr(installer_run, "run_installer", native_acquisition)
+    logs = []
+    summary = reconcile.apply_plan(
+        env.repo, passes=1, include_payload_refresh=True, log=logs.append,
+        output_fd=42 if verb == "update" else None,
+    )
+    assert len(calls) == 1
+    assert summary["executed"][0].get("returncode") == {
+        "success": 0, "failure": 7, "timeout": 124,
+    }[outcome], summary
+    settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+    assert settings["enabledPlugins"].get(identity) is before
+    assert (identity in settings["enabledPlugins"]) is (before is not None)
+    assert settings["enabledPlugins"]["other@m"] is False
+    assert settings["unrelated"] == {"keep": True}
+    assert settings["nativeSetting"] == "retained"
+    config = json.loads((home / "config.json").read_text(encoding="utf-8"))
+    assert config["trustedFolders"] == ["fixture", "native"]
+    record = config["installedPlugins"][0]
+    assert record["enabled"] is (before is True)
+    assert record["version"] == "2.0.0"
+    assert record["cache_path"] == "retained-cache"
+    assert reconcile.payload_version(reconcile.core_installed_payload_dir("optional-plugin")) == "2.0.0"
+    assert not (home / "activation-preservation" / "transaction.json").exists()
+    if verb == "install":
+        assert "    fixture output" in logs
+    if outcome == "timeout":
+        assert "    timed out (fixture)" in logs
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_apply_plan_payload_unverified_cleanup_retains_recovery(env, monkeypatch, windows):
+    from agent_worktrees import installer_run, update_acquisition
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "install")
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", windows)
+    calls = []
+
+    def unverified(argv, **kwargs):
+        calls.append(argv)
+        settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+        settings["enabledPlugins"][identity] = True
+        (home / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        raise installer_run.InstallerCleanupError("fixture tree still live")
+
+    monkeypatch.setattr(installer_run, "run_installer", unverified)
+    summary = reconcile.apply_plan(env.repo, include_payload_refresh=True)
+    assert len(calls) == 1
+    assert len(summary["executed"]) == 2
+    assert all(not step["ok"] for step in summary["executed"])
+    assert summary["executed"][0]["ok"] is False
+    assert "fixture tree still live" in summary["executed"][0]["error"]
+    settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+    assert settings["enabledPlugins"][identity] is True
+    assert (home / "activation-preservation" / "transaction.json").is_file()
+    monkeypatch.setattr(
+        reconcile, "core_installed_payload_dir",
+        lambda name: env.home if name == "optional-plugin" else None,
+    )
+    assert update_acquisition.acquire("optional-plugin", MKT, "fixture-copilot").startswith(
+        "plugin state error",
+    )
+    assert update_acquisition.acquire("another-plugin", MKT, "fixture-copilot").startswith(
+        "plugin state error",
+    )
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("failure_at", [1, 2])
+def test_payload_spool_refusal_settles_without_launch(env, monkeypatch, windows, failure_at):
+    from agent_worktrees import installer_run, update_acquisition
+    from agent_procutil import owned_process
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "install")
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", windows)
+    temporary = installer_run.tempfile.TemporaryFile
+    opened, attempts = [], []
+
+    def prepare(*args, **kwargs):
+        attempts.append(True)
+        if len(attempts) == failure_at:
+            raise OSError("fixture output storage unavailable")
+        stream = temporary(*args, **kwargs)
+        opened.append(stream)
+        return stream
+
+    monkeypatch.setattr(installer_run.tempfile, "TemporaryFile", prepare)
+    if os.name == "nt" and not windows:
+        original_runner = installer_run.run_installer
+
+        def common_preparation(argv, *, on_settled=None, **kwargs):
+            return original_runner(argv, **kwargs)
+
+        # No target runs here; exercise common allocation with modeled POSIX custody.
+        monkeypatch.setattr(installer_run, "run_installer", common_preparation)
+    no_launch = lambda *args, **kwargs: pytest.fail("spool refusal launched a target")
+    monkeypatch.setattr(installer_run, "_spawn", no_launch)
+    monkeypatch.setattr(owned_process, "spawn_sync_in_kill_on_close_job", no_launch)
+    result = reconcile.apply_plan(env.repo, passes=1, include_payload_refresh=True)
+    assert result["executed"][0]["ok"] is False
+    assert "output preparation failed" in result["executed"][0]["error"]
+    assert all(stream.closed for stream in opened)
+    assert not (home / "activation-preservation" / "transaction.json").exists()
+    assert json.loads((home / "settings.json").read_text())["enabledPlugins"][identity] is False
+
+    def next_acquisition(argv, **kwargs):
+        if kwargs.get("on_settled") is not None:
+            kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(update_acquisition, "_run_update", next_acquisition)
+    assert update_acquisition.acquire("optional-plugin", MKT, "fixture").startswith("OK")
+    assert not (home / "activation-preservation" / "transaction.json").exists()
+
+
+@pytest.mark.real_installer_processes
+@pytest.mark.parametrize("outcome", ["success", "timeout"])
+def test_apply_plan_payload_native_consumer(env, monkeypatch, outcome):
+    from agent_worktrees import installer_run
+    from plugin_activation import read_json_object
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "install")
+    script = env.home / "native_acquisition.py"
+    script.write_text(
+        "import json, os, sys, time\n"
+        "from pathlib import Path\n"
+        "home = Path(os.environ['PAYLOAD_FIXTURE_HOME'])\n"
+        "identity = sys.argv[3]\n"
+        "path = home / 'settings.json'\n"
+        "settings = json.loads(path.read_text(encoding='utf-8'))\n"
+        "settings['enabledPlugins'][identity] = True\n"
+        "path.write_text(json.dumps(settings), encoding='utf-8')\n"
+        "print('native payload output', flush=True)\n"
+        "if os.environ['PAYLOAD_FIXTURE_OUTCOME'] == 'timeout': time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PAYLOAD_FIXTURE_HOME", str(home))
+    monkeypatch.setenv("PAYLOAD_FIXTURE_OUTCOME", outcome)
+    original_spawn = installer_run._spawn
+    calls = []
+
+    def fixture_spawn(argv, *args, **kwargs):
+        calls.append(argv)
+        assert argv == ["fixture-copilot", "plugin", "install", identity]
+        return original_spawn([sys.executable, str(script), *argv[1:]], *args, **kwargs)
+
+    monkeypatch.setattr(installer_run, "_spawn", fixture_spawn)
+    if os.name != "nt":
+        from agent_procutil import owned_process
+        original_owned_spawn = owned_process.spawn_sync_in_kill_on_close_job
+
+        def owned_fixture_spawn(argv, **kwargs):
+            calls.append(argv)
+            assert argv == ["fixture-copilot", "plugin", "install", identity]
+            return original_owned_spawn([sys.executable, str(script), *argv[1:]], **kwargs)
+
+        monkeypatch.setattr(owned_process, "spawn_sync_in_kill_on_close_job", owned_fixture_spawn)
+    monkeypatch.setattr(
+        "agent_worktrees.update_runtime._installer_timeout",
+        lambda *args: 1 if outcome == "timeout" else 10,
+    )
+    logs = []
+    result = reconcile.apply_plan(
+        env.repo, passes=1, include_payload_refresh=True, log=logs.append,
+    )
+    assert len(calls) == 1
+    assert result["executed"][0]["returncode"] == (124 if outcome == "timeout" else 0)
+    assert read_json_object(home / "settings.json")[1]["enabledPlugins"][identity] is False
+    assert "    native payload output" in logs
+    assert not (home / "activation-preservation" / "transaction.json").exists()
+
+
+def test_payload_preflight_timeout_does_not_fence_later_acquisition(env, monkeypatch):
+    from agent_worktrees import installer_run, update_acquisition
+    from agent_procutil import owned_process
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    home, identity = _payload_activation_state(env, monkeypatch, False, "install")
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    calls = []
+
+    def expired(argv, **kwargs):
+        calls.append(argv)
+        return owned_process._run_owned(
+            argv, timeout=1, budget=OwnedExecutionBudget(1, .25),
+        )
+
+    monkeypatch.setattr(owned_process, "run_owned", expired)
+    monkeypatch.setattr(
+        owned_process, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: pytest.fail("expired preflight launched a target"),
+    )
+    with pytest.raises(installer_run.InstallerLaunchError, match="before launch"):
+        update_acquisition._run_install(["fixture"], identity, cwd=None, timeout=1)
+    assert len(calls) == 1
+    assert not (home / "activation-preservation" / "transaction.json").exists()
+    assert json.loads((home / "settings.json").read_text())["enabledPlugins"][identity] is False
+
+    def next_acquisition(argv, **kwargs):
+        kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(update_acquisition, "_run_update", next_acquisition)
+    assert update_acquisition.acquire("optional-plugin", MKT, "fixture").startswith("OK")
+    assert not (home / "activation-preservation" / "transaction.json").exists()
 
 
 @pytest.mark.guard

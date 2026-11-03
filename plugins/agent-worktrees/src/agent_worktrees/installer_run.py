@@ -286,21 +286,90 @@ def run_installer(
     log: Callable[[str], None] | None = None,
     output_fd: int | None = None,
     require_tree_exit: bool = False,
+    on_settled: Callable[[], None] | None = None,
 ) -> InstallerRun:
-    """Keep native output live; deliver legacy logs after verified producer settlement."""
+    """Keep native output live; deliver legacy logs after verified producer settlement.
+
+    Strict POSIX execution uses the existing unreaped-group owner. Its optional
+    settlement callback runs only after native scope and output-worker cleanup;
+    Windows retains its existing strict Job executor and external witness.
+    """
     if log is not None and output_fd is not None:
         raise ValueError("installer output_fd and log are mutually exclusive")
+    if on_settled is not None and (not require_tree_exit or os.name == "nt"):
+        raise ValueError("installer settlement callback requires the strict POSIX group owner")
     with ExitStack() as resources:
-        spools = {
-            name: resources.enter_context(tempfile.TemporaryFile())
-            for name in ("stdout", "stderr")
-        } if log is not None else None
+        try:
+            spools = {
+                name: resources.enter_context(tempfile.TemporaryFile())
+                for name in ("stdout", "stderr")
+            } if log is not None else None
+        except Exception as error:
+            if require_tree_exit:
+                raise InstallerLaunchError(f"installer output preparation failed: {error}") from error
+            raise
+        if require_tree_exit and os.name != "nt":
+            return _run_posix_owned(
+                argv, cwd=cwd, env=env, deadline_s=deadline_s,
+                target_version=target_version, receipt=receipt, log=log,
+                output_fd=output_fd, spools=spools, on_settled=on_settled,
+            )
         return _run_installer(
             argv, cwd=cwd, env=env, deadline_s=deadline_s,
             target_version=target_version, receipt=receipt, log=log,
             output_fd=output_fd, require_tree_exit=require_tree_exit,
             output_spools=spools,
         )
+
+
+def _run_posix_owned(
+    argv, *, cwd, env, deadline_s, target_version, receipt, log,
+    output_fd, spools, on_settled,
+) -> InstallerRun:
+    from agent_procutil import SyncProcessLaunchError
+    from agent_procutil.owned_process import OwnedCleanupError, _PreparationTimeout, run_owned
+    from update_driver import participant_environment
+
+    started = time.monotonic()
+    try:
+        env = {**env, **participant_environment()}
+        fds = (
+            {name: spool.fileno() for name, spool in spools.items()} if spools is not None
+            else {name: output_fd for name in ("stdout", "stderr")} if output_fd is not None
+            else {name: getattr(sys, name).fileno() for name in ("stdout", "stderr")}
+        )
+    except Exception as error:
+        raise InstallerLaunchError(f"installer context preparation failed: {error}") from error
+    expired, rc = False, None
+    try:
+        result = run_owned(
+            list(argv), timeout=None, inactivity_timeout=deadline_s,
+            cwd=cwd, env=dict(env), output_fds=fds, capture=False,
+            on_settled=on_settled or (lambda: None),
+        )
+        rc = result.returncode
+    except _PreparationTimeout as error:
+        raise InstallerLaunchError("installer budget expired before launch") from error
+    except subprocess.TimeoutExpired:
+        expired = True
+    except OwnedCleanupError as error:
+        raise InstallerCleanupError(
+            "owned POSIX group or output cleanup unverified",
+            process=error.process, job=error.job,
+        ) from error
+    except SyncProcessLaunchError as error:
+        raise InstallerLaunchError(str(error)) from error
+    for spool in (spools or {}).values():
+        spool.seek(0)
+        reader = io.TextIOWrapper(spool, encoding="utf-8", errors="replace", newline="\n")
+        try:
+            for line in reader:
+                log(line.rstrip("\r\n"))
+        finally:
+            reader.detach()
+    deployed = receipt() if receipt is not None else None
+    status, complete = _judge(rc, expired, target_version, deployed)
+    return InstallerRun(status, rc, deployed, complete, time.monotonic() - started)
 
 
 def _run_installer(

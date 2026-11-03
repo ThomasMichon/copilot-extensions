@@ -117,6 +117,84 @@ def test_windows_install_settlement_and_no_timeout_replay(tmp_path, monkeypatch,
         assert state.inspect_plugin_state(IDENTITY, home)["inventoryEnabled"] is False
 
 
+_POSIX_WORKER = r'''
+import os,sys,time
+from pathlib import Path
+from plugin_activation import preservation,state
+from agent_worktrees import update_acquisition
+root,home,mode=Path(sys.argv[1]),Path(sys.argv[2]),sys.argv[3]
+state.copilot_home=lambda:home
+def pause():
+    (root/"transaction-ready").touch()
+    time.sleep(20)
+confirm=preservation.ActivationPreservation.confirm_posix_quiescent
+def witness(self):
+    if mode=="running": pause()
+    confirm(self)
+    if mode=="quiescent": pause()
+preservation.ActivationPreservation.confirm_posix_quiescent=witness
+write=state.write_json_object_atomic
+def publish(path,value,*args):
+    if mode=="partial" and path==home/"config.json": pause()
+    write(path,value,*args)
+state.write_json_object_atomic=publish
+result=update_acquisition._run_install(
+    [sys.executable,str(root/"payload.py"),str(home)],
+    "agent-example@market",cwd=root,timeout=5)
+assert result.returncode==0
+'''
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="real Linux acquisition/group settlement")
+@pytest.mark.parametrize("phase", ["running", "quiescent", "partial"])
+def test_posix_native_acquisition_interruption_retains_original(tmp_path, monkeypatch, phase):
+    from plugin_activation import activation_custody
+
+    home = tmp_path / "copilot"
+    _initialize(home)
+    monkeypatch.setattr(state, "copilot_home", lambda: home)
+    (tmp_path / "payload.py").write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "home=Path(sys.argv[1]); identity='agent-example@market'\n"
+        "(home/'settings.json').write_text(json.dumps({"
+        "'enabledPlugins':{identity:True},'unrelated':'refreshed'}))\n"
+        "(home/'config.json').write_text(json.dumps({'installedPlugins':["
+        "{'name':identity,'enabled':True,'version':'new'}]}))\n",
+        encoding="utf-8",
+    )
+    worker = subprocess.Popen(
+        [sys.executable, "-c", _POSIX_WORKER, str(tmp_path), str(home), phase],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        **no_window_kwargs(),
+    )
+    try:
+        _wait_file(tmp_path / "transaction-ready", worker)
+        worker.kill()
+        stdout, stderr = worker.communicate(timeout=5)
+        assert not stdout and not stderr
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+            worker.communicate(timeout=5)
+    transaction = home / "activation-preservation" / "transaction.json"
+    record = json.loads(transaction.read_text(encoding="utf-8"))
+    assert record["snapshot"]["user_value"] is False
+    if phase == "running":
+        with pytest.raises(state.PluginStateError, match="settlement is unproven"):
+            with activation_custody(home):
+                pytest.fail("parent death is not a native settlement witness")
+        assert transaction.is_file()
+    else:
+        assert record["witness"] == "posix-owned-group-empty"
+        with activation_custody(home):
+            assert state.inspect_plugin_state(IDENTITY, home)["userActivation"] == "false"
+            assert state.inspect_plugin_state(IDENTITY, home)["inventoryEnabled"] is False
+            assert json.loads((home / "config.json").read_text())["installedPlugins"][0]["version"] == "new"
+            assert json.loads((home / "settings.json").read_text())["unrelated"] == "refreshed"
+        assert not transaction.exists()
+
+
 _PAYLOAD = r'''
 import json, os, subprocess, sys, time
 from pathlib import Path
