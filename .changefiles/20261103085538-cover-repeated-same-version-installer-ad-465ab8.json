@@ -1,0 +1,9 @@
+{
+  "comment": "Cover repeated same-version installer admission",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}
