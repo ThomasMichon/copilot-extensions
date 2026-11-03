@@ -270,18 +270,21 @@ def test_bridge_selected_snapshot_rechecks_selection_and_bytes_around_freeze(own
                           "    return result\n", encoding="utf-8")
     else:
         engine.write_text(engine.read_text() + "\n"
-                          "_canonical_copyfile = shutil.copyfile\n"
-                          "def _mutating_copyfile(source, target, **kwargs):\n"
-                          "    result = _canonical_copyfile(source, target, **kwargs)\n"
-                          "    if Path(source) == Path(__file__).with_name('install.sh'):\n"
-                          "        Path(source).write_bytes(Path(source).read_bytes() + b'\\n# changed\\n')\n"
+                          "_canonical_write_bytes = Path.write_bytes\n"
+                          "def _mutating_write_bytes(target, data):\n"
+                          "    result = _canonical_write_bytes(target, data)\n"
+                          "    if target.name == 'install.sh' and '.install-stage' in target.parts:\n"
+                          "        source = Path(__file__).with_name('install.sh')\n"
+                          "        _canonical_write_bytes(source, source.read_bytes() + b'\\n# changed\\n')\n"
                           "    return result\n"
-                          "shutil.copyfile = _mutating_copyfile\n", encoding="utf-8")
+                          "Path.write_bytes = _mutating_write_bytes\n", encoding="utf-8")
     payload, installation, project = select_snapshot(owning_bridge)
     root = area / "queue"
     request = provision.enqueue(payload, installation, project, root=root)
     drain(root=root)
     result = status(request.id, root=root)
+    if change == "during-copy":
+        assert (payload / "scripts/install.sh").read_bytes().endswith(b"\n# changed\n")
     assert result.state == "completed" and result.exit_code == 1, result.log_path.read_text()
     assert "Selected Bridge source refused before installer execution" in result.log_path.read_text()
     assert not (installation / "executed").exists()
