@@ -31,6 +31,12 @@ Independent Windows-wave, collector/publication and shadow-consumer owners
 retain their obligations; this bounded change does not complete the umbrella.
 
 - [ ] Merge this plan-only amendment before implementation.
+- [ ] Before re-scoping #6783, move its still-unearned native baseline
+      enrollment/qualification to a tracked successor under #4453. Update
+      active references in the parent Phase 5 and `dispatch-pr-selection.md`
+      to that successor; retain the original draft and prototype as historical
+      provenance, not completion evidence. The successor owns deferred research,
+      not permission to resume universal collection or alter required CI.
 - [ ] Base the owned #6783 branch on reviewed current `dev`, preserving the
       exact prototype first. Replace that PR's scope and description through
       the managed rewrite flow, retaining its discussion and identity.

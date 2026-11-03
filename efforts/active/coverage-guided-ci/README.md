@@ -131,6 +131,10 @@ Operator-selected scope:
 
 > Re-scope the existing PR to tagged selection; preserve the old prototype separately
 
+In the first selected answer, "Never coverage-skip tests" refers to the
+unauditable and unclassified tests in the preceding direction, not to
+proven-auditable tests eligible for conditional diff selection.
+
 The [auditability amendment](coverage-auditability-selection.md) is the
 agent-recommended implementation and validation decomposition. It does not
 replace independent Windows waves, baseline publication or shadow-consumer
