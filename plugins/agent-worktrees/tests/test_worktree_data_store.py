@@ -531,6 +531,35 @@ def test_native_windows_allocation_and_retry_use_real_durability_barriers(owner:
     assert selected is not None and selected.placements == (first,)
 
 
+def test_final_project_root_barrier_failure_never_acknowledges_publication(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_sync = store._sync_directory
+    fail = [True]
+    flushed = []
+
+    def synced(path: Path) -> None:
+        if path == owner and _descriptor(owner).exists() and fail[0]:
+            raise OSError("synthetic final project-root barrier failure")
+        real_sync(path)
+        flushed.append(path)
+
+    monkeypatch.setattr(store, "_sync_directory", synced)
+    with pytest.raises(WorktreeDataError) as failure:
+        _allocate()
+    assert failure.value.code == "allocation-failed"
+    original = _descriptor(owner).read_bytes()
+    with pytest.raises(WorktreeDataError):
+        _allocate()
+    fail[0] = False
+    flushed.clear()
+    placement = _allocate()
+    assert placement.store_id == STORE
+    assert _descriptor(owner).read_bytes() == original
+    assert flushed[-1] == owner
+
+
 @pytest.mark.parametrize("raw", ["{", "[]", '{"worktree_id": 1}', "repo: []\nbranch: x\n"])
 def test_malformed_canonical_record_is_not_absent(owner: Path, raw: str) -> None:
     (owner / "worktrees" / f"{WORKTREE}.yaml").write_text(raw, encoding="utf-8")
@@ -989,3 +1018,120 @@ def test_real_process_allocation_serializes_one_admitted_location(
         for queue in (ready, result):
             queue.close()
             queue.join_thread()
+
+
+def _allocate_across_shared_base(
+    root: str,
+    worktree: str,
+    role: str,
+    preflight_done: Any,
+    creator_paused: Any,
+    release_creator: Any,
+    results: Any,
+) -> None:
+    cfg.project_dir = lambda _project: Path(root)
+    project_state._normalized_repository_remote = lambda repository: (
+        f"network:example.invalid/{repository}"
+    )
+    registry_paths.installation_context = lambda: None
+    owner = Path(root)
+    real_require, real_sync = store._require_durability, store._sync_directory
+    real_publish = store._publish_descriptor
+    published = False
+    root_after_publication = False
+
+    def require(path: Path) -> None:
+        real_require(path)
+        if role == "caller":
+            preflight_done.set()
+            if not creator_paused.wait(15):
+                raise TimeoutError("shared-base creator did not pause")
+
+    def sync(path: Path) -> None:
+        nonlocal root_after_publication
+        if role == "creator" and path == owner / "worktree-state":
+            creator_paused.set()
+            if not release_creator.wait(15):
+                raise TimeoutError("shared-base creator was not released")
+        real_sync(path)
+        if published and path == owner:
+            root_after_publication = True
+
+    def publish(path: Path, raw: bytes) -> None:
+        nonlocal published
+        real_publish(path, raw)
+        published = True
+
+    store._require_durability = require
+    store._sync_directory = sync
+    store._publish_descriptor = publish
+    try:
+        if role == "creator" and not preflight_done.wait(15):
+            raise TimeoutError("caller did not finish root preflight")
+        placement = store.allocate_worktree_data(
+            PROJECT,
+            worktree,
+            creation_nonce=NONCE,
+            domain="agendas",
+            lane="main",
+            store_id=STORE,
+        )
+        results.put((role, placement.store_id, root_after_publication))
+    except Exception as error:
+        results.put((role, type(error).__name__, str(error)))
+
+
+def test_real_process_shared_base_is_durable_without_waiting_for_other_worktree(
+    owner: Path,
+) -> None:
+    other_worktree = WORKTREE + "-other"
+    record = json.loads((owner / "worktrees" / f"{WORKTREE}.yaml").read_text())
+    record["worktree_id"] = other_worktree
+    (owner / "worktrees" / f"{other_worktree}.yaml").write_text(json.dumps(record))
+    context = multiprocessing.get_context("spawn")
+    preflight_done, creator_paused, release_creator = (
+        context.Event(),
+        context.Event(),
+        context.Event(),
+    )
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_allocate_across_shared_base,
+            args=(
+                str(owner),
+                worktree,
+                role,
+                preflight_done,
+                creator_paused,
+                release_creator,
+                results,
+            ),
+        )
+        for worktree, role in ((WORKTREE, "caller"), (other_worktree, "creator"))
+    ]
+    try:
+        for process in processes:
+            process.start()
+        caller = results.get(timeout=25)
+        # The creator still owns its different record lock and has not flushed
+        # the shared base's parent link; caller acknowledgment must stand alone.
+        assert creator_paused.is_set()
+        release_creator.set()
+        creator = results.get(timeout=25)
+        for process in processes:
+            process.join(timeout=10)
+            assert process.exitcode == 0
+        assert caller == ("caller", STORE, True)
+        assert creator == ("creator", STORE, True)
+        assert store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE) is not None
+        assert store.read_worktree_data(PROJECT, other_worktree, store_id=STORE) is not None
+    finally:
+        release_creator.set()
+        for process in processes:
+            if process.pid is not None:
+                if process.is_alive():
+                    process.terminate()
+                process.join(timeout=10)
+        results.close()
+        results.join_thread()

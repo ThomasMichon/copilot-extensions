@@ -487,6 +487,8 @@ def allocate_worktree_data(
             _mkdir(directory / entry.relative_home)
             _same_directory(root, root_metadata)
             _publish_descriptor(directory / _DESCRIPTOR, raw)
+            # A different worktree may have created the shared base after preflight.
+            _sync_directory(root)
             return _placement(root, updated, entry)
     except WorktreeDataError:
         raise
