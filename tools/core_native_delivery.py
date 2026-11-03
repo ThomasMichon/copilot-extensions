@@ -7,11 +7,12 @@ import importlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
 from contextlib import ExitStack, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html import escape
 from pathlib import Path
 
@@ -20,8 +21,15 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 
 import bundle_lock
+import installer_native_feed as feed_owner
 import local_install_profile as native
 import local_install_source as source_owner
+from core_native_feed_resolution import (
+    compile_guarded,
+    hold_compile_inputs,
+    verify_guarded_projects,
+    verify_lock_witness,
+)
 from core_runtime_profile import _core_manifest, _read, build_core_profile, core_roots
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
@@ -201,6 +209,31 @@ def _inspect_offline_pool(pool, *, limits, deadline: float) -> None:
     pool.verify()
 
 
+def _guarded_feed_inputs(selected, transaction, projections, *, uv, download_origins,
+                         exclusions, deadline):
+    outer = feed_owner._projection(projections[1], "PipCompileSettings")
+    settings = feed_owner._fields(feed_owner._body(outer["settings"], "PipSettings"))
+    feed_owner._local_exclusions(outer.get("constraints", ""), transaction, [], exclusions)
+    feed_owner._machine_constraints({**outer, "constraints": "[]"}, settings, transaction, None)
+    names = {
+        acquisition_name
+        for option, value in native.dependencies._argument_pairs(transaction.argv[3:])
+        if option == "--exclude-newer-package"
+        for acquisition_name in (feed_owner._name(value.partition("=")[0]),)
+    } - set(exclusions)
+    if len(names) >= 256:
+        raise ProfileError("guarded native feed has too many package cutoffs")
+    sentinel = "guarded-cutoff-" + secrets.token_hex(16)
+    while sentinel in names:
+        sentinel = "guarded-cutoff-" + secrets.token_hex(16)
+    policy, feed = native._profile_feed(
+        selected, transaction, projections, uv=uv, download_origins=download_origins,
+        wheels=[{"name": name} for name in sorted(names | {sentinel})],
+        deadline=deadline, excluded_local_packages=exclusions,
+    )
+    return policy, feed, feed.cutoffs[sentinel], {name: feed.cutoffs[name] for name in names}
+
+
 def _inspect_first_party(snapshot, manifest: dict, source: Path, *, limits, deadline: float) -> None:
     for row in manifest["wheels"]:
         _check_deadline(deadline)
@@ -221,12 +254,15 @@ def _build_from_snapshot(
     target: dict, *, uv: str, download_origins: tuple[str, ...], materials: dict,
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
+    guarded_feed: bool = False,
 ) -> dict:
     """Keep selected lock, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
-    if (native_lock is None) == (offline_wheel_pool is None):
-        raise ProfileError("core delivery requires exactly one native lock or offline wheel pool")
+    if type(guarded_feed) is not bool or sum(
+        (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
+    ) != 1:
+        raise ProfileError("core delivery requires exactly one native selection mode")
     if (
         not isinstance(materials, dict) or not isinstance(material_paths, dict)
         or any(not isinstance(name, str) for name in materials)
@@ -266,7 +302,7 @@ def _build_from_snapshot(
             "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
             "size": len(selected_lock),
         }
-    else:
+    elif offline_wheel_pool is not None:
         pool_manifest = Path(source_owner.native_retained_path(offline_wheel_pool))
         pool_data = _read_lock(pool_manifest, deadline)
         pool_digests = json.loads(pool_data, object_pairs_hook=_unique)
@@ -279,9 +315,18 @@ def _build_from_snapshot(
             "size": len(pool_data),
         }
         selected_files = None
+    else:
+        selected_files = None
     if selected_files is not None and first_names & {item["name"] for item in selected_files}:
         raise ProfileError("native core lock overlaps its first-party wheel set")
     limits = native.wheel_limits()
+    acquisition_limits = AcquisitionLimits(
+        max_packages=256, max_requests=2048, max_redirects=128,
+        max_candidates_per_project=100_000, max_index_bytes=16 << 20,
+        max_total_metadata_bytes=128 << 20, max_wheel_bytes=128 << 20,
+        max_closure_bytes=max_bytes, max_temporary_bytes=2 * max_bytes,
+    )
+    verification_limits = None
     with native.dependencies._temporary_inputs(destination.parent) as temporary:
         work = Path(source_owner.native_retained_path(
             native.dependencies._private_retained_root(Path(temporary)).resolve(),
@@ -312,7 +357,7 @@ def _build_from_snapshot(
                     "--system-certs", "--format", "pylock.toml", "--output-file", str(lock_file),
                 ], cwd=work, env=dict(os.environ), deadline=deadline, native_target=True,
                 excluded_local_packages=first_exclusions, _projection=projections,
-            ) as transaction:
+            ) as transaction, ExitStack() as compile_owners:
                 if pool is not None:
                     _compile_offline_pool(transaction, pool, deadline=deadline)
                     selected_lock = _read_lock(lock_file, deadline)
@@ -322,6 +367,31 @@ def _build_from_snapshot(
                     )
                     if any(pool.digests.get(item["filename"]) != item["sha256"] for item in selected_files):
                         raise ProfileError("offline selected wheels differ from the held pool")
+                elif guarded_feed:
+                    compile_owners.enter_context(hold_compile_inputs(transaction, deadline))
+                    initial_policy, initial_feed, floor, cutoffs = _guarded_feed_inputs(
+                        selected, transaction, projections, uv=uv, download_origins=download_origins,
+                        exclusions=first_exclusions, deadline=deadline,
+                    )
+                    witness = compile_guarded(
+                        transaction, projections[1], initial_feed, floor=floor, cutoffs=cutoffs,
+                        exclusions=first_exclusions, limits=acquisition_limits, wheel_limits=limits,
+                        deadline=deadline, procutil=_producer_procutil(),
+                    )
+                    selected_lock = _read_lock(lock_file, deadline)
+                    selected_files = _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
+                    verify_lock_witness(selected_lock, selected_files, witness, deadline)
+                    remaining = {
+                        "max_requests": acquisition_limits.max_requests - witness["usage"]["requests"],
+                        "max_redirects": acquisition_limits.max_redirects - witness["usage"]["redirects"],
+                        "max_total_metadata_bytes": (
+                            acquisition_limits.max_total_metadata_bytes - witness["usage"]["metadata_bytes"]
+                        ),
+                    }
+                    if any(value <= 0 for value in remaining.values()):
+                        raise ProfileError("guarded native selection exhausted the acquisition budget")
+                    acquisition_limits = replace(acquisition_limits, **remaining)
+                if pool is not None or guarded_feed:
                     owners.enter_context(_held(
                         {"generated-lock": lock_file},
                         {"generated-lock": {
@@ -337,18 +407,18 @@ def _build_from_snapshot(
                     download_origins=download_origins, wheels=selected_files, deadline=deadline,
                     excluded_local_packages=first_exclusions,
                 )
+                if guarded_feed and (
+                    policy != initial_policy or feed.policy_id != initial_feed.policy_id
+                ):
+                    raise ProfileError("native core feed identity changed during selection")
                 acquisition = acquire_wheel_inputs(
                     selected_files, feeds=feed.feeds, download_origins=feed.download_origins,
                     cutoffs=feed.cutoffs, policy_id=feed.policy_id,
-                    limits=AcquisitionLimits(
-                        max_packages=256, max_requests=2048, max_redirects=128,
-                        max_candidates_per_project=100_000, max_index_bytes=16 << 20,
-                        max_total_metadata_bytes=128 << 20, max_wheel_bytes=128 << 20,
-                        max_closure_bytes=max_bytes, max_temporary_bytes=2 * max_bytes,
-                    ),
+                    limits=acquisition_limits,
                     deadline=deadline, ssl_context=feed.context, proxies=feed.proxies,
                     procutil=_producer_procutil(),
                 ) if selected_files else nullcontext(None)
+                acquisition_evidence = None
                 with acquisition as acquired:
                     paths = dict(first.paths)
                     expected = dict(first_digests)
@@ -396,6 +466,8 @@ def _build_from_snapshot(
                         retained.verify()
                     if acquired is not None:
                         acquired.snapshot.verify()
+                        if guarded_feed:
+                            acquisition_evidence = acquired.evidence()
                 final_policy, final_feed = native._profile_feed(
                     selected, transaction, projections, uv=uv,
                     download_origins=download_origins, wheels=selected_files, deadline=deadline,
@@ -403,6 +475,18 @@ def _build_from_snapshot(
                 )
                 if policy != final_policy or feed.policy_id != final_feed.policy_id:
                     raise ProfileError("native core feed identity changed during construction")
+                if guarded_feed and witness["projects"]:
+                    evidence = acquisition_evidence or {}
+                    remaining = {
+                        "max_requests": acquisition_limits.max_requests - evidence.get("request_count", 0),
+                        "max_redirects": acquisition_limits.max_redirects - evidence.get("redirect_count", 0),
+                        "max_total_metadata_bytes": (
+                            acquisition_limits.max_total_metadata_bytes - evidence.get("metadata_bytes", 0)
+                        ),
+                    }
+                    if any(value <= 0 for value in remaining.values()):
+                        raise ProfileError("guarded native selection exhausted the verification budget")
+                    verification_limits = replace(acquisition_limits, **remaining)
                 if project_core_inputs(source, manifest_data, target, deadline=deadline) != (
                     roots, requirements,
                 ):
@@ -416,12 +500,22 @@ def _build_from_snapshot(
             opened = _unchanged(candidate, before, retained)
             if _digest(retained, max_bytes, deadline) != (result["sha256"], result["size"]):
                 raise ProfileError("core delivery changed after input verification")
+            if verification_limits is not None:
+                verify_guarded_projects(
+                    final_feed, witness["projects"], limits=verification_limits,
+                    deadline=deadline, procutil=_producer_procutil(),
+                )
+                if project_core_inputs(source, manifest_data, target, deadline=deadline) != (
+                    roots, requirements,
+                ):
+                    raise ProfileError("core source projection changed during guarded verification")
             _unchanged(candidate, before, retained, opened=opened)
             _check_deadline(deadline)
             os.link(candidate, destination)
     return result | {
         "source_commit": identity.source_commit, "approval": "unattested",
         **({"selection": "offline-wheel-pool"} if offline_wheel_pool is not None else {}),
+        **({"selection": "guarded-native-feed"} if guarded_feed else {}),
     }
 
 
@@ -430,13 +524,16 @@ def prepare_core_delivery(
     materials: dict, material_paths: dict, destination: Path, *, uv: str,
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
+    guarded_feed: bool = False,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
-    if (native_lock is None) == (offline_wheel_pool is None):
-        raise ProfileError("core delivery requires exactly one native lock or offline wheel pool")
+    if type(guarded_feed) is not bool or sum(
+        (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
+    ) != 1:
+        raise ProfileError("core delivery requires exactly one native selection mode")
     destination = Path(os.path.abspath(destination))
     if os.path.lexists(destination):
         raise FileExistsError("core delivery output already exists")
@@ -458,7 +555,7 @@ def prepare_core_delivery(
             snapshot / "source", record, manifest_data, wheel_dir, target, uv=uv,
             download_origins=download_origins, materials=materials, material_paths=material_paths,
             destination=destination, deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
-            offline_wheel_pool=offline_wheel_pool,
+            offline_wheel_pool=offline_wheel_pool, guarded_feed=guarded_feed,
         )
 
 
@@ -476,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--native-lock", type=Path)
     selection.add_argument("--offline-wheel-pool", type=Path)
+    selection.add_argument("--guarded-feed", action="store_true")
     parser.add_argument("--download-origin", action="append", default=[])
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
@@ -490,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
             args.wheel_dir, materials, {name: args.material_dir / name for name in materials},
             args.output, uv=args.uv, download_origins=tuple(args.download_origin),
             deadline=deadline, max_bytes=args.max_bytes, native_lock=args.native_lock,
-            offline_wheel_pool=args.offline_wheel_pool,
+            offline_wheel_pool=args.offline_wheel_pool, guarded_feed=args.guarded_feed,
         )
         print(json.dumps(result, sort_keys=True))
         return 0
