@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
-from dataclasses import dataclass
 import importlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
+from dataclasses import dataclass
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
@@ -29,7 +29,13 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 from promotion_python_artifacts import inspect_wheel, validate_source_binding
 from runtime_profile import ProfileError, _target
 from runtime_profile_bundle import build_profile_bundle
-from runtime_profile_delivery import _held, _json, _material_files, _read_json, build_profile_delivery
+from runtime_profile_delivery import (
+    _held,
+    _json,
+    _material_files,
+    _read_json,
+    build_profile_delivery,
+)
 from runtime_source_lock import _wheel_pins
 from standalone_python_artifacts import COMPONENTS
 
@@ -105,7 +111,7 @@ def _run_compile(transaction, *, deadline: float) -> None:
     try:
         result = subprocess.run(
             list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,
-            capture_output=True, timeout=max(0.1, deadline - time.monotonic()),
+            capture_output=True, timeout=max(0.1, deadline - time.monotonic()), check=False,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except subprocess.TimeoutExpired:

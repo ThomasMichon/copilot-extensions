@@ -1,31 +1,36 @@
 """Core native inputs must remain bound to the released source composition."""
 from __future__ import annotations
 
-from contextlib import contextmanager
-from copy import deepcopy
-from datetime import datetime, timezone
 import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import ssl
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
 import zipfile
+from contextlib import contextmanager
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-
 from promotion_python_artifacts import PromotionArtifactError
 from runtime_profile import ProfileError
 from runtime_profile_cases import _record
 from test_core_python_artifacts import _build
 from test_installer_wheel_acquisition import (
-    CERTIFICATE, FILENAME, IDENTITY, POLICY, feeds as feeds, listed, project,
+    CERTIFICATE,
+    FILENAME,
+    IDENTITY,
+    POLICY,
+    listed,
+    project,
 )
+from test_installer_wheel_acquisition import feeds as local_tls_feed  # noqa: F401
 from test_promotion_python_artifacts import _wheel_bytes
 
 
@@ -221,7 +226,7 @@ def test_core_delivery_composes_existing_profile_and_transport_owners(delivery):
 
 
 @pytest.fixture
-def tls_source(tmp_path, monkeypatch, feeds):
+def tls_source(tmp_path, monkeypatch, local_tls_feed):  # noqa: F811
     import core_native_delivery as producer
     import standalone_python_artifacts as standalone
     import test_core_python_artifacts as core_tests
@@ -257,7 +262,7 @@ def tls_source(tmp_path, monkeypatch, feeds):
         )},
     )
     digest = hashlib.sha256(wheel).hexdigest()
-    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    state = local_tls_feed(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     project(state, [listed(hashes={"sha256": digest})])
     state["routes"]["/files/" + FILENAME] = (200, {}, wheel)
     return producer, wheels, manifest, state, wheel, digest
@@ -286,7 +291,7 @@ def test_core_delivery_acquires_external_wheel_over_local_tls(tmp_path, monkeypa
             {"policyId": POLICY},
             SimpleNamespace(
                 policy_id=POLICY, feeds=(WheelFeed(IDENTITY, state["origin"] + "/simple"),),
-                download_origins=(), cutoffs={"fixture": datetime(2025, 1, 1, tzinfo=timezone.utc)},
+                download_origins=(), cutoffs={"fixture": datetime(2025, 1, 1, tzinfo=timezone.utc)},  # noqa: UP017
                 context=ssl.create_default_context(cafile=str(CERTIFICATE)), proxies={},
             ),
         )
@@ -470,7 +475,7 @@ def test_core_delivery_command_loads_without_ambient_python_paths(tmp_path):
     environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
     result = subprocess.run(
         [sys.executable, "-I", str(script), "--help"], cwd=tmp_path, env=environment,
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, check=False,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
